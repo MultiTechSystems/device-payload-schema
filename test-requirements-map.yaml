@@ -1,0 +1,277 @@
+# Test Requirements Mapping
+# Maps test functions to specification requirements
+# Format: test pattern -> list of requirement IDs
+#
+# Patterns support wildcards:
+#   TestClassName.* - all tests in class
+#   TestClassName.test_specific - single test
+#
+# Requirement IDs from: la-payload-schema/build/requirements.csv
+
+mappings:
+  # Section 01: Schema Format
+  - test: test_schema_interpreter.TestSchemaInterpreterBasic.*
+    requirements:
+      - REQ-Document-S-SHAL-003  # Schema SHALL be valid JSON/YAML
+      - REQ-Document-S-REQU-004  # name field REQUIRED
+      - REQ-Document-S-REQU-008  # fields array REQUIRED
+
+  # Section 02: Field Types - Integers
+  - test: test_schema_interpreter.TestIntegerTypes.*
+    requirements:
+      - REQ-Unsigned-I-001  # u8, u16, u32
+      - REQ-Signed-Int-002  # s8, s16, s32
+      - REQ-Type-Alia-003   # Type aliases
+
+  - test: test_schema_interpreter.TestIntegerTypes.test_decode_u8
+    requirements:
+      - REQ-Unsigned-I-001
+
+  - test: test_schema_interpreter.TestIntegerTypes.test_decode_u16_big_endian
+    requirements:
+      - REQ-Unsigned-I-001
+      - REQ-Endiannes-004   # Big endian default
+
+  - test: test_schema_interpreter.TestIntegerTypes.test_decode_u16_little_endian
+    requirements:
+      - REQ-Unsigned-I-001
+      - REQ-Endiannes-005   # Little endian option
+
+  - test: test_schema_interpreter.TestIntegerTypes.test_decode_s16_negative
+    requirements:
+      - REQ-Signed-Int-002
+
+  - test: test_schema_interpreter.TestIntegerTypes.test_decode_u24
+    requirements:
+      - REQ-Extended--006   # 3-byte integers
+
+  # Section 02: Field Types - Floats
+  - test: test_schema_interpreter.TestFloatTypes.*
+    requirements:
+      - REQ-Float-Typ-007   # f32, f64
+
+  - test: test_schema_interpreter.TestNewTypes.test_f16_half_precision
+    requirements:
+      - REQ-Float-Typ-008   # f16 half precision
+
+  # Section 02: Field Types - Bitfields
+  - test: test_schema_interpreter.TestBitfieldTypes.*
+    requirements:
+      - REQ-Bitfield--009   # Bitfield extraction
+      - REQ-Bitfield--010   # Python slice syntax
+      - REQ-Bitfield--011   # Verilog syntax
+      - REQ-Bitfield--012   # C++ template syntax
+      - REQ-Bitfield--013   # @ notation syntax
+      - REQ-Bitfield--014   # Sequential syntax
+
+  - test: test_schema_interpreter.TestBitfieldTypes.test_decode_bitfield_python_slice
+    requirements:
+      - REQ-Bitfield--010   # Python slice u8[3:4]
+
+  - test: test_schema_interpreter.TestBitfieldTypes.test_decode_bitfield_verilog
+    requirements:
+      - REQ-Bitfield--011   # Verilog u8[3+:2]
+
+  - test: test_schema_interpreter.TestBitfieldTypes.test_decode_bitfield_cpp_template
+    requirements:
+      - REQ-Bitfield--012   # C++ bits<3,2>
+
+  - test: test_schema_interpreter.TestBitfieldTypes.test_decode_bitfield_at_notation
+    requirements:
+      - REQ-Bitfield--013   # bits:2@3
+
+  - test: test_schema_interpreter.TestBitfieldTypes.test_decode_bitfield_sequential
+    requirements:
+      - REQ-Bitfield--014   # Sequential u8:2
+
+  - test: test_schema_interpreter.TestBitfieldTypes.test_decode_multiple_bitfields_no_advance
+    requirements:
+      - REQ-Consume-Fi-015  # consume: 0
+
+  # Section 02: Field Types - Boolean
+  - test: test_schema_interpreter.TestBooleanType.*
+    requirements:
+      - REQ-Boolean-Ty-016  # bool type
+
+  # Section 02: Field Types - Strings
+  - test: test_schema_interpreter.TestBytesAndStrings.*
+    requirements:
+      - REQ-Bytes-Type-017  # bytes type
+      - REQ-String-Typ-018  # string type
+
+  - test: test_schema_interpreter.TestNewTypes.test_ascii_type
+    requirements:
+      - REQ-ASCII-Type-019  # ascii type
+
+  - test: test_schema_interpreter.TestNewTypes.test_hex_type
+    requirements:
+      - REQ-Hex-Type-020    # hex output type
+
+  - test: test_schema_interpreter.TestNewTypes.test_skip_type
+    requirements:
+      - REQ-Skip-Type-021   # skip/padding type
+
+  # Section 03: Modifiers
+  - test: test_schema_interpreter.TestModifiers.*
+    requirements:
+      - REQ-Arithmeti-022   # mult, add, div modifiers
+      - REQ-Modifier-O-023  # Modifier order: mult -> div -> add
+
+  - test: test_schema_interpreter.TestModifiers.test_mult_modifier
+    requirements:
+      - REQ-Mult-Modi-024
+
+  - test: test_schema_interpreter.TestModifiers.test_add_modifier
+    requirements:
+      - REQ-Add-Modif-025
+
+  - test: test_schema_interpreter.TestModifiers.test_div_modifier
+    requirements:
+      - REQ-Div-Modif-026
+
+  - test: test_schema_interpreter.TestModifiers.test_lookup_modifier
+    requirements:
+      - REQ-Lookup-Ta-027   # lookup tables
+
+  - test: test_schema_interpreter.TestFormulaField.*
+    requirements:
+      - REQ-Formula-Fi-028  # formula expressions
+
+  # Section 04: Nested/Conditional
+  - test: test_schema_interpreter.TestNestedObjects.*
+    requirements:
+      - REQ-Nested-Obj-029  # type: object
+
+  - test: test_schema_interpreter.TestMatchConditional.*
+    requirements:
+      - REQ-Match-Cond-030  # match/on/cases
+      - REQ-Match-Defa-031  # default handling
+
+  - test: test_schema_interpreter.TestMatchConditional.test_match_single_value
+    requirements:
+      - REQ-Match-Sing-032  # Single value case
+
+  - test: test_schema_interpreter.TestMatchConditional.test_match_list
+    requirements:
+      - REQ-Match-List-033  # List of values case
+
+  - test: test_schema_interpreter.TestMatchConditional.test_match_range
+    requirements:
+      - REQ-Match-Rang-034  # Range case (1..5)
+
+  - test: test_schema_interpreter.TestMatchConditional.test_match_default_skip
+    requirements:
+      - REQ-Match-Defa-035  # default: skip
+
+  - test: test_schema_interpreter.TestMatchConditional.test_match_default_error
+    requirements:
+      - REQ-Match-Defa-036  # default: error
+
+  # Section 05: Byte Groups
+  - test: test_schema_interpreter.TestByteGroup.*
+    requirements:
+      - REQ-Byte-Group-037  # byte_group for bitfield grouping
+
+  # Section 06: Enum Type
+  - test: test_schema_interpreter.TestEnumType.*
+    requirements:
+      - REQ-Enum-Type-038   # enum type
+      - REQ-Enum-Value-039  # enum values mapping
+
+  # Section 08: Output Formats
+  - test: test_schema_interpreter.TestSemanticOutputs.*
+    requirements:
+      - REQ-Output-For-040  # Semantic output layer
+      - REQ-IPSO-Outpu-041  # IPSO format
+      - REQ-SenML-Outp-042  # SenML format
+      - REQ-TTN-Output-043  # TTN normalized format
+
+  - test: test_schema_interpreter.TestSemanticOutputs.test_ipso_output
+    requirements:
+      - REQ-IPSO-Outpu-041
+
+  - test: test_schema_interpreter.TestSemanticOutputs.test_senml_output
+    requirements:
+      - REQ-SenML-Outp-042
+
+  - test: test_schema_interpreter.TestSemanticOutputs.test_ttn_output
+    requirements:
+      - REQ-TTN-Output-043
+
+  # Section 11: Testing - Encoder
+  - test: test_schema_interpreter.TestEncoder.*
+    requirements:
+      - REQ-Encoder-Re-044  # Bidirectional encoding
+      - REQ-Roundtrip-045   # Encode/decode roundtrip
+
+  # Section 11: Testing - Safety
+  - test: test_hypothesis.TestDecoderSafety.*
+    requirements:
+      - REQ-Decoder-Sa-046  # Decoders MUST NOT crash
+      - REQ-Decoder-Sa-047  # MUST NOT enter infinite loops
+      - REQ-Decoder-Sa-048  # MUST return error for invalid
+
+  - test: test_hypothesis.TestRoundtrip.*
+    requirements:
+      - REQ-Roundtrip-045   # Encode/decode consistency
+
+  - test: test_hypothesis.TestTypeBoundaries.*
+    requirements:
+      - REQ-Type-Bound-049  # Boundary value handling
+
+  - test: test_hypothesis.TestSchemaParserSafety.*
+    requirements:
+      - REQ-Validator-Sa-050  # Validator MUST NOT crash
+
+  # Type Aliases
+  - test: test_hypothesis.TestTypeAliases.*
+    requirements:
+      - REQ-Type-Alia-003   # Type aliases equivalent
+
+  # Section 16: Definitions and References
+  - test: test_schema_interpreter.TestDefinitionsAndRef.*
+    requirements:
+      - REQ-Definitio-051   # definitions section
+      - REQ-Ref-Field-052   # $ref field
+
+  # Binary Schema (Section 17)
+  - test: test_binary_schema.*
+    requirements:
+      - REQ-Binary-Sch-053  # Binary schema encoding
+      - REQ-Binary-Dec-054  # Binary schema decoding
+
+  # QR Schema
+  - test: test_qr_schema.*
+    requirements:
+      - REQ-QR-Schema-055   # QR code embedding
+      - REQ-QR-Parse-056    # QR code parsing
+
+  # Validate Schema Tool
+  - test: validate_schema.*
+    requirements:
+      - REQ-Schema-Val-MUST-001  # Schema validation
+      - REQ-Schema-Val-MUST-002  # Clear error messages
+
+# Summary mapping for quick reference
+summary:
+  total_tests: 158
+  total_requirements_mapped: 56
+  coverage_areas:
+    - Schema format and structure
+    - All integer types (u8-u64, s8-s64)
+    - Float types (f16, f32, f64)
+    - All 5 bitfield syntaxes
+    - Boolean type
+    - String types (bytes, string, ascii, hex)
+    - Skip/padding type
+    - All modifiers (mult, add, div, lookup, formula)
+    - Nested objects
+    - Match conditionals (single, list, range, default)
+    - Byte groups
+    - Enum type
+    - All output formats (IPSO, SenML, TTN)
+    - Encoder and roundtrip
+    - Safety (fuzzing, boundaries)
+    - Definitions and $ref
+    - Binary schema encoding
+    - QR code embedding
