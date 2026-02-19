@@ -112,6 +112,86 @@ Recommendations:
 - Add IPSO/SenML annotations for interoperability
 ```
 
+## Using the Sensor Library
+
+Build schemas faster using pre-defined sensor types with IPSO annotations already included.
+
+### Quick Start with Library
+
+```yaml
+name: my_env_sensor
+version: 1
+endian: big
+
+fields:
+  - $ref: "lib/common/headers.yaml#/definitions/msg_type_header"
+  - $ref: "lib/profiles/env-sensor.yaml#/definitions/temp_humidity"
+  - $ref: "lib/sensors/power.yaml#/definitions/battery_mv"
+```
+
+### Process Schema
+
+```bash
+# Resolve library references
+python tools/schema_preprocessor.py schemas/mycompany/my_env_sensor.yaml -o schemas/mycompany/my_env_sensor_resolved.yaml
+
+# Validate the resolved schema
+python tools/validate_schema.py schemas/mycompany/my_env_sensor_resolved.yaml -v
+```
+
+### Available Sensor Types
+
+| Category | Library File | Sensors |
+|----------|--------------|---------|
+| Environmental | `lib/sensors/environmental.yaml` | temperature, humidity, pressure, CO2, TVOC, illuminance |
+| Power | `lib/sensors/power.yaml` | battery_mv, battery_pct, voltage, current, power, energy |
+| Position | `lib/sensors/position.yaml` | latitude, longitude, altitude, accelerometer, gyroscope |
+| Digital | `lib/sensors/digital.yaml` | digital_input, digital_output, counter, presence |
+| Distance | `lib/sensors/distance.yaml` | distance_mm, level_pct, radar |
+| Flow | `lib/sensors/flow.yaml` | flow_rate, total_volume |
+
+### Sensor Profiles (Pre-built Combinations)
+
+| Profile | File | Contents |
+|---------|------|----------|
+| `temp_humidity` | `lib/profiles/env-sensor.yaml` | Temperature + Humidity |
+| `temp_humidity_pressure` | `lib/profiles/env-sensor.yaml` | + Pressure |
+| `indoor_air_quality` | `lib/profiles/env-sensor.yaml` | + CO2 + TVOC |
+| `gps_basic` | `lib/profiles/tracker.yaml` | Lat + Lon + Alt |
+| `full_tracker` | `lib/profiles/tracker.yaml` | GPS + Speed + Heading + Battery |
+
+### Multiple Sensors of Same Type
+
+Use `rename:` or `prefix:` when you have multiple sensors:
+
+```yaml
+fields:
+  # Two temperature sensors
+  - $ref: "lib/sensors/environmental.yaml#/definitions/temperature_c"
+    rename:
+      temperature: indoor_temp
+      
+  - $ref: "lib/sensors/environmental.yaml#/definitions/temperature_c"
+    rename:
+      temperature: outdoor_temp
+
+  # Or use prefix for groups
+  - $ref: "lib/profiles/env-sensor.yaml#/definitions/temp_humidity"
+    prefix: "zone1_"
+    
+  - $ref: "lib/profiles/env-sensor.yaml#/definitions/temp_humidity"
+    prefix: "zone2_"
+```
+
+### Benefits of Using the Library
+
+1. **IPSO annotations included** - Automatic interoperability scoring boost
+2. **Consistent scaling** - Standard units and precision across devices
+3. **Less typing** - Common patterns ready to use
+4. **SenML units** - RFC 8428 compliance built-in
+
+See `lib/README.md` for the complete library reference.
+
 ## Common Patterns
 
 ### Signed vs Unsigned
@@ -271,10 +351,11 @@ output/
 
 ## Next Steps
 
-1. **[Schema Language Reference](SCHEMA-LANGUAGE-REFERENCE.md)** - Full field type and modifier documentation
-2. **[Output Formats](OUTPUT-FORMATS.md)** - IPSO, SenML, TTN normalized output
-3. **[Bidirectional Codec](BIDIRECTIONAL-CODEC.md)** - Downlink encoding for device configuration
-4. **[C Code Generation](C-CODE-GENERATION.md)** - Embedded firmware integration
+1. **[Sensor Library](../lib/README.md)** - Pre-built sensor definitions with IPSO mappings
+2. **[Schema Language Reference](SCHEMA-LANGUAGE-REFERENCE.md)** - Full field type and modifier documentation
+3. **[Output Formats](OUTPUT-FORMATS.md)** - IPSO, SenML, TTN normalized output
+4. **[Bidirectional Codec](BIDIRECTIONAL-CODEC.md)** - Downlink encoding for device configuration
+5. **[C Code Generation](C-CODE-GENERATION.md)** - Embedded firmware integration
 
 ## Getting Help
 
