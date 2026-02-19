@@ -1,6 +1,6 @@
-# LoRaWAN Payload Schema
+# Device Payload Schema
 
-Declarative payload schema definitions for LoRaWAN device codecs.
+Declarative payload schema definitions for IoT device codecs.
 
 **New to this toolkit?** Start with the [Getting Started Guide](docs/GETTING-STARTED.md).
 
