@@ -1,0 +1,43 @@
+{
+  "timestamp": "2026-02-18T22:28:05.222279-06:00",
+  "schemas": [
+    {
+      "schema_path": "schemas/decentlab/dl-5tm.yaml",
+      "timestamp": "2026-02-18T22:28:05.198948-06:00",
+      "score": 100.0,
+      "tier": "PLATINUM",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 7,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 7,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [],
+        "semantic_annotations": {
+          "total_fields": 7,
+          "ipso_mapped": 2,
+          "ipso_missing": [],
+          "senml_mapped": 2,
+          "senml_missing": [],
+          "semantic_mapped": 2,
+          "detectable_sensors": 2
+        }
+      },
+      "recommendations": []
+    }
+  ]
+}

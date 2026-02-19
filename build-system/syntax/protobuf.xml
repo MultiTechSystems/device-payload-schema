@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE language>
+<!-- Protocol Buffers syntax highlighting for Pandoc -->
+<language name="Protocol Buffers"
+  kateversion="5.0"
+  version="1"
+  section="Sources"
+  extensions="*.proto"
+  mimetype="text/x-protobuf"
+  casesensitive="1"
+  author="Payload Schema Project"
+  license="MIT">
+
+  <highlighting>
+    <list name="keywords">
+      <item>syntax</item>
+      <item>package</item>
+      <item>option</item>
+      <item>import</item>
+      <item>public</item>
+      <item>weak</item>
+      <item>message</item>
+      <item>enum</item>
+      <item>service</item>
+      <item>rpc</item>
+      <item>returns</item>
+      <item>stream</item>
+      <item>extend</item>
+      <item>extensions</item>
+      <item>to</item>
+      <item>max</item>
+      <item>reserved</item>
+      <item>oneof</item>
+      <item>map</item>
+    </list>
+
+    <list name="modifiers">
+      <item>optional</item>
+      <item>required</item>
+      <item>repeated</item>
+    </list>
+
+    <list name="types">
+      <item>double</item>
+      <item>float</item>
+      <item>int32</item>
+      <item>int64</item>
+      <item>uint32</item>
+      <item>uint64</item>
+      <item>sint32</item>
+      <item>sint64</item>
+      <item>fixed32</item>
+      <item>fixed64</item>
+      <item>sfixed32</item>
+      <item>sfixed64</item>
+      <item>bool</item>
+      <item>string</item>
+      <item>bytes</item>
+    </list>
+
+    <list name="constants">
+      <item>true</item>
+      <item>false</item>
+    </list>
+
+    <contexts>
+      <context name="Normal" attribute="Normal Text" lineEndContext="#stay">
+        <DetectSpaces />
+        <keyword String="keywords" attribute="Keyword" context="#stay" />
+        <keyword String="modifiers" attribute="Modifier" context="#stay" />
+        <keyword String="types" attribute="Data Type" context="#stay" />
+        <keyword String="constants" attribute="Constant" context="#stay" />
+        
+        <DetectChar attribute="String" char="&quot;" context="String" />
+        <Detect2Chars attribute="Comment" char="/" char1="/" context="SingleLineComment" />
+        <Detect2Chars attribute="Comment" char="/" char1="*" context="MultiLineComment" beginRegion="Comment" />
+        
+        <RegExpr attribute="Number" String="\b[0-9]+\b" context="#stay" />
+        <RegExpr attribute="Field Number" String="=\s*[0-9]+" context="#stay" />
+      </context>
+
+      <context name="String" attribute="String" lineEndContext="#pop">
+        <DetectChar attribute="String" char="&quot;" context="#pop" />
+        <HlCStringChar attribute="String Escape" context="#stay" />
+      </context>
+
+      <context name="SingleLineComment" attribute="Comment" lineEndContext="#pop">
+        <DetectSpaces />
+        <IncludeRules context="##Comments" />
+      </context>
+
+      <context name="MultiLineComment" attribute="Comment" lineEndContext="#stay">
+        <Detect2Chars attribute="Comment" char="*" char1="/" context="#pop" endRegion="Comment" />
+        <IncludeRules context="##Comments" />
+      </context>
+    </contexts>
+
+    <itemDatas>
+      <itemData name="Normal Text" defStyleNum="dsNormal" />
+      <itemData name="Keyword" defStyleNum="dsKeyword" />
+      <itemData name="Modifier" defStyleNum="dsBuiltIn" />
+      <itemData name="Data Type" defStyleNum="dsDataType" />
+      <itemData name="Constant" defStyleNum="dsConstant" />
+      <itemData name="String" defStyleNum="dsString" />
+      <itemData name="String Escape" defStyleNum="dsSpecialChar" />
+      <itemData name="Number" defStyleNum="dsDecVal" />
+      <itemData name="Field Number" defStyleNum="dsDecVal" />
+      <itemData name="Comment" defStyleNum="dsComment" />
+    </itemDatas>
+  </highlighting>
+
+  <general>
+    <comments>
+      <comment name="singleLine" start="//" />
+      <comment name="multiLine" start="/*" end="*/" />
+    </comments>
+    <keywords casesensitive="1" />
+  </general>
+</language>

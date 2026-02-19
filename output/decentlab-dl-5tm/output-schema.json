@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "decentlab_dl_5tm decoder output",
+  "type": "object",
+  "properties": {
+    "protocol_version": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 255
+    },
+    "device_id": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535
+    },
+    "flags": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535
+    }
+  },
+  "required": [
+    "protocol_version",
+    "device_id",
+    "flags"
+  ]
+}

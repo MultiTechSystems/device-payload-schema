@@ -1,0 +1,3461 @@
+"""
+Tests for schema interpreter.
+
+Requirements Coverage:
+- REQ-Document-S-SHAL-003: Schema format
+- REQ-Unsigned-I-001 through REQ-Type-Alia-003: Integer types
+- REQ-Float-Typ-007, REQ-Float-Typ-008: Float types
+- REQ-Bitfield--009 through REQ-Bitfield--014: Bitfield syntaxes
+- REQ-Boolean-Ty-016: Boolean type
+- REQ-Arithmeti-022 through REQ-Lookup-Ta-027: Modifiers
+- REQ-Match-Cond-030 through REQ-Match-Defa-036: Conditional parsing
+- REQ-Output-For-040 through REQ-TTN-Output-043: Output formats
+- REQ-Encoder-Re-044, REQ-Roundtrip-045: Encoding
+"""
+
+import pytest
+import struct
+import sys
+from pathlib import Path
+
+# Add tools to path
+sys.path.insert(0, str(Path(__file__).parent.parent / 'tools'))
+
+from schema_interpreter import (
+    SchemaInterpreter, DecodeResult, EncodeResult,
+    Endian, decode_payload, encode_payload
+)
+
+
+class TestSchemaInterpreterBasic:
+    """Basic tests for SchemaInterpreter.
+    
+    REQ-Document-S-SHAL-003: Schema SHALL be valid JSON/YAML
+    REQ-Document-S-REQU-004: name field REQUIRED
+    REQ-Document-S-REQU-008: fields array REQUIRED
+    """
+    
+    @pytest.fixture
+    def simple_schema(self):
+        return {
+            'name': 'test_sensor',
+            'endian': 'big',
+            'fields': [
+                {'name': 'temperature', 'type': 'u16'},
+                {'name': 'humidity', 'type': 'u8'},
+            ]
+        }
+    
+    def test_decode_simple(self, simple_schema):
+        """Test decoding simple payload."""
+        interpreter = SchemaInterpreter(simple_schema)
+        payload = bytes([0x01, 0x00, 0x64])  # temp=256, hum=100
+        
+        result = interpreter.decode(payload)
+        
+        assert result.success
+        assert result.data['temperature'] == 256
+        assert result.data['humidity'] == 100
+        assert result.bytes_consumed == 3
+    
+    def test_decode_empty_payload(self, simple_schema):
+        """Test decoding empty payload fails gracefully."""
+        interpreter = SchemaInterpreter(simple_schema)
+        
+        result = interpreter.decode(bytes())
+        
+        assert not result.success
+        assert len(result.errors) > 0
+
+
+class TestIntegerTypes:
+    """Tests for integer type decoding.
+    
+    REQ-Unsigned-I-001: u8, u16, u32, u64 unsigned integers
+    REQ-Signed-Int-002: s8, s16, s32, s64 signed integers
+    REQ-Type-Alia-003: Type aliases (uint8, int8, etc.)
+    REQ-Endiannes-004: Big endian default
+    REQ-Endiannes-005: Little endian option
+    """
+    
+    def test_decode_u8(self):
+        """Test unsigned 8-bit decode."""
+        schema = {'fields': [{'name': 'val', 'type': 'u8'}]}
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0xFF]))
+        assert result.data['val'] == 255
+    
+    def test_decode_u16_big_endian(self):
+        """Test unsigned 16-bit big-endian decode."""
+        schema = {'endian': 'big', 'fields': [{'name': 'val', 'type': 'u16'}]}
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x01, 0x02]))
+        assert result.data['val'] == 0x0102
+    
+    def test_decode_u16_little_endian(self):
+        """Test unsigned 16-bit little-endian decode."""
+        schema = {'endian': 'little', 'fields': [{'name': 'val', 'type': 'u16'}]}
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x01, 0x02]))
+        assert result.data['val'] == 0x0201
+    
+    def test_decode_s16_negative(self):
+        """Test signed 16-bit with negative value."""
+        schema = {'endian': 'big', 'fields': [{'name': 'val', 'type': 's16'}]}
+        interpreter = SchemaInterpreter(schema)
+        
+        # -100 in big-endian
+        result = interpreter.decode(bytes([0xFF, 0x9C]))
+        assert result.data['val'] == -100
+    
+    def test_decode_u32(self):
+        """Test unsigned 32-bit decode."""
+        schema = {'endian': 'big', 'fields': [{'name': 'val', 'type': 'u32'}]}
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x00, 0x01, 0x00, 0x00]))
+        assert result.data['val'] == 65536
+    
+    def test_decode_i8(self):
+        """Test signed 8-bit decode."""
+        schema = {'fields': [{'name': 'val', 'type': 'i8'}]}
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x80]))  # -128
+        assert result.data['val'] == -128
+    
+    def test_decode_u24(self):
+        """Test unsigned 24-bit decode."""
+        schema = {'endian': 'big', 'fields': [{'name': 'val', 'type': 'u24'}]}
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x01, 0x02, 0x03]))
+        assert result.data['val'] == 0x010203
+
+
+class TestFloatTypes:
+    """Tests for floating point type decoding.
+    
+    REQ-Float-Typ-007: f32/float, f64/double types
+    """
+    
+    def test_decode_f32(self):
+        """Test 32-bit float decode."""
+        schema = {'endian': 'little', 'fields': [{'name': 'val', 'type': 'f32'}]}
+        interpreter = SchemaInterpreter(schema)
+        
+        # 1.5 as little-endian float
+        payload = struct.pack('<f', 1.5)
+        result = interpreter.decode(payload)
+        
+        assert abs(result.data['val'] - 1.5) < 0.0001
+    
+    def test_decode_f64(self):
+        """Test 64-bit float decode."""
+        schema = {'endian': 'big', 'fields': [{'name': 'val', 'type': 'f64'}]}
+        interpreter = SchemaInterpreter(schema)
+        
+        payload = struct.pack('>d', 3.14159)
+        result = interpreter.decode(payload)
+        
+        assert abs(result.data['val'] - 3.14159) < 0.00001
+
+
+class TestBitfieldTypes:
+    """Tests for bitfield type decoding.
+    
+    REQ-Bitfield--009: Bitfield extraction
+    REQ-Bitfield--010: Python slice syntax u8[3:4]
+    REQ-Bitfield--011: Verilog part-select u8[3+:2]
+    REQ-Bitfield--012: C++ template bits<3,2>
+    REQ-Bitfield--013: @ notation bits:2@3
+    REQ-Bitfield--014: Sequential syntax u8:2
+    REQ-Consume-Fi-015: consume: 0 prevents byte advance
+    """
+    
+    def test_decode_bitfield_python_slice(self):
+        """Test Python slice notation: u8[3:4]."""
+        schema = {'fields': [
+            {'name': 'val', 'type': 'u8[3:4]', 'consume': 1}
+        ]}
+        interpreter = SchemaInterpreter(schema)
+        
+        # Byte: 0b00011000 = 0x18, bits 3-4 = 0b11 = 3
+        result = interpreter.decode(bytes([0x18]))
+        assert result.data['val'] == 3
+    
+    def test_decode_bitfield_verilog(self):
+        """Test Verilog part-select: u8[3+:2]."""
+        schema = {'fields': [
+            {'name': 'val', 'type': 'u8[3+:2]', 'consume': 1}
+        ]}
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x18]))
+        assert result.data['val'] == 3
+    
+    def test_decode_bitfield_cpp_template(self):
+        """Test C++ template: bits<3,2>."""
+        schema = {'fields': [
+            {'name': 'val', 'type': 'bits<3,2>', 'consume': 1}
+        ]}
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x18]))
+        assert result.data['val'] == 3
+    
+    def test_decode_bitfield_at_notation(self):
+        """Test @ notation: bits:2@3."""
+        schema = {'fields': [
+            {'name': 'val', 'type': 'bits:2@3', 'consume': 1}
+        ]}
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x18]))
+        assert result.data['val'] == 3
+    
+    def test_decode_bitfield_sequential(self):
+        """Test sequential: u8:2."""
+        schema = {'fields': [
+            {'name': 'high', 'type': 'u8:2'},
+            {'name': 'mid', 'type': 'u8:3'},
+            {'name': 'low', 'type': 'u8:3', 'consume': 1},
+        ]}
+        interpreter = SchemaInterpreter(schema)
+        
+        # Byte: 0b11_010_001 = 0xD1
+        result = interpreter.decode(bytes([0xD1]))
+        assert result.data['high'] == 3   # bits 6-7 = 0b11
+        assert result.data['mid'] == 2    # bits 3-5 = 0b010
+        assert result.data['low'] == 1    # bits 0-2 = 0b001
+    
+    def test_decode_multiple_bitfields_no_advance(self):
+        """Test multiple bitfields from same byte."""
+        schema = {'fields': [
+            {'name': 'a', 'type': 'u8[0:0]'},  # Bit 0
+            {'name': 'b', 'type': 'u8[1:1]'},  # Bit 1
+            {'name': 'c', 'type': 'u8[2:2]'},  # Bit 2
+            {'name': 'd', 'type': 'u8[3:7]', 'consume': 1},  # Bits 3-7
+        ]}
+        interpreter = SchemaInterpreter(schema)
+        
+        # Byte: 0b11110101 = 0xF5
+        result = interpreter.decode(bytes([0xF5]))
+        assert result.data['a'] == 1  # Bit 0
+        assert result.data['b'] == 0  # Bit 1
+        assert result.data['c'] == 1  # Bit 2
+        assert result.data['d'] == 0b11110  # Bits 3-7
+
+
+class TestBooleanType:
+    """Tests for boolean type decoding.
+    
+    REQ-Boolean-Ty-016: bool type with bit position
+    """
+    
+    def test_decode_bool_true(self):
+        """Test boolean decode true."""
+        schema = {'fields': [
+            {'name': 'flag', 'type': 'bool', 'bit': 0, 'consume': 1}
+        ]}
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x01]))
+        assert result.data['flag'] is True
+    
+    def test_decode_bool_false(self):
+        """Test boolean decode false."""
+        schema = {'fields': [
+            {'name': 'flag', 'type': 'bool', 'bit': 0, 'consume': 1}
+        ]}
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x00]))
+        assert result.data['flag'] is False
+    
+    def test_decode_bool_specific_bit(self):
+        """Test boolean at specific bit."""
+        schema = {'fields': [
+            {'name': 'flag', 'type': 'bool', 'bit': 7, 'consume': 1}
+        ]}
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x80]))  # Bit 7 set
+        assert result.data['flag'] is True
+
+
+class TestModifiers:
+    """Tests for arithmetic modifiers.
+    
+    REQ-Arithmeti-022: mult, add, div modifiers
+    REQ-Modifier-O-023: Modifier application order (mult -> div -> add)
+    REQ-Mult-Modi-024: mult modifier
+    REQ-Add-Modif-025: add modifier
+    REQ-Div-Modif-026: div modifier
+    REQ-Lookup-Ta-027: lookup table modifier
+    """
+    
+    def test_mult_modifier(self):
+        """Test multiplier modifier."""
+        schema = {'fields': [
+            {'name': 'temp', 'type': 'u16', 'mult': 0.01}
+        ]}
+        interpreter = SchemaInterpreter(schema)
+        
+        # 2345 * 0.01 = 23.45
+        result = interpreter.decode(bytes([0x09, 0x29]))
+        assert abs(result.data['temp'] - 23.45) < 0.001
+    
+    def test_add_modifier(self):
+        """Test add modifier."""
+        schema = {'fields': [
+            {'name': 'val', 'type': 'u8', 'add': 100}
+        ]}
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x0A]))  # 10 + 100 = 110
+        assert result.data['val'] == 110
+    
+    def test_div_modifier(self):
+        """Test div modifier."""
+        schema = {'fields': [
+            {'name': 'val', 'type': 'u16', 'div': 10}
+        ]}
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x00, 0x64]))  # 100 / 10 = 10
+        assert result.data['val'] == 10.0
+    
+    def test_combined_modifiers(self):
+        """Test combined mult, div, add."""
+        schema = {'fields': [
+            {'name': 'val', 'type': 'u8', 'mult': 2, 'add': 10}
+        ]}
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x05]))  # 5 * 2 + 10 = 20
+        assert result.data['val'] == 20
+    
+    def test_lookup_modifier(self):
+        """Test lookup table modifier."""
+        schema = {'fields': [
+            {'name': 'mode', 'type': 'u8', 'lookup': ['off', 'low', 'medium', 'high']}
+        ]}
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x02]))
+        assert result.data['mode'] == 'medium'
+
+
+class TestNestedObjects:
+    """Tests for nested object types.
+    
+    REQ-Nested-Obj-029: type: object with nested fields
+    """
+    
+    def test_decode_nested_object(self):
+        """Test nested object decoding."""
+        schema = {'fields': [
+            {'name': 'header', 'type': 'u8'},
+            {'name': 'sensor', 'type': 'object', 'fields': [
+                {'name': 'temp', 'type': 'u16'},
+                {'name': 'hum', 'type': 'u8'},
+            ]},
+        ]}
+        interpreter = SchemaInterpreter(schema)
+        
+        payload = bytes([0x01, 0x00, 0x64, 0x32])
+        result = interpreter.decode(payload)
+        
+        assert result.data['header'] == 1
+        assert result.data['sensor']['temp'] == 100
+        assert result.data['sensor']['hum'] == 50
+
+
+class TestBytesAndStrings:
+    """Tests for bytes and string types.
+    
+    REQ-Bytes-Type-017: bytes type
+    REQ-String-Typ-018: string type
+    """
+    
+    def test_decode_bytes(self):
+        """Test bytes type decode."""
+        schema = {'fields': [
+            {'name': 'data', 'type': 'bytes', 'length': 4}
+        ]}
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x01, 0x02, 0x03, 0x04]))
+        assert result.data['data'] == bytes([0x01, 0x02, 0x03, 0x04])
+    
+    def test_decode_string(self):
+        """Test string type decode."""
+        schema = {'fields': [
+            {'name': 'name', 'type': 'string', 'length': 5}
+        ]}
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(b'hello')
+        assert result.data['name'] == 'hello'
+    
+    def test_decode_string_with_null(self):
+        """Test string strips null padding."""
+        schema = {'fields': [
+            {'name': 'name', 'type': 'string', 'length': 8}
+        ]}
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(b'test\x00\x00\x00\x00')
+        assert result.data['name'] == 'test'
+
+
+class TestInternalFields:
+    """Tests for internal/hidden fields."""
+    
+    def test_skip_internal_fields(self):
+        """Test that fields starting with _ are skipped in output."""
+        schema = {'fields': [
+            {'name': '_header', 'type': 'u8'},
+            {'name': 'value', 'type': 'u16'},
+        ]}
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0xFF, 0x00, 0x64]))
+        
+        assert '_header' not in result.data
+        assert result.data['value'] == 100
+
+
+class TestEncoder:
+    """Tests for payload encoding.
+    
+    REQ-Encoder-Re-044: Bidirectional encoding
+    REQ-Roundtrip-045: Encode/decode roundtrip consistency
+    """
+    
+    @pytest.fixture
+    def simple_schema(self):
+        return {
+            'name': 'test',
+            'endian': 'big',
+            'fields': [
+                {'name': 'temp', 'type': 'u16'},
+                {'name': 'hum', 'type': 'u8'},
+            ]
+        }
+    
+    def test_encode_simple(self, simple_schema):
+        """Test simple encoding."""
+        interpreter = SchemaInterpreter(simple_schema)
+        
+        result = interpreter.encode({'temp': 256, 'hum': 100})
+        
+        assert result.success
+        assert result.payload == bytes([0x01, 0x00, 0x64])
+    
+    def test_encode_with_mult(self):
+        """Test encoding with multiplier."""
+        schema = {'fields': [
+            {'name': 'temp', 'type': 'u16', 'mult': 0.01}
+        ]}
+        interpreter = SchemaInterpreter(schema)
+        
+        # 23.45 / 0.01 = 2345
+        result = interpreter.encode({'temp': 23.45})
+        assert result.payload == bytes([0x09, 0x29])
+    
+    def test_encode_missing_field_warning(self, simple_schema):
+        """Test warning for missing field."""
+        interpreter = SchemaInterpreter(simple_schema)
+        
+        result = interpreter.encode({'temp': 256})  # Missing 'hum'
+        
+        assert 'hum' in ''.join(result.warnings)
+    
+    def test_encode_decode_roundtrip(self, simple_schema):
+        """Test encode/decode roundtrip."""
+        interpreter = SchemaInterpreter(simple_schema)
+        
+        original = {'temp': 512, 'hum': 75}
+        encoded = interpreter.encode(original)
+        decoded = interpreter.decode(encoded.payload)
+        
+        assert decoded.data == original
+
+
+class TestSemanticOutputs:
+    """Tests for semantic output formats.
+    
+    REQ-Output-For-040: Semantic output layer
+    REQ-IPSO-Outpu-041: IPSO/LwM2M format
+    REQ-SenML-Outp-042: SenML (RFC 8428) format
+    REQ-TTN-Output-043: TTN normalized format
+    """
+    
+    @pytest.fixture
+    def semantic_schema(self):
+        return {
+            'fields': [
+                {'name': 'temperature', 'type': 's16', 'mult': 0.01,
+                 'unit': '°C', 'semantic': {'ipso': 3303}},
+                {'name': 'humidity', 'type': 'u8', 'mult': 0.5,
+                 'unit': '%RH', 'semantic': {'ipso': 3304}},
+            ]
+        }
+    
+    def test_ipso_output(self, semantic_schema):
+        """Test IPSO format output."""
+        interpreter = SchemaInterpreter(semantic_schema)
+        payload = bytes([0x09, 0x29, 0x82])  # temp=2345*0.01=23.45, hum=130*0.5=65
+        
+        result = interpreter.decode(payload)
+        ipso = interpreter.get_semantic_output(result.data, 'ipso')
+        
+        assert '3303' in ipso
+        assert ipso['3303']['value'] == 23.45
+        assert ipso['3303']['unit'] == '°C'
+    
+    def test_senml_output(self, semantic_schema):
+        """Test SenML format output."""
+        interpreter = SchemaInterpreter(semantic_schema)
+        payload = bytes([0x09, 0x29, 0x82])
+        
+        result = interpreter.decode(payload)
+        senml = interpreter.get_semantic_output(result.data, 'senml')
+        
+        assert isinstance(senml, list)
+        assert len(senml) == 2
+        assert senml[0]['n'] == 'temperature'
+        assert senml[0]['v'] == 23.45
+        assert senml[0]['u'] == '°C'
+    
+    def test_ttn_output(self, semantic_schema):
+        """Test TTN normalized output."""
+        interpreter = SchemaInterpreter(semantic_schema)
+        payload = bytes([0x09, 0x29, 0x82])
+        
+        result = interpreter.decode(payload)
+        ttn = interpreter.get_semantic_output(result.data, 'ttn')
+        
+        assert 'decoded_payload' in ttn
+        assert 'normalized_payload' in ttn
+
+
+class TestConvenienceFunctions:
+    """Tests for module-level convenience functions."""
+    
+    @pytest.fixture
+    def test_schema(self):
+        return {
+            'fields': [
+                {'name': 'value', 'type': 'u16'}
+            ]
+        }
+    
+    def test_decode_payload(self, test_schema):
+        """Test decode_payload function."""
+        result = decode_payload(test_schema, bytes([0x01, 0x00]))
+        assert result['value'] == 256
+    
+    def test_encode_payload(self, test_schema):
+        """Test encode_payload function."""
+        result = encode_payload(test_schema, {'value': 256})
+        assert result == bytes([0x01, 0x00])
+    
+    def test_decode_payload_raises_on_error(self, test_schema):
+        """Test decode_payload raises on error."""
+        with pytest.raises(ValueError, match="Decode errors"):
+            decode_payload(test_schema, bytes())
+
+
+class TestDecodeResult:
+    """Tests for DecodeResult class."""
+    
+    def test_success_property(self):
+        """Test success property."""
+        result = DecodeResult(data={}, bytes_consumed=0)
+        assert result.success
+        
+        result.errors.append("error")
+        assert not result.success
+
+
+class TestEncodeResult:
+    """Tests for EncodeResult class."""
+    
+    def test_success_property(self):
+        """Test success property."""
+        result = EncodeResult(payload=b'')
+        assert result.success
+        
+        result.errors.append("error")
+        assert not result.success
+
+
+class TestEnumType:
+    """Tests for enum type.
+    
+    REQ-Enum-Type-038: enum type with base integer
+    REQ-Enum-Value-039: enum values mapping (dict or list)
+    """
+    
+    def test_decode_enum_dict(self):
+        """Test decoding enum with dict values."""
+        schema = {
+            'fields': [{
+                'name': 'status',
+                'type': 'enum',
+                'base': 'u8',
+                'values': {0: 'idle', 1: 'running', 2: 'error'}
+            }]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x01]))
+        assert result.success
+        assert result.data['status'] == 'running'
+    
+    def test_decode_enum_list(self):
+        """Test decoding enum with list values."""
+        schema = {
+            'fields': [{
+                'name': 'mode',
+                'type': 'enum',
+                'base': 'u8',
+                'values': ['off', 'low', 'medium', 'high']
+            }]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x02]))
+        assert result.success
+        assert result.data['mode'] == 'medium'
+    
+    def test_decode_enum_unknown(self):
+        """Test decoding unknown enum value."""
+        schema = {
+            'fields': [{
+                'name': 'status',
+                'type': 'enum',
+                'base': 'u8',
+                'values': {0: 'idle', 1: 'running'}
+            }]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0xFF]))
+        assert result.success
+        assert result.data['status'] == 'unknown(255)'
+    
+    def test_encode_enum(self):
+        """Test encoding enum back to integer."""
+        schema = {
+            'fields': [{
+                'name': 'status',
+                'type': 'enum',
+                'base': 'u8',
+                'values': {0: 'idle', 1: 'running', 2: 'error'}
+            }]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.encode({'status': 'running'})
+        assert result.success
+        assert result.payload == bytes([0x01])
+    
+    def test_enum_roundtrip(self):
+        """Test enum encode/decode roundtrip."""
+        schema = {
+            'fields': [{
+                'name': 'status',
+                'type': 'enum',
+                'base': 'u8',
+                'values': {0: 'idle', 1: 'running', 2: 'error'}
+            }]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        original = {'status': 'error'}
+        encoded = interpreter.encode(original)
+        decoded = interpreter.decode(encoded.payload)
+        
+        assert decoded.data['status'] == 'error'
+
+
+class TestMatchConditional:
+    """Tests for match conditional decoding.
+    
+    REQ-Match-Cond-030: match/on/cases conditional parsing
+    REQ-Match-Sing-032: Single value case
+    REQ-Match-List-033: List of values case
+    REQ-Match-Rang-034: Range case (1..5)
+    REQ-Match-Defa-035: default: skip
+    REQ-Match-Defa-036: default: error
+    """
+    
+    def test_match_single_value(self):
+        """Test match with single value case."""
+        schema = {
+            'fields': [
+                {'name': 'msg_type', 'type': 'u8'},
+                {
+                    'type': 'match',
+                    'on': 'msg_type',
+                    'cases': [
+                        {'case': 1, 'fields': [{'name': 'temp', 'type': 's16', 'mult': 0.01}]},
+                        {'case': 2, 'fields': [{'name': 'humidity', 'type': 'u8'}]},
+                    ]
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # msg_type=1, temp=2345 (23.45°C)
+        result = interpreter.decode(bytes([0x01, 0x09, 0x29]))
+        assert result.success
+        assert result.data['msg_type'] == 1
+        assert abs(result.data['temp'] - 23.45) < 0.01
+    
+    def test_match_list(self):
+        """Test match with list of values."""
+        schema = {
+            'fields': [
+                {'name': 'msg_type', 'type': 'u8'},
+                {
+                    'type': 'match',
+                    'on': 'msg_type',
+                    'cases': [
+                        {'case': [1, 2, 3], 'fields': [{'name': 'data', 'type': 'u8'}]},
+                    ]
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        for msg_type in [1, 2, 3]:
+            result = interpreter.decode(bytes([msg_type, 0x42]))
+            assert result.success
+            assert result.data['data'] == 0x42
+    
+    def test_match_range(self):
+        """Test match with range pattern."""
+        schema = {
+            'fields': [
+                {'name': 'msg_type', 'type': 'u8'},
+                {
+                    'type': 'match',
+                    'on': 'msg_type',
+                    'cases': [
+                        {'case': '10..20', 'fields': [{'name': 'data', 'type': 'u8'}]},
+                    ]
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # Should match
+        result = interpreter.decode(bytes([15, 0x42]))
+        assert result.success
+        assert result.data['data'] == 0x42
+        
+        # Boundary - should match
+        result = interpreter.decode(bytes([10, 0x42]))
+        assert result.success
+        
+        result = interpreter.decode(bytes([20, 0x42]))
+        assert result.success
+    
+    def test_match_default_skip(self):
+        """Test match with default: skip."""
+        schema = {
+            'fields': [
+                {'name': 'msg_type', 'type': 'u8'},
+                {
+                    'type': 'match',
+                    'on': 'msg_type',
+                    'default': 'skip',
+                    'cases': [
+                        {'case': 1, 'fields': [{'name': 'data', 'type': 'u8'}]},
+                    ]
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # Unknown type - should skip
+        result = interpreter.decode(bytes([99, 0x42]))
+        assert result.success
+        assert 'data' not in result.data
+    
+    def test_match_default_error(self):
+        """Test match with default: error."""
+        schema = {
+            'fields': [
+                {'name': 'msg_type', 'type': 'u8'},
+                {
+                    'type': 'match',
+                    'on': 'msg_type',
+                    'default': 'error',
+                    'cases': [
+                        {'case': 1, 'fields': [{'name': 'data', 'type': 'u8'}]},
+                    ]
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # Unknown type - should error
+        result = interpreter.decode(bytes([99, 0x42]))
+        assert not result.success
+
+
+class TestByteGroup:
+    """Tests for byte_group construct.
+    
+    REQ-Byte-Group-037: byte_group for grouping bitfields
+    """
+    
+    def test_byte_group_basic(self):
+        """Test basic byte_group with bitfields."""
+        schema = {
+            'fields': [{
+                'byte_group': [
+                    {'name': 'flag_a', 'type': 'u8[0:0]'},
+                    {'name': 'flag_b', 'type': 'u8[1:1]'},
+                    {'name': 'value', 'type': 'u8[2:7]'},
+                ],
+                'size': 1
+            }]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # 0b11_000011 = 0xC3 -> flag_a=1, flag_b=1, value=48
+        result = interpreter.decode(bytes([0xC3]))
+        assert result.success
+        assert result.data['flag_a'] == 1
+        assert result.data['flag_b'] == 1
+        assert result.data['value'] == 48
+    
+    def test_byte_group_consumes_correctly(self):
+        """Test that byte_group advances position correctly."""
+        schema = {
+            'fields': [
+                {
+                    'byte_group': [
+                        {'name': 'low', 'type': 'u8[0:3]'},
+                        {'name': 'high', 'type': 'u8[4:7]'},
+                    ],
+                    'size': 1
+                },
+                {'name': 'next_byte', 'type': 'u8'}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # 0xAB = low=11, high=10, next=0xFF
+        result = interpreter.decode(bytes([0xAB, 0xFF]))
+        assert result.success
+        assert result.data['low'] == 0x0B
+        assert result.data['high'] == 0x0A
+        assert result.data['next_byte'] == 0xFF
+
+
+class TestFormulaField:
+    """Tests for formula field modifier.
+    
+    REQ-Formula-Fi-028: formula expression evaluation
+    """
+    
+    def test_formula_simple(self):
+        """Test simple formula."""
+        schema = {
+            'fields': [{
+                'name': 'temperature',
+                'type': 'u8',
+                'formula': 'x * 0.5 - 40'
+            }]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # x=160 -> 160 * 0.5 - 40 = 40
+        result = interpreter.decode(bytes([160]))
+        assert result.success
+        assert abs(result.data['temperature'] - 40.0) < 0.01
+    
+    def test_formula_with_math(self):
+        """Test formula with math operations."""
+        schema = {
+            'fields': [{
+                'name': 'value',
+                'type': 'u16',
+                'formula': '(x / 100) ** 2'
+            }]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # x=1000 -> (1000/100)^2 = 100
+        result = interpreter.decode(bytes([0x03, 0xE8]))  # 1000 big-endian
+        assert result.success
+        assert abs(result.data['value'] - 100.0) < 0.01
+    
+    def test_formula_overrides_mult_add(self):
+        """Test that formula takes precedence over mult/add."""
+        schema = {
+            'fields': [{
+                'name': 'value',
+                'type': 'u8',
+                'mult': 999,  # Should be ignored
+                'add': 999,   # Should be ignored
+                'formula': 'x * 2'
+            }]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([10]))
+        assert result.success
+        assert result.data['value'] == 20  # formula: 10 * 2 = 20
+
+
+class TestNewTypes:
+    """Tests for newly implemented types.
+    
+    REQ-Float-Typ-008: f16 half precision float
+    REQ-Skip-Type-021: skip type for padding/reserved bytes
+    REQ-ASCII-Type-019: ascii string type
+    REQ-Hex-Type-020: hex string output
+    REQ-Base64-Typ-057: base64 string output
+    """
+    
+    def test_f16_half_precision(self):
+        """Test f16 half-precision float."""
+        schema = {'fields': [{'name': 'val', 'type': 'f16'}]}
+        interpreter = SchemaInterpreter(schema)
+        
+        # 0x4248 = 3.140625 in half-precision (close to pi)
+        result = interpreter.decode(bytes([0x42, 0x48]))
+        assert result.success
+        assert abs(result.data['val'] - 3.140625) < 0.001
+    
+    def test_skip_type(self):
+        """Test skip type for padding."""
+        schema = {
+            'fields': [
+                {'name': 'header', 'type': 'u8'},
+                {'name': '_pad', 'type': 'skip', 'length': 2},
+                {'name': 'data', 'type': 'u8'},
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x01, 0xAA, 0xBB, 0x02]))
+        assert result.success
+        assert result.data['header'] == 1
+        assert result.data['data'] == 2
+        assert '_pad' not in result.data
+    
+    def test_ascii_type(self):
+        """Test ascii string type."""
+        schema = {'fields': [{'name': 'name', 'type': 'ascii', 'length': 4}]}
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(b'TEST')
+        assert result.success
+        assert result.data['name'] == 'TEST'
+    
+    def test_hex_type(self):
+        """Test hex string output."""
+        schema = {'fields': [{'name': 'mac', 'type': 'hex', 'length': 4}]}
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0xDE, 0xAD, 0xBE, 0xEF]))
+        assert result.success
+        assert result.data['mac'] == 'DEADBEEF'
+    
+    def test_base64_type(self):
+        """Test base64 string output."""
+        schema = {'fields': [{'name': 'data', 'type': 'base64', 'length': 3}]}
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x01, 0x02, 0x03]))
+        assert result.success
+        assert result.data['data'] == 'AQID'  # base64 of 0x010203
+
+
+class TestDefinitionsAndRef:
+    """Tests for definitions and $ref support.
+    
+    REQ-Definitio-051: definitions section for reusable field groups
+    REQ-Ref-Field-052: $ref for referencing definitions
+    """
+    
+    def test_simple_ref(self):
+        """Test simple $ref to definition."""
+        schema = {
+            'definitions': {
+                'header': {
+                    'fields': [
+                        {'name': 'msg_type', 'type': 'u8'},
+                        {'name': 'length', 'type': 'u8'},
+                    ]
+                }
+            },
+            'fields': [
+                {'$ref': '#/definitions/header'},
+                {'name': 'data', 'type': 'u8'},
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x01, 0x05, 0xFF]))
+        assert result.success
+        assert result.data['msg_type'] == 1
+        assert result.data['length'] == 5
+        assert result.data['data'] == 255
+    
+    def test_ref_not_found(self):
+        """Test $ref with missing definition."""
+        schema = {
+            'definitions': {},
+            'fields': [
+                {'$ref': '#/definitions/missing'},
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x01]))
+        assert not result.success
+        assert 'not found' in result.errors[0].lower()
+
+
+class TestEdgeCases:
+    """Tests for edge cases."""
+    
+    def test_default_endian(self):
+        """Test default endian is big."""
+        schema = {'fields': [{'name': 'val', 'type': 'u16'}]}
+        interpreter = SchemaInterpreter(schema)
+        
+        assert interpreter.endian == Endian.BIG
+    
+    def test_buffer_too_short(self):
+        """Test error when buffer is too short."""
+        schema = {'fields': [{'name': 'val', 'type': 'u32'}]}
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x01, 0x02]))
+        assert not result.success
+    
+    def test_empty_schema(self):
+        """Test empty schema."""
+        schema = {'fields': []}
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x01, 0x02]))
+        assert result.success
+        assert result.data == {}
+        assert result.bytes_consumed == 0
+
+
+class TestOptionBMatchSyntax:
+    """Tests for Option B match syntax (match: as top-level key).
+
+    The new syntax uses:
+      - match: as a top-level key
+      - field: $var for variable-based dispatch
+      - length: N for inline byte read
+      - name: / var: for optional output/storage
+    """
+
+    def test_match_inline_basic(self):
+        """Test inline match that reads 1 byte and dispatches."""
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {
+                    'match': {
+                        'length': 1,
+                        'name': 'msg_type',
+                        'cases': {
+                            1: [{'name': 'temp', 'type': 's16', 'mult': 0.01}],
+                            2: [{'name': 'humidity', 'type': 'u8'}],
+                        }
+                    }
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+
+        # msg_type=1, temp=2345 (23.45°C)
+        result = interpreter.decode(bytes([0x01, 0x09, 0x29]))
+        assert result.success
+        assert result.data['msg_type'] == 1
+        assert abs(result.data['temp'] - 23.45) < 0.01
+
+    def test_match_inline_case2(self):
+        """Test inline match dispatching to second case."""
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {
+                    'match': {
+                        'length': 1,
+                        'cases': {
+                            1: [{'name': 'temp', 'type': 's16'}],
+                            2: [{'name': 'humidity', 'type': 'u8'}],
+                        }
+                    }
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+
+        result = interpreter.decode(bytes([0x02, 0x64]))
+        assert result.success
+        assert result.data['humidity'] == 100
+
+    def test_match_variable_based(self):
+        """Test variable-based match using field: $var."""
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {'name': 'msg_type', 'type': 'u8', 'var': 'msg_type'},
+                {
+                    'match': {
+                        'field': '$msg_type',
+                        'cases': {
+                            1: [{'name': 'temp', 'type': 's16'}],
+                            2: [{'name': 'humidity', 'type': 'u8'}],
+                        }
+                    }
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+
+        # msg_type=1, temp=0x0100=256
+        result = interpreter.decode(bytes([0x01, 0x01, 0x00]))
+        assert result.success
+        assert result.data['msg_type'] == 1
+        assert result.data['temp'] == 256
+
+    def test_match_inline_with_var(self):
+        """Test inline match storing value in variable for later use."""
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {
+                    'match': {
+                        'length': 1,
+                        'name': 'event',
+                        'var': 'evt',
+                        'cases': {
+                            0: [{'name': 'reset_code', 'type': 'u8'}],
+                            1: [{'name': 'data', 'type': 'u16'}],
+                        }
+                    }
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+
+        result = interpreter.decode(bytes([0x00, 0xFF]))
+        assert result.success
+        assert result.data['event'] == 0
+        assert result.data['reset_code'] == 255
+
+    def test_match_default_skip(self):
+        """Test match with default: skip in Option B syntax."""
+        schema = {
+            'fields': [
+                {
+                    'match': {
+                        'length': 1,
+                        'default': 'skip',
+                        'cases': {
+                            1: [{'name': 'data', 'type': 'u8'}],
+                        }
+                    }
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+
+        result = interpreter.decode(bytes([0xFF, 0x42]))
+        assert result.success
+        assert 'data' not in result.data
+
+    def test_match_default_error(self):
+        """Test match with default: error in Option B syntax."""
+        schema = {
+            'fields': [
+                {
+                    'match': {
+                        'length': 1,
+                        'default': 'error',
+                        'cases': {
+                            1: [{'name': 'data', 'type': 'u8'}],
+                        }
+                    }
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+
+        result = interpreter.decode(bytes([0xFF, 0x42]))
+        assert not result.success
+
+    def test_match_default_fields(self):
+        """Test match with default case as field list in cases dict."""
+        schema = {
+            'fields': [
+                {
+                    'match': {
+                        'length': 1,
+                        'cases': {
+                            1: [{'name': 'known', 'type': 'u8'}],
+                            'default': [{'name': 'fallback', 'type': 'u8'}],
+                        }
+                    }
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+
+        result = interpreter.decode(bytes([0xFF, 0x42]))
+        assert result.success
+        assert result.data['fallback'] == 0x42
+
+    def test_two_level_dispatch(self):
+        """Test two-level match: inline + variable-based nested match."""
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {'name': 'device_type', 'type': 'u8', 'var': 'dev_type'},
+                {
+                    'match': {
+                        'length': 1,
+                        'name': 'event_type',
+                        'var': 'evt_type',
+                        'cases': {
+                            0: [
+                                {
+                                    'match': {
+                                        'field': '$dev_type',
+                                        'cases': {
+                                            1: [{'name': 'door_config', 'type': 'u16'}],
+                                            4: [{'name': 'temp_config', 'type': 'u8'}],
+                                        }
+                                    }
+                                }
+                            ],
+                            1: [{'name': 'battery', 'type': 'u8'}],
+                        }
+                    }
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+
+        # device_type=1, event=0 -> door sensor reset, door_config=0x0200
+        result = interpreter.decode(bytes([0x01, 0x00, 0x02, 0x00]))
+        assert result.success
+        assert result.data['device_type'] == 1
+        assert result.data['event_type'] == 0
+        assert result.data['door_config'] == 512
+
+
+class TestOptionBObjectSyntax:
+    """Tests for Option B object: syntax."""
+
+    def test_object_basic(self):
+        """Test basic object: syntax."""
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {'name': 'header', 'type': 'u8'},
+                {
+                    'object': 'sensor',
+                    'fields': [
+                        {'name': 'temp', 'type': 'u16'},
+                        {'name': 'hum', 'type': 'u8'},
+                    ]
+                },
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+
+        result = interpreter.decode(bytes([0x01, 0x00, 0x64, 0x32]))
+        assert result.success
+        assert result.data['header'] == 1
+        assert result.data['sensor']['temp'] == 100
+        assert result.data['sensor']['hum'] == 50
+
+    def test_object_with_var(self):
+        """Test object fields can store variables for later match."""
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {
+                    'object': 'header',
+                    'fields': [
+                        {'name': 'version', 'type': 'u8'},
+                        {'name': 'msg_type', 'type': 'u8', 'var': 'msg_type'},
+                    ]
+                },
+                {
+                    'match': {
+                        'field': '$msg_type',
+                        'cases': {
+                            1: [{'name': 'temp', 'type': 'u16'}],
+                            2: [{'name': 'hum', 'type': 'u8'}],
+                        }
+                    }
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+
+        result = interpreter.decode(bytes([0x01, 0x02, 0x50]))
+        assert result.success
+        assert result.data['header']['version'] == 1
+        assert result.data['header']['msg_type'] == 2
+        assert result.data['hum'] == 80
+
+    def test_nested_objects(self):
+        """Test nested object: inside object:."""
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {
+                    'object': 'outer',
+                    'fields': [
+                        {'name': 'a', 'type': 'u8'},
+                        {
+                            'object': 'inner',
+                            'fields': [
+                                {'name': 'b', 'type': 'u8'},
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+
+        result = interpreter.decode(bytes([0x01, 0x02]))
+        assert result.success
+        assert result.data['outer']['a'] == 1
+        assert result.data['outer']['inner']['b'] == 2
+
+
+class TestOptionBTlvSyntax:
+    """Tests for Option B tlv: syntax."""
+
+    def test_tlv_simple(self):
+        """Test simple TLV with single-byte tags."""
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {
+                    'tlv': {
+                        'tag_size': 1,
+                        'cases': {
+                            0x01: [{'name': 'temperature', 'type': 's16', 'mult': 0.1}],
+                            0x02: [{'name': 'humidity', 'type': 'u8'}],
+                            0x07: [{'name': 'battery', 'type': 'u16'}],
+                        }
+                    }
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+
+        # tag=0x01 temp=0x00E7(231*0.1=23.1), tag=0x02 hum=30, tag=0x07 batt=3000
+        payload = bytes([0x01, 0x00, 0xE7, 0x02, 0x1E, 0x07, 0x0B, 0xB8])
+        result = interpreter.decode(payload)
+
+        assert result.success
+        assert abs(result.data['temperature'] - 23.1) < 0.01
+        assert result.data['humidity'] == 30
+        assert result.data['battery'] == 3000
+
+    def test_tlv_composite_tag(self):
+        """Test TLV with composite tag (channel_id + channel_type)."""
+        schema = {
+            'endian': 'little',
+            'fields': [
+                {
+                    'tlv': {
+                        'tag_fields': [
+                            {'name': 'channel_id', 'type': 'u8'},
+                            {'name': 'channel_type', 'type': 'u8'},
+                        ],
+                        'tag_key': ['channel_id', 'channel_type'],
+                        'cases': {
+                            (0x01, 0x75): [{'name': 'battery', 'type': 'u8'}],
+                            (0x03, 0x67): [{'name': 'temperature', 'type': 's16', 'mult': 0.1}],
+                        }
+                    }
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+
+        # battery=100, temperature=272 (27.2°C in LE: 0x10 0x01)
+        payload = bytes([0x01, 0x75, 0x64, 0x03, 0x67, 0x10, 0x01])
+        result = interpreter.decode(payload)
+
+        assert result.success
+        assert result.data['battery'] == 100
+        assert abs(result.data['temperature'] - 27.2) < 0.01
+
+    def test_tlv_unknown_skip(self):
+        """Test TLV with unknown tag and length_size for skipping."""
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {
+                    'tlv': {
+                        'tag_size': 1,
+                        'length_size': 1,
+                        'unknown': 'skip',
+                        'cases': {
+                            0x01: [{'name': 'temp', 'type': 's16'}],
+                        }
+                    }
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+
+        # tag=0x01 len=2 temp, tag=0xFF len=1 unknown(skip), tag=0x01 len=2 temp again
+        payload = bytes([0x01, 0x02, 0x00, 0xC8, 0xFF, 0x01, 0xAA])
+        result = interpreter.decode(payload)
+
+        assert result.success
+        assert result.data['temp'] == 200
+
+    def test_tlv_repeated_tags(self):
+        """Test TLV with repeated tags collecting into array."""
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {
+                    'tlv': {
+                        'tag_size': 1,
+                        'cases': {
+                            0x01: [{'name': 'reading', 'type': 'u8'}],
+                        }
+                    }
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+
+        payload = bytes([0x01, 0x0A, 0x01, 0x14])
+        result = interpreter.decode(payload)
+
+        assert result.success
+        assert result.data['reading'] == [10, 20]
+
+
+# =============================================================================
+# Phase 2 Tests
+# =============================================================================
+
+class TestPortBasedSelection:
+    """Tests for port-based schema selection."""
+    
+    def test_port_selection(self):
+        schema = {
+            'name': 'port_test',
+            'endian': 'big',
+            'ports': {
+                '1': {
+                    'direction': 'uplink',
+                    'fields': [
+                        {'name': 'temperature', 'type': 's16', 'div': 10},
+                        {'name': 'humidity', 'type': 'u8'}
+                    ]
+                },
+                '100': {
+                    'direction': 'downlink',
+                    'fields': [
+                        {'name': 'report_interval', 'type': 'u16'}
+                    ]
+                },
+                'default': {
+                    'fields': [
+                        {'name': 'raw_byte', 'type': 'u8'}
+                    ]
+                }
+            }
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # Port 1: temp=23.5, humid=50
+        result = interpreter.decode(bytes([0x00, 0xEB, 0x32]), fPort=1)
+        assert result.success
+        assert abs(result.data['temperature'] - 23.5) < 0.1
+        assert result.data['humidity'] == 50
+        
+        # Port 100: interval=60
+        result = interpreter.decode(bytes([0x00, 0x3C]), fPort=100)
+        assert result.success
+        assert result.data['report_interval'] == 60
+        
+        # Default port
+        result = interpreter.decode(bytes([0xAB]), fPort=42)
+        assert result.success
+        assert result.data['raw_byte'] == 0xAB
+    
+    def test_port_no_default_error(self):
+        schema = {
+            'name': 'no_default',
+            'ports': {
+                '1': {'fields': [{'name': 'x', 'type': 'u8'}]}
+            }
+        }
+        interpreter = SchemaInterpreter(schema)
+        try:
+            interpreter.decode(bytes([0x01]), fPort=99)
+            assert False, "Should have raised ValueError"
+        except ValueError:
+            pass
+
+
+class TestBitfieldString:
+    """Tests for bitfield_string type."""
+    
+    def test_hex_version(self):
+        schema = {
+            'endian': 'big',
+            'fields': [{
+                'name': 'firmware_version',
+                'type': 'bitfield_string',
+                'length': 2,
+                'delimiter': '.',
+                'prefix': 'v',
+                'parts': [[8, 8, 'hex'], [0, 8, 'hex']]
+            }]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x01, 0x03]))
+        assert result.success
+        assert result.data['firmware_version'] == 'v1.3'
+        
+        result = interpreter.decode(bytes([0x02, 0x0A]))
+        assert result.success
+        assert result.data['firmware_version'] == 'v2.A'
+    
+    def test_decimal_version(self):
+        schema = {
+            'endian': 'big',
+            'fields': [{
+                'name': 'version',
+                'type': 'bitfield_string',
+                'length': 2,
+                'delimiter': '.',
+                'parts': [[8, 8], [0, 8]]
+            }]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x03, 0x0A]))
+        assert result.success
+        assert result.data['version'] == '3.10'
+
+
+class TestFlaggedBitmask:
+    """Tests for flagged/bitmask field presence."""
+    
+    def test_all_groups(self):
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {'name': 'protocol_version', 'type': 'u8'},
+                {'name': 'device_id', 'type': 'u16'},
+                {'name': 'flags', 'type': 'u16'},
+                {'flagged': {
+                    'field': 'flags',
+                    'groups': [
+                        {'bit': 0, 'fields': [
+                            {'name': 'dielectric', 'type': 'u16', 'div': 50},
+                            {'name': 'soil_temp', 'type': 'u16', 'formula': '(x - 400) / 10'}
+                        ]},
+                        {'bit': 1, 'fields': [
+                            {'name': 'battery', 'type': 'u16', 'div': 1000}
+                        ]}
+                    ]
+                }}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # All groups (flags=0x0003)
+        data = bytes([0x02, 0x0C, 0x43, 0x00, 0x03, 0x01, 0x55, 0x01, 0x90, 0x0C, 0x5E])
+        result = interpreter.decode(data)
+        assert result.success
+        assert result.data['protocol_version'] == 2
+        assert abs(result.data['dielectric'] - 6.82) < 0.01
+        assert abs(result.data['soil_temp'] - 0.0) < 0.1
+        assert abs(result.data['battery'] - 3.166) < 0.001
+    
+    def test_partial_groups(self):
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {'name': 'proto', 'type': 'u8'},
+                {'name': 'id', 'type': 'u16'},
+                {'name': 'flags', 'type': 'u16'},
+                {'flagged': {
+                    'field': 'flags',
+                    'groups': [
+                        {'bit': 0, 'fields': [
+                            {'name': 'dielectric', 'type': 'u16', 'div': 50}
+                        ]},
+                        {'bit': 1, 'fields': [
+                            {'name': 'battery', 'type': 'u16', 'div': 1000}
+                        ]}
+                    ]
+                }}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # Battery only (flags=0x0002)
+        data = bytes([0x02, 0x0C, 0x43, 0x00, 0x02, 0x0C, 0x5E])
+        result = interpreter.decode(data)
+        assert result.success
+        assert 'dielectric' not in result.data
+        assert abs(result.data['battery'] - 3.166) < 0.001
+
+
+class TestCrossFieldFormula:
+    """Tests for cross-field computed values."""
+    
+    def test_polynomial(self):
+        import math
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {'name': 'dielectric', 'type': 'u16', 'div': 50},
+                {'name': 'vwc', 'type': 'number',
+                 'formula': '0.0000043 * pow($dielectric, 3) - 0.00055 * pow($dielectric, 2) + 0.0292 * $dielectric - 0.053'}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x01, 0x55]))
+        assert result.success
+        assert abs(result.data['dielectric'] - 6.82) < 0.01
+        expected_vwc = 0.0000043 * math.pow(6.82, 3) - 0.00055 * math.pow(6.82, 2) + 0.0292 * 6.82 - 0.053
+        assert abs(result.data['vwc'] - expected_vwc) < 0.001
+    
+    def test_albedo_ratio(self):
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {'name': 'incoming', 'type': 'u16', 'div': 10},
+                {'name': 'reflected', 'type': 'u16', 'div': 10},
+                {'name': 'albedo', 'type': 'number',
+                 'formula': '$incoming > 0 and $reflected > 0 ? $reflected / $incoming : 0'}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # incoming=100, reflected=50 => albedo=0.5
+        result = interpreter.decode(bytes([0x03, 0xE8, 0x01, 0xF4]))
+        assert result.success
+        assert abs(result.data['albedo'] - 0.5) < 0.01
+    
+    def test_albedo_zero_guard(self):
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {'name': 'incoming', 'type': 'u16', 'div': 10},
+                {'name': 'reflected', 'type': 'u16', 'div': 10},
+                {'name': 'albedo', 'type': 'number',
+                 'formula': '$incoming > 0 and $reflected > 0 ? $reflected / $incoming : 0'}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # incoming=0 => albedo=0
+        result = interpreter.decode(bytes([0x00, 0x00, 0x01, 0xF4]))
+        assert result.success
+        assert result.data['albedo'] == 0
+
+
+class TestDeclarativeComputedFields:
+    """Tests for new declarative computed field constructs.
+    
+    REQ-Polynomial-001: polynomial calibration using Horner's method
+    REQ-Compute-001: cross-field binary operations (add/sub/mul/div)
+    REQ-Guard-001: conditional evaluation with fallback
+    REQ-Transform-001: transform array with math operations
+    """
+    
+    def test_polynomial_topp_equation(self):
+        """Test polynomial evaluation (Topp equation for soil moisture)."""
+        import math
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {'name': 'dielectric', 'type': 'u16', 'div': 50},
+                {'name': 'vwc', 'type': 'number',
+                 'ref': '$dielectric',
+                 'polynomial': [0.0000043, -0.00055, 0.0292, -0.053]}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # dielectric = 341 / 50 = 6.82
+        result = interpreter.decode(bytes([0x01, 0x55]))
+        assert result.success
+        
+        # Verify dielectric value
+        assert abs(result.data['dielectric'] - 6.82) < 0.01
+        
+        # Verify polynomial evaluation (Horner's method)
+        x = 6.82
+        expected = 0.0000043 * x**3 - 0.00055 * x**2 + 0.0292 * x - 0.053
+        assert abs(result.data['vwc'] - expected) < 0.001
+    
+    def test_polynomial_quadratic(self):
+        """Test simple quadratic polynomial."""
+        schema = {
+            'fields': [
+                {'name': 'x', 'type': 'u8'},
+                {'name': 'y', 'type': 'number',
+                 'ref': '$x',
+                 'polynomial': [1, -2, 1]}  # x^2 - 2x + 1 = (x-1)^2
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # x=3 => (3-1)^2 = 4
+        result = interpreter.decode(bytes([3]))
+        assert result.success
+        assert result.data['y'] == 4.0
+    
+    def test_compute_division(self):
+        """Test compute with division operation."""
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {'name': 'numerator', 'type': 'u16'},
+                {'name': 'denominator', 'type': 'u16'},
+                {'name': 'ratio', 'type': 'number',
+                 'compute': {'op': 'div', 'a': '$numerator', 'b': '$denominator'}}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # 100 / 200 = 0.5
+        result = interpreter.decode(bytes([0x00, 0x64, 0x00, 0xC8]))
+        assert result.success
+        assert result.data['ratio'] == 0.5
+    
+    def test_compute_multiplication(self):
+        """Test compute with multiplication operation."""
+        schema = {
+            'fields': [
+                {'name': 'a', 'type': 'u8'},
+                {'name': 'b', 'type': 'u8'},
+                {'name': 'product', 'type': 'number',
+                 'compute': {'op': 'mul', 'a': '$a', 'b': '$b'}}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([7, 8]))
+        assert result.success
+        assert result.data['product'] == 56.0
+    
+    def test_compute_with_literal(self):
+        """Test compute with literal value as operand."""
+        schema = {
+            'fields': [
+                {'name': 'raw', 'type': 'u8'},
+                {'name': 'scaled', 'type': 'number',
+                 'compute': {'op': 'mul', 'a': '$raw', 'b': 0.01}}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([250]))
+        assert result.success
+        assert abs(result.data['scaled'] - 2.5) < 0.01
+    
+    def test_guard_with_gt(self):
+        """Test guard with greater-than condition."""
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {'name': 'incoming', 'type': 'u16'},
+                {'name': 'reflected', 'type': 'u16'},
+                {'name': 'albedo', 'type': 'number',
+                 'compute': {'op': 'div', 'a': '$reflected', 'b': '$incoming'},
+                 'guard': {'when': [{'field': '$incoming', 'gt': 0}], 'else': 0}}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # Positive case: incoming=100, reflected=50 => 0.5
+        result = interpreter.decode(bytes([0x00, 0x64, 0x00, 0x32]))
+        assert result.success
+        assert result.data['albedo'] == 0.5
+        
+        # Guard fallback: incoming=0 => 0
+        result2 = interpreter.decode(bytes([0x00, 0x00, 0x00, 0x32]))
+        assert result2.success
+        assert result2.data['albedo'] == 0
+    
+    def test_guard_multiple_conditions(self):
+        """Test guard with multiple conditions (AND)."""
+        schema = {
+            'fields': [
+                {'name': 'a', 'type': 'u8'},
+                {'name': 'b', 'type': 'u8'},
+                {'name': 'result', 'type': 'number',
+                 'compute': {'op': 'div', 'a': '$a', 'b': '$b'},
+                 'guard': {
+                     'when': [
+                         {'field': '$a', 'gte': 0},
+                         {'field': '$b', 'gt': 0}
+                     ],
+                     'else': -1
+                 }}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # Both conditions pass
+        result = interpreter.decode(bytes([10, 5]))
+        assert result.data['result'] == 2.0
+        
+        # b=0 fails second condition
+        result2 = interpreter.decode(bytes([10, 0]))
+        assert result2.data['result'] == -1
+    
+    def test_guard_with_eq(self):
+        """Test guard with equality condition."""
+        schema = {
+            'fields': [
+                {'name': 'status', 'type': 'u8'},
+                {'name': 'value', 'type': 'u8'},
+                {'name': 'active_value', 'type': 'number',
+                 'ref': '$value',
+                 'guard': {'when': [{'field': '$status', 'eq': 1}], 'else': 0}}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # status=1 (active)
+        result = interpreter.decode(bytes([1, 42]))
+        assert result.data['active_value'] == 42.0
+        
+        # status=0 (inactive)
+        result2 = interpreter.decode(bytes([0, 42]))
+        assert result2.data['active_value'] == 0
+    
+    def test_transform_floor_ceiling(self):
+        """Test transform with floor and ceiling (clamping)."""
+        schema = {
+            'fields': [
+                {'name': 'value', 'type': 'u8',
+                 'transform': [
+                     {'add': -50},
+                     {'floor': 0},
+                     {'ceiling': 100}
+                 ]}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # 150 - 50 = 100, within [0,100]
+        result = interpreter.decode(bytes([150]))
+        assert result.data['value'] == 100.0
+        
+        # 30 - 50 = -20, clamped to 0
+        result2 = interpreter.decode(bytes([30]))
+        assert result2.data['value'] == 0.0
+        
+        # 75 - 50 = 25, within [0,100]
+        result3 = interpreter.decode(bytes([75]))
+        assert result3.data['value'] == 25.0
+    
+    def test_transform_sqrt(self):
+        """Test transform with square root."""
+        schema = {
+            'fields': [
+                {'name': 'squared', 'type': 'u8',
+                 'transform': [{'sqrt': True}]}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([64]))
+        assert result.data['squared'] == 8.0
+    
+    def test_transform_pow(self):
+        """Test transform with power."""
+        schema = {
+            'fields': [
+                {'name': 'value', 'type': 'u8',
+                 'transform': [{'pow': 2}]}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([5]))
+        assert result.data['value'] == 25.0
+    
+    def test_transform_log10(self):
+        """Test transform with log base 10."""
+        import math
+        schema = {
+            'fields': [
+                {'name': 'value', 'type': 'u8',
+                 'transform': [{'log10': True}]}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([100]))
+        assert abs(result.data['value'] - 2.0) < 0.001
+    
+    def test_transform_log_natural(self):
+        """Test transform with natural log."""
+        import math
+        schema = {
+            'fields': [
+                {'name': 'value', 'type': 'u8',
+                 'transform': [{'log': True}]}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([100]))
+        assert abs(result.data['value'] - math.log(100)) < 0.001
+    
+    def test_transform_clamp(self):
+        """Test transform with clamp [min, max]."""
+        schema = {
+            'fields': [
+                {'name': 'value', 'type': 'u8',
+                 'transform': [{'clamp': [10, 50]}]}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # Within range
+        result = interpreter.decode(bytes([30]))
+        assert result.data['value'] == 30.0
+        
+        # Below min
+        result2 = interpreter.decode(bytes([5]))
+        assert result2.data['value'] == 10.0
+        
+        # Above max
+        result3 = interpreter.decode(bytes([100]))
+        assert result3.data['value'] == 50.0
+    
+    def test_transform_chained(self):
+        """Test multiple transform operations in sequence."""
+        schema = {
+            'fields': [
+                {'name': 'raw', 'type': 'u8',
+                 'transform': [
+                     {'mult': 0.1},       # 100 -> 10
+                     {'add': -5},          # 10 -> 5
+                     {'pow': 2},           # 5 -> 25
+                     {'sqrt': True}        # 25 -> 5
+                 ]}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([100]))
+        assert result.data['raw'] == 5.0
+    
+    def test_ref_with_transform(self):
+        """Test ref field with transform array."""
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {'name': 'temperature_raw', 'type': 'u16'},
+                {'name': 'temperature_celsius', 'type': 'number',
+                 'ref': '$temperature_raw',
+                 'transform': [
+                     {'div': 100},
+                     {'add': -40}
+                 ]}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # raw=6500 => 65.0 - 40 = 25.0
+        result = interpreter.decode(bytes([0x19, 0x64]))
+        assert result.success
+        assert result.data['temperature_celsius'] == 25.0
+
+
+class TestEncodeFlagged:
+    """Tests for Phase 2 encoding: flagged, bitfield_string, port-based."""
+    
+    def test_encode_flagged_all_groups(self):
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {'name': 'version', 'type': 'u8'},
+                {'name': 'flags', 'type': 'u16'},
+                {'flagged': {
+                    'field': 'flags',
+                    'groups': [
+                        {'bit': 0, 'fields': [
+                            {'name': 'temperature', 'type': 'u16', 'mult': 0.1},
+                            {'name': 'humidity', 'type': 'u16', 'mult': 0.5}
+                        ]},
+                        {'bit': 1, 'fields': [
+                            {'name': 'battery', 'type': 'u16', 'div': 1000}
+                        ]}
+                    ]
+                }}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        result = interpreter.encode({
+            'version': 2,
+            'temperature': 25.0,
+            'humidity': 65.0,
+            'battery': 3.166
+        })
+        payload = result.payload
+        assert payload[0] == 2, f"version={payload[0]}"
+        assert payload[1] == 0x00 and payload[2] == 0x03, f"flags={payload[1]:02X}{payload[2]:02X}"
+        assert payload[3] == 0x00 and payload[4] == 0xFA, f"temp={payload[3]:02X}{payload[4]:02X}"
+        assert payload[5] == 0x00 and payload[6] == 0x82, f"humidity={payload[5]:02X}{payload[6]:02X}"
+        assert payload[7] == 0x0C and payload[8] == 0x5E, f"battery={payload[7]:02X}{payload[8]:02X}"
+        assert len(payload) == 9
+    
+    def test_encode_flagged_partial(self):
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {'name': 'version', 'type': 'u8'},
+                {'name': 'flags', 'type': 'u16'},
+                {'flagged': {
+                    'field': 'flags',
+                    'groups': [
+                        {'bit': 0, 'fields': [
+                            {'name': 'temperature', 'type': 'u16', 'mult': 0.1}
+                        ]},
+                        {'bit': 1, 'fields': [
+                            {'name': 'battery', 'type': 'u16', 'div': 1000}
+                        ]}
+                    ]
+                }}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        result = interpreter.encode({
+            'version': 2,
+            'battery': 3.166
+        })
+        payload = result.payload
+        assert payload[1] == 0x00 and payload[2] == 0x02, f"flags={payload[1]:02X}{payload[2]:02X}"
+        assert len(payload) == 5
+    
+    def test_encode_bitfield_string(self):
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {'name': 'fw_version', 'type': 'bitfield_string', 'length': 2,
+                 'prefix': 'v', 'delimiter': '.',
+                 'parts': [[8, 8, 'hex'], [0, 8, 'hex']]},
+                {'name': 'hw_version', 'type': 'bitfield_string', 'length': 2,
+                 'delimiter': '.', 'parts': [[8, 8], [0, 8]]}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        result = interpreter.encode({'fw_version': 'v1.3', 'hw_version': '3.10'})
+        payload = result.payload
+        assert payload[0] == 0x01 and payload[1] == 0x03, f"fw={payload[0]:02X}{payload[1]:02X}"
+        assert payload[2] == 0x03 and payload[3] == 0x0A, f"hw={payload[2]:02X}{payload[3]:02X}"
+        assert len(payload) == 4
+    
+    def test_encode_port_based(self):
+        schema = {
+            'endian': 'big',
+            'ports': {
+                1: {'fields': [{'name': 'temperature', 'type': 'u16', 'mult': 0.1}]},
+                2: {'fields': [{'name': 'config_interval', 'type': 'u16'}]}
+            }
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        result1 = interpreter.encode({'temperature': 25.0}, fPort=1)
+        assert result1.payload == bytes([0x00, 0xFA])
+        
+        result2 = interpreter.encode({'config_interval': 300}, fPort=2)
+        assert result2.payload == bytes([0x01, 0x2C])
+    
+    def test_encode_flagged_roundtrip(self):
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {'name': 'version', 'type': 'u8'},
+                {'name': 'flags', 'type': 'u16'},
+                {'flagged': {
+                    'field': 'flags',
+                    'groups': [
+                        {'bit': 0, 'fields': [
+                            {'name': 'temperature', 'type': 'u16', 'mult': 0.1}
+                        ]},
+                        {'bit': 1, 'fields': [
+                            {'name': 'battery', 'type': 'u16', 'div': 1000}
+                        ]}
+                    ]
+                }}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        data = {'version': 2, 'temperature': 25.0, 'battery': 3.166}
+        encoded = interpreter.encode(data)
+        decoded = interpreter.decode(encoded.payload)
+        
+        assert decoded.success
+        assert abs(decoded.data['temperature'] - 25.0) < 0.1
+        assert abs(decoded.data['battery'] - 3.166) < 0.01
+
+
+class TestMetadataEnrichment:
+    """Tests for TS013 metadata enrichment."""
+    
+    def test_include_recv_time_and_rssi(self):
+        schema = {
+            'endian': 'big',
+            'fields': [{'name': 'temperature', 'type': 'u16', 'mult': 0.1}],
+            'metadata': {
+                'include': [
+                    {'name': 'received_at', 'source': '$recvTime'},
+                    {'name': 'rssi', 'source': '$rxMetadata[0].rssi'},
+                    {'name': 'snr', 'source': '$rxMetadata[0].snr'},
+                ]
+            }
+        }
+        interpreter = SchemaInterpreter(schema)
+        result = interpreter.decode(
+            bytes([0x00, 0xFA]),
+            input_metadata={
+                'recvTime': '2026-02-16T12:00:00.000Z',
+                'rxMetadata': [{'rssi': -85, 'snr': 7.5}]
+            }
+        )
+        assert result.success
+        assert result.data['temperature'] == 25.0
+        assert result.data['received_at'] == '2026-02-16T12:00:00.000Z'
+        assert result.data['rssi'] == -85
+        assert result.data['snr'] == 7.5
+    
+    def test_time_offset_subtract(self):
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {'name': 'seconds_ago', 'type': 'u16'},
+                {'name': 'temperature', 'type': 'u16', 'mult': 0.1}
+            ],
+            'metadata': {
+                'timestamps': [
+                    {'name': 'measurement_time', 'mode': 'subtract', 'offset_field': 'seconds_ago'}
+                ]
+            }
+        }
+        interpreter = SchemaInterpreter(schema)
+        result = interpreter.decode(
+            bytes([0x00, 0x3C, 0x00, 0xFA]),
+            input_metadata={'recvTime': '2026-02-16T12:00:00.000Z'}
+        )
+        assert result.data['seconds_ago'] == 60
+        assert result.data['measurement_time'] == '2026-02-16T11:59:00.000Z'
+    
+    def test_no_metadata_section_unchanged(self):
+        schema = {
+            'endian': 'big',
+            'fields': [{'name': 'value', 'type': 'u8'}]
+        }
+        interpreter = SchemaInterpreter(schema)
+        result = interpreter.decode(
+            bytes([42]),
+            input_metadata={'recvTime': '2026-02-16T12:00:00Z'}
+        )
+        assert result.data == {'value': 42}
+    
+    def test_missing_metadata_graceful(self):
+        schema = {
+            'endian': 'big',
+            'fields': [{'name': 'temperature', 'type': 'u16', 'mult': 0.1}],
+            'metadata': {
+                'include': [
+                    {'name': 'rssi', 'source': '$rxMetadata[0].rssi'},
+                ]
+            }
+        }
+        interpreter = SchemaInterpreter(schema)
+        result = interpreter.decode(bytes([0x00, 0xFA]))
+        assert result.success
+        assert result.data['temperature'] == 25.0
+        assert 'rssi' not in result.data
+
+
+# =============================================================================
+# Phase 3 Tests
+# =============================================================================
+
+class TestPhase3TimestampFormatting:
+    """Tests for Phase 3 timestamp formatting features.
+    
+    REQ-Timestamp-ISO-060: iso8601 formatting mode
+    REQ-Timestamp-Elapsed-061: elapsed_to_absolute mode
+    """
+    
+    def test_iso8601_format_unix_epoch(self):
+        """Test iso8601 mode formatting a unix timestamp field."""
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {'name': 'epoch', 'type': 'u32'},
+            ],
+            'metadata': {
+                'timestamps': [
+                    {'name': 'formatted_time', 'mode': 'iso8601', 'field': 'epoch'}
+                ]
+            }
+        }
+        interpreter = SchemaInterpreter(schema)
+        # 1739721600 = 2025-02-16T16:00:00Z
+        payload = (1739721600).to_bytes(4, 'big')
+        result = interpreter.decode(payload, input_metadata={})
+        assert result.success
+        assert result.data['epoch'] == 1739721600
+        assert result.data['formatted_time'] == '2025-02-16T16:00:00Z'
+    
+    def test_iso8601_custom_format(self):
+        """Test iso8601 with custom strftime format."""
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {'name': 'epoch', 'type': 'u32'},
+            ],
+            'metadata': {
+                'timestamps': [
+                    {'name': 'date_only', 'mode': 'iso8601', 'field': 'epoch',
+                     'format': '%Y-%m-%d'}
+                ]
+            }
+        }
+        interpreter = SchemaInterpreter(schema)
+        payload = (1739721600).to_bytes(4, 'big')
+        result = interpreter.decode(payload, input_metadata={})
+        assert result.success
+        assert result.data['date_only'] == '2025-02-16'
+    
+    def test_elapsed_to_absolute(self):
+        """Test elapsed_to_absolute mode converting offset to timestamp."""
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {'name': 'seconds_since', 'type': 'u16'},
+                {'name': 'temperature', 'type': 'u16', 'mult': 0.1},
+            ],
+            'metadata': {
+                'timestamps': [
+                    {'name': 'sample_time', 'mode': 'elapsed_to_absolute',
+                     'elapsed_field': 'seconds_since', 'time_base': 'rx_time'}
+                ]
+            }
+        }
+        interpreter = SchemaInterpreter(schema)
+        # 120 seconds ago
+        result = interpreter.decode(
+            bytes([0x00, 0x78, 0x00, 0xFA]),
+            input_metadata={'recvTime': '2026-02-16T12:00:00.000Z'}
+        )
+        assert result.success
+        assert result.data['seconds_since'] == 120
+        assert result.data['sample_time'] == '2026-02-16T11:58:00.000Z'
+
+
+class TestPhase3VersionString:
+    """Tests for Phase 3 version_string type.
+    
+    REQ-Version-String-062: Assemble version string from raw bytes
+    """
+    
+    def test_version_string_decode(self):
+        """Test decoding version_string from 3 bytes."""
+        schema = {
+            'fields': [{
+                'name': 'firmware',
+                'type': 'version_string',
+                'length': 3,
+                'delimiter': '.',
+                'prefix': 'v'
+            }]
+        }
+        interpreter = SchemaInterpreter(schema)
+        result = interpreter.decode(bytes([0x02, 0x03, 0x0A]))
+        assert result.success
+        assert result.data['firmware'] == 'v2.3.10'
+    
+    def test_version_string_no_prefix(self):
+        """Test version_string without prefix."""
+        schema = {
+            'fields': [{
+                'name': 'version',
+                'type': 'version_string',
+                'length': 2,
+                'delimiter': '.'
+            }]
+        }
+        interpreter = SchemaInterpreter(schema)
+        result = interpreter.decode(bytes([0x01, 0x05]))
+        assert result.success
+        assert result.data['version'] == '1.5'
+    
+    def test_version_string_encode(self):
+        """Test encoding version_string back to bytes."""
+        schema = {
+            'fields': [{
+                'name': 'firmware',
+                'type': 'version_string',
+                'length': 3,
+                'delimiter': '.',
+                'prefix': 'v'
+            }]
+        }
+        interpreter = SchemaInterpreter(schema)
+        result = interpreter.encode({'firmware': 'v2.3.10'})
+        assert result.success
+        assert result.payload == bytes([0x02, 0x03, 0x0A])
+    
+    def test_version_string_roundtrip(self):
+        """Test version_string encode/decode roundtrip."""
+        schema = {
+            'fields': [{
+                'name': 'fw',
+                'type': 'version_string',
+                'length': 3,
+                'delimiter': '.',
+                'prefix': 'v'
+            }]
+        }
+        interpreter = SchemaInterpreter(schema)
+        encoded = interpreter.encode({'fw': 'v1.0.255'})
+        decoded = interpreter.decode(encoded.payload)
+        assert decoded.data['fw'] == 'v1.0.255'
+
+
+class TestPhase3EncodeFormula:
+    """Tests for Phase 3 encode_formula feature.
+    
+    REQ-Encode-Formula-063: Custom encoding formula (inverse of decode formula)
+    """
+    
+    def test_encode_formula_simple(self):
+        """Test simple encode_formula."""
+        schema = {
+            'fields': [{
+                'name': 'temperature',
+                'type': 'u8',
+                'formula': 'x * 0.5 - 40',
+                'encode_formula': '(x + 40) / 0.5'
+            }]
+        }
+        interpreter = SchemaInterpreter(schema)
+        # 40 deg -> encode: (40 + 40) / 0.5 = 160
+        result = interpreter.encode({'temperature': 40.0})
+        assert result.success
+        assert result.payload == bytes([160])
+    
+    def test_encode_formula_overrides_mult(self):
+        """Test that encode_formula overrides mult/add reversal."""
+        schema = {
+            'fields': [{
+                'name': 'value',
+                'type': 'u16',
+                'mult': 999,
+                'add': 999,
+                'encode_formula': 'x * 100'
+            }]
+        }
+        interpreter = SchemaInterpreter(schema)
+        result = interpreter.encode({'value': 25.0})
+        assert result.success
+        assert result.payload == bytes([0x09, 0xC4])  # 2500 BE
+    
+    def test_encode_formula_roundtrip(self):
+        """Test encode_formula / formula roundtrip."""
+        schema = {
+            'endian': 'big',
+            'fields': [{
+                'name': 'pressure',
+                'type': 'u16',
+                'formula': '(x / 10) + 300',
+                'encode_formula': '(x - 300) * 10'
+            }]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # Decode: raw=10000 -> 10000/10 + 300 = 1300
+        decoded = interpreter.decode(bytes([0x27, 0x10]))
+        assert abs(decoded.data['pressure'] - 1300.0) < 0.1
+        
+        # Encode: 1300 -> (1300 - 300) * 10 = 10000
+        encoded = interpreter.encode({'pressure': 1300.0})
+        assert encoded.payload == bytes([0x27, 0x10])
+
+
+# =============================================================================
+# Test Coverage Gaps
+# =============================================================================
+
+class TestU24S24Types:
+    """Comprehensive tests for u24/s24 3-byte integer types.
+    
+    REQ-Unsigned-I-001: u24 unsigned 24-bit
+    REQ-Signed-Int-002: s24 signed 24-bit
+    """
+    
+    def test_u24_big_endian(self):
+        """Test u24 big-endian decode."""
+        schema = {'endian': 'big', 'fields': [{'name': 'val', 'type': 'u24'}]}
+        interpreter = SchemaInterpreter(schema)
+        result = interpreter.decode(bytes([0x01, 0x02, 0x03]))
+        assert result.data['val'] == 0x010203
+    
+    def test_u24_little_endian(self):
+        """Test u24 little-endian decode."""
+        schema = {'endian': 'little', 'fields': [{'name': 'val', 'type': 'u24'}]}
+        interpreter = SchemaInterpreter(schema)
+        result = interpreter.decode(bytes([0x01, 0x02, 0x03]))
+        assert result.data['val'] == 0x030201
+    
+    def test_u24_max_value(self):
+        """Test u24 maximum value (16777215)."""
+        schema = {'endian': 'big', 'fields': [{'name': 'val', 'type': 'u24'}]}
+        interpreter = SchemaInterpreter(schema)
+        result = interpreter.decode(bytes([0xFF, 0xFF, 0xFF]))
+        assert result.data['val'] == 0xFFFFFF
+    
+    def test_u24_zero(self):
+        """Test u24 zero value."""
+        schema = {'endian': 'big', 'fields': [{'name': 'val', 'type': 'u24'}]}
+        interpreter = SchemaInterpreter(schema)
+        result = interpreter.decode(bytes([0x00, 0x00, 0x00]))
+        assert result.data['val'] == 0
+    
+    def test_s24_positive(self):
+        """Test s24 positive value."""
+        schema = {'endian': 'big', 'fields': [{'name': 'val', 'type': 's24'}]}
+        interpreter = SchemaInterpreter(schema)
+        result = interpreter.decode(bytes([0x01, 0x02, 0x03]))
+        assert result.data['val'] == 0x010203
+    
+    def test_s24_negative(self):
+        """Test s24 negative value (-1)."""
+        schema = {'endian': 'big', 'fields': [{'name': 'val', 'type': 's24'}]}
+        interpreter = SchemaInterpreter(schema)
+        result = interpreter.decode(bytes([0xFF, 0xFF, 0xFF]))
+        assert result.data['val'] == -1
+    
+    def test_s24_negative_100(self):
+        """Test s24 value -100."""
+        schema = {'endian': 'big', 'fields': [{'name': 'val', 'type': 's24'}]}
+        interpreter = SchemaInterpreter(schema)
+        # -100 in 3 bytes big-endian: 0xFF 0xFF 0x9C
+        result = interpreter.decode(bytes([0xFF, 0xFF, 0x9C]))
+        assert result.data['val'] == -100
+    
+    def test_s24_little_endian_negative(self):
+        """Test s24 negative little-endian."""
+        schema = {'endian': 'little', 'fields': [{'name': 'val', 'type': 's24'}]}
+        interpreter = SchemaInterpreter(schema)
+        # -100 in 3 bytes little-endian: 0x9C 0xFF 0xFF
+        result = interpreter.decode(bytes([0x9C, 0xFF, 0xFF]))
+        assert result.data['val'] == -100
+    
+    def test_u24_encode_roundtrip(self):
+        """Test u24 encode/decode roundtrip."""
+        schema = {'endian': 'big', 'fields': [{'name': 'val', 'type': 'u24'}]}
+        interpreter = SchemaInterpreter(schema)
+        encoded = interpreter.encode({'val': 0x123456})
+        decoded = interpreter.decode(encoded.payload)
+        assert decoded.data['val'] == 0x123456
+    
+    def test_u24_with_modifiers(self):
+        """Test u24 with multiplier (e.g., GPS coordinate)."""
+        schema = {'endian': 'big', 'fields': [
+            {'name': 'lat', 'type': 'u24', 'mult': 0.0001, 'add': -90}
+        ]}
+        interpreter = SchemaInterpreter(schema)
+        # 1234567 * 0.0001 - 90 = 33.4567
+        result = interpreter.decode(bytes([0x12, 0xD6, 0x87]))
+        assert abs(result.data['lat'] - 33.4567) < 0.0001
+
+
+class TestLittleEndianVariants:
+    """Comprehensive tests for little-endian across all types.
+    
+    REQ-Endiannes-005: Little endian with endian: little
+    """
+    
+    def test_u16_le(self):
+        schema = {'endian': 'little', 'fields': [{'name': 'v', 'type': 'u16'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0x34, 0x12]))
+        assert r.data['v'] == 0x1234
+    
+    def test_s16_le_negative(self):
+        schema = {'endian': 'little', 'fields': [{'name': 'v', 'type': 's16'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0x9C, 0xFF]))
+        assert r.data['v'] == -100
+    
+    def test_u32_le(self):
+        schema = {'endian': 'little', 'fields': [{'name': 'v', 'type': 'u32'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0x78, 0x56, 0x34, 0x12]))
+        assert r.data['v'] == 0x12345678
+    
+    def test_s32_le_negative(self):
+        schema = {'endian': 'little', 'fields': [{'name': 'v', 'type': 's32'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0xFE, 0xFF, 0xFF, 0xFF]))
+        assert r.data['v'] == -2
+    
+    def test_u64_le(self):
+        schema = {'endian': 'little', 'fields': [{'name': 'v', 'type': 'u64'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80]))
+        assert r.data['v'] == 0x8000000000000001
+    
+    def test_s64_le(self):
+        schema = {'endian': 'little', 'fields': [{'name': 'v', 'type': 's64'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]))
+        assert r.data['v'] == -1
+    
+    def test_f32_le(self):
+        schema = {'endian': 'little', 'fields': [{'name': 'v', 'type': 'f32'}]}
+        payload = struct.pack('<f', -1.5)
+        r = SchemaInterpreter(schema).decode(payload)
+        assert abs(r.data['v'] - (-1.5)) < 0.001
+    
+    def test_f64_le(self):
+        schema = {'endian': 'little', 'fields': [{'name': 'v', 'type': 'f64'}]}
+        payload = struct.pack('<d', 123.456)
+        r = SchemaInterpreter(schema).decode(payload)
+        assert abs(r.data['v'] - 123.456) < 0.0001
+    
+    def test_f16_le(self):
+        schema = {'endian': 'little', 'fields': [{'name': 'v', 'type': 'f16'}]}
+        payload = struct.pack('<e', 1.0)
+        r = SchemaInterpreter(schema).decode(payload)
+        assert abs(r.data['v'] - 1.0) < 0.001
+    
+    def test_u24_le(self):
+        schema = {'endian': 'little', 'fields': [{'name': 'v', 'type': 'u24'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0x03, 0x02, 0x01]))
+        assert r.data['v'] == 0x010203
+    
+    def test_le_encode_roundtrip_u16(self):
+        schema = {'endian': 'little', 'fields': [{'name': 'v', 'type': 'u16'}]}
+        interp = SchemaInterpreter(schema)
+        enc = interp.encode({'v': 0x1234})
+        dec = interp.decode(enc.payload)
+        assert dec.data['v'] == 0x1234
+    
+    def test_le_encode_roundtrip_s16(self):
+        schema = {'endian': 'little', 'fields': [{'name': 'v', 'type': 's16'}]}
+        interp = SchemaInterpreter(schema)
+        enc = interp.encode({'v': -500})
+        dec = interp.decode(enc.payload)
+        assert dec.data['v'] == -500
+    
+    def test_mixed_endian_fields(self):
+        """Test schema with mixed endian (sensor data common)."""
+        schema = {
+            'endian': 'little',
+            'fields': [
+                {'name': 'temp', 'type': 's16', 'mult': 0.1},
+                {'name': 'humidity', 'type': 'u8'},
+                {'name': 'pressure', 'type': 'u16', 'mult': 0.1},
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        # temp = 272 (27.2C) LE: 0x10 0x01, hum=65, press=10132 (1013.2) LE: 0x94 0x27
+        result = interpreter.decode(bytes([0x10, 0x01, 0x41, 0x94, 0x27]))
+        assert abs(result.data['temp'] - 27.2) < 0.1
+        assert result.data['humidity'] == 65
+        assert abs(result.data['pressure'] - 1013.2) < 0.1
+
+
+class TestComplexMatchDefault:
+    """Tests for complex match default with inline fields.
+    
+    REQ-Match-Defa-036: default with fields for unknown message types
+    """
+    
+    def test_match_default_with_fields_legacy(self):
+        """Test legacy match with default: {fields: [...]}."""
+        schema = {
+            'fields': [
+                {'name': 'msg_type', 'type': 'u8'},
+                {
+                    'type': 'match',
+                    'on': 'msg_type',
+                    'default': {'fields': [
+                        {'name': 'raw_data', 'type': 'u16'},
+                    ]},
+                    'cases': [
+                        {'case': 1, 'fields': [{'name': 'temp', 'type': 's16'}]},
+                    ]
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # Unknown type 99 - should use default fields
+        result = interpreter.decode(bytes([99, 0x12, 0x34]))
+        assert result.success
+        assert result.data['raw_data'] == 0x1234
+    
+    def test_match_option_b_default_list(self):
+        """Test Option B match with default: [fields] list."""
+        schema = {
+            'fields': [{
+                'match': {
+                    'length': 1,
+                    'name': 'cmd',
+                    'default': [
+                        {'name': 'unknown_payload', 'type': 'u8'},
+                    ],
+                    'cases': {
+                        1: [{'name': 'config', 'type': 'u16'}],
+                    }
+                }
+            }]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0xFF, 0xAB]))
+        assert result.success
+        assert result.data['cmd'] == 0xFF
+        assert result.data['unknown_payload'] == 0xAB
+    
+    def test_match_default_cases_key(self):
+        """Test default in cases dict (Option B)."""
+        schema = {
+            'fields': [{
+                'match': {
+                    'length': 1,
+                    'cases': {
+                        1: [{'name': 'known', 'type': 'u8'}],
+                        'default': [{'name': 'fallback_val', 'type': 'u16'}],
+                    }
+                }
+            }]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([0x99, 0xAB, 0xCD]))
+        assert result.success
+        assert result.data['fallback_val'] == 0xABCD
+
+
+class TestTypeAliases:
+    """Tests for all type aliases working correctly.
+    
+    REQ-Type-Alia-003: uint8/int8/i8 etc. aliases
+    """
+    
+    def test_uint8(self):
+        schema = {'fields': [{'name': 'v', 'type': 'uint8'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0xFF]))
+        assert r.data['v'] == 255
+    
+    def test_uint16(self):
+        schema = {'fields': [{'name': 'v', 'type': 'uint16'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0x01, 0x00]))
+        assert r.data['v'] == 256
+    
+    def test_uint24(self):
+        schema = {'fields': [{'name': 'v', 'type': 'uint24'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0x01, 0x00, 0x00]))
+        assert r.data['v'] == 65536
+    
+    def test_uint32(self):
+        schema = {'fields': [{'name': 'v', 'type': 'uint32'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0x00, 0x01, 0x00, 0x00]))
+        assert r.data['v'] == 65536
+    
+    def test_int8(self):
+        schema = {'fields': [{'name': 'v', 'type': 'int8'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0x80]))
+        assert r.data['v'] == -128
+    
+    def test_int16(self):
+        schema = {'fields': [{'name': 'v', 'type': 'int16'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0xFF, 0x9C]))
+        assert r.data['v'] == -100
+    
+    def test_i8_alias(self):
+        schema = {'fields': [{'name': 'v', 'type': 'i8'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0xFF]))
+        assert r.data['v'] == -1
+    
+    def test_i16_alias(self):
+        schema = {'fields': [{'name': 'v', 'type': 'i16'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0xFF, 0xFE]))
+        assert r.data['v'] == -2
+    
+    def test_i24_alias(self):
+        schema = {'fields': [{'name': 'v', 'type': 'i24'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0xFF, 0xFF, 0x9C]))
+        assert r.data['v'] == -100
+
+
+class TestNibbleDecimalTypes:
+    """Tests for UDec/SDec nibble-decimal types."""
+    
+    def test_udec_decode(self):
+        schema = {'fields': [{'name': 'v', 'type': 'udec'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0x37]))
+        assert abs(r.data['v'] - 3.7) < 0.01
+    
+    def test_sdec_positive(self):
+        schema = {'fields': [{'name': 'v', 'type': 'sdec'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0x25]))
+        assert abs(r.data['v'] - 2.5) < 0.01
+    
+    def test_sdec_negative(self):
+        schema = {'fields': [{'name': 'v', 'type': 'sdec'}]}
+        # -2 + 0.5 => nibbles: upper = 0xE (-2 in 4-bit), lower = 5
+        r = SchemaInterpreter(schema).decode(bytes([0xE5]))
+        assert abs(r.data['v'] - (-2 + 0.5)) < 0.01
+
+
+class Test64BitTypes:
+    """Tests for u64/s64/int64/uint64 types."""
+    
+    def test_u64_big_endian(self):
+        schema = {'endian': 'big', 'fields': [{'name': 'v', 'type': 'u64'}]}
+        r = SchemaInterpreter(schema).decode(bytes([
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00
+        ]))
+        assert r.data['v'] == 256
+    
+    def test_s64_negative(self):
+        schema = {'endian': 'big', 'fields': [{'name': 'v', 'type': 's64'}]}
+        r = SchemaInterpreter(schema).decode(bytes([
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
+        ]))
+        assert r.data['v'] == -1
+    
+    def test_uint64_alias(self):
+        schema = {'endian': 'big', 'fields': [{'name': 'v', 'type': 'uint64'}]}
+        r = SchemaInterpreter(schema).decode(bytes([
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01
+        ]))
+        assert r.data['v'] == 1
+    
+    def test_int64_alias(self):
+        schema = {'endian': 'big', 'fields': [{'name': 'v', 'type': 'int64'}]}
+        r = SchemaInterpreter(schema).decode(bytes([
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE
+        ]))
+        assert r.data['v'] == -2
+
+
+# =============================================================================
+# Negative Tests and Edge Cases
+# =============================================================================
+
+class TestShortBufferErrors:
+    """Tests that all multi-byte types fail gracefully on short buffers."""
+
+    @pytest.mark.parametrize("type_str,min_bytes", [
+        ('u16', 2), ('u24', 3), ('u32', 4), ('u64', 8),
+        ('s16', 2), ('s24', 3), ('s32', 4), ('s64', 8),
+        ('f16', 2), ('f32', 4), ('f64', 8),
+    ])
+    def test_short_buffer_numeric(self, type_str, min_bytes):
+        """Test that numeric types fail on buffer too short."""
+        schema = {'fields': [{'name': 'val', 'type': type_str}]}
+        interpreter = SchemaInterpreter(schema)
+        result = interpreter.decode(bytes(min_bytes - 1))
+        assert not result.success
+
+    def test_short_buffer_bytes(self):
+        schema = {'fields': [{'name': 'val', 'type': 'bytes', 'length': 4}]}
+        result = SchemaInterpreter(schema).decode(bytes([0x01, 0x02]))
+        assert not result.success
+
+    def test_short_buffer_string(self):
+        schema = {'fields': [{'name': 'val', 'type': 'string', 'length': 4}]}
+        result = SchemaInterpreter(schema).decode(bytes([0x01]))
+        assert not result.success
+
+    def test_short_buffer_hex(self):
+        schema = {'fields': [{'name': 'val', 'type': 'hex', 'length': 4}]}
+        result = SchemaInterpreter(schema).decode(bytes([0x01, 0x02]))
+        assert not result.success
+
+    def test_short_buffer_base64(self):
+        schema = {'fields': [{'name': 'val', 'type': 'base64', 'length': 4}]}
+        result = SchemaInterpreter(schema).decode(bytes([0x01]))
+        assert not result.success
+
+    def test_short_buffer_ascii(self):
+        schema = {'fields': [{'name': 'val', 'type': 'ascii', 'length': 4}]}
+        result = SchemaInterpreter(schema).decode(bytes([0x41]))
+        assert not result.success
+
+    def test_short_buffer_enum(self):
+        """Enum with u16 base on 1-byte buffer."""
+        schema = {'fields': [{
+            'name': 'val', 'type': 'enum', 'base': 'u16',
+            'values': {0: 'a', 1: 'b'}
+        }]}
+        result = SchemaInterpreter(schema).decode(bytes([0x01]))
+        assert not result.success
+
+
+class TestZeroAndBoundaryValues:
+    """Tests for zero and boundary values for integer types."""
+
+    def test_u8_zero(self):
+        schema = {'fields': [{'name': 'v', 'type': 'u8'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0x00]))
+        assert r.data['v'] == 0
+
+    def test_u8_max(self):
+        schema = {'fields': [{'name': 'v', 'type': 'u8'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0xFF]))
+        assert r.data['v'] == 255
+
+    def test_u16_zero(self):
+        schema = {'endian': 'big', 'fields': [{'name': 'v', 'type': 'u16'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0x00, 0x00]))
+        assert r.data['v'] == 0
+
+    def test_u16_max(self):
+        schema = {'endian': 'big', 'fields': [{'name': 'v', 'type': 'u16'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0xFF, 0xFF]))
+        assert r.data['v'] == 65535
+
+    def test_u32_max(self):
+        schema = {'endian': 'big', 'fields': [{'name': 'v', 'type': 'u32'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0xFF, 0xFF, 0xFF, 0xFF]))
+        assert r.data['v'] == 0xFFFFFFFF
+
+    def test_s8_zero(self):
+        schema = {'fields': [{'name': 'v', 'type': 's8'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0x00]))
+        assert r.data['v'] == 0
+
+    def test_s8_min(self):
+        schema = {'fields': [{'name': 'v', 'type': 's8'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0x80]))
+        assert r.data['v'] == -128
+
+    def test_s8_max(self):
+        schema = {'fields': [{'name': 'v', 'type': 's8'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0x7F]))
+        assert r.data['v'] == 127
+
+    def test_s16_min(self):
+        schema = {'endian': 'big', 'fields': [{'name': 'v', 'type': 's16'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0x80, 0x00]))
+        assert r.data['v'] == -32768
+
+    def test_s16_max(self):
+        schema = {'endian': 'big', 'fields': [{'name': 'v', 'type': 's16'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0x7F, 0xFF]))
+        assert r.data['v'] == 32767
+
+    def test_s16_zero(self):
+        schema = {'endian': 'big', 'fields': [{'name': 'v', 'type': 's16'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0x00, 0x00]))
+        assert r.data['v'] == 0
+
+    def test_s32_min(self):
+        schema = {'endian': 'big', 'fields': [{'name': 'v', 'type': 's32'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0x80, 0x00, 0x00, 0x00]))
+        assert r.data['v'] == -2147483648
+
+    def test_s32_max(self):
+        schema = {'endian': 'big', 'fields': [{'name': 'v', 'type': 's32'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0x7F, 0xFF, 0xFF, 0xFF]))
+        assert r.data['v'] == 2147483647
+
+    def test_s24_min(self):
+        """s24 minimum = -8388608 (0x800000)."""
+        schema = {'endian': 'big', 'fields': [{'name': 'v', 'type': 's24'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0x80, 0x00, 0x00]))
+        assert r.data['v'] == -8388608
+
+    def test_s24_max(self):
+        """s24 maximum = 8388607 (0x7FFFFF)."""
+        schema = {'endian': 'big', 'fields': [{'name': 'v', 'type': 's24'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0x7F, 0xFF, 0xFF]))
+        assert r.data['v'] == 8388607
+
+
+class TestFloatEdgeCases:
+    """Tests for float edge cases: negative, zero, special values."""
+
+    def test_f32_negative(self):
+        schema = {'endian': 'big', 'fields': [{'name': 'v', 'type': 'f32'}]}
+        payload = struct.pack('>f', -42.5)
+        r = SchemaInterpreter(schema).decode(payload)
+        assert abs(r.data['v'] - (-42.5)) < 0.001
+
+    def test_f32_zero(self):
+        schema = {'endian': 'big', 'fields': [{'name': 'v', 'type': 'f32'}]}
+        payload = struct.pack('>f', 0.0)
+        r = SchemaInterpreter(schema).decode(payload)
+        assert r.data['v'] == 0.0
+
+    def test_f16_negative(self):
+        """f16 = -1.0 is 0xBC00 in big-endian."""
+        schema = {'endian': 'big', 'fields': [{'name': 'v', 'type': 'f16'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0xBC, 0x00]))
+        assert abs(r.data['v'] - (-1.0)) < 0.001
+
+    def test_f16_zero(self):
+        schema = {'endian': 'big', 'fields': [{'name': 'v', 'type': 'f16'}]}
+        r = SchemaInterpreter(schema).decode(bytes([0x00, 0x00]))
+        assert r.data['v'] == 0.0
+
+    def test_f64_negative(self):
+        schema = {'endian': 'big', 'fields': [{'name': 'v', 'type': 'f64'}]}
+        payload = struct.pack('>d', -99.99)
+        r = SchemaInterpreter(schema).decode(payload)
+        assert abs(r.data['v'] - (-99.99)) < 0.001
+
+
+class TestBitfieldEdgeCases:
+    """Edge cases for bitfield extraction."""
+
+    def test_bitfield_empty_buffer(self):
+        """Bitfield on empty payload should fail."""
+        schema = {'fields': [{'name': 'v', 'type': 'u8[3:4]', 'consume': 1}]}
+        result = SchemaInterpreter(schema).decode(bytes())
+        assert not result.success
+
+
+class TestModifierEdgeCases:
+    """Edge cases for modifiers."""
+
+    def test_add_negative(self):
+        """Test negative add modifier (e.g., offset subtraction)."""
+        schema = {'fields': [{'name': 'v', 'type': 'u8', 'add': -40}]}
+        r = SchemaInterpreter(schema).decode(bytes([200]))
+        assert r.data['v'] == 160  # 200 + (-40) = 160
+
+    def test_lookup_out_of_range(self):
+        """Lookup with index beyond list length."""
+        schema = {'fields': [
+            {'name': 'v', 'type': 'u8', 'lookup': ['a', 'b', 'c', 'd']}
+        ]}
+        r = SchemaInterpreter(schema).decode(bytes([10]))
+        assert r.success
+        # Out of range should either return raw value or "unknown"
+        assert r.data['v'] == 10 or 'unknown' in str(r.data['v']).lower()
+
+
+class TestNestedObjectEdgeCases:
+    """Edge cases for nested objects."""
+
+    def test_nested_object_short_buffer(self):
+        """Nested object where inner field needs more bytes than available."""
+        schema = {'fields': [
+            {'name': 'sensor', 'type': 'object', 'fields': [
+                {'name': 'temp', 'type': 'u16'},
+            ]}
+        ]}
+        result = SchemaInterpreter(schema).decode(bytes([0x01]))
+        assert not result.success
+
+
+class TestEncoderEdgeCases:
+    """Edge cases for the encoder."""
+
+    def test_encode_unknown_type(self):
+        """Encoding a field with an unrecognized type should error."""
+        schema = {'fields': [{'name': 'val', 'type': 'custom_xyz'}]}
+        result = SchemaInterpreter(schema).encode({'val': 42})
+        assert not result.success or len(result.errors) > 0
+
+    def test_encode_enum_unknown_string(self):
+        """Encoding an enum with an unknown string value."""
+        schema = {'fields': [{
+            'name': 'status', 'type': 'enum', 'base': 'u8',
+            'values': {0: 'idle', 1: 'running'}
+        }]}
+        result = SchemaInterpreter(schema).encode({'status': 'bogus'})
+        # Should either error or produce a warning
+        assert not result.success or len(result.warnings) > 0 or len(result.errors) > 0
+
+
+class TestMatchEdgeCases:
+    """Edge cases for match conditional."""
+
+    def test_match_range_outside_low(self):
+        """Value just below range should not match."""
+        schema = {
+            'fields': [
+                {'name': 'v', 'type': 'u8'},
+                {
+                    'type': 'match', 'on': 'v',
+                    'default': 'skip',
+                    'cases': [
+                        {'case': '10..20', 'fields': [{'name': 'd', 'type': 'u8'}]},
+                    ]
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        result = interpreter.decode(bytes([9, 0x42]))
+        assert result.success
+        assert 'd' not in result.data
+
+    def test_match_range_outside_high(self):
+        """Value just above range should not match."""
+        schema = {
+            'fields': [
+                {'name': 'v', 'type': 'u8'},
+                {
+                    'type': 'match', 'on': 'v',
+                    'default': 'skip',
+                    'cases': [
+                        {'case': '10..20', 'fields': [{'name': 'd', 'type': 'u8'}]},
+                    ]
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        result = interpreter.decode(bytes([21, 0x42]))
+        assert result.success
+        assert 'd' not in result.data
+
+    def test_match_no_field_no_length(self):
+        """Option B match with neither field: nor length: should handle gracefully."""
+        schema = {
+            'fields': [{
+                'match': {
+                    'cases': {
+                        1: [{'name': 'd', 'type': 'u8'}],
+                    }
+                }
+            }]
+        }
+        interpreter = SchemaInterpreter(schema)
+        result = interpreter.decode(bytes([0x01, 0x42]))
+        # Should fail or degrade gracefully
+        # No dispatch source - cannot match anything
+        assert not result.success or 'd' not in result.data
+
+    def test_match_inline_buffer_short(self):
+        """Option B match with length:1 but empty buffer."""
+        schema = {
+            'fields': [{
+                'match': {
+                    'length': 1,
+                    'cases': {
+                        1: [{'name': 'd', 'type': 'u8'}],
+                    }
+                }
+            }]
+        }
+        result = SchemaInterpreter(schema).decode(bytes())
+        assert not result.success
+
+
+class TestRefEdgeCases:
+    """Edge cases for $ref."""
+
+    def test_ref_bad_format(self):
+        """$ref with unsupported format should error."""
+        schema = {
+            'definitions': {'foo': {'fields': [{'name': 'x', 'type': 'u8'}]}},
+            'fields': [{'$ref': 'invalid_format'}]
+        }
+        result = SchemaInterpreter(schema).decode(bytes([0x01]))
+        assert not result.success
+
+
+class TestFormulaEdgeCases:
+    """Edge cases for formula field."""
+
+    def test_formula_division_by_zero(self):
+        """Formula with division by zero should not crash."""
+        schema = {
+            'fields': [{
+                'name': 'v', 'type': 'u8',
+                'formula': 'x / 0'
+            }]
+        }
+        result = SchemaInterpreter(schema).decode(bytes([10]))
+        # Should either error or produce inf
+        assert not result.success or result.data.get('v') is not None
+
+    def test_formula_invalid_expression(self):
+        """Formula with syntax error should not crash."""
+        schema = {
+            'fields': [{
+                'name': 'v', 'type': 'u8',
+                'formula': 'x *** 2'
+            }]
+        }
+        result = SchemaInterpreter(schema).decode(bytes([10]))
+        assert not result.success
+
+
+class TestTlvEdgeCases:
+    """Edge cases for TLV parsing."""
+
+    def test_tlv_unknown_error(self):
+        """TLV with unknown: error should fail on unknown tag."""
+        schema = {
+            'fields': [{
+                'tlv': {
+                    'tag_size': 1,
+                    'length_size': 1,
+                    'unknown': 'error',
+                    'cases': {
+                        0x01: [{'name': 'temp', 'type': 's16'}],
+                    }
+                }
+            }]
+        }
+        result = SchemaInterpreter(schema).decode(bytes([0xFF, 0x01, 0xAA]))
+        assert not result.success
+
+    def test_tlv_empty_payload(self):
+        """TLV with empty payload should produce no fields."""
+        schema = {
+            'fields': [{
+                'tlv': {
+                    'tag_size': 1,
+                    'cases': {
+                        0x01: [{'name': 'temp', 'type': 'u8'}],
+                    }
+                }
+            }]
+        }
+        result = SchemaInterpreter(schema).decode(bytes())
+        assert result.success
+        assert 'temp' not in result.data
+
+
+class TestFlaggedEdgeCases:
+    """Edge cases for flagged/bitmask construct."""
+
+    def test_no_groups_active(self):
+        """Flags=0 means no groups should be decoded."""
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {'name': 'flags', 'type': 'u16'},
+                {'flagged': {
+                    'field': 'flags',
+                    'groups': [
+                        {'bit': 0, 'fields': [
+                            {'name': 'temp', 'type': 'u16'}
+                        ]},
+                        {'bit': 1, 'fields': [
+                            {'name': 'battery', 'type': 'u16'}
+                        ]}
+                    ]
+                }}
+            ]
+        }
+        result = SchemaInterpreter(schema).decode(bytes([0x00, 0x00]))
+        assert result.success
+        assert 'temp' not in result.data
+        assert 'battery' not in result.data
+
+
+class TestVersionStringEdgeCases:
+    """Edge cases for version_string type."""
+
+    def test_version_string_short_buffer(self):
+        """version_string with length=3 but only 2 bytes available."""
+        schema = {
+            'fields': [{
+                'name': 'fw', 'type': 'version_string',
+                'length': 3, 'delimiter': '.'
+            }]
+        }
+        result = SchemaInterpreter(schema).decode(bytes([0x01, 0x02]))
+        assert not result.success
+
+
+class TestEncodeFormulaEdgeCases:
+    """Edge cases for encode_formula."""
+
+    def test_encode_formula_invalid(self):
+        """encode_formula with syntax error should not crash."""
+        schema = {
+            'fields': [{
+                'name': 'v', 'type': 'u8',
+                'formula': 'x * 0.5 - 40',
+                'encode_formula': 'x @@@ invalid('
+            }]
+        }
+        result = SchemaInterpreter(schema).encode({'v': 40.0})
+        assert not result.success or len(result.errors) > 0
+
+
+class TestTimestampEdgeCases:
+    """Edge cases for timestamp formatting."""
+
+    def test_iso8601_missing_field_ref(self):
+        """iso8601 mode referencing a field that doesn't exist in decoded data."""
+        schema = {
+            'fields': [{'name': 'temp', 'type': 'u8'}],
+            'metadata': {
+                'timestamps': [
+                    {'name': 'ts', 'mode': 'iso8601', 'field': 'nonexistent'}
+                ]
+            }
+        }
+        result = SchemaInterpreter(schema).decode(bytes([42]), input_metadata={})
+        assert result.success
+        # Missing source field - ts should not appear or should be null
+        assert 'ts' not in result.data or result.data['ts'] is None
+
+    def test_elapsed_no_recv_time(self):
+        """elapsed_to_absolute without recvTime in metadata."""
+        schema = {
+            'endian': 'big',
+            'fields': [{'name': 'elapsed', 'type': 'u16'}],
+            'metadata': {
+                'timestamps': [
+                    {'name': 'abs_time', 'mode': 'elapsed_to_absolute',
+                     'elapsed_field': 'elapsed', 'time_base': 'rx_time'}
+                ]
+            }
+        }
+        result = SchemaInterpreter(schema).decode(bytes([0x00, 0x3C]), input_metadata={})
+        assert result.success
+        # No recvTime - abs_time should not appear
+        assert 'abs_time' not in result.data
+
+
+class TestSemanticEdgeCases:
+    """Edge cases for semantic output."""
+
+    def test_unknown_semantic_format(self):
+        """Unknown format string should return raw decoded data."""
+        schema = {
+            'fields': [{'name': 'temperature', 'type': 'u8',
+                        'semantic': {'ipso': 3303}}]
+        }
+        interpreter = SchemaInterpreter(schema)
+        result = interpreter.decode(bytes([42]))
+        output = interpreter.get_semantic_output(result.data, 'bogus_format')
+        assert output == result.data
+
+
+class TestExtraPayloadAndUnknownType:
+    """Tests for extra bytes in payload and unknown type strings."""
+
+    def test_extra_bytes_ignored(self):
+        """Payload longer than schema expects should still decode."""
+        schema = {'fields': [{'name': 'v', 'type': 'u8'}]}
+        result = SchemaInterpreter(schema).decode(bytes([0x42, 0xFF, 0xEE]))
+        assert result.success
+        assert result.data['v'] == 0x42
+        assert result.bytes_consumed == 1
+
+    def test_unknown_type_error(self):
+        """Unknown type string should produce an error."""
+        schema = {'fields': [{'name': 'v', 'type': 'foobar'}]}
+        result = SchemaInterpreter(schema).decode(bytes([0x42]))
+        assert not result.success
+
+
+# =============================================================================
+# Encode Roundtrip Coverage for All Types
+# =============================================================================
+
+class TestEncodeRoundtripAllTypes:
+    """Roundtrip encode/decode tests for every supported encode type.
+
+    Covers s8, u32, s32, u64, s64, f32, f64, bool, bytes, string.
+    (u8, u16, s16, u24 roundtrips already exist in other classes.)
+    """
+
+    def test_s8_roundtrip(self):
+        schema = {'fields': [{'name': 'v', 'type': 's8'}]}
+        interp = SchemaInterpreter(schema)
+        enc = interp.encode({'v': -42})
+        dec = interp.decode(enc.payload)
+        assert dec.data['v'] == -42
+
+    def test_u32_roundtrip(self):
+        schema = {'endian': 'big', 'fields': [{'name': 'v', 'type': 'u32'}]}
+        interp = SchemaInterpreter(schema)
+        enc = interp.encode({'v': 0xDEADBEEF})
+        dec = interp.decode(enc.payload)
+        assert dec.data['v'] == 0xDEADBEEF
+
+    def test_s32_roundtrip(self):
+        schema = {'endian': 'big', 'fields': [{'name': 'v', 'type': 's32'}]}
+        interp = SchemaInterpreter(schema)
+        enc = interp.encode({'v': -100000})
+        dec = interp.decode(enc.payload)
+        assert dec.data['v'] == -100000
+
+    def test_u64_roundtrip(self):
+        schema = {'endian': 'big', 'fields': [{'name': 'v', 'type': 'u64'}]}
+        interp = SchemaInterpreter(schema)
+        enc = interp.encode({'v': 0x0000000100000001})
+        dec = interp.decode(enc.payload)
+        assert dec.data['v'] == 0x0000000100000001
+
+    def test_s64_roundtrip(self):
+        schema = {'endian': 'big', 'fields': [{'name': 'v', 'type': 's64'}]}
+        interp = SchemaInterpreter(schema)
+        enc = interp.encode({'v': -9999999999})
+        dec = interp.decode(enc.payload)
+        assert dec.data['v'] == -9999999999
+
+    def test_f32_roundtrip(self):
+        schema = {'endian': 'big', 'fields': [{'name': 'v', 'type': 'f32'}]}
+        interp = SchemaInterpreter(schema)
+        enc = interp.encode({'v': -1.5})
+        dec = interp.decode(enc.payload)
+        assert abs(dec.data['v'] - (-1.5)) < 0.001
+
+    def test_f64_roundtrip(self):
+        schema = {'endian': 'big', 'fields': [{'name': 'v', 'type': 'f64'}]}
+        interp = SchemaInterpreter(schema)
+        enc = interp.encode({'v': 3.14159265358979})
+        dec = interp.decode(enc.payload)
+        assert abs(dec.data['v'] - 3.14159265358979) < 1e-10
+
+    def test_bool_roundtrip_true(self):
+        schema = {'fields': [
+            {'name': 'v', 'type': 'bool', 'bit': 0, 'consume': 1}
+        ]}
+        interp = SchemaInterpreter(schema)
+        enc = interp.encode({'v': True})
+        dec = interp.decode(enc.payload)
+        assert dec.data['v'] is True
+
+    def test_bool_roundtrip_false(self):
+        schema = {'fields': [
+            {'name': 'v', 'type': 'bool', 'bit': 0, 'consume': 1}
+        ]}
+        interp = SchemaInterpreter(schema)
+        enc = interp.encode({'v': False})
+        dec = interp.decode(enc.payload)
+        assert dec.data['v'] is False
+
+    def test_bytes_roundtrip(self):
+        schema = {'fields': [{'name': 'v', 'type': 'bytes', 'length': 4}]}
+        interp = SchemaInterpreter(schema)
+        enc = interp.encode({'v': bytes([0xDE, 0xAD, 0xBE, 0xEF])})
+        dec = interp.decode(enc.payload)
+        assert dec.data['v'] == bytes([0xDE, 0xAD, 0xBE, 0xEF])
+
+    def test_string_roundtrip(self):
+        schema = {'fields': [{'name': 'v', 'type': 'string', 'length': 8}]}
+        interp = SchemaInterpreter(schema)
+        enc = interp.encode({'v': 'hello'})
+        dec = interp.decode(enc.payload)
+        assert dec.data['v'] == 'hello'
+
+    def test_u32_le_roundtrip(self):
+        schema = {'endian': 'little', 'fields': [{'name': 'v', 'type': 'u32'}]}
+        interp = SchemaInterpreter(schema)
+        enc = interp.encode({'v': 0x12345678})
+        dec = interp.decode(enc.payload)
+        assert dec.data['v'] == 0x12345678
+
+    def test_s32_le_roundtrip(self):
+        schema = {'endian': 'little', 'fields': [{'name': 'v', 'type': 's32'}]}
+        interp = SchemaInterpreter(schema)
+        enc = interp.encode({'v': -2})
+        dec = interp.decode(enc.payload)
+        assert dec.data['v'] == -2
+
+    def test_f32_le_roundtrip(self):
+        schema = {'endian': 'little', 'fields': [{'name': 'v', 'type': 'f32'}]}
+        interp = SchemaInterpreter(schema)
+        enc = interp.encode({'v': 42.5})
+        dec = interp.decode(enc.payload)
+        assert abs(dec.data['v'] - 42.5) < 0.001
+
+    def test_f64_le_roundtrip(self):
+        schema = {'endian': 'little', 'fields': [{'name': 'v', 'type': 'f64'}]}
+        interp = SchemaInterpreter(schema)
+        enc = interp.encode({'v': -123.456})
+        dec = interp.decode(enc.payload)
+        assert abs(dec.data['v'] - (-123.456)) < 0.0001
+
+
+class TestBoolConsumeDefault:
+    """Test bool type with default consume behavior (no consume key)."""
+
+    def test_bool_no_consume_stays(self):
+        """Bool without consume should not advance position."""
+        schema = {'fields': [
+            {'name': 'flag_a', 'type': 'bool', 'bit': 0},
+            {'name': 'flag_b', 'type': 'bool', 'bit': 1},
+            {'name': 'raw', 'type': 'u8'},
+        ]}
+        interp = SchemaInterpreter(schema)
+        # 0x03 = bits 0 and 1 set
+        result = interp.decode(bytes([0x03]))
+        assert result.success
+        assert result.data['flag_a'] is True
+        assert result.data['flag_b'] is True
+        # raw reads the same byte since bool didn't advance
+        assert result.data['raw'] == 0x03
+
+    def test_bool_consume_1_advances(self):
+        """Bool with consume:1 should advance position."""
+        schema = {'fields': [
+            {'name': 'flag', 'type': 'bool', 'bit': 0, 'consume': 1},
+            {'name': 'next', 'type': 'u8'},
+        ]}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([0x01, 0xFF]))
+        assert result.success
+        assert result.data['flag'] is True
+        assert result.data['next'] == 0xFF
+
+    def test_two_bools_then_consume(self):
+        """Two bools without consume, then a field consuming the byte."""
+        schema = {'fields': [
+            {'name': 'a', 'type': 'bool', 'bit': 7},
+            {'name': 'b', 'type': 'bool', 'bit': 0},
+            {'name': 'byte_val', 'type': 'u8'},  # reads same byte
+            {'name': 'next', 'type': 'u8'},
+        ]}
+        interp = SchemaInterpreter(schema)
+        # 0x81 = bit 0 and bit 7 set, then 0x42
+        result = interp.decode(bytes([0x81, 0x42]))
+        assert result.success
+        assert result.data['a'] is True
+        assert result.data['b'] is True
+        assert result.data['byte_val'] == 0x81  # same byte
+        assert result.data['next'] == 0x42
