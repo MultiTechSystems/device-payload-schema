@@ -132,7 +132,7 @@ See the schema language documentation for complete reference.
 
 ### Why Declarative Schemas?
 
-Traditional LoRaWAN codecs use JavaScript with `eval()` or `new Function()`, creating security risks on shared infrastructure. Declarative schemas eliminate this attack surface entirely.
+Traditional LoRaWAN(R) codecs use JavaScript with `eval()` or `new Function()`, creating security risks on shared infrastructure. Declarative schemas eliminate this attack surface entirely.
 
 ### Performance Comparison
 
