@@ -131,6 +131,14 @@
 - REQ-Output-For-040 through REQ-TTN-Output-043
 - REQ-Unit-Annot-071, REQ-Encoder-Re-044, REQ-Roundtrip-045
 
+### OPC UA Semantic Fields (15 requirements)
+- REQ-VRANGE-001 through REQ-VRANGE-005 (valid_range)
+- REQ-RES-001 through REQ-RES-003 (resolution)
+- REQ-UNECE-001 through REQ-UNECE-003 (unece)
+- REQ-QUAL-001 through REQ-QUAL-004 (_quality output)
+
+See [OPC-UA-REQUIREMENTS-AUDIT.md](OPC-UA-REQUIREMENTS-AUDIT.md) for detailed compliance.
+
 ---
 
 ## Verification
@@ -144,6 +152,12 @@ Run Go tests: `cd go/schema && go test -v`
 ---
 
 ## Changelog
+
+- 2026-02-19: OPC UA semantic fields requirements audit
+  - Added 15 new requirements: REQ-VRANGE-001-005, REQ-RES-001-003, REQ-UNECE-001-003, REQ-QUAL-001-004
+  - Python: 21 OPC UA-related tests passing
+  - Go: 5 OPC UA-related tests passing
+  - Created OPC-UA-REQUIREMENTS-AUDIT.md with detailed compliance mapping
 
 - 2026-02-19: Edge case tests and benchmark documentation
   - Python tests: 448 (81.0% coverage)
