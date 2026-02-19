@@ -1,23 +1,20 @@
 # Payload Codec Proto - Spec Completeness Audit
 
-**Generated:** 2026-02-19 11:05
+**Generated:** 2026-02-19 11:15
 
 ---
 
 ## Summary
 
-| Metric | Count |
-|--------|-------|
-| Features Complete | 31/31 |
-| Features Partial | 0 |
-| Features Missing | 0 |
-| Requirements Traced | 70 |
-| Requirements Tested | 70 |
-| Total Tests | 401 |
+| Metric | Python | Go | Total |
+|--------|--------|-----|-------|
+| Tests Passing | 401 | 49 | 450 |
+| Features Complete | 31/31 | 31/31 | 31/31 |
+| Requirements Traced | 70 | — | 70 |
 
 ---
 
-## Feature Status
+## Python Interpreter Tests
 
 | Feature | Status | Tests |
 |---------|--------|-------|
@@ -53,7 +50,63 @@
 | semantic | PASS | 6 |
 | formula | PASS | 10 |
 
-*Note: Test counts are approximate due to pattern-matching. Some tests cover multiple features.*
+---
+
+## Go Interpreter Tests
+
+| Test | Status |
+|------|--------|
+| TestBenchmarkResults | PASS |
+| TestDecodeUint | PASS |
+| TestDecodeSint | PASS |
+| TestDecodeBits | PASS |
+| TestCompactFormat | PASS |
+| TestSchemaBasic | PASS |
+| TestSchemaWithModifiers | PASS |
+| TestSchemaWithLookup | PASS |
+| TestSchemaWithNestedObject | PASS |
+| TestSchemaWithMatch | PASS |
+| TestSchemaWithVariable | PASS |
+| TestFloat16 | PASS |
+| TestBufferUnderflow | PASS |
+| TestTLVSimple | PASS |
+| TestTLVCompositeTag | PASS |
+| TestBytesHex | PASS |
+| TestBytesHexUpper | PASS |
+| TestBytesWithSeparator | PASS |
+| TestBytesBase64 | PASS |
+| TestBytesArray | PASS |
+| TestRepeatCount | PASS |
+| TestRepeatUntilEnd | PASS |
+| TestRepeatWithVariable | PASS |
+| TestEncodeBasic | PASS |
+| TestEncodeWithModifiers | PASS |
+| TestEncodeWithDiv | PASS |
+| TestEncodeWithLookup | PASS |
+| TestEncodeLittleEndian | PASS |
+| TestRoundTrip | PASS |
+| TestPortBasedSelection | PASS |
+| TestBitfieldStringHex | PASS |
+| TestBitfieldStringDecimal | PASS |
+| TestFlaggedAllGroups | PASS |
+| TestFlaggedPartialGroups | PASS |
+| TestCrossFieldFormula | PASS |
+| TestFormulaWithX | PASS |
+| TestModifierYAMLKeyOrder | PASS |
+| TestModifierYAMLKeyOrderRoundtrip | PASS |
+| TestAlbedoFormula | PASS |
+| TestEncodeFlaggedAllGroups | PASS |
+| TestEncodeFlaggedBatteryOnly | PASS |
+| TestEncodeBitfieldString | PASS |
+| TestEncodePortBased | PASS |
+| TestEncodeFlaggedRoundtrip | PASS |
+| TestPolynomialEvaluation | PASS |
+| TestComputeDiv | PASS |
+| TestComputeMul | PASS |
+| TestGuardWithConditions | PASS |
+| TestRefWithTransform | PASS |
+
+**Go Test Summary:** 49 tests, 0 failures
 
 ---
 
@@ -150,25 +203,9 @@
 
 ---
 
-## Implementation Coverage
-
-### Python Interpreter (`tools/schema_interpreter.py`)
-- All 31 features implemented
-- 401 passing tests
-- Supports decode and encode
-- Full repeat/array support added
-
-### Go Interpreter (`go/schema/schema.go`)
-- All features implemented
-- Includes repeat, TLV, match, flagged
-- Production-ready performance
-
----
-
 ## Notes
 
-- **PASS**: Feature is implemented, documented, and tested
-- **PARTIAL**: Feature exists but missing documentation or tests
-- **FAIL**: Feature not implemented
-
-All requirements are traced to test cases via `REQ-*` tags in test docstrings.
+- **Python Interpreter:** `tools/schema_interpreter.py` - 401 tests
+- **Go Interpreter:** `go/schema/schema.go` - 49 tests
+- **Total Coverage:** 450 tests across both implementations
+- All requirements traced via `REQ-*` tags in test docstrings
