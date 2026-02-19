@@ -4681,3 +4681,400 @@ class TestBase64SchemaEdgeCases:
         
         decoded = json.loads(base64.b64decode(b64).decode())
         assert decoded['fields'] == []
+
+
+class TestOPCUASemanticFields:
+    """Tests for OPC UA semantic fields: valid_range, resolution, unece.
+    
+    These fields enable industrial interoperability and quality tracking
+    per OPC UA Part 8 (Data Access) specifications.
+    """
+    
+    def test_valid_range_in_range(self):
+        """Test value within valid_range reports good quality."""
+        schema = {
+            'name': 'test',
+            'fields': [
+                {
+                    'name': 'temperature',
+                    'type': 's16',
+                    'div': 100,
+                    'valid_range': [-40, 85]
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        # temp = 23.45 (0x0929 / 100)
+        result = interpreter.decode(bytes([0x09, 0x29]))
+        
+        assert result.success
+        assert abs(result.data['temperature'] - 23.45) < 0.01
+        assert '_quality' in result.data
+        assert result.data['_quality']['temperature'] == 'good'
+        assert len(result.warnings) == 0
+    
+    def test_valid_range_at_boundary(self):
+        """Test value exactly at boundary is valid."""
+        schema = {
+            'name': 'test',
+            'fields': [
+                {
+                    'name': 'temperature',
+                    'type': 's16',
+                    'div': 100,
+                    'valid_range': [-40, 85]
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        # temp = -40.0 (0xF060 / 100 = -4000 / 100)
+        result = interpreter.decode(bytes([0xF0, 0x60]))
+        
+        assert result.success
+        assert abs(result.data['temperature'] - (-40.0)) < 0.01
+        assert result.data['_quality']['temperature'] == 'good'
+    
+    def test_valid_range_out_of_range_low(self):
+        """Test value below valid_range reports out_of_range quality."""
+        schema = {
+            'name': 'test',
+            'fields': [
+                {
+                    'name': 'temperature',
+                    'type': 's16',
+                    'div': 100,
+                    'valid_range': [-40, 85]
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        # temp = -999.0 (sensor fault value)
+        # -999 * 100 = -99900 = 0xFFFE795C (but we use s16, so encode -99900 mod 65536)
+        # Actually: -999.0 -> raw = -99900 doesn't fit in s16
+        # Let's use a value that does fit: -50.0 -> raw = -5000 = 0xEC78
+        result = interpreter.decode(bytes([0xEC, 0x78]))
+        
+        assert result.success
+        assert abs(result.data['temperature'] - (-50.0)) < 0.01
+        assert result.data['_quality']['temperature'] == 'out_of_range'
+        assert len(result.warnings) == 1
+        assert 'outside valid range' in result.warnings[0]
+    
+    def test_valid_range_out_of_range_high(self):
+        """Test value above valid_range reports out_of_range quality."""
+        schema = {
+            'name': 'test',
+            'fields': [
+                {
+                    'name': 'temperature',
+                    'type': 's16',
+                    'div': 100,
+                    'valid_range': [-40, 85]
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        # temp = 100.0 (above 85 max) -> raw = 10000 = 0x2710
+        result = interpreter.decode(bytes([0x27, 0x10]))
+        
+        assert result.success
+        assert abs(result.data['temperature'] - 100.0) < 0.01
+        assert result.data['_quality']['temperature'] == 'out_of_range'
+        assert len(result.warnings) == 1
+    
+    def test_multiple_fields_with_valid_range(self):
+        """Test multiple fields each with valid_range."""
+        schema = {
+            'name': 'test',
+            'fields': [
+                {
+                    'name': 'temperature',
+                    'type': 's16',
+                    'div': 100,
+                    'valid_range': [-40, 85]
+                },
+                {
+                    'name': 'humidity',
+                    'type': 'u8',
+                    'valid_range': [0, 100]
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        # temp = 23.45 (good), humidity = 105 (out of range)
+        result = interpreter.decode(bytes([0x09, 0x29, 0x69]))
+        
+        assert result.success
+        assert result.data['_quality']['temperature'] == 'good'
+        assert result.data['_quality']['humidity'] == 'out_of_range'
+        assert len(result.warnings) == 1  # Only humidity warning
+    
+    def test_field_without_valid_range_no_quality(self):
+        """Test fields without valid_range don't appear in _quality."""
+        schema = {
+            'name': 'test',
+            'fields': [
+                {
+                    'name': 'temperature',
+                    'type': 's16',
+                    'div': 100,
+                    'valid_range': [-40, 85]
+                },
+                {
+                    'name': 'status',
+                    'type': 'u8'
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        result = interpreter.decode(bytes([0x09, 0x29, 0x01]))
+        
+        assert result.success
+        assert 'temperature' in result.data['_quality']
+        assert 'status' not in result.data['_quality']
+    
+    def test_no_quality_dict_when_no_valid_range_fields(self):
+        """Test _quality not present when no fields have valid_range."""
+        schema = {
+            'name': 'test',
+            'fields': [
+                {'name': 'temperature', 'type': 's16'},
+                {'name': 'humidity', 'type': 'u8'}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        result = interpreter.decode(bytes([0x09, 0x29, 0x64]))
+        
+        assert result.success
+        assert '_quality' not in result.data
+    
+    def test_valid_range_with_resolution_and_unece(self):
+        """Test schema with all OPC UA semantic fields."""
+        schema = {
+            'name': 'test',
+            'fields': [
+                {
+                    'name': 'temperature',
+                    'type': 's16',
+                    'div': 100,
+                    'unit': '°C',
+                    'valid_range': [-40, 85],
+                    'resolution': 0.01,
+                    'unece': 'CEL'
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        result = interpreter.decode(bytes([0x09, 0x29]))
+        
+        assert result.success
+        assert abs(result.data['temperature'] - 23.45) < 0.01
+        # resolution and unece are metadata, not affecting decode output
+        # but valid_range produces quality
+        assert result.data['_quality']['temperature'] == 'good'
+    
+    def test_quality_result_attribute(self):
+        """Test DecodeResult.quality attribute is populated."""
+        schema = {
+            'name': 'test',
+            'fields': [
+                {
+                    'name': 'temperature',
+                    'type': 's16',
+                    'div': 100,
+                    'valid_range': [-40, 85]
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        result = interpreter.decode(bytes([0x09, 0x29]))
+        
+        assert result.quality['temperature'] == 'good'
+        # quality dict attribute matches _quality in data
+        assert result.quality == result.data['_quality']
+
+
+class TestGetFieldMetadata:
+    """Tests for get_field_metadata() API."""
+    
+    def test_get_all_field_metadata(self):
+        """Test retrieving metadata for all fields."""
+        schema = {
+            'name': 'test',
+            'fields': [
+                {
+                    'name': 'temperature',
+                    'type': 's16',
+                    'div': 100,
+                    'unit': '°C',
+                    'valid_range': [-40, 85],
+                    'resolution': 0.01,
+                    'unece': 'CEL',
+                    'description': 'Temperature sensor',
+                    'semantic': {'ipso': 3303}
+                },
+                {
+                    'name': 'humidity',
+                    'type': 'u8',
+                    'unit': '%RH',
+                    'valid_range': [0, 100],
+                    'semantic': {'ipso': 3304, 'senml_unit': '%RH'}
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        metadata = interpreter.get_field_metadata()
+        
+        assert 'temperature' in metadata
+        assert 'humidity' in metadata
+        
+        temp_meta = metadata['temperature']
+        assert temp_meta['unit'] == '°C'
+        assert temp_meta['valid_range'] == [-40, 85]
+        assert temp_meta['resolution'] == 0.01
+        assert temp_meta['unece'] == 'CEL'
+        assert temp_meta['ipso'] == 3303
+        assert temp_meta['description'] == 'Temperature sensor'
+        
+        hum_meta = metadata['humidity']
+        assert hum_meta['unit'] == '%RH'
+        assert hum_meta['ipso'] == 3304
+        assert hum_meta['senml_unit'] == '%RH'
+    
+    def test_get_single_field_metadata(self):
+        """Test retrieving metadata for a specific field."""
+        schema = {
+            'name': 'test',
+            'fields': [
+                {
+                    'name': 'temperature',
+                    'type': 's16',
+                    'div': 100,
+                    'unit': '°C',
+                    'valid_range': [-40, 85],
+                    'unece': 'CEL'
+                },
+                {
+                    'name': 'humidity',
+                    'type': 'u8'
+                }
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        metadata = interpreter.get_field_metadata('temperature')
+        
+        assert metadata['unit'] == '°C'
+        assert metadata['valid_range'] == [-40, 85]
+        assert metadata['unece'] == 'CEL'
+    
+    def test_get_metadata_field_not_found(self):
+        """Test get_field_metadata returns empty for unknown field."""
+        schema = {
+            'name': 'test',
+            'fields': [
+                {'name': 'temperature', 'type': 's16'}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        metadata = interpreter.get_field_metadata('nonexistent')
+        
+        assert metadata == {}
+    
+    def test_metadata_empty_for_no_semantic_fields(self):
+        """Test fields without semantic annotations return empty metadata."""
+        schema = {
+            'name': 'test',
+            'fields': [
+                {'name': 'value', 'type': 'u8'}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        metadata = interpreter.get_field_metadata()
+        
+        # Fields without semantic annotations are not included
+        # (only fields with unit, valid_range, etc. appear)
+        assert metadata == {} or 'value' not in metadata or metadata.get('value') == {}
+
+
+class TestLibrarySensorDefinitions:
+    """Tests for sensor library definitions with semantic fields."""
+    
+    def test_environmental_library_temperature(self):
+        """Test environmental library temperature definition."""
+        import yaml
+        from pathlib import Path
+        
+        lib_path = Path(__file__).parent.parent / 'lib' / 'sensors' / 'environmental.yaml'
+        if not lib_path.exists():
+            pytest.skip("Library file not found")
+        
+        with open(lib_path) as f:
+            lib = yaml.safe_load(f)
+        
+        temp_def = lib['definitions']['temperature_c_div10']
+        
+        assert temp_def['type'] == 's16'
+        assert temp_def['div'] == 10
+        assert temp_def['unit'] == '°C'
+        assert temp_def['unece'] == 'CEL'
+        assert temp_def['valid_range'] == [-40, 125]
+        assert temp_def['resolution'] == 0.1
+        assert temp_def['semantic']['ipso'] == 3303
+    
+    def test_power_library_battery(self):
+        """Test power library battery definitions have semantic fields."""
+        import yaml
+        from pathlib import Path
+        
+        lib_path = Path(__file__).parent.parent / 'lib' / 'sensors' / 'power.yaml'
+        if not lib_path.exists():
+            pytest.skip("Library file not found")
+        
+        with open(lib_path) as f:
+            lib = yaml.safe_load(f)
+        
+        battery_def = lib['definitions']['battery_pct']
+        
+        assert battery_def['type'] == 'u8'
+        assert battery_def['unit'] == '%'
+        assert battery_def['valid_range'] == [0, 100]
+        assert battery_def['unece'] == 'P1'
+        assert battery_def['semantic']['ipso'] == 3316  # Voltage object (battery level)
+    
+    def test_all_library_files_valid_yaml(self):
+        """Test all sensor library files are valid YAML."""
+        import yaml
+        from pathlib import Path
+        
+        lib_dir = Path(__file__).parent.parent / 'lib' / 'sensors'
+        if not lib_dir.exists():
+            pytest.skip("Library directory not found")
+        
+        for yaml_file in lib_dir.glob('*.yaml'):
+            with open(yaml_file) as f:
+                lib = yaml.safe_load(f)
+            
+            assert 'definitions' in lib, f"{yaml_file.name} missing 'definitions'"
+            assert len(lib['definitions']) > 0, f"{yaml_file.name} has no definitions"
+    
+    def test_library_definitions_have_required_fields(self):
+        """Test library definitions have name, type, and unit."""
+        import yaml
+        from pathlib import Path
+        
+        lib_dir = Path(__file__).parent.parent / 'lib' / 'sensors'
+        if not lib_dir.exists():
+            pytest.skip("Library directory not found")
+        
+        errors = []
+        for yaml_file in lib_dir.glob('*.yaml'):
+            with open(yaml_file) as f:
+                lib = yaml.safe_load(f)
+            
+            for def_name, definition in lib['definitions'].items():
+                if 'name' not in definition:
+                    errors.append(f"{yaml_file.name}:{def_name} missing 'name'")
+                if 'type' not in definition:
+                    errors.append(f"{yaml_file.name}:{def_name} missing 'type'")
+        
+        assert len(errors) == 0, f"Library errors:\n" + "\n".join(errors)

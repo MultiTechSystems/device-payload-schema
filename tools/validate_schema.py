@@ -338,6 +338,30 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                 elif mod in ('mult', 'div') and val == 0:
                     errors.append(f"{path}[{i}] ({name}): '{mod}' must not be zero")
         
+        # Validate OPC UA semantic fields
+        if 'valid_range' in fld:
+            vr = fld['valid_range']
+            if not isinstance(vr, list) or len(vr) != 2:
+                errors.append(f"{path}[{i}] ({name}): 'valid_range' must be array of exactly 2 numbers [min, max]")
+            elif not all(isinstance(v, (int, float)) for v in vr):
+                errors.append(f"{path}[{i}] ({name}): 'valid_range' values must be numbers")
+            elif vr[0] > vr[1]:
+                errors.append(f"{path}[{i}] ({name}): 'valid_range' min ({vr[0]}) must be <= max ({vr[1]})")
+        
+        if 'resolution' in fld:
+            res = fld['resolution']
+            if not isinstance(res, (int, float)):
+                errors.append(f"{path}[{i}] ({name}): 'resolution' must be a number")
+            elif res <= 0:
+                errors.append(f"{path}[{i}] ({name}): 'resolution' must be positive")
+        
+        if 'unece' in fld:
+            unece = fld['unece']
+            if not isinstance(unece, str):
+                errors.append(f"{path}[{i}] ({name}): 'unece' must be a string")
+            elif not re.match(r'^[A-Z0-9]{2,3}$', unece):
+                errors.append(f"{path}[{i}] ({name}): 'unece' must be 2-3 uppercase alphanumeric characters")
+        
         # Validate transform array
         if 'transform' in fld:
             transform = fld['transform']

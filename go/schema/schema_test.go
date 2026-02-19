@@ -7692,3 +7692,165 @@ func TestDecodeCompactEdgeCaseHugeCount(t *testing.T) {
 		t.Error("expected buffer underflow error")
 	}
 }
+
+// Tests for OPC UA semantic fields: valid_range, resolution, unece
+
+func TestValidRangeInRange(t *testing.T) {
+	schema, err := ParseSchema(`
+name: test
+endian: big
+fields:
+  - name: temperature
+    type: s16
+    div: 100
+    valid_range: [-40, 85]
+`)
+	if err != nil {
+		t.Fatalf("ParseSchema error: %v", err)
+	}
+
+	// temp = 23.45 -> raw = 2345 = 0x0929
+	result, err := schema.Decode([]byte{0x09, 0x29})
+	if err != nil {
+		t.Fatalf("Decode error: %v", err)
+	}
+
+	temp, ok := result["temperature"].(float64)
+	if !ok {
+		t.Fatalf("temperature not float64: %T", result["temperature"])
+	}
+	if temp < 23.44 || temp > 23.46 {
+		t.Errorf("temperature = %v, want ~23.45", temp)
+	}
+
+	quality, ok := result["_quality"].(map[string]string)
+	if !ok {
+		t.Fatalf("_quality not map[string]string: %T", result["_quality"])
+	}
+	if quality["temperature"] != "good" {
+		t.Errorf("quality[temperature] = %v, want good", quality["temperature"])
+	}
+}
+
+func TestValidRangeOutOfRange(t *testing.T) {
+	schema, err := ParseSchema(`
+name: test
+endian: big
+fields:
+  - name: temperature
+    type: s16
+    div: 100
+    valid_range: [-40, 85]
+`)
+	if err != nil {
+		t.Fatalf("ParseSchema error: %v", err)
+	}
+
+	// temp = 100.0 -> raw = 10000 = 0x2710 (above 85 max)
+	result, err := schema.Decode([]byte{0x27, 0x10})
+	if err != nil {
+		t.Fatalf("Decode error: %v", err)
+	}
+
+	temp, ok := result["temperature"].(float64)
+	if !ok {
+		t.Fatalf("temperature not float64: %T", result["temperature"])
+	}
+	if temp < 99.99 || temp > 100.01 {
+		t.Errorf("temperature = %v, want ~100.0", temp)
+	}
+
+	quality, ok := result["_quality"].(map[string]string)
+	if !ok {
+		t.Fatalf("_quality not map[string]string: %T", result["_quality"])
+	}
+	if quality["temperature"] != "out_of_range" {
+		t.Errorf("quality[temperature] = %v, want out_of_range", quality["temperature"])
+	}
+}
+
+func TestValidRangeNoQualityWhenNotDefined(t *testing.T) {
+	schema, err := ParseSchema(`
+name: test
+endian: big
+fields:
+  - name: temperature
+    type: s16
+    div: 100
+`)
+	if err != nil {
+		t.Fatalf("ParseSchema error: %v", err)
+	}
+
+	result, err := schema.Decode([]byte{0x09, 0x29})
+	if err != nil {
+		t.Fatalf("Decode error: %v", err)
+	}
+
+	if _, ok := result["_quality"]; ok {
+		t.Error("_quality should not be present when no valid_range defined")
+	}
+}
+
+func TestValidRangeMultipleFields(t *testing.T) {
+	schema, err := ParseSchema(`
+name: test
+endian: big
+fields:
+  - name: temperature
+    type: s16
+    div: 100
+    valid_range: [-40, 85]
+  - name: humidity
+    type: u8
+    valid_range: [0, 100]
+`)
+	if err != nil {
+		t.Fatalf("ParseSchema error: %v", err)
+	}
+
+	// temp = 23.45 (good), humidity = 105 (out of range)
+	result, err := schema.Decode([]byte{0x09, 0x29, 0x69})
+	if err != nil {
+		t.Fatalf("Decode error: %v", err)
+	}
+
+	quality, ok := result["_quality"].(map[string]string)
+	if !ok {
+		t.Fatalf("_quality not map[string]string: %T", result["_quality"])
+	}
+
+	if quality["temperature"] != "good" {
+		t.Errorf("quality[temperature] = %v, want good", quality["temperature"])
+	}
+	if quality["humidity"] != "out_of_range" {
+		t.Errorf("quality[humidity] = %v, want out_of_range", quality["humidity"])
+	}
+}
+
+func TestResolutionAndUNECEParsing(t *testing.T) {
+	schema, err := ParseSchema(`
+name: test
+fields:
+  - name: temperature
+    type: s16
+    div: 100
+    resolution: 0.01
+    unece: "CEL"
+`)
+	if err != nil {
+		t.Fatalf("ParseSchema error: %v", err)
+	}
+
+	if len(schema.Fields) != 1 {
+		t.Fatalf("expected 1 field, got %d", len(schema.Fields))
+	}
+
+	field := schema.Fields[0]
+	if field.Resolution == nil || *field.Resolution != 0.01 {
+		t.Errorf("resolution = %v, want 0.01", field.Resolution)
+	}
+	if field.UNECE != "CEL" {
+		t.Errorf("unece = %v, want CEL", field.UNECE)
+	}
+}

@@ -16,20 +16,20 @@ fields:
   - $ref: "lib/common/headers.yaml#/definitions/msg_type_header"
   
   # Indoor temperature - rename field
-  - $ref: "lib/sensors/environmental.yaml#/definitions/temperature_c"
+  - $ref: "lib/sensors/environmental.yaml#/definitions/temperature_c_div10"
     rename:
       temperature: indoor_temp
   
   # Outdoor temperature - rename field  
-  - $ref: "lib/sensors/environmental.yaml#/definitions/temperature_c"
+  - $ref: "lib/sensors/environmental.yaml#/definitions/temperature_c_div10"
     rename:
       temperature: outdoor_temp
   
   # Two humidity sensors using prefix
-  - $ref: "lib/sensors/environmental.yaml#/definitions/humidity_pct"
+  - $ref: "lib/sensors/environmental.yaml#/definitions/humidity_pct_half"
     prefix: "indoor_"
     
-  - $ref: "lib/sensors/environmental.yaml#/definitions/humidity_pct"
+  - $ref: "lib/sensors/environmental.yaml#/definitions/humidity_pct_half"
     prefix: "outdoor_"
   
   # Battery with computed percentage (rename to avoid conflict)
@@ -41,10 +41,10 @@ test_vectors:
     description: "Indoor warm, outdoor cold"
     payload: "01 00E7 FF9C 32 46 0BB8"
     expected:
-      msg_type: 1
+      msg_type: "data"        # lookup transforms 1 -> "data"
       indoor_temp: 23.1
       outdoor_temp: -10.0
       indoor_humidity: 25.0
       outdoor_humidity: 35.0
       battery_mv: 3000
-      battery_percent: 83.33333333333334
+      battery_percent: 100.0  # (3000-1800)/12 = 100%

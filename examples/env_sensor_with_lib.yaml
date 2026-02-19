@@ -32,20 +32,20 @@ test_vectors:
     description: "Typical indoor reading"
     payload: "01 00E7 32 0BB8 003C"
     expected:
-      msg_type: 1
+      msg_type: "data"        # lookup transforms 1 -> "data"
       temperature: 23.1
       humidity: 25.0
       battery_mv: 3000
-      battery_percent: 83.33333333333334
+      battery_percent: 100.0  # (3000-1800)/12 = 100%
       report_interval: 60
 
   - name: cold_low_battery
     description: "Cold temperature, low battery"
     payload: "01 FF9C 5A 0898 0078"
     expected:
-      msg_type: 1
+      msg_type: "data"
       temperature: -10.0
       humidity: 45.0
       battery_mv: 2200
-      battery_percent: 16.666666666666668
+      battery_percent: 33.333333333333336  # (2200-1800)/12 = 33.33%
       report_interval: 120

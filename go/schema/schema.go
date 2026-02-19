@@ -150,6 +150,10 @@ type Field struct {
 	Prefix    string  `json:"prefix,omitempty" yaml:"prefix,omitempty"`
 	// Formula (can reference $field_name for computed values) - DEPRECATED
 	Formula string `json:"formula,omitempty" yaml:"formula,omitempty"`
+	// OPC UA semantic fields
+	ValidRange []float64 `json:"valid_range,omitempty" yaml:"valid_range,omitempty"` // [min, max] bounds for quality checks
+	Resolution *float64  `json:"resolution,omitempty" yaml:"resolution,omitempty"`   // Minimum detectable change
+	UNECE      string    `json:"unece,omitempty" yaml:"unece,omitempty"`             // UNECE Rec 20 unit code
 	// Phase 2: Declarative computed values
 	Ref        string     `json:"ref,omitempty" yaml:"ref,omitempty"`               // Reference to another field ($field_name)
 	Polynomial []float64  `json:"polynomial,omitempty" yaml:"polynomial,omitempty"` // Coefficients [a_n, ..., a_0] for Horner's method
@@ -242,6 +246,8 @@ type DecodeContext struct {
 	Offset    int
 	Endian    string
 	Variables map[string]any
+	Quality   map[string]string   // Quality status for fields with valid_range
+	Warnings  []string            // Quality warnings
 }
 
 // EncodeContext maintains state during encoding.
@@ -298,7 +304,35 @@ func NewDecodeContext(data []byte, endian string) *DecodeContext {
 		Offset:    0,
 		Endian:    endian,
 		Variables: make(map[string]any),
+		Quality:   make(map[string]string),
+		Warnings:  []string{},
 	}
+}
+
+// checkValidRange checks if value is within valid_range and updates quality.
+// Returns "good" if in range (or no range defined), "out_of_range" otherwise.
+func (ctx *DecodeContext) checkValidRange(value any, field Field) string {
+	if len(field.ValidRange) < 2 {
+		return "good"
+	}
+	
+	numVal, ok := toFloat64(value)
+	if !ok {
+		return "good"
+	}
+	
+	minVal, maxVal := field.ValidRange[0], field.ValidRange[1]
+	
+	if numVal < minVal || numVal > maxVal {
+		warning := fmt.Sprintf("%s: value %v outside valid range [%v, %v]",
+			field.Name, numVal, minVal, maxVal)
+		ctx.Warnings = append(ctx.Warnings, warning)
+		ctx.Quality[field.Name] = "out_of_range"
+		return "out_of_range"
+	}
+	
+	ctx.Quality[field.Name] = "good"
+	return "good"
 }
 
 // Remaining returns the number of bytes remaining.
@@ -836,6 +870,24 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 		f.Formula = formula
 	}
 
+	// OPC UA semantic fields
+	if vrRaw, ok := fm["valid_range"].([]any); ok {
+		for _, v := range vrRaw {
+			if vf, ok := toFloat64(v); ok {
+				f.ValidRange = append(f.ValidRange, vf)
+			}
+		}
+	}
+	if res, ok := fm["resolution"].(float64); ok {
+		f.Resolution = &res
+	} else if res, ok := fm["resolution"].(int); ok {
+		r := float64(res)
+		f.Resolution = &r
+	}
+	if unece, ok := fm["unece"].(string); ok {
+		f.UNECE = unece
+	}
+
 	// Phase 2: ref (field reference)
 	if ref, ok := fm["ref"].(string); ok {
 		f.Ref = ref
@@ -960,6 +1012,61 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	return f
 }
 
+// FieldMetadata contains semantic annotations for a field.
+type FieldMetadata struct {
+	Unit        string    `json:"unit,omitempty"`
+	ValidRange  []float64 `json:"valid_range,omitempty"`
+	Resolution  *float64  `json:"resolution,omitempty"`
+	UNECE       string    `json:"unece,omitempty"`
+	Description string    `json:"description,omitempty"`
+	IPSO        int       `json:"ipso,omitempty"`
+	SenMLUnit   string    `json:"senml_unit,omitempty"`
+}
+
+// GetFieldMetadata returns semantic metadata for schema fields.
+// If fieldName is empty, returns metadata for all fields.
+func (s *Schema) GetFieldMetadata(fieldName string) map[string]FieldMetadata {
+	result := make(map[string]FieldMetadata)
+	collectFieldMetadata(s.Fields, result)
+	
+	if fieldName != "" {
+		if meta, ok := result[fieldName]; ok {
+			return map[string]FieldMetadata{fieldName: meta}
+		}
+		return map[string]FieldMetadata{}
+	}
+	return result
+}
+
+func collectFieldMetadata(fields []Field, result map[string]FieldMetadata) {
+	for _, f := range fields {
+		if f.Name == "" {
+			continue
+		}
+		
+		meta := FieldMetadata{
+			ValidRange:  f.ValidRange,
+			Resolution:  f.Resolution,
+			UNECE:       f.UNECE,
+		}
+		
+		// These would need to be added to Field struct if needed
+		// For now, just include the OPC UA semantic fields
+		
+		if len(meta.ValidRange) > 0 || meta.Resolution != nil || meta.UNECE != "" {
+			result[f.Name] = meta
+		}
+		
+		// Recurse into nested structures
+		if len(f.Fields) > 0 {
+			collectFieldMetadata(f.Fields, result)
+		}
+		if len(f.ByteGroup) > 0 {
+			collectFieldMetadata(f.ByteGroup, result)
+		}
+	}
+}
+
 // ResolveFields returns the field set for a given fPort.
 // If the schema uses ports, selects the matching port entry.
 // Otherwise returns the top-level fields.
@@ -1006,6 +1113,11 @@ func (s *Schema) DecodeWithPort(data []byte, fPort int) (map[string]any, error) 
 		result[k] = v
 	}
 
+	// Add quality dict to output if any quality flags were set
+	if len(ctx.Quality) > 0 {
+		result["_quality"] = ctx.Quality
+	}
+
 	return result, nil
 }
 
@@ -1032,6 +1144,11 @@ func (s *Schema) Decode(data []byte) (map[string]any, error) {
 	}
 	for k, v := range fieldsResult {
 		result[k] = v
+	}
+
+	// Add quality dict to output if any quality flags were set
+	if len(ctx.Quality) > 0 {
+		result["_quality"] = ctx.Quality
 	}
 
 	return result, nil
@@ -1116,6 +1233,10 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 		if value != nil && field.Name != "" {
 			result[field.Name] = value
 			ctx.Variables[field.Name] = value
+			// Check valid_range and update quality
+			if len(field.ValidRange) >= 2 {
+				ctx.checkValidRange(value, field)
+			}
 		}
 	}
 

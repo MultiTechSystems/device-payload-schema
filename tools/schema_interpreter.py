@@ -35,6 +35,7 @@ class DecodeResult:
     bytes_consumed: int
     warnings: List[str] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
+    quality: Dict[str, str] = field(default_factory=dict)
     
     @property
     def success(self) -> bool:
@@ -1355,6 +1356,32 @@ class SchemaInterpreter:
         
         return result, pos
     
+    def _check_valid_range(self, value: Any, field_def: Dict[str, Any], 
+                           result: 'DecodeResult') -> str:
+        """
+        Check if value is within valid_range and update quality.
+        
+        Returns: "good" if in range (or no range defined), "out_of_range" otherwise
+        """
+        valid_range = field_def.get('valid_range')
+        name = field_def.get('name', 'unknown')
+        
+        if valid_range is None or not isinstance(value, (int, float)):
+            return "good"
+        
+        if not isinstance(valid_range, list) or len(valid_range) < 2:
+            return "good"
+        
+        min_val, max_val = valid_range[0], valid_range[1]
+        
+        if value < min_val or value > max_val:
+            result.warnings.append(
+                f"{name}: value {value} outside valid range [{min_val}, {max_val}]"
+            )
+            return "out_of_range"
+        
+        return "good"
+    
     def _apply_modifiers(self, value: Any, field_def: Dict[str, Any]) -> Any:
         """Apply arithmetic modifiers to decoded value."""
         if not isinstance(value, (int, float)):
@@ -1501,11 +1528,19 @@ class SchemaInterpreter:
             # Phase 2: flagged: construct (bitmask field presence)
             if 'flagged' in field_def and not field_def.get('type'):
                 try:
-                    flagged_result, pos = self._decode_flagged(field_def['flagged'], payload, pos)
+                    flagged_def = field_def['flagged']
+                    flagged_result, pos = self._decode_flagged(flagged_def, payload, pos)
                     result.data.update(flagged_result)
-                    # Store flagged fields as variables too
+                    # Store flagged fields as variables and check valid_range
                     for k, v in flagged_result.items():
                         self._variables[k] = v
+                    # Check valid_range for fields in flagged groups
+                    for group in flagged_def.get('groups', []):
+                        for gf in group.get('fields', []):
+                            gf_name = gf.get('name')
+                            if gf_name and gf_name in flagged_result and gf.get('valid_range'):
+                                quality = self._check_valid_range(flagged_result[gf_name], gf, result)
+                                result.quality[gf_name] = quality
                 except Exception as e:
                     result.errors.append(f"Error in flagged: {e}")
                 continue
@@ -1530,6 +1565,10 @@ class SchemaInterpreter:
                     if value is not None:
                         result.data[name] = value
                         self._variables[name] = value
+                        # Check valid_range for computed fields
+                        if field_def.get('valid_range'):
+                            quality = self._check_valid_range(value, field_def, result)
+                            result.quality[name] = quality
                 except Exception as e:
                     result.errors.append(f"Error computing {name}: {e}")
                 continue
@@ -1561,6 +1600,10 @@ class SchemaInterpreter:
                     else:
                         value = self._apply_modifiers(value, field_def)
                     result.data[name] = value
+                    # Check valid_range and update quality
+                    if field_def.get('valid_range'):
+                        quality = self._check_valid_range(value, field_def, result)
+                        result.quality[name] = quality
                     # Store variable if var: specified (Option B)
                     if field_def.get('var'):
                         self._variables[field_def['var']] = value
@@ -1576,6 +1619,10 @@ class SchemaInterpreter:
         metadata_def = self.schema.get('metadata')
         if metadata_def and input_metadata is not None:
             self._enrich_metadata(result.data, metadata_def, input_metadata)
+        
+        # Add quality dict to output if any quality flags were set
+        if result.quality:
+            result.data['_quality'] = dict(result.quality)
         
         return result
     
@@ -1978,6 +2025,48 @@ class SchemaInterpreter:
         # Encode as base type
         base_field = {'type': base_type}
         return self._encode_field(base_field, int_value)
+    
+    def get_field_metadata(self, field_name: str = None) -> Dict[str, Any]:
+        """
+        Get semantic metadata for schema fields.
+        
+        Args:
+            field_name: Specific field name, or None for all fields
+            
+        Returns:
+            Metadata dict with unit, valid_range, resolution, unece, ipso, etc.
+        """
+        def extract_metadata(field_def: Dict[str, Any]) -> Dict[str, Any]:
+            meta = {}
+            for key in ('unit', 'valid_range', 'resolution', 'unece', 
+                       'description', 'semantic', 'ipso', 'senml_unit'):
+                if key in field_def:
+                    meta[key] = field_def[key]
+            # Flatten semantic sub-dict
+            if 'semantic' in meta:
+                for k, v in meta.pop('semantic').items():
+                    meta[k] = v
+            return meta
+        
+        def collect_fields(fields: List[Dict[str, Any]], result: Dict[str, Dict]):
+            for field_def in fields:
+                name = field_def.get('name')
+                if name:
+                    meta = extract_metadata(field_def)
+                    if meta:
+                        result[name] = meta
+                # Recurse into nested structures
+                if 'fields' in field_def:
+                    collect_fields(field_def['fields'], result)
+                if 'byte_group' in field_def:
+                    collect_fields(field_def['byte_group'], result)
+        
+        all_metadata = {}
+        collect_fields(self.schema.get('fields', []), all_metadata)
+        
+        if field_name:
+            return all_metadata.get(field_name, {})
+        return all_metadata
     
     def get_semantic_output(self, decoded: Dict[str, Any], 
                            format: str = 'ipso') -> Dict[str, Any]:

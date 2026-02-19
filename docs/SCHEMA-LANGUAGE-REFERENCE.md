@@ -496,6 +496,101 @@ ports:
   senml_unit: "Cel"   # SenML unit
 ```
 
+## OPC UA Semantic Fields
+
+Fields for industrial interoperability and value quality tracking.
+
+### Valid Range
+
+Declares expected output value bounds. Out-of-range values produce quality warnings but are not modified (unlike `clamp`).
+
+```yaml
+- name: temperature
+  type: s16
+  div: 100
+  unit: "°C"
+  valid_range: [-40, 85]    # Expected operating range
+```
+
+**Interpreter Behavior:**
+
+```python
+# Normal reading
+{
+    "temperature": 23.45,
+    "_quality": {"temperature": "good"}
+}
+
+# Out-of-range (e.g., sensor failure reads -999)
+{
+    "temperature": -999.0,
+    "_quality": {"temperature": "out_of_range"},
+    "_warnings": ["temperature: value -999.0 outside valid range [-40, 85]"]
+}
+```
+
+**OPC UA Mapping:** Maps to `EURange` (EngineeringUnit Range).
+
+### Resolution
+
+Documents minimum detectable change. Useful for fixed-point scaling and code generation.
+
+```yaml
+- name: temperature
+  type: s16
+  div: 100
+  unit: "°C"
+  resolution: 0.01    # 0.01°C steps
+```
+
+**Interpreter Behavior:** Included in metadata output. Optional rounding to resolution in strict mode.
+
+**OPC UA Mapping:** Maps to `AnalogItemType` resolution metadata.
+
+### UNECE Unit Codes
+
+Standard unit identifiers per UNECE Recommendation 20.
+
+```yaml
+- name: temperature
+  type: s16
+  div: 100
+  unit: "°C"
+  unece: "CEL"        # UNECE code for Celsius
+```
+
+**Common UNECE Codes:**
+
+| Measurement | Code | Display |
+|-------------|------|---------|
+| Temperature (C) | CEL | °C |
+| Temperature (F) | FAH | °F |
+| Humidity (%) | P1 | % |
+| Pressure (Pa) | PAL | Pa |
+| Pressure (bar) | BAR | bar |
+| Voltage | VLT | V |
+| Current | AMP | A |
+| Power (W) | WTT | W |
+| Distance (m) | MTR | m |
+| Distance (mm) | MMT | mm |
+| Mass (kg) | KGM | kg |
+| Time (s) | SEC | s |
+
+**OPC UA Mapping:** Maps to `EngineeringUnits.UnitId`.
+
+### Combined Example
+
+```yaml
+- name: temperature
+  type: s16
+  div: 100
+  unit: "°C"
+  valid_range: [-40, 85]
+  resolution: 0.01
+  unece: "CEL"
+  ipso: 3303
+```
+
 ## Compact Format (Alternative Syntax)
 
 ```yaml
@@ -535,6 +630,8 @@ ENCODINGS:    sign_magnitude bcd gray
 MATCH:        exact | range (n..m) | default (_)
 
 REFERENCES:   $field_name | use: definition_name
+
+SEMANTICS:    unit | ipso | senml_unit | valid_range | resolution | unece
 ```
 
 ## See Also
