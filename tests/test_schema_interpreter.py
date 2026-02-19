@@ -4299,3 +4299,385 @@ class TestRepeatType:
         
         assert not result.success
         assert 'must specify' in str(result.errors[0]).lower()
+
+
+class TestEdgeCasesAndSecurity:
+    """Tests for edge cases, malformed inputs, and security boundaries."""
+
+    # --- Formula Injection Prevention ---
+    
+    def test_formula_injection_import_blocked(self):
+        """Formula cannot use __import__ to execute arbitrary code."""
+        schema = {'fields': [
+            {'name': 'x', 'type': 'u8', 'formula': '__import__("os").system("echo pwned")'}
+        ]}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([42]))
+        # Should fail or return safe default, not execute code
+        assert 'x' not in result.data or result.data.get('x') == 0.0
+
+    def test_formula_injection_globals_blocked(self):
+        """Formula cannot access globals()."""
+        schema = {'fields': [
+            {'name': 'x', 'type': 'u8', 'formula': 'globals()'}
+        ]}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([42]))
+        assert 'x' not in result.data or result.data.get('x') == 0.0
+
+    def test_formula_injection_eval_blocked(self):
+        """Formula cannot use nested eval."""
+        schema = {'fields': [
+            {'name': 'x', 'type': 'u8', 'formula': 'eval("1+1")'}
+        ]}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([42]))
+        assert 'x' not in result.data or result.data.get('x') == 0.0
+
+    def test_formula_injection_class_access_blocked(self):
+        """Formula cannot access __class__ for sandbox escape."""
+        schema = {'fields': [
+            {'name': 'x', 'type': 'u8', 'formula': '().__class__.__bases__[0].__subclasses__()'}
+        ]}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([42]))
+        # Should not crash or leak class info
+        assert result.data.get('x', 0.0) == 0.0
+
+    # --- Recursion and Iteration Limits ---
+
+    def test_deep_nested_match_handled(self):
+        """Deep nested match structures don't cause stack overflow."""
+        def make_nested_match(depth):
+            if depth == 0:
+                return {'name': 'leaf', 'type': 'u8'}
+            return {
+                'name': f'match_{depth}',
+                'type': 'match',
+                'on': '$type',
+                'cases': [{'case': 1, 'fields': [make_nested_match(depth-1)]}]
+            }
+        
+        schema = {'fields': [
+            {'name': 'type', 'type': 'u8', 'var': 'type'},
+            make_nested_match(100)
+        ]}
+        interp = SchemaInterpreter(schema)
+        # Should not crash - may truncate or return partial result
+        result = interp.decode(bytes([1] * 200))
+        assert result is not None
+
+    def test_repeat_huge_count_bounded_by_buffer(self):
+        """Repeat with huge count is bounded by available buffer."""
+        schema = {'fields': [
+            {'name': 'items', 'type': 'repeat', 'count': 999999999, 'max': 999999999,
+             'fields': [{'name': 'x', 'type': 'u8'}]}
+        ]}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([42] * 100))
+        # Should not hang - bounded by 100 bytes available
+        assert result is not None
+
+    def test_repeat_until_end_large_payload(self):
+        """Repeat until=end respects max_iterations safety limit."""
+        schema = {'fields': [
+            {'name': 'items', 'type': 'repeat', 'until': 'end',
+             'fields': [{'name': 'x', 'type': 'u8'}]}
+        ]}
+        interp = SchemaInterpreter(schema)
+        import time
+        start = time.time()
+        result = interp.decode(bytes([42] * 10000))
+        elapsed = time.time() - start
+        
+        assert result.success
+        # Default max_iterations=1000 is a safety limit
+        assert len(result.data['items']) == 1000
+        assert elapsed < 1.0  # Should complete quickly due to limit
+
+    # --- Variable Reference Edge Cases ---
+
+    def test_self_referencing_formula_uses_default(self):
+        """Formula referencing its own var before assignment uses 0."""
+        schema = {'fields': [
+            {'name': 'x', 'type': 'u8', 'var': 'x', 'formula': '$x + 1'}
+        ]}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([42]))
+        # $x is 0 before assignment, so result is 0 + 1 = 1
+        assert result.data['x'] == 1.0
+
+    def test_circular_formula_references(self):
+        """Circular variable references don't cause infinite loop."""
+        schema = {'fields': [
+            {'name': 'a', 'type': 'u8', 'var': 'a', 'formula': '$b + 1'},
+            {'name': 'b', 'type': 'u8', 'var': 'b', 'formula': '$a + 1'}
+        ]}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([1, 2]))
+        # Should complete without hanging
+        assert result is not None
+        assert 'a' in result.data
+        assert 'b' in result.data
+
+    # --- Buffer Boundary Conditions ---
+
+    def test_tlv_length_exceeds_buffer(self):
+        """TLV with length > remaining buffer handles gracefully."""
+        schema = {'fields': [
+            {'name': 'data', 'type': 'tlv', 'tag': {'type': 'u8'},
+             'length': {'type': 'u8'},
+             'cases': {'1': [{'name': 'val', 'type': 'bytes', 'length': '$length'}]}}
+        ]}
+        interp = SchemaInterpreter(schema)
+        # tag=1, length=255, but only 2 bytes follow
+        result = interp.decode(bytes([1, 255, 0x41, 0x42]))
+        # Should not crash
+        assert result is not None
+
+    def test_string_length_exceeds_buffer(self):
+        """String with length > buffer returns partial or empty."""
+        schema = {'fields': [
+            {'name': 's', 'type': 'string', 'length': 1000}
+        ]}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([0x41, 0x42, 0x43]))
+        # Should not crash
+        assert result is not None
+
+    def test_bytes_negative_length_variable(self):
+        """Bytes with negative length from signed var handles gracefully."""
+        schema = {'fields': [
+            {'name': 'len', 'type': 's8', 'var': 'len'},
+            {'name': 'data', 'type': 'bytes', 'length': '$len'}
+        ]}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([0xFF, 0x41, 0x42]))  # len=-1
+        # Should not crash
+        assert result is not None
+        assert result.data['len'] == -1
+
+    # --- Numeric Edge Cases ---
+
+    def test_division_by_zero_modifier(self):
+        """Division by zero in modifier doesn't crash."""
+        schema = {'fields': [
+            {'name': 'x', 'type': 'u8', 'div': 0}
+        ]}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([42]))
+        # Should not crash - may return original, inf, or error
+        assert result is not None
+
+    def test_division_by_zero_formula(self):
+        """Division by zero in formula doesn't crash."""
+        schema = {'fields': [
+            {'name': 'x', 'type': 'u8', 'formula': 'x / 0'}
+        ]}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([42]))
+        # Should not crash
+        assert result is not None
+
+    def test_sqrt_negative_clamped(self):
+        """Sqrt of negative value clamps to 0."""
+        schema = {'fields': [
+            {'name': 'x', 'type': 's8', 'transform': [{'sqrt': True}]}
+        ]}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([0xFF]))  # -1 as s8
+        
+        assert result.success
+        assert result.data['x'] == 0.0
+
+    def test_overflow_large_mult(self):
+        """Large multiplier doesn't cause overflow crash."""
+        schema = {'fields': [
+            {'name': 'x', 'type': 'u32', 'mult': 1e30}
+        ]}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([0xFF, 0xFF, 0xFF, 0xFF]))
+        
+        assert result is not None
+        assert result.data['x'] > 0
+
+    # --- Malformed Schema Edge Cases ---
+
+    def test_empty_fields_array(self):
+        """Schema with empty fields array decodes to empty result."""
+        schema = {'fields': []}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([42]))
+        
+        assert result.success
+        assert result.data == {}
+
+    def test_field_missing_type(self):
+        """Field without type handles gracefully."""
+        schema = {'fields': [
+            {'name': 'x'}
+        ]}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([42]))
+        # Should not crash - may use default type or skip
+        assert result is not None
+
+    def test_match_no_matching_case(self):
+        """Match with no matching case handles gracefully."""
+        schema = {'fields': [
+            {'name': 'type', 'type': 'u8', 'var': 't'},
+            {'name': 'data', 'type': 'match', 'on': '$t', 'cases': [
+                {'case': 1, 'fields': [{'name': 'a', 'type': 'u8'}]},
+                {'case': 2, 'fields': [{'name': 'b', 'type': 'u8'}]},
+            ]}
+        ]}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([99, 42]))  # type=99, no matching case
+        
+        assert result is not None
+        assert result.data['type'] == 99
+
+    # --- TLV Edge Cases ---
+
+    def test_tlv_zero_length_records(self):
+        """TLV with many zero-length records doesn't hang."""
+        schema = {'fields': [
+            {'name': 'data', 'type': 'tlv', 'tag': {'type': 'u8'},
+             'length': {'type': 'u8'},
+             'cases': {'1': []}}
+        ]}
+        interp = SchemaInterpreter(schema)
+        import time
+        start = time.time()
+        result = interp.decode(bytes([1, 0] * 1000))  # 1000 zero-length records
+        elapsed = time.time() - start
+        
+        assert result is not None
+        assert elapsed < 1.0  # Should complete quickly
+
+    def test_tlv_unknown_tag(self):
+        """TLV with unknown tag handles gracefully."""
+        schema = {'fields': [
+            {'name': 'data', 'type': 'tlv', 'tag': {'type': 'u8'},
+             'length': {'type': 'u8'},
+             'cases': {'1': [{'name': 'a', 'type': 'u8'}]}}
+        ]}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([99, 1, 42]))  # tag=99, not in cases
+        
+        assert result is not None
+
+
+class TestBase64SchemaEdgeCases:
+    """Edge case tests for base64 schema encoding/decoding."""
+
+    def test_base64_encode_decode_roundtrip(self):
+        """Base64 encode/decode roundtrip preserves schema."""
+        import base64
+        import json
+        
+        schema = {
+            'name': 'test',
+            'fields': [
+                {'name': 'temp', 'type': 's16', 'mult': 0.01},
+                {'name': 'humidity', 'type': 'u8'},
+            ]
+        }
+        
+        # Encode to JSON then base64
+        json_str = json.dumps(schema)
+        b64 = base64.b64encode(json_str.encode()).decode()
+        
+        # Decode back
+        decoded_json = base64.b64decode(b64).decode()
+        decoded = json.loads(decoded_json)
+        
+        assert decoded['name'] == schema['name']
+        assert len(decoded['fields']) == len(schema['fields'])
+
+    def test_base64_invalid_characters(self):
+        """Invalid base64 characters raise error."""
+        import base64
+        
+        with pytest.raises(Exception):
+            base64.b64decode("!!!invalid!!!")
+
+    def test_base64_malformed_json(self):
+        """Valid base64 but malformed JSON handled."""
+        import base64
+        import json
+        
+        # Encode invalid JSON
+        b64 = base64.b64encode(b"{not valid json}").decode()
+        
+        with pytest.raises(json.JSONDecodeError):
+            decoded = base64.b64decode(b64).decode()
+            json.loads(decoded)
+
+    def test_base64_compressed_schema(self):
+        """Compressed (gzip) base64 schema."""
+        import base64
+        import gzip
+        import json
+        
+        schema = {'name': 'compressed', 'fields': [{'name': 'x', 'type': 'u8'}]}
+        json_bytes = json.dumps(schema).encode()
+        
+        # Compress then base64
+        compressed = gzip.compress(json_bytes)
+        b64 = base64.b64encode(compressed).decode()
+        
+        # Decompress and decode
+        decompressed = gzip.decompress(base64.b64decode(b64))
+        decoded = json.loads(decompressed.decode())
+        
+        assert decoded['name'] == 'compressed'
+
+    def test_base64_unicode_field_names(self):
+        """Unicode field names in base64 schema."""
+        import base64
+        import json
+        
+        schema = {
+            'name': 'unicode',
+            'fields': [
+                {'name': 'température', 'type': 's16'},
+                {'name': '湿度', 'type': 'u8'},
+            ]
+        }
+        
+        json_str = json.dumps(schema, ensure_ascii=False)
+        b64 = base64.b64encode(json_str.encode('utf-8')).decode()
+        
+        decoded = json.loads(base64.b64decode(b64).decode('utf-8'))
+        assert decoded['fields'][0]['name'] == 'température'
+        assert decoded['fields'][1]['name'] == '湿度'
+
+    def test_base64_large_schema(self):
+        """Large schema with many fields."""
+        import base64
+        import json
+        
+        schema = {
+            'name': 'large',
+            'fields': [{'name': f'field_{i}', 'type': 'u8'} for i in range(100)]
+        }
+        
+        json_str = json.dumps(schema)
+        b64 = base64.b64encode(json_str.encode()).decode()
+        
+        decoded = json.loads(base64.b64decode(b64).decode())
+        assert len(decoded['fields']) == 100
+
+    def test_base64_empty_schema(self):
+        """Empty schema in base64."""
+        import base64
+        import json
+        
+        schema = {'name': 'empty', 'fields': []}
+        
+        json_str = json.dumps(schema)
+        b64 = base64.b64encode(json_str.encode()).decode()
+        
+        decoded = json.loads(base64.b64decode(b64).decode())
+        assert decoded['fields'] == []

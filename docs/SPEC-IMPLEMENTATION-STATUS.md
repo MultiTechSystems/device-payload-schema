@@ -199,16 +199,60 @@ All implementations MUST support v1 schemas. V2 adds optional features.
 
 ## Performance Benchmarks
 
-Tested with Milesight AM308 schema (8 fields, typical complexity):
+Tested with DL-5TM schema (8 fields, flagged construct, polynomial transform).
 
-| Implementation | Throughput | Latency (p99) |
-|----------------|------------|---------------|
-| C Interpreted | 32M msg/s | 31 ns |
-| C Precompiled | 200M msg/s | 5 ns |
-| Go Binary | 2.1M msg/s | 476 ns |
-| Go YAML | 350K msg/s | 2.8 µs |
-| JS Generated | 180K msg/s | 5.5 µs |
-| Python | 45K msg/s | 22 µs |
+### Hardware Comparison
+
+| Hardware | Year | Python Interpreter | Go Binary Schema |
+|----------|------|-------------------|------------------|
+| AMD Ryzen 9 7950X3D | 2023 | 81K ops/s (12 µs) | 1.87M ops/s (0.5 µs) |
+| Intel i5-2400 | 2011 | 17K ops/s (58 µs) | 555K ops/s (1.8 µs) |
+| **Ratio** | | **4.7x** | **3.4x** |
+
+### Go Implementation (Intel i5-2400)
+
+| Implementation | Throughput | Latency |
+|----------------|------------|---------|
+| Native Go | 1.45M ops/s | 690 ns |
+| Binary Schema (pre-parsed) | 555K ops/s | 1.8 µs |
+| YAML Schema (pre-parsed) | 121K ops/s | 8.3 µs |
+| Binary Parse | 393K ops/s | 2.5 µs |
+| YAML Parse | 2.2K ops/s | 446 µs |
+
+### Python Implementation (Intel i5-2400)
+
+| Implementation | Throughput | Latency |
+|----------------|------------|---------|
+| Native Python | 514K ops/s | 1.9 µs |
+| Binary Schema (w/ parse) | 28K ops/s | 36 µs |
+| Interpreter (pre-parsed) | 17K ops/s | 58 µs |
+| Interpreter (w/ parse) | 179 ops/s | 5.6 ms |
+
+### Estimated Cloud Performance
+
+| Cloud Instance | Python Interpreter | Go Binary Schema |
+|----------------|-------------------|------------------|
+| AWS t3.micro ($7/mo) | 17K ops/s | 555K ops/s |
+| AWS t3.small ($14/mo) | 20K ops/s | 650K ops/s |
+| AWS c6i.large ($62/mo) | 50K ops/s | 1.2M ops/s |
+| AWS c7g.large (Graviton3) | 55K ops/s | 1.4M ops/s |
+
+### LoRaWAN Scale Analysis
+
+| Devices | Messages/day | t3.micro Python | t3.micro Go |
+|---------|-------------|-----------------|-------------|
+| 100 | 14K | <1 sec | trivial |
+| 1,000 | 144K | 8 sec | <1 sec |
+| 10,000 | 1.4M | 84 sec | 3 sec |
+| 100,000 | 14M | 14 min | 26 sec |
+| 1,000,000 | 144M | 2.4 hours | 4.3 min |
+
+### Recommendations
+
+- **<10K devices**: Python on t3.micro ($7/mo) is sufficient
+- **10K-100K devices**: Go on t3.small ($14/mo) recommended
+- **>100K devices**: Go on c6i.medium ($31/mo) for headroom
+- **Latency-sensitive**: Go Binary Schema (<2µs on cloud)
 
 ## Roadmap
 
@@ -221,6 +265,17 @@ Tested with Milesight AM308 schema (8 fields, typical complexity):
 | JS binary schema | Q3 | Medium |
 | Rust implementation | Q3 | High |
 | WASM build | Q4 | Medium |
+
+### Schema Language Enhancements
+
+See [FUTURE-FEATURES.md](FUTURE-FEATURES.md) for detailed specifications.
+
+| Feature | Value | Priority |
+|---------|-------|----------|
+| `valid_range` | Quality flags, bounds checking | **P1** |
+| `resolution` | Generated constants | P2 |
+| `unece` | OPC UA interoperability | P3 |
+| `accuracy` | Documentation | P4 |
 
 ### Not Planned
 

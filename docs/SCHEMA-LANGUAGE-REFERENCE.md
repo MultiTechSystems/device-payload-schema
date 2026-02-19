@@ -536,3 +536,9 @@ MATCH:        exact | range (n..m) | default (_)
 
 REFERENCES:   $field_name | use: definition_name
 ```
+
+## See Also
+
+- [FUTURE-FEATURES.md](FUTURE-FEATURES.md) - Proposed additions: `valid_range`, `resolution`, `unece`
+- [OUTPUT-FORMATS.md](OUTPUT-FORMATS.md) - Output format specifications
+- [C-CODE-GENERATION.md](C-CODE-GENERATION.md) - Embedded firmware codec generation

@@ -161,8 +161,9 @@ def main():
     # Encode to binary schema
     encoder = BinarySchemaEncoder()
     binary_schema = encoder.encode(schema_dict)
+    binary_schema_bytes = binary_schema.to_bytes()
     print(f"YAML schema size: {len(DL5TM_SCHEMA)} bytes")
-    print(f"Binary schema size: {len(binary_schema)} bytes ({len(binary_schema)/len(DL5TM_SCHEMA)*100:.1f}%)")
+    print(f"Binary schema size: {len(binary_schema_bytes)} bytes ({len(binary_schema_bytes)/len(DL5TM_SCHEMA)*100:.1f}%)")
     print()
     
     # Verify all decoders produce same result

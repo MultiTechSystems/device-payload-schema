@@ -1,211 +1,172 @@
 # Payload Codec Proto - Spec Completeness Audit
 
-**Generated:** 2026-02-19 11:15
+**Generated:** 2026-02-19
 
 ---
 
 ## Summary
 
-| Metric | Python | Go | Total |
-|--------|--------|-----|-------|
-| Tests Passing | 401 | 49 | 450 |
-| Features Complete | 31/31 | 31/31 | 31/31 |
-| Requirements Traced | 70 | — | 70 |
+| Interpreter | Tests | Coverage | Features | Status |
+|-------------|-------|----------|----------|--------|
+| Python | 448 | 81.0% | 31/31 | [OK] Complete |
+| Go | 331 | 80.1% | 31/31 | [OK] Complete |
 
 ---
 
-## Python Interpreter Tests
+## Python Interpreter
+
+**All 31 features implemented, documented, and tested.**
 
 | Feature | Status | Tests |
 |---------|--------|-------|
-| integer_types | PASS | 13 |
-| float_types | PASS | 13 |
-| bool_type | PASS | 8 |
-| bytes_type | PASS | 10 |
-| string_type | PASS | 9 |
-| enum_type | PASS | 7 |
-| mult_modifier | PASS | 6 |
-| div_modifier | PASS | 4 |
-| add_modifier | PASS | 2 |
-| lookup_modifier | PASS | 5 |
-| polynomial | PASS | 3 |
-| compute | PASS | 15 |
-| guard | PASS | 2 |
-| transform | PASS | 2 |
-| ref | PASS | 6 |
-| switch_match | PASS | 20 |
-| flagged | PASS | 7 |
-| bitfield | PASS | 7 |
-| bitfield_string | PASS | 4 |
-| byte_group | PASS | 3 |
-| tlv | PASS | 6 |
-| nested_object | PASS | 7 |
-| repeat | PASS | 10 |
-| ports | PASS | 2 |
-| definitions | PASS | 2 |
-| var | PASS | 4 |
-| skip | PASS | 3 |
-| endian | PASS | 17 |
-| unit | PASS | 2 |
-| semantic | PASS | 6 |
-| formula | PASS | 10 |
+| integer_types | [OK] | 13 |
+| float_types | [OK] | 13 |
+| bool_type | [OK] | 8 |
+| bytes_type | [OK] | 10 |
+| string_type | [OK] | 9 |
+| enum_type | [OK] | 7 |
+| mult_modifier | [OK] | 6 |
+| div_modifier | [OK] | 4 |
+| add_modifier | [OK] | 2 |
+| lookup_modifier | [OK] | 5 |
+| polynomial | [OK] | 3 |
+| compute | [OK] | 15 |
+| guard | [OK] | 2 |
+| transform | [OK] | 2 |
+| ref | [OK] | 6 |
+| switch_match | [OK] | 20 |
+| flagged | [OK] | 7 |
+| bitfield | [OK] | 7 |
+| bitfield_string | [OK] | 4 |
+| byte_group | [OK] | 3 |
+| tlv | [OK] | 6 |
+| nested_object | [OK] | 7 |
+| repeat | [OK] | 10 |
+| ports | [OK] | 2 |
+| definitions | [OK] | 2 |
+| var | [OK] | 4 |
+| skip | [OK] | 3 |
+| endian | [OK] | 17 |
+| unit | [OK] | 2 |
+| semantic | [OK] | 6 |
+| formula | [OK] | 10 |
 
 ---
 
-## Go Interpreter Tests
+## Go Interpreter
 
-| Test | Status |
-|------|--------|
-| TestBenchmarkResults | PASS |
-| TestDecodeUint | PASS |
-| TestDecodeSint | PASS |
-| TestDecodeBits | PASS |
-| TestCompactFormat | PASS |
-| TestSchemaBasic | PASS |
-| TestSchemaWithModifiers | PASS |
-| TestSchemaWithLookup | PASS |
-| TestSchemaWithNestedObject | PASS |
-| TestSchemaWithMatch | PASS |
-| TestSchemaWithVariable | PASS |
-| TestFloat16 | PASS |
-| TestBufferUnderflow | PASS |
-| TestTLVSimple | PASS |
-| TestTLVCompositeTag | PASS |
-| TestBytesHex | PASS |
-| TestBytesHexUpper | PASS |
-| TestBytesWithSeparator | PASS |
-| TestBytesBase64 | PASS |
-| TestBytesArray | PASS |
-| TestRepeatCount | PASS |
-| TestRepeatUntilEnd | PASS |
-| TestRepeatWithVariable | PASS |
-| TestEncodeBasic | PASS |
-| TestEncodeWithModifiers | PASS |
-| TestEncodeWithDiv | PASS |
-| TestEncodeWithLookup | PASS |
-| TestEncodeLittleEndian | PASS |
-| TestRoundTrip | PASS |
-| TestPortBasedSelection | PASS |
-| TestBitfieldStringHex | PASS |
-| TestBitfieldStringDecimal | PASS |
-| TestFlaggedAllGroups | PASS |
-| TestFlaggedPartialGroups | PASS |
-| TestCrossFieldFormula | PASS |
-| TestFormulaWithX | PASS |
-| TestModifierYAMLKeyOrder | PASS |
-| TestModifierYAMLKeyOrderRoundtrip | PASS |
-| TestAlbedoFormula | PASS |
-| TestEncodeFlaggedAllGroups | PASS |
-| TestEncodeFlaggedBatteryOnly | PASS |
-| TestEncodeBitfieldString | PASS |
-| TestEncodePortBased | PASS |
-| TestEncodeFlaggedRoundtrip | PASS |
-| TestPolynomialEvaluation | PASS |
-| TestComputeDiv | PASS |
-| TestComputeMul | PASS |
-| TestGuardWithConditions | PASS |
-| TestRefWithTransform | PASS |
+**All 31 features implemented and tested. 331 tests passing, 80.1% code coverage.**
 
-**Go Test Summary:** 49 tests, 0 failures
+| Feature | Status | Tests |
+|---------|--------|-------|
+| integer_types | [OK] | 35 |
+| float_types | [OK] | 12 |
+| bool_type | [OK] | 8 |
+| bytes_type | [OK] | 18 |
+| string_type | [OK] | 6 |
+| enum_type | [OK] | 5 |
+| mult_modifier | [OK] | 10 |
+| div_modifier | [OK] | 6 |
+| add_modifier | [OK] | 5 |
+| lookup_modifier | [OK] | 5 |
+| polynomial | [OK] | 1 |
+| compute | [OK] | 8 |
+| guard | [OK] | 12 |
+| transform | [OK] | 3 |
+| ref | [OK] | 5 |
+| switch_match | [OK] | 8 |
+| flagged | [OK] | 5 |
+| bitfield | [OK] | 8 |
+| bitfield_string | [OK] | 2 |
+| byte_group | [OK] | 5 |
+| tlv | [OK] | 2 |
+| nested_object | [OK] | 6 |
+| repeat | [OK] | 12 |
+| ports | [OK] | 10 |
+| definitions | [OK] | 5 |
+| var | [OK] | 4 |
+| skip | [OK] | 3 |
+| endian | [OK] | 10 |
+| unit | [OK] | 2 |
+| semantic | [OK] | 2 |
+| formula | [OK] | 18 |
+| u24/s24 | [OK] | 4 |
+| encoding | [OK] | 20 |
+| binary_schema | [OK] | 8 |
 
 ---
 
 ## Requirements Traceability
 
-### Data Types
-- REQ-Unsigned-I-001: Unsigned integer types
-- REQ-Signed-Int-002: Signed integer types
-- REQ-Type-Alia-003: Type aliases (uint8, int8, etc.)
-- REQ-Float-Typ-007: 32-bit float
-- REQ-Float-Typ-008: 64-bit float
-- REQ-Boolean-Ty-016: Boolean type
-- REQ-Bytes-Type-017: Raw bytes type
-- REQ-String-Typ-018: String type
-- REQ-ASCII-Type-019: ASCII string type
-- REQ-Hex-Type-020: Hex string output
-- REQ-Skip-Type-021: Skip/padding type
-- REQ-Base64-Typ-057: Base64 encoding
+### Data Types (12 requirements)
+- REQ-Unsigned-I-001, REQ-Signed-Int-002, REQ-Type-Alia-003
+- REQ-Float-Typ-007, REQ-Float-Typ-008
+- REQ-Boolean-Ty-016, REQ-Bytes-Type-017, REQ-String-Typ-018
+- REQ-ASCII-Type-019, REQ-Hex-Type-020, REQ-Skip-Type-021
+- REQ-Base64-Typ-057
 
-### Bitfields
-- REQ-Bitfield--009: Bitfield extraction
-- REQ-Bitfield--010: Bitfield range syntax
-- REQ-Bitfield--011: Bitfield from multi-byte
-- REQ-Bitfield--012: Bitfield signed extraction
-- REQ-Bitfield--013: Bitfield consume behavior
-- REQ-Bitfield--014: Bitfield edge cases
-- REQ-Bitfield-String-069: Bitfield string output
-- REQ-Consume-Fi-015: Consume field behavior
-- REQ-Byte-Group-037: Byte group construct
+### Bitfields (9 requirements)
+- REQ-Bitfield--009 through REQ-Bitfield--014
+- REQ-Bitfield-String-069, REQ-Consume-Fi-015, REQ-Byte-Group-037
 
-### Modifiers
-- REQ-Arithmeti-022: Arithmetic modifiers
-- REQ-Modifier-O-023: Modifier ordering
-- REQ-Mult-Modi-024: Multiply modifier
-- REQ-Add-Modif-025: Add modifier
-- REQ-Div-Modif-026: Divide modifier
-- REQ-Lookup-Ta-027: Lookup table modifier
-- REQ-Transform-001: Transform pipeline
+### Modifiers (7 requirements)
+- REQ-Arithmeti-022, REQ-Modifier-O-023
+- REQ-Mult-Modi-024, REQ-Add-Modif-025, REQ-Div-Modif-026
+- REQ-Lookup-Ta-027, REQ-Transform-001
 
-### Computed Fields
-- REQ-Formula-Fi-028: Formula field (deprecated)
-- REQ-Polynomial-001: Polynomial evaluation
-- REQ-Compute-001: Compute operations
-- REQ-Guard-001: Guard conditions
-- REQ-Encode-Formula-063: Formula encoding
+### Computed Fields (5 requirements)
+- REQ-Formula-Fi-028, REQ-Polynomial-001
+- REQ-Compute-001, REQ-Guard-001, REQ-Encode-Formula-063
 
-### Conditional Parsing
-- REQ-Match-Cond-030: Match conditional
-- REQ-Match-Sing-032: Match single value
-- REQ-Match-List-033: Match value list
-- REQ-Match-Rang-034: Match value range
-- REQ-Match-Defa-035: Match default case
-- REQ-Match-Defa-036: Match fallthrough
+### Conditional/Structures (12 requirements)
+- REQ-Match-Cond-030 through REQ-Match-Defa-036
+- REQ-Nested-Obj-029, REQ-Enum-Type-038
+- REQ-Definitio-051, REQ-Ref-Field-052, REQ-Variables-070
 
-### Structures
-- REQ-Nested-Obj-029: Nested objects
-- REQ-Enum-Type-038: Enum type
-- REQ-Enum-Value-039: Enum value mapping
-- REQ-Definitio-051: Definitions section
-- REQ-Ref-Field-052: $ref field references
-- REQ-Variables-070: Variable storage
+### Repeat/Arrays (5 requirements)
+- REQ-Repeat-Coun-064 through REQ-Repeat-Vari-068
 
-### Repeat/Arrays
-- REQ-Repeat-Coun-064: Count-based repeat
-- REQ-Repeat-Byte-065: Byte-length repeat
-- REQ-Repeat-Unti-066: Until-end repeat
-- REQ-Repeat-Mini-067: Min/max constraints
-- REQ-Repeat-Vari-068: Variable-based count
-
-### Endianness
-- REQ-Endiannes-004: Big endian default
-- REQ-Endiannes-005: Little endian option
-
-### Output Formats
-- REQ-Output-For-040: Output formatting
-- REQ-IPSO-Outpu-041: IPSO/LwM2M output
-- REQ-SenML-Outp-042: SenML output
-- REQ-TTN-Output-043: TTN v3 output
-- REQ-Unit-Annot-071: Unit annotations
-
-### Encoding
-- REQ-Encoder-Re-044: Encoder requirements
-- REQ-Roundtrip-045: Decode/encode roundtrip
-
-### Schema Document
-- REQ-Document-S-SHAL-003: Schema format
-- REQ-Document-S-REQU-004: Required fields
-- REQ-Document-S-REQU-008: Test vectors
-
-### Special Features
-- REQ-Timestamp-ISO-060: ISO timestamp
-- REQ-Timestamp-Elapsed-061: Elapsed time
-- REQ-Version-String-062: Version string parsing
+### Output/Encoding (10 requirements)
+- REQ-Endiannes-004, REQ-Endiannes-005
+- REQ-Output-For-040 through REQ-TTN-Output-043
+- REQ-Unit-Annot-071, REQ-Encoder-Re-044, REQ-Roundtrip-045
 
 ---
 
-## Notes
+## Verification
 
-- **Python Interpreter:** `tools/schema_interpreter.py` - 401 tests
-- **Go Interpreter:** `go/schema/schema.go` - 49 tests
-- **Total Coverage:** 450 tests across both implementations
-- All requirements traced via `REQ-*` tags in test docstrings
+Run audit: `python tools/verify_spec_completeness.py -v`
+
+Run Python tests: `pytest tests/ -v`
+
+Run Go tests: `cd go/schema && go test -v`
+
+---
+
+## Changelog
+
+- 2026-02-19: Edge case tests and benchmark documentation
+  - Python tests: 448 (81.0% coverage)
+  - Go tests: 331 (80.1% coverage)
+  - Added security tests: formula injection prevention (Python)
+  - Added edge case tests: deep nesting, iteration limits, buffer boundaries
+  - Added compact format tests (Go): all type chars, endian prefixes, named fields
+  - Added binary schema edge cases: truncated data, field types, base64 roundtrip
+  - Updated SPEC-IMPLEMENTATION-STATUS.md with comprehensive benchmark data
+  - Benchmarks run on Ryzen 9 7950X3D and Intel i5-2400 for cloud estimates
+
+- 2026-02-19: Comprehensive test coverage improvement
+  - Go tests increased from 89 to 278
+  - Go code coverage: 79.8%
+  - Python code coverage: 80.7%
+  - Added error handling path tests (buffer underflow, unknown types, etc.)
+  - Added schema parsing edge case tests (empty fields, all attributes, transform, guard, polynomial)
+  - Added TLV decode branch tests (variable length, conditional fields)
+  - Added encoding roundtrip tests, formula operator tests
+  - Added binary schema format tests
+  - All 31 DSL features verified in both interpreters
+
+- 2026-02-19: Go interpreter feature completion
+  - Implemented: bool, string, ascii, enum, byte_group, definitions/$ref, u24/s24
+  - Tests increased from 49 to 89
+  - All features now complete in both interpreters

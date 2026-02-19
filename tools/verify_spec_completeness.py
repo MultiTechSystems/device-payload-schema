@@ -434,6 +434,175 @@ def verify_completeness(
     return report
 
 
+def find_go_test_coverage(test_file: Path) -> Dict[str, int]:
+    """Find which features have Go tests and count them."""
+    coverage = {}
+    
+    if not test_file.exists():
+        return coverage
+    
+    content = test_file.read_text()
+    
+    # Count test functions per feature
+    for line in content.split('\n'):
+        test_match = re.match(r'^func\s+(Test\w+)', line)
+        if test_match:
+            test_name = test_match.group(1).lower()
+            feature = None
+            
+            if 'uint' in test_name or 'sint' in test_name or 'decode' in test_name and 'bit' not in test_name:
+                feature = 'integer_types'
+            elif 'float' in test_name:
+                feature = 'float_types'
+            elif 'bool' in test_name:
+                feature = 'bool_type'
+            elif 'bytes' in test_name or 'hex' in test_name or 'base64' in test_name:
+                feature = 'bytes_type'
+            elif 'string' in test_name or 'ascii' in test_name:
+                feature = 'string_type'
+            elif 'enum' in test_name:
+                feature = 'enum_type'
+            elif 'modifier' in test_name or 'mult' in test_name:
+                feature = 'mult_modifier'
+            elif 'div' in test_name:
+                feature = 'div_modifier'
+            elif 'lookup' in test_name:
+                feature = 'lookup_modifier'
+            elif 'polynomial' in test_name:
+                feature = 'polynomial'
+            elif 'compute' in test_name:
+                feature = 'compute'
+            elif 'guard' in test_name or 'albedo' in test_name:
+                feature = 'guard'
+            elif 'transform' in test_name:
+                feature = 'transform'
+            elif 'ref' in test_name:
+                feature = 'ref'
+            elif 'match' in test_name:
+                feature = 'switch_match'
+            elif 'flagged' in test_name:
+                feature = 'flagged'
+            elif 'bit' in test_name and 'string' in test_name:
+                feature = 'bitfield_string'
+            elif 'bit' in test_name:
+                feature = 'bitfield'
+            elif 'bytegroup' in test_name or 'byte_group' in test_name:
+                feature = 'byte_group'
+            elif 'tlv' in test_name:
+                feature = 'tlv'
+            elif 'nested' in test_name or 'object' in test_name:
+                feature = 'nested_object'
+            elif 'repeat' in test_name:
+                feature = 'repeat'
+            elif 'port' in test_name:
+                feature = 'ports'
+            elif 'definition' in test_name:
+                feature = 'definitions'
+            elif 'variable' in test_name:
+                feature = 'var'
+            elif 'skip' in test_name:
+                feature = 'skip'
+            elif 'endian' in test_name or 'little' in test_name:
+                feature = 'endian'
+            elif 'unit' in test_name:
+                feature = 'unit'
+            elif 'ipso' in test_name or 'senml' in test_name:
+                feature = 'semantic'
+            elif 'formula' in test_name:
+                feature = 'formula'
+            elif 'encode' in test_name or 'roundtrip' in test_name:
+                feature = 'encoding'
+            
+            if feature:
+                coverage[feature] = coverage.get(feature, 0) + 1
+    
+    return coverage
+
+
+def find_go_skipped_tests(test_file: Path) -> Dict[str, str]:
+    """Find skipped tests and their reasons (missing features)."""
+    skipped = {}
+    
+    if not test_file.exists():
+        return skipped
+    
+    content = test_file.read_text()
+    
+    current_test = None
+    for line in content.split('\n'):
+        test_match = re.match(r'^func\s+(Test\w+)', line)
+        if test_match:
+            current_test = test_match.group(1)
+        
+        skip_match = re.search(r't\.Skip\(["\'](.+?)["\']\)', line)
+        if skip_match and current_test:
+            skipped[current_test] = skip_match.group(1)
+    
+    return skipped
+
+
+def find_go_implementation(go_file: Path) -> Dict[str, str]:
+    """Find implemented features in Go interpreter."""
+    features = {}
+    
+    if not go_file.exists():
+        return features
+    
+    content = go_file.read_text()
+    
+    # Map features to implementation patterns
+    feature_patterns = {
+        'integer_types': r'decodeUint|decodeSint|["\']u8["\']|["\']u16["\']',
+        'float_types': r'float16|float32|float64|["\']f16["\']|["\']f32["\']',
+        'bool_type': r'["\']bool["\']|decodeBool',
+        'bytes_type': r'["\']bytes["\']|["\']hex["\']|["\']base64["\']',
+        'string_type': r'["\']string["\']|["\']ascii["\']',
+        'enum_type': r'["\']enum["\']|decodeEnum',
+        'mult_modifier': r'["\']mult["\']|Mult',
+        'div_modifier': r'["\']div["\']|Div',
+        'lookup_modifier': r'["\']lookup["\']|Lookup',
+        'polynomial': r'polynomial|Polynomial',
+        'compute': r'["\']compute["\']|Compute',
+        'guard': r'["\']guard["\']|Guard',
+        'transform': r'["\']transform["\']|Transform',
+        'ref': r'\$[a-z]|["\']ref["\']',
+        'switch_match': r'["\']match["\']|Match',
+        'flagged': r'["\']flagged["\']|Flagged',
+        'bitfield': r'decodeBits|Bitfield',
+        'bitfield_string': r'bitfield_string|BitfieldString',
+        'byte_group': r'byte_group|ByteGroup',
+        'tlv': r'["\']tlv["\']|TLV',
+        'nested_object': r'["\']object["\']|Nested',
+        'repeat': r'["\']repeat["\']|Repeat',
+        'ports': r'["\']ports["\']|fPort|FPort',
+        'definitions': r'definitions|Definitions|\$ref',
+        'var': r'["\']var["\']|Variable',
+        'skip': r'["\']skip["\']|Skip',
+        'endian': r'endian|Endian|little|big',
+        'unit': r'["\']unit["\']|Unit',
+        'semantic': r'["\']ipso["\']|["\']senml["\']|IPSO|SenML',
+        'formula': r'["\']formula["\']|Formula',
+    }
+    
+    for feature, pattern in feature_patterns.items():
+        if re.search(pattern, content, re.IGNORECASE):
+            features[feature] = pattern
+    
+    return features
+
+
+def verify_go_completeness(
+    go_impl: Path,
+    go_test: Path
+) -> Tuple[Dict[str, str], Dict[str, int], Dict[str, str]]:
+    """Verify Go interpreter completeness."""
+    impl_features = find_go_implementation(go_impl)
+    test_coverage = find_go_test_coverage(go_test)
+    skipped_tests = find_go_skipped_tests(go_test)
+    
+    return impl_features, test_coverage, skipped_tests
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Verify spec/implementation completeness'
@@ -442,6 +611,8 @@ def main():
     parser.add_argument('--lang-ref', help='Language reference markdown file')
     parser.add_argument('--interpreter', help='Interpreter Python file')
     parser.add_argument('--tests', help='Test file')
+    parser.add_argument('--go-impl', help='Go interpreter file')
+    parser.add_argument('--go-tests', help='Go test file')
     parser.add_argument('--report', '-r', help='Output JSON report file')
     parser.add_argument('--verbose', '-v', action='store_true')
     
@@ -455,7 +626,10 @@ def main():
     lang_ref = Path(args.lang_ref) if args.lang_ref else proto_root / 'docs' / 'SCHEMA-LANGUAGE-REFERENCE.md'
     interp_file = Path(args.interpreter) if args.interpreter else proto_root / 'tools' / 'schema_interpreter.py'
     test_file = Path(args.tests) if args.tests else proto_root / 'tests' / 'test_schema_interpreter.py'
+    go_impl = Path(args.go_impl) if args.go_impl else proto_root / 'go' / 'schema' / 'schema.go'
+    go_tests = Path(args.go_tests) if args.go_tests else proto_root / 'go' / 'schema' / 'schema_test.go'
     
+    # Python verification
     report = verify_completeness(
         spec_dir=spec_dir,
         lang_ref=lang_ref,
@@ -463,23 +637,38 @@ def main():
         test_file=test_file
     )
     
+    # Go verification
+    go_impl_features, go_test_coverage, go_skipped = verify_go_completeness(go_impl, go_tests)
+    
     # Output
     if args.report:
         with open(args.report, 'w') as f:
             json.dump(report.to_dict(), f, indent=2)
         print(f"Report written to {args.report}")
     
-    # Console summary
+    # Console summary - Python
     total = len(report.features)
     print(f"\nSpec Completeness Report")
     print(f"========================")
-    print(f"Features: {report.features_complete}/{total} complete, "
+    print(f"\nPython Interpreter:")
+    print(f"  Features: {report.features_complete}/{total} complete, "
           f"{report.features_partial} partial, {report.features_missing} missing")
-    print(f"Requirements: {report.requirements_found} found, "
+    print(f"  Requirements: {report.requirements_found} found, "
           f"{report.requirements_with_tests} with tests")
     
+    # Console summary - Go
+    go_total_tests = sum(go_test_coverage.values())
+    go_skipped_count = len(go_skipped)
+    go_features_tested = len(go_test_coverage)
+    go_features_missing = len(go_skipped)
+    
+    print(f"\nGo Interpreter:")
+    print(f"  Tests: {go_total_tests} passing, {go_skipped_count} skipped (missing features)")
+    print(f"  Features tested: {go_features_tested}")
+    print(f"  Features missing: {go_features_missing}")
+    
     if args.verbose:
-        print(f"\nFeature Status:")
+        print(f"\nPython Feature Status:")
         for f in report.features:
             status_icon = {
                 'complete': '✓',
@@ -489,9 +678,39 @@ def main():
             }.get(f.status, '?')
             tests = f"({f.test_count} tests)" if f.has_tests else "(no tests)"
             print(f"  {status_icon} {f.name}: {f.status} {tests}")
+        
+        print(f"\nGo Feature Status:")
+        for feature_id, _ in CORE_FEATURES:
+            has_impl = feature_id in go_impl_features
+            has_tests = feature_id in go_test_coverage
+            test_count = go_test_coverage.get(feature_id, 0)
+            
+            # Check if any test for this feature is skipped
+            is_skipped = any(feature_id in reason.lower() for reason in go_skipped.values())
+            
+            if has_impl and has_tests and not is_skipped:
+                status_icon = '✓'
+                status = 'complete'
+            elif has_impl and (has_tests or is_skipped):
+                status_icon = '◐'
+                status = 'partial'
+            elif is_skipped:
+                status_icon = '✗'
+                status = 'missing'
+            else:
+                status_icon = '?'
+                status = 'unknown'
+            
+            tests = f"({test_count} tests)" if test_count > 0 else "(no tests)"
+            print(f"  {status_icon} {feature_id}: {status} {tests}")
+        
+        if go_skipped:
+            print(f"\nGo Skipped Tests (missing features):")
+            for test_name, reason in go_skipped.items():
+                print(f"  - {test_name}: {reason}")
     
     if report.issues:
-        print(f"\nIssues ({len(report.issues)}):")
+        print(f"\nPython Issues ({len(report.issues)}):")
         for issue in report.issues[:10]:
             print(f"  - {issue}")
         if len(report.issues) > 10:

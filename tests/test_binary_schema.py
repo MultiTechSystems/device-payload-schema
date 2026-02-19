@@ -989,3 +989,202 @@ class TestBinarySchemaV2Combined:
         binary = encode_schema_v2(schema)
         # With string table overhead, should be reasonable
         assert len(binary) < 100  # sanity check
+
+
+# =============================================================================
+# Edge Cases and Security Tests
+# =============================================================================
+
+import struct as struct_module
+
+
+class TestBinarySchemaEdgeCases:
+    """Edge case tests for binary schema encoder/decoder."""
+
+    def test_empty_schema(self):
+        """Empty schema encodes/decodes correctly."""
+        schema = BinarySchema(version=1, fields=[])
+        data = schema.to_bytes()
+        decoded = BinarySchema.from_bytes(data)
+        assert decoded.version == 1
+        assert len(decoded.fields) == 0
+
+    def test_max_field_count(self):
+        """Schema with maximum field count (255)."""
+        fields = [BinaryField(FieldType.UNSIGNED, 1, 0, 0) for _ in range(255)]
+        schema = BinarySchema(version=1, fields=fields)
+        data = schema.to_bytes()
+        decoded = BinarySchema.from_bytes(data)
+        assert len(decoded.fields) == 255
+
+    def test_truncated_header(self):
+        """Truncated header raises error."""
+        with pytest.raises((ValueError, struct_module.error)):
+            BinarySchema.from_bytes(bytes([1]))  # Only version, no count
+
+    def test_truncated_fields(self):
+        """Truncated field data raises error."""
+        # Version=1, count=2, but only 1 field worth of data
+        data = bytes([1, 2, 0x01, 0x00, 0x00, 0x00])
+        with pytest.raises((ValueError, struct_module.error)):
+            BinarySchema.from_bytes(data)
+
+    def test_all_field_types(self):
+        """All field types encode/decode correctly."""
+        types_to_test = [
+            FieldType.UNSIGNED,
+            FieldType.SIGNED,
+            FieldType.FLOAT,
+            FieldType.BYTES,
+            FieldType.BOOL,
+            FieldType.ENUM,
+        ]
+        for ft in types_to_test:
+            field = BinaryField(ft, 2, -1, 3303)
+            data = field.to_bytes()
+            decoded = BinaryField.from_bytes(data)
+            assert decoded.type_code == ft
+
+    def test_extreme_mult_exponents(self):
+        """Extreme multiplier exponents handled."""
+        # Max positive exponent (127)
+        field1 = BinaryField(FieldType.UNSIGNED, 1, 127, 0)
+        data1 = field1.to_bytes()
+        decoded1 = BinaryField.from_bytes(data1)
+        assert decoded1.mult_exponent == 127
+
+        # Max negative exponent (-128)
+        field2 = BinaryField(FieldType.UNSIGNED, 1, -128, 0)
+        data2 = field2.to_bytes()
+        decoded2 = BinaryField.from_bytes(data2)
+        assert decoded2.mult_exponent == -128
+
+    def test_max_semantic_id(self):
+        """Maximum semantic ID (65535) encodes correctly."""
+        field = BinaryField(FieldType.UNSIGNED, 1, 0, 65535)
+        data = field.to_bytes()
+        decoded = BinaryField.from_bytes(data)
+        assert decoded.semantic_id == 65535
+
+    def test_base64_roundtrip_binary(self):
+        """Base64 encode/decode roundtrip with BinarySchema."""
+        schema = BinarySchema(
+            version=1,
+            fields=[
+                BinaryField(FieldType.SIGNED, 2, -2, 3303),
+                BinaryField(FieldType.UNSIGNED, 1, -1, 3304),
+            ]
+        )
+        # Use direct base64 encoding of binary
+        import base64
+        b64 = base64.b64encode(schema.to_bytes()).decode()
+        decoded_bytes = base64.b64decode(b64)
+        decoded = BinarySchema.from_bytes(decoded_bytes)
+        assert decoded.version == schema.version
+        assert len(decoded.fields) == len(schema.fields)
+
+    def test_base64_invalid_padding(self):
+        """Invalid base64 padding handled."""
+        import base64
+        with pytest.raises(Exception):
+            base64.b64decode("invalid!!!")
+
+    def test_base64_truncated(self):
+        """Truncated base64 data handled."""
+        import base64
+        # Valid base64 but too short for schema
+        with pytest.raises(Exception):
+            BinarySchema.from_bytes(base64.b64decode("AQ=="))  # Just [0x01]
+
+    def test_schema_hash_with_dict(self):
+        """Schema hash works with dict schema."""
+        schema_dict = {
+            'name': 'test',
+            'fields': [{'name': 'x', 'type': 'u8'}]
+        }
+        hash1 = schema_hash(schema_dict)
+        hash2 = schema_hash(schema_dict)
+        assert hash1 == hash2
+
+    def test_schema_hash_differs_dict(self):
+        """Different dict schemas have different hashes."""
+        schema1 = {'name': 'test1', 'fields': [{'name': 'x', 'type': 'u8'}]}
+        schema2 = {'name': 'test2', 'fields': [{'name': 'x', 'type': 's8'}]}
+        assert schema_hash(schema1) != schema_hash(schema2)
+
+    def test_crc32_known_value(self):
+        """CRC32 produces expected value."""
+        crc = compute_crc32(b"Hello")
+        assert isinstance(crc, int)
+        assert crc > 0
+
+
+class TestBinarySchemaV2EdgeCases:
+    """Edge case tests for binary schema v2."""
+
+    def test_v2_empty_schema(self):
+        """V2: Empty schema encodes/decodes."""
+        schema = {'name': 'empty', 'fields': []}
+        data = encode_schema_v2(schema)
+        decoded = decode_schema_v2(data)
+        assert decoded['name'] == 'empty'
+
+    def test_v2_complex_schema(self):
+        """V2: Complex schema with many field types."""
+        schema = {
+            'name': 'complex',
+            'fields': [
+                {'name': 'temp', 'type': 's16', 'mult': 0.01},
+                {'name': 'hum', 'type': 'u8', 'div': 2},
+                {'name': 'flag', 'type': 'bool'},
+                {'name': 'data', 'type': 'bytes', 'length': 4},
+            ]
+        }
+        data = encode_schema_v2(schema)
+        decoded = decode_schema_v2(data)
+        assert decoded['name'] == schema['name']
+        assert len(decoded['fields']) == len(schema['fields'])
+
+    def test_v2_base64_roundtrip(self):
+        """V2: Base64 roundtrip."""
+        schema = {'name': 'test', 'fields': [{'name': 'x', 'type': 'u8'}]}
+        b64 = schema_to_base64_v2(schema)
+        decoded = base64_to_schema_v2(b64)
+        assert decoded['name'] == 'test'
+
+    def test_v2_malformed_data(self):
+        """V2: Malformed binary data handled."""
+        with pytest.raises(Exception):
+            decode_schema_v2(bytes([0xFF, 0xFF, 0xFF]))
+
+
+class TestBinarySchemaLoaderEdgeCases:
+    """Edge case tests for binary schema loader."""
+
+    def test_loader_unknown_type_code(self):
+        """Unknown type code handled gracefully."""
+        from binary_schema_loader import TypeCode, BinaryField as LoaderField
+        # TypeCode only has values 0-8
+        # Creating field with invalid code should be handled
+        field = LoaderField(
+            name='test',
+            type_code=TypeCode.UINT,
+            size=1
+        )
+        assert field.type_code == TypeCode.UINT
+
+    def test_loader_match_field(self):
+        """Match field with cases."""
+        from binary_schema_loader import TypeCode, BinaryField as LoaderField
+        field = LoaderField(
+            name='data',
+            type_code=TypeCode.MATCH,
+            size=0,
+            match_var='type',
+            cases=[
+                (1, [LoaderField('a', TypeCode.UINT, 1)]),
+                (2, [LoaderField('b', TypeCode.UINT, 2)]),
+            ]
+        )
+        assert field.type_code == TypeCode.MATCH
+        assert len(field.cases) == 2

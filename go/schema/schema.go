@@ -60,6 +60,10 @@ const (
 	TypeF32 FieldType = "f32"
 	TypeF64 FieldType = "f64"
 
+	// 24-bit integer types
+	TypeU24 FieldType = "u24"
+	TypeS24 FieldType = "s24"
+
 	// Lowercase variants
 	TypeBitsLower   FieldType = "bits"
 	TypeSkipLower   FieldType = "skip"
@@ -70,6 +74,17 @@ const (
 	// Bytes type (raw bytes with format options)
 	TypeBytes      FieldType = "Bytes"
 	TypeBytesLower FieldType = "bytes"
+
+	// Enum type (maps integer values to strings)
+	TypeEnum      FieldType = "Enum"
+	TypeEnumLower FieldType = "enum"
+
+	// Bool lowercase
+	TypeBoolLower FieldType = "bool"
+
+	// String/Ascii lowercase
+	TypeStringLower FieldType = "string"
+	TypeAsciiLower  FieldType = "ascii"
 
 	// Repeat type (arrays)
 	TypeRepeat      FieldType = "Repeat"
@@ -110,6 +125,17 @@ type Field struct {
 	// Bytes field options
 	Format    string `json:"format,omitempty" yaml:"format,omitempty"`       // hex, hex:upper, base64, array
 	Separator string `json:"separator,omitempty" yaml:"separator,omitempty"` // Byte separator for hex output
+	// Enum field options
+	Base       string         `json:"base,omitempty" yaml:"base,omitempty"`     // Base type (u8, u16, etc.)
+	Values     map[int]string `json:"values,omitempty" yaml:"values,omitempty"` // Enum value mapping
+	// Bool field options
+	Bit     int  `json:"bit,omitempty" yaml:"bit,omitempty"`         // Bit position for bool extraction
+	Consume int  `json:"consume,omitempty" yaml:"consume,omitempty"` // Bytes to consume after reading
+	// Byte group (inline grouped bitfields)
+	ByteGroup []Field `json:"byte_group,omitempty" yaml:"byte_group,omitempty"`
+	Size      int     `json:"size,omitempty" yaml:"size,omitempty"` // Size of byte group in bytes
+	// $ref for definitions
+	Ref2 string `json:"$ref,omitempty" yaml:"$ref,omitempty"` // Reference to definition
 	// TLV-specific fields
 	TagSize    int                `json:"tag_size,omitempty" yaml:"tag_size,omitempty"`
 	LengthSize int                `json:"length_size,omitempty" yaml:"length_size,omitempty"`
@@ -193,15 +219,21 @@ type PortDef struct {
 	Fields      []Field `json:"fields,omitempty" yaml:"fields,omitempty"`
 }
 
+// DefinitionDef represents a reusable field definition.
+type DefinitionDef struct {
+	Fields []Field `json:"fields,omitempty" yaml:"fields,omitempty"`
+}
+
 // Schema represents a payload schema definition.
 type Schema struct {
-	Name        string              `json:"name,omitempty" yaml:"name,omitempty"`
-	Version     int                 `json:"version,omitempty" yaml:"version,omitempty"`
-	Description string              `json:"description,omitempty" yaml:"description,omitempty"`
-	Endian      string              `json:"endian,omitempty" yaml:"endian,omitempty"`
-	Header      []Field             `json:"header,omitempty" yaml:"header,omitempty"`
-	Fields      []Field             `json:"fields,omitempty" yaml:"fields,omitempty"`
-	Ports       map[string]*PortDef `json:"-" yaml:"-"` // Port-based schema selection
+	Name        string                    `json:"name,omitempty" yaml:"name,omitempty"`
+	Version     int                       `json:"version,omitempty" yaml:"version,omitempty"`
+	Description string                    `json:"description,omitempty" yaml:"description,omitempty"`
+	Endian      string                    `json:"endian,omitempty" yaml:"endian,omitempty"`
+	Header      []Field                   `json:"header,omitempty" yaml:"header,omitempty"`
+	Fields      []Field                   `json:"fields,omitempty" yaml:"fields,omitempty"`
+	Ports       map[string]*PortDef       `json:"-" yaml:"-"` // Port-based schema selection
+	Definitions map[string]*DefinitionDef `json:"-" yaml:"-"` // Reusable definitions
 }
 
 // DecodeContext maintains state during decoding.
@@ -243,6 +275,8 @@ func inferLengthFromType(t FieldType) int {
 		return 1
 	case TypeU16, TypeS16, TypeI16:
 		return 2
+	case TypeU24, TypeS24:
+		return 3
 	case TypeU32, TypeS32, TypeI32, TypeF32:
 		return 4
 	case TypeU64, TypeS64, TypeI64, TypeF64:
@@ -367,6 +401,41 @@ func ParseSchema(data string) (*Schema, error) {
 	}
 	if schema.Endian == "" {
 		schema.Endian = "big"
+	}
+
+	// Parse definitions
+	if defsRaw, ok := raw["definitions"].(map[string]any); ok {
+		schema.Definitions = make(map[string]*DefinitionDef)
+		for defName, defVal := range defsRaw {
+			if defMap, ok := defVal.(map[string]any); ok {
+				dd := &DefinitionDef{}
+				if defFields, ok := defMap["fields"].([]any); ok {
+					dd.Fields = parseFieldsRaw(defFields)
+				}
+				schema.Definitions[defName] = dd
+			}
+		}
+	}
+	// Handle map[any]any from YAML
+	if defsRaw, ok := raw["definitions"].(map[any]any); ok {
+		schema.Definitions = make(map[string]*DefinitionDef)
+		for defName, defVal := range defsRaw {
+			name := fmt.Sprintf("%v", defName)
+			if defMap, ok := defVal.(map[string]any); ok {
+				dd := &DefinitionDef{}
+				if defFields, ok := defMap["fields"].([]any); ok {
+					dd.Fields = parseFieldsRaw(defFields)
+				}
+				schema.Definitions[name] = dd
+			}
+			if defMap, ok := defVal.(map[any]any); ok {
+				dd := &DefinitionDef{}
+				if defFields, ok := defMap["fields"].([]any); ok {
+					dd.Fields = parseFieldsRaw(defFields)
+				}
+				schema.Definitions[name] = dd
+			}
+		}
 	}
 
 	// Parse fields
@@ -676,6 +745,65 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 		f.Separator = separator
 	}
 
+	// Bool field options
+	if bit, ok := fm["bit"].(int); ok {
+		f.Bit = bit
+	} else if bit, ok := fm["bit"].(float64); ok {
+		f.Bit = int(bit)
+	}
+	if consume, ok := fm["consume"].(int); ok {
+		f.Consume = consume
+	} else if consume, ok := fm["consume"].(float64); ok {
+		f.Consume = int(consume)
+	}
+
+	// Enum field options
+	if base, ok := fm["base"].(string); ok {
+		f.Base = base
+	}
+	if valuesRaw, ok := fm["values"].(map[string]any); ok {
+		f.Values = make(map[int]string)
+		for k, v := range valuesRaw {
+			if key, err := strconv.Atoi(k); err == nil {
+				if str, ok := v.(string); ok {
+					f.Values[key] = str
+				}
+			}
+		}
+	}
+	if valuesRaw, ok := fm["values"].(map[any]any); ok {
+		f.Values = make(map[int]string)
+		for k, v := range valuesRaw {
+			var key int
+			switch kv := k.(type) {
+			case int:
+				key = kv
+			case float64:
+				key = int(kv)
+			case string:
+				key, _ = strconv.Atoi(kv)
+			}
+			if str, ok := v.(string); ok {
+				f.Values[key] = str
+			}
+		}
+	}
+
+	// Byte group (inline grouped bitfields)
+	if bgRaw, ok := fm["byte_group"].([]any); ok {
+		f.ByteGroup = parseFieldsRaw(bgRaw)
+	}
+	if size, ok := fm["size"].(int); ok {
+		f.Size = size
+	} else if size, ok := fm["size"].(float64); ok {
+		f.Size = int(size)
+	}
+
+	// $ref for definitions
+	if ref2, ok := fm["$ref"].(string); ok {
+		f.Ref2 = ref2
+	}
+
 	// TLV cases (map format)
 	if f.Type == TypeTLV || f.Type == "tlv" {
 		if casesMap, ok := fm["cases"].(map[string]any); ok {
@@ -888,7 +1016,7 @@ func (s *Schema) Decode(data []byte) (map[string]any, error) {
 
 	// Decode header fields
 	if len(s.Header) > 0 {
-		headerResult, err := decodeFields(s.Header, ctx)
+		headerResult, err := decodeFieldsWithSchema(s.Header, ctx, s)
 		if err != nil {
 			return nil, err
 		}
@@ -898,7 +1026,7 @@ func (s *Schema) Decode(data []byte) (map[string]any, error) {
 	}
 
 	// Decode main fields
-	fieldsResult, err := decodeFields(s.Fields, ctx)
+	fieldsResult, err := decodeFieldsWithSchema(s.Fields, ctx, s)
 	if err != nil {
 		return nil, err
 	}
@@ -910,9 +1038,39 @@ func (s *Schema) Decode(data []byte) (map[string]any, error) {
 }
 
 func decodeFields(fields []Field, ctx *DecodeContext) (map[string]any, error) {
+	return decodeFieldsWithSchema(fields, ctx, nil)
+}
+
+func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) (map[string]any, error) {
 	result := make(map[string]any)
 
 	for _, field := range fields {
+		// $ref to definition
+		if field.Ref2 != "" && schema != nil {
+			refResult, err := resolveRef(field.Ref2, ctx, schema)
+			if err != nil {
+				return nil, err
+			}
+			for k, v := range refResult {
+				result[k] = v
+				ctx.Variables[k] = v
+			}
+			continue
+		}
+
+		// Byte group (inline grouped bitfields)
+		if len(field.ByteGroup) > 0 {
+			bgResult, err := decodeByteGroup(field, ctx)
+			if err != nil {
+				return nil, err
+			}
+			for k, v := range bgResult {
+				result[k] = v
+				ctx.Variables[k] = v
+			}
+			continue
+		}
+
 		// TLV fields merge directly into result
 		if field.Type == TypeTLV || field.Type == "tlv" {
 			tlvResult, err := decodeTLV(field, ctx)
@@ -964,6 +1122,73 @@ func decodeFields(fields []Field, ctx *DecodeContext) (map[string]any, error) {
 	return result, nil
 }
 
+// resolveRef resolves a $ref reference to a definition.
+func resolveRef(ref string, ctx *DecodeContext, schema *Schema) (map[string]any, error) {
+	// Parse ref like "#/definitions/header"
+	if !strings.HasPrefix(ref, "#/definitions/") {
+		return nil, fmt.Errorf("unsupported $ref format: %s", ref)
+	}
+	defName := strings.TrimPrefix(ref, "#/definitions/")
+	
+	if schema.Definitions == nil {
+		return nil, fmt.Errorf("no definitions in schema")
+	}
+	
+	def, ok := schema.Definitions[defName]
+	if !ok {
+		return nil, fmt.Errorf("definition not found: %s", defName)
+	}
+	
+	return decodeFieldsWithSchema(def.Fields, ctx, schema)
+}
+
+// decodeByteGroup decodes a byte group (multiple bitfields from shared bytes).
+func decodeByteGroup(field Field, ctx *DecodeContext) (map[string]any, error) {
+	size := field.Size
+	if size == 0 {
+		size = 1
+	}
+	
+	data, err := ctx.Read(size)
+	if err != nil {
+		return nil, err
+	}
+	
+	result := make(map[string]any)
+	
+	// Parse each subfield from the shared bytes
+	for _, subfield := range field.ByteGroup {
+		// Parse bit range from type like "u8[4:7]"
+		typeStr := string(subfield.Type)
+		bitStart, bitEnd := 0, 7
+		
+		if idx := strings.Index(typeStr, "["); idx >= 0 {
+			rangeStr := typeStr[idx+1 : len(typeStr)-1]
+			parts := strings.Split(rangeStr, ":")
+			if len(parts) == 2 {
+				bitStart, _ = strconv.Atoi(parts[0])
+				bitEnd, _ = strconv.Atoi(parts[1])
+			}
+		}
+		
+		// Extract bits from the data
+		var rawVal uint64
+		for i, b := range data {
+			rawVal |= uint64(b) << (8 * i)
+		}
+		
+		bitLen := bitEnd - bitStart + 1
+		mask := uint64((1 << bitLen) - 1)
+		value := float64((rawVal >> bitStart) & mask)
+		
+		if subfield.Name != "" {
+			result[subfield.Name] = value
+		}
+	}
+	
+	return result, nil
+}
+
 func decodeFlagged(fd *FlaggedDef, ctx *DecodeContext) (map[string]any, error) {
 	flagsVal, ok := ctx.Variables[fd.Field]
 	if !ok {
@@ -1004,14 +1229,14 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 	var err error
 
 	switch field.Type {
-	case TypeByte, TypeUInt, TypeU8, TypeU16, TypeU32, TypeU64:
+	case TypeByte, TypeUInt, TypeU8, TypeU16, TypeU32, TypeU64, TypeU24:
 		data, err := ctx.Read(length)
 		if err != nil {
 			return nil, err
 		}
 		value = decodeUint(data, endian)
 
-	case TypeSInt, TypeS8, TypeS16, TypeS32, TypeS64, TypeI8, TypeI16, TypeI32, TypeI64:
+	case TypeSInt, TypeS8, TypeS16, TypeS32, TypeS64, TypeI8, TypeI16, TypeI32, TypeI64, TypeS24:
 		data, err := ctx.Read(length)
 		if err != nil {
 			return nil, err
@@ -1039,12 +1264,17 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 			return nil, err
 		}
 
-	case TypeBool:
-		data, err := ctx.Peek(1, field.ByteOffset)
+	case TypeBool, TypeBoolLower:
+		// Bool extracts a single bit from the current byte
+		data, err := ctx.Peek(1, 0)
 		if err != nil {
 			return nil, err
 		}
-		value = decodeBits(data[0], field.BitOffset, 1) != 0
+		value = decodeBits(data[0], field.Bit, 1) != 0
+		// Consume bytes if specified
+		if field.Consume > 0 {
+			ctx.Read(field.Consume)
+		}
 
 	case TypeBits, TypeBitsLower:
 		data, err := ctx.Peek(1, field.ByteOffset)
@@ -1057,12 +1287,50 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		}
 		value = decodeBits(data[0], field.BitOffset, bits)
 
-	case TypeAscii:
+	case TypeString, TypeStringLower:
+		// If length is specified, read bytes; otherwise use static value
+		if length > 0 {
+			data, err := ctx.Read(length)
+			if err != nil {
+				return nil, err
+			}
+			value = strings.TrimRight(string(data), "\x00")
+		} else {
+			value = field.Value
+		}
+
+	case TypeAscii, TypeAsciiLower:
 		data, err := ctx.Read(length)
 		if err != nil {
 			return nil, err
 		}
 		value = strings.TrimRight(string(data), "\x00")
+
+	case TypeEnum, TypeEnumLower:
+		// Enum: read base type and map to string
+		baseLen := 1
+		switch field.Base {
+		case "u8", "s8":
+			baseLen = 1
+		case "u16", "s16":
+			baseLen = 2
+		case "u32", "s32":
+			baseLen = 4
+		}
+		data, err := ctx.Read(baseLen)
+		if err != nil {
+			return nil, err
+		}
+		intVal := int(decodeUint(data, endian))
+		if field.Values != nil {
+			if str, ok := field.Values[intVal]; ok {
+				value = str
+			} else {
+				value = intVal // Return raw value if not in enum
+			}
+		} else {
+			value = intVal
+		}
 
 	case TypeHex:
 		data, err := ctx.Read(length)
@@ -1124,9 +1392,6 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 			}
 		}
 		value = prefix + strings.Join(partStrs, delimiter)
-
-	case TypeString:
-		value = field.Value
 
 	case TypeNumber, "number":
 		// Computed field — reads no bytes
