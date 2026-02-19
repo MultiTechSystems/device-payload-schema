@@ -72,6 +72,20 @@ Bytes format options:
 | `enum` | Enumerated values |
 | `bitfield_string` | Bit flags as string |
 
+### Bool Type
+
+Boolean fields extract a single bit and convert to true/false:
+
+```yaml
+- name: motion_detected
+  type: bool
+  bit: 0           # Bit position (0-7)
+  consume: 1       # Advance past byte (optional)
+```
+
+By default, bool fields do not advance the position, allowing multiple bits
+from the same byte. Add `consume: 1` to advance after reading.
+
 ### Bitfields
 
 ```yaml
@@ -166,6 +180,19 @@ Applied in YAML key order:
         gt: 0          # gt, gte, lt, lte, eq, ne
     else: 0            # Fallback if condition fails
 ```
+
+### Formula (Deprecated)
+
+Legacy formula syntax for simple expressions. **Use `compute` instead.**
+
+```yaml
+- name: temp_c
+  type: number
+  formula: "($raw_temp - 4000) / 100"  # String expression
+```
+
+Note: `formula` is deprecated in favor of the more explicit `compute` syntax
+which provides better validation and error handling.
 
 ## Transform Operations
 

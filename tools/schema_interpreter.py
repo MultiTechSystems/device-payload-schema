@@ -404,6 +404,10 @@ class SchemaInterpreter:
                 nested_result[name] = value
             return nested_result, pos
         
+        if field_type == 'repeat':
+            # Repeated/array field
+            return self._decode_repeat(field_def, buf, pos)
+        
         if field_type == 'enum':
             # Enum type: decode base type then map to string
             return self._decode_enum(field_def, buf, pos)
@@ -442,6 +446,108 @@ class SchemaInterpreter:
         
         # No mapping - return raw value
         return raw_value, new_pos
+    
+    def _decode_repeat(self, field_def: Dict[str, Any], buf: bytes,
+                       pos: int) -> Tuple[List[Any], int]:
+        """
+        Decode repeated/array field.
+        
+        Supports three modes:
+        - count: fixed number of iterations (int or $variable)
+        - byte_length: repeat until N bytes consumed (int or $variable)
+        - until: "end" to repeat until payload exhausted
+        
+        Options:
+        - max: maximum iterations (safety limit, default 1000)
+        - min: minimum required iterations
+        - fields: nested fields to decode per iteration
+        """
+        nested_fields = field_def.get('fields', [])
+        max_iterations = field_def.get('max', 1000)
+        min_iterations = field_def.get('min', 0)
+        
+        result = []
+        iterations = 0
+        
+        # Determine iteration mode
+        count = field_def.get('count')
+        byte_length = field_def.get('byte_length')
+        until = field_def.get('until')
+        
+        if count is not None:
+            # Count-based: fixed number of iterations
+            if isinstance(count, str) and count.startswith('$'):
+                var_name = count[1:]
+                if hasattr(self, '_variables') and var_name in self._variables:
+                    count = int(self._variables[var_name])
+                else:
+                    raise ValueError(f"repeat count variable not found: {var_name}")
+            else:
+                count = int(count)
+            
+            count = min(count, max_iterations)
+            
+            for _ in range(count):
+                element = {}
+                for nested_field in nested_fields:
+                    name = nested_field.get('name', 'unknown')
+                    value, pos = self._decode_field(nested_field, buf, pos)
+                    value = self._apply_modifiers(value, nested_field)
+                    if value is not None:
+                        element[name] = value
+                result.append(element)
+                
+        elif byte_length is not None:
+            # Byte-length based: consume specified number of bytes
+            if isinstance(byte_length, str) and byte_length.startswith('$'):
+                var_name = byte_length[1:]
+                if hasattr(self, '_variables') and var_name in self._variables:
+                    byte_length = int(self._variables[var_name])
+                else:
+                    raise ValueError(f"repeat byte_length variable not found: {var_name}")
+            else:
+                byte_length = int(byte_length)
+            
+            end_pos = pos + byte_length
+            
+            while pos < end_pos and iterations < max_iterations:
+                element = {}
+                for nested_field in nested_fields:
+                    name = nested_field.get('name', 'unknown')
+                    value, pos = self._decode_field(nested_field, buf, pos)
+                    value = self._apply_modifiers(value, nested_field)
+                    if value is not None:
+                        element[name] = value
+                result.append(element)
+                iterations += 1
+            
+            if pos != end_pos:
+                raise ValueError(f"repeat byte_length mismatch: expected end at {end_pos}, got {pos}")
+                
+        elif until == 'end':
+            # Until-end: repeat until payload exhausted
+            while pos < len(buf) and iterations < max_iterations:
+                element = {}
+                start_pos = pos
+                for nested_field in nested_fields:
+                    name = nested_field.get('name', 'unknown')
+                    value, pos = self._decode_field(nested_field, buf, pos)
+                    value = self._apply_modifiers(value, nested_field)
+                    if value is not None:
+                        element[name] = value
+                # Safety: check we made progress
+                if pos == start_pos:
+                    break
+                result.append(element)
+                iterations += 1
+        else:
+            raise ValueError("repeat field must specify one of: count, byte_length, or until")
+        
+        # Validate minimum iterations
+        if len(result) < min_iterations:
+            raise ValueError(f"repeat produced {len(result)} elements, but minimum is {min_iterations}")
+        
+        return result, pos
     
     def _decode_match(self, field_def: Dict[str, Any], buf: bytes, 
                       pos: int) -> Tuple[Dict[str, Any], int]:

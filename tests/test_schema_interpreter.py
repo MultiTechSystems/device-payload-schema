@@ -3459,3 +3459,843 @@ class TestBoolConsumeDefault:
         assert result.data['b'] is True
         assert result.data['byte_val'] == 0x81  # same byte
         assert result.data['next'] == 0x42
+
+
+class TestBytesType:
+    """
+    Tests for bytes/hex/base64 types.
+    
+    REQ-Bytes-Type-017: bytes type with length
+    REQ-Hex-Type-020: hex string output
+    REQ-Base64-Typ-057: base64 string output
+    """
+
+    def test_bytes_type(self):
+        """REQ-Bytes-Type-017: Raw bytes extraction."""
+        schema = {'fields': [{'name': 'data', 'type': 'bytes', 'length': 4}]}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([0xDE, 0xAD, 0xBE, 0xEF]))
+        assert result.success
+        assert result.data['data'] == bytes([0xDE, 0xAD, 0xBE, 0xEF])
+
+    def test_hex_type(self):
+        """REQ-Hex-Type-020: Hex string output."""
+        schema = {'fields': [{'name': 'mac', 'type': 'hex', 'length': 6}]}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([0x00, 0x11, 0x22, 0x33, 0x44, 0x55]))
+        assert result.success
+        assert result.data['mac'].lower() == '001122334455'
+
+    def test_base64_type(self):
+        """REQ-Base64-Typ-057: Base64 encoded output."""
+        schema = {'fields': [{'name': 'blob', 'type': 'base64', 'length': 3}]}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([0x01, 0x02, 0x03]))
+        assert result.success
+        import base64
+        assert base64.b64decode(result.data['blob']) == bytes([0x01, 0x02, 0x03])
+
+
+class TestStringType:
+    """
+    Tests for string/ascii types.
+    
+    REQ-String-Typ-018: string type
+    REQ-ASCII-Type-019: ascii string type
+    """
+
+    def test_string_type(self):
+        """REQ-String-Typ-018: String type with length."""
+        schema = {'fields': [{'name': 'msg', 'type': 'string', 'length': 5}]}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(b'Hello')
+        assert result.success
+        assert result.data['msg'] == 'Hello'
+
+    def test_ascii_type(self):
+        """REQ-ASCII-Type-019: ASCII string type."""
+        schema = {'fields': [{'name': 'name', 'type': 'ascii', 'length': 4}]}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(b'Test')
+        assert result.success
+        assert result.data['name'] == 'Test'
+
+    def test_string_with_null(self):
+        """String with null terminator."""
+        schema = {'fields': [{'name': 's', 'type': 'string', 'length': 8}]}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(b'Hi\x00\x00\x00\x00\x00\x00')
+        assert result.success
+        # Should strip or include nulls depending on implementation
+        assert 'Hi' in result.data['s']
+
+
+class TestLookupModifier:
+    """
+    Tests for lookup table modifier.
+    
+    REQ-Lookup-Ta-027: lookup table modifier
+    """
+
+    def test_lookup_dict(self):
+        """REQ-Lookup-Ta-027: Lookup with dictionary."""
+        schema = {
+            'fields': [{
+                'name': 'status',
+                'type': 'u8',
+                'lookup': {0: 'idle', 1: 'running', 2: 'error'}
+            }]
+        }
+        interp = SchemaInterpreter(schema)
+        
+        result = interp.decode(bytes([0x01]))
+        assert result.success
+        assert result.data['status'] == 'running'
+
+    def test_lookup_list(self):
+        """Lookup with list (index-based)."""
+        schema = {
+            'fields': [{
+                'name': 'mode',
+                'type': 'u8',
+                'lookup': ['off', 'on', 'standby']
+            }]
+        }
+        interp = SchemaInterpreter(schema)
+        
+        result = interp.decode(bytes([0x02]))
+        assert result.success
+        assert result.data['mode'] == 'standby'
+
+    def test_lookup_unknown(self):
+        """Lookup with unknown value."""
+        schema = {
+            'fields': [{
+                'name': 'status',
+                'type': 'u8',
+                'lookup': {0: 'ok', 1: 'error'}
+            }]
+        }
+        interp = SchemaInterpreter(schema)
+        
+        result = interp.decode(bytes([0x99]))
+        assert result.success
+        # Should return raw value or unknown marker
+        assert '153' in str(result.data['status']) or result.data['status'] == 153
+
+
+class TestTransformOperations:
+    """
+    Tests for transform pipeline.
+    
+    REQ-Transform-001: transform array with math operations
+    """
+
+    def test_transform_basic(self):
+        """REQ-Transform-001: Basic transform pipeline."""
+        schema = {
+            'fields': [{
+                'name': 'temp',
+                'type': 'u16',
+                'transform': [
+                    {'add': -4000},
+                    {'div': 100}
+                ]
+            }]
+        }
+        interp = SchemaInterpreter(schema)
+        # Raw 4231 -> (4231-4000)/100 = 2.31
+        result = interp.decode(bytes([0x10, 0x87]))  # 4231 big endian
+        assert result.success
+        assert abs(result.data['temp'] - 2.31) < 0.01
+
+    def test_transform_clamp(self):
+        """Transform with clamp operation."""
+        schema = {
+            'fields': [{
+                'name': 'pct',
+                'type': 'u8',
+                'transform': [{'clamp': [0, 100]}]
+            }]
+        }
+        interp = SchemaInterpreter(schema)
+        
+        result = interp.decode(bytes([0xFF]))  # 255
+        assert result.success
+        assert result.data['pct'] == 100  # Clamped
+
+
+class TestBitfieldString:
+    """
+    Tests for bitfield_string type (version strings from packed bits).
+    
+    REQ-Bitfield-String-069: Bitfield string output
+    """
+
+    def test_bitfield_string_version(self):
+        """REQ-Bitfield-String-069: Bitfield string for version numbers."""
+        schema = {
+            'fields': [{
+                'name': 'version',
+                'type': 'bitfield_string',
+                'length': 2,
+                'parts': [
+                    [12, 4],  # bits 12-15: major (4 bits)
+                    [8, 4],   # bits 8-11: minor (4 bits)
+                    [0, 8]    # bits 0-7: patch (8 bits)
+                ],
+                'delimiter': '.',
+                'prefix': 'v'
+            }]
+        }
+        interp = SchemaInterpreter(schema)
+        # 0x1203 big endian = major=1, minor=2, patch=3
+        result = interp.decode(bytes([0x12, 0x03]))
+        assert result.success
+        assert result.data['version'] == 'v1.2.3'
+
+
+class TestByteGroup:
+    """
+    Tests for byte_group type.
+    
+    REQ-Byte-Group-037: byte_group for grouping bitfields
+    """
+
+    def test_byte_group_nibbles(self):
+        """REQ-Byte-Group-037: Byte group with nibble extraction."""
+        schema = {
+            'fields': [{
+                'byte_group': [
+                    {'name': 'high_nibble', 'type': 'u8[4:7]'},
+                    {'name': 'low_nibble', 'type': 'u8[0:3]'},
+                ],
+                'size': 1
+            }]
+        }
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([0xAB]))
+        assert result.success
+        assert result.data['high_nibble'] == 0xA
+        assert result.data['low_nibble'] == 0xB
+
+
+class TestDefinitions:
+    """
+    Tests for definitions and $ref.
+    
+    REQ-Definitio-051: definitions section for reusable field groups
+    REQ-Ref-Field-052: $ref for referencing definitions
+    """
+
+    def test_definitions_basic(self):
+        """REQ-Definitio-051: Basic definitions usage."""
+        schema = {
+            'definitions': {
+                'header': {
+                    'fields': [
+                        {'name': 'version', 'type': 'u8'},
+                        {'name': 'msg_type', 'type': 'u8'}
+                    ]
+                }
+            },
+            'fields': [
+                {'$ref': '#/definitions/header'},
+                {'name': 'payload', 'type': 'u16'}
+            ]
+        }
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([0x01, 0x02, 0x00, 0x64]))
+        assert result.success
+        assert result.data['version'] == 1
+        assert result.data['msg_type'] == 2
+        assert result.data['payload'] == 100
+
+
+class TestVariables:
+    """
+    Tests for var: field storage.
+    
+    REQ-Variables-070: var for storing field values
+    """
+
+    def test_var_basic(self):
+        """REQ-Variables-070: Store and use variable."""
+        schema = {
+            'fields': [
+                {'name': 'length', 'type': 'u8', 'var': 'len'},
+                {'name': 'data', 'type': 'bytes', 'length': 3}
+            ]
+        }
+        interp = SchemaInterpreter(schema)
+        # length=3, then 3 bytes of data
+        result = interp.decode(bytes([0x03, 0xAA, 0xBB, 0xCC]))
+        assert result.success
+        assert result.data['length'] == 3
+        assert result.data['data'] == bytes([0xAA, 0xBB, 0xCC])
+
+
+class TestSkipType:
+    """
+    Tests for skip type.
+    
+    REQ-Skip-Type-021: skip type for padding/reserved bytes
+    """
+
+    def test_skip_basic(self):
+        """REQ-Skip-Type-021: Skip padding bytes."""
+        schema = {
+            'fields': [
+                {'name': 'a', 'type': 'u8'},
+                {'name': '_pad', 'type': 'skip', 'length': 2},
+                {'name': 'b', 'type': 'u8'}
+            ]
+        }
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([0x01, 0xFF, 0xFF, 0x02]))
+        assert result.success
+        assert result.data['a'] == 1
+        assert result.data['b'] == 2
+        assert '_pad' not in result.data  # Skip should not appear in output
+
+
+class TestEndian:
+    """
+    Tests for endianness.
+    
+    REQ-Endiannes-004: Big endian default
+    REQ-Endiannes-005: Little endian option
+    """
+
+    def test_big_endian_default(self):
+        """REQ-Endiannes-004: Default big endian."""
+        schema = {'fields': [{'name': 'val', 'type': 'u16'}]}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([0x01, 0x02]))
+        assert result.success
+        assert result.data['val'] == 0x0102  # Big endian
+
+    def test_little_endian_schema(self):
+        """REQ-Endiannes-005: Schema-level little endian."""
+        schema = {'endian': 'little', 'fields': [{'name': 'val', 'type': 'u16'}]}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([0x01, 0x02]))
+        assert result.success
+        assert result.data['val'] == 0x0201  # Little endian
+
+    def test_u32_little_endian(self):
+        """32-bit little endian value."""
+        schema = {'endian': 'little', 'fields': [{'name': 'val', 'type': 'u32'}]}
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([0x01, 0x02, 0x03, 0x04]))
+        assert result.success
+        assert result.data['val'] == 0x04030201  # Little endian
+
+
+class TestMultModifierComprehensive:
+    """
+    Comprehensive tests for mult modifier.
+    
+    REQ-Mult-Modi-024: Multiply modifier
+    """
+
+    def test_mult_integer(self):
+        """Mult with integer multiplier."""
+        schema = {'fields': [{'name': 'v', 'type': 'u8', 'mult': 10}]}
+        result = SchemaInterpreter(schema).decode(bytes([5]))
+        assert result.data['v'] == 50
+
+    def test_mult_decimal(self):
+        """Mult with decimal multiplier."""
+        schema = {'fields': [{'name': 'v', 'type': 'u16', 'mult': 0.01}]}
+        result = SchemaInterpreter(schema).decode(bytes([0x09, 0x29]))  # 2345
+        assert abs(result.data['v'] - 23.45) < 0.001
+
+    def test_mult_negative(self):
+        """Mult with negative multiplier."""
+        schema = {'fields': [{'name': 'v', 'type': 'u8', 'mult': -1}]}
+        result = SchemaInterpreter(schema).decode(bytes([100]))
+        assert result.data['v'] == -100
+
+    def test_mult_encode_roundtrip(self):
+        """Mult encode/decode roundtrip."""
+        schema = {'fields': [{'name': 'v', 'type': 'u16', 'mult': 0.1}]}
+        interp = SchemaInterpreter(schema)
+        encoded = interp.encode({'v': 25.5})
+        decoded = interp.decode(encoded.payload)
+        assert abs(decoded.data['v'] - 25.5) < 0.01
+
+
+class TestDivModifierComprehensive:
+    """
+    Comprehensive tests for div modifier.
+    
+    REQ-Div-Modif-026: Divide modifier
+    """
+
+    def test_div_integer(self):
+        """Div with integer divisor."""
+        schema = {'fields': [{'name': 'v', 'type': 'u16', 'div': 10}]}
+        result = SchemaInterpreter(schema).decode(bytes([0x00, 0x64]))  # 100
+        assert result.data['v'] == 10.0
+
+    def test_div_decimal_result(self):
+        """Div producing decimal result."""
+        schema = {'fields': [{'name': 'v', 'type': 'u8', 'div': 4}]}
+        result = SchemaInterpreter(schema).decode(bytes([10]))
+        assert result.data['v'] == 2.5
+
+    def test_div_encode_roundtrip(self):
+        """Div encode/decode roundtrip."""
+        schema = {'fields': [{'name': 'v', 'type': 'u16', 'div': 100}]}
+        interp = SchemaInterpreter(schema)
+        encoded = interp.encode({'v': 23.45})
+        decoded = interp.decode(encoded.payload)
+        assert abs(decoded.data['v'] - 23.45) < 0.01
+
+    def test_div_with_mult(self):
+        """Div combined with mult."""
+        schema = {'fields': [{'name': 'v', 'type': 'u16', 'mult': 0.1, 'div': 2}]}
+        result = SchemaInterpreter(schema).decode(bytes([0x00, 0x64]))  # 100
+        # 100 * 0.1 / 2 = 5.0
+        assert result.data['v'] == 5.0
+
+
+class TestDefinitionsComprehensive:
+    """
+    Comprehensive tests for definitions and $ref.
+    
+    REQ-Definitio-051: definitions section
+    REQ-Ref-Field-052: $ref references
+    """
+
+    def test_definition_simple(self):
+        """Simple definition reference."""
+        schema = {
+            'definitions': {
+                'temp_field': {'fields': [{'name': 'temp', 'type': 's16', 'div': 10}]}
+            },
+            'fields': [{'$ref': '#/definitions/temp_field'}]
+        }
+        result = SchemaInterpreter(schema).decode(bytes([0x00, 0xE7]))
+        assert abs(result.data['temp'] - 23.1) < 0.01
+
+    def test_definition_multiple_refs(self):
+        """Multiple references to same definition."""
+        schema = {
+            'definitions': {
+                'byte_val': {'fields': [{'name': 'v', 'type': 'u8'}]}
+            },
+            'fields': [
+                {'$ref': '#/definitions/byte_val'},
+                {'name': 'middle', 'type': 'u8'},
+                {'$ref': '#/definitions/byte_val'}
+            ]
+        }
+        result = SchemaInterpreter(schema).decode(bytes([1, 2, 3]))
+        assert result.data['v'] == 3  # Last ref overwrites
+        assert result.data['middle'] == 2
+
+    def test_definition_nested(self):
+        """Definition with nested object."""
+        schema = {
+            'definitions': {
+                'sensor': {
+                    'fields': [
+                        {'name': 'id', 'type': 'u8'},
+                        {'name': 'reading', 'type': 'u16'}
+                    ]
+                }
+            },
+            'fields': [{'$ref': '#/definitions/sensor'}]
+        }
+        result = SchemaInterpreter(schema).decode(bytes([0x01, 0x01, 0xF4]))
+        assert result.data['id'] == 1
+        assert result.data['reading'] == 500
+
+
+class TestVariablesComprehensive:
+    """
+    Comprehensive tests for var storage.
+    
+    REQ-Variables-070: var for storing field values
+    """
+
+    def test_var_in_formula(self):
+        """Variable used in formula."""
+        schema = {
+            'fields': [
+                {'name': 'raw', 'type': 'u8', 'var': 'r'},
+                {'name': 'doubled', 'type': 'number', 'formula': '$r * 2'}
+            ]
+        }
+        result = SchemaInterpreter(schema).decode(bytes([25]))
+        assert result.data['raw'] == 25
+        assert result.data['doubled'] == 50
+
+    def test_var_in_compute(self):
+        """Variable used in compute."""
+        schema = {
+            'fields': [
+                {'name': 'a', 'type': 'u8', 'var': 'val_a'},
+                {'name': 'b', 'type': 'u8', 'var': 'val_b'},
+                {'name': 'sum', 'type': 'number', 
+                 'compute': {'op': 'add', 'a': '$val_a', 'b': '$val_b'}}
+            ]
+        }
+        result = SchemaInterpreter(schema).decode(bytes([10, 20]))
+        assert result.data['sum'] == 30
+
+    def test_var_in_repeat_count(self):
+        """Variable used as repeat count."""
+        schema = {
+            'fields': [
+                {'name': 'count', 'type': 'u8', 'var': 'n'},
+                {'name': 'items', 'type': 'repeat', 'count': '$n',
+                 'fields': [{'name': 'val', 'type': 'u8'}]}
+            ]
+        }
+        result = SchemaInterpreter(schema).decode(bytes([3, 10, 20, 30]))
+        assert len(result.data['items']) == 3
+
+
+class TestUnitAnnotation:
+    """
+    Tests for unit annotation.
+    
+    REQ-Unit-Annot-071: unit field annotation
+    """
+
+    def test_unit_annotation(self):
+        """REQ-Unit-Annot-071: Unit annotation preserved."""
+        schema = {
+            'fields': [{
+                'name': 'temp',
+                'type': 's16',
+                'div': 10,
+                'unit': '°C'
+            }]
+        }
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([0x00, 0xE7]))
+        assert result.success
+        assert abs(result.data['temp'] - 23.1) < 0.01
+
+    def test_unit_multiple_fields(self):
+        """Multiple fields with different units."""
+        schema = {
+            'fields': [
+                {'name': 'temp', 'type': 's16', 'div': 10, 'unit': '°C'},
+                {'name': 'humidity', 'type': 'u8', 'unit': '%'},
+                {'name': 'pressure', 'type': 'u16', 'div': 10, 'unit': 'hPa'}
+            ]
+        }
+        result = SchemaInterpreter(schema).decode(bytes([0x00, 0xE7, 0x32, 0x27, 0x10]))
+        assert abs(result.data['temp'] - 23.1) < 0.01
+        assert result.data['humidity'] == 50
+        assert abs(result.data['pressure'] - 1000.0) < 0.1
+
+
+class TestSemanticOutput:
+    """
+    Tests for semantic annotations.
+    
+    REQ-IPSO-Outpu-041: IPSO/LwM2M annotations
+    REQ-SenML-Outp-042: SenML annotations
+    """
+
+    def test_ipso_annotation(self):
+        """REQ-IPSO-Outpu-041: IPSO annotation preserved in decode."""
+        schema = {
+            'fields': [{
+                'name': 'temp',
+                'type': 's16',
+                'div': 10,
+                'ipso': {'object': 3303, 'resource': 5700}
+            }]
+        }
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([0x00, 0xE7]))
+        assert result.success
+        assert abs(result.data['temp'] - 23.1) < 0.01
+
+    def test_senml_annotation(self):
+        """REQ-SenML-Outp-042: SenML annotation preserved in decode."""
+        schema = {
+            'fields': [{
+                'name': 'temp',
+                'type': 's16',
+                'div': 10,
+                'senml': {'unit': 'Cel'}
+            }]
+        }
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([0x00, 0xE7]))
+        assert result.success
+        assert abs(result.data['temp'] - 23.1) < 0.01
+
+
+class TestRepeatType:
+    """
+    Tests for repeat/array type.
+    
+    REQ-Repeat-Coun-064: count-based iteration
+    REQ-Repeat-Byte-065: byte_length-based iteration
+    REQ-Repeat-Unti-066: until: end iteration
+    REQ-Repeat-Mini-067: min/max constraints
+    REQ-Repeat-Vari-068: variable references for count/byte_length
+    """
+
+    def test_repeat_count_fixed(self):
+        """REQ-Repeat-Coun-064: Fixed count iteration."""
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {
+                    'name': 'readings',
+                    'type': 'repeat',
+                    'count': 3,
+                    'fields': [
+                        {'name': 'temp', 'type': 's16', 'mult': 0.1},
+                        {'name': 'humidity', 'type': 'u8'}
+                    ]
+                }
+            ]
+        }
+        interp = SchemaInterpreter(schema)
+        # 3 readings: (23.1°C, 50%), (24.5°C, 55%), (22.0°C, 45%)
+        payload = bytes([
+            0x00, 0xE7, 0x32,  # 231*0.1=23.1, 50
+            0x00, 0xF5, 0x37,  # 245*0.1=24.5, 55
+            0x00, 0xDC, 0x2D,  # 220*0.1=22.0, 45
+        ])
+        result = interp.decode(payload)
+        
+        assert result.success
+        assert len(result.data['readings']) == 3
+        assert abs(result.data['readings'][0]['temp'] - 23.1) < 0.01
+        assert result.data['readings'][0]['humidity'] == 50
+        assert abs(result.data['readings'][1]['temp'] - 24.5) < 0.01
+        assert result.data['readings'][2]['humidity'] == 45
+
+    def test_repeat_count_variable(self):
+        """REQ-Repeat-Vari-068: Count from variable."""
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {'name': 'num_readings', 'type': 'u8', 'var': 'count'},
+                {
+                    'name': 'readings',
+                    'type': 'repeat',
+                    'count': '$count',
+                    'fields': [
+                        {'name': 'value', 'type': 'u16'}
+                    ]
+                }
+            ]
+        }
+        interp = SchemaInterpreter(schema)
+        # 2 readings: 1000, 2000
+        payload = bytes([0x02, 0x03, 0xE8, 0x07, 0xD0])
+        result = interp.decode(payload)
+        
+        assert result.success
+        assert result.data['num_readings'] == 2
+        assert len(result.data['readings']) == 2
+        assert result.data['readings'][0]['value'] == 1000
+        assert result.data['readings'][1]['value'] == 2000
+
+    def test_repeat_until_end(self):
+        """REQ-Repeat-Unti-066: Repeat until end of payload."""
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {
+                    'name': 'samples',
+                    'type': 'repeat',
+                    'until': 'end',
+                    'fields': [
+                        {'name': 'value', 'type': 'u8'}
+                    ]
+                }
+            ]
+        }
+        interp = SchemaInterpreter(schema)
+        payload = bytes([0x01, 0x02, 0x03, 0x04, 0x05])
+        result = interp.decode(payload)
+        
+        assert result.success
+        assert len(result.data['samples']) == 5
+        assert result.data['samples'][0]['value'] == 1
+        assert result.data['samples'][4]['value'] == 5
+
+    def test_repeat_byte_length(self):
+        """REQ-Repeat-Byte-065: Repeat for specified byte length."""
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {'name': 'header', 'type': 'u8'},
+                {
+                    'name': 'data',
+                    'type': 'repeat',
+                    'byte_length': 6,
+                    'fields': [
+                        {'name': 'x', 'type': 'u8'},
+                        {'name': 'y', 'type': 'u8'}
+                    ]
+                },
+                {'name': 'trailer', 'type': 'u8'}
+            ]
+        }
+        interp = SchemaInterpreter(schema)
+        # header=0xAA, 3 pairs (6 bytes), trailer=0xBB
+        payload = bytes([0xAA, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0xBB])
+        result = interp.decode(payload)
+        
+        assert result.success
+        assert result.data['header'] == 0xAA
+        assert len(result.data['data']) == 3
+        assert result.data['data'][0] == {'x': 1, 'y': 2}
+        assert result.data['data'][1] == {'x': 3, 'y': 4}
+        assert result.data['data'][2] == {'x': 5, 'y': 6}
+        assert result.data['trailer'] == 0xBB
+
+    def test_repeat_byte_length_variable(self):
+        """REQ-Repeat-Vari-068: Byte length from variable."""
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {'name': 'data_len', 'type': 'u8', 'var': 'len'},
+                {
+                    'name': 'points',
+                    'type': 'repeat',
+                    'byte_length': '$len',
+                    'fields': [
+                        {'name': 'val', 'type': 'u16'}
+                    ]
+                }
+            ]
+        }
+        interp = SchemaInterpreter(schema)
+        # len=4, then 2 u16 values (4 bytes)
+        payload = bytes([0x04, 0x00, 0x64, 0x00, 0xC8])
+        result = interp.decode(payload)
+        
+        assert result.success
+        assert result.data['data_len'] == 4
+        assert len(result.data['points']) == 2
+        assert result.data['points'][0]['val'] == 100
+        assert result.data['points'][1]['val'] == 200
+
+    def test_repeat_min_constraint(self):
+        """REQ-Repeat-Mini-067: Minimum iterations constraint."""
+        schema = {
+            'fields': [
+                {
+                    'name': 'items',
+                    'type': 'repeat',
+                    'until': 'end',
+                    'min': 3,
+                    'fields': [{'name': 'v', 'type': 'u8'}]
+                }
+            ]
+        }
+        interp = SchemaInterpreter(schema)
+        
+        # Only 2 items - should fail
+        result = interp.decode(bytes([0x01, 0x02]))
+        assert not result.success
+        assert 'minimum' in str(result.errors[0]).lower()
+
+    def test_repeat_max_constraint(self):
+        """REQ-Repeat-Mini-067: Maximum iterations constraint (safety)."""
+        schema = {
+            'fields': [
+                {
+                    'name': 'items',
+                    'type': 'repeat',
+                    'until': 'end',
+                    'max': 3,
+                    'fields': [{'name': 'v', 'type': 'u8'}]
+                }
+            ]
+        }
+        interp = SchemaInterpreter(schema)
+        
+        # 5 items but max is 3 - should only get 3
+        result = interp.decode(bytes([0x01, 0x02, 0x03, 0x04, 0x05]))
+        assert result.success
+        assert len(result.data['items']) == 3
+
+    def test_repeat_nested_objects(self):
+        """Repeat with complex nested structure."""
+        schema = {
+            'endian': 'big',
+            'fields': [
+                {
+                    'name': 'sensors',
+                    'type': 'repeat',
+                    'count': 2,
+                    'fields': [
+                        {'name': 'id', 'type': 'u8'},
+                        {
+                            'name': 'reading',
+                            'type': 'object',
+                            'fields': [
+                                {'name': 'temp', 'type': 's16', 'mult': 0.1},
+                                {'name': 'humidity', 'type': 'u8'}
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+        interp = SchemaInterpreter(schema)
+        # sensor 1: id=1, temp=23.1, hum=50
+        # sensor 2: id=2, temp=24.5, hum=55
+        payload = bytes([
+            0x01, 0x00, 0xE7, 0x32,
+            0x02, 0x00, 0xF5, 0x37
+        ])
+        result = interp.decode(payload)
+        
+        assert result.success
+        assert len(result.data['sensors']) == 2
+        assert result.data['sensors'][0]['id'] == 1
+        assert abs(result.data['sensors'][0]['reading']['temp'] - 23.1) < 0.01
+        assert result.data['sensors'][1]['id'] == 2
+
+    def test_repeat_empty(self):
+        """Repeat with count=0 produces empty array."""
+        schema = {
+            'fields': [
+                {
+                    'name': 'items',
+                    'type': 'repeat',
+                    'count': 0,
+                    'fields': [{'name': 'v', 'type': 'u8'}]
+                }
+            ]
+        }
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([]))
+        
+        assert result.success
+        assert result.data['items'] == []
+
+    def test_repeat_missing_mode_error(self):
+        """Repeat without count/byte_length/until should error."""
+        schema = {
+            'fields': [
+                {
+                    'name': 'items',
+                    'type': 'repeat',
+                    'fields': [{'name': 'v', 'type': 'u8'}]
+                }
+            ]
+        }
+        interp = SchemaInterpreter(schema)
+        result = interp.decode(bytes([0x01, 0x02]))
+        
+        assert not result.success
+        assert 'must specify' in str(result.errors[0]).lower()

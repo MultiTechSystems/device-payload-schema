@@ -155,47 +155,71 @@ def find_test_coverage(test_file: Path) -> Dict[str, int]:
         if test_match and current_class:
             # Map class names to features
             feature = None
-            if 'polynomial' in current_class or 'polynomial' in test_match.group(1):
+            test_name = test_match.group(1).lower()
+            
+            if 'polynomial' in current_class or 'polynomial' in test_name:
                 feature = 'polynomial'
-            elif 'compute' in current_class or 'compute' in test_match.group(1):
+            elif 'compute' in current_class or 'compute' in test_name:
                 feature = 'compute'
-            elif 'guard' in current_class or 'guard' in test_match.group(1):
+            elif 'guard' in current_class or 'guard' in test_name or 'albedo' in test_name:
                 feature = 'guard'
-            elif 'transform' in current_class or 'transform' in test_match.group(1):
+            elif 'transform' in current_class or 'transform' in test_name:
                 feature = 'transform'
-            elif 'formula' in current_class or 'formula' in test_match.group(1):
+            elif 'formula' in current_class or 'formula' in test_name:
                 feature = 'formula'
-            elif 'integer' in current_class or 'u8' in test_match.group(1) or 'u16' in test_match.group(1):
+            elif 'integer' in current_class or 'u8' in test_name or 'u16' in test_name:
                 feature = 'integer_types'
-            elif 'float' in current_class or 'f32' in test_match.group(1):
+            elif 'float' in current_class or 'f32' in test_name or 'f64' in test_name:
                 feature = 'float_types'
-            elif 'bool' in current_class or 'bool' in test_match.group(1):
+            elif 'bool' in current_class or 'bool' in test_name:
                 feature = 'bool_type'
-            elif 'bitfield' in current_class or 'bitfield' in test_match.group(1):
+            elif 'bitfieldstring' in current_class or 'bitfield_string' in test_name:
+                feature = 'bitfield_string'
+            elif 'bitfield' in current_class or 'bitfield' in test_name:
                 feature = 'bitfield'
-            elif 'match' in current_class or 'switch' in test_match.group(1):
+            elif 'match' in current_class or 'switch' in test_name:
                 feature = 'switch_match'
             elif 'flagged' in current_class:
                 feature = 'flagged'
             elif 'tlv' in current_class:
                 feature = 'tlv'
-            elif 'enum' in current_class or 'enum' in test_match.group(1):
+            elif 'enum' in current_class or 'enum' in test_name:
                 feature = 'enum_type'
+            elif 'lookup' in current_class or 'lookup' in test_name:
+                feature = 'lookup_modifier'
             elif 'modifier' in current_class:
-                if 'mult' in test_match.group(1):
+                if 'mult' in test_name:
                     feature = 'mult_modifier'
-                elif 'div' in test_match.group(1):
+                elif 'div' in test_name:
                     feature = 'div_modifier'
-                elif 'add' in test_match.group(1):
+                elif 'add' in test_name:
                     feature = 'add_modifier'
-            elif 'nested' in test_match.group(1) or 'object' in test_match.group(1):
+            elif 'nested' in test_name or 'object' in test_name:
                 feature = 'nested_object'
-            elif 'repeat' in test_match.group(1):
+            elif 'repeat' in current_class or 'repeat' in test_name:
                 feature = 'repeat'
-            elif 'port' in test_match.group(1):
+            elif 'port' in test_name:
                 feature = 'ports'
-            elif 'ref' in test_match.group(1):
+            elif 'ref' in test_name:
                 feature = 'ref'
+            elif 'bytestype' in current_class or 'bytes' in current_class or 'hex' in test_name or 'base64' in test_name:
+                feature = 'bytes_type'
+            elif 'stringtype' in current_class or ('string' in current_class and 'bitfield' not in current_class) or 'ascii' in test_name:
+                feature = 'string_type'
+            elif 'bytegroup' in current_class or 'byte_group' in test_name:
+                feature = 'byte_group'
+            elif 'definitions' in current_class or 'definition' in test_name:
+                feature = 'definitions'
+            elif 'variable' in current_class or 'var' in test_name:
+                feature = 'var'
+            elif 'skip' in current_class or 'skip' in test_name:
+                feature = 'skip'
+            elif 'endian' in current_class or 'endian' in test_name:
+                feature = 'endian'
+            elif 'unit' in current_class or 'unit' in test_name:
+                feature = 'unit'
+            elif 'semantic' in current_class or 'ipso' in test_name or 'senml' in test_name:
+                feature = 'semantic'
             
             if feature:
                 coverage[feature] = coverage.get(feature, 0) + 1
