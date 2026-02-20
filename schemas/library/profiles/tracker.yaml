@@ -3,7 +3,7 @@
 #
 # Usage:
 #   fields:
-#     - $ref: "lib/profiles/tracker.yaml#/definitions/gps_basic"
+#     - $ref: "schemas/library/profiles/tracker.yaml#/definitions/gps_basic"
 
 definitions:
 

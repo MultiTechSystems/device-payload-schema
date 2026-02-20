@@ -1,30 +1,30 @@
-# Test schema for lib/sensors definitions
+# Test schema for schemas/library/sensors definitions
 # Validates that library definitions work correctly with preprocessor and interpreter
 
 name: lib_sensors_test
 version: 1
 endian: big
-description: Test schema using lib/sensors definitions
+description: Test schema using schemas/library/sensors definitions
 
 fields:
   # Environmental sensors
-  - $ref: "lib/sensors/environmental.yaml#/definitions/temperature_c_div10"
-  - $ref: "lib/sensors/environmental.yaml#/definitions/humidity_pct_half"
-  - $ref: "lib/sensors/environmental.yaml#/definitions/pressure_hpa_div10"
-  - $ref: "lib/sensors/environmental.yaml#/definitions/co2_ppm"
+  - $ref: "schemas/library/sensors/environmental.yaml#/definitions/temperature_c_div10"
+  - $ref: "schemas/library/sensors/environmental.yaml#/definitions/humidity_pct_half"
+  - $ref: "schemas/library/sensors/environmental.yaml#/definitions/pressure_hpa_div10"
+  - $ref: "schemas/library/sensors/environmental.yaml#/definitions/co2_ppm"
   
   # Power
-  - $ref: "lib/sensors/power.yaml#/definitions/battery_pct"
+  - $ref: "schemas/library/sensors/power.yaml#/definitions/battery_pct"
   
   # Distance
-  - $ref: "lib/sensors/distance.yaml#/definitions/distance_mm"
+  - $ref: "schemas/library/sensors/distance.yaml#/definitions/distance_mm"
   
   # Motion (use pir_byte which consumes full byte)
-  - $ref: "lib/sensors/motion.yaml#/definitions/pir_byte"
+  - $ref: "schemas/library/sensors/motion.yaml#/definitions/pir_byte"
   
   # Position (3-byte compact)
-  - $ref: "lib/sensors/position.yaml#/definitions/latitude_3byte"
-  - $ref: "lib/sensors/position.yaml#/definitions/longitude_3byte"
+  - $ref: "schemas/library/sensors/position.yaml#/definitions/latitude_3byte"
+  - $ref: "schemas/library/sensors/position.yaml#/definitions/longitude_3byte"
 
 test_vectors:
   - name: normal_indoor

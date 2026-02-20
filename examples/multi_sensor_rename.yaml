@@ -13,28 +13,28 @@ description: Device with indoor and outdoor temperature sensors
 
 fields:
   # Message header
-  - $ref: "lib/common/headers.yaml#/definitions/msg_type_header"
+  - $ref: "schemas/library/common/headers.yaml#/definitions/msg_type_header"
   
   # Indoor temperature - rename field
-  - $ref: "lib/sensors/environmental.yaml#/definitions/temperature_c_div10"
+  - $ref: "schemas/library/sensors/environmental.yaml#/definitions/temperature_c_div10"
     rename:
       temperature: indoor_temp
   
   # Outdoor temperature - rename field  
-  - $ref: "lib/sensors/environmental.yaml#/definitions/temperature_c_div10"
+  - $ref: "schemas/library/sensors/environmental.yaml#/definitions/temperature_c_div10"
     rename:
       temperature: outdoor_temp
   
   # Two humidity sensors using prefix
-  - $ref: "lib/sensors/environmental.yaml#/definitions/humidity_pct_half"
+  - $ref: "schemas/library/sensors/environmental.yaml#/definitions/humidity_pct_half"
     prefix: "indoor_"
     
-  - $ref: "lib/sensors/environmental.yaml#/definitions/humidity_pct_half"
+  - $ref: "schemas/library/sensors/environmental.yaml#/definitions/humidity_pct_half"
     prefix: "outdoor_"
   
   # Battery with computed percentage (rename to avoid conflict)
-  - $ref: "lib/sensors/power.yaml#/definitions/battery_mv"
-  - $ref: "lib/sensors/power.yaml#/definitions/battery_pct_from_mv"
+  - $ref: "schemas/library/sensors/power.yaml#/definitions/battery_mv"
+  - $ref: "schemas/library/sensors/power.yaml#/definitions/battery_pct_from_mv"
 
 test_vectors:
   - name: normal_reading

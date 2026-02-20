@@ -12,14 +12,14 @@ description: Environmental sensor using library definitions
 
 fields:
   # Message type header from library
-  - $ref: "lib/common/headers.yaml#/definitions/msg_type_header"
+  - $ref: "schemas/library/common/headers.yaml#/definitions/msg_type_header"
   
   # Temperature and humidity from profile
-  - $ref: "lib/profiles/env-sensor.yaml#/definitions/temp_humidity"
+  - $ref: "schemas/library/profiles/env-sensor.yaml#/definitions/temp_humidity"
   
   # Battery from individual sensor definitions
-  - $ref: "lib/sensors/power.yaml#/definitions/battery_mv"
-  - $ref: "lib/sensors/power.yaml#/definitions/battery_pct_from_mv"
+  - $ref: "schemas/library/sensors/power.yaml#/definitions/battery_mv"
+  - $ref: "schemas/library/sensors/power.yaml#/definitions/battery_pct_from_mv"
   
   # Device-specific field (not from library)
   - name: report_interval

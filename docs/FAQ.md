@@ -97,14 +97,14 @@ Scores based on:
 
 ### Is there a library of pre-built sensor definitions?
 
-Yes. The `lib/` directory contains common sensors with scaling and IPSO mappings:
+Yes. The `schemas/library/` directory contains common sensors with scaling and IPSO mappings:
 
 | Category | File | Sensors |
 |----------|------|---------|
-| Environmental | `lib/sensors/environmental.yaml` | temperature, humidity, pressure, CO2, TVOC |
-| Power | `lib/sensors/power.yaml` | battery_mv, battery_pct, voltage, current |
-| Position | `lib/sensors/position.yaml` | GPS, accelerometer, gyroscope |
-| Digital | `lib/sensors/digital.yaml` | digital I/O, counter, presence |
+| Environmental | `schemas/library/sensors/environmental.yaml` | temperature, humidity, pressure, CO2, TVOC |
+| Power | `schemas/library/sensors/power.yaml` | battery_mv, battery_pct, voltage, current |
+| Position | `schemas/library/sensors/position.yaml` | GPS, accelerometer, gyroscope |
+| Digital | `schemas/library/sensors/digital.yaml` | digital I/O, counter, presence |
 
 ### How do I use library definitions?
 
@@ -112,8 +112,8 @@ Reference them with `$ref`:
 
 ```yaml
 fields:
-  - $ref: "lib/sensors/environmental.yaml#/definitions/temperature_c"
-  - $ref: "lib/sensors/power.yaml#/definitions/battery_mv"
+  - $ref: "schemas/library/sensors/environmental.yaml#/definitions/temperature_c"
+  - $ref: "schemas/library/sensors/power.yaml#/definitions/battery_mv"
 ```
 
 Then run the preprocessor:
@@ -128,11 +128,11 @@ Use `rename:` or `prefix:`:
 
 ```yaml
 fields:
-  - $ref: "lib/sensors/environmental.yaml#/definitions/temperature_c"
+  - $ref: "schemas/library/sensors/environmental.yaml#/definitions/temperature_c"
     rename:
       temperature: indoor_temp
       
-  - $ref: "lib/sensors/environmental.yaml#/definitions/temperature_c"
+  - $ref: "schemas/library/sensors/environmental.yaml#/definitions/temperature_c"
     rename:
       temperature: outdoor_temp
 ```
@@ -141,7 +141,7 @@ Or with prefix for groups:
 
 ```yaml
 fields:
-  - $ref: "lib/profiles/env-sensor.yaml#/definitions/temp_humidity"
+  - $ref: "schemas/library/profiles/env-sensor.yaml#/definitions/temp_humidity"
     prefix: "zone1_"
 ```
 
@@ -356,7 +356,7 @@ Add library paths:
 python tools/schema_preprocessor.py my_schema.yaml -L ../lib -o output.yaml
 ```
 
-Or check that `lib/` is in the expected location relative to your schema.
+Or check that `schemas/library/` is in the expected location relative to your schema.
 
 ---
 

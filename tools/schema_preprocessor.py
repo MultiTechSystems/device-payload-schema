@@ -13,21 +13,21 @@ Usage:
 
 References supported:
     $ref: "#/definitions/local"                    # Local (passed through)
-    $ref: "lib/sensors/env.yaml#/definitions/temp" # Cross-file (resolved)
-    $ref: "lib/sensors/env.yaml"                   # Entire file's fields
+    $ref: "schemas/library/sensors/env.yaml#/definitions/temp" # Cross-file (resolved)
+    $ref: "schemas/library/sensors/env.yaml"                   # Entire file's fields
 
 Field renaming (for multiple same-type sensors):
     # Rename specific fields
-    - $ref: "lib/sensors/environmental.yaml#/definitions/temperature_c"
+    - $ref: "schemas/library/sensors/environmental.yaml#/definitions/temperature_c"
       rename:
         temperature: indoor_temp
     
     # Add prefix to all fields
-    - $ref: "lib/sensors/environmental.yaml#/definitions/temperature_c"
+    - $ref: "schemas/library/sensors/environmental.yaml#/definitions/temperature_c"
       prefix: "outdoor_"
     
     # Combined (prefix applied first, then renames)
-    - $ref: "lib/profiles/env-sensor.yaml#/definitions/temp_humidity"
+    - $ref: "schemas/library/profiles/env-sensor.yaml#/definitions/temp_humidity"
       prefix: "room1_"
       rename:
         room1_temperature: room1_temp  # Override specific field after prefix

@@ -159,9 +159,9 @@ Reference library definitions to inherit semantic metadata:
 
 ```yaml
 fields:
-  - $ref: "lib/sensors/environmental.yaml#/definitions/temperature_c_div10"
-  - $ref: "lib/sensors/environmental.yaml#/definitions/humidity_pct"
-  - $ref: "lib/sensors/power.yaml#/definitions/battery_pct"
+  - $ref: "schemas/library/sensors/environmental.yaml#/definitions/temperature_c_div10"
+  - $ref: "schemas/library/sensors/environmental.yaml#/definitions/humidity_pct"
+  - $ref: "schemas/library/sensors/power.yaml#/definitions/battery_pct"
 ```
 
 The interpreter's `get_field_metadata()` returns all semantic fields:

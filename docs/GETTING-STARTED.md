@@ -124,9 +124,9 @@ version: 1
 endian: big
 
 fields:
-  - $ref: "lib/common/headers.yaml#/definitions/msg_type_header"
-  - $ref: "lib/profiles/env-sensor.yaml#/definitions/temp_humidity"
-  - $ref: "lib/sensors/power.yaml#/definitions/battery_mv"
+  - $ref: "schemas/library/common/headers.yaml#/definitions/msg_type_header"
+  - $ref: "schemas/library/profiles/env-sensor.yaml#/definitions/temp_humidity"
+  - $ref: "schemas/library/sensors/power.yaml#/definitions/battery_mv"
 ```
 
 ### Process Schema
@@ -143,22 +143,22 @@ python tools/validate_schema.py schemas/mycompany/my_env_sensor_resolved.yaml -v
 
 | Category | Library File | Sensors |
 |----------|--------------|---------|
-| Environmental | `lib/sensors/environmental.yaml` | temperature, humidity, pressure, CO2, TVOC, illuminance |
-| Power | `lib/sensors/power.yaml` | battery_mv, battery_pct, voltage, current, power, energy |
-| Position | `lib/sensors/position.yaml` | latitude, longitude, altitude, accelerometer, gyroscope |
-| Digital | `lib/sensors/digital.yaml` | digital_input, digital_output, counter, presence |
-| Distance | `lib/sensors/distance.yaml` | distance_mm, level_pct, radar |
-| Flow | `lib/sensors/flow.yaml` | flow_rate, total_volume |
+| Environmental | `schemas/library/sensors/environmental.yaml` | temperature, humidity, pressure, CO2, TVOC, illuminance |
+| Power | `schemas/library/sensors/power.yaml` | battery_mv, battery_pct, voltage, current, power, energy |
+| Position | `schemas/library/sensors/position.yaml` | latitude, longitude, altitude, accelerometer, gyroscope |
+| Digital | `schemas/library/sensors/digital.yaml` | digital_input, digital_output, counter, presence |
+| Distance | `schemas/library/sensors/distance.yaml` | distance_mm, level_pct, radar |
+| Flow | `schemas/library/sensors/flow.yaml` | flow_rate, total_volume |
 
 ### Sensor Profiles (Pre-built Combinations)
 
 | Profile | File | Contents |
 |---------|------|----------|
-| `temp_humidity` | `lib/profiles/env-sensor.yaml` | Temperature + Humidity |
-| `temp_humidity_pressure` | `lib/profiles/env-sensor.yaml` | + Pressure |
-| `indoor_air_quality` | `lib/profiles/env-sensor.yaml` | + CO2 + TVOC |
-| `gps_basic` | `lib/profiles/tracker.yaml` | Lat + Lon + Alt |
-| `full_tracker` | `lib/profiles/tracker.yaml` | GPS + Speed + Heading + Battery |
+| `temp_humidity` | `schemas/library/profiles/env-sensor.yaml` | Temperature + Humidity |
+| `temp_humidity_pressure` | `schemas/library/profiles/env-sensor.yaml` | + Pressure |
+| `indoor_air_quality` | `schemas/library/profiles/env-sensor.yaml` | + CO2 + TVOC |
+| `gps_basic` | `schemas/library/profiles/tracker.yaml` | Lat + Lon + Alt |
+| `full_tracker` | `schemas/library/profiles/tracker.yaml` | GPS + Speed + Heading + Battery |
 
 ### Multiple Sensors of Same Type
 
@@ -167,19 +167,19 @@ Use `rename:` or `prefix:` when you have multiple sensors:
 ```yaml
 fields:
   # Two temperature sensors
-  - $ref: "lib/sensors/environmental.yaml#/definitions/temperature_c"
+  - $ref: "schemas/library/sensors/environmental.yaml#/definitions/temperature_c"
     rename:
       temperature: indoor_temp
       
-  - $ref: "lib/sensors/environmental.yaml#/definitions/temperature_c"
+  - $ref: "schemas/library/sensors/environmental.yaml#/definitions/temperature_c"
     rename:
       temperature: outdoor_temp
 
   # Or use prefix for groups
-  - $ref: "lib/profiles/env-sensor.yaml#/definitions/temp_humidity"
+  - $ref: "schemas/library/profiles/env-sensor.yaml#/definitions/temp_humidity"
     prefix: "zone1_"
     
-  - $ref: "lib/profiles/env-sensor.yaml#/definitions/temp_humidity"
+  - $ref: "schemas/library/profiles/env-sensor.yaml#/definitions/temp_humidity"
     prefix: "zone2_"
 ```
 
@@ -190,7 +190,7 @@ fields:
 3. **Less typing** - Common patterns ready to use
 4. **SenML units** - RFC 8428 compliance built-in
 
-See `lib/README.md` for the complete library reference.
+See `schemas/library/README.md` for the complete library reference.
 
 ## Common Patterns
 
@@ -351,7 +351,7 @@ output/
 
 ## Next Steps
 
-1. **[Sensor Library](../lib/README.md)** - Pre-built sensor definitions with IPSO mappings
+1. **[Sensor Library](../schemas/library/README.md)** - Pre-built sensor definitions with IPSO mappings
 2. **[Schema Language Reference](SCHEMA-LANGUAGE-REFERENCE.md)** - Full field type and modifier documentation
 3. **[Output Formats](OUTPUT-FORMATS.md)** - IPSO, SenML, TTN normalized output
 4. **[Bidirectional Codec](BIDIRECTIONAL-CODEC.md)** - Downlink encoding for device configuration
