@@ -496,9 +496,9 @@ ports:
   senml_unit: "Cel"   # SenML unit
 ```
 
-## OPC UA Semantic Fields
+## Semantic Fields
 
-Fields for industrial interoperability and value quality tracking.
+Fields for value quality tracking and IoT interoperability.
 
 ### Valid Range
 
@@ -529,8 +529,6 @@ Declares expected output value bounds. Out-of-range values produce quality warni
 }
 ```
 
-**OPC UA Mapping:** Maps to `EURange` (EngineeringUnit Range).
-
 ### Resolution
 
 Documents minimum detectable change. Useful for fixed-point scaling and code generation.
@@ -544,8 +542,6 @@ Documents minimum detectable change. Useful for fixed-point scaling and code gen
 ```
 
 **Interpreter Behavior:** Included in metadata output. Optional rounding to resolution in strict mode.
-
-**OPC UA Mapping:** Maps to `AnalogItemType` resolution metadata.
 
 ### UNECE Unit Codes
 
@@ -575,8 +571,6 @@ Standard unit identifiers per UNECE Recommendation 20.
 | Distance (mm) | MMT | mm |
 | Mass (kg) | KGM | kg |
 | Time (s) | SEC | s |
-
-**OPC UA Mapping:** Maps to `EngineeringUnits.UnitId`.
 
 ### Combined Example
 
@@ -636,6 +630,6 @@ SEMANTICS:    unit | ipso | senml_unit | valid_range | resolution | unece
 
 ## See Also
 
-- [FUTURE-FEATURES.md](FUTURE-FEATURES.md) - Proposed additions: `valid_range`, `resolution`, `unece`
+- [FUTURE-FEATURES.md](FUTURE-FEATURES.md) - Roadmap and semantic field documentation
 - [OUTPUT-FORMATS.md](OUTPUT-FORMATS.md) - Output format specifications
 - [C-CODE-GENERATION.md](C-CODE-GENERATION.md) - Embedded firmware codec generation

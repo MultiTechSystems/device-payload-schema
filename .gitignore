@@ -58,3 +58,6 @@ htmlcov/
 # pytest
 .pytest_cache/
 .hypothesis/
+
+# Local-only documentation (not for upstream)
+docs/local/

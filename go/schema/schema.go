@@ -150,7 +150,7 @@ type Field struct {
 	Prefix    string  `json:"prefix,omitempty" yaml:"prefix,omitempty"`
 	// Formula (can reference $field_name for computed values) - DEPRECATED
 	Formula string `json:"formula,omitempty" yaml:"formula,omitempty"`
-	// OPC UA semantic fields
+	// Semantic fields
 	ValidRange []float64 `json:"valid_range,omitempty" yaml:"valid_range,omitempty"` // [min, max] bounds for quality checks
 	Resolution *float64  `json:"resolution,omitempty" yaml:"resolution,omitempty"`   // Minimum detectable change
 	UNECE      string    `json:"unece,omitempty" yaml:"unece,omitempty"`             // UNECE Rec 20 unit code
@@ -870,7 +870,7 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 		f.Formula = formula
 	}
 
-	// OPC UA semantic fields
+	// Semantic fields
 	if vrRaw, ok := fm["valid_range"].([]any); ok {
 		for _, v := range vrRaw {
 			if vf, ok := toFloat64(v); ok {
@@ -1051,7 +1051,7 @@ func collectFieldMetadata(fields []Field, result map[string]FieldMetadata) {
 		}
 		
 		// These would need to be added to Field struct if needed
-		// For now, just include the OPC UA semantic fields
+		// For now, just include the semantic fields
 		
 		if len(meta.ValidRange) > 0 || meta.Resolution != nil || meta.UNECE != "" {
 			result[f.Name] = meta

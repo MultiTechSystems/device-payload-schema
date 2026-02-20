@@ -29,57 +29,29 @@
 - Updated `SPEC-IMPLEMENTATION-STATUS.md` with benchmarks
 - Created `FUTURE-FEATURES.md` roadmap
 
-### OPC UA Analysis
-
-Analyzed OPC UA standards for sensor information modeling:
-- OPC UA Part 8 (Data Access) - AnalogItemType, EUInformation
-- Companion specs: DI, IO-Link, ISA-95, PADIM
-- UNECE Recommendation 20 unit codes
-
-Compared with TTN codec analysis - identified gaps:
-- No standardized range validation
-- No resolution metadata
-- No standard unit codes
+**Semantic Fields (Implemented)**
+- `valid_range: [min, max]` - bounds checking with `_quality` flags
+- `resolution` - minimum detectable change metadata
+- `unece` - standard unit codes (UNECE Recommendation 20)
+- Schema validation in `validate_schema.py`
+- Python interpreter support with quality output
+- Go interpreter support with quality output
+- Test coverage in both Python and Go
 
 ---
 
 ## Future TODO
 
-### OPC UA Semantics Integration
+See [FUTURE-FEATURES.md](docs/FUTURE-FEATURES.md) for detailed roadmap.
 
-**Priority 1: `valid_range`**
-- Add `valid_range: [min, max]` to schema fields
-- Interpreter returns `_quality` flags for out-of-range values
-- Embedded codegen produces bounds constants and validation
-- Maps to OPC UA `EURange`
+**Planned:**
+- Embedded codegen: bounds constants from `valid_range`, scale constants from `resolution`
+- Output format extensions: SenML vmin/vmax, IPSO 5603/5604
 
-**Priority 2: `resolution`**
-- Add `resolution: 0.01` for minimum detectable change
-- Embedded codegen produces scale constants
-- Maps to OPC UA sensor resolution
-
-**Priority 3: `unece` unit codes**
-- Add `unece: "CEL"` for standard unit identifiers
-- Enables OPC UA `EngineeringUnits.UnitId` mapping
-- List of common codes in `FUTURE-FEATURES.md`
-
-**Priority 4: Documentation metadata**
-- `accuracy` - measurement accuracy (±value)
-- `instrument_range` - physical sensor limits
-- Generated as comments in embedded code
-
-### Implementation Steps
-
-1. Schema validation updates (`validate_schema.py`)
-2. Python interpreter changes (quality flags in output)
-3. Go interpreter changes (quality flags in output)
-4. Embedded codegen updates (constants, bounds checks)
-5. Output format extensions (SenML vmin/vmax, IPSO 5603/5604)
-6. Test coverage for new fields
+**Out of Scope (device profile, not schema):**
+- `accuracy`, `instrument_range` - static sensor characteristics belong in device registries
 
 ### References
 
-- [FUTURE-FEATURES.md](docs/FUTURE-FEATURES.md) - Detailed specifications
-- OPC UA Part 8: Data Access
+- [FUTURE-FEATURES.md](docs/FUTURE-FEATURES.md)
 - UNECE Recommendation 20
-- OMA LwM2M Object 3303

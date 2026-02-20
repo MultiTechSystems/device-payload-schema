@@ -1,6 +1,6 @@
 # Sensor Library Semantic Mapping
 
-Coverage of IPSO, SenML, UNECE (OPC UA), and TTN sensor types.
+Coverage of IPSO, SenML, UNECE, and TTN sensor types.
 
 ## Coverage Summary
 
@@ -8,7 +8,7 @@ Coverage of IPSO, SenML, UNECE (OPC UA), and TTN sensor types.
 |----------|-------------|-------|
 | TTN sensor types | 100% | All 70+ TTN types covered |
 | IPSO Object IDs | 43 refs | Core sensor objects |
-| UNECE codes | 60 refs | OPC UA EngineeringUnits |
+| UNECE codes | 60 refs | Standard unit identifiers |
 | SenML units | via unit field | RFC 8428 compatible |
 
 ## IPSO Object ID Reference
@@ -45,7 +45,7 @@ Coverage of IPSO, SenML, UNECE (OPC UA), and TTN sensor types.
 | 3336 | GPS Location | `position.yaml: latitude, longitude` |
 | 3347 | Push Button | `user_input.yaml: button_pressed` |
 
-## UNECE Code Reference (OPC UA)
+## UNECE Code Reference
 
 | UNECE | Unit | Library Usage |
 |-------|------|---------------|

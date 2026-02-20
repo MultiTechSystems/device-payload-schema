@@ -338,7 +338,7 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                 elif mod in ('mult', 'div') and val == 0:
                     errors.append(f"{path}[{i}] ({name}): '{mod}' must not be zero")
         
-        # Validate OPC UA semantic fields
+        # Validate semantic fields
         if 'valid_range' in fld:
             vr = fld['valid_range']
             if not isinstance(vr, list) or len(vr) != 2:

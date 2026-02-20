@@ -4683,11 +4683,10 @@ class TestBase64SchemaEdgeCases:
         assert decoded['fields'] == []
 
 
-class TestOPCUASemanticFields:
-    """Tests for OPC UA semantic fields: valid_range, resolution, unece.
+class TestSemanticFields:
+    """Tests for semantic fields: valid_range, resolution, unece.
     
-    These fields enable industrial interoperability and quality tracking
-    per OPC UA Part 8 (Data Access) specifications.
+    These fields enable IoT interoperability and quality tracking.
     """
     
     def test_valid_range_in_range(self):
@@ -4849,7 +4848,7 @@ class TestOPCUASemanticFields:
         assert '_quality' not in result.data
     
     def test_valid_range_with_resolution_and_unece(self):
-        """Test schema with all OPC UA semantic fields."""
+        """Test schema with all semantic fields."""
         schema = {
             'name': 'test',
             'fields': [

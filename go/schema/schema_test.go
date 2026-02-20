@@ -7693,7 +7693,7 @@ func TestDecodeCompactEdgeCaseHugeCount(t *testing.T) {
 	}
 }
 
-// Tests for OPC UA semantic fields: valid_range, resolution, unece
+// Tests for semantic fields: valid_range, resolution, unece
 
 func TestValidRangeInRange(t *testing.T) {
 	schema, err := ParseSchema(`

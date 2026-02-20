@@ -274,7 +274,7 @@ See [FUTURE-FEATURES.md](FUTURE-FEATURES.md) for detailed specifications.
 |---------|-------|----------|
 | `valid_range` | Quality flags, bounds checking | **P1** |
 | `resolution` | Generated constants | P2 |
-| `unece` | OPC UA interoperability | P3 |
+| `unece` | Standard unit identifiers | P3 |
 | `accuracy` | Documentation | P4 |
 
 ### Not Planned

@@ -1,6 +1,6 @@
 # Environmental Sensor Library
 # Common patterns from TTN device repo and Milesight/Decentlab schemas
-# All definitions include OPC UA semantic fields
+# All definitions include semantic fields (valid_range, resolution, unece)
 
 definitions:
   # === TEMPERATURE ===
