@@ -4,12 +4,32 @@ generate_firmware_codec.py - Generate firmware C codec from Payload Schema YAML.
 
 Generates a header-only C file with:
   - Struct definitions for each payload variant
-  - pack_<name>() encoder (sensor values → bytes for LoRaWAN TX)
-  - unpack_<name>() decoder (bytes → struct for downlink RX)
+  - pack_<name>() encoder (raw sensor values → bytes for LoRaWAN TX)
+  - unpack_<name>() decoder (bytes → raw struct for downlink RX)
   - payload_size_<name>() size calculator
   - Static test vectors for validation
 
 Targets: Zephyr RTOS, Arduino, STM32 HAL, bare-metal ARM
+
+DESIGN DECISION: Raw Values Only (No Transforms)
+------------------------------------------------
+The C firmware codec works with RAW wire values only. Schema transforms
+(div, mult, sqrt, polynomial, etc.) are NOT applied in the generated C code.
+
+Rationale:
+  1. Sensors typically produce raw ADC/register values ready to transmit
+  2. Simple normalization (e.g., *10 for fixed-point) is done at sensor read time
+  3. Complex transforms (sqrt, log, polynomial calibration) belong server-side
+     where CPU/memory is plentiful
+  4. This keeps firmware small and avoids requiring <math.h> (~2-8KB on embedded)
+  5. Transform logic lives in one place (Python/JS interpreter) not duplicated
+
+Data flow:
+  UPLINK:   Device reads raw sensor → pack_*() → bytes → Network decode + transform
+  DOWNLINK: Network encode (reverse transform) → bytes → unpack_*() → raw config
+
+If application code needs transformed values on-device, apply them manually:
+  float temp_celsius = (float)data.temperature_raw / 100.0f - 40.0f;
 
 Usage:
     python tools/generate_firmware_codec.py schema.yaml [-o output.h]
@@ -250,31 +270,38 @@ class FirmwareGenerator:
         self.version = schema.get('version', 1)
         self.endian = schema.get('endian', 'big')
         self.has_ports = 'ports' in schema
+        self.needs_math = False  # Track if math.h is needed
 
     def generate(self) -> str:
         guard = f'{self.name_upper}_CODEC_H'
-        sections = []
-
-        sections.append(self._gen_header(guard))
-        sections.append(self._gen_read_write_helpers())
+        
+        # Generate body first to determine if math.h is needed
+        body_sections = []
+        body_sections.append(self._gen_read_write_helpers())
 
         if self.has_ports:
             for port_key, port_def in self.schema['ports'].items():
-                sections.append(self._gen_port_section(int(port_key), port_def))
+                body_sections.append(self._gen_port_section(int(port_key), port_def))
         else:
             fields = self.schema.get('fields', [])
-            sections.append(self._gen_struct(self.name, fields))
-            sections.append(self._gen_sizes(self.name, fields))
-            sections.append(self._gen_pack(self.name, fields))
-            sections.append(self._gen_unpack(self.name, fields))
+            body_sections.append(self._gen_struct(self.name, fields))
+            body_sections.append(self._gen_sizes(self.name, fields))
+            body_sections.append(self._gen_pack(self.name, fields))
+            body_sections.append(self._gen_unpack(self.name, fields))
 
-        sections.append(self._gen_test_vectors())
+        body_sections.append(self._gen_test_vectors())
+        
+        # Now generate header with correct includes
+        sections = []
+        sections.append(self._gen_header(guard))
+        sections.extend(body_sections)
         sections.append(self._gen_footer(guard))
 
         return '\n'.join(sections)
 
     def _gen_header(self, guard: str) -> str:
         desc = self.schema.get('description', '').strip().replace('\n', '\n * ')
+        math_include = '#include <math.h>\n' if self.needs_math else ''
         return f'''/**
  * {self.name}_codec.h — Auto-generated firmware codec
  *
@@ -294,7 +321,7 @@ class FirmwareGenerator:
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
-'''
+{math_include}'''
 
     def _gen_footer(self, guard: str) -> str:
         return f'''
@@ -367,6 +394,36 @@ static inline uint32_t get_u32_le(const uint8_t *buf, size_t *pos) {
                  ((uint32_t)buf[*pos+2] << 16) | ((uint32_t)buf[*pos+3] << 24);
     *pos += 4; return v;
 }
+
+static inline uint64_t get_u64_be(const uint8_t *buf, size_t *pos) {
+    uint64_t v = ((uint64_t)buf[*pos] << 56) | ((uint64_t)buf[*pos+1] << 48) |
+                 ((uint64_t)buf[*pos+2] << 40) | ((uint64_t)buf[*pos+3] << 32) |
+                 ((uint64_t)buf[*pos+4] << 24) | ((uint64_t)buf[*pos+5] << 16) |
+                 ((uint64_t)buf[*pos+6] << 8) | buf[*pos+7];
+    *pos += 8; return v;
+}
+
+static inline uint64_t get_u64_le(const uint8_t *buf, size_t *pos) {
+    uint64_t v = buf[*pos] | ((uint64_t)buf[*pos+1] << 8) |
+                 ((uint64_t)buf[*pos+2] << 16) | ((uint64_t)buf[*pos+3] << 24) |
+                 ((uint64_t)buf[*pos+4] << 32) | ((uint64_t)buf[*pos+5] << 40) |
+                 ((uint64_t)buf[*pos+6] << 48) | ((uint64_t)buf[*pos+7] << 56);
+    *pos += 8; return v;
+}
+
+static inline void put_u64_be(uint8_t *buf, size_t *pos, uint64_t v) {
+    buf[*pos] = (v >> 56); buf[*pos+1] = (v >> 48) & 0xFF;
+    buf[*pos+2] = (v >> 40) & 0xFF; buf[*pos+3] = (v >> 32) & 0xFF;
+    buf[*pos+4] = (v >> 24) & 0xFF; buf[*pos+5] = (v >> 16) & 0xFF;
+    buf[*pos+6] = (v >> 8) & 0xFF; buf[*pos+7] = v & 0xFF; *pos += 8;
+}
+
+static inline void put_u64_le(uint8_t *buf, size_t *pos, uint64_t v) {
+    buf[*pos] = v & 0xFF; buf[*pos+1] = (v >> 8) & 0xFF;
+    buf[*pos+2] = (v >> 16) & 0xFF; buf[*pos+3] = (v >> 24) & 0xFF;
+    buf[*pos+4] = (v >> 32) & 0xFF; buf[*pos+5] = (v >> 40) & 0xFF;
+    buf[*pos+6] = (v >> 48) & 0xFF; buf[*pos+7] = (v >> 56) & 0xFF; *pos += 8;
+}
 '''
 
     def _gen_port_section(self, port_key: int, port_def: Dict) -> str:
@@ -398,12 +455,8 @@ static inline uint32_t get_u32_le(const uint8_t *buf, size_t *pos) {
                 maxlen = fdef.get('length', 16) + 1
                 lines.append(f'    char {cname}[{maxlen}];')
             else:
-                # Determine if we need a float for decoded value or raw int
-                has_modifier = any(k in fdef for k in ('div', 'mult', 'add', 'formula', 'transform'))
-                if has_modifier and not is_float(fdef.get('type', '')):
-                    lines.append(f'    float {cname};{unit_comment}')
-                else:
-                    lines.append(f'    {ctype} {cname};{unit_comment}')
+                # Store raw wire types - transforms applied on decode (network-side)
+                lines.append(f'    {ctype} {cname};{unit_comment}')
         # Presence flags for flagged groups (only if not already in struct)
         existing_names = {m[0] for m in members}
         for field in fields:
@@ -503,9 +556,9 @@ static inline uint32_t get_u32_le(const uint8_t *buf, size_t *pos) {
                 self._gen_pack_tlv(lines, field['tlv'], indent, suffix)
                 continue
 
-            # match — skip
+            # match/switch — generate switch statement
             if 'match' in field:
-                lines.append(f'{indent}/* TODO: match encoding */')
+                self._gen_pack_match(lines, field['match'], indent, suffix)
                 continue
 
             # type: number (computed) — skip
@@ -549,19 +602,21 @@ static inline uint32_t get_u32_le(const uint8_t *buf, size_t *pos) {
                 lines.append(f'{indent}put_u{sz*8}{suffix}(buf, &pos, {const_val});')
             return
 
-        has_modifier = any(k in field for k in ('div', 'mult', 'add', 'formula', 'transform'))
-        if 'formula' in field and not any(k in field for k in ('div', 'mult', 'add', 'transform')):
-            lines.append(f'{indent}/* formula field: provide raw value */')
-            lines.append(f'{indent}/* decode formula: {field["formula"]} */')
+        # Handle float types specially (IEEE 754 bit pattern)
+        if is_float(ftype):
+            if sz == 4:
+                lines.append(f'{indent}{{ union {{ float f; uint32_t u; }} conv; conv.f = data->{cname}; put_u{sz*8}{suffix}(buf, &pos, conv.u); }}')
+            else:  # f64
+                lines.append(f'{indent}{{ union {{ double f; uint64_t u; }} conv; conv.f = data->{cname}; put_u{sz*8}{suffix}(buf, &pos, conv.u); }}')
+            return
 
-        rev = self._c_reverse_mod(f'data->{cname}', field)
-
+        # Pack raw values directly - transforms are applied on decode (network-side)
         if sz == 1:
-            lines.append(f'{indent}put_u8(buf, &pos, (uint8_t)({rev}));')
+            lines.append(f'{indent}put_u8(buf, &pos, (uint8_t)(data->{cname}));')
         elif is_signed(ftype):
-            lines.append(f'{indent}put_u{sz*8}{suffix}(buf, &pos, (uint{sz*8}_t)(int{sz*8}_t)({rev}));')
+            lines.append(f'{indent}put_u{sz*8}{suffix}(buf, &pos, (uint{sz*8}_t)(int{sz*8}_t)(data->{cname}));')
         else:
-            lines.append(f'{indent}put_u{sz*8}{suffix}(buf, &pos, (uint{sz*8}_t)({rev}));')
+            lines.append(f'{indent}put_u{sz*8}{suffix}(buf, &pos, (uint{sz*8}_t)(data->{cname}));')
 
     def _gen_pack_tlv(self, lines: List[str], tlv: Dict, indent: str, suffix: str):
         tag_fields = tlv.get('tag_fields', [])
@@ -590,16 +645,98 @@ static inline uint32_t get_u32_le(const uint8_t *buf, size_t *pos) {
                 self._gen_pack_one(lines, cf, indent + '    ', suffix)
             lines.append(f'{indent}}}')
 
+    def _gen_pack_match(self, lines: List[str], match: Dict, indent: str, suffix: str):
+        """Generate switch statement for match encoding."""
+        field_ref = match.get('field', '')
+        # Remove $ prefix if present
+        field_name = field_ref.lstrip('$')
+        cfield = to_c(field_name)
+        cases = match.get('cases', {})
+        
+        lines.append(f'{indent}/* match on {field_name} */')
+        lines.append(f'{indent}switch (data->{cfield}) {{')
+        
+        for case_val, case_fields in cases.items():
+            if case_val == '_':
+                lines.append(f'{indent}default:')
+            else:
+                # Handle range syntax (e.g., "1..5")
+                if '..' in str(case_val):
+                    start, end = str(case_val).split('..')
+                    for v in range(int(start), int(end) + 1):
+                        lines.append(f'{indent}case {v}:')
+                else:
+                    lines.append(f'{indent}case {case_val}:')
+            
+            if isinstance(case_fields, list):
+                for cf in case_fields:
+                    self._gen_pack_one(lines, cf, indent + '    ', suffix)
+            lines.append(f'{indent}    break;')
+        
+        lines.append(f'{indent}}}')
+
     def _c_reverse_mod(self, expr: str, field: Dict) -> str:
-        """Generate C expression to reverse modifiers in opposite YAML key order: value → raw."""
-        has_formula_only = 'formula' in field and not any(k in field for k in ('div', 'mult', 'add'))
+        """Generate C expression to reverse modifiers in opposite YAML key order: value → raw.
+        
+        NOTE: Currently unused in firmware codec generation (devices pack raw values).
+        Retained for future --network-encoder mode for:
+          - Simulated sensors generating test payloads from human-readable values
+          - C-based LNS/gateway encoding downlinks
+          - Test harness payload generation
+        """
+        has_formula_only = 'formula' in field and not any(k in field for k in ('div', 'mult', 'add', 'transform'))
         if has_formula_only:
             return expr  # Can't auto-reverse arbitrary formula
 
-        # Collect modifier keys in YAML order, then reverse
-        mod_keys = [k for k in field if k in ('add', 'mult', 'div')]
         result = expr
+        needs_float = False
+
+        # First reverse transform array (in reverse order)
+        if 'transform' in field:
+            needs_float = True
+            for op in reversed(field['transform']):
+                if 'sqrt' in op and op['sqrt']:
+                    # sqrt → square
+                    result = f'({result} * {result})'
+                elif 'abs' in op and op['abs']:
+                    # abs is lossy - can't reverse, pass through with warning comment
+                    result = f'{result} /* WARNING: abs() loses sign */'
+                elif 'pow' in op:
+                    # pow: n → pow: 1/n
+                    n = float(op['pow'])
+                    if n != 0:
+                        self.needs_math = True
+                        result = f'powf({result}, {1.0/n}f)'
+                elif 'floor' in op:
+                    # floor (lower clamp) - pass through, lossy
+                    pass
+                elif 'ceiling' in op:
+                    # ceiling (upper clamp) - pass through, lossy
+                    pass
+                elif 'clamp' in op:
+                    # clamp - pass through, lossy
+                    pass
+                elif 'log10' in op and op['log10']:
+                    # log10 → 10^x
+                    self.needs_math = True
+                    result = f'powf(10.0f, {result})'
+                elif 'log' in op and op['log']:
+                    # log → e^x
+                    self.needs_math = True
+                    result = f'expf({result})'
+                elif 'add' in op:
+                    result = f'({result} - ({float(op["add"])}f))'
+                elif 'mult' in op:
+                    result = f'({result} / {float(op["mult"])}f)'
+                elif 'div' in op and op['div'] != 0:
+                    result = f'({result} * {float(op["div"])}f)'
+                elif 'sub' in op:
+                    result = f'({result} + ({float(op["sub"])}f))'
+
+        # Then reverse top-level modifiers in YAML key order (reversed)
+        mod_keys = [k for k in field if k in ('add', 'mult', 'div')]
         for key in reversed(mod_keys):
+            needs_float = True
             if key == 'add':
                 result = f'({result} - ({float(field["add"])}f))'
             elif key == 'div':
@@ -607,8 +744,8 @@ static inline uint32_t get_u32_le(const uint8_t *buf, size_t *pos) {
             elif key == 'mult':
                 result = f'({result} / {float(field["mult"])}f)'
 
-        # If any modifier was applied, we need rounding
-        if mod_keys:
+        # If any modifier was applied, we need rounding for integer output
+        if needs_float:
             return f'(int32_t)({result} + 0.5f)'
 
         return result
@@ -681,7 +818,7 @@ static inline uint32_t get_u32_le(const uint8_t *buf, size_t *pos) {
                 continue
 
             if 'match' in field:
-                lines.append(f'{indent}/* match decoding — use reference interpreter */')
+                self._gen_unpack_match(lines, field['match'], indent, suffix)
                 continue
 
             if field.get('type') == 'number':
@@ -711,9 +848,18 @@ static inline uint32_t get_u32_le(const uint8_t *buf, size_t *pos) {
 
         lines.append(f'{indent}if (pos + {sz} > len) return -1;')
 
-        signed = is_signed(ftype)
         eo = field_endian(ftype, self.endian)
         esuffix = '_be' if eo == 'big' else '_le'
+
+        # Handle float types specially
+        if is_float(ftype):
+            if sz == 4:
+                lines.append(f'{indent}{{ union {{ float f; uint32_t u; }} conv; conv.u = get_u32{esuffix}(buf, &pos); data->{cname} = conv.f; }}')
+            else:  # f64
+                lines.append(f'{indent}{{ union {{ double f; uint64_t u; }} conv; conv.u = get_u64{esuffix}(buf, &pos); data->{cname} = conv.f; }}')
+            return
+
+        signed = is_signed(ftype)
 
         if sz == 1:
             raw = 'get_u8(buf, &pos)'
@@ -731,10 +877,48 @@ static inline uint32_t get_u32_le(const uint8_t *buf, size_t *pos) {
                 lines.append(f'{indent}(void){raw}; /* {name} */')
             return
 
-        val = self._c_apply_mod(raw, field)
-        lines.append(f'{indent}data->{cname} = {val};')
+        # Store raw value - transforms applied by network-side interpreter
+        lines.append(f'{indent}data->{cname} = {raw};')
+
+    def _gen_unpack_match(self, lines: List[str], match: Dict, indent: str, suffix: str):
+        """Generate switch statement for match decoding."""
+        field_ref = match.get('field', '')
+        # Remove $ prefix if present
+        field_name = field_ref.lstrip('$')
+        cfield = to_c(field_name)
+        cases = match.get('cases', {})
+        
+        lines.append(f'{indent}/* match on {field_name} */')
+        lines.append(f'{indent}switch (data->{cfield}) {{')
+        
+        for case_val, case_fields in cases.items():
+            if case_val == '_':
+                lines.append(f'{indent}default:')
+            else:
+                # Handle range syntax (e.g., "1..5")
+                if '..' in str(case_val):
+                    start, end = str(case_val).split('..')
+                    for v in range(int(start), int(end) + 1):
+                        lines.append(f'{indent}case {v}:')
+                else:
+                    lines.append(f'{indent}case {case_val}:')
+            
+            if isinstance(case_fields, list):
+                for cf in case_fields:
+                    self._gen_unpack_one(lines, cf, indent + '    ', suffix)
+            lines.append(f'{indent}    break;')
+        
+        lines.append(f'{indent}}}')
 
     def _c_apply_mod(self, raw_expr: str, field: Dict) -> str:
+        """Generate C expression to apply modifiers: raw → decoded value.
+        
+        NOTE: Currently unused in firmware codec generation (devices use raw values).
+        Retained for future --network-decoder mode for:
+          - C-based LNS/gateway decoding uplinks with transforms
+          - Edge computing with on-device transform application
+          - Test validation comparing decoded values
+        """
         if 'formula' in field:
             return raw_expr  # Application computes
         expr = raw_expr
@@ -751,22 +935,30 @@ static inline uint32_t get_u32_le(const uint8_t *buf, size_t *pos) {
         if 'transform' in field:
             for op in field['transform']:
                 if 'sqrt' in op and op['sqrt']:
+                    self.needs_math = True
                     expr = f'sqrtf({expr} > 0 ? {expr} : 0)'
                 elif 'abs' in op and op['abs']:
+                    self.needs_math = True
                     expr = f'fabsf({expr})'
                 elif 'pow' in op:
+                    self.needs_math = True
                     expr = f'powf({expr}, {float(op["pow"])}f)'
                 elif 'floor' in op:  # Clamp lower
+                    self.needs_math = True
                     expr = f'fmaxf({expr}, {float(op["floor"])}f)'
                 elif 'ceiling' in op:  # Clamp upper
+                    self.needs_math = True
                     expr = f'fminf({expr}, {float(op["ceiling"])}f)'
                 elif 'clamp' in op:
+                    self.needs_math = True
                     bounds = op['clamp']
                     if isinstance(bounds, list) and len(bounds) >= 2:
                         expr = f'fmaxf({float(bounds[0])}f, fminf({float(bounds[1])}f, {expr}))'
                 elif 'log10' in op and op['log10']:
+                    self.needs_math = True
                     expr = f'log10f({expr} > 1e-10f ? {expr} : 1e-10f)'
                 elif 'log' in op and op['log']:
+                    self.needs_math = True
                     expr = f'logf({expr} > 1e-10f ? {expr} : 1e-10f)'
                 elif 'add' in op:
                     expr = f'({expr} + {float(op["add"])}f)'
@@ -774,6 +966,8 @@ static inline uint32_t get_u32_le(const uint8_t *buf, size_t *pos) {
                     expr = f'({expr} * {float(op["mult"])}f)'
                 elif 'div' in op and op['div'] != 0:
                     expr = f'({expr} / {float(op["div"])}f)'
+                elif 'sub' in op:
+                    expr = f'({expr} - {float(op["sub"])}f)'
         
         return expr
 
