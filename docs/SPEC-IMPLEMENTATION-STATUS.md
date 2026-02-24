@@ -178,6 +178,15 @@ Feature support matrix across reference implementations.
 - Eval-free generated code
 - TS013 format compliant
 
+### Output JSON Schema (`tools/generate_output_schema.py`)
+
+**Validation schemas** for decoder output.
+
+- Describes structure of decoded payload data
+- JSON Schema draft-07 compliant
+- Includes type constraints, ranges, and descriptions
+- Enables standard JSON Schema validation of codec output
+
 ## Test Coverage
 
 | Test Suite | Python | Go | C |

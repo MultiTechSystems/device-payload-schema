@@ -108,7 +108,7 @@ def run_python_tests(schema: Dict[str, Any]) -> Tuple[bool, int, int, List[str]]
         tv_name = tv.get('name', f'test_{i}')
         payload_hex = tv.get('payload', '').replace(' ', '')
         expected = tv.get('expected', {})
-        fport = tv.get('fPort', None)
+        fport = tv.get('fPort') or tv.get('fport')
         
         try:
             payload_bytes = bytes.fromhex(payload_hex)
@@ -165,7 +165,7 @@ def run_js_tests(schema: Dict[str, Any], schema_path: str) -> Tuple[bool, List[s
         tv_name = tv.get('name', f'test_{i}')
         payload_hex = tv.get('payload', '').replace(' ', '')
         expected = tv.get('expected', {})
-        fport = tv.get('fPort', 1)
+        fport = tv.get('fPort') or tv.get('fport') or 1
         
         test_cases.append({
             'name': tv_name,
@@ -306,7 +306,7 @@ def analyze_branch_coverage(schema: Dict[str, Any]) -> Tuple[float, List[str]]:
         interpreter = SchemaInterpreter(schema)
         for tv in vectors:
             payload_hex = tv.get('payload', '').replace(' ', '')
-            fport = tv.get('fPort', None)
+            fport = tv.get('fPort') or tv.get('fport')
             try:
                 payload_bytes = bytes.fromhex(payload_hex)
                 result = interpreter.decode(payload_bytes, fPort=fport)
@@ -352,48 +352,138 @@ def analyze_branch_coverage(schema: Dict[str, Any]) -> Tuple[float, List[str]]:
 
 
 STANDARD_SENSOR_IPSO = {
+    # Temperature & Environment
     'temperature': 3303,
     'humidity': 3304,
     'pressure': 3323,
+    'barometer': 3315,
+    'altitude': 3321,
+    'depth': 3319,
+    
+    # Light
     'illuminance': 3301,
     'light': 3301,
     'lux': 3301,
+    
+    # Electrical
     'voltage': 3316,
     'battery': 3316,
     'current': 3317,
     'power': 3328,
     'energy': 3331,
     'frequency': 3318,
+    'powerfactor': 3329,
+    
+    # Distance & Position
     'distance': 3330,
+    'level': 3319,
+    
+    # Gas & Air Quality
     'co2': 3325,
-    'conductivity': 3327,
     'concentration': 3325,
+    'conductivity': 3327,
     'acidity': 3326,
     'ph': 3326,
+    'loudness': 3324,
+    'sound': 3324,
+    'noise': 3324,
+    
+    # Location
     'gps': 3336,
     'location': 3336,
     'latitude': 3336,
     'longitude': 3336,
+    
+    # Motion sensors
     'accelerometer': 3313,
     'acceleration': 3313,
     'gyroscope': 3334,
+    'gyro': 3334,
     'magnetometer': 3314,
+    'compass': 3332,
+    'direction': 3332,
+    'heading': 3332,
+    
+    # Control & Actuators
+    'setpoint': 3308,
+    'target': 3308,
+    'valve': 3337,
+    'positioner': 3337,
+    'valveposition': 3337,
+    'openness': 3337,
+    'dimmer': 3343,
+    'actuator': 3306,
+    
+    # Presence & Input
+    'presence': 3302,
+    'motion': 3302,
+    'occupancy': 3302,
+    'pir': 3302,
+    'button': 3347,
+    'switch': 3342,
+    
+    # Other
+    'load': 3322,
+    'weight': 3322,
+    'percentage': 3320,
+    'digital': 3200,
+    'analog': 3202,
+    'generic': 3300,
 }
 
 SENML_UNITS = {
+    # Temperature & Environment
     'temperature': 'Cel',
     'humidity': '%RH',
     'pressure': 'Pa',
+    'barometer': 'Pa',
+    'altitude': 'm',
+    'depth': 'm',
+    
+    # Light
     'illuminance': 'lx',
+    'light': 'lx',
+    'lux': 'lx',
+    
+    # Electrical
     'voltage': 'V',
+    'battery': 'V',
     'current': 'A',
     'power': 'W',
     'energy': 'J',
     'frequency': 'Hz',
+    
+    # Distance
     'distance': 'm',
+    'level': 'm',
+    
+    # Gas & Sound
     'co2': 'ppm',
+    'concentration': 'ppm',
+    'loudness': 'dB',
+    'sound': 'dB',
+    'noise': 'dB',
+    
+    # Location
     'latitude': 'lat',
     'longitude': 'lon',
+    
+    # Control
+    'setpoint': 'Cel',
+    'target': 'Cel',
+    'valve': '%',
+    'openness': '%',
+    'dimmer': '%',
+    'percentage': '%',
+    
+    # Weight
+    'load': 'kg',
+    'weight': 'kg',
+    
+    # Direction
+    'compass': 'deg',
+    'direction': 'deg',
+    'heading': 'deg',
 }
 
 
@@ -436,8 +526,12 @@ def check_semantic_annotations(schema: Dict[str, Any]) -> Tuple[Dict[str, Any], 
                             scan_fields(case_def, f"{full_name}.")
                 continue
             
-            # Skip raw/internal fields (typically have _raw suffix)
-            if field_name.endswith('_raw'):
+            # Skip raw/internal/component fields
+            if (field_name.startswith('_') or 
+                field_name.endswith('_raw') or
+                field_name.endswith('Raw') or
+                field_name.endswith('Low') or
+                field_name.endswith('High')):
                 continue
             
             results['total_fields'] += 1

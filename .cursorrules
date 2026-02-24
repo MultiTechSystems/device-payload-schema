@@ -17,7 +17,7 @@ STRUCTURES:   object | repeat | byte_group | tlv
 MODIFIERS:    add mult div | lookup | polynomial | compute | guard | transform
 CONDITIONALS: switch (value) | flagged (bitmask) | tlv (tag dispatch)
 TRANSFORMS:   sqrt abs pow floor ceiling clamp log10 log
-COMPUTE OPS:  add sub mul div
+COMPUTE OPS:  add sub mul div mod idiv
 GUARD OPS:    gt gte lt lte eq ne
 ENCODINGS:    sign_magnitude bcd gray
 REFERENCES:   $field_name | var: name | use: definition
@@ -247,6 +247,43 @@ proto/         - Protocol buffer definitions
 - Don't skip error handling
 - Don't merge without tests passing
 - Don't hardcode IP addresses or ports (use config)
+
+## Schema Development (Converting Existing Codecs)
+
+See `docs/SCHEMA-DEVELOPMENT-GUIDE.md` for complete guide.
+
+### Required Process
+
+1. **Analyze original codec** - Extract ALL message types and code paths
+2. **Generate test vectors** - Run original codec, capture exact output
+3. **Write schema incrementally** - Validate after each change
+4. **Document deviations** - Note bugs in original, scope limitations
+
+### Minimum Test Vector Coverage
+
+- One test per message type
+- Boundary tests: all zeros, all 0xFF
+- Edge cases: division by zero, negative values
+- Flag combinations
+
+### Tools
+
+```bash
+# Extract test vectors from existing JS codec
+node tools/analyze_codec.js vendor/codec.js --output vectors.yaml
+
+# Validate schema and test vectors
+python3 tools/validate_schema.py schema.yaml
+
+# Compare generated vs original codec
+node -e "..." # inline comparison script
+```
+
+### Common Issues
+
+- **Rounding**: Use `transform: [{op: round, decimals: 2}]`
+- **Booleans**: Schema returns 0/1, JS returns true/false (document)
+- **Missing types**: Use `analyze_codec.js` to find ALL message types
 
 ## Automation and Context Limits
 

@@ -24,8 +24,10 @@ test_vectors: [...]       # Test cases
 
 | Type | Bytes | Description |
 |------|-------|-------------|
-| `u8`, `u16`, `u32`, `u64` | 1,2,4,8 | Unsigned integer |
-| `s8`, `s16`, `s32`, `s64` | 1,2,4,8 | Signed integer (two's complement) |
+| `u8`, `u16`, `u24`, `u32`, `u64` | 1,2,3,4,8 | Unsigned integer |
+| `s8`, `s16`, `s24`, `s32`, `s64` | 1,2,3,4,8 | Signed integer (two's complement) |
+
+**Note:** 24-bit types (`u24`, `s24`) are commonly used for GPS coordinates in compact formats.
 
 ### Floating Point Types
 
@@ -160,9 +162,41 @@ Applied in YAML key order:
 - name: ratio
   type: number
   compute:
-    op: div          # div, mul, add, sub
+    op: div          # add, sub, mul, div, mod, idiv
     a: $field1       # Field reference or literal
     b: $field2
+```
+
+**Available Operations:**
+
+| Op | Description | Example |
+|----|-------------|---------|
+| `add` | Addition | `a + b` |
+| `sub` | Subtraction | `a - b` |
+| `mul` | Multiplication | `a * b` |
+| `div` | Division | `a / b` |
+| `mod` | Modulo (remainder) | `int(a) % int(b)` |
+| `idiv` | Integer division | `int(a) // int(b)` |
+
+**Nibble Extraction Example:**
+
+```yaml
+- name: rawByte
+  type: u8
+
+- name: upperNibble
+  type: number
+  compute:
+    op: idiv
+    a: $rawByte
+    b: 16
+
+- name: lowerNibble
+  type: number
+  compute:
+    op: mod
+    a: $rawByte
+    b: 16
 ```
 
 ### Guard Conditions
@@ -419,10 +453,14 @@ Store values for later reference:
 
 ## TLV (Type-Length-Value)
 
+Parse tag-based variable content. Supports single and multi-byte tags.
+
 ```yaml
 - tlv:
-    tag_type: u8
-    length_type: u8
+    tag_size: 1           # Tag size in bytes (1, 2, or more)
+    length_size: 1        # Length field size (0 = implicit/no length field)
+    merge: true           # Merge results into parent (default)
+    unknown: skip         # skip|error|raw for unknown tags
     cases:
       0x01:
         - name: temperature
@@ -430,6 +468,40 @@ Store values for later reference:
       0x02:
         - name: humidity
           type: u8
+```
+
+### Multi-Byte Tags (Tektelic-style)
+
+```yaml
+- tlv:
+    tag_size: 2           # 2-byte tags (big-endian)
+    length_size: 0        # Implicit length from case definition
+    cases:
+      0x00BA:             # Battery status
+        - name: battery_level
+          type: u8
+      0x0B67:             # Ambient temperature
+        - name: temperature
+          type: s16
+          div: 10
+```
+
+### Composite Tags
+
+For protocols with multi-field tag structures:
+
+```yaml
+- tlv:
+    tag_fields:
+      - name: channel
+        type: u8
+      - name: sensor_type
+        type: u8
+    tag_key: [channel, sensor_type]
+    cases:
+      [1, 0x67]:          # Channel 1, temperature type
+        - name: ch1_temperature
+          type: s16
 ```
 
 ## Match Patterns
@@ -495,6 +567,23 @@ ports:
   ipso: 3303          # IPSO Smart Object ID
   senml_unit: "Cel"   # SenML unit
 ```
+
+**Common IPSO Smart Objects:**
+
+| ID | Name | Use Case |
+|----|------|----------|
+| 3200 | Digital Input | Binary sensors |
+| 3301 | Illuminance | Light (lux) |
+| 3303 | Temperature | Temperature (°C) |
+| 3304 | Humidity | Humidity (%) |
+| 3308 | Set Point | Thermostat setpoints |
+| 3316 | Voltage | Battery voltage |
+| 3323 | Pressure | Pressure sensors |
+| 3325 | Concentration | CO2/gas (ppm) |
+| 3330 | Distance | Range/level sensors |
+| 3337 | Positioner | Valve position (%) |
+
+See [OUTPUT-FORMATS.md](OUTPUT-FORMATS.md) for complete reference.
 
 ## Semantic Fields
 
@@ -603,7 +692,7 @@ names: [temp, hum]
 ## Quick Reference Card
 
 ```
-TYPES:        u8 u16 u32 u64 | s8 s16 s32 s64 | f16 f32 f64 | bool
+TYPES:        u8 u16 u24 u32 u64 | s8 s16 s24 s32 s64 | f16 f32 f64 | bool
               ascii hex bytes base64 | number string | skip enum
               udec sdec | bitfield_string
               
@@ -615,7 +704,7 @@ CONDITIONALS: switch (value match) | flagged (bitmask) | tlv (tag dispatch)
 
 TRANSFORMS:   sqrt abs pow floor ceiling clamp log10 log
 
-COMPUTE OPS:  add sub mul div
+COMPUTE OPS:  add sub mul div mod idiv
 
 GUARD OPS:    gt gte lt lte eq ne
 

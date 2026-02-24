@@ -225,6 +225,19 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
         if name:
             known_field_names.append(name)
         
+        # Handle byte_group - add contained fields to known_field_names
+        if 'byte_group' in fld:
+            bg = fld['byte_group']
+            # Support both formats: list of fields directly, or {size: N, fields: [...]}
+            if isinstance(bg, dict):
+                bg_fields = bg.get('fields', [])
+            else:
+                bg_fields = bg if isinstance(bg, list) else []
+            for bgf in bg_fields:
+                if isinstance(bgf, dict) and 'name' in bgf:
+                    known_field_names.append(bgf['name'])
+            continue
+        
         if ('name' not in fld and 'type' not in fld and 'tlv' not in fld
                 and 'byte_group' not in fld and 'object' not in fld and 'match' not in fld):
             errors.append(f"{path}[{i}]: must have 'name', 'type', 'flagged', 'tlv', 'byte_group', 'object', or 'match'")
@@ -278,8 +291,8 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                     else:
                         if 'op' not in compute:
                             errors.append(f"{path}[{i}] ({name}): compute missing 'op'")
-                        elif compute['op'] not in ('add', 'sub', 'mul', 'div'):
-                            errors.append(f"{path}[{i}] ({name}): compute 'op' must be add/sub/mul/div")
+                        elif compute['op'] not in ('add', 'sub', 'mul', 'div', 'mod', 'idiv'):
+                            errors.append(f"{path}[{i}] ({name}): compute 'op' must be add/sub/mul/div/mod/idiv")
                         for operand in ('a', 'b'):
                             if operand in compute:
                                 op_val = compute[operand]

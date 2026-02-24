@@ -857,6 +857,10 @@ class SchemaInterpreter:
                     value = self._evaluate_compute(field_def['compute'])
             else:
                 value = self._evaluate_compute(field_def['compute'])
+            
+            # Apply transform after compute
+            if value is not None and 'transform' in field_def:
+                value = self._apply_transform(float(value), field_def['transform'])
         
         # Literal value
         elif 'value' in field_def:
@@ -1003,7 +1007,7 @@ class SchemaInterpreter:
         """
         Evaluate a cross-field binary computation.
         
-        compute_def: {op: 'div'|'mul'|'add'|'sub', a: '$field'|literal, b: '$field'|literal}
+        compute_def: {op: 'add'|'sub'|'mul'|'div'|'mod'|'idiv', a: '$field'|literal, b: '$field'|literal}
         """
         op = compute_def.get('op', 'add')
         a_spec = compute_def.get('a', 0)
@@ -1030,6 +1034,14 @@ class SchemaInterpreter:
             if b == 0:
                 return float('nan')
             return a / b
+        elif op == 'mod':
+            if b == 0:
+                return float('nan')
+            return float(int(a) % int(b))
+        elif op == 'idiv':
+            if b == 0:
+                return float('nan')
+            return float(int(a) // int(b))
         else:
             raise ValueError(f"Unknown compute op: {op}")
     
@@ -1074,7 +1086,7 @@ class SchemaInterpreter:
     
     def _resolve_ref_value(self, field_def: Dict[str, Any]) -> float:
         """
-        Resolve a ref field and apply polynomial/transform.
+        Resolve a ref field and apply modifiers/polynomial/transform.
         
         field_def must have 'ref' key.
         """
@@ -1090,6 +1102,15 @@ class SchemaInterpreter:
             coeffs = field_def['polynomial']
             if isinstance(coeffs, list) and len(coeffs) >= 2:
                 value = self._evaluate_polynomial(coeffs, value)
+        
+        # Apply basic modifiers (mult, div, add) in YAML key order
+        for key in field_def:
+            if key == 'mult' and field_def['mult'] is not None:
+                value = value * field_def['mult']
+            elif key == 'div' and field_def['div'] is not None and field_def['div'] != 0:
+                value = value / field_def['div']
+            elif key == 'add' and field_def['add'] is not None:
+                value = value + field_def['add']
         
         # Apply transform array if present
         if 'transform' in field_def:
@@ -1131,6 +1152,24 @@ class SchemaInterpreter:
                 value = value * float(op['mult'])
             elif 'div' in op and float(op['div']) != 0:
                 value = value / float(op['div'])
+            elif 'round' in op:
+                decimals = op['round']
+                if decimals is True or decimals == 0:
+                    value = round(value)
+                else:
+                    value = round(value, int(decimals))
+            elif 'op' in op:
+                # Handle {op: 'round', decimals: N} syntax
+                if op['op'] == 'round':
+                    decimals = op.get('decimals', 0)
+                    if decimals == 0:
+                        value = round(value)
+                    else:
+                        value = round(value, int(decimals))
+                elif op['op'] == 'floor':
+                    value = math.floor(value)
+                elif op['op'] == 'ceiling' or op['op'] == 'ceil':
+                    value = math.ceil(value)
         
         return value
     
@@ -1143,16 +1182,31 @@ class SchemaInterpreter:
         - All fields read from same starting position
         - Advances position by group size after all fields decoded
         
-        Example:
+        Supports two formats:
+            # Format 1: List directly under byte_group
             - byte_group:
                 - name: flags_low
                   type: u8[0:3]
-                - name: flags_high
-                  type: u8[4:7]
-              # Implicitly consumes 1 byte after group
+              size: 1
+            
+            # Format 2: Nested fields key
+            - byte_group:
+                size: 1
+                fields:
+                  - name: flags_low
+                    type: u8[0:3]
         """
-        group_fields = field_def.get('byte_group', [])
-        group_size = field_def.get('size', 1)  # Default 1 byte group
+        byte_group = field_def.get('byte_group', [])
+        
+        # Handle both formats
+        if isinstance(byte_group, dict):
+            # Format 2: {size: N, fields: [...]}
+            group_fields = byte_group.get('fields', [])
+            group_size = byte_group.get('size', 1)
+        else:
+            # Format 1: list of fields directly
+            group_fields = byte_group
+            group_size = field_def.get('size', 1)
         
         if not group_fields:
             return pos
@@ -1170,6 +1224,8 @@ class SchemaInterpreter:
                 value = self._apply_modifiers(value, gf)
                 if not name.startswith('_'):
                     result.data[name] = value
+                # Add to variables so field can be referenced by compute/formula
+                self._variables[name] = value
             except Exception as e:
                 result.errors.append(f"Error in byte_group field {name}: {e}")
         

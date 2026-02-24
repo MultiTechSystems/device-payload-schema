@@ -1,5 +1,41 @@
 # Session Notes
 
+## Session: Feb 24, 2026
+
+### Completed
+
+**Output JSON Schema Generation**
+- Added `tools/generate_output_schema.py` for generating JSON Schema describing decoder output
+- Generates draft-07 compliant schemas with type constraints, ranges, descriptions
+- Enables standard JSON Schema validation of codec output
+- Updated README, SPEC-IMPLEMENTATION-STATUS.md, OUTPUT-FORMATS.md documentation
+
+**MClimate Vicki Schema**
+- Created `schemas/devices/manual/mclimate-vicki.yaml` for Vicki Smart Radiator Thermostat
+- Added `mod` and `idiv` compute operators across Python, Go, and JS interpreters
+- Fixed `byte_group` field referencing in interpreter and validator
+- Fixed `ref` field modifier application (`mult`, `div`, `add`)
+- Generated JS codec and output schema
+
+**Schema Language Extensions**
+- `compute` now supports: `add`, `sub`, `mul`, `div`, `mod`, `idiv`
+- `transform` now supports: `{op: round, decimals: N}` syntax
+- Updated JSON meta-schema to include new operators
+- Updated documentation (SCHEMA-LANGUAGE-REFERENCE.md, .cursorrules)
+
+**Schema Development Process**
+- Created `tools/analyze_codec.js` for extracting test vectors from existing JS codecs
+- Created `docs/SCHEMA-DEVELOPMENT-GUIDE.md` with best practices for codec conversion
+- Added schema development section to `.cursorrules`
+- Process: Analyze original → Generate test vectors → Write schema → Validate → Document deviations
+
+**Interpreter/Generator Fixes**
+- Added `round` transform to Python interpreter (`{op: round, decimals: N}` syntax)
+- Added `round` transform to JS generator (generates `Math.round()` calls)
+- Vicki schema now produces identical output to original TTN codec for keepalive messages
+
+---
+
 ## Session: Feb 19, 2026
 
 ### Completed
@@ -47,6 +83,12 @@ See [FUTURE-FEATURES.md](docs/FUTURE-FEATURES.md) for detailed roadmap.
 **Planned:**
 - Embedded codegen: bounds constants from `valid_range`, scale constants from `resolution`
 - Output format extensions: SenML vmin/vmax, IPSO 5603/5604
+- Batch generation of output schemas for all device schemas
+
+**Per-Device Deliverables (Required):**
+1. YAML Schema (`device.yaml`) - Source payload definition
+2. JS Codec (`device-codec.js`) - TS013-compliant decoder
+3. Output Schema (`device-output.schema.json`) - JSON Schema for decoded payload
 
 **Out of Scope (device profile, not schema):**
 - `accuracy`, `instrument_range` - static sensor characteristics belong in device registries

@@ -163,6 +163,8 @@ type Field struct {
 	Flagged *FlaggedDef `json:"-" yaml:"-"`
 	// TLV inline (for port-based schemas where tlv: is a nested key)
 	TLVInline *Field `json:"-" yaml:"-"`
+	// Match inline (for Option B syntax: `- match: { field: $var, cases: {...} }`)
+	MatchInline *Field `json:"-" yaml:"-"`
 }
 
 // Transform represents a single transformation stage.
@@ -823,9 +825,31 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 		}
 	}
 
-	// Byte group (inline grouped bitfields)
+	// Byte group (inline grouped bitfields) - array format
 	if bgRaw, ok := fm["byte_group"].([]any); ok {
 		f.ByteGroup = parseFieldsRaw(bgRaw)
+	}
+	// Byte group - Option B format: `- byte_group: { size: N, fields: [...] }`
+	if bgMap, ok := fm["byte_group"].(map[string]any); ok {
+		if bgSize, ok := bgMap["size"].(int); ok {
+			f.Size = bgSize
+		} else if bgSize, ok := bgMap["size"].(float64); ok {
+			f.Size = int(bgSize)
+		}
+		if bgFields, ok := bgMap["fields"].([]any); ok {
+			f.ByteGroup = parseFieldsRaw(bgFields)
+		}
+	}
+	// Also handle map[any]any for YAML parsing quirks
+	if bgMap, ok := fm["byte_group"].(map[any]any); ok {
+		if bgSize, ok := bgMap["size"].(int); ok {
+			f.Size = bgSize
+		} else if bgSize, ok := bgMap["size"].(float64); ok {
+			f.Size = int(bgSize)
+		}
+		if bgFields, ok := bgMap["fields"].([]any); ok {
+			f.ByteGroup = parseFieldsRaw(bgFields)
+		}
 	}
 	if size, ok := fm["size"].(int); ok {
 		f.Size = size
@@ -1007,6 +1031,55 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 		tlvField := parseFieldMap(tlvRaw, nil)
 		tlvField.Type = "tlv"
 		f.TLVInline = &tlvField
+	}
+
+	// Match inline (for Option B syntax: `- match: { field: $var, cases: {...} }`)
+	if matchRaw, ok := fm["match"].(map[string]any); ok {
+		matchField := Field{Type: TypeMatch}
+		if fieldRef, ok := matchRaw["field"].(string); ok {
+			matchField.On = fieldRef
+		}
+		if casesRaw, ok := matchRaw["cases"].(map[string]any); ok {
+			for caseKey, caseVal := range casesRaw {
+				c := Case{}
+				// Parse case key (could be int or string)
+				if keyInt, err := strconv.Atoi(caseKey); err == nil {
+					c.Case = keyInt
+				} else {
+					c.Case = caseKey
+				}
+				// Parse case fields
+				if caseFields, ok := caseVal.([]any); ok {
+					c.Fields = parseFieldsRaw(caseFields)
+				}
+				matchField.Cases = append(matchField.Cases, c)
+			}
+		}
+		// Also check for cases as map[any]any (YAML parsing quirk)
+		if casesRaw, ok := matchRaw["cases"].(map[any]any); ok {
+			for caseKey, caseVal := range casesRaw {
+				c := Case{}
+				switch k := caseKey.(type) {
+				case int:
+					c.Case = k
+				case float64:
+					c.Case = int(k)
+				case string:
+					if keyInt, err := strconv.Atoi(k); err == nil {
+						c.Case = keyInt
+					} else {
+						c.Case = k
+					}
+				default:
+					c.Case = fmt.Sprintf("%v", k)
+				}
+				if caseFields, ok := caseVal.([]any); ok {
+					c.Fields = parseFieldsRaw(caseFields)
+				}
+				matchField.Cases = append(matchField.Cases, c)
+			}
+		}
+		f.MatchInline = &matchField
 	}
 	
 	return f
@@ -1221,6 +1294,21 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 			for k, v := range flaggedResult {
 				result[k] = v
 				ctx.Variables[k] = v
+			}
+			continue
+		}
+
+		// Match inline (Option B syntax: `- match: { field: $var, cases: {...} }`)
+		if field.MatchInline != nil {
+			matchResult, err := decodeMatch(*field.MatchInline, ctx)
+			if err != nil {
+				return nil, err
+			}
+			if matchMap, ok := matchResult.(map[string]any); ok {
+				for k, v := range matchMap {
+					result[k] = v
+					ctx.Variables[k] = v
+				}
 			}
 			continue
 		}
@@ -1530,7 +1618,7 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 				numVal = evaluatePolynomial(field.Polynomial, numVal)
 			}
 
-			// Apply transform (for ref fields, transform comes before guard)
+			// Apply transform array (for ref fields, transform comes before guard)
 			if len(field.Transform) > 0 {
 				for _, stage := range field.Transform {
 					if stage.Sub != nil {
@@ -1546,6 +1634,17 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 						numVal = numVal / *stage.Div
 					}
 				}
+			}
+
+			// Apply top-level modifiers (mult, add, div) for number fields with ref
+			if field.Mult != nil {
+				numVal = numVal * *field.Mult
+			}
+			if field.Div != nil && *field.Div != 0 {
+				numVal = numVal / *field.Div
+			}
+			if field.Add != nil {
+				numVal = numVal + *field.Add
 			}
 
 			value = numVal
@@ -2762,6 +2861,16 @@ func evaluateCompute(cd *ComputeDef, ctx *DecodeContext) (float64, error) {
 		return a + b, nil
 	case "sub":
 		return a - b, nil
+	case "mod":
+		if b == 0 {
+			return 0, fmt.Errorf("modulo by zero")
+		}
+		return float64(int64(a) % int64(b)), nil
+	case "idiv":
+		if b == 0 {
+			return 0, fmt.Errorf("integer division by zero")
+		}
+		return float64(int64(a) / int64(b)), nil
 	default:
 		return 0, fmt.Errorf("unknown compute op: %s", cd.Op)
 	}

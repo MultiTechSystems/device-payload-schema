@@ -32,7 +32,7 @@ pip install -r requirements.txt
 ```bash
 # Using the Python interpreter
 python tools/schema_interpreter.py decode \
-  schemas/decentlab/dl-5tm.yaml \
+  schemas/devices/decentlab/dl-5tm.yaml \
   "02 1234 0003 01F4 0190 0C1C"
 ```
 
@@ -56,7 +56,7 @@ pytest tests/ -v
 
 ```bash
 # Check schema quality and scoring tier
-python tools/score_schema.py schemas/decentlab/dl-5tm.yaml --verbose
+python tools/score_schema.py schemas/devices/decentlab/dl-5tm.yaml --verbose
 
 # Output: PLATINUM (95.0%) with recommendations
 ```
@@ -70,13 +70,16 @@ Scoring includes: schema validity, test vectors, Python/JS cross-validation, bra
 ```
 payload-codec-proto/
 ├── schemas/                     # Device payload schemas
-│   ├── decentlab/              # Decentlab sensor schemas
-│   ├── milesight/              # Milesight sensor schemas
-│   └── payload-schema.json     # JSON Schema for validation
+│   ├── devices/                # Device-specific schemas (YAML)
+│   ├── payload-schema.json     # Meta-schema for YAML validation
+│   ├── ipso-output.schema.json # IPSO format output validation
+│   ├── senml-output.schema.json # SenML format output validation
+│   └── ttn-output.schema.json  # TTN normalized output validation
 │
 ├── tools/                       # Interpreters and generators
 │   ├── schema_interpreter.py   # Reference Python decoder
 │   ├── generate_ts013_codec.py # TS013 JavaScript generator
+│   ├── generate_output_schema.py # Output JSON Schema generator
 │   ├── generate_firmware_codec.py # C code generator
 │   ├── validate_schema.py      # Schema validator
 │   ├── score_schema.py         # Quality scoring tool
@@ -164,16 +167,25 @@ See [benchmarks documentation](docs/BENCHMARKS.md) for detailed results.
 ### TS013-Compliant JavaScript
 
 ```bash
-python tools/generate_ts013_codec.py schemas/decentlab/dl-5tm.yaml > dl_5tm_codec.js
+python tools/generate_ts013_codec.py schemas/devices/decentlab/dl-5tm.yaml > dl_5tm_codec.js
 ```
 
 Generates decoders compatible with The Things Network, ChirpStack, and other
 LoRaWAN network servers that support the TS013 Payload Codec API.
 
+### Output JSON Schema
+
+```bash
+python tools/generate_output_schema.py schemas/devices/decentlab/dl-5tm.yaml > dl_5tm_output.schema.json
+```
+
+Generates a JSON Schema describing the decoded payload structure. This schema
+enables validation of decoder output with standard JSON Schema tools.
+
 ### Embedded C
 
 ```bash
-python tools/generate_firmware_codec.py schemas/decentlab/dl-5tm.yaml > dl_5tm_codec.h
+python tools/generate_firmware_codec.py schemas/devices/decentlab/dl-5tm.yaml > dl_5tm_codec.h
 ```
 
 Generates header-only C decoders for embedded systems (Arduino, ESP32, STM32, etc.).

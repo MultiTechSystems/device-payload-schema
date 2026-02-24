@@ -122,6 +122,10 @@ def compute_to_js(compute: Dict[str, Any]) -> str:
         return f'({a_js} * {b_js})'
     elif op == 'div':
         return f'({b_js} !== 0 ? {a_js} / {b_js} : NaN)'
+    elif op == 'mod':
+        return f'({b_js} !== 0 ? Math.trunc({a_js}) % Math.trunc({b_js}) : NaN)'
+    elif op == 'idiv':
+        return f'({b_js} !== 0 ? Math.trunc({a_js} / {b_js}) : NaN)'
     return '0'
 
 
@@ -186,6 +190,27 @@ def transform_to_js(transform_ops: List[Dict[str, Any]], input_expr: str) -> str
             result = f'({result} * {op["mult"]})'
         elif 'div' in op and op['div'] != 0:
             result = f'({result} / {op["div"]})'
+        elif 'round' in op:
+            decimals = op['round']
+            if decimals is True or decimals == 0:
+                result = f'Math.round({result})'
+            else:
+                factor = 10 ** int(decimals)
+                result = f'(Math.round({result} * {factor}) / {factor})'
+        elif 'op' in op:
+            # Handle {op: 'name', ...} syntax
+            op_name = op['op']
+            if op_name == 'round':
+                decimals = op.get('decimals', 0)
+                if decimals == 0:
+                    result = f'Math.round({result})'
+                else:
+                    factor = 10 ** int(decimals)
+                    result = f'(Math.round({result} * {factor}) / {factor})'
+            elif op_name == 'floor':
+                result = f'Math.floor({result})'
+            elif op_name in ('ceiling', 'ceil'):
+                result = f'Math.ceil({result})'
     return result
 
 
@@ -240,7 +265,7 @@ function readU(buf, pos, size, endian) {
 
 function readS(buf, pos, size, endian) {
   var v = readU(buf, pos, size, endian);
-  var sign = 1 << (size * 8 - 1);
+  var sign = Math.pow(2, size * 8 - 1);
   if (v >= sign) v -= sign * 2;
   return v;
 }
@@ -363,7 +388,7 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append(f'{i}  d.{name} = {js_formula};')
                 return lines
             
-            # New: ref + polynomial/transform
+            # New: ref + polynomial/transform/modifiers
             if 'ref' in field:
                 ref_expr = ref_to_js(field['ref'])
                 value_expr = ref_expr
@@ -371,6 +396,15 @@ function writeS(buf, pos, size, value, endian) {
                 # Apply polynomial if present
                 if 'polynomial' in field:
                     value_expr = polynomial_to_js(field['polynomial'], ref_expr)
+                
+                # Apply basic modifiers (mult, div, add) in field key order
+                for key in field:
+                    if key == 'mult' and field['mult'] is not None:
+                        value_expr = f'({value_expr} * {field["mult"]})'
+                    elif key == 'div' and field['div'] is not None and field['div'] != 0:
+                        value_expr = f'({value_expr} / {field["div"]})'
+                    elif key == 'add' and field['add'] is not None:
+                        value_expr = f'({value_expr} + {field["add"]})'
                 
                 # Apply transform array if present
                 if 'transform' in field:
@@ -383,9 +417,13 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append(f'{i}  d.{name} = {value_expr};')
                 return lines
             
-            # New: compute with optional guard
+            # New: compute with optional guard and transform
             if 'compute' in field:
                 value_expr = compute_to_js(field['compute'])
+                
+                # Apply transform if present
+                if 'transform' in field:
+                    value_expr = transform_to_js(field['transform'], value_expr)
                 
                 # Apply guard if present
                 if 'guard' in field:

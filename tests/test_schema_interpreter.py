@@ -1793,6 +1793,92 @@ class TestDeclarativeComputedFields:
         assert result.success
         assert abs(result.data['scaled'] - 2.5) < 0.01
     
+    def test_compute_modulo(self):
+        """Test compute with modulo operation for nibble extraction."""
+        schema = {
+            'fields': [
+                {'name': 'byte', 'type': 'u8'},
+                {'name': 'lower_nibble', 'type': 'number',
+                 'compute': {'op': 'mod', 'a': '$byte', 'b': 16}}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # 0xAB = 171, lower nibble = 11 (0xB)
+        result = interpreter.decode(bytes([0xAB]))
+        assert result.success
+        assert result.data['lower_nibble'] == 11
+    
+    def test_compute_integer_division(self):
+        """Test compute with integer division for nibble extraction."""
+        schema = {
+            'fields': [
+                {'name': 'byte', 'type': 'u8'},
+                {'name': 'upper_nibble', 'type': 'number',
+                 'compute': {'op': 'idiv', 'a': '$byte', 'b': 16}}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # 0xAB = 171, upper nibble = 10 (0xA)
+        result = interpreter.decode(bytes([0xAB]))
+        assert result.success
+        assert result.data['upper_nibble'] == 10
+    
+    def test_compute_mod_idiv_combined(self):
+        """Test combined mod/idiv for full nibble extraction."""
+        schema = {
+            'fields': [
+                {'name': 'byte', 'type': 'u8'},
+                {'name': 'upper', 'type': 'number',
+                 'compute': {'op': 'idiv', 'a': '$byte', 'b': 16}},
+                {'name': 'lower', 'type': 'number',
+                 'compute': {'op': 'mod', 'a': '$byte', 'b': 16}},
+                {'name': 'reconstructed', 'type': 'number',
+                 'compute': {'op': 'add', 'a': '$lower', 'b': 0}},
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # Test multiple values
+        for test_byte in [0x00, 0x12, 0xAB, 0xFF]:
+            result = interpreter.decode(bytes([test_byte]))
+            assert result.success
+            assert result.data['upper'] == test_byte // 16
+            assert result.data['lower'] == test_byte % 16
+    
+    def test_compute_mod_division_by_zero(self):
+        """Test mod operation with division by zero returns NaN."""
+        schema = {
+            'fields': [
+                {'name': 'a', 'type': 'u8'},
+                {'name': 'result', 'type': 'number',
+                 'compute': {'op': 'mod', 'a': '$a', 'b': 0}}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([100]))
+        assert result.success
+        import math
+        assert math.isnan(result.data['result'])
+    
+    def test_compute_idiv_division_by_zero(self):
+        """Test idiv operation with division by zero returns NaN."""
+        schema = {
+            'fields': [
+                {'name': 'a', 'type': 'u8'},
+                {'name': 'result', 'type': 'number',
+                 'compute': {'op': 'idiv', 'a': '$a', 'b': 0}}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        result = interpreter.decode(bytes([100]))
+        assert result.success
+        import math
+        assert math.isnan(result.data['result'])
+    
     def test_guard_with_gt(self):
         """Test guard with greater-than condition."""
         schema = {

@@ -96,7 +96,7 @@ def generate_payload_schema() -> dict:
                 "properties": {
                     "op": {
                         "type": "string",
-                        "enum": ["add", "sub", "mul", "div"],
+                        "enum": ["add", "sub", "mul", "div", "mod", "idiv"],
                         "description": "Binary operation to perform"
                     },
                     "a": {
