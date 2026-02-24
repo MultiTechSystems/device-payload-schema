@@ -380,7 +380,7 @@ Milesight TLV format maps directly to schema `tlv` construct.
 | `Math.log()` | `transform: log` | 100% |
 | `Math.min/max` | `transform: clamp` | 100% |
 | Lookup array | `lookup:` | 100% |
-| Conditional | `switch:`, `match_value:` | 95% |
+| Conditional | `match:`, `match_value:` | 95% |
 | Polynomial | `polynomial:` | 100% |
 | Cross-field | `compute:` | 90% |
 | String parsing | - | 0% |

@@ -135,10 +135,10 @@ type: sdec       # 0xF35 → -23.5 (high nibble=0xF means negative)
 
 **Rationale**: Each maps to common protocol patterns:
 
-**`switch`** - Fixed message types:
+**`match`** - Fixed message types:
 ```yaml
-- switch:
-    field: msg_type
+- match:
+    field: $msg_type
     cases:
       0x01: [temperature_fields]
       0x02: [gps_fields]

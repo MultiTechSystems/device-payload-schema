@@ -106,12 +106,22 @@ type: be_u32       # Big-endian (explicit)
 
 ```yaml
 - byte_group:
-    bytes: 3
+    size: 3
     fields:
       - name: value_a
         type: u8[0:3]
       - name: value_b
         type: u8[4:7]
+```
+
+Shorthand (size inferred from field types):
+
+```yaml
+- byte_group:
+    - name: value_a
+      type: u8[0:3]
+    - name: value_b
+      type: u8[4:7]
 ```
 
 ## Arithmetic Modifiers
@@ -244,14 +254,14 @@ transform:
 
 ## Conditional Parsing
 
-### Switch (by field value)
+### Match (by field value)
 
 ```yaml
 - name: msg_type
   type: u8
 
-- switch:
-    field: msg_type
+- match:
+    field: $msg_type
     cases:
       1:
         - name: temperature
@@ -386,7 +396,7 @@ test_vectors:
 ```yaml
 - name: status
   type: enum
-  size: 1
+  base: u8
   values:
     0: "off"
     1: "on"
@@ -444,7 +454,7 @@ Store values for later reference:
   type: u8
   var: dev_type      # Store as variable
 
-- switch:
+- match:
     field: $dev_type  # Reference variable
     cases:
       1: [...]
@@ -507,8 +517,8 @@ For protocols with multi-field tag structures:
 ## Match Patterns
 
 ```yaml
-- switch:
-    field: msg_type
+- match:
+    field: $msg_type
     cases:
       1: [...]                    # Exact match
       2..5: [...]                 # Range (2,3,4,5)
@@ -700,7 +710,7 @@ STRUCTURES:   object | repeat | byte_group | tlv
 
 MODIFIERS:    add mult div | lookup | polynomial | compute | guard | transform | match_value
 
-CONDITIONALS: switch (value match) | flagged (bitmask) | tlv (tag dispatch)
+CONDITIONALS: match (value dispatch) | flagged (bitmask) | tlv (tag dispatch)
 
 TRANSFORMS:   sqrt abs pow floor ceiling clamp log10 log
 

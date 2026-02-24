@@ -157,17 +157,15 @@ fields:
   - name: message_type
     type: u8
     
-  - switch:
-      on: $message_type
+  - match:
+      field: $message_type
       cases:
-        - case: 1
-          fields:
-            - name: sensor_data
-              type: u16
-        - case: 2
-          fields:
-            - name: config_data
-              type: u8
+        1:
+          - name: sensor_data
+            type: u16
+        2:
+          - name: config_data
+            type: u8
 ```
 
 #### Computed Fields

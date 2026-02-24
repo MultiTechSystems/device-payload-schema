@@ -11,11 +11,11 @@ declarative device payload definitions.
 See `docs/SCHEMA-LANGUAGE-REFERENCE.md` for complete reference.
 
 ```
-TYPES:        u8 u16 u32 u64 | s8 s16 s32 s64 | f16 f32 f64 | bool
+TYPES:        u8 u16 u24 u32 u64 | s8 s16 s24 s32 s64 | f16 f32 f64 | bool
               ascii hex bytes base64 | number string | skip enum
 STRUCTURES:   object | repeat | byte_group | tlv
 MODIFIERS:    add mult div | lookup | polynomial | compute | guard | transform
-CONDITIONALS: switch (value) | flagged (bitmask) | tlv (tag dispatch)
+CONDITIONALS: match (value) | flagged (bitmask) | tlv (tag dispatch)
 TRANSFORMS:   sqrt abs pow floor ceiling clamp log10 log
 COMPUTE OPS:  add sub mul div mod idiv
 GUARD OPS:    gt gte lt lte eq ne
