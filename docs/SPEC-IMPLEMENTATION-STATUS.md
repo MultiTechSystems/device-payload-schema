@@ -106,6 +106,36 @@ Feature support matrix across reference implementations.
 | `bcd` | ✓ | ✓ | ✓ | ✓ |
 | `gray` | ✓ | - | - | ✓ |
 
+### Downlink Support (v0.3.2)
+
+| Feature | Python | Go | C | JS |
+|---------|--------|-----|---|-----|
+| `direction` property | ✓ | - | - | ✓ |
+| `downlink_commands` | ✓ | - | - | ✓ |
+| `encode_command()` | ✓ | - | - | ✓ |
+| `decode_command()` | ✓ | - | - | ✓ |
+| Bidirectional schemas | ✓ | - | - | ✓ |
+
+### Schema Composition (v0.3.2)
+
+| Feature | Python | Go | C | JS |
+|---------|--------|-----|---|-----|
+| `$ref:` cross-file | ✓ | - | - | - |
+| `use:` shorthand | ✓ | - | - | - |
+| `rename:` fields | ✓ | - | - | - |
+| `prefix:` fields | ✓ | - | - | - |
+| Compact format strings | ✓ | - | - | - |
+
+### Validation (v0.3.2)
+
+| Feature | Python | Go | C | JS |
+|---------|--------|-----|---|-----|
+| ERROR level | ✓ | - | - | - |
+| WARNING level | ✓ | - | - | - |
+| INFO level | ✓ | - | - | - |
+| Best practice checks | ✓ | - | - | - |
+| Quality scoring | ✓ | - | - | - |
+
 ### Semantic Hints
 
 | Feature | Python | Go | C | JS |
@@ -142,10 +172,11 @@ Feature support matrix across reference implementations.
 **Reference implementation** - most complete and tested.
 
 - Full decode and encode support
-- All schema features implemented
-- Extensive test coverage
+- All schema features implemented (v0.3.2 spec)
+- Extensive test coverage (477+ tests)
 - Binary schema encode/decode
 - Used for validation and code generation
+- **v0.3.2 additions**: downlink_commands, direction, encodings, compact format
 
 ### Go (`go/schema/`)
 
@@ -177,6 +208,7 @@ Feature support matrix across reference implementations.
 - No binary schema (uses generated code)
 - Eval-free generated code
 - TS013 format compliant
+- **v0.3.2 additions**: downlink_commands (encodeCommand/decodeCommand)
 
 ### Output JSON Schema (`tools/generate_output_schema.py`)
 
@@ -186,6 +218,17 @@ Feature support matrix across reference implementations.
 - JSON Schema draft-07 compliant
 - Includes type constraints, ranges, and descriptions
 - Enables standard JSON Schema validation of codec output
+
+### Schema Validator (`tools/validate_schema.py`)
+
+**Schema validation and testing tool** (v0.3.2 enhanced).
+
+- Validates schema syntax and structure
+- Runs embedded test vectors
+- **v0.3.2**: Three-level validation (ERROR/WARNING/INFO)
+- Best practice checks for IPSO annotations
+- Test coverage recommendations
+- JSON output for CI integration
 
 ## Test Coverage
 
@@ -265,11 +308,24 @@ Tested with DL-5TM schema (8 fields, flagged construct, polynomial transform).
 
 ## Roadmap
 
+### Recently Completed (v0.3.2)
+
+| Feature | Implementation | Notes |
+|---------|---------------|-------|
+| `encoding:` property | Python, JS | sign_magnitude, bcd, gray |
+| `downlink_commands:` | Python, JS | Command-based encoding |
+| `direction:` property | Python, JS | uplink/downlink/bidirectional |
+| `use:` shorthand | Python | Simplified schema composition |
+| Compact format strings | Python | struct-like syntax |
+| Validation levels | Python | ERROR/WARNING/INFO |
+| Quality scoring | Python | Bronze/Silver/Gold/Platinum |
+
 ### Planned Additions
 
 | Feature | Target | Priority |
 |---------|--------|----------|
 | Go encode (full) | Q2 | Medium |
+| Go downlink_commands | Q2 | Medium |
 | C definitions | Q2 | Low |
 | JS binary schema | Q3 | Medium |
 | Rust implementation | Q3 | High |
@@ -279,12 +335,15 @@ Tested with DL-5TM schema (8 fields, flagged construct, polynomial transform).
 
 See [FUTURE-FEATURES.md](FUTURE-FEATURES.md) for detailed specifications.
 
-| Feature | Value | Priority |
-|---------|-------|----------|
-| `valid_range` | Quality flags, bounds checking | **P1** |
-| `resolution` | Generated constants | P2 |
-| `unece` | Standard unit identifiers | P3 |
-| `accuracy` | Documentation | P4 |
+| Feature | Value | Status |
+|---------|-------|--------|
+| `valid_range` | Quality flags, bounds checking | ✓ Implemented |
+| `resolution` | Metadata annotation | ✓ Implemented |
+| `unece` | Standard unit identifiers | ✓ Implemented |
+| `downlink_commands` | Command-based downlinks | ✓ Implemented |
+| `direction` | Schema direction hint | ✓ Implemented |
+| Validation levels | ERROR/WARNING/INFO | ✓ Implemented |
+| Compact format | Struct-like syntax | ✓ Implemented |
 
 ### Not Planned
 

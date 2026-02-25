@@ -51,11 +51,37 @@ class TestResult:
         }
 
 
+class ValidationLevel:
+    """Validation message severity levels."""
+    ERROR = 'ERROR'      # Must fix before use
+    WARNING = 'WARNING'  # Should review
+    INFO = 'INFO'        # Best practice suggestion
+
+
+@dataclass
+class ValidationMessage:
+    """A validation message with level and details."""
+    level: str
+    message: str
+    field: str = ""
+    
+    def __str__(self) -> str:
+        if self.field:
+            return f"[{self.level}] {self.field}: {self.message}"
+        return f"[{self.level}] {self.message}"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {'level': self.level, 'message': self.message, 'field': self.field}
+
+
 @dataclass
 class ValidationResult:
     """Result of schema validation."""
     schema_valid: bool
     schema_errors: List[str] = field(default_factory=list)
+    schema_warnings: List[str] = field(default_factory=list)
+    schema_info: List[str] = field(default_factory=list)
+    messages: List[ValidationMessage] = field(default_factory=list)
     test_results: List[TestResult] = field(default_factory=list)
     
     @property
@@ -74,14 +100,47 @@ class ValidationResult:
     def all_passed(self) -> bool:
         return self.schema_valid and self.tests_failed == 0
     
+    @property
+    def error_count(self) -> int:
+        return len([m for m in self.messages if m.level == ValidationLevel.ERROR])
+    
+    @property
+    def warning_count(self) -> int:
+        return len([m for m in self.messages if m.level == ValidationLevel.WARNING])
+    
+    @property
+    def info_count(self) -> int:
+        return len([m for m in self.messages if m.level == ValidationLevel.INFO])
+    
+    def add_error(self, message: str, field: str = ""):
+        """Add an ERROR level message."""
+        self.messages.append(ValidationMessage(ValidationLevel.ERROR, message, field))
+        self.schema_errors.append(f"{field}: {message}" if field else message)
+    
+    def add_warning(self, message: str, field: str = ""):
+        """Add a WARNING level message."""
+        self.messages.append(ValidationMessage(ValidationLevel.WARNING, message, field))
+        self.schema_warnings.append(f"{field}: {message}" if field else message)
+    
+    def add_info(self, message: str, field: str = ""):
+        """Add an INFO level message."""
+        self.messages.append(ValidationMessage(ValidationLevel.INFO, message, field))
+        self.schema_info.append(f"{field}: {message}" if field else message)
+    
     def to_dict(self) -> Dict[str, Any]:
         return {
             'schema_valid': self.schema_valid,
             'schema_errors': self.schema_errors,
+            'schema_warnings': self.schema_warnings,
+            'schema_info': self.schema_info,
+            'error_count': self.error_count,
+            'warning_count': self.warning_count,
+            'info_count': self.info_count,
             'tests_passed': self.tests_passed,
             'tests_failed': self.tests_failed,
             'total_tests': self.total_tests,
             'all_passed': self.all_passed,
+            'messages': [m.to_dict() for m in self.messages],
             'test_results': [t.to_dict() for t in self.test_results],
         }
 
@@ -536,23 +595,131 @@ def run_test_vector(interpreter: SchemaInterpreter, tv: Dict[str, Any]) -> TestR
     return result
 
 
+def check_best_practices(schema: Dict[str, Any], result: ValidationResult) -> None:
+    """Check for best practices and add warnings/info to result."""
+    
+    # Standard sensor field names that should have IPSO/unit annotations
+    SENSOR_KEYWORDS = {
+        'temperature': (3303, '°C'),
+        'humidity': (3304, '%'),
+        'pressure': (3323, 'Pa'),
+        'voltage': (3316, 'V'),
+        'battery': (3316, 'mV'),
+        'current': (3317, 'A'),
+        'illuminance': (3301, 'lx'),
+        'distance': (3330, 'm'),
+        'co2': (3325, 'ppm'),
+    }
+    
+    def check_fields(fields: List[Dict], path: str = ""):
+        if not isinstance(fields, list):
+            return
+        for i, fld in enumerate(fields):
+            if not isinstance(fld, dict):
+                continue
+            
+            name = fld.get('name', '')
+            ftype = fld.get('type', '')
+            field_path = f"{path}[{i}]" if path else f"fields[{i}]"
+            
+            # Check for sensor fields missing IPSO annotation
+            name_lower = name.lower()
+            for keyword, (ipso_id, default_unit) in SENSOR_KEYWORDS.items():
+                if keyword in name_lower:
+                    if 'ipso' not in fld:
+                        result.add_warning(
+                            f"Consider adding ipso: {ipso_id} for standard sensor type",
+                            f"{name}"
+                        )
+                    if 'unit' not in fld:
+                        result.add_info(
+                            f"Consider adding unit: \"{default_unit}\"",
+                            f"{name}"
+                        )
+                    break
+            
+            # Check for numeric fields without valid_range
+            if ftype in ('u8', 'u16', 'u32', 's8', 's16', 's32', 'f32', 'f64'):
+                if 'valid_range' not in fld and not name.startswith('_'):
+                    # Only suggest for sensor-like fields
+                    for keyword in SENSOR_KEYWORDS:
+                        if keyword in name_lower:
+                            result.add_info(
+                                "Consider adding valid_range for data quality checks",
+                                f"{name}"
+                            )
+                            break
+            
+            # Recurse into nested structures
+            if 'fields' in fld:
+                check_fields(fld['fields'], f"{field_path}.fields")
+            if 'byte_group' in fld:
+                bg = fld['byte_group']
+                bg_fields = bg.get('fields', bg) if isinstance(bg, dict) else bg
+                if isinstance(bg_fields, list):
+                    check_fields(bg_fields, f"{field_path}.byte_group")
+            if 'flagged' in fld:
+                for gi, group in enumerate(fld['flagged'].get('groups', [])):
+                    if 'fields' in group:
+                        check_fields(group['fields'], f"{field_path}.flagged.groups[{gi}].fields")
+    
+    # Check top-level fields
+    if 'fields' in schema:
+        check_fields(schema['fields'])
+    
+    # Check port-specific fields
+    if 'ports' in schema:
+        for port_key, port_def in schema['ports'].items():
+            if isinstance(port_def, dict) and 'fields' in port_def:
+                check_fields(port_def['fields'], f"ports.{port_key}.fields")
+    
+    # Check test vector coverage
+    test_vectors = schema.get('test_vectors', [])
+    if len(test_vectors) == 0:
+        result.add_warning("No test vectors defined", "test_vectors")
+    elif len(test_vectors) < 3:
+        result.add_info(f"Only {len(test_vectors)} test vectors - recommend at least 3", "test_vectors")
+    
+    # Check for edge case test vectors
+    has_zero_test = False
+    has_max_test = False
+    for tv in test_vectors:
+        name = tv.get('name', '').lower()
+        desc = tv.get('description', '').lower()
+        if 'zero' in name or 'zero' in desc:
+            has_zero_test = True
+        if 'max' in name or 'max' in desc or 'boundary' in name:
+            has_max_test = True
+    
+    if test_vectors and not has_zero_test:
+        result.add_info("Consider adding a test vector for zero/minimum values", "test_vectors")
+    if test_vectors and not has_max_test:
+        result.add_info("Consider adding a test vector for maximum/boundary values", "test_vectors")
+
+
 def validate_schema(schema: Dict[str, Any]) -> ValidationResult:
     """Validate schema and run all test vectors."""
     result = ValidationResult(schema_valid=True)
     
-    # Validate structure
+    # Validate structure (errors only)
     structure_errors = validate_schema_structure(schema)
     if structure_errors:
         result.schema_valid = False
         result.schema_errors = structure_errors
+        # Add as ERROR level messages
+        for err in structure_errors:
+            result.messages.append(ValidationMessage(ValidationLevel.ERROR, err))
         return result
+    
+    # Check best practices (warnings and info)
+    check_best_practices(schema, result)
     
     # Create interpreter
     try:
         interpreter = SchemaInterpreter(schema)
     except Exception as e:
         result.schema_valid = False
-        result.schema_errors.append(f"Failed to create interpreter: {e}")
+        result.add_error(f"Failed to create interpreter: {e}")
         return result
     
     # Run test vectors
@@ -572,8 +739,19 @@ def print_results(result: ValidationResult, verbose: bool = False):
     else:
         print("Schema: INVALID")
         for error in result.schema_errors:
-            print(f"  - {error}")
+            print(f"  [ERROR] {error}")
         return
+    
+    # Show warnings and info if any
+    if result.schema_warnings:
+        print(f"\nWarnings ({len(result.schema_warnings)}):")
+        for warning in result.schema_warnings:
+            print(f"  [WARNING] {warning}")
+    
+    if verbose and result.schema_info:
+        print(f"\nSuggestions ({len(result.schema_info)}):")
+        for info in result.schema_info:
+            print(f"  [INFO] {info}")
     
     # Test vectors
     if result.total_tests == 0:

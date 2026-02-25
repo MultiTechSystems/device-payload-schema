@@ -1,16 +1,44 @@
 """
 Tests for schema interpreter.
 
-Requirements Coverage:
-- REQ-Document-S-SHAL-003: Schema format
-- REQ-Unsigned-I-001 through REQ-Type-Alia-003: Integer types
-- REQ-Float-Typ-007, REQ-Float-Typ-008: Float types
-- REQ-Bitfield--009 through REQ-Bitfield--014: Bitfield syntaxes
-- REQ-Boolean-Ty-016: Boolean type
-- REQ-Arithmeti-022 through REQ-Lookup-Ta-027: Modifiers
-- REQ-Match-Cond-030 through REQ-Match-Defa-036: Conditional parsing
-- REQ-Output-For-040 through REQ-TTN-Output-043: Output formats
-- REQ-Encoder-Re-044, REQ-Roundtrip-045: Encoding
+Requirements Coverage (see test-requirements-map.yaml for full mapping):
+Requirement IDs from: la-payload-schema/spec/sections/A4-requirements.md
+
+Mandatory Requirements (M001-M234):
+- M003-M040: Schema format, structure, ports
+- M041-M045: Integer types and endianness
+- M046-M047: Float types
+- M048-M053: Bitfield syntaxes
+- M054-M055: Boolean type
+- M056-M058: Enum type
+- M059-M060: Byte groups
+- M061-M064: String types
+- M065-M067: Computed fields
+- M072-M076: Repeat/arrays
+- M085-M092: Modifiers (add, mult, div, lookup)
+- M093-M097: Polynomial
+- M098-M101: Transforms
+- M102-M106: Compute operations
+- M107-M111: Guard conditions
+- M112-M115: Valid range
+- M119-M121: Nested objects
+- M122-M127: Variables
+- M128-M132: Match conditionals
+- M133-M137: TLV parsing
+- M138-M148: Flagged construct
+- M149-M156, M166-M169: Compact format
+- M179-M188: Validation
+- M189-M201: Safety
+- M210-M213: Downlink encoding
+- M226-M231: Schema composition
+
+Recommended Requirements (R001-R057):
+- R024: SenML unit codes
+- R027-R029: IPSO/SenML warnings
+
+Optional Requirements (O001-O044):
+- O005, O028: Direction property
+- O021, O022: Compact format strings
 """
 
 import pytest
@@ -30,9 +58,10 @@ from schema_interpreter import (
 class TestSchemaInterpreterBasic:
     """Basic tests for SchemaInterpreter.
     
-    REQ-Document-S-SHAL-003: Schema SHALL be valid JSON/YAML
-    REQ-Document-S-REQU-004: name field REQUIRED
-    REQ-Document-S-REQU-008: fields array REQUIRED
+    Spec Requirements:
+    - M003: Schema SHALL be valid JSON/YAML
+    - M004: name field REQUIRED
+    - M008: Schema MUST contain fields or ports
     """
     
     @pytest.fixture
@@ -71,11 +100,12 @@ class TestSchemaInterpreterBasic:
 class TestIntegerTypes:
     """Tests for integer type decoding.
     
-    REQ-Unsigned-I-001: u8, u16, u32, u64 unsigned integers
-    REQ-Signed-Int-002: s8, s16, s32, s64 signed integers
-    REQ-Type-Alia-003: Type aliases (uint8, int8, etc.)
-    REQ-Endiannes-004: Big endian default
-    REQ-Endiannes-005: Little endian option
+    Spec Requirements:
+    - M041: Type aliases
+    - M042: All defined integer widths (u8, u16, u32, u64, s8, s16, s32, s64)
+    - M043: Documented type aliases
+    - M044: Big-endian and little-endian support
+    - R008: Big endian default
     """
     
     def test_decode_u8(self):
@@ -139,7 +169,9 @@ class TestIntegerTypes:
 class TestFloatTypes:
     """Tests for floating point type decoding.
     
-    REQ-Float-Typ-007: f32/float, f64/double types
+    Spec Requirements:
+    - M046: IEEE 754 formats (f16, f32, f64)
+    - M047: Special values (NaN, Infinity)
     """
     
     def test_decode_f32(self):
@@ -167,13 +199,10 @@ class TestFloatTypes:
 class TestBitfieldTypes:
     """Tests for bitfield type decoding.
     
-    REQ-Bitfield--009: Bitfield extraction
-    REQ-Bitfield--010: Python slice syntax u8[3:4]
-    REQ-Bitfield--011: Verilog part-select u8[3+:2]
-    REQ-Bitfield--012: C++ template bits<3,2>
-    REQ-Bitfield--013: @ notation bits:2@3
-    REQ-Bitfield--014: Sequential syntax u8:2
-    REQ-Consume-Fi-015: consume: 0 prevents byte advance
+    Spec Requirements:
+    - M048: Bits numbered 0 (LSB) to 7 (MSB)
+    - M049: All shorthand syntaxes (slice, part-select, template, @, sequential)
+    - M050: Bitfield extractions MUST NOT advance read position unless consume:1
     """
     
     def test_decode_bitfield_python_slice(self):
@@ -253,7 +282,9 @@ class TestBitfieldTypes:
 class TestBooleanType:
     """Tests for boolean type decoding.
     
-    REQ-Boolean-Ty-016: bool type with bit position
+    Spec Requirements:
+    - M054: Decoders MUST output JSON boolean values (true/false)
+    - M055: Bool MUST NOT advance read position
     """
     
     def test_decode_bool_true(self):
@@ -290,12 +321,11 @@ class TestBooleanType:
 class TestModifiers:
     """Tests for arithmetic modifiers.
     
-    REQ-Arithmeti-022: mult, add, div modifiers
-    REQ-Modifier-O-023: Modifier application order (mult -> div -> add)
-    REQ-Mult-Modi-024: mult modifier
-    REQ-Add-Modif-025: add modifier
-    REQ-Div-Modif-026: div modifier
-    REQ-Lookup-Ta-027: lookup table modifier
+    Spec Requirements:
+    - M085: add, mult, div transformations
+    - M086: Floating-point arithmetic
+    - M087: Division by zero handling
+    - M089-M092: lookup table modifier
     """
     
     def test_mult_modifier(self):
@@ -353,7 +383,10 @@ class TestModifiers:
 class TestNestedObjects:
     """Tests for nested object types.
     
-    REQ-Nested-Obj-029: type: object with nested fields
+    Spec Requirements:
+    - M119: Nested object: constructs
+    - M120: Fields processed in order
+    - M121: fields array MUST contain at least one field
     """
     
     def test_decode_nested_object(self):
@@ -378,8 +411,11 @@ class TestNestedObjects:
 class TestBytesAndStrings:
     """Tests for bytes and string types.
     
-    REQ-Bytes-Type-017: bytes type
-    REQ-String-Typ-018: string type
+    Spec Requirements:
+    - M061: ascii, hex, base64 support
+    - M062: length field requirement
+    - M063: hex lowercase output
+    - M064: RFC 4648 Base64
     """
     
     def test_decode_bytes(self):
@@ -433,8 +469,10 @@ class TestInternalFields:
 class TestEncoder:
     """Tests for payload encoding.
     
-    REQ-Encoder-Re-044: Bidirectional encoding
-    REQ-Roundtrip-045: Encode/decode roundtrip consistency
+    Spec Requirements:
+    - M153: Modifiers MUST be reversed in opposite order from decode
+    - M154: Round non-integer values
+    - M210-M212: JSON to binary encoding, reverse transformations
     """
     
     @pytest.fixture
@@ -490,10 +528,10 @@ class TestEncoder:
 class TestSemanticOutputs:
     """Tests for semantic output formats.
     
-    REQ-Output-For-040: Semantic output layer
-    REQ-IPSO-Outpu-041: IPSO/LwM2M format
-    REQ-SenML-Outp-042: SenML (RFC 8428) format
-    REQ-TTN-Output-043: TTN normalized format
+    Spec Requirements:
+    - M170: _quality object when valid_range
+    - R024: SenML unit codes (RFC 8428)
+    - R027: IPSO for standard sensors
     """
     
     @pytest.fixture
@@ -599,8 +637,10 @@ class TestEncodeResult:
 class TestEnumType:
     """Tests for enum type.
     
-    REQ-Enum-Type-038: enum type with base integer
-    REQ-Enum-Value-039: enum values mapping (dict or list)
+    Spec Requirements:
+    - M056: String name output for known values
+    - M057: Unknown value handling per default_action
+    - M058: Encoder accepts string names and integer values
     """
     
     def test_decode_enum_dict(self):
@@ -689,12 +729,12 @@ class TestEnumType:
 class TestMatchConditional:
     """Tests for match conditional decoding.
     
-    REQ-Match-Cond-030: match/on/cases conditional parsing
-    REQ-Match-Sing-032: Single value case
-    REQ-Match-List-033: List of values case
-    REQ-Match-Rang-034: Range case (1..5)
-    REQ-Match-Defa-035: default: skip
-    REQ-Match-Defa-036: default: error
+    Spec Requirements:
+    - M128: match construct support
+    - M129: Exactly one matching case processed
+    - M130: Cases evaluated in order
+    - M131: Range start <= end
+    - M132: All three matching patterns (single, list, range)
     """
     
     def test_match_single_value(self):
@@ -867,7 +907,8 @@ class TestByteGroup:
 class TestFormulaField:
     """Tests for formula field modifier.
     
-    REQ-Formula-Fi-028: formula expression evaluation
+    Note: formula is deprecated, use compute/polynomial/transform instead.
+    Related to M102-M106 (compute operations).
     """
     
     def test_formula_simple(self):
@@ -921,13 +962,13 @@ class TestFormulaField:
 
 
 class TestNewTypes:
-    """Tests for newly implemented types.
+    """Tests for type extensions.
     
-    REQ-Float-Typ-008: f16 half precision float
-    REQ-Skip-Type-021: skip type for padding/reserved bytes
-    REQ-ASCII-Type-019: ascii string type
-    REQ-Hex-Type-020: hex string output
-    REQ-Base64-Typ-057: base64 string output
+    Spec Requirements:
+    - M046: f16 half precision float (IEEE 754)
+    - M061: ascii, hex, base64 support
+    - M063: hex lowercase output
+    - M064: RFC 4648 Base64
     """
     
     def test_f16_half_precision(self):
@@ -988,8 +1029,11 @@ class TestNewTypes:
 class TestDefinitionsAndRef:
     """Tests for definitions and $ref support.
     
-    REQ-Definitio-051: definitions section for reusable field groups
-    REQ-Ref-Field-052: $ref for referencing definitions
+    Spec Requirements:
+    - M226: Detect circular references
+    - M227: Resolve ref references
+    - M228: Reject circular with error
+    - M229: Undefined definitions error
     """
     
     def test_simple_ref(self):
@@ -1693,12 +1737,13 @@ class TestCrossFieldFormula:
 
 
 class TestDeclarativeComputedFields:
-    """Tests for new declarative computed field constructs.
+    """Tests for declarative computed field constructs.
     
-    REQ-Polynomial-001: polynomial calibration using Horner's method
-    REQ-Compute-001: cross-field binary operations (add/sub/mul/div)
-    REQ-Guard-001: conditional evaluation with fallback
-    REQ-Transform-001: transform array with math operations
+    Spec Requirements:
+    - M093-M097: Polynomial calibration using Horner's method
+    - M102-M106: Cross-field compute operations (add/sub/mul/div)
+    - M107-M111: Guard conditions with when clause
+    - M098-M101: Transform array with math operations
     """
     
     def test_polynomial_topp_equation(self):
@@ -2307,10 +2352,10 @@ class TestMetadataEnrichment:
 # =============================================================================
 
 class TestPhase3TimestampFormatting:
-    """Tests for Phase 3 timestamp formatting features.
+    """Tests for timestamp formatting features.
     
-    REQ-Timestamp-ISO-060: iso8601 formatting mode
-    REQ-Timestamp-Elapsed-061: elapsed_to_absolute mode
+    Note: Timestamp formatting is a prototype extension (utility formats).
+    Related to M214 (utility formats MUST preserve accuracy).
     """
     
     def test_iso8601_format_unix_epoch(self):
@@ -2381,9 +2426,10 @@ class TestPhase3TimestampFormatting:
 
 
 class TestPhase3VersionString:
-    """Tests for Phase 3 version_string type.
+    """Tests for version_string type.
     
-    REQ-Version-String-062: Assemble version string from raw bytes
+    Spec Requirements:
+    - M077-M082: Bitfield string (parts processed in order, prefix prepended)
     """
     
     def test_version_string_decode(self):
@@ -2451,9 +2497,10 @@ class TestPhase3VersionString:
 
 
 class TestPhase3EncodeFormula:
-    """Tests for Phase 3 encode_formula feature.
+    """Tests for encode_formula feature.
     
-    REQ-Encode-Formula-063: Custom encoding formula (inverse of decode formula)
+    Note: encode_formula is a prototype extension for custom reverse transformations.
+    Related to M211 (reverse arithmetic transformations).
     """
     
     def test_encode_formula_simple(self):
@@ -2517,8 +2564,8 @@ class TestPhase3EncodeFormula:
 class TestU24S24Types:
     """Comprehensive tests for u24/s24 3-byte integer types.
     
-    REQ-Unsigned-I-001: u24 unsigned 24-bit
-    REQ-Signed-Int-002: s24 signed 24-bit
+    Spec Requirements:
+    - M042: All defined integer widths (includes u24, s24)
     """
     
     def test_u24_big_endian(self):
@@ -2601,7 +2648,8 @@ class TestU24S24Types:
 class TestLittleEndianVariants:
     """Comprehensive tests for little-endian across all types.
     
-    REQ-Endiannes-005: Little endian with endian: little
+    Spec Requirements:
+    - M044: Big-endian and little-endian support
     """
     
     def test_u16_le(self):
@@ -2692,7 +2740,9 @@ class TestLittleEndianVariants:
 class TestComplexMatchDefault:
     """Tests for complex match default with inline fields.
     
-    REQ-Match-Defa-036: default with fields for unknown message types
+    Spec Requirements:
+    - M128: match construct support
+    - M129: Exactly one matching case processed
     """
     
     def test_match_default_with_fields_legacy(self):
@@ -2765,7 +2815,9 @@ class TestComplexMatchDefault:
 class TestTypeAliases:
     """Tests for all type aliases working correctly.
     
-    REQ-Type-Alia-003: uint8/int8/i8 etc. aliases
+    Spec Requirements:
+    - M041: Type aliases
+    - M043: Documented type aliases
     """
     
     def test_uint8(self):
@@ -3557,7 +3609,7 @@ class TestBytesType:
     """
 
     def test_bytes_type(self):
-        """REQ-Bytes-Type-017: Raw bytes extraction."""
+        """M061: Raw bytes extraction."""
         schema = {'fields': [{'name': 'data', 'type': 'bytes', 'length': 4}]}
         interp = SchemaInterpreter(schema)
         result = interp.decode(bytes([0xDE, 0xAD, 0xBE, 0xEF]))
@@ -3565,7 +3617,7 @@ class TestBytesType:
         assert result.data['data'] == bytes([0xDE, 0xAD, 0xBE, 0xEF])
 
     def test_hex_type(self):
-        """REQ-Hex-Type-020: Hex string output."""
+        """M063: Hex string output (lowercase)."""
         schema = {'fields': [{'name': 'mac', 'type': 'hex', 'length': 6}]}
         interp = SchemaInterpreter(schema)
         result = interp.decode(bytes([0x00, 0x11, 0x22, 0x33, 0x44, 0x55]))
@@ -3573,7 +3625,7 @@ class TestBytesType:
         assert result.data['mac'].lower() == '001122334455'
 
     def test_base64_type(self):
-        """REQ-Base64-Typ-057: Base64 encoded output."""
+        """M064: Base64 encoded output (RFC 4648)."""
         schema = {'fields': [{'name': 'blob', 'type': 'base64', 'length': 3}]}
         interp = SchemaInterpreter(schema)
         result = interp.decode(bytes([0x01, 0x02, 0x03]))
@@ -3591,7 +3643,7 @@ class TestStringType:
     """
 
     def test_string_type(self):
-        """REQ-String-Typ-018: String type with length."""
+        """M061: String type with length."""
         schema = {'fields': [{'name': 'msg', 'type': 'string', 'length': 5}]}
         interp = SchemaInterpreter(schema)
         result = interp.decode(b'Hello')
@@ -3599,7 +3651,7 @@ class TestStringType:
         assert result.data['msg'] == 'Hello'
 
     def test_ascii_type(self):
-        """REQ-ASCII-Type-019: ASCII string type."""
+        """M061: ASCII string type."""
         schema = {'fields': [{'name': 'name', 'type': 'ascii', 'length': 4}]}
         interp = SchemaInterpreter(schema)
         result = interp.decode(b'Test')
@@ -3624,7 +3676,7 @@ class TestLookupModifier:
     """
 
     def test_lookup_dict(self):
-        """REQ-Lookup-Ta-027: Lookup with dictionary."""
+        """M089-M092: Lookup with dictionary."""
         schema = {
             'fields': [{
                 'name': 'status',
@@ -3678,7 +3730,7 @@ class TestTransformOperations:
     """
 
     def test_transform_basic(self):
-        """REQ-Transform-001: Basic transform pipeline."""
+        """M098-M101: Basic transform pipeline."""
         schema = {
             'fields': [{
                 'name': 'temp',
@@ -3719,7 +3771,7 @@ class TestBitfieldString:
     """
 
     def test_bitfield_string_version(self):
-        """REQ-Bitfield-String-069: Bitfield string for version numbers."""
+        """M077-M082: Bitfield string for version numbers."""
         schema = {
             'fields': [{
                 'name': 'version',
@@ -3749,7 +3801,7 @@ class TestByteGroup:
     """
 
     def test_byte_group_nibbles(self):
-        """REQ-Byte-Group-037: Byte group with nibble extraction."""
+        """M059-M060: Byte group with nibble extraction."""
         schema = {
             'fields': [{
                 'byte_group': [
@@ -3775,7 +3827,7 @@ class TestDefinitions:
     """
 
     def test_definitions_basic(self):
-        """REQ-Definitio-051: Basic definitions usage."""
+        """M226-M229: Basic definitions usage."""
         schema = {
             'definitions': {
                 'header': {
@@ -3806,7 +3858,7 @@ class TestVariables:
     """
 
     def test_var_basic(self):
-        """REQ-Variables-070: Store and use variable."""
+        """M122-M125: Store and use variable."""
         schema = {
             'fields': [
                 {'name': 'length', 'type': 'u8', 'var': 'len'},
@@ -3829,7 +3881,7 @@ class TestSkipType:
     """
 
     def test_skip_basic(self):
-        """REQ-Skip-Type-021: Skip padding bytes."""
+        """M015: Skip padding bytes (variable-length type)."""
         schema = {
             'fields': [
                 {'name': 'a', 'type': 'u8'},
@@ -3854,7 +3906,7 @@ class TestEndian:
     """
 
     def test_big_endian_default(self):
-        """REQ-Endiannes-004: Default big endian."""
+        """R008: Default big endian."""
         schema = {'fields': [{'name': 'val', 'type': 'u16'}]}
         interp = SchemaInterpreter(schema)
         result = interp.decode(bytes([0x01, 0x02]))
@@ -3862,7 +3914,7 @@ class TestEndian:
         assert result.data['val'] == 0x0102  # Big endian
 
     def test_little_endian_schema(self):
-        """REQ-Endiannes-005: Schema-level little endian."""
+        """M044: Schema-level little endian."""
         schema = {'endian': 'little', 'fields': [{'name': 'val', 'type': 'u16'}]}
         interp = SchemaInterpreter(schema)
         result = interp.decode(bytes([0x01, 0x02]))
@@ -4053,7 +4105,7 @@ class TestUnitAnnotation:
     """
 
     def test_unit_annotation(self):
-        """REQ-Unit-Annot-071: Unit annotation preserved."""
+        """R024: Unit annotation preserved (SenML)."""
         schema = {
             'fields': [{
                 'name': 'temp',
@@ -4091,7 +4143,7 @@ class TestSemanticOutput:
     """
 
     def test_ipso_annotation(self):
-        """REQ-IPSO-Outpu-041: IPSO annotation preserved in decode."""
+        """R027: IPSO annotation preserved in decode."""
         schema = {
             'fields': [{
                 'name': 'temp',
@@ -4106,7 +4158,7 @@ class TestSemanticOutput:
         assert abs(result.data['temp'] - 23.1) < 0.01
 
     def test_senml_annotation(self):
-        """REQ-SenML-Outp-042: SenML annotation preserved in decode."""
+        """R024: SenML annotation preserved in decode."""
         schema = {
             'fields': [{
                 'name': 'temp',
@@ -4133,7 +4185,7 @@ class TestRepeatType:
     """
 
     def test_repeat_count_fixed(self):
-        """REQ-Repeat-Coun-064: Fixed count iteration."""
+        """M072: Fixed count iteration."""
         schema = {
             'endian': 'big',
             'fields': [
@@ -4165,7 +4217,7 @@ class TestRepeatType:
         assert result.data['readings'][2]['humidity'] == 45
 
     def test_repeat_count_variable(self):
-        """REQ-Repeat-Vari-068: Count from variable."""
+        """O014: Count from variable (MAY reference field)."""
         schema = {
             'endian': 'big',
             'fields': [
@@ -4192,7 +4244,7 @@ class TestRepeatType:
         assert result.data['readings'][1]['value'] == 2000
 
     def test_repeat_until_end(self):
-        """REQ-Repeat-Unti-066: Repeat until end of payload."""
+        """M074: Repeat until end of payload."""
         schema = {
             'endian': 'big',
             'fields': [
@@ -4216,7 +4268,7 @@ class TestRepeatType:
         assert result.data['samples'][4]['value'] == 5
 
     def test_repeat_byte_length(self):
-        """REQ-Repeat-Byte-065: Repeat for specified byte length."""
+        """M073: Repeat for specified byte length."""
         schema = {
             'endian': 'big',
             'fields': [
@@ -4247,7 +4299,7 @@ class TestRepeatType:
         assert result.data['trailer'] == 0xBB
 
     def test_repeat_byte_length_variable(self):
-        """REQ-Repeat-Vari-068: Byte length from variable."""
+        """M073: Byte length from variable reference."""
         schema = {
             'endian': 'big',
             'fields': [
@@ -4274,7 +4326,7 @@ class TestRepeatType:
         assert result.data['points'][1]['val'] == 200
 
     def test_repeat_min_constraint(self):
-        """REQ-Repeat-Mini-067: Minimum iterations constraint."""
+        """R013-R014: Minimum iterations constraint."""
         schema = {
             'fields': [
                 {
@@ -4294,7 +4346,7 @@ class TestRepeatType:
         assert 'minimum' in str(result.errors[0]).lower()
 
     def test_repeat_max_constraint(self):
-        """REQ-Repeat-Mini-067: Maximum iterations constraint (safety)."""
+        """R014: Maximum iterations constraint (safety)."""
         schema = {
             'fields': [
                 {
@@ -5163,3 +5215,517 @@ class TestLibrarySensorDefinitions:
                     errors.append(f"{yaml_file.name}:{def_name} missing 'type'")
         
         assert len(errors) == 0, f"Library errors:\n" + "\n".join(errors)
+
+
+class TestEncodings:
+    """Tests for special encodings (sign_magnitude, bcd, gray).
+    
+    Note: These encodings are prototype extensions not yet in spec requirements.
+    Related to M044 (endian support) as they affect integer interpretation.
+    """
+    
+    def test_sign_magnitude_positive(self):
+        """Test sign_magnitude with positive value."""
+        schema = {
+            'name': 'test',
+            'fields': [
+                {'name': 'value', 'type': 'u16', 'encoding': 'sign_magnitude'}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        # 0x0064 = 100 (positive, sign bit = 0)
+        result = interpreter.decode(bytes([0x00, 0x64]))
+        
+        assert result.success
+        assert result.data['value'] == 100
+    
+    def test_sign_magnitude_negative(self):
+        """Test sign_magnitude with negative value."""
+        schema = {
+            'name': 'test',
+            'endian': 'big',
+            'fields': [
+                {'name': 'value', 'type': 'u16', 'encoding': 'sign_magnitude'}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        # 0x8064 = -100 (sign bit = 1, magnitude = 100)
+        result = interpreter.decode(bytes([0x80, 0x64]))
+        
+        assert result.success
+        assert result.data['value'] == -100
+    
+    def test_sign_magnitude_roundtrip(self):
+        """Test sign_magnitude encode/decode roundtrip."""
+        schema = {
+            'name': 'test',
+            'fields': [
+                {'name': 'value', 'type': 'u16', 'encoding': 'sign_magnitude'}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # Test positive
+        encoded = interpreter.encode({'value': 100})
+        decoded = interpreter.decode(encoded.payload)
+        assert decoded.data['value'] == 100
+        
+        # Test negative
+        encoded = interpreter.encode({'value': -100})
+        decoded = interpreter.decode(encoded.payload)
+        assert decoded.data['value'] == -100
+    
+    def test_bcd_decode(self):
+        """Test BCD decoding (default big-endian)."""
+        schema = {
+            'name': 'test',
+            'fields': [
+                {'name': 'value', 'type': 'u16', 'encoding': 'bcd'}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        # 0x1234 in BCD = 1234 decimal (default is big-endian)
+        result = interpreter.decode(bytes([0x12, 0x34]))
+        
+        assert result.success
+        assert result.data['value'] == 1234
+    
+    def test_bcd_decode_big_endian(self):
+        """Test BCD decoding with big endian."""
+        schema = {
+            'name': 'test',
+            'endian': 'big',
+            'fields': [
+                {'name': 'value', 'type': 'u16', 'encoding': 'bcd'}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        # 0x1234 in BCD = 1234 decimal
+        result = interpreter.decode(bytes([0x12, 0x34]))
+        
+        assert result.success
+        assert result.data['value'] == 1234
+    
+    def test_bcd_roundtrip(self):
+        """Test BCD encode/decode roundtrip."""
+        schema = {
+            'name': 'test',
+            'endian': 'big',
+            'fields': [
+                {'name': 'value', 'type': 'u16', 'encoding': 'bcd'}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        encoded = interpreter.encode({'value': 1234})
+        decoded = interpreter.decode(encoded.payload)
+        assert decoded.data['value'] == 1234
+    
+    def test_gray_decode(self):
+        """Test Gray code decoding."""
+        schema = {
+            'name': 'test',
+            'fields': [
+                {'name': 'value', 'type': 'u8', 'encoding': 'gray'}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        # Gray code 0b1011 = binary 0b1101 = 13
+        result = interpreter.decode(bytes([0b1011]))
+        
+        assert result.success
+        assert result.data['value'] == 13
+    
+    def test_gray_roundtrip(self):
+        """Test Gray code encode/decode roundtrip."""
+        schema = {
+            'name': 'test',
+            'fields': [
+                {'name': 'value', 'type': 'u8', 'encoding': 'gray'}
+            ]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        for value in [0, 1, 5, 10, 127, 255]:
+            encoded = interpreter.encode({'value': value})
+            decoded = interpreter.decode(encoded.payload)
+            assert decoded.data['value'] == value, f"Failed for value {value}"
+
+
+class TestDownlinkCommands:
+    """Tests for downlink_commands support.
+    
+    Spec Requirements:
+    - M210: JSON to binary encoding support
+    - M211: Reverse arithmetic transformations
+    - M212: Validate values fit in type
+    Note: downlink_commands structure is a prototype extension. Spec uses match-based approach.
+    """
+    
+    @pytest.fixture
+    def command_schema(self):
+        return {
+            'name': 'device_config',
+            'direction': 'bidirectional',
+            'fields': [
+                {'name': 'temperature', 'type': 's16', 'div': 10},
+                {'name': 'humidity', 'type': 'u8'},
+            ],
+            'downlink_commands': {
+                'set_interval': {
+                    'command_id': 0x01,
+                    'fields': [
+                        {'name': 'interval_minutes', 'type': 'u16'}
+                    ]
+                },
+                'reboot': {
+                    'command_id': 0x02,
+                    'fields': []
+                },
+                'set_threshold': {
+                    'command_id': 0x03,
+                    'fields': [
+                        {'name': 'low', 'type': 'u8'},
+                        {'name': 'high', 'type': 'u8'}
+                    ]
+                }
+            }
+        }
+    
+    def test_encode_command_basic(self, command_schema):
+        """Test encoding a basic command."""
+        interpreter = SchemaInterpreter(command_schema)
+        
+        result = interpreter.encode_command('set_interval', {'interval_minutes': 60})
+        
+        assert result.success
+        assert result.payload[0] == 0x01  # command_id
+        # 60 in big-endian (default): 0x00, 0x3C
+        assert result.payload == bytes([0x01, 0x00, 0x3C])
+    
+    def test_encode_command_no_fields(self, command_schema):
+        """Test encoding a command with no fields."""
+        interpreter = SchemaInterpreter(command_schema)
+        
+        result = interpreter.encode_command('reboot', {})
+        
+        assert result.success
+        assert result.payload == bytes([0x02])  # Just command_id
+    
+    def test_encode_command_multiple_fields(self, command_schema):
+        """Test encoding a command with multiple fields."""
+        interpreter = SchemaInterpreter(command_schema)
+        
+        result = interpreter.encode_command('set_threshold', {'low': 10, 'high': 90})
+        
+        assert result.success
+        assert result.payload == bytes([0x03, 10, 90])
+    
+    def test_encode_command_unknown(self, command_schema):
+        """Test encoding unknown command returns error."""
+        interpreter = SchemaInterpreter(command_schema)
+        
+        result = interpreter.encode_command('unknown_cmd', {})
+        
+        assert not result.success
+        assert 'Unknown command' in result.errors[0]
+    
+    def test_decode_command_basic(self, command_schema):
+        """Test decoding a basic command."""
+        interpreter = SchemaInterpreter(command_schema)
+        
+        # 60 in big-endian (default): 0x00, 0x3C
+        result = interpreter.decode_command(bytes([0x01, 0x00, 0x3C]))
+        
+        assert result.success
+        assert result.data['_command'] == 'set_interval'
+        assert result.data['_command_id'] == 0x01
+        assert result.data['interval_minutes'] == 60
+    
+    def test_decode_command_unknown_id(self, command_schema):
+        """Test decoding unknown command_id."""
+        interpreter = SchemaInterpreter(command_schema)
+        
+        result = interpreter.decode_command(bytes([0xFF, 0x00, 0x00]))
+        
+        assert not result.success
+        assert 'Unknown command_id' in result.errors[0]
+        assert result.data['_command_id'] == 0xFF
+    
+    def test_list_commands(self, command_schema):
+        """Test listing available commands."""
+        interpreter = SchemaInterpreter(command_schema)
+        
+        commands = interpreter.list_commands()
+        
+        assert 'set_interval' in commands
+        assert 'reboot' in commands
+        assert 'set_threshold' in commands
+        
+        assert commands['set_interval']['command_id'] == 0x01
+        assert len(commands['set_interval']['fields']) == 1
+        assert commands['reboot']['command_id'] == 0x02
+        assert len(commands['reboot']['fields']) == 0
+    
+    def test_command_roundtrip(self, command_schema):
+        """Test command encode/decode roundtrip."""
+        interpreter = SchemaInterpreter(command_schema)
+        
+        original = {'interval_minutes': 120}
+        encoded = interpreter.encode_command('set_interval', original)
+        decoded = interpreter.decode_command(encoded.payload)
+        
+        assert decoded.success
+        assert decoded.data['interval_minutes'] == 120
+
+
+class TestCompactFormat:
+    """Tests for compact format string parsing.
+    
+    Spec Requirements:
+    - M166: Compact format functionally equivalent to full
+    - M167: Simple sequential fields only
+    - M168: Complex features not supported in compact
+    - M169: Big-endian default when prefix omitted
+    - O021: Compact string format MAY be supported
+    - O022: Parsers MAY support compact format strings
+    """
+    
+    def test_basic_format_string(self):
+        """Test basic format string parsing."""
+        schema = {
+            'name': 'test',
+            'fields': '>B:version H:length I:timestamp'
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # version=1, length=256, timestamp=1000000
+        payload = bytes([0x01, 0x01, 0x00, 0x00, 0x0F, 0x42, 0x40])
+        result = interpreter.decode(payload)
+        
+        assert result.success
+        assert result.data['version'] == 1
+        assert result.data['length'] == 256
+        assert result.data['timestamp'] == 1000000
+    
+    def test_format_with_skip(self):
+        """Test format string with skip bytes."""
+        schema = {
+            'name': 'test',
+            'fields': '>B:type 2x H:value'
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # type=1, skip 2 bytes, value=1000
+        payload = bytes([0x01, 0x00, 0x00, 0x03, 0xE8])
+        result = interpreter.decode(payload)
+        
+        assert result.success
+        assert result.data['type'] == 1
+        assert result.data['value'] == 1000
+    
+    def test_format_little_endian(self):
+        """Test format string with little endian."""
+        schema = {
+            'name': 'test',
+            'fields': '<H:value I:timestamp'
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # value=0x0102 LE, timestamp=0x04030201 LE
+        payload = bytes([0x02, 0x01, 0x01, 0x02, 0x03, 0x04])
+        result = interpreter.decode(payload)
+        
+        assert result.success
+        assert result.data['value'] == 0x0102
+        assert result.data['timestamp'] == 0x04030201
+    
+    def test_format_signed_types(self):
+        """Test format string with signed types."""
+        schema = {
+            'name': 'test',
+            'fields': '>b:signed_byte h:signed_short'
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # signed_byte=-1, signed_short=-100
+        payload = bytes([0xFF, 0xFF, 0x9C])
+        result = interpreter.decode(payload)
+        
+        assert result.success
+        assert result.data['signed_byte'] == -1
+        assert result.data['signed_short'] == -100
+    
+    def test_format_float_types(self):
+        """Test format string with float types."""
+        schema = {
+            'name': 'test',
+            'fields': '>f:temperature'
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        # 23.5 as big-endian float
+        payload = struct.pack('>f', 23.5)
+        result = interpreter.decode(payload)
+        
+        assert result.success
+        assert abs(result.data['temperature'] - 23.5) < 0.001
+
+
+class TestDirectionProperty:
+    """Tests for direction property support.
+    
+    Spec Requirements:
+    - O005: direction property (uplink/downlink/both)
+    - O028: direction: downlink indication
+    - R002: When direction specified, decoders SHOULD validate
+    """
+    
+    def test_direction_uplink(self):
+        """Test direction: uplink (default)."""
+        schema = {
+            'name': 'test',
+            'direction': 'uplink',
+            'fields': [{'name': 'temp', 'type': 's16'}]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        assert interpreter.direction == 'uplink'
+    
+    def test_direction_downlink(self):
+        """Test direction: downlink."""
+        schema = {
+            'name': 'test',
+            'direction': 'downlink',
+            'fields': [{'name': 'interval', 'type': 'u16'}]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        assert interpreter.direction == 'downlink'
+    
+    def test_direction_bidirectional(self):
+        """Test direction: bidirectional."""
+        schema = {
+            'name': 'test',
+            'direction': 'bidirectional',
+            'fields': [{'name': 'temp', 'type': 's16'}],
+            'downlink_commands': {
+                'config': {'command_id': 1, 'fields': []}
+            }
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        assert interpreter.direction == 'bidirectional'
+        assert 'config' in interpreter.downlink_commands
+    
+    def test_direction_default(self):
+        """Test default direction is uplink."""
+        schema = {
+            'name': 'test',
+            'fields': [{'name': 'temp', 'type': 's16'}]
+        }
+        interpreter = SchemaInterpreter(schema)
+        
+        assert interpreter.direction == 'uplink'
+
+
+class TestValidationLevels:
+    """Tests for validation levels (ERROR/WARNING/INFO).
+    
+    Spec Requirements:
+    - M179: Reject invalid schemas
+    - M185: Schema MUST NOT be used if errors exist
+    - R030: Validators SHOULD output structured error information
+    """
+    
+    def test_validation_error(self):
+        """Test ERROR level messages."""
+        from validate_schema import validate_schema, ValidationLevel
+        
+        # Schema with missing required field
+        schema = {
+            # Missing 'name'
+            'fields': [{'name': 'temp', 'type': 's16'}]
+        }
+        
+        result = validate_schema(schema)
+        
+        assert not result.schema_valid
+        assert result.error_count > 0
+    
+    def test_validation_warning_missing_ipso(self):
+        """Test WARNING for missing IPSO annotation on sensor field."""
+        from validate_schema import validate_schema
+        
+        schema = {
+            'name': 'test',
+            'fields': [
+                {'name': 'temperature', 'type': 's16', 'div': 10}
+            ],
+            'test_vectors': [
+                {'name': 'basic', 'payload': '00E7', 'expected': {'temperature': 23.1}}
+            ]
+        }
+        
+        result = validate_schema(schema)
+        
+        assert result.schema_valid
+        assert result.warning_count > 0
+        assert any('ipso' in w.lower() for w in result.schema_warnings)
+    
+    def test_validation_info_missing_unit(self):
+        """Test INFO for missing unit annotation."""
+        from validate_schema import validate_schema
+        
+        schema = {
+            'name': 'test',
+            'fields': [
+                {'name': 'temperature', 'type': 's16', 'div': 10, 'ipso': 3303}
+            ],
+            'test_vectors': [
+                {'name': 'basic', 'payload': '00E7', 'expected': {'temperature': 23.1}}
+            ]
+        }
+        
+        result = validate_schema(schema)
+        
+        assert result.schema_valid
+        assert result.info_count > 0
+        assert any('unit' in i.lower() for i in result.schema_info)
+    
+    def test_validation_warning_no_test_vectors(self):
+        """Test WARNING when no test vectors defined."""
+        from validate_schema import validate_schema
+        
+        schema = {
+            'name': 'test',
+            'fields': [{'name': 'value', 'type': 'u8'}]
+        }
+        
+        result = validate_schema(schema)
+        
+        assert result.schema_valid
+        assert result.warning_count > 0
+        assert any('test vector' in w.lower() for w in result.schema_warnings)
+    
+    def test_validation_result_to_dict(self):
+        """Test ValidationResult.to_dict() includes all levels."""
+        from validate_schema import validate_schema
+        
+        schema = {
+            'name': 'test',
+            'fields': [{'name': 'temperature', 'type': 's16'}],
+            'test_vectors': [
+                {'name': 'basic', 'payload': '00E7', 'expected': {'temperature': 231}}
+            ]
+        }
+        
+        result = validate_schema(schema)
+        result_dict = result.to_dict()
+        
+        assert 'schema_errors' in result_dict
+        assert 'schema_warnings' in result_dict
+        assert 'schema_info' in result_dict
+        assert 'error_count' in result_dict
+        assert 'warning_count' in result_dict
+        assert 'info_count' in result_dict

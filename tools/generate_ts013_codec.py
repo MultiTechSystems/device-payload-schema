@@ -229,6 +229,8 @@ class TS013Generator:
         self.version = schema.get('version', 1)
         self.endian = schema.get('endian', 'big')
         self.has_ports = 'ports' in schema
+        self.has_commands = 'downlink_commands' in schema
+        self.downlink_commands = schema.get('downlink_commands', {})
         self.indent = 0
 
     def _i(self) -> str:
@@ -247,6 +249,9 @@ class TS013Generator:
         lines.append(self._gen_decode_fields())
         lines.append('')
         lines.append(self._gen_encode_fields())
+        if self.has_commands:
+            lines.append('')
+            lines.append(self._gen_command_functions())
         lines.append('')
         lines.append(self._gen_entry_points())
         return '\n'.join(lines)
@@ -895,6 +900,126 @@ function writeS(buf, pos, size, value, endian) {
         return lines
 
     # ---------------------------------------------------------------
+    # Downlink Commands
+    # ---------------------------------------------------------------
+    def _gen_command_functions(self) -> str:
+        """Generate functions for encoding/decoding downlink commands."""
+        lines = []
+        
+        # Command ID lookup table
+        cmd_ids = {}
+        for cmd_name, cmd_def in self.downlink_commands.items():
+            cmd_id = cmd_def.get('command_id', 0)
+            if isinstance(cmd_id, str) and cmd_id.startswith('0x'):
+                cmd_id = int(cmd_id, 16)
+            cmd_ids[cmd_name] = cmd_id
+        
+        lines.append('// --- Downlink Commands ---')
+        lines.append(f'var COMMANDS = {json.dumps(cmd_ids)};')
+        lines.append('')
+        
+        # Generate encodeCommand function
+        lines.append('function encodeCommand(cmdName, data, endian) {')
+        lines.append('  var buf = [];')
+        lines.append('  var pos = 0;')
+        lines.append('  if (!(cmdName in COMMANDS)) {')
+        lines.append('    throw new Error("Unknown command: " + cmdName);')
+        lines.append('  }')
+        lines.append('  var cmdId = COMMANDS[cmdName];')
+        lines.append('  buf[pos++] = cmdId & 0xFF;')
+        lines.append('')
+        
+        # Generate case for each command
+        first = True
+        for cmd_name, cmd_def in self.downlink_commands.items():
+            prefix = 'if' if first else '} else if'
+            first = False
+            lines.append(f'  {prefix} (cmdName === "{cmd_name}") {{')
+            
+            fields = cmd_def.get('fields', [])
+            for field in fields:
+                fname = field.get('name', '')
+                ftype = field.get('type', 'u8')
+                if fname and not fname.startswith('_'):
+                    sz = type_size(ftype) or 1
+                    signed = is_signed(ftype)
+                    write_fn = 'writeS' if signed else 'writeU'
+                    js_name = to_js_name(fname)
+                    
+                    # Handle modifiers
+                    src = f'data.{js_name} !== undefined ? data.{js_name} : 0'
+                    rev = self._reverse_modifiers_expr(f'({src})', field)
+                    
+                    lines.append(f'    {write_fn}(buf, pos, {sz}, {rev}, endian);')
+                    lines.append(f'    pos += {sz};')
+        
+        if self.downlink_commands:
+            lines.append('  }')
+        
+        lines.append('  return buf;')
+        lines.append('}')
+        lines.append('')
+        
+        # Generate decodeCommand function
+        lines.append('function decodeCommand(buf, endian) {')
+        lines.append('  var d = {};')
+        lines.append('  var pos = 0;')
+        lines.append('  if (buf.length < 1) {')
+        lines.append('    throw new Error("Payload too short for command_id");')
+        lines.append('  }')
+        lines.append('  var cmdId = buf[pos++];')
+        lines.append('  d._command_id = cmdId;')
+        lines.append('')
+        
+        # Generate case for each command
+        first = True
+        for cmd_name, cmd_def in self.downlink_commands.items():
+            cmd_id = cmd_def.get('command_id', 0)
+            if isinstance(cmd_id, str) and cmd_id.startswith('0x'):
+                cmd_id = int(cmd_id, 16)
+            
+            prefix = 'if' if first else '} else if'
+            first = False
+            lines.append(f'  {prefix} (cmdId === {cmd_id}) {{')
+            lines.append(f'    d._command = "{cmd_name}";')
+            
+            fields = cmd_def.get('fields', [])
+            for field in fields:
+                fname = field.get('name', '')
+                ftype = field.get('type', 'u8')
+                if fname and not fname.startswith('_'):
+                    sz = type_size(ftype) or 1
+                    signed = is_signed(ftype)
+                    read_fn = 'readS' if signed else 'readU'
+                    js_name = to_js_name(fname)
+                    
+                    lines.append(f'    d.{js_name} = {read_fn}(buf, pos, {sz}, endian);')
+                    lines.append(f'    pos += {sz};')
+                    
+                    # Apply modifiers
+                    if any(k in field for k in ('mult', 'add', 'div')):
+                        mod_expr = f'd.{js_name}'
+                        for key in ['mult', 'add', 'div']:
+                            if key in field:
+                                if key == 'mult':
+                                    mod_expr = f'({mod_expr} * {field[key]})'
+                                elif key == 'add':
+                                    mod_expr = f'({mod_expr} + {field[key]})'
+                                elif key == 'div':
+                                    mod_expr = f'({mod_expr} / {field[key]})'
+                        lines.append(f'    d.{js_name} = {mod_expr};')
+        
+        if self.downlink_commands:
+            lines.append('  } else {')
+            lines.append('    d._command = "unknown";')
+            lines.append('  }')
+        
+        lines.append('  return { data: d, pos: pos };')
+        lines.append('}')
+        
+        return '\n'.join(lines)
+
+    # ---------------------------------------------------------------
     # TS013 Entry Points
     # ---------------------------------------------------------------
     def _gen_entry_points(self) -> str:
@@ -971,19 +1096,44 @@ function writeS(buf, pos, size, value, endian) {
             lines.append('}')
             lines.append('')
 
-            lines.append('function decodeDownlink(input) {')
-            lines.append('  return decodeUplink(input);')
-            lines.append('}')
-            lines.append('')
+            if self.has_commands:
+                # Use command decoding for downlinks
+                lines.append('function decodeDownlink(input) {')
+                lines.append('  try {')
+                lines.append(f'    var r = decodeCommand(input.bytes, "{self.endian}");')
+                lines.append('    return { data: r.data, warnings: [], errors: [] };')
+                lines.append('  } catch (e) {')
+                lines.append('    return { data: {}, warnings: [], errors: [e.message] };')
+                lines.append('  }')
+                lines.append('}')
+                lines.append('')
 
-            lines.append('function encodeDownlink(input) {')
-            lines.append('  try {')
-            lines.append(f'    var bytes = encodePayload(input.data, "{self.endian}");')
-            lines.append('    return { bytes: bytes, fPort: 1, warnings: [], errors: [] };')
-            lines.append('  } catch (e) {')
-            lines.append('    return { bytes: [], fPort: 1, warnings: [], errors: [e.message] };')
-            lines.append('  }')
-            lines.append('}')
+                lines.append('function encodeDownlink(input) {')
+                lines.append('  try {')
+                lines.append('    var cmdName = input.data._command;')
+                lines.append('    if (!cmdName) {')
+                lines.append('      return { bytes: [], fPort: 1, warnings: ["No _command specified"], errors: [] };')
+                lines.append('    }')
+                lines.append(f'    var bytes = encodeCommand(cmdName, input.data, "{self.endian}");')
+                lines.append('    return { bytes: bytes, fPort: 1, warnings: [], errors: [] };')
+                lines.append('  } catch (e) {')
+                lines.append('    return { bytes: [], fPort: 1, warnings: [], errors: [e.message] };')
+                lines.append('  }')
+                lines.append('}')
+            else:
+                lines.append('function decodeDownlink(input) {')
+                lines.append('  return decodeUplink(input);')
+                lines.append('}')
+                lines.append('')
+
+                lines.append('function encodeDownlink(input) {')
+                lines.append('  try {')
+                lines.append(f'    var bytes = encodePayload(input.data, "{self.endian}");')
+                lines.append('    return { bytes: bytes, fPort: 1, warnings: [], errors: [] };')
+                lines.append('  } catch (e) {')
+                lines.append('    return { bytes: [], fPort: 1, warnings: [], errors: [e.message] };')
+                lines.append('  }')
+                lines.append('}')
 
         return '\n'.join(lines)
 

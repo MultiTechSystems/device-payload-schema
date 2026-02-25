@@ -1,6 +1,6 @@
 # Payload Schema Language Reference
 
-Condensed reference for AI assistants and quick lookup.
+Complete reference for the LoRa Alliance Payload Schema specification (v0.3.2).
 
 ## Document Structure
 
@@ -9,13 +9,18 @@ name: string              # REQUIRED: unique identifier
 version: integer          # REQUIRED: schema version
 endian: big|little        # Default: big
 description: string       # Optional
+direction: uplink|downlink|bidirectional  # Default: uplink
 fields: [...]             # Field definitions (or use ports)
 ports:                    # Port-based routing (or use fields)
   1: { fields: [...] }
   2: { fields: [...] }
 definitions:              # Reusable field groups
   common_header: [...]
+metadata:                 # Network metadata enrichment
+  include: [...]
+  timestamps: [...]
 test_vectors: [...]       # Test cases
+downlink_commands: [...]  # Command definitions (for downlink)
 ```
 
 ## Field Types
@@ -298,6 +303,12 @@ transform:
   encoding: sign_magnitude   # Also: bcd, gray
 ```
 
+| Encoding | Description |
+|----------|-------------|
+| `sign_magnitude` | Bit 15 is sign, bits 0-14 are magnitude |
+| `bcd` | Binary-coded decimal |
+| `gray` | Gray code |
+
 ## Value-Range Matching
 
 For value-dependent transformations:
@@ -340,55 +351,13 @@ test_vectors:
     expected:
       temperature: 23.1
       humidity: 50
-```
 
-## Complete Example
-
-```yaml
-name: environment_sensor
-version: 1
-endian: big
-description: Temperature and humidity sensor with battery
-
-fields:
-  - name: temperature
-    type: s16
-    div: 10
-    unit: "°C"
-    
-  - name: humidity
-    type: u8
-    unit: "%"
-    
-  - name: battery_mv
-    type: u16
-    unit: "mV"
-    
-  - name: battery_percent
-    type: number
-    ref: $battery_mv
-    transform:
-      - add: -2000        # 2000mV = 0%
-      - div: 12           # 3200mV = 100%
-      - clamp: [0, 100]
-    unit: "%"
-
-test_vectors:
-  - name: normal
-    payload: "00E7 32 0C80"
-    expected:
+  - name: encoding_test
+    direction: encode          # Test encoding (JSON → binary)
+    input:
       temperature: 23.1
       humidity: 50
-      battery_mv: 3200
-      battery_percent: 100
-      
-  - name: cold
-    payload: "FF9C 5A 0BB8"
-    expected:
-      temperature: -10.0
-      humidity: 90
-      battery_mv: 3000
-      battery_percent: 83.3
+    expected_payload: "00E732"
 ```
 
 ## Enum Type
@@ -551,6 +520,40 @@ fields:
     length: 10
 ```
 
+## Schema Composition
+
+### Cross-File References
+
+```yaml
+# Reference definitions from other files
+fields:
+  - use: common/headers.yaml#message_header
+  - use: ./local-defs.yaml#sensor_block
+  - name: data
+    type: u16
+```
+
+### Standard Library
+
+```yaml
+# Use standard sensor definitions
+fields:
+  - use: std/sensors/temperature
+    rename: ambient_temp
+  - use: std/sensors/humidity
+  - use: std/sensors/battery_percent
+```
+
+### Field Renaming
+
+```yaml
+- use: gps_position
+  rename: device_location    # Rename single field
+
+- use: sensor_block
+  prefix: indoor_           # Prefix all fields: indoor_temp, indoor_humidity
+```
+
 ## Port-Based Routing
 
 ```yaml
@@ -566,6 +569,129 @@ ports:
       - name: battery
         type: u8
 ```
+
+## Downlink Encoding
+
+### Direction Property
+
+```yaml
+name: device_config
+direction: downlink        # or: bidirectional
+
+fields:
+  - name: interval
+    type: u16
+    mult: 60              # Minutes to seconds
+  - name: threshold
+    type: u8
+```
+
+### Arithmetic Reversal
+
+When encoding downlinks, arithmetic is reversed automatically:
+
+| Decode (uplink) | Encode (downlink) |
+|-----------------|-------------------|
+| `mult: n` | `div: n` |
+| `div: n` | `mult: n` |
+| `add: n` | `sub: n` |
+
+### Command-Based Downlinks
+
+```yaml
+name: device_commands
+direction: downlink
+
+downlink_commands:
+  set_interval:
+    command_id: 0x01
+    fields:
+      - name: interval_minutes
+        type: u16
+  
+  reboot:
+    command_id: 0x02
+    fields: []            # No payload
+  
+  set_threshold:
+    command_id: 0x03
+    fields:
+      - name: low
+        type: u8
+      - name: high
+        type: u8
+```
+
+### Bidirectional Schema
+
+```yaml
+name: env_sensor
+direction: bidirectional
+
+fields:
+  # Uplink: sensor readings
+  - name: temperature
+    type: s16
+    div: 10
+  - name: humidity
+    type: u8
+
+downlink_commands:
+  # Downlink: configuration
+  set_interval:
+    command_id: 0x01
+    fields:
+      - name: interval
+        type: u16
+```
+
+## Network Metadata Enrichment
+
+Include TS013 input fields in decoder output:
+
+```yaml
+metadata:
+  include:
+    - name: received_at
+      source: $recvTime
+    - name: rssi
+      source: $rxMetadata[0].rssi
+    - name: snr
+      source: $rxMetadata[0].snr
+    - name: port
+      source: $fPort
+```
+
+### Timestamp Modes
+
+```yaml
+metadata:
+  timestamps:
+    # Mode 1: Use network receive time
+    - name: timestamp
+      mode: rx_time
+
+    # Mode 2: Compute from offset field
+    - name: measurement_time
+      mode: subtract
+      offset_field: seconds_ago
+
+    # Mode 3: Convert Unix epoch from payload
+    - name: device_time
+      mode: unix_epoch
+      field: unix_timestamp
+```
+
+### Available TS013 Input Fields
+
+| Field | Description |
+|-------|-------------|
+| `$fPort` | LoRaWAN FPort |
+| `$recvTime` | Server receive time (ISO 8601) |
+| `$devEui` | Device EUI |
+| `$rxMetadata[n].rssi` | RSSI from gateway n |
+| `$rxMetadata[n].snr` | SNR from gateway n |
+| `$rxMetadata[n].gatewayId` | Gateway identifier |
 
 ## Output Format Hints
 
@@ -593,7 +719,16 @@ ports:
 | 3330 | Distance | Range/level sensors |
 | 3337 | Positioner | Valve position (%) |
 
-See [OUTPUT-FORMATS.md](OUTPUT-FORMATS.md) for complete reference.
+### M-Bus / Utility Format Hints
+
+```yaml
+- name: volume
+  type: u32
+  div: 1000
+  unit: "m³"
+  mbus_dif: 0x04        # 32-bit integer
+  mbus_vif: 0x14        # Volume in 0.001 m³
+```
 
 ## Semantic Fields
 
@@ -686,6 +821,8 @@ Standard unit identifiers per UNECE Recommendation 20.
 
 ## Compact Format (Alternative Syntax)
 
+### Basic Compact
+
 ```yaml
 # Verbose
 fields:
@@ -697,6 +834,189 @@ fields:
 # Compact equivalent
 format: ">hB"         # struct-like format string
 names: [temp, hum]
+```
+
+### Inline Field Names
+
+```yaml
+# Single-line format with names
+fields: ">B:version H:length I:timestamp"
+
+# With padding (2x = skip 2 bytes)
+fields: ">B:type 2x H:value I:timestamp"
+```
+
+### Format Characters
+
+| Char | Type | Bytes |
+|------|------|-------|
+| `b/B` | s8/u8 | 1 |
+| `h/H` | s16/u16 | 2 |
+| `i/I` | s32/u32 | 4 |
+| `q/Q` | s64/u64 | 8 |
+| `f` | f32 | 4 |
+| `d` | f64 | 8 |
+| `x` | skip | 1 |
+| `>` | big-endian | - |
+| `<` | little-endian | - |
+
+## OTA Schema Transfer
+
+Schemas can be transmitted over-the-air from device to network.
+
+### Binary Schema Encoding
+
+Schemas compile to compact binary for transmission:
+
+```yaml
+# ~5 bytes for simple field
+- name: temperature
+  type: s16
+  div: 10
+
+# Compiles to: 0x11 0x0A 0x00 [name...]
+```
+
+### QR Code Embedding
+
+```
+LW:1:DevEUI:AppEUI:AppKey:SCHEMA:Base64EncodedSchema
+```
+
+## Schema Validation
+
+### Validation Levels
+
+| Level | Description |
+|-------|-------------|
+| ERROR | Must fix before use |
+| WARNING | Should review |
+| INFO | Best practice suggestion |
+
+### Common Validations
+
+```yaml
+# ERROR: Undefined variable reference
+- match:
+    field: $undefined_var    # Error: variable not defined
+
+# WARNING: Missing IPSO for known sensor type
+- name: temperature          # Warning: detected as temperature sensor
+  type: s16                  # but missing ipso: annotation
+  div: 10
+
+# INFO: Consider adding unit
+- name: voltage
+  type: u16
+  div: 1000                  # Info: consider adding unit: "V"
+```
+
+## Quality Scoring
+
+Schemas are scored for certification readiness:
+
+| Tier | Requirements |
+|------|--------------|
+| Bronze | Valid schema, parses without error |
+| Silver | Test vectors present, all pass |
+| Gold | Full metadata (units, IPSO), edge cases tested |
+| Platinum | Bidirectional support, fuzz tested |
+
+### Test Coverage Requirements
+
+- Minimum 3 test vectors for basic coverage
+- Edge cases: min/max values, error conditions
+- All message types / ports exercised
+
+## TS013 Code Generation
+
+Schemas generate TS013-compliant JavaScript decoders:
+
+```javascript
+// Generated from schema
+function decodeUplink(input) {
+  // ... generated decoder logic
+  return {
+    data: { temperature: 23.1, humidity: 50 },
+    warnings: [],
+    errors: []
+  };
+}
+
+function encodeDownlink(input) {
+  // ... generated encoder logic
+  return {
+    fPort: 1,
+    bytes: [0x00, 0xE7, 0x32]
+  };
+}
+```
+
+## Complete Example
+
+```yaml
+name: environment_sensor
+version: 1
+endian: big
+direction: bidirectional
+description: Temperature and humidity sensor with battery
+
+fields:
+  - name: temperature
+    type: s16
+    div: 10
+    unit: "°C"
+    ipso: 3303
+    valid_range: [-40, 85]
+    
+  - name: humidity
+    type: u8
+    unit: "%"
+    ipso: 3304
+    valid_range: [0, 100]
+    
+  - name: battery_mv
+    type: u16
+    unit: "mV"
+    
+  - name: battery_percent
+    type: number
+    ref: $battery_mv
+    transform:
+      - add: -2000        # 2000mV = 0%
+      - div: 12           # 3200mV = 100%
+      - clamp: [0, 100]
+    unit: "%"
+    ipso: 3316
+
+downlink_commands:
+  set_interval:
+    command_id: 0x01
+    fields:
+      - name: interval_minutes
+        type: u16
+
+metadata:
+  include:
+    - name: rssi
+      source: $rxMetadata[0].rssi
+
+test_vectors:
+  - name: normal
+    payload: "00E7 32 0C80"
+    expected:
+      temperature: 23.1
+      humidity: 50
+      battery_mv: 3200
+      battery_percent: 100
+      
+  - name: cold
+    payload: "FF9C 5A 0BB8"
+    expected:
+      temperature: -10.0
+      humidity: 90
+      battery_mv: 3000
+      battery_percent: 83.3
 ```
 
 ## Quick Reference Card
@@ -722,13 +1042,18 @@ ENCODINGS:    sign_magnitude bcd gray
 
 MATCH:        exact | range (n..m) | default (_)
 
-REFERENCES:   $field_name | use: definition_name
+REFERENCES:   $field_name | use: definition_name | file: path.yaml#def
 
 SEMANTICS:    unit | ipso | senml_unit | valid_range | resolution | unece
+
+DIRECTIONS:   uplink | downlink | bidirectional
+
+METADATA:     include | timestamps (rx_time, subtract, unix_epoch)
 ```
 
 ## See Also
 
-- [FUTURE-FEATURES.md](FUTURE-FEATURES.md) - Roadmap and semantic field documentation
-- [OUTPUT-FORMATS.md](OUTPUT-FORMATS.md) - Output format specifications
+- [SCHEMA-DEVELOPMENT-GUIDE.md](SCHEMA-DEVELOPMENT-GUIDE.md) - Tutorial and best practices
+- [OUTPUT-FORMATS.md](OUTPUT-FORMATS.md) - Output format specifications (IPSO, SenML)
 - [C-CODE-GENERATION.md](C-CODE-GENERATION.md) - Embedded firmware codec generation
+- [BIDIRECTIONAL-CODEC.md](BIDIRECTIONAL-CODEC.md) - Downlink encoding details

@@ -210,9 +210,47 @@ class SchemaPreprocessor:
         else:
             return node
 
-    def _process_node(self, node: Any, base_dir: Path, source: str) -> Any:
+    def _resolve_use(self, use_ref: str, base_dir: Path, source: str,
+                      schema_defs: Dict[str, Any] = None) -> Any:
+        """
+        Resolve a 'use:' shorthand reference.
+        
+        Supports:
+        - use: definition_name         -> local #/definitions/definition_name
+        - use: std/sensors/temperature -> standard library path
+        - use: ./local.yaml#def_name   -> cross-file reference
+        """
+        # Local definition (no path separators)
+        if '/' not in use_ref and '#' not in use_ref and '.' not in use_ref:
+            # Check if it's a local definition
+            if schema_defs and use_ref in schema_defs:
+                return copy.deepcopy(schema_defs[use_ref])
+            # Convert to $ref format
+            return self._resolve_ref(f"#/definitions/{use_ref}", base_dir, source)
+        
+        # Standard library reference (std/...)
+        if use_ref.startswith('std/'):
+            # Convert std/sensors/temperature -> schemas/library/std/sensors/temperature.yaml
+            lib_path = f"schemas/library/{use_ref}.yaml"
+            return self._resolve_ref(lib_path, base_dir, source)
+        
+        # Cross-file reference (file.yaml#fragment or ./file.yaml#fragment)
+        if '#' in use_ref:
+            file_part, fragment = use_ref.split('#', 1)
+            ref = f"{file_part}#/definitions/{fragment}"
+        else:
+            ref = use_ref
+        
+        return self._resolve_ref(ref, base_dir, source)
+    
+    def _process_node(self, node: Any, base_dir: Path, source: str,
+                      schema_defs: Dict[str, Any] = None) -> Any:
         """Recursively process a node, resolving references."""
         if isinstance(node, dict):
+            # Track schema definitions for 'use:' resolution
+            if 'definitions' in node and schema_defs is None:
+                schema_defs = node.get('definitions', {})
+            
             # Check for $ref (with optional rename/prefix modifiers)
             if '$ref' in node:
                 ref = node['$ref']
@@ -229,17 +267,33 @@ class SchemaPreprocessor:
                 
                 return resolved
             
+            # Check for 'use:' shorthand (with optional rename/prefix)
+            if 'use' in node:
+                use_ref = node['use']
+                renames = node.get('rename', {})
+                prefix = node.get('prefix', '')
+                
+                resolved = self._resolve_use(use_ref, base_dir, source, schema_defs)
+                
+                # Apply prefix first, then specific renames
+                if prefix:
+                    resolved = self._apply_prefix(resolved, prefix)
+                if renames:
+                    resolved = self._apply_renames(resolved, renames)
+                
+                return resolved
+            
             # Process all values
             result = {}
             for key, value in node.items():
-                result[key] = self._process_node(value, base_dir, source)
+                result[key] = self._process_node(value, base_dir, source, schema_defs)
             return result
         
         elif isinstance(node, list):
             result = []
             for item in node:
-                processed = self._process_node(item, base_dir, source)
-                # If a $ref resolved to a list, flatten it
+                processed = self._process_node(item, base_dir, source, schema_defs)
+                # If a $ref or use: resolved to a list, flatten it
                 if isinstance(processed, list):
                     result.extend(processed)
                 else:

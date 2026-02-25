@@ -77,26 +77,130 @@ class SchemaInterpreter:
         self.name = schema.get('name', 'unknown')
         self.version = schema.get('version', 1)
         self.definitions = schema.get('definitions', {})
+        self.direction = schema.get('direction', 'uplink')  # uplink|downlink|bidirectional
+        self.downlink_commands = schema.get('downlink_commands', {})
         
         # Bitfield state for sequential extraction
         self._bit_pos = 0
+    
+    def _parse_compact_format(self, format_str: str) -> tuple:
+        """
+        Parse compact format string to field definitions.
+        
+        Format: ">B:version H:length I:timestamp"
+        - >/<: big/little endian prefix
+        - b/B: s8/u8, h/H: s16/u16, i/I: s32/u32, q/Q: s64/u64
+        - f: f32, d: f64, x: skip 1 byte, Nx: skip N bytes
+        - :name suffix assigns field name
+        
+        Returns:
+            Tuple of (field list, endian override or None)
+        """
+        FORMAT_CHARS = {
+            'b': ('s8', 1), 'B': ('u8', 1),
+            'h': ('s16', 2), 'H': ('u16', 2),
+            'i': ('s32', 4), 'I': ('u32', 4),
+            'q': ('s64', 8), 'Q': ('u64', 8),
+            'f': ('f32', 4), 'd': ('f64', 8),
+            'e': ('f16', 2),
+            'x': ('skip', 1),
+            '?': ('bool', 1),
+        }
+        
+        fields = []
+        parts = format_str.split()
+        endian_override = None
+        
+        for part in parts:
+            # Handle endian prefix
+            if part in ('>', '<'):
+                endian_override = Endian.BIG if part == '>' else Endian.LITTLE
+                continue
+            
+            # Check for endian prefix at start of token
+            if part.startswith('>') or part.startswith('<'):
+                endian_override = Endian.BIG if part[0] == '>' else Endian.LITTLE
+                part = part[1:]
+            
+            # Parse count prefix (e.g., "2x" for 2 skip bytes)
+            count = 1
+            if part and part[0].isdigit():
+                count_str = ''
+                while part and part[0].isdigit():
+                    count_str += part[0]
+                    part = part[1:]
+                count = int(count_str) if count_str else 1
+            
+            if not part:
+                continue
+            
+            # Extract format char and optional name
+            if ':' in part:
+                fmt_char = part[0]
+                name = part[2:]  # Skip format char and colon
+            else:
+                fmt_char = part[0]
+                name = f'_field{len(fields)}'
+            
+            if fmt_char not in FORMAT_CHARS:
+                raise ValueError(f"Unknown format character: {fmt_char}")
+            
+            type_name, size = FORMAT_CHARS[fmt_char]
+            
+            # Handle skip with count
+            if type_name == 'skip':
+                fields.append({
+                    'name': f'_skip{len(fields)}',
+                    'type': 'skip',
+                    'length': count
+                })
+            else:
+                field_def = {'name': name, 'type': type_name}
+                fields.append(field_def)
+        
+        return fields, endian_override
     
     def _resolve_fields(self, fPort: int = None) -> list:
         """Resolve fields for a given fPort (port-based schema selection)."""
         ports = self.schema.get('ports')
         if not ports:
-            return self.schema.get('fields', [])
+            fields = self.schema.get('fields', [])
+            # Handle compact format string
+            if isinstance(fields, str):
+                parsed_fields, endian_override = self._parse_compact_format(fields)
+                if endian_override:
+                    self.endian = endian_override
+                return parsed_fields
+            return fields
         
         if fPort is not None:
             port_key = str(fPort)
             if port_key in ports:
-                return ports[port_key].get('fields', [])
+                fields = ports[port_key].get('fields', [])
+                if isinstance(fields, str):
+                    parsed_fields, endian_override = self._parse_compact_format(fields)
+                    if endian_override:
+                        self.endian = endian_override
+                    return parsed_fields
+                return fields
             # Try int key (YAML may parse as int)
             if fPort in ports:
-                return ports[fPort].get('fields', [])
+                fields = ports[fPort].get('fields', [])
+                if isinstance(fields, str):
+                    parsed_fields, endian_override = self._parse_compact_format(fields)
+                    if endian_override:
+                        self.endian = endian_override
+                    return parsed_fields
+                return fields
         
         if 'default' in ports:
-            return ports['default'].get('fields', [])
+            fields = ports['default'].get('fields', [])
+            if isinstance(fields, str):
+                parsed_fields, endian_override = self._parse_compact_format(fields)
+                if endian_override:
+                    self.endian = endian_override
+                return parsed_fields
+            return fields
         
         raise ValueError(f"No port definition for fPort {fPort} and no default in schema '{self.name}'")
     
@@ -184,6 +288,77 @@ class SchemaInterpreter:
             return float('nan')
         
         return ((-1) ** sign) * (1 + frac / 1024) * (2 ** (exp - 15))
+    
+    def _decode_encoding(self, value: int, encoding: str, size: int) -> int:
+        """
+        Decode value from special encoding format.
+        
+        Supports:
+        - sign_magnitude: MSB is sign bit, remaining bits are magnitude
+        - bcd: Binary-coded decimal (each nibble is 0-9)
+        - gray: Gray code (adjacent values differ by one bit)
+        """
+        if encoding == 'sign_magnitude':
+            # MSB is sign, rest is magnitude
+            sign_bit = 1 << (size * 8 - 1)
+            if value & sign_bit:
+                return -(value & (sign_bit - 1))
+            return value
+        
+        elif encoding == 'bcd':
+            # Binary-coded decimal: each nibble is a decimal digit
+            result = 0
+            multiplier = 1
+            temp = value
+            for _ in range(size * 2):  # 2 nibbles per byte
+                digit = temp & 0x0F
+                if digit > 9:
+                    raise ValueError(f"Invalid BCD digit: {digit}")
+                result += digit * multiplier
+                multiplier *= 10
+                temp >>= 4
+            return result
+        
+        elif encoding == 'gray':
+            # Gray code to binary: XOR with right-shifted versions
+            result = value
+            shift = 1
+            while shift < size * 8:
+                result ^= (result >> shift)
+                shift <<= 1
+            return result
+        
+        return value
+    
+    def _encode_encoding(self, value: int, encoding: str, size: int) -> int:
+        """
+        Encode value to special encoding format.
+        
+        Reverse of _decode_encoding for encoding payloads.
+        """
+        if encoding == 'sign_magnitude':
+            sign_bit = 1 << (size * 8 - 1)
+            if value < 0:
+                return sign_bit | abs(value)
+            return value
+        
+        elif encoding == 'bcd':
+            # Binary to BCD
+            result = 0
+            shift = 0
+            temp = abs(int(value))
+            while temp > 0:
+                digit = temp % 10
+                result |= (digit << shift)
+                shift += 4
+                temp //= 10
+            return result
+        
+        elif encoding == 'gray':
+            # Binary to Gray code: XOR with right-shifted self
+            return value ^ (value >> 1)
+        
+        return value
     
     def _parse_bitfield_type(self, type_str: str) -> Tuple[int, int, int]:
         """
@@ -308,6 +483,13 @@ class SchemaInterpreter:
         if field_type in type_info:
             size, signed = type_info[field_type]
             value, new_pos = self._read_int(buf, pos, size, signed)
+            # Apply encoding if specified (sign_magnitude, bcd, gray)
+            encoding = field_def.get('encoding')
+            if encoding:
+                # For encoded values, read as unsigned first
+                if signed:
+                    value, _ = self._read_int(buf, pos, size, False)
+                value = self._decode_encoding(value, encoding, size)
             return value, new_pos
         
         # Nibble-decimal types: upper nibble = whole, lower nibble = tenths
@@ -1995,7 +2177,14 @@ class SchemaInterpreter:
         
         if field_type in type_info:
             size, signed = type_info[field_type]
-            return self._write_int(int(value), size, signed)
+            int_val = int(value)
+            # Apply encoding if specified (sign_magnitude, bcd, gray)
+            encoding = field_def.get('encoding')
+            if encoding:
+                int_val = self._encode_encoding(int_val, encoding, size)
+                # Encoded values are written as unsigned
+                signed = False
+            return self._write_int(int_val, size, signed)
         
         if field_type == 'f16':
             fmt = '<e' if self.endian == Endian.LITTLE else '>e'
@@ -2081,6 +2270,139 @@ class SchemaInterpreter:
         # Encode as base type
         base_field = {'type': base_type}
         return self._encode_field(base_field, int_value)
+    
+    def encode_command(self, command_name: str, data: Dict[str, Any] = None) -> EncodeResult:
+        """
+        Encode a downlink command by name.
+        
+        Args:
+            command_name: Name of the command (from downlink_commands)
+            data: Command parameters (field values)
+            
+        Returns:
+            EncodeResult with encoded payload starting with command_id
+        """
+        result = EncodeResult(payload=b'')
+        data = data or {}
+        
+        if command_name not in self.downlink_commands:
+            result.errors.append(f"Unknown command: {command_name}")
+            return result
+        
+        cmd_def = self.downlink_commands[command_name]
+        command_id = cmd_def.get('command_id', 0)
+        fields = cmd_def.get('fields', [])
+        
+        output = bytearray()
+        
+        # Write command_id as first byte
+        if isinstance(command_id, int):
+            output.append(command_id & 0xFF)
+        elif isinstance(command_id, str) and command_id.startswith('0x'):
+            output.append(int(command_id, 16) & 0xFF)
+        
+        # Encode command fields
+        for field_def in fields:
+            name = field_def.get('name', '_')
+            if name.startswith('_'):
+                continue
+            
+            value = data.get(name, 0)
+            if value is None:
+                result.warnings.append(f"Missing command field: {name}")
+                value = 0
+            
+            try:
+                value = self._reverse_modifiers(value, field_def)
+                encoded = self._encode_field(field_def, value)
+                output.extend(encoded)
+            except Exception as e:
+                result.errors.append(f"Error encoding command field {name}: {e}")
+        
+        result.payload = bytes(output)
+        return result
+    
+    def decode_command(self, payload: bytes) -> DecodeResult:
+        """
+        Decode a downlink command from payload.
+        
+        First byte is command_id, followed by command-specific fields.
+        
+        Returns:
+            DecodeResult with decoded data including '_command' name
+        """
+        result = DecodeResult(data={}, bytes_consumed=0)
+        
+        if len(payload) < 1:
+            result.errors.append("Payload too short for command_id")
+            return result
+        
+        command_id = payload[0]
+        pos = 1
+        
+        # Find matching command by command_id
+        matched_cmd = None
+        matched_name = None
+        for cmd_name, cmd_def in self.downlink_commands.items():
+            cmd_id = cmd_def.get('command_id', -1)
+            if isinstance(cmd_id, str) and cmd_id.startswith('0x'):
+                cmd_id = int(cmd_id, 16)
+            if cmd_id == command_id:
+                matched_cmd = cmd_def
+                matched_name = cmd_name
+                break
+        
+        if matched_cmd is None:
+            result.errors.append(f"Unknown command_id: 0x{command_id:02X}")
+            result.data['_command_id'] = command_id
+            result.bytes_consumed = 1
+            return result
+        
+        result.data['_command'] = matched_name
+        result.data['_command_id'] = command_id
+        
+        # Decode command fields
+        fields = matched_cmd.get('fields', [])
+        for field_def in fields:
+            name = field_def.get('name', 'unknown')
+            try:
+                value, pos = self._decode_field(field_def, payload, pos)
+                if value is not None:
+                    value = self._apply_modifiers(value, field_def)
+                    if not name.startswith('_'):
+                        result.data[name] = value
+            except Exception as e:
+                result.errors.append(f"Error decoding command field {name}: {e}")
+                break
+        
+        result.bytes_consumed = pos
+        return result
+    
+    def list_commands(self) -> Dict[str, Dict[str, Any]]:
+        """
+        List available downlink commands with their metadata.
+        
+        Returns:
+            Dict mapping command names to their definitions
+        """
+        commands = {}
+        for cmd_name, cmd_def in self.downlink_commands.items():
+            cmd_id = cmd_def.get('command_id', 0)
+            if isinstance(cmd_id, str) and cmd_id.startswith('0x'):
+                cmd_id = int(cmd_id, 16)
+            
+            fields = []
+            for f in cmd_def.get('fields', []):
+                field_info = {'name': f.get('name'), 'type': f.get('type', 'u8')}
+                if 'unit' in f:
+                    field_info['unit'] = f['unit']
+                fields.append(field_info)
+            
+            commands[cmd_name] = {
+                'command_id': cmd_id,
+                'fields': fields,
+            }
+        return commands
     
     def get_field_metadata(self, field_name: str = None) -> Dict[str, Any]:
         """
