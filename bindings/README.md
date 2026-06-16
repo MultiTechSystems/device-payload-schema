@@ -1,6 +1,6 @@
-# Native Bindings for Schema Decoder
+# Language Bindings for Schema Decoder
 
-High-performance FFI bindings to embed the C schema decoder in Go, Python, and Node.js.
+High-performance bindings for the schema decoder in multiple languages: Java, Go, Python, Node.js, and C FFI.
 
 ## Two Approaches
 
@@ -14,14 +14,17 @@ Generate optimized C from schema at build time. Faster but schema baked in.
 
 | Implementation | Throughput | Use Case |
 |----------------|------------|----------|
-| **C Precompiled** | 200M msg/s | Max performance, fixed schema |
-| **C Interpreted** | 32M msg/s | Runtime schema flexibility |
+| **C Precompiled** | 259M msg/s | Max performance, fixed schema |
+| **C Interpreted** | 33M msg/s | Runtime schema flexibility |
 | **Go + CGO (precompiled)** | ~180M msg/s | Go backend, fixed schema |
 | **Go + CGO (interpreted)** | ~30M msg/s | Go backend, runtime schema |
 | **Node + N-API** | ~25M msg/s | Node.js backend |
 | **Python + ctypes** | ~25M msg/s | Python backend |
+| **Java Schema (YAML)** | 3.7M msg/s | Pure Java, lowest overhead |
 | **Go Binary Schema** | 2.1M msg/s | Pure Go, no CGO |
-| **Pure Python** | 215K msg/s | Development |
+| **Go YAML Schema** | 1.3M msg/s | Pure Go, YAML |
+| **JS Schema (Node)** | 638K msg/s | Pure Node.js |
+| **Pure Python** | 184K msg/s | Development |
 
 **Precompiled is 6x faster** than interpreted because:
 - No schema parsing at runtime
@@ -80,7 +83,29 @@ codec_result_t result;
 codec->to_fields(&decoded, &result);
 ```
 
-### 2. Use from Python
+### 2. Use from Java
+
+```bash
+cd bindings/java
+mvn package
+```
+
+```java
+import org.lora.schema.Schema;
+import java.util.Map;
+
+// Load schema from YAML
+Schema schema = Schema.fromYamlFile("schemas/devices/milesight/em310-udl.yaml");
+
+// Decode payload
+byte[] payload = new byte[] { 0x01, 0x75, 0x64 };
+Map<String, Object> result = schema.decode(payload);
+// result: {battery: 100}
+```
+
+Java provides the **best pure-language performance** at 3.7M msg/s with only 3x overhead vs hand-coded decoders.
+
+### 3. Use from Python
 
 ```python
 from bindings.python.schema_native import NativeSchema
@@ -96,7 +121,7 @@ print(result)  # {'temperature': 25.5, 'humidity': 60}
 json_str = schema.decode_json(payload)
 ```
 
-### 3. Use from Go
+### 4. Use from Go
 
 ```go
 import "github.com/your-org/payload-codec/bindings/go/schema_native"
@@ -119,7 +144,7 @@ Build with CGO enabled:
 CGO_ENABLED=1 go build
 ```
 
-### 4. Use from Node.js
+### 5. Use from Node.js
 
 ```bash
 cd bindings/node
@@ -147,6 +172,15 @@ bindings/
 │   ├── schema_ffi.c          # FFI implementation
 │   ├── schema_precompiled.h  # FFI header for precompiled
 │   └── Makefile              # Build shared library
+├── java/
+│   ├── pom.xml               # Maven build config
+│   ├── src/main/java/org/lora/schema/
+│   │   ├── Schema.java       # Main interpreter
+│   │   ├── Field.java        # Field definitions
+│   │   ├── DecodeContext.java # Decode state
+│   │   ├── FormulaEvaluator.java # Math parser
+│   │   └── BinarySchemaParser.java # Binary format
+│   └── README.md             # Java documentation
 ├── tools/
 │   └── generate_native_codec.py  # Generate precompiled codec
 ├── python/
@@ -296,12 +330,14 @@ func (s *Schema) Free()
 func Version() string
 ```
 
-## When to Use Native Bindings
+## When to Use Which Binding
 
 | Scenario | Recommendation |
 |----------|----------------|
-| **High-throughput LNS** | Use C/CGO for 32M msg/s |
-| **Cloud platform** | Go binary schema (2.1M msg/s) usually sufficient |
+| **High-throughput LNS** | Use C/CGO for 33M msg/s |
+| **JVM backend** | Java schema (3.7M msg/s) - best pure-language perf |
+| **Cloud platform (Go)** | Go binary schema (2.1M msg/s) usually sufficient |
+| **Cloud platform (Node)** | JS schema (638K msg/s) or N-API bindings |
 | **Python hot path** | Native bindings for 100x speedup |
 | **Development** | Pure implementations for easier debugging |
 

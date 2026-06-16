@@ -6,164 +6,165 @@ Feature support matrix across reference implementations.
 
 | Implementation | Decode | Encode | Binary Schema | Performance |
 |----------------|--------|--------|---------------|-------------|
-| **Python** | Full | Full | Full | 45K msg/s |
+| **Python** | Full | Full | Full | 184K msg/s |
+| **Java** | Core | - | Full | 3.7M msg/s |
 | **Go** | Full | Partial | Full | 2.1M msg/s |
-| **C** | Full | - | Full | 32M msg/s |
-| **JavaScript** | Full | Partial | - | 180K msg/s |
+| **C** | Full | - | Full | 33M msg/s |
+| **JavaScript** | Full | Partial | - | 638K msg/s |
 
 ## Detailed Feature Matrix
 
 ### Core Types
 
-| Feature | Python | Go | C | JS |
-|---------|--------|-----|---|-----|
-| `u8`, `u16`, `u32`, `u64` | ✓ | ✓ | ✓ | ✓ |
-| `s8`, `s16`, `s32`, `s64` | ✓ | ✓ | ✓ | ✓ |
-| `u24`, `s24` | ✓ | ✓ | ✓ | ✓ |
-| `f16` (half-precision) | ✓ | ✓ | ✓ | ✓ |
-| `f32`, `f64` | ✓ | ✓ | ✓ | ✓ |
-| `bool` | ✓ | ✓ | ✓ | ✓ |
-| `ascii` | ✓ | ✓ | ✓ | ✓ |
-| `hex` | ✓ | ✓ | ✓ | ✓ |
-| `bytes` | ✓ | ✓ | ✓ | ✓ |
-| `base64` | ✓ | ✓ | ✓ | ✓ |
-| `skip` | ✓ | ✓ | ✓ | ✓ |
-| `enum` | ✓ | ✓ | ✓ | ✓ |
-| `udec` / `sdec` | ✓ | ✓ | ✓ | ✓ |
-| `bitfield_string` | ✓ | ✓ | - | ✓ |
+| Feature | Python | Java | Go | C | JS |
+|---------|--------|------|-----|---|-----|
+| `u8`, `u16`, `u32`, `u64` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `s8`, `s16`, `s32`, `s64` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `u24`, `s24` | ✓ | - | ✓ | ✓ | ✓ |
+| `f16` (half-precision) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `f32`, `f64` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `bool` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `ascii` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `hex` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `bytes` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `base64` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `skip` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `enum` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `udec` / `sdec` | ✓ | - | ✓ | ✓ | ✓ |
+| `bitfield_string` | ✓ | ✓ | ✓ | - | ✓ |
 
 ### Bitfield Syntax
 
-| Feature | Python | Go | C | JS |
-|---------|--------|-----|---|-----|
-| Range `u8[0:3]` | ✓ | ✓ | ✓ | ✓ |
-| Width `u8:4` | ✓ | ✓ | ✓ | ✓ |
-| Cross-byte `u16[4:11]` | ✓ | ✓ | ✓ | ✓ |
-| `byte_group` | ✓ | ✓ | ✓ | ✓ |
-| Endian prefix `le_u16` | ✓ | ✓ | ✓ | ✓ |
+| Feature | Python | Java | Go | C | JS |
+|---------|--------|------|-----|---|-----|
+| Range `u8[0:3]` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Width `u8:4` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Cross-byte `u16[4:11]` | ✓ | - | ✓ | ✓ | ✓ |
+| `byte_group` | ✓ | - | ✓ | ✓ | ✓ |
+| Endian prefix `le_u16` | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 ### Arithmetic Modifiers
 
-| Feature | Python | Go | C | JS |
-|---------|--------|-----|---|-----|
-| `add` | ✓ | ✓ | ✓ | ✓ |
-| `mult` | ✓ | ✓ | ✓ | ✓ |
-| `div` | ✓ | ✓ | ✓ | ✓ |
-| YAML key ordering | ✓ | ✓ | ✓ | ✓ |
-| `lookup` (array) | ✓ | ✓ | ✓ | ✓ |
-| `lookup` (map) | ✓ | ✓ | ✓ | ✓ |
+| Feature | Python | Java | Go | C | JS |
+|---------|--------|------|-----|---|-----|
+| `add` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `mult` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `div` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| YAML key ordering | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `lookup` (array) | ✓ | - | ✓ | ✓ | ✓ |
+| `lookup` (map) | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 ### Transform Pipeline
 
-| Feature | Python | Go | C | JS |
-|---------|--------|-----|---|-----|
-| `sqrt` | ✓ | ✓ | ✓ | ✓ |
-| `abs` | ✓ | ✓ | ✓ | ✓ |
-| `pow` | ✓ | ✓ | ✓ | ✓ |
-| `log` / `log10` | ✓ | ✓ | ✓ | ✓ |
-| `floor` / `ceiling` | ✓ | ✓ | ✓ | ✓ |
-| `clamp` | ✓ | ✓ | ✓ | ✓ |
-| `round` | ✓ | ✓ | - | ✓ |
+| Feature | Python | Java | Go | C | JS |
+|---------|--------|------|-----|---|-----|
+| `sqrt` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `abs` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `pow` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `log` / `log10` | ✓ | - | ✓ | ✓ | ✓ |
+| `floor` / `ceiling` | ✓ | - | ✓ | ✓ | ✓ |
+| `clamp` | ✓ | - | ✓ | ✓ | ✓ |
+| `round` | ✓ | - | ✓ | - | ✓ |
 
 ### Computed Fields
 
-| Feature | Python | Go | C | JS |
-|---------|--------|-----|---|-----|
-| `type: number` | ✓ | ✓ | ✓ | ✓ |
-| `ref: $field` | ✓ | ✓ | ✓ | ✓ |
-| `polynomial` | ✓ | ✓ | ✓ | ✓ |
-| `compute: {op, a, b}` | ✓ | ✓ | - | ✓ |
-| `guard` conditions | ✓ | ✓ | - | ✓ |
+| Feature | Python | Java | Go | C | JS |
+|---------|--------|------|-----|---|-----|
+| `type: number` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `ref: $field` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `polynomial` | ✓ | - | ✓ | ✓ | ✓ |
+| `compute: {op, a, b}` | ✓ | - | ✓ | - | ✓ |
+| `guard` conditions | ✓ | - | ✓ | - | ✓ |
 
 ### Conditional Parsing
 
-| Feature | Python | Go | C | JS |
-|---------|--------|-----|---|-----|
-| `switch` | ✓ | ✓ | ✓ | ✓ |
-| `switch` range `2..5` | ✓ | ✓ | - | ✓ |
-| `switch` default `_` | ✓ | ✓ | ✓ | ✓ |
-| `flagged` | ✓ | ✓ | ✓ | ✓ |
-| `tlv` | ✓ | ✓ | ✓ | ✓ |
-| `match_value` | ✓ | ✓ | - | ✓ |
+| Feature | Python | Java | Go | C | JS |
+|---------|--------|------|-----|---|-----|
+| `switch` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `switch` range `2..5` | ✓ | - | ✓ | - | ✓ |
+| `switch` default `_` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `flagged` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `tlv` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `match_value` | ✓ | - | ✓ | - | ✓ |
 
 ### Structures
 
-| Feature | Python | Go | C | JS |
-|---------|--------|-----|---|-----|
-| `type: object` | ✓ | ✓ | ✓ | ✓ |
-| `type: repeat` (count) | ✓ | ✓ | ✓ | ✓ |
-| `repeat` (count_field) | ✓ | ✓ | ✓ | ✓ |
-| `repeat` (until: end) | ✓ | ✓ | ✓ | ✓ |
-| `definitions` / `use` | ✓ | ✓ | - | ✓ |
-| `ports` (fPort routing) | ✓ | ✓ | ✓ | ✓ |
-| `var` (variables) | ✓ | ✓ | - | ✓ |
+| Feature | Python | Java | Go | C | JS |
+|---------|--------|------|-----|---|-----|
+| `type: object` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `type: repeat` (count) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `repeat` (count_field) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `repeat` (until: end) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `definitions` / `use` | ✓ | - | ✓ | - | ✓ |
+| `ports` (fPort routing) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `var` (variables) | ✓ | ✓ | ✓ | - | ✓ |
 
 ### Encodings
 
-| Feature | Python | Go | C | JS |
-|---------|--------|-----|---|-----|
-| `sign_magnitude` | ✓ | ✓ | ✓ | ✓ |
-| `bcd` | ✓ | ✓ | ✓ | ✓ |
-| `gray` | ✓ | - | - | ✓ |
+| Feature | Python | Java | Go | C | JS |
+|---------|--------|------|-----|---|-----|
+| `sign_magnitude` | ✓ | - | ✓ | ✓ | ✓ |
+| `bcd` | ✓ | - | ✓ | ✓ | ✓ |
+| `gray` | ✓ | - | - | - | ✓ |
 
 ### Downlink Support (v0.3.2)
 
-| Feature | Python | Go | C | JS |
-|---------|--------|-----|---|-----|
-| `direction` property | ✓ | - | - | ✓ |
-| `downlink_commands` | ✓ | - | - | ✓ |
-| `encode_command()` | ✓ | - | - | ✓ |
-| `decode_command()` | ✓ | - | - | ✓ |
-| Bidirectional schemas | ✓ | - | - | ✓ |
+| Feature | Python | Java | Go | C | JS |
+|---------|--------|------|-----|---|-----|
+| `direction` property | ✓ | - | - | - | ✓ |
+| `downlink_commands` | ✓ | - | - | - | ✓ |
+| `encode_command()` | ✓ | - | - | - | ✓ |
+| `decode_command()` | ✓ | - | - | - | ✓ |
+| Bidirectional schemas | ✓ | - | - | - | ✓ |
 
 ### Schema Composition (v0.3.2)
 
-| Feature | Python | Go | C | JS |
-|---------|--------|-----|---|-----|
-| `$ref:` cross-file | ✓ | - | - | - |
-| `use:` shorthand | ✓ | - | - | - |
-| `rename:` fields | ✓ | - | - | - |
-| `prefix:` fields | ✓ | - | - | - |
-| Compact format strings | ✓ | - | - | - |
+| Feature | Python | Java | Go | C | JS |
+|---------|--------|------|-----|---|-----|
+| `$ref:` cross-file | ✓ | - | - | - | - |
+| `use:` shorthand | ✓ | - | - | - | - |
+| `rename:` fields | ✓ | - | - | - | - |
+| `prefix:` fields | ✓ | - | - | - | - |
+| Compact format strings | ✓ | - | - | - | - |
 
 ### Validation (v0.3.2)
 
-| Feature | Python | Go | C | JS |
-|---------|--------|-----|---|-----|
-| ERROR level | ✓ | - | - | - |
-| WARNING level | ✓ | - | - | - |
-| INFO level | ✓ | - | - | - |
-| Best practice checks | ✓ | - | - | - |
-| Quality scoring | ✓ | - | - | - |
+| Feature | Python | Java | Go | C | JS |
+|---------|--------|------|-----|---|-----|
+| ERROR level | ✓ | - | - | - | - |
+| WARNING level | ✓ | - | - | - | - |
+| INFO level | ✓ | - | - | - | - |
+| Best practice checks | ✓ | - | - | - | - |
+| Quality scoring | ✓ | - | - | - | - |
 
 ### Semantic Hints
 
-| Feature | Python | Go | C | JS |
-|---------|--------|-----|---|-----|
-| `unit` | ✓ | ✓ | - | ✓ |
-| `ipso` | ✓ | ✓ | - | ✓ |
-| `senml_unit` | ✓ | ✓ | - | ✓ |
-| `description` | ✓ | ✓ | - | ✓ |
+| Feature | Python | Java | Go | C | JS |
+|---------|--------|------|-----|---|-----|
+| `unit` | ✓ | - | ✓ | - | ✓ |
+| `ipso` | ✓ | - | ✓ | - | ✓ |
+| `senml_unit` | ✓ | - | ✓ | - | ✓ |
+| `description` | ✓ | - | ✓ | - | ✓ |
 
 ### Binary Schema Format
 
-| Feature | Python | Go | C | JS |
-|---------|--------|-----|---|-----|
-| Parse v1 | ✓ | ✓ | ✓ | - |
-| Parse v2 | ✓ | ✓ | ✓ | - |
-| Encode v1 | ✓ | ✓ | - | - |
-| Encode v2 | ✓ | ✓ | - | - |
-| QR encoding | ✓ | - | - | - |
+| Feature | Python | Java | Go | C | JS |
+|---------|--------|------|-----|---|-----|
+| Parse v1 | ✓ | - | ✓ | ✓ | - |
+| Parse v2 | ✓ | ✓ | ✓ | ✓ | - |
+| Encode v1 | ✓ | - | ✓ | - | - |
+| Encode v2 | ✓ | - | ✓ | - | - |
+| QR encoding | ✓ | - | - | - | - |
 
 ### Encoding (Struct→Binary)
 
-| Feature | Python | Go | C | JS |
-|---------|--------|-----|---|-----|
-| Basic types | ✓ | ✓ | - | ✓ |
-| Bitfields | ✓ | Partial | - | ✓ |
-| Nested objects | ✓ | - | - | ✓ |
-| Repeat | ✓ | - | - | ✓ |
-| Conditionals | ✓ | - | - | - |
+| Feature | Python | Java | Go | C | JS |
+|---------|--------|------|-----|---|-----|
+| Basic types | ✓ | - | ✓ | - | ✓ |
+| Bitfields | ✓ | - | Partial | - | ✓ |
+| Nested objects | ✓ | - | - | - | ✓ |
+| Repeat | ✓ | - | - | - | ✓ |
+| Conditionals | ✓ | - | - | - | - |
 
 ## Implementation Notes
 
@@ -177,6 +178,18 @@ Feature support matrix across reference implementations.
 - Binary schema encode/decode
 - Used for validation and code generation
 - **v0.3.2 additions**: downlink_commands, direction, encodings, compact format
+
+### Java (`bindings/java/`)
+
+**High-performance JVM implementation** - best pure-language schema performance.
+
+- Core decode support (no encode)
+- YAML and binary schema v2 parsing
+- Formula evaluation with field references
+- Optimized for throughput (3.7M msg/s with 3x overhead)
+- JIT-friendly interpreter loop
+- Missing: polynomial, guard, definitions, some transform functions
+- No encode support (decode-only)
 
 ### Go (`go/schema/`)
 
@@ -232,20 +245,20 @@ Feature support matrix across reference implementations.
 
 ## Test Coverage
 
-| Test Suite | Python | Go | C |
-|------------|--------|-----|---|
-| Unit tests | ✓ | ✓ | ✓ |
-| Test vectors | ✓ | ✓ | ✓ |
-| Fuzz testing | ✓ | ✓ | ✓ |
-| Property tests | ✓ | - | - |
-| Round-trip | ✓ | Partial | - |
+| Test Suite | Python | Java | Go | C |
+|------------|--------|------|-----|---|
+| Unit tests | ✓ | - | ✓ | ✓ |
+| Test vectors | ✓ | - | ✓ | ✓ |
+| Fuzz testing | ✓ | - | ✓ | ✓ |
+| Property tests | ✓ | - | - | - |
+| Round-trip | ✓ | - | Partial | - |
 
 ## Version Compatibility
 
-| Schema Version | Python | Go | C | JS |
-|----------------|--------|-----|---|-----|
-| v1 (baseline) | ✓ | ✓ | ✓ | ✓ |
-| v2 (extended) | ✓ | ✓ | ✓ | ✓ |
+| Schema Version | Python | Java | Go | C | JS |
+|----------------|--------|------|-----|---|-----|
+| v1 (baseline) | ✓ | - | ✓ | ✓ | ✓ |
+| v2 (extended) | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 All implementations MUST support v1 schemas. V2 adds optional features.
 
@@ -260,6 +273,16 @@ Tested with DL-5TM schema (8 fields, flagged construct, polynomial transform).
 | AMD Ryzen 9 7950X3D | 2023 | 81K ops/s (12 µs) | 1.87M ops/s (0.5 µs) |
 | Intel i5-2400 | 2011 | 17K ops/s (58 µs) | 555K ops/s (1.8 µs) |
 | **Ratio** | | **4.7x** | **3.4x** |
+
+### Java Implementation (AMD Ryzen 9 7950X3D)
+
+| Implementation | Throughput | Latency | vs Traditional |
+|----------------|------------|---------|----------------|
+| Traditional (hand-coded) | 11.2M ops/s | 89 ns | 1x |
+| Schema Interpreter (YAML) | 3.7M ops/s | 270 ns | 3.0x |
+| Cold Parse + Decode | 21.6K ops/s | 46 µs | 519x |
+
+Java has the **lowest schema overhead (3x)** among high-level languages due to JIT optimization of the interpreter loop.
 
 ### Go Implementation (Intel i5-2400)
 
@@ -302,9 +325,10 @@ Tested with DL-5TM schema (8 fields, flagged construct, polynomial transform).
 ### Recommendations
 
 - **<10K devices**: Python on t3.micro ($7/mo) is sufficient
-- **10K-100K devices**: Go on t3.small ($14/mo) recommended
-- **>100K devices**: Go on c6i.medium ($31/mo) for headroom
-- **Latency-sensitive**: Go Binary Schema (<2µs on cloud)
+- **10K-100K devices**: Go or Java on t3.small ($14/mo) recommended
+- **>100K devices**: Java (3.7M ops/s) or Go on c6i.medium ($31/mo) for headroom
+- **Latency-sensitive**: Java Schema (270 ns) or Go Binary Schema (<500 ns)
+- **JVM ecosystem**: Java provides best schema performance at 3.7M ops/s
 
 ## Roadmap
 
@@ -312,6 +336,7 @@ Tested with DL-5TM schema (8 fields, flagged construct, polynomial transform).
 
 | Feature | Implementation | Notes |
 |---------|---------------|-------|
+| **Java interpreter** | Java | Core decode, binary v2, 3.7M msg/s |
 | `encoding:` property | Python, JS | sign_magnitude, bcd, gray |
 | `downlink_commands:` | Python, JS | Command-based encoding |
 | `direction:` property | Python, JS | uplink/downlink/bidirectional |
@@ -324,6 +349,8 @@ Tested with DL-5TM schema (8 fields, flagged construct, polynomial transform).
 
 | Feature | Target | Priority |
 |---------|--------|----------|
+| Java polynomial/guard | Q2 | Medium |
+| Java transform functions | Q2 | Medium |
 | Go encode (full) | Q2 | Medium |
 | Go downlink_commands | Q2 | Medium |
 | C definitions | Q2 | Low |

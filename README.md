@@ -9,7 +9,7 @@ Declarative payload schema definitions for IoT device codecs.
 This repository provides:
 
 - **YAML Schema Language**: Declarative payload definitions for binary-to-JSON decoding
-- **Reference Interpreters**: Python, JavaScript, C implementations
+- **Reference Interpreters**: Python, JavaScript, Java, Go, C implementations
 - **Code Generators**: Generate TS013-compliant codec code from schemas
 - **Device Schemas**: Ready-to-use schemas for common devices (Decentlab, Milesight, etc.)
 
@@ -141,24 +141,27 @@ Traditional LoRaWAN(R) codecs use JavaScript with `eval()` or `new Function()`, 
 
 | Implementation | Throughput | Security | Use Case |
 |----------------|------------|----------|----------|
-| **C Interpreter** | 32M msg/s | ✅ No eval | High-performance backends |
+| **C Interpreter** | 33M msg/s | ✅ No eval | High-performance backends |
+| **Java Schema** | 3.7M msg/s | ✅ No eval | JVM backends (best high-level perf) |
 | **Go Binary Schema** | 2.1M msg/s | ✅ No eval | Cloud platforms |
-| **JS Traditional** | 20M msg/s | ⚠️ eval risk | Legacy compatibility |
-| **Go YAML Schema** | 343K msg/s | ✅ No eval | Development |
-| **Python Schema** | 215K msg/s | ✅ No eval | Prototyping |
+| **Go YAML Schema** | 1.3M msg/s | ✅ No eval | Go backends |
+| **JS Schema (Node)** | 638K msg/s | ✅ No eval | Node.js backends |
+| **JS Traditional** | 22M msg/s | ⚠️ eval risk | Legacy compatibility |
+| **Python Schema** | 184K msg/s | ✅ No eval | Prototyping |
 
 ### Backend Recommendations
 
 | Scenario | Recommended | Why |
 |----------|-------------|-----|
-| **Multi-tenant LNS** | C Interpreter | 32M msg/s, no code execution |
-| **Cloud platform** | Go Binary Schema | 2.1M msg/s, easy deployment |
+| **Multi-tenant LNS** | C Interpreter | 33M msg/s, no code execution |
+| **JVM backend** | Java Schema | 3.7M msg/s, lowest overhead (3x) |
+| **Cloud platform (Go)** | Go Binary Schema | 2.1M msg/s, easy deployment |
 | **Edge gateway** | C or QuickJS | Embedded-friendly |
 | **Development** | Python/YAML | Human-readable, fast iteration |
 
 ### Headroom
 
-Even Python (215K msg/s) handles 2,000x typical gateway traffic. C interpreter at 32M msg/s has 320,000x headroom for single-gateway loads.
+Even Python (184K msg/s) handles 1,800x typical gateway traffic. Java at 3.7M msg/s has 370,000x headroom for single-gateway loads.
 
 See [benchmarks documentation](docs/BENCHMARKS.md) for detailed results.
 
