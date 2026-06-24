@@ -247,8 +247,10 @@ class TS013Generator:
         lines.append(self._gen_helpers())
         lines.append('')
         lines.append(self._gen_decode_fields())
-        lines.append('')
-        lines.append(self._gen_encode_fields())
+        encode_fields = self._gen_encode_fields()
+        if encode_fields:
+            lines.append('')
+            lines.append(encode_fields)
         if self.has_commands:
             lines.append('')
             lines.append(self._gen_command_functions())
@@ -689,7 +691,7 @@ function writeS(buf, pos, size, value, endian) {
                 fname = f'encodePort{port_key}'
                 fields = port_def.get('fields', [])
                 parts.append(self._gen_encode_fn(fname, fields))
-        else:
+        elif self.has_commands:
             fields = self.schema.get('fields', [])
             parts.append(self._gen_encode_fn('encodePayload', fields))
         return '\n\n'.join(parts)
@@ -1122,17 +1124,12 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append('}')
             else:
                 lines.append('function decodeDownlink(input) {')
-                lines.append('  return decodeUplink(input);')
+                lines.append('  return { data: {}, warnings: ["No downlink encoding defined"], errors: [] };')
                 lines.append('}')
                 lines.append('')
 
                 lines.append('function encodeDownlink(input) {')
-                lines.append('  try {')
-                lines.append(f'    var bytes = encodePayload(input.data, "{self.endian}");')
-                lines.append('    return { bytes: bytes, fPort: 1, warnings: [], errors: [] };')
-                lines.append('  } catch (e) {')
-                lines.append('    return { bytes: [], fPort: 1, warnings: [], errors: [e.message] };')
-                lines.append('  }')
+                lines.append('  return { bytes: [], fPort: 1, warnings: ["No downlink encoding defined"], errors: [] };')
                 lines.append('}')
 
         return '\n'.join(lines)
