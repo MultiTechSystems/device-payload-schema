@@ -1,10 +1,81 @@
 # Device Payload Schema - Frequently Asked Questions
 
+## Architecture and Layers
+
+### What is the Device Payload Schema?
+
+A declarative, YAML/JSON-based format for defining the structure of binary LoRaWAN device payloads. The device manufacturer describes the payload structure — field names, types, sizes, byte order, arithmetic transforms, units, and IPSO semantic metadata — in a machine-readable schema document. From that single schema, conforming tools can decode payloads in any language, generate TS013-compliant JavaScript codecs, produce test vectors, and emit semantic metadata (`_meta`) that drives downstream integration.
+
+### Where does the Payload Schema sit in the architecture?
+
+The Payload Schema is **Stage 1** of a two-stage pipeline:
+
+```
+Binary payload → [Payload Schema interpreter] → Decoded JSON + _meta
+                                                        ↓
+                                         [Integration Layer converters]
+                                                        ↓
+                                    BACnet / Modbus / Sparkplug / Matter / SenML / ...
+```
+
+**Stage 1 (this project):** The schema defines how to decode binary bytes into named, typed, unit-annotated fields. The interpreter produces decoded JSON with a `_meta` object carrying five protocol-independent attributes per field: name, type, unit (UCUM), IPSO object/resource ID, and device EUI.
+
+**Stage 2 (companion — Integration Layer):** The Integration Layer consumes the decoded JSON + `_meta` and converts it to native protocol formats using declarative Integration Profiles. See [INTEGRATION-LAYER.md](INTEGRATION-LAYER.md) for details.
+
+### What does the Payload Schema produce?
+
+Two outputs from every decode:
+
+1. **Decoded JSON** — the engineering values:
+   ```json
+   {"temperature": 23.5, "humidity": 65, "battery": 3.6}
+   ```
+
+2. **`_meta` object** — semantic metadata per field:
+   ```json
+   {
+     "fields": {
+       "temperature": {
+         "type": "s16", "unit": "Cel",
+         "ipso": {"object": 3303, "resource": 5700}
+       }
+     },
+     "device_eui": "a1-00-00-27-05-00-00-77"
+   }
+   ```
+
+The `_meta` carries enough information for any downstream system to classify, convert units, assign identity, and format the data — without knowing anything about the original binary encoding.
+
+### What components make up the Payload Schema ecosystem?
+
+| Component | What it does | Who uses it |
+|-----------|-------------|-------------|
+| **Schema document** | YAML/JSON describing binary payload structure | Device manufacturer authors it |
+| **Interpreter** | Reads schema + binary bytes, produces decoded JSON + `_meta` | Network server, gateway, application |
+| **TS013 codec generator** | Produces standalone JavaScript codec from schema | Network servers requiring TS013 API |
+| **C code generator** | Produces C header with struct definitions and decode functions | Embedded firmware |
+| **Test vectors** | Payload/expected-output pairs embedded in the schema | Automated validation |
+| **Sensor definition library** | Pre-built schemas for common sensors with IPSO annotations | Profile generators, integrators |
+| **Validation/scoring tools** | Schema syntax validation, completeness scoring (Bronze→Platinum) | Quality assurance |
+
+### How does this relate to TS013?
+
+TS013 defines the JavaScript codec API (`decodeUplink`, `encodeDownlink`, `decodeDownlink`) that network servers use. The Payload Schema can be:
+
+1. **Compiled** — the TS013 generator produces a standalone JavaScript codec from the schema
+2. **Interpreted** — a schema-aware decoder in any language (Python, Go, C, JS, Java, .NET) decodes directly
+
+Both approaches produce TS013-compliant output. The schema is the single source of truth; TS013 codecs are one output.
+
+### How does this relate to the Integration Layer?
+
+The Integration Layer is a companion that consumes the Payload Schema's decoded output. The Payload Schema handles **what** the device sends (binary structure, field semantics). The Integration Layer handles **where** the data goes (BACnet objects, Modbus registers, Sparkplug metrics, Matter clusters).
+
+The `_meta` object is the contract between them. The Integration Layer's seven universal operations (RENAME, CLASSIFY, ATTACH UNIT, CONVERT UNIT, TYPE COERCE, ATTACH IDENTITY, ATTACH TIMESTAMP) all operate on `_meta` attributes. See [INTEGRATION-LAYER.md](INTEGRATION-LAYER.md) for the full architecture.
+
+---
+
 ## General
-
-### What is this?
-
-A declarative schema format for defining LoRaWAN device payloads. Define your payload structure in YAML, use interpreters and generators to decode payloads and generate codecs.
 
 ### Why use schemas instead of JavaScript codecs?
 
@@ -151,10 +222,13 @@ fields:
 
 ### What interpreters are available?
 
-| Language | File | Notes |
-|----------|------|-------|
-| Go | `go/schema/schema.go` | Full feature support |
-| Python | `tools/schema_interpreter.py` | Full feature support |
+| Language | File | Tests | Notes |
+|----------|------|-------|-------|
+| Python | `tools/schema_interpreter.py` | 126 | Reference implementation, full feature support |
+| JavaScript | `reference-impl/js/` | 92+ | TS013 codec generation |
+| C | `reference-impl/c/` | — | Embedded-friendly, ARM benchmarks |
+| Java | `reference-impl/java/` | — | Maven project |
+| Go | `go/schema/schema.go` | — | Full feature support |
 
 ### How do I decode a payload in Python?
 
@@ -372,4 +446,3 @@ Benchmarks show 200,000-400,000 decodes/second in Python, sufficient for any LoR
 |--------|------|
 | YAML | 500-2000 bytes |
 | JSON | 400-1500 bytes |
-| Binary (compact) | 100-400 bytes |
