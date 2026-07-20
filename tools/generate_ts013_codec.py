@@ -43,6 +43,35 @@ def type_size(t: str) -> Optional[int]:
     return basic.get(t)
 
 
+def parse_bit_slice_type(t: str) -> Optional[Tuple[str, int, int]]:
+    """Parse bit-slice type syntax.
+
+    Supports:
+      - u8[3:4]   -> start=3, width=2
+      - u8[3+:2]  -> start=3, width=2
+    Returns (base_type, bit_start, bit_width) or None.
+    """
+    m = re.match(r'^((?:be_|le_)?[usif]\d+)\[(\d+):(\d+)\]$', t)
+    if m:
+        base_t = m.group(1)
+        lo = int(m.group(2))
+        hi = int(m.group(3))
+        if hi < lo:
+            return None
+        return base_t, lo, (hi - lo + 1)
+
+    m = re.match(r'^((?:be_|le_)?[usif]\d+)\[(\d+)\+:(\d+)\]$', t)
+    if m:
+        base_t = m.group(1)
+        start = int(m.group(2))
+        width = int(m.group(3))
+        if width <= 0:
+            return None
+        return base_t, start, width
+
+    return None
+
+
 def is_signed(t: str) -> bool:
     clean = re.sub(r'^(?:be_|le_)?', '', t)
     return clean.startswith('s') or clean.startswith('i')
@@ -456,6 +485,35 @@ function writeS(buf, pos, size, value, endian) {
         # bitfield_string
         if ftype == 'bitfield_string':
             return self._gen_decode_bitfield_string(field)
+
+        # bit-slice integer (e.g., u8[0:6], u8[7:7], u8[3+:2])
+        bit_slice = parse_bit_slice_type(ftype)
+        if bit_slice is not None:
+            base_type, bit_start, bit_width = bit_slice
+            base_size = type_size(base_type)
+            if base_size is None:
+                lines.append(f'{i}  // TODO: unsupported base type for {ftype}')
+                return lines
+
+            eo = field_endian_override(base_type)
+            endian_arg = f'"{eo}"' if eo else 'endian'
+            mask = (1 << bit_width) - 1
+            consume = field.get('consume', 1)
+
+            lines.append(f'{i}  var {js_name}_raw = readU(buf, pos, {base_size}, {endian_arg});')
+            lines.append(f'{i}  var {js_name} = ({js_name}_raw >> {bit_start}) & 0x{mask:X};')
+            if consume:
+                lines.append(f'{i}  pos += {base_size};')
+
+            if field.get('var'):
+                lines.append(f'{i}  vars.{to_js_name(field["var"])} = {js_name};')
+            lines.append(f'{i}  vars.{js_name} = {js_name};')
+
+            if not name.startswith('_'):
+                val_expr = self._apply_modifiers_expr(js_name, field)
+                lines.append(f'{i}  d.{js_name} = {val_expr};')
+
+            return lines
 
         # enum
         if ftype == 'enum':
