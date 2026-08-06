@@ -16,14 +16,17 @@ fields:
         "[5, 142]":
           - name: state
             type: u8
+            lookup: ["normal", "abnormal"]
         # vale
         "[6, 1]":
           - name: valve
             type: u8
+            lookup: ["close", "open"]
         # relay
         "[7, 1]":
           - name: relay
             type: u8
+            lookup: ["close", "open"]
         # remained life time for the sensor
         "[8, 144]":
           - name: life_remain

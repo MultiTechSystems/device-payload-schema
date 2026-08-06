@@ -20,3 +20,50 @@ fields:
         "[5, 0]":
           - name: leakage_status
             type: u8
+            lookup: ["normal", "leak"]
+
+test_vectors:
+  - name: vendor_reference
+    description: "Example declared by the vendor in the TTN device repository"
+    payload: "01755C050000"
+    fPort: 85
+    source: vendor-doc
+    expected:
+      battery: 92
+      leakage_status: "normal"
+  - name: vendor_reference_2
+    description: "Example declared by the vendor in the TTN device repository"
+    payload: "01755C050001"
+    fPort: 85
+    source: vendor-doc
+    expected:
+      battery: 92
+      leakage_status: "leak"
+  - name: ch1_type117_midscale
+    description: "Channel 1 type 117, midscale bytes, decoded by the vendor's own decoder"
+    payload: "017511"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      battery: 17
+  - name: ch1_type117_zero_values
+    description: "Channel 1 type 117, zero values bytes, decoded by the vendor's own decoder"
+    payload: "017500"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      battery: 0
+  - name: ch5_type0_zero_values
+    description: "Channel 5 type 0, zero values bytes, decoded by the vendor's own decoder"
+    payload: "050000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      leakage_status: "normal"
+  - name: ch1_type117_max_values
+    description: "Channel 1 type 117, max values bytes, decoded by the vendor's own decoder"
+    payload: "0175FF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      battery: 255

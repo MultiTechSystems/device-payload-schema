@@ -20,6 +20,53 @@ fields:
         "[3, 0]":
           - name: door
             type: u8
+            lookup: ["close", "open"]
         "[4, 0]":
           - name: install
             type: u8
+            lookup: ["yes", "no"]
+
+test_vectors:
+  - name: vendor_reference
+    description: "Example declared by the vendor in the TTN device repository"
+    payload: "01754B030001"
+    fPort: 85
+    source: vendor-doc
+    expected:
+      battery: 75
+      door: "open"
+  - name: ch1_type117_midscale
+    description: "Channel 1 type 117, midscale bytes, decoded by the vendor's own decoder"
+    payload: "017511"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      battery: 17
+  - name: ch1_type117_zero_values
+    description: "Channel 1 type 117, zero values bytes, decoded by the vendor's own decoder"
+    payload: "017500"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      battery: 0
+  - name: ch3_type0_zero_values
+    description: "Channel 3 type 0, zero values bytes, decoded by the vendor's own decoder"
+    payload: "030000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      door: "close"
+  - name: ch4_type0_zero_values
+    description: "Channel 4 type 0, zero values bytes, decoded by the vendor's own decoder"
+    payload: "040000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      install: "yes"
+  - name: ch1_type117_max_values
+    description: "Channel 1 type 117, max values bytes, decoded by the vendor's own decoder"
+    payload: "0175FF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      battery: 255

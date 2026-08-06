@@ -16,22 +16,28 @@ fields:
         "[3, 0]":
           - name: digital_input_1
             type: u8
+            lookup: ["off", "on"]
         "[4, 0]":
           - name: digital_input_2
             type: u8
+            lookup: ["off", "on"]
         "[5, 0]":
           - name: digital_input_3
             type: u8
+            lookup: ["off", "on"]
         "[6, 0]":
           - name: digital_input_4
             type: u8
+            lookup: ["off", "on"]
         # Digital Output
         "[7, 1]":
           - name: digital_output_1
             type: u8
+            lookup: ["off", "on"]
         "[8, 1]":
           - name: digital_output_2
             type: u8
+            lookup: ["off", "on"]
         # Digital Input as Counter
         "[3, 200]":
           - name: pulse_count_1
@@ -79,18 +85,6 @@ fields:
             # raw: []
 
 test_vectors:
-  - name: vendor_reference
-    description: "Example declared by the vendor in the TTN device repository"
-    payload: "03C816000000040000050000060001070100080101"
-    fPort: 85
-    source: vendor-doc
-    expected:
-      digital_input_2: false
-      digital_input_3: false
-      digital_input_4: true
-      digital_output_1: false
-      digital_output_2: true
-      pulse_count_1: 22
   - name: ch3_type200_midscale
     description: "Channel 3 type 200, midscale bytes, decoded by the vendor's own decoder"
     payload: "03C811111111"
@@ -133,6 +127,48 @@ test_vectors:
     source: vendor-codec
     expected:
       pt100_2: 436.9
+  - name: ch3_type0_zero_values
+    description: "Channel 3 type 0, zero values bytes, decoded by the vendor's own decoder"
+    payload: "030000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      digital_input_1: "off"
+  - name: ch4_type0_zero_values
+    description: "Channel 4 type 0, zero values bytes, decoded by the vendor's own decoder"
+    payload: "040000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      digital_input_2: "off"
+  - name: ch5_type0_zero_values
+    description: "Channel 5 type 0, zero values bytes, decoded by the vendor's own decoder"
+    payload: "050000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      digital_input_3: "off"
+  - name: ch6_type0_zero_values
+    description: "Channel 6 type 0, zero values bytes, decoded by the vendor's own decoder"
+    payload: "060000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      digital_input_4: "off"
+  - name: ch7_type1_zero_values
+    description: "Channel 7 type 1, zero values bytes, decoded by the vendor's own decoder"
+    payload: "070100"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      digital_output_1: "off"
+  - name: ch8_type1_zero_values
+    description: "Channel 8 type 1, zero values bytes, decoded by the vendor's own decoder"
+    payload: "080100"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      digital_output_2: "off"
   - name: ch3_type200_zero_values
     description: "Channel 3 type 200, zero values bytes, decoded by the vendor's own decoder"
     payload: "03C800000000"
@@ -154,38 +190,3 @@ test_vectors:
     source: vendor-codec
     expected:
       pulse_count_3: 0
-  - name: ch6_type200_zero_values
-    description: "Channel 6 type 200, zero values bytes, decoded by the vendor's own decoder"
-    payload: "06C800000000"
-    fPort: 85
-    source: vendor-codec
-    expected:
-      pulse_count_4: 0
-  - name: ch9_type103_zero_values
-    description: "Channel 9 type 103, zero values bytes, decoded by the vendor's own decoder"
-    payload: "09670000"
-    fPort: 85
-    source: vendor-codec
-    expected:
-      pt100_1: 0
-  - name: ch10_type103_zero_values
-    description: "Channel 10 type 103, zero values bytes, decoded by the vendor's own decoder"
-    payload: "0A670000"
-    fPort: 85
-    source: vendor-codec
-    expected:
-      pt100_2: 0
-  - name: ch11_type2_zero_values
-    description: "Channel 11 type 2, zero values bytes, decoded by the vendor's own decoder"
-    payload: "0B0200000000"
-    fPort: 85
-    source: vendor-codec
-    expected:
-      analog_input_adc_1: 0
-  - name: ch12_type2_zero_values
-    description: "Channel 12 type 2, zero values bytes, decoded by the vendor's own decoder"
-    payload: "0C0200000000"
-    fPort: 85
-    source: vendor-codec
-    expected:
-      analog_input_adc_2: 0

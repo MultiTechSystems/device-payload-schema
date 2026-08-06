@@ -30,6 +30,7 @@ fields:
         "[5, 0]":
           - name: occupancy
             type: u8
+            lookup: ["vacant", "occupied"]
         # TEMPERATURE WITH ABNORMAL
         "[131, 103]":
           - name: temperature
@@ -37,8 +38,19 @@ fields:
             div: 10
           - name: temperature_abnormal
             type: u8
+            lookup: ["normal", "abnormal"]
 
 test_vectors:
+  - name: vendor_reference
+    description: "Example declared by the vendor in the TTN device repository"
+    payload: "01756403673401046865050000"
+    fPort: 85
+    source: vendor-doc
+    expected:
+      battery: 100
+      humidity: 50.5
+      occupancy: "vacant"
+      temperature: 30.8
   - name: ch1_type117_midscale
     description: "Channel 1 type 117, midscale bytes, decoded by the vendor's own decoder"
     payload: "017511"
@@ -81,6 +93,21 @@ test_vectors:
     source: vendor-codec
     expected:
       humidity: 0
+  - name: ch5_type0_zero_values
+    description: "Channel 5 type 0, zero values bytes, decoded by the vendor's own decoder"
+    payload: "050000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      occupancy: "vacant"
+  - name: ch131_type103_zero_values
+    description: "Channel 131 type 103, zero values bytes, decoded by the vendor's own decoder"
+    payload: "8367000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 0
+      temperature_abnormal: "normal"
   - name: ch1_type117_max_values
     description: "Channel 1 type 117, max values bytes, decoded by the vendor's own decoder"
     payload: "0175FF"

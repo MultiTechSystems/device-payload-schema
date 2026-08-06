@@ -29,6 +29,7 @@ fields:
         "[5, 0]":
           - name: position
             type: u8
+            lookup: ["normal", "tilt"]
         # TEMPERATURE WITH ABNORMAL
         "[131, 103]":
           - name: temperature
@@ -44,6 +45,16 @@ fields:
             type: u8
 
 test_vectors:
+  - name: vendor_reference
+    description: "Example declared by the vendor in the TTN device repository"
+    payload: "01755C0367010104824408050001"
+    fPort: 85
+    source: vendor-doc
+    expected:
+      battery: 92
+      temperature: 25.7
+      distance: 2116
+      position: "tilt"
   - name: ch1_type117_midscale
     description: "Channel 1 type 117, midscale bytes, decoded by the vendor's own decoder"
     payload: "017511"
@@ -86,6 +97,13 @@ test_vectors:
     source: vendor-codec
     expected:
       distance: 0
+  - name: ch5_type0_zero_values
+    description: "Channel 5 type 0, zero values bytes, decoded by the vendor's own decoder"
+    payload: "050000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      position: "normal"
   - name: ch131_type103_zero_values
     description: "Channel 131 type 103, zero values bytes, decoded by the vendor's own decoder"
     payload: "8367000000"

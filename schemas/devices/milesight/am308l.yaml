@@ -30,6 +30,7 @@ fields:
         "[5, 0]":
           - name: pir
             type: u8
+            lookup: ["idle", "trigger"]
         # LIGHT
         "[6, 203]":
           - name: light_level
@@ -74,6 +75,7 @@ fields:
         "[14, 1]":
           - name: beep
             type: u8
+            lookup: ["no", "yes"]
 
 test_vectors:
   - name: vendor_reference

@@ -109,13 +109,13 @@ Generated inventory of this repository: what lives where, what each document cov
 ## Device schemas
 
 158 schemas under `schemas/devices/`.
-Mean quality score 49.9% (PLATINUM 14, GOLD 8, SILVER 52, BRONZE 6, REJECTED 78). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+Mean quality score 52.0% (PLATINUM 14, GOLD 8, SILVER 58, BRONZE 5, REJECTED 73). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
-| milesight | 84 | 637 | SILVER 51, BRONZE 5, REJECTED 28 |
+| milesight | 84 | 677 | SILVER 57, BRONZE 4, REJECTED 23 |
 | decentlab | 58 | 120 | PLATINUM 12, GOLD 7, SILVER 1, REJECTED 38 |
 | makerfabs | 6 | 0 | REJECTED 6 |
 | mclimate | 3 | 11 | GOLD 1, REJECTED 2 |
@@ -226,7 +226,7 @@ Mean quality score 49.9% (PLATINUM 14, GOLD 8, SILVER 52, BRONZE 6, REJECTED 78)
 | `milesight/ct310` | 13 | 0 | fields | 14% | REJECTED |
 | `milesight/em300-di` | 7 | 15 | fields | 80% | SILVER |
 | `milesight/em300-mcs` | 14 | 9 | fields | 80% | SILVER |
-| `milesight/em300-mld` | 4 | 0 | fields | 16% | REJECTED |
+| `milesight/em300-mld` | 4 | 6 | fields | 80% | SILVER |
 | `milesight/em300-sld` | 6 | 9 | fields | 80% | SILVER |
 | `milesight/em300-th` | 5 | 10 | fields | 80% | SILVER |
 | `milesight/em300-zld` | 6 | 9 | fields | 80% | SILVER |
@@ -234,9 +234,9 @@ Mean quality score 49.9% (PLATINUM 14, GOLD 8, SILVER 52, BRONZE 6, REJECTED 78)
 | `milesight/em310-udl` | 13 | 6 | fields | 80% | SILVER |
 | `milesight/em320-th` | 5 | 10 | fields | 80% | SILVER |
 | `milesight/em320-tilt` | 9 | 0 | fields | 14% | REJECTED |
-| `milesight/em400-mud` | 10 | 11 | fields | 65% | BRONZE |
-| `milesight/em400-tld` | 10 | 11 | fields | 65% | BRONZE |
-| `milesight/em400-udl` | 10 | 11 | fields | 65% | BRONZE |
+| `milesight/em400-mud` | 10 | 13 | fields | 65% | BRONZE |
+| `milesight/em400-tld` | 10 | 13 | fields | 65% | BRONZE |
+| `milesight/em400-udl` | 10 | 13 | fields | 65% | BRONZE |
 | `milesight/em410-rdl` | 15 | 12 | fields | 80% | SILVER |
 | `milesight/em500-co2` | 7 | 0 | fields | 14% | REJECTED |
 | `milesight/em500-lgt` | 4 | 7 | fields | 80% | SILVER |
@@ -255,15 +255,15 @@ Mean quality score 49.9% (PLATINUM 14, GOLD 8, SILVER 52, BRONZE 6, REJECTED 78)
 | `milesight/uc100` | 7 | 0 | fields | 16% | REJECTED |
 | `milesight/uc1114` | 4 | 0 | fields | 16% | REJECTED |
 | `milesight/uc1152` | 3 | 0 | fields | 16% | REJECTED |
-| `milesight/uc300` | 19 | 15 | fields | 61% | BRONZE |
+| `milesight/uc300` | 19 | 15 | fields | 76% | SILVER |
 | `milesight/uc50x` | 11 | 0 | fields | 16% | REJECTED |
 | `milesight/uc51x` | 20 | 12 | fields | 80% | SILVER |
 | `milesight/vs121` | 5 | 0 | fields | 16% | REJECTED |
 | `milesight/vs135` | 15 | 6 | fields | 80% | SILVER |
 | `milesight/vs321` | 21 | 9 | fields | 78% | SILVER |
-| `milesight/vs330` | 6 | 6 | fields | 80% | SILVER |
-| `milesight/vs340` | 4 | 0 | fields | 16% | REJECTED |
-| `milesight/vs341` | 4 | 0 | fields | 16% | REJECTED |
+| `milesight/vs330` | 6 | 9 | fields | 80% | SILVER |
+| `milesight/vs340` | 4 | 5 | fields | 80% | SILVER |
+| `milesight/vs341` | 4 | 5 | fields | 80% | SILVER |
 | `milesight/vs350` | 25 | 15 | fields | 80% | SILVER |
 | `milesight/vs351` | 26 | 15 | fields | 80% | SILVER |
 | `milesight/vs360` | 23 | 15 | fields | 80% | SILVER |
@@ -273,9 +273,9 @@ Mean quality score 49.9% (PLATINUM 14, GOLD 8, SILVER 52, BRONZE 6, REJECTED 78)
 | `milesight/ws136` | 3 | 0 | fields | 16% | REJECTED |
 | `milesight/ws156` | 3 | 0 | fields | 16% | REJECTED |
 | `milesight/ws201` | 5 | 10 | fields | 80% | SILVER |
-| `milesight/ws202` | 5 | 0 | fields | 16% | REJECTED |
-| `milesight/ws203` | 8 | 9 | fields | 80% | SILVER |
-| `milesight/ws301` | 5 | 0 | fields | 16% | REJECTED |
+| `milesight/ws202` | 5 | 6 | fields | 80% | SILVER |
+| `milesight/ws203` | 8 | 12 | fields | 80% | SILVER |
+| `milesight/ws301` | 5 | 6 | fields | 80% | SILVER |
 | `milesight/ws302` | 9 | 0 | fields | 16% | REJECTED |
 | `milesight/ws303` | 4 | 0 | fields | 16% | REJECTED |
 | `milesight/ws50x` | 17 | 0 | fields | 16% | REJECTED |

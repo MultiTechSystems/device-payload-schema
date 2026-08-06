@@ -24,12 +24,24 @@ fields:
         "[3, 142]":
           - name: occupancy
             type: u8
+            lookup: ["vacant", "occupied"]
         # CALIBRATION
         "[4, 142]":
           - name: calibration
             type: u8
+            lookup: ["failed", "success"]
 
 test_vectors:
+  - name: vendor_reference
+    description: "Example declared by the vendor in the TTN device repository"
+    payload: "01756202820F00038E01048E01"
+    fPort: 85
+    source: vendor-doc
+    expected:
+      battery: 98
+      distance: 15
+      occupancy: "occupied"
+      calibration: "success"
   - name: ch1_type117_midscale
     description: "Channel 1 type 117, midscale bytes, decoded by the vendor's own decoder"
     payload: "017511"
@@ -58,6 +70,20 @@ test_vectors:
     source: vendor-codec
     expected:
       distance: 0
+  - name: ch3_type142_zero_values
+    description: "Channel 3 type 142, zero values bytes, decoded by the vendor's own decoder"
+    payload: "038E00"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      occupancy: "vacant"
+  - name: ch4_type142_zero_values
+    description: "Channel 4 type 142, zero values bytes, decoded by the vendor's own decoder"
+    payload: "048E00"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      calibration: "failed"
   - name: ch1_type117_max_values
     description: "Channel 1 type 117, max values bytes, decoded by the vendor's own decoder"
     payload: "0175FF"
