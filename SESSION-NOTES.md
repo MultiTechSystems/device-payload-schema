@@ -1,5 +1,93 @@
 # Session Notes
 
+## Session: Aug 6, 2026
+
+### Completed
+
+**Cross-language conformance suite (the big one)**
+- The corpus is now the shared test set: 1,116 vectors across 98 schemas, run by a
+  runner in every implementation reading the same YAML.
+  - `tests/test_corpus_conformance.py` 1116/1116
+  - `go/schema/corpus_conformance_test.go` 1101
+  - `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` 1082
+  - `bindings/java/.../CorpusConformanceTest.java` 1052
+  - C has no runner: it consumes a binary schema, not YAML.
+- Non-Python runners assert against a committed floor, so known gaps stay visible and
+  a regression fails. **Raise the floor whenever a gap closes.**
+- Before this existed, Go and C# each read two hardcoded schemas and Java none, which
+  is how Go and Java came to return an empty result for *every* TLV schema in the
+  repository without a test failing.
+
+**Interpreter defects found by running the corpus**
+- Go and Java: inline `- tlv:` blocks never got their cases (type assigned after
+  parse), so no channel/type schema decoded. Fixed in both.
+- Go and C#: composite case keys compared as strings against a tag rendered without a
+  space, `[1,117]` vs the `"[1, 117]"` schemas are written with. Fixed in both.
+- Go and Java: the sequence form `lookup: ["off", "on"]` was unparsed - hundreds of
+  corpus fields reported raw integers. Fixed in both.
+- Go: `DecodeContext.Read` bounds-checked only the upper end, so `length: -1` panicked
+  and took the caller down. Now treats negative as the remainder.
+- Go: guards were evaluated *after* compute, so a guarded division by zero aborted the
+  whole payload (dl-alb, vicki). Conditions are checked first now.
+- Go: no `hex` type (constant is `"Hex"`, no lowercase alias) and no `u8[lo:hi]` bit
+  ranges - both added.
+- C#: `ParseFieldType` strips the range so `u8[0:0]` read the whole byte. Routed to
+  the Bits path, which now honours `consume`.
+- Python: `hex` emitted uppercase, violating PS-074; `hex:upper` was unreachable
+  because any type containing a colon parsed as a bit range.
+- All four disagreed four ways on an unmatched `lookup`: raw value (Python, Go, Java)
+  or the string `"unknown(42)"` (C). All now omit the field per PS-269.
+
+**CR-2026-004 - implemented and applied**
+- `name_from` computed keys, sparse mapping `lookup` with `default`, negated/wildcard
+  TLV case keys (`"[1, !0]"`, `"[2, *]"`). PS-265..PS-270.
+- Spec text applied to Clauses 2, 3 and 4; CR moved to `change-requests/implemented/`.
+- Implemented in Python, Go, Java, C#. **Not C** - no TLV, fixed-size names, binary
+  schema has no slot for a template or a default.
+
+**Milesight family**
+- 84 Rejected -> 18 Platinum, 33 Gold, 22 Silver, 11 Rejected (mean 14% -> 82.3%).
+- Vendor agreement 0 -> 47 of 84, measured against the vendor's own JS decoder.
+- Fixed: 13 conversions recorded in comments but never applied (humidity /2 etc.),
+  version and serial channels (were `u8`, vendor reads 1-8 bytes), packed flag bytes,
+  enum labels from vendor ternaries and status maps, units from TTN's payload schema.
+
+### Next
+
+1. **Java is the biggest conformance gap** (64 failures): computed `ref` fields are not
+   evaluated and `u8[lo:hi]` bit ranges are unsupported. The same two fixes just made
+   in Go and C# should close most of it. Then raise its floor.
+2. **C#**: `rbs30x`'s `match` cases decode nothing; `vicki.sensorTemperature` differs
+   by more than rounding (46.95 vs 14.76) - a real computed-field bug, not a tolerance
+   issue. Both need the `round` transform op too (Go also lacks it).
+3. **Go**: `byte_group` (oyster, ers) and `round`.
+4. **`name_from` unlocks 27 milesight channels** that were blocked on computed keys -
+   they can be added now that the construct exists in four implementations.
+5. **Milesight leftovers**: 26 channels need per-device modelling (conditional members,
+   loops over bit maps); 11 schemas are still Rejected for want of 5 verified vectors.
+6. **Decentlab**: 37 of 58 still disagree with the vendor decoder - untouched since the
+   offset-binary fix.
+7. **CR-2026-002 and CR-2026-003** are in `change-requests/submitted/` awaiting WG
+   review. 004 is implemented.
+
+### Notes for whoever picks this up
+
+- Re-clone the Decentlab oracle: `git clone --depth 1
+  https://github.com/decentlab/decentlab-decoders` - the copy used today was in a
+  session scratchpad and is not persistent. The TTN checkout at
+  `~/Workspace/lora/tools/lorawan-devices` is permanent.
+- Three TTN declared examples are stale and disagree with their own vendor decoder:
+  `ws50x`, `uc1114`, `uc1152` all declare `true` where the decoder yields `"on"`.
+  Prefer the decoder; `crossvalidate_ttn.py` reports the two oracles separately.
+- `uc1114`'s vendor decoder reads past the end of the payload (its loop has no
+  `else break`), so it reports a field for a channel type its own condition excludes.
+  We deliberately do not reproduce that, so cross-validation will keep flagging it.
+- A field-block scan that jumps to the end of each block never sees fields nested
+  inside an `object`. This bit twice today - when annotating history records and when
+  marking label fields. Advance by one line instead.
+- `schemas/library/gateway/telemetry-v1.yaml` is untracked and was left alone all
+  session: it predates this work and is not mine to commit.
+
 ## Session: Feb 24, 2026
 
 ### Completed
