@@ -277,6 +277,10 @@ public static class SchemaDecoder
                 var data = ctx.Peek(1, field.ByteOffset);
                 int bits = field.BitCount > 0 ? field.BitCount : 1;
                 value = (double)Helpers.DecodeBits(data[0], field.BitOffset, bits);
+                // An explicit range does not advance the cursor by itself: several
+                // fields share one byte and the last of them declares `consume`.
+                if (field.Consume > 0)
+                    ctx.Read(field.Consume);
                 break;
             }
 

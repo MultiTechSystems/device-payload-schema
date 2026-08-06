@@ -19,9 +19,9 @@ namespace PayloadSchema.Tests;
 public class CorpusConformanceTests
 {
     // Raise as gaps close.
-    // Gaps behind the 36 failures: `u8[lo:hi]` bit ranges are unsupported, and a
-    // handful of computed fields differ. Each is named in the test output.
-    const int CorpusFloor = 1080;
+    // Gaps behind the remaining 34: rbs30x's match cases are not decoded, and vicki
+    // needs the `round` transform op and a computed-field fix. Named in the output.
+    const int CorpusFloor = 1082;
 
     readonly ITestOutputHelper _output;
 

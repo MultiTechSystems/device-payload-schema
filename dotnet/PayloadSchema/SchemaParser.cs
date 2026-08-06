@@ -109,6 +109,13 @@ public static class SchemaParser
             }
 
             f.Type = Helpers.ParseFieldType(f.RawType);
+            if (bitRange != null)
+            {
+                // ParseFieldType strips the range, so `u8[0:0]` resolved to U8 and the
+                // whole byte was read instead of the bits - a packed flag byte decoded
+                // as its raw value. A range makes this a bit field.
+                f.Type = FieldType.Bits;
+            }
         }
 
         if (fm.TryGetValue("length", out var len))
