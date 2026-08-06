@@ -108,23 +108,23 @@ Generated inventory of this repository: what lives where, what each document cov
 ## Device schemas
 
 158 schemas under `schemas/devices/`.
-Mean quality score 24.7% (PLATINUM 15, GOLD 7, SILVER 2, BRONZE 134). Tiers are defined in `tools/score_schema.py`: Bronze 50-69%, Silver 70-84%, Gold 85-94%, Platinum 95-100%.
+Mean quality score 27.5% (PLATINUM 14, GOLD 8, SILVER 1, BRONZE 1, REJECTED 134). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
-| milesight | 84 | 0 | BRONZE 84 |
-| decentlab | 58 | 120 | PLATINUM 12, GOLD 7, SILVER 1, BRONZE 38 |
-| makerfabs | 6 | 0 | BRONZE 6 |
-| mclimate | 3 | 11 | PLATINUM 1, BRONZE 2 |
+| milesight | 84 | 0 | REJECTED 84 |
+| decentlab | 58 | 120 | PLATINUM 12, GOLD 7, SILVER 1, REJECTED 38 |
+| makerfabs | 6 | 0 | REJECTED 6 |
+| mclimate | 3 | 11 | GOLD 1, REJECTED 2 |
 | digital-matter | 1 | 7 | PLATINUM 1 |
 | dragino | 1 | 5 | PLATINUM 1 |
-| elsys | 1 | 2 | BRONZE 1 |
-| hbi | 1 | 0 | BRONZE 1 |
-| radio-bridge | 1 | 28 | SILVER 1 |
-| radionode | 1 | 0 | BRONZE 1 |
-| rakwireless | 1 | 0 | BRONZE 1 |
+| elsys | 1 | 2 | REJECTED 1 |
+| hbi | 1 | 0 | REJECTED 1 |
+| radio-bridge | 1 | 28 | BRONZE 1 |
+| radionode | 1 | 0 | REJECTED 1 |
+| rakwireless | 1 | 0 | REJECTED 1 |
 
 ### By device
 
@@ -133,163 +133,163 @@ Mean quality score 24.7% (PLATINUM 15, GOLD 7, SILVER 2, BRONZE 134). Tiers are 
 | Schema | Fields | Vectors | Constructs | Score | Tier |
 |---|---|---|---|---|---|
 | `decentlab/dl-5tm` | 10 | 7 | fields | 100% | PLATINUM |
-| `decentlab/dl-alb` | 11 | 6 | fields | 98% | PLATINUM |
-| `decentlab/dl-atm22` | 15 | 6 | fields | 98% | PLATINUM |
-| `decentlab/dl-atm41` | 27 | 6 | fields | 89% | GOLD |
-| `decentlab/dl-atm41g2` | 20 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-blg` | 7 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-ctd10` | 10 | 6 | fields | 87% | GOLD |
-| `decentlab/dl-cws` | 10 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-cws2` | 12 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-dlr2-002` | 7 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-dlr2-003` | 6 | 5 | fields | 98% | PLATINUM |
-| `decentlab/dl-dlr2-004-10` | 5 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-dlr2-005` | 5 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-dlr2-006` | 5 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-dlr2-008-2000` | 5 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-dlr2-009-2000` | 6 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-dlr2-010` | 10 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-dlr2-011` | 7 | 6 | fields | 98% | PLATINUM |
-| `decentlab/dl-dlr2-012` | 5 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-ds18` | 7 | 6 | fields | 98% | PLATINUM |
-| `decentlab/dl-dws-232263168-0000302459-1370` | 6 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-gmm` | 15 | 6 | fields | 89% | GOLD |
-| `decentlab/dl-iam` | 15 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-ifd` | 6 | 6 | fields | 98% | PLATINUM |
-| `decentlab/dl-ilt` | 7 | 6 | fields | 98% | PLATINUM |
-| `decentlab/dl-isd` | 6 | 6 | fields | 98% | PLATINUM |
-| `decentlab/dl-isf` | 19 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-itst` | 6 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-kl66-1538372-464859` | 10 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-lid` | 16 | 6 | fields | 78% | SILVER |
-| `decentlab/dl-lp8p` | 16 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-lpw` | 5 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-lws` | 5 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-mbx` | 7 | 6 | fields | 87% | GOLD |
-| `decentlab/dl-mes5` | 11 | 6 | fields | 98% | PLATINUM |
-| `decentlab/dl-ntu` | 11 | 6 | fields | 98% | PLATINUM |
-| `decentlab/dl-optod` | 12 | 6 | fields | 92% | GOLD |
-| `decentlab/dl-par` | 5 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-pheht` | 11 | 6 | fields | 87% | GOLD |
-| `decentlab/dl-pm` | 17 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-pr21-1-10` | 6 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-pr26-0-1` | 6 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-pr36-8192` | 6 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-pr36ctd-8192-1024` | 8 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-pyr` | 5 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-rad` | 10 | 6 | fields | 90% | GOLD |
-| `decentlab/dl-rhc` | 7 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-sdd` | 40 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-sht35` | 6 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-smtp` | 20 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-tbrg-01` | 7 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-tp` | 37 | 6 | fields | 98% | PLATINUM |
-| `decentlab/dl-trs11` | 7 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-trs12` | 8 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-trs21` | 6 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-wrm` | 8 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-zn1` | 5 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-zn2` | 6 | 0 | fields | 12% | BRONZE |
+| `decentlab/dl-alb` | 11 | 6 | fields | 100% | PLATINUM |
+| `decentlab/dl-atm22` | 15 | 6 | fields | 100% | PLATINUM |
+| `decentlab/dl-atm41` | 27 | 6 | fields | 92% | GOLD |
+| `decentlab/dl-atm41g2` | 20 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-blg` | 7 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-ctd10` | 10 | 6 | fields | 89% | GOLD |
+| `decentlab/dl-cws` | 10 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-cws2` | 12 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-dlr2-002` | 7 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-dlr2-003` | 6 | 5 | fields | 100% | PLATINUM |
+| `decentlab/dl-dlr2-004-10` | 5 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-dlr2-005` | 5 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-dlr2-006` | 5 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-dlr2-008-2000` | 5 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-dlr2-009-2000` | 6 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-dlr2-010` | 10 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-dlr2-011` | 7 | 6 | fields | 100% | PLATINUM |
+| `decentlab/dl-dlr2-012` | 5 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-ds18` | 7 | 6 | fields | 100% | PLATINUM |
+| `decentlab/dl-dws-232263168-0000302459-1370` | 6 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-gmm` | 15 | 6 | fields | 92% | GOLD |
+| `decentlab/dl-iam` | 15 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-ifd` | 6 | 6 | fields | 100% | PLATINUM |
+| `decentlab/dl-ilt` | 7 | 6 | fields | 100% | PLATINUM |
+| `decentlab/dl-isd` | 6 | 6 | fields | 100% | PLATINUM |
+| `decentlab/dl-isf` | 19 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-itst` | 6 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-kl66-1538372-464859` | 10 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-lid` | 16 | 6 | fields | 80% | SILVER |
+| `decentlab/dl-lp8p` | 16 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-lpw` | 5 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-lws` | 5 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-mbx` | 7 | 6 | fields | 89% | GOLD |
+| `decentlab/dl-mes5` | 11 | 6 | fields | 100% | PLATINUM |
+| `decentlab/dl-ntu` | 11 | 6 | fields | 100% | PLATINUM |
+| `decentlab/dl-optod` | 12 | 6 | fields | 94% | GOLD |
+| `decentlab/dl-par` | 5 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-pheht` | 11 | 6 | fields | 89% | GOLD |
+| `decentlab/dl-pm` | 17 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-pr21-1-10` | 6 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-pr26-0-1` | 6 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-pr36-8192` | 6 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-pr36ctd-8192-1024` | 8 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-pyr` | 5 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-rad` | 10 | 6 | fields | 92% | GOLD |
+| `decentlab/dl-rhc` | 7 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-sdd` | 40 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-sht35` | 6 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-smtp` | 20 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-tbrg-01` | 7 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-tp` | 37 | 6 | fields | 100% | PLATINUM |
+| `decentlab/dl-trs11` | 7 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-trs12` | 8 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-trs21` | 6 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-wrm` | 8 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-zn1` | 5 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-zn2` | 6 | 0 | fields | 16% | REJECTED |
 | `digital-matter/oyster` | 24 | 7 | ports | 100% | PLATINUM |
-| `dragino/laq4` | 14 | 5 | fields | 96% | PLATINUM |
-| `elsys/ers` | 32 | 2 | fields | 56% | BRONZE |
-| `hbi/mla20` | 18 | 0 | fields | 12% | BRONZE |
-| `makerfabs/4-channel-adc` | 8 | 0 | fields | 12% | BRONZE |
-| `makerfabs/ath20` | 4 | 0 | fields | 12% | BRONZE |
-| `makerfabs/gps-tracker` | 16 | 0 | fields | 12% | BRONZE |
-| `makerfabs/leaf-moisture-sn-3001` | 6 | 0 | fields | 12% | BRONZE |
-| `makerfabs/pipe-pressure` | 3 | 0 | fields | 12% | BRONZE |
-| `makerfabs/soil-monitor` | 8 | 0 | fields | 12% | BRONZE |
-| `mclimate/flood-sensor` | 5 | 0 | fields | 12% | BRONZE |
-| `mclimate/t-valve` | 11 | 0 | fields | 12% | BRONZE |
-| `mclimate/vicki` | 31 | 11 | fields | 100% | PLATINUM |
-| `milesight/am102` | 13 | 0 | fields | 12% | BRONZE |
-| `milesight/am102l` | 13 | 0 | fields | 12% | BRONZE |
-| `milesight/am103` | 12 | 0 | fields | 12% | BRONZE |
-| `milesight/am103l` | 12 | 0 | fields | 12% | BRONZE |
-| `milesight/am104` | 9 | 0 | fields | 12% | BRONZE |
-| `milesight/am107` | 12 | 0 | fields | 12% | BRONZE |
-| `milesight/am307` | 15 | 0 | fields | 12% | BRONZE |
-| `milesight/am307l` | 15 | 0 | fields | 12% | BRONZE |
-| `milesight/am308` | 16 | 0 | fields | 12% | BRONZE |
-| `milesight/am308l` | 16 | 0 | fields | 12% | BRONZE |
-| `milesight/am319` | 22 | 0 | fields | 12% | BRONZE |
-| `milesight/am319l` | 22 | 0 | fields | 12% | BRONZE |
-| `milesight/at101-fh` | 22 | 0 | fields | 12% | BRONZE |
-| `milesight/at101` | 16 | 0 | fields | 12% | BRONZE |
-| `milesight/ct101` | 19 | 0 | fields | 12% | BRONZE |
-| `milesight/ct103` | 19 | 0 | fields | 12% | BRONZE |
-| `milesight/ct105` | 19 | 0 | fields | 12% | BRONZE |
-| `milesight/ct303` | 13 | 0 | fields | 12% | BRONZE |
-| `milesight/ct305` | 13 | 0 | fields | 12% | BRONZE |
-| `milesight/ct310` | 13 | 0 | fields | 12% | BRONZE |
-| `milesight/em300-di` | 7 | 0 | fields | 12% | BRONZE |
-| `milesight/em300-mcs` | 14 | 0 | fields | 12% | BRONZE |
-| `milesight/em300-mld` | 4 | 0 | fields | 12% | BRONZE |
-| `milesight/em300-sld` | 6 | 0 | fields | 12% | BRONZE |
-| `milesight/em300-th` | 5 | 0 | fields | 12% | BRONZE |
-| `milesight/em300-zld` | 6 | 0 | fields | 12% | BRONZE |
-| `milesight/em310-tilt` | 17 | 0 | fields | 12% | BRONZE |
-| `milesight/em310-udl` | 13 | 0 | fields | 12% | BRONZE |
-| `milesight/em320-th` | 5 | 0 | fields | 12% | BRONZE |
-| `milesight/em320-tilt` | 9 | 0 | fields | 12% | BRONZE |
-| `milesight/em400-mud` | 10 | 0 | fields | 12% | BRONZE |
-| `milesight/em400-tld` | 10 | 0 | fields | 12% | BRONZE |
-| `milesight/em400-udl` | 10 | 0 | fields | 12% | BRONZE |
-| `milesight/em410-rdl` | 15 | 0 | fields | 12% | BRONZE |
-| `milesight/em500-co2` | 7 | 0 | fields | 12% | BRONZE |
-| `milesight/em500-lgt` | 4 | 0 | fields | 12% | BRONZE |
-| `milesight/em500-pp` | 4 | 0 | fields | 12% | BRONZE |
-| `milesight/em500-pt100` | 4 | 0 | fields | 12% | BRONZE |
-| `milesight/em500-smt` | 5 | 0 | fields | 12% | BRONZE |
-| `milesight/em500-smtc` | 7 | 0 | fields | 12% | BRONZE |
-| `milesight/em500-swl` | 4 | 0 | fields | 12% | BRONZE |
-| `milesight/em500-udl` | 4 | 0 | fields | 12% | BRONZE |
-| `milesight/gs101` | 7 | 0 | fields | 12% | BRONZE |
-| `milesight/gs301` | 20 | 0 | fields | 12% | BRONZE |
-| `milesight/ts101` | 10 | 0 | fields | 12% | BRONZE |
-| `milesight/ts201` | 12 | 0 | fields | 12% | BRONZE |
-| `milesight/ts201v2` | 14 | 0 | fields | 12% | BRONZE |
-| `milesight/ts30x` | 25 | 0 | fields | 12% | BRONZE |
-| `milesight/uc100` | 7 | 0 | fields | 12% | BRONZE |
-| `milesight/uc1114` | 4 | 0 | fields | 12% | BRONZE |
-| `milesight/uc1152` | 3 | 0 | fields | 12% | BRONZE |
-| `milesight/uc300` | 19 | 0 | fields | 12% | BRONZE |
-| `milesight/uc50x` | 11 | 0 | fields | 12% | BRONZE |
-| `milesight/uc51x` | 20 | 0 | fields | 12% | BRONZE |
-| `milesight/vs121` | 5 | 0 | fields | 12% | BRONZE |
-| `milesight/vs135` | 15 | 0 | fields | 12% | BRONZE |
-| `milesight/vs321` | 21 | 0 | fields | 12% | BRONZE |
-| `milesight/vs330` | 6 | 0 | fields | 12% | BRONZE |
-| `milesight/vs340` | 4 | 0 | fields | 12% | BRONZE |
-| `milesight/vs341` | 4 | 0 | fields | 12% | BRONZE |
-| `milesight/vs350` | 25 | 0 | fields | 12% | BRONZE |
-| `milesight/vs351` | 26 | 0 | fields | 12% | BRONZE |
-| `milesight/vs360` | 23 | 0 | fields | 12% | BRONZE |
-| `milesight/vs370` | 13 | 0 | fields | 12% | BRONZE |
-| `milesight/vs373` | 33 | 0 | fields | 12% | BRONZE |
-| `milesight/ws101` | 4 | 0 | fields | 12% | BRONZE |
-| `milesight/ws136` | 3 | 0 | fields | 12% | BRONZE |
-| `milesight/ws156` | 3 | 0 | fields | 12% | BRONZE |
-| `milesight/ws201` | 5 | 0 | fields | 12% | BRONZE |
-| `milesight/ws202` | 5 | 0 | fields | 12% | BRONZE |
-| `milesight/ws203` | 8 | 0 | fields | 12% | BRONZE |
-| `milesight/ws301` | 5 | 0 | fields | 12% | BRONZE |
-| `milesight/ws302` | 9 | 0 | fields | 12% | BRONZE |
-| `milesight/ws303` | 4 | 0 | fields | 12% | BRONZE |
-| `milesight/ws50x` | 17 | 0 | fields | 12% | BRONZE |
-| `milesight/ws515` | 22 | 0 | fields | 12% | BRONZE |
-| `milesight/ws52x` | 16 | 0 | fields | 12% | BRONZE |
-| `milesight/ws558` | 7 | 0 | fields | 12% | BRONZE |
-| `milesight/wt101` | 22 | 0 | fields | 12% | BRONZE |
-| `milesight/wt201v1` | 26 | 0 | fields | 12% | BRONZE |
-| `milesight/wt201v2` | 27 | 0 | fields | 12% | BRONZE |
-| `milesight/wts305` | 10 | 0 | fields | 12% | BRONZE |
-| `milesight/wts505` | 10 | 0 | fields | 12% | BRONZE |
-| `milesight/wts506` | 10 | 0 | fields | 12% | BRONZE |
-| `radio-bridge/rbs30x` | 52 | 28 | fields | 78% | SILVER |
-| `radionode/rn320bth` | 13 | 0 | fields | 12% | BRONZE |
-| `rakwireless/qingping` | 9 | 0 | fields | 12% | BRONZE |
+| `dragino/laq4` | 14 | 5 | fields | 100% | PLATINUM |
+| `elsys/ers` | 32 | 2 | fields | 56% | REJECTED |
+| `hbi/mla20` | 18 | 0 | fields | 16% | REJECTED |
+| `makerfabs/4-channel-adc` | 8 | 0 | fields | 16% | REJECTED |
+| `makerfabs/ath20` | 4 | 0 | fields | 14% | REJECTED |
+| `makerfabs/gps-tracker` | 16 | 0 | fields | 16% | REJECTED |
+| `makerfabs/leaf-moisture-sn-3001` | 6 | 0 | fields | 14% | REJECTED |
+| `makerfabs/pipe-pressure` | 3 | 0 | fields | 16% | REJECTED |
+| `makerfabs/soil-monitor` | 8 | 0 | fields | 14% | REJECTED |
+| `mclimate/flood-sensor` | 5 | 0 | fields | 16% | REJECTED |
+| `mclimate/t-valve` | 11 | 0 | fields | 16% | REJECTED |
+| `mclimate/vicki` | 31 | 11 | fields | 85% | GOLD |
+| `milesight/am102` | 13 | 0 | fields | 14% | REJECTED |
+| `milesight/am102l` | 13 | 0 | fields | 14% | REJECTED |
+| `milesight/am103` | 12 | 0 | fields | 14% | REJECTED |
+| `milesight/am103l` | 12 | 0 | fields | 14% | REJECTED |
+| `milesight/am104` | 9 | 0 | fields | 14% | REJECTED |
+| `milesight/am107` | 12 | 0 | fields | 14% | REJECTED |
+| `milesight/am307` | 15 | 0 | fields | 14% | REJECTED |
+| `milesight/am307l` | 15 | 0 | fields | 14% | REJECTED |
+| `milesight/am308` | 16 | 0 | fields | 14% | REJECTED |
+| `milesight/am308l` | 16 | 0 | fields | 14% | REJECTED |
+| `milesight/am319` | 22 | 0 | fields | 14% | REJECTED |
+| `milesight/am319l` | 22 | 0 | fields | 14% | REJECTED |
+| `milesight/at101-fh` | 22 | 0 | fields | 14% | REJECTED |
+| `milesight/at101` | 16 | 0 | fields | 14% | REJECTED |
+| `milesight/ct101` | 19 | 0 | fields | 14% | REJECTED |
+| `milesight/ct103` | 19 | 0 | fields | 14% | REJECTED |
+| `milesight/ct105` | 19 | 0 | fields | 14% | REJECTED |
+| `milesight/ct303` | 13 | 0 | fields | 14% | REJECTED |
+| `milesight/ct305` | 13 | 0 | fields | 14% | REJECTED |
+| `milesight/ct310` | 13 | 0 | fields | 14% | REJECTED |
+| `milesight/em300-di` | 7 | 0 | fields | 14% | REJECTED |
+| `milesight/em300-mcs` | 14 | 0 | fields | 14% | REJECTED |
+| `milesight/em300-mld` | 4 | 0 | fields | 16% | REJECTED |
+| `milesight/em300-sld` | 6 | 0 | fields | 14% | REJECTED |
+| `milesight/em300-th` | 5 | 0 | fields | 14% | REJECTED |
+| `milesight/em300-zld` | 6 | 0 | fields | 14% | REJECTED |
+| `milesight/em310-tilt` | 17 | 0 | fields | 14% | REJECTED |
+| `milesight/em310-udl` | 13 | 0 | fields | 16% | REJECTED |
+| `milesight/em320-th` | 5 | 0 | fields | 14% | REJECTED |
+| `milesight/em320-tilt` | 9 | 0 | fields | 14% | REJECTED |
+| `milesight/em400-mud` | 10 | 0 | fields | 14% | REJECTED |
+| `milesight/em400-tld` | 10 | 0 | fields | 14% | REJECTED |
+| `milesight/em400-udl` | 10 | 0 | fields | 14% | REJECTED |
+| `milesight/em410-rdl` | 15 | 0 | fields | 14% | REJECTED |
+| `milesight/em500-co2` | 7 | 0 | fields | 14% | REJECTED |
+| `milesight/em500-lgt` | 4 | 0 | fields | 16% | REJECTED |
+| `milesight/em500-pp` | 4 | 0 | fields | 14% | REJECTED |
+| `milesight/em500-pt100` | 4 | 0 | fields | 14% | REJECTED |
+| `milesight/em500-smt` | 5 | 0 | fields | 16% | REJECTED |
+| `milesight/em500-smtc` | 7 | 0 | fields | 14% | REJECTED |
+| `milesight/em500-swl` | 4 | 0 | fields | 16% | REJECTED |
+| `milesight/em500-udl` | 4 | 0 | fields | 14% | REJECTED |
+| `milesight/gs101` | 7 | 0 | fields | 16% | REJECTED |
+| `milesight/gs301` | 20 | 0 | fields | 14% | REJECTED |
+| `milesight/ts101` | 10 | 0 | fields | 14% | REJECTED |
+| `milesight/ts201` | 12 | 0 | fields | 14% | REJECTED |
+| `milesight/ts201v2` | 14 | 0 | fields | 14% | REJECTED |
+| `milesight/ts30x` | 25 | 0 | fields | 14% | REJECTED |
+| `milesight/uc100` | 7 | 0 | fields | 16% | REJECTED |
+| `milesight/uc1114` | 4 | 0 | fields | 16% | REJECTED |
+| `milesight/uc1152` | 3 | 0 | fields | 16% | REJECTED |
+| `milesight/uc300` | 19 | 0 | fields | 14% | REJECTED |
+| `milesight/uc50x` | 11 | 0 | fields | 16% | REJECTED |
+| `milesight/uc51x` | 20 | 0 | fields | 16% | REJECTED |
+| `milesight/vs121` | 5 | 0 | fields | 16% | REJECTED |
+| `milesight/vs135` | 15 | 0 | fields | 16% | REJECTED |
+| `milesight/vs321` | 21 | 0 | fields | 14% | REJECTED |
+| `milesight/vs330` | 6 | 0 | fields | 16% | REJECTED |
+| `milesight/vs340` | 4 | 0 | fields | 16% | REJECTED |
+| `milesight/vs341` | 4 | 0 | fields | 16% | REJECTED |
+| `milesight/vs350` | 25 | 0 | fields | 14% | REJECTED |
+| `milesight/vs351` | 26 | 0 | fields | 14% | REJECTED |
+| `milesight/vs360` | 23 | 0 | fields | 16% | REJECTED |
+| `milesight/vs370` | 13 | 0 | fields | 16% | REJECTED |
+| `milesight/vs373` | 33 | 0 | fields | 16% | REJECTED |
+| `milesight/ws101` | 4 | 0 | fields | 16% | REJECTED |
+| `milesight/ws136` | 3 | 0 | fields | 16% | REJECTED |
+| `milesight/ws156` | 3 | 0 | fields | 16% | REJECTED |
+| `milesight/ws201` | 5 | 0 | fields | 16% | REJECTED |
+| `milesight/ws202` | 5 | 0 | fields | 16% | REJECTED |
+| `milesight/ws203` | 8 | 0 | fields | 14% | REJECTED |
+| `milesight/ws301` | 5 | 0 | fields | 16% | REJECTED |
+| `milesight/ws302` | 9 | 0 | fields | 16% | REJECTED |
+| `milesight/ws303` | 4 | 0 | fields | 16% | REJECTED |
+| `milesight/ws50x` | 17 | 0 | fields | 16% | REJECTED |
+| `milesight/ws515` | 22 | 0 | fields | 14% | REJECTED |
+| `milesight/ws52x` | 16 | 0 | fields | 16% | REJECTED |
+| `milesight/ws558` | 7 | 0 | fields | 16% | REJECTED |
+| `milesight/wt101` | 22 | 0 | fields | 14% | REJECTED |
+| `milesight/wt201v1` | 26 | 0 | fields | 14% | REJECTED |
+| `milesight/wt201v2` | 27 | 0 | fields | 14% | REJECTED |
+| `milesight/wts305` | 10 | 0 | fields | 14% | REJECTED |
+| `milesight/wts505` | 10 | 0 | fields | 14% | REJECTED |
+| `milesight/wts506` | 10 | 0 | fields | 14% | REJECTED |
+| `radio-bridge/rbs30x` | 52 | 28 | fields | 68% | BRONZE |
+| `radionode/rn320bth` | 13 | 0 | fields | 14% | REJECTED |
+| `rakwireless/qingping` | 9 | 0 | fields | 16% | REJECTED |
 
 ## Other schema files
 

@@ -1,0 +1,72 @@
+name: Quality
+
+# Until this workflow existed, CI ran fuzzing only: nothing gated the test suite,
+# schema validation or scoring, so a schema could regress silently.
+
+on:
+    push:
+        branches: [master, main]
+    pull_request:
+
+jobs:
+    tests:
+        name: Python tests
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.11"
+
+            - name: Install dependencies
+              run: pip install -r requirements.txt
+
+            - name: Run tests
+              run: python -m pytest tests/ -q
+
+    schemas:
+        name: Schema validation and scoring
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.11"
+
+            # Pinned so scoring is reproducible: a schema whose generated JS
+            # codec fails scores differently from one where the JS run was
+            # skipped for want of Node.js.
+            - name: Set up Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+
+            - name: Install dependencies
+              run: pip install -r requirements.txt
+
+            - name: Validate every device schema
+              run: |
+                  status=0
+                  for schema in schemas/devices/*/*.yaml; do
+                      python tools/validate_schema.py "$schema" > /tmp/out.txt 2>&1 || status=1
+                      if grep -q "Schema: INVALID" /tmp/out.txt; then
+                          echo "INVALID: $schema"
+                          cat /tmp/out.txt
+                          status=1
+                      fi
+                  done
+                  exit $status
+
+            # The backlog of unverified schemas must not fail the build, so the
+            # gate is "nothing got worse", not "everything is good".
+            - name: Check for quality regressions
+              run: |
+                  python tools/score_schema.py schemas/devices --all \
+                      --baseline score-baseline.json --quiet
+
+            - name: Check the repository index is current
+              run: python tools/generate_docs_index.py --check

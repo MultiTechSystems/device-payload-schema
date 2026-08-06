@@ -105,30 +105,54 @@ test_vectors:
 
 ## Quality tiers
 
-`tools/score_schema.py` scores each schema out of 100 and assigns a tier:
-Bronze 50-69%, Silver 70-84%, Gold 85-94%, Platinum 95-100%.
+`tools/score_schema.py` scores each schema out of 100 and assigns the tier
+defined in the specification's Section 10: Platinum 95-100%, Gold 85-94%,
+Silver 70-84%, Bronze 60-69%, **Rejected** below 60% ("insufficient coverage for
+repository acceptance"). Most schemas in this repository are currently Rejected
+because they ship no test vectors.
 
 | Points | Requirement |
 |---|---|
 | 12 | Passes structural validation |
-| 8 | Has `test_vectors` |
+| 8 | Has usable `test_vectors` (payload *and* expected) |
 | 20 | Python interpreter decodes all vectors correctly |
 | 15 | Generated JS codec decodes all vectors correctly |
-| 12 | All `match`/`flagged`/port branches covered by vectors |
+| 12 | All `match`/`flagged`/port branches entered by a vector |
 | 8 | Edge cases covered (zero, max, negative, min payload) |
 | 5 | At least 5 vectors |
-| 20 | IPSO + SenML + semantic annotation of detectable sensor fields |
+| 20 | Correct IPSO + SenML + semantic annotation of detectable sensor fields |
 
-Two consequences worth internalising before doing schema work:
+Gold and Platinum additionally have **gates** (PS-239), not just points. A schema
+missing any of these is capped below Gold however high it scores: at least 5
+vectors, vectors passing, every branch covered, edge case vectors present, and no
+incorrect annotations.
 
-1. A schema with no `test_vectors` forfeits 68 of 100 points and cannot exceed
-   Bronze, no matter how correct it is.
+Three things to internalise before doing schema work:
+
+1. A schema with no `test_vectors` cannot exceed Rejected, however correct it is.
 2. The test gates total 80 points, so perfect vector coverage *alone* reaches
-   only Silver. **Platinum requires annotations as well** — at least 15 of the
-   20 semantic points.
+   only Silver. Platinum requires correct annotations too.
+3. **A high score is not proof of correctness.** The tool runs a schema against
+   its own vectors, so it measures self-consistency. Vectors generated from our
+   own decoder score perfectly while encoding whatever bug they captured — this
+   is not hypothetical, it is how a schema that mis-decoded every real payload
+   held a 100% Platinum score. Declare `source:` on every vector
+   (`vendor-doc`, `vendor-codec`, `field-capture`, `spec-example`, or
+   `generated`) and run `--require-provenance` to make independent provenance a
+   condition for Platinum.
+
+```bash
+python3 tools/score_schema.py schemas/devices --all --baseline score-baseline.json
+python3 tools/score_schema.py <schema> --require-provenance
+python3 tools/crossvalidate_decentlab.py --vendor-dir ../decentlab-decoders
+```
+
+`score-baseline.json` is the committed baseline; CI fails on a *regression*
+rather than on the backlog. Refresh it deliberately when scores legitimately
+improve, and say so in the commit message.
 
 Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
-`decentlab/dl-alb`, `digital-matter/oyster`, `mclimate/vicki`, `dragino/laq4`.
+`decentlab/dl-atm22`, `digital-matter/oyster`, `dragino/laq4`.
 
 ## Rules for this repository
 
@@ -164,11 +188,14 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   bare string. It accepts an unknown wire type such as `s17`, a field with no
   `name`, and `mult: "0.1"`. For real structural checking use
   `tools/validate_schema.py`, which knows the type vocabulary.
-- **CI runs fuzzing only.** `.github/workflows/` contains just `fuzz.yml`;
-  nothing gates `tests/`, schema validation or scoring.
-- **Most published schemas are unverified.** 151 of 158 device schemas ship with
-  no test vectors (5 Platinum, 1 Silver, 152 Bronze; mean score 15.5%). See the
-  per-device table in [`docs/INDEX.md`](docs/INDEX.md).
+- **Bare `mult`/`div`/`add` keys are applied in YAML key order.** `{div: 10,
+  add: -5}` and `{add: -5, div: 10}` decode differently, so a schema's meaning
+  depends on key order — which another language's YAML or JSON parser is not
+  obliged to preserve. Prefer an explicit ordered `transform:` list whenever more
+  than one operation applies.
+- **Most published schemas are unverified.** 134 of 158 device schemas ship with
+  no test vectors and are therefore Rejected. See the per-device table in
+  [`docs/INDEX.md`](docs/INDEX.md).
 - **The JS TS013 generator has a shared-byte bug.** `generate_ts013_codec.py`
   can drop bare bit-range fields and fail to advance the cursor. The Python
   interpreter path is correct; only generated JavaScript is affected.

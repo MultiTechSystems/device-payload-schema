@@ -50,6 +50,7 @@ test_vectors:
   - name: typical_reading
     description: "Typical soil moisture and temperature reading"
     payload: "02 1234 0003 01F4 0226 0C5E"
+    source: vendor-codec
     expected:
       protocol_version: 2
       device_id: 0x1234
@@ -63,12 +64,13 @@ test_vectors:
   - name: dry_soil
     description: "Low moisture, cool temperature"
     payload: "02 ABCD 0003 0064 01C2 0BB8"
+    source: vendor-codec
     expected:
       protocol_version: 2
       device_id: 0xABCD
       flags: 3
       dielectric_permittivity: 2.0
-      volumetric_water_content: 0.0013
+      volumetric_water_content: 0.0032344
       soil_temperature_raw: 450
       soil_temperature: 5.0
       battery_voltage: 3.0
@@ -76,6 +78,7 @@ test_vectors:
   - name: battery_only
     description: "Only battery group present (bit 1)"
     payload: "02 0001 0002 0FA0"
+    source: vendor-codec
     expected:
       protocol_version: 2
       device_id: 1
@@ -85,6 +88,7 @@ test_vectors:
   - name: sensor_only
     description: "Only sensor group present (bit 0)"
     payload: "02 5678 0001 0000 0190 "
+    source: vendor-codec
     expected:
       protocol_version: 2
       device_id: 0x5678
@@ -97,6 +101,7 @@ test_vectors:
   - name: zero_values
     description: "Zero dielectric permittivity edge case"
     payload: "02 0000 0003 0000 0190 0000"
+    source: vendor-codec
     expected:
       protocol_version: 2
       device_id: 0
@@ -110,6 +115,7 @@ test_vectors:
   - name: max_values
     description: "Maximum values edge case"
     payload: "02 FFFF 0003 FFFF FFFF FFFF"
+    source: vendor-codec
     expected:
       protocol_version: 2
       device_id: 0xFFFF
@@ -122,6 +128,7 @@ test_vectors:
   - name: minimum_payload
     description: "Minimum valid payload (no flagged groups)"
     payload: "02 1234 0000"
+    source: vendor-codec
     expected:
       protocol_version: 2
       device_id: 0x1234

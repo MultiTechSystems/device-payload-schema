@@ -173,6 +173,7 @@ fields:
 test_vectors:
   - name: min_payload_vendor_1
     description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
     payload: "023E3E00020AFC"
     expected:
       device_id: 15934
@@ -180,6 +181,7 @@ test_vectors:
       battery_voltage: 2.812
   - name: vendor_reference_2
     description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
     payload: "023E3E00038ABC8A928AA08A848AB38A898AC38AAD8AB78A928AA1000000000000000000000AFC"
     expected:
       device_id: 15934
@@ -203,6 +205,7 @@ test_vectors:
       battery_voltage: 2.812
   - name: zero_words
     description: "All sensor words zero (offset-binary minimum, negative readings)"
+    source: vendor-codec
     payload: "021234000300000000000000000000000000000000000000000000000000000000000000000000"
     expected:
       device_id: 4660
@@ -226,6 +229,7 @@ test_vectors:
       battery_voltage: 0.0
   - name: midscale_words
     description: "All sensor words at offset-binary midpoint (zero readings)"
+    source: vendor-codec
     payload: "021234000380008000800080008000800080008000800080008000800080008000800080008000"
     expected:
       device_id: 4660
@@ -249,6 +253,7 @@ test_vectors:
       battery_voltage: 32.768
   - name: max_words
     description: "All sensor words 0xFFFF (maximum readings)"
+    source: vendor-codec
     payload: "0212340003FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
     expected:
       device_id: 4660
@@ -272,6 +277,7 @@ test_vectors:
       battery_voltage: 65.535
   - name: min_payload_battery_only
     description: "Minimum payload: only the last sensor group present"
+    source: vendor-codec
     payload: "02123400020BF5"
     expected:
       device_id: 4660

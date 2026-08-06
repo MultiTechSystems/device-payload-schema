@@ -287,7 +287,9 @@ def render_tools(entries: List[Dict[str, str]]) -> List[str]:
 
 def render_schema_summary(entries: List[Dict[str, Any]]) -> List[str]:
     """Render totals, the per-vendor tier breakdown and the per-device table."""
-    tiers = ("PLATINUM", "GOLD", "SILVER", "BRONZE", "UNSCORED")
+    tiers = (
+        "PLATINUM", "GOLD", "SILVER", "BRONZE", "REJECTED", "FAILED", "UNSCORED",
+    )
     scored = [e for e in entries if e["score"] is not None]
     lines = ["## Device schemas", ""]
     lines.append("%d schemas under `schemas/devices/`." % len(entries))
@@ -295,9 +297,12 @@ def render_schema_summary(entries: List[Dict[str, Any]]) -> List[str]:
         mean = sum(e["score"] for e in scored) / len(scored)
         counts = {t: sum(1 for e in entries if e["tier"] == t) for t in tiers}
         lines.append(
-            "Mean quality score %.1f%% (%s). Tiers are defined in"
-            " `tools/score_schema.py`: Bronze 50-69%%, Silver 70-84%%,"
-            " Gold 85-94%%, Platinum 95-100%%."
+            "Mean quality score %.1f%% (%s). Tiers follow the specification's"
+            " Section 10: Platinum 95-100%%, Gold 85-94%%, Silver 70-84%%,"
+            " Bronze 60-69%%, Rejected below 60%%. Gold and Platinum also have"
+            " gates (PS-239) -- see `../AGENTS.md`. A high score shows"
+            " self-consistency with a schema's own test vectors, not that the"
+            " vectors are right."
             % (mean, ", ".join("%s %d" % (t, counts[t]) for t in tiers if counts[t]))
         )
     lines.extend(["", "### By vendor", "", "| Vendor | Schemas | Vectors | Tiers |", "|---|---|---|---|"])
