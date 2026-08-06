@@ -17,32 +17,55 @@ fields:
         - bit: 0
           fields:
             - name: photosynthetically_active_radiation
-              type: s16
-              div: 10
+              type: u16
+              transform:
+                - add: -32768
+                - div: 10
               unit: "µmol⋅m⁻²⋅s⁻¹"
             - name: air_temperature
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "°C"
+              ipso: {object: 3303, instance: 0, resource: 5700}
+              senml: {name: "air_temperature", unit: "Cel"}
+              semantic: "air.temperature"
             - name: air_humidity
-              type: s16
-              div: 10
+              type: u16
+              transform:
+                - add: -32768
+                - div: 10
               unit: "%"
+              ipso: {object: 3304, instance: 0, resource: 5700}
+              senml: {name: "air_humidity", unit: "%RH"}
+              semantic: "air.humidity"
             - name: co2_concentration
-              type: s16
-              div: 1
+              type: u16
+              transform:
+                - add: -32768
+                - div: 1
               unit: "ppm"
+              ipso: {object: 3325, instance: 0, resource: 5700}
+              senml: {name: "co2_concentration", unit: "ppm"}
+              semantic: "co2.concentration"
             - name: atmospheric_pressure
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "kPa"
             - name: vapor_pressure_deficit
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "kPa"
             - name: dew_point
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "°C"
         - bit: 1
           fields:
@@ -50,3 +73,78 @@ fields:
               type: u16
               div: 1000
               unit: "V"
+
+              ipso: {object: 3316, instance: 0, resource: 5700}
+              senml: {name: "battery_voltage", unit: "V"}
+              semantic: "battery.voltage"
+test_vectors:
+  - name: min_payload_vendor_1
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    payload: "02528500020BBC"
+    expected:
+      device_id: 21125
+      protocol_version: 2
+      battery_voltage: 3.004
+  - name: vendor_reference_2
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    payload: "02532B00038726892081148297A57380CF81700BBC"
+    expected:
+      device_id: 21291
+      protocol_version: 2
+      photosynthetically_active_radiation: 183.0
+      air_temperature: 23.36
+      air_humidity: 27.6
+      co2_concentration: 663.0
+      atmospheric_pressure: 95.87
+      vapor_pressure_deficit: 2.07
+      dew_point: 3.68
+      battery_voltage: 3.004
+  - name: zero_words
+    description: "All sensor words zero (offset-binary minimum, negative readings)"
+    payload: "021234000300000000000000000000000000000000"
+    expected:
+      device_id: 4660
+      protocol_version: 2
+      photosynthetically_active_radiation: -3276.8
+      air_temperature: -327.68
+      air_humidity: -3276.8
+      co2_concentration: -32768.0
+      atmospheric_pressure: -327.68
+      vapor_pressure_deficit: -327.68
+      dew_point: -327.68
+      battery_voltage: 0.0
+  - name: midscale_words
+    description: "All sensor words at offset-binary midpoint (zero readings)"
+    payload: "021234000380008000800080008000800080008000"
+    expected:
+      device_id: 4660
+      protocol_version: 2
+      photosynthetically_active_radiation: 0.0
+      air_temperature: 0.0
+      air_humidity: 0.0
+      co2_concentration: 0.0
+      atmospheric_pressure: 0.0
+      vapor_pressure_deficit: 0.0
+      dew_point: 0.0
+      battery_voltage: 32.768
+  - name: max_words
+    description: "All sensor words 0xFFFF (maximum readings)"
+    payload: "0212340003FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
+    expected:
+      device_id: 4660
+      protocol_version: 2
+      photosynthetically_active_radiation: 3276.7
+      air_temperature: 327.67
+      air_humidity: 3276.7
+      co2_concentration: 32767.0
+      atmospheric_pressure: 327.67
+      vapor_pressure_deficit: 327.67
+      dew_point: 327.67
+      battery_voltage: 65.535
+  - name: min_payload_battery_only
+    description: "Minimum payload: only the last sensor group present"
+    payload: "02123400020BF5"
+    expected:
+      device_id: 4660
+      protocol_version: 2
+      battery_voltage: 3.061

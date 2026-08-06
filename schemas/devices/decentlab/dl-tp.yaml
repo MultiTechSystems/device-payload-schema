@@ -17,72 +17,263 @@ fields:
         - bit: 0
           fields:
             - name: temperature_at_level_0
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "°C"
+              ipso: {object: 3303, instance: 0, resource: 5700}
+              senml: {name: "temperature_at_level_0", unit: "Cel"}
+              semantic: "temperature.at.level.0"
             - name: temperature_at_level_1
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "°C"
+              ipso: {object: 3303, instance: 0, resource: 5700}
+              senml: {name: "temperature_at_level_1", unit: "Cel"}
+              semantic: "temperature.at.level.1"
             - name: temperature_at_level_2
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "°C"
+              ipso: {object: 3303, instance: 0, resource: 5700}
+              senml: {name: "temperature_at_level_2", unit: "Cel"}
+              semantic: "temperature.at.level.2"
             - name: temperature_at_level_3
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "°C"
+              ipso: {object: 3303, instance: 0, resource: 5700}
+              senml: {name: "temperature_at_level_3", unit: "Cel"}
+              semantic: "temperature.at.level.3"
             - name: temperature_at_level_4
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "°C"
+              ipso: {object: 3303, instance: 0, resource: 5700}
+              senml: {name: "temperature_at_level_4", unit: "Cel"}
+              semantic: "temperature.at.level.4"
             - name: temperature_at_level_5
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "°C"
+              ipso: {object: 3303, instance: 0, resource: 5700}
+              senml: {name: "temperature_at_level_5", unit: "Cel"}
+              semantic: "temperature.at.level.5"
             - name: temperature_at_level_6
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "°C"
+              ipso: {object: 3303, instance: 0, resource: 5700}
+              senml: {name: "temperature_at_level_6", unit: "Cel"}
+              semantic: "temperature.at.level.6"
             - name: temperature_at_level_7
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "°C"
+              ipso: {object: 3303, instance: 0, resource: 5700}
+              senml: {name: "temperature_at_level_7", unit: "Cel"}
+              semantic: "temperature.at.level.7"
             - name: temperature_at_level_8
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "°C"
+              ipso: {object: 3303, instance: 0, resource: 5700}
+              senml: {name: "temperature_at_level_8", unit: "Cel"}
+              semantic: "temperature.at.level.8"
             - name: temperature_at_level_9
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "°C"
+              ipso: {object: 3303, instance: 0, resource: 5700}
+              senml: {name: "temperature_at_level_9", unit: "Cel"}
+              semantic: "temperature.at.level.9"
             - name: temperature_at_level_10
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "°C"
+              ipso: {object: 3303, instance: 0, resource: 5700}
+              senml: {name: "temperature_at_level_10", unit: "Cel"}
+              semantic: "temperature.at.level.10"
             - name: temperature_at_level_11
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "°C"
+              ipso: {object: 3303, instance: 0, resource: 5700}
+              senml: {name: "temperature_at_level_11", unit: "Cel"}
+              semantic: "temperature.at.level.11"
             - name: temperature_at_level_12
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "°C"
+              ipso: {object: 3303, instance: 0, resource: 5700}
+              senml: {name: "temperature_at_level_12", unit: "Cel"}
+              semantic: "temperature.at.level.12"
             - name: temperature_at_level_13
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "°C"
+              ipso: {object: 3303, instance: 0, resource: 5700}
+              senml: {name: "temperature_at_level_13", unit: "Cel"}
+              semantic: "temperature.at.level.13"
             - name: temperature_at_level_14
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "°C"
+              ipso: {object: 3303, instance: 0, resource: 5700}
+              senml: {name: "temperature_at_level_14", unit: "Cel"}
+              semantic: "temperature.at.level.14"
             - name: temperature_at_level_15
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "°C"
+              ipso: {object: 3303, instance: 0, resource: 5700}
+              senml: {name: "temperature_at_level_15", unit: "Cel"}
+              semantic: "temperature.at.level.15"
         - bit: 1
           fields:
             - name: battery_voltage
               type: u16
               div: 1000
               unit: "V"
+
+              ipso: {object: 3316, instance: 0, resource: 5700}
+              senml: {name: "battery_voltage", unit: "V"}
+              semantic: "battery.voltage"
+test_vectors:
+  - name: min_payload_vendor_1
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    payload: "023E3E00020AFC"
+    expected:
+      device_id: 15934
+      protocol_version: 2
+      battery_voltage: 2.812
+  - name: vendor_reference_2
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    payload: "023E3E00038ABC8A928AA08A848AB38A898AC38AAD8AB78A928AA1000000000000000000000AFC"
+    expected:
+      device_id: 15934
+      protocol_version: 2
+      temperature_at_level_0: 27.48
+      temperature_at_level_1: 27.06
+      temperature_at_level_2: 27.2
+      temperature_at_level_3: 26.92
+      temperature_at_level_4: 27.39
+      temperature_at_level_5: 26.97
+      temperature_at_level_6: 27.55
+      temperature_at_level_7: 27.33
+      temperature_at_level_8: 27.43
+      temperature_at_level_9: 27.06
+      temperature_at_level_10: 27.21
+      temperature_at_level_11: -327.68
+      temperature_at_level_12: -327.68
+      temperature_at_level_13: -327.68
+      temperature_at_level_14: -327.68
+      temperature_at_level_15: -327.68
+      battery_voltage: 2.812
+  - name: zero_words
+    description: "All sensor words zero (offset-binary minimum, negative readings)"
+    payload: "021234000300000000000000000000000000000000000000000000000000000000000000000000"
+    expected:
+      device_id: 4660
+      protocol_version: 2
+      temperature_at_level_0: -327.68
+      temperature_at_level_1: -327.68
+      temperature_at_level_2: -327.68
+      temperature_at_level_3: -327.68
+      temperature_at_level_4: -327.68
+      temperature_at_level_5: -327.68
+      temperature_at_level_6: -327.68
+      temperature_at_level_7: -327.68
+      temperature_at_level_8: -327.68
+      temperature_at_level_9: -327.68
+      temperature_at_level_10: -327.68
+      temperature_at_level_11: -327.68
+      temperature_at_level_12: -327.68
+      temperature_at_level_13: -327.68
+      temperature_at_level_14: -327.68
+      temperature_at_level_15: -327.68
+      battery_voltage: 0.0
+  - name: midscale_words
+    description: "All sensor words at offset-binary midpoint (zero readings)"
+    payload: "021234000380008000800080008000800080008000800080008000800080008000800080008000"
+    expected:
+      device_id: 4660
+      protocol_version: 2
+      temperature_at_level_0: 0.0
+      temperature_at_level_1: 0.0
+      temperature_at_level_2: 0.0
+      temperature_at_level_3: 0.0
+      temperature_at_level_4: 0.0
+      temperature_at_level_5: 0.0
+      temperature_at_level_6: 0.0
+      temperature_at_level_7: 0.0
+      temperature_at_level_8: 0.0
+      temperature_at_level_9: 0.0
+      temperature_at_level_10: 0.0
+      temperature_at_level_11: 0.0
+      temperature_at_level_12: 0.0
+      temperature_at_level_13: 0.0
+      temperature_at_level_14: 0.0
+      temperature_at_level_15: 0.0
+      battery_voltage: 32.768
+  - name: max_words
+    description: "All sensor words 0xFFFF (maximum readings)"
+    payload: "0212340003FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
+    expected:
+      device_id: 4660
+      protocol_version: 2
+      temperature_at_level_0: 327.67
+      temperature_at_level_1: 327.67
+      temperature_at_level_2: 327.67
+      temperature_at_level_3: 327.67
+      temperature_at_level_4: 327.67
+      temperature_at_level_5: 327.67
+      temperature_at_level_6: 327.67
+      temperature_at_level_7: 327.67
+      temperature_at_level_8: 327.67
+      temperature_at_level_9: 327.67
+      temperature_at_level_10: 327.67
+      temperature_at_level_11: 327.67
+      temperature_at_level_12: 327.67
+      temperature_at_level_13: 327.67
+      temperature_at_level_14: 327.67
+      temperature_at_level_15: 327.67
+      battery_voltage: 65.535
+  - name: min_payload_battery_only
+    description: "Minimum payload: only the last sensor group present"
+    payload: "02123400020BF5"
+    expected:
+      device_id: 4660
+      protocol_version: 2
+      battery_voltage: 3.061

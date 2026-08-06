@@ -19,9 +19,14 @@ fields:
             - name: status
               type: u16
             - name: temperature
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "°C"
+              ipso: {object: 3303, instance: 0, resource: 5700}
+              senml: {name: "temperature", unit: "Cel"}
+              semantic: "temperature"
             - name: turbidity_in_ntu
               type: u16
               div: 10
@@ -40,3 +45,70 @@ fields:
               type: u16
               div: 1000
               unit: "V"
+
+              ipso: {object: 3316, instance: 0, resource: 5700}
+              senml: {name: "battery_voltage", unit: "V"}
+              semantic: "battery.voltage"
+test_vectors:
+  - name: min_payload_vendor_1
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    payload: "02233200020B10"
+    expected:
+      device_id: 9010
+      protocol_version: 2
+      battery_voltage: 2.832
+  - name: vendor_reference_2
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    payload: "022332000300008885013E013E02330B10"
+    expected:
+      device_id: 9010
+      protocol_version: 2
+      status: 0
+      temperature: 21.81
+      turbidity_in_ntu: 31.8
+      turbidity_in_fnu: 31.8
+      turbidity_in_mg_l: 56.3
+      battery_voltage: 2.832
+  - name: zero_words
+    description: "All sensor words zero (offset-binary minimum, negative readings)"
+    payload: "0212340003000000000000000000000000"
+    expected:
+      device_id: 4660
+      protocol_version: 2
+      status: 0
+      temperature: -327.68
+      turbidity_in_ntu: 0.0
+      turbidity_in_fnu: 0.0
+      turbidity_in_mg_l: 0.0
+      battery_voltage: 0.0
+  - name: midscale_words
+    description: "All sensor words at offset-binary midpoint (zero readings)"
+    payload: "0212340003800080008000800080008000"
+    expected:
+      device_id: 4660
+      protocol_version: 2
+      status: 32768
+      temperature: 0.0
+      turbidity_in_ntu: 3276.8
+      turbidity_in_fnu: 3276.8
+      turbidity_in_mg_l: 3276.8
+      battery_voltage: 32.768
+  - name: max_words
+    description: "All sensor words 0xFFFF (maximum readings)"
+    payload: "0212340003FFFFFFFFFFFFFFFFFFFFFFFF"
+    expected:
+      device_id: 4660
+      protocol_version: 2
+      status: 65535
+      temperature: 327.67
+      turbidity_in_ntu: 6553.5
+      turbidity_in_fnu: 6553.5
+      turbidity_in_mg_l: 6553.5
+      battery_voltage: 65.535
+  - name: min_payload_battery_only
+    description: "Minimum payload: only the last sensor group present"
+    payload: "02123400020BF5"
+    expected:
+      device_id: 4660
+      protocol_version: 2
+      battery_voltage: 3.061

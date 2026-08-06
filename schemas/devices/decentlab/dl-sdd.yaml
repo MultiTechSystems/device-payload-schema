@@ -17,52 +17,76 @@ fields:
         - bit: 0
           fields:
             - name: moisture_at_level_0
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "%"
             - name: moisture_at_level_1
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "%"
             - name: moisture_at_level_2
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "%"
             - name: moisture_at_level_3
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "%"
             - name: moisture_at_level_4
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "%"
             - name: moisture_at_level_5
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "%"
             - name: temperature_at_level_0
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "°C"
             - name: temperature_at_level_1
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "°C"
             - name: temperature_at_level_2
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "°C"
             - name: temperature_at_level_3
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "°C"
             - name: temperature_at_level_4
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "°C"
             - name: temperature_at_level_5
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "°C"
             - name: salinity_at_level_0
               type: u16

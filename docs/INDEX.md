@@ -84,6 +84,7 @@ Generated inventory of this repository: what lives where, what each document cov
 | `tools/binary_schema_v2.py` | Extended Binary Schema Encoder/Decoder |
 | `tools/convert_decentlab.py` | Decentlab Protocol V2 Codec → Payload Schema Schema Converter |
 | `tools/convert_milesight.py` | Milesight IoT Codec → Payload Schema Schema Converter |
+| `tools/crossvalidate_decentlab.py` | Check decentlab schemas against the vendor's decoders. |
 | `tools/fuzz_decoder.py` | Fuzz test the schema interpreter |
 | `tools/generate-c.py` | Generate C codec from Payload Schema YAML |
 | `tools/generate_codec.py` | Generate C codec AND unit tests from Payload Schema |
@@ -107,14 +108,14 @@ Generated inventory of this repository: what lives where, what each document cov
 ## Device schemas
 
 158 schemas under `schemas/devices/`.
-Mean quality score 15.5% (PLATINUM 5, SILVER 1, BRONZE 152). Tiers are defined in `tools/score_schema.py`: Bronze 50-69%, Silver 70-84%, Gold 85-94%, Platinum 95-100%.
+Mean quality score 24.7% (PLATINUM 15, GOLD 7, SILVER 2, BRONZE 134). Tiers are defined in `tools/score_schema.py`: Bronze 50-69%, Silver 70-84%, Gold 85-94%, Platinum 95-100%.
 
 ### By vendor
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
 | milesight | 84 | 0 | BRONZE 84 |
-| decentlab | 58 | 15 | PLATINUM 2, BRONZE 56 |
+| decentlab | 58 | 120 | PLATINUM 12, GOLD 7, SILVER 1, BRONZE 38 |
 | makerfabs | 6 | 0 | BRONZE 6 |
 | mclimate | 3 | 11 | PLATINUM 1, BRONZE 2 |
 | digital-matter | 1 | 7 | PLATINUM 1 |
@@ -132,57 +133,57 @@ Mean quality score 15.5% (PLATINUM 5, SILVER 1, BRONZE 152). Tiers are defined i
 | Schema | Fields | Vectors | Constructs | Score | Tier |
 |---|---|---|---|---|---|
 | `decentlab/dl-5tm` | 10 | 7 | fields | 100% | PLATINUM |
-| `decentlab/dl-alb` | 11 | 8 | fields | 100% | PLATINUM |
-| `decentlab/dl-atm22` | 12 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-atm41` | 21 | 0 | fields | 12% | BRONZE |
+| `decentlab/dl-alb` | 11 | 6 | fields | 98% | PLATINUM |
+| `decentlab/dl-atm22` | 15 | 6 | fields | 98% | PLATINUM |
+| `decentlab/dl-atm41` | 27 | 6 | fields | 89% | GOLD |
 | `decentlab/dl-atm41g2` | 20 | 0 | fields | 12% | BRONZE |
 | `decentlab/dl-blg` | 7 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-ctd10` | 8 | 0 | fields | 12% | BRONZE |
+| `decentlab/dl-ctd10` | 10 | 6 | fields | 87% | GOLD |
 | `decentlab/dl-cws` | 10 | 0 | fields | 12% | BRONZE |
 | `decentlab/dl-cws2` | 12 | 0 | fields | 12% | BRONZE |
 | `decentlab/dl-dlr2-002` | 7 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-dlr2-003` | 5 | 0 | fields | 12% | BRONZE |
+| `decentlab/dl-dlr2-003` | 6 | 5 | fields | 98% | PLATINUM |
 | `decentlab/dl-dlr2-004-10` | 5 | 0 | fields | 12% | BRONZE |
 | `decentlab/dl-dlr2-005` | 5 | 0 | fields | 12% | BRONZE |
 | `decentlab/dl-dlr2-006` | 5 | 0 | fields | 12% | BRONZE |
 | `decentlab/dl-dlr2-008-2000` | 5 | 0 | fields | 12% | BRONZE |
 | `decentlab/dl-dlr2-009-2000` | 6 | 0 | fields | 12% | BRONZE |
 | `decentlab/dl-dlr2-010` | 10 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-dlr2-011` | 6 | 0 | fields | 12% | BRONZE |
+| `decentlab/dl-dlr2-011` | 7 | 6 | fields | 98% | PLATINUM |
 | `decentlab/dl-dlr2-012` | 5 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-ds18` | 5 | 0 | fields | 12% | BRONZE |
+| `decentlab/dl-ds18` | 7 | 6 | fields | 98% | PLATINUM |
 | `decentlab/dl-dws-232263168-0000302459-1370` | 6 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-gmm` | 11 | 0 | fields | 12% | BRONZE |
+| `decentlab/dl-gmm` | 15 | 6 | fields | 89% | GOLD |
 | `decentlab/dl-iam` | 15 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-ifd` | 5 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-ilt` | 5 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-isd` | 5 | 0 | fields | 12% | BRONZE |
+| `decentlab/dl-ifd` | 6 | 6 | fields | 98% | PLATINUM |
+| `decentlab/dl-ilt` | 7 | 6 | fields | 98% | PLATINUM |
+| `decentlab/dl-isd` | 6 | 6 | fields | 98% | PLATINUM |
 | `decentlab/dl-isf` | 19 | 0 | fields | 12% | BRONZE |
 | `decentlab/dl-itst` | 6 | 0 | fields | 12% | BRONZE |
 | `decentlab/dl-kl66-1538372-464859` | 10 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-lid` | 15 | 0 | fields | 12% | BRONZE |
+| `decentlab/dl-lid` | 16 | 6 | fields | 78% | SILVER |
 | `decentlab/dl-lp8p` | 16 | 0 | fields | 12% | BRONZE |
 | `decentlab/dl-lpw` | 5 | 0 | fields | 12% | BRONZE |
 | `decentlab/dl-lws` | 5 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-mbx` | 6 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-mes5` | 9 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-ntu` | 9 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-optod` | 9 | 0 | fields | 12% | BRONZE |
+| `decentlab/dl-mbx` | 7 | 6 | fields | 87% | GOLD |
+| `decentlab/dl-mes5` | 11 | 6 | fields | 98% | PLATINUM |
+| `decentlab/dl-ntu` | 11 | 6 | fields | 98% | PLATINUM |
+| `decentlab/dl-optod` | 12 | 6 | fields | 92% | GOLD |
 | `decentlab/dl-par` | 5 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-pheht` | 9 | 0 | fields | 12% | BRONZE |
+| `decentlab/dl-pheht` | 11 | 6 | fields | 87% | GOLD |
 | `decentlab/dl-pm` | 17 | 0 | fields | 12% | BRONZE |
 | `decentlab/dl-pr21-1-10` | 6 | 0 | fields | 12% | BRONZE |
 | `decentlab/dl-pr26-0-1` | 6 | 0 | fields | 12% | BRONZE |
 | `decentlab/dl-pr36-8192` | 6 | 0 | fields | 12% | BRONZE |
 | `decentlab/dl-pr36ctd-8192-1024` | 8 | 0 | fields | 12% | BRONZE |
 | `decentlab/dl-pyr` | 5 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-rad` | 8 | 0 | fields | 12% | BRONZE |
+| `decentlab/dl-rad` | 10 | 6 | fields | 90% | GOLD |
 | `decentlab/dl-rhc` | 7 | 0 | fields | 12% | BRONZE |
 | `decentlab/dl-sdd` | 40 | 0 | fields | 12% | BRONZE |
 | `decentlab/dl-sht35` | 6 | 0 | fields | 12% | BRONZE |
 | `decentlab/dl-smtp` | 20 | 0 | fields | 12% | BRONZE |
 | `decentlab/dl-tbrg-01` | 7 | 0 | fields | 12% | BRONZE |
-| `decentlab/dl-tp` | 20 | 0 | fields | 12% | BRONZE |
+| `decentlab/dl-tp` | 37 | 6 | fields | 98% | PLATINUM |
 | `decentlab/dl-trs11` | 7 | 0 | fields | 12% | BRONZE |
 | `decentlab/dl-trs12` | 8 | 0 | fields | 12% | BRONZE |
 | `decentlab/dl-trs21` | 6 | 0 | fields | 12% | BRONZE |

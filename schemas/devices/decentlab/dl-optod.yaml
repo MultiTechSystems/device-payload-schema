@@ -19,24 +19,105 @@ fields:
             - name: status
               type: u16
             - name: temperature
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "°C"
+              ipso: {object: 3303, instance: 0, resource: 5700}
+              senml: {name: "temperature", unit: "Cel"}
+              semantic: "temperature"
             - name: oxygen_saturation
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "%"
             - name: oxygen_concentration
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "mg⋅L⁻¹"
             - name: oxygen_concentration_alt
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "ppm"
+              ipso: {object: 3325, instance: 0, resource: 5700}
+              senml: {name: "oxygen_concentration_alt", unit: "ppm"}
+              semantic: "oxygen.concentration.alt"
         - bit: 1
           fields:
             - name: battery_voltage
               type: u16
               div: 1000
               unit: "V"
+
+              ipso: {object: 3316, instance: 0, resource: 5700}
+              senml: {name: "battery_voltage", unit: "V"}
+              semantic: "battery.voltage"
+test_vectors:
+  - name: min_payload_vendor_1
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    payload: "02186C00020C60"
+    expected:
+      device_id: 6252
+      protocol_version: 2
+      battery_voltage: 3.168
+  - name: vendor_reference_2
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    payload: "02186C000300008862A618836583650C60"
+    expected:
+      device_id: 6252
+      protocol_version: 2
+      status: 0
+      temperature: 21.46
+      oxygen_saturation: 97.52
+      oxygen_concentration: 8.69
+      oxygen_concentration_alt: 8.69
+      battery_voltage: 3.168
+  - name: zero_words
+    description: "All sensor words zero (offset-binary minimum, negative readings)"
+    payload: "0212340003000000000000000000000000"
+    expected:
+      device_id: 4660
+      protocol_version: 2
+      status: 0
+      temperature: -327.68
+      oxygen_saturation: -327.68
+      oxygen_concentration: -327.68
+      oxygen_concentration_alt: -327.68
+      battery_voltage: 0.0
+  - name: midscale_words
+    description: "All sensor words at offset-binary midpoint (zero readings)"
+    payload: "0212340003800080008000800080008000"
+    expected:
+      device_id: 4660
+      protocol_version: 2
+      status: 32768
+      temperature: 0.0
+      oxygen_saturation: 0.0
+      oxygen_concentration: 0.0
+      oxygen_concentration_alt: 0.0
+      battery_voltage: 32.768
+  - name: max_words
+    description: "All sensor words 0xFFFF (maximum readings)"
+    payload: "0212340003FFFFFFFFFFFFFFFFFFFFFFFF"
+    expected:
+      device_id: 4660
+      protocol_version: 2
+      status: 65535
+      temperature: 327.67
+      oxygen_saturation: 327.67
+      oxygen_concentration: 327.67
+      oxygen_concentration_alt: 327.67
+      battery_voltage: 65.535
+  - name: min_payload_battery_only
+    description: "Minimum payload: only the last sensor group present"
+    payload: "02123400020BF5"
+    expected:
+      device_id: 4660
+      protocol_version: 2
+      battery_voltage: 3.061

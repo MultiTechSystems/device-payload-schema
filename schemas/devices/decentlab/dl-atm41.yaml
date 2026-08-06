@@ -21,8 +21,10 @@ fields:
               add: -32768
               unit: "W⋅m⁻²"
             - name: precipitation
-              type: s16
-              div: 1000
+              type: u16
+              transform:
+                - add: -32768
+                - div: 1000
               unit: "mm"
             - name: lightning_strike_count
               type: u16
@@ -32,56 +34,95 @@ fields:
               add: -32768
               unit: "km"
             - name: wind_speed
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "m⋅s⁻¹"
             - name: wind_direction
-              type: s16
-              div: 10
+              type: u16
+              transform:
+                - add: -32768
+                - div: 10
               unit: "°"
+              ipso: {object: 3332, instance: 0, resource: 5700}
+              senml: {name: "wind_direction", unit: "deg"}
+              semantic: "wind.direction"
             - name: maximum_wind_speed
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "m⋅s⁻¹"
             - name: air_temperature
-              type: s16
-              div: 10
+              type: u16
+              transform:
+                - add: -32768
+                - div: 10
               unit: "°C"
+              ipso: {object: 3303, instance: 0, resource: 5700}
+              senml: {name: "air_temperature", unit: "Cel"}
+              semantic: "air.temperature"
             - name: vapor_pressure
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "kPa"
             - name: atmospheric_pressure
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "kPa"
             - name: relative_humidity
-              type: s16
-              div: 10
+              type: u16
+              transform:
+                - add: -32768
+                - div: 10
               unit: "%"
+              ipso: {object: 3304, instance: 0, resource: 5700}
+              senml: {name: "relative_humidity", unit: "%RH"}
+              semantic: "relative.humidity"
             - name: sensor_temperature_internal
-              type: s16
-              div: 10
+              type: u16
+              transform:
+                - add: -32768
+                - div: 10
               unit: "°C"
+              ipso: {object: 3303, instance: 0, resource: 5700}
+              senml: {name: "sensor_temperature_internal", unit: "Cel"}
+              semantic: "sensor.temperature.internal"
             - name: x_orientation_angle
-              type: s16
-              div: 10
+              type: u16
+              transform:
+                - add: -32768
+                - div: 10
               unit: "°"
             - name: y_orientation_angle
-              type: s16
-              div: 10
+              type: u16
+              transform:
+                - add: -32768
+                - div: 10
               unit: "°"
             - name: compass_heading
               type: u16
               add: -32768
               unit: "°"
+              ipso: {object: 3332, instance: 0, resource: 5700}
+              senml: {name: "compass_heading", unit: "deg"}
+              semantic: "compass.heading"
             - name: north_wind_speed
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "m⋅s⁻¹"
             - name: east_wind_speed
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - add: -32768
+                - div: 100
               unit: "m⋅s⁻¹"
         - bit: 1
           fields:
@@ -89,3 +130,118 @@ fields:
               type: u16
               div: 1000
               unit: "V"
+
+              ipso: {object: 3316, instance: 0, resource: 5700}
+              senml: {name: "battery_voltage", unit: "V"}
+              semantic: "battery.voltage"
+test_vectors:
+  - name: min_payload_vendor_1
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    payload: "02035A00020BF5"
+    expected:
+      device_id: 858
+      protocol_version: 2
+      battery_voltage: 3.061
+  - name: vendor_reference_2
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    payload: "02035A0003800A8000800080008009812B8014810880B4A57C820C810980027FE88056800880040BF5"
+    expected:
+      device_id: 858
+      protocol_version: 2
+      solar_radiation: 10
+      precipitation: 0.0
+      lightning_strike_count: 0
+      lightning_average_distance: 0
+      wind_speed: 0.09
+      wind_direction: 29.9
+      maximum_wind_speed: 0.2
+      air_temperature: 26.4
+      vapor_pressure: 1.8
+      atmospheric_pressure: 95.96
+      relative_humidity: 52.4
+      sensor_temperature_internal: 26.5
+      x_orientation_angle: 0.2
+      y_orientation_angle: -2.4
+      compass_heading: 86
+      north_wind_speed: 0.08
+      east_wind_speed: 0.04
+      battery_voltage: 3.061
+  - name: zero_words
+    description: "All sensor words zero (offset-binary minimum, negative readings)"
+    payload: "0212340003000000000000000000000000000000000000000000000000000000000000000000000000"
+    expected:
+      device_id: 4660
+      protocol_version: 2
+      solar_radiation: -32768
+      precipitation: -32.768
+      lightning_strike_count: -32768
+      lightning_average_distance: -32768
+      wind_speed: -327.68
+      wind_direction: -3276.8
+      maximum_wind_speed: -327.68
+      air_temperature: -3276.8
+      vapor_pressure: -327.68
+      atmospheric_pressure: -327.68
+      relative_humidity: -3276.8
+      sensor_temperature_internal: -3276.8
+      x_orientation_angle: -3276.8
+      y_orientation_angle: -3276.8
+      compass_heading: -32768
+      north_wind_speed: -327.68
+      east_wind_speed: -327.68
+      battery_voltage: 0.0
+  - name: midscale_words
+    description: "All sensor words at offset-binary midpoint (zero readings)"
+    payload: "0212340003800080008000800080008000800080008000800080008000800080008000800080008000"
+    expected:
+      device_id: 4660
+      protocol_version: 2
+      solar_radiation: 0
+      precipitation: 0.0
+      lightning_strike_count: 0
+      lightning_average_distance: 0
+      wind_speed: 0.0
+      wind_direction: 0.0
+      maximum_wind_speed: 0.0
+      air_temperature: 0.0
+      vapor_pressure: 0.0
+      atmospheric_pressure: 0.0
+      relative_humidity: 0.0
+      sensor_temperature_internal: 0.0
+      x_orientation_angle: 0.0
+      y_orientation_angle: 0.0
+      compass_heading: 0
+      north_wind_speed: 0.0
+      east_wind_speed: 0.0
+      battery_voltage: 32.768
+  - name: max_words
+    description: "All sensor words 0xFFFF (maximum readings)"
+    payload: "0212340003FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
+    expected:
+      device_id: 4660
+      protocol_version: 2
+      solar_radiation: 32767
+      precipitation: 32.767
+      lightning_strike_count: 32767
+      lightning_average_distance: 32767
+      wind_speed: 327.67
+      wind_direction: 3276.7
+      maximum_wind_speed: 327.67
+      air_temperature: 3276.7
+      vapor_pressure: 327.67
+      atmospheric_pressure: 327.67
+      relative_humidity: 3276.7
+      sensor_temperature_internal: 3276.7
+      x_orientation_angle: 3276.7
+      y_orientation_angle: 3276.7
+      compass_heading: 32767
+      north_wind_speed: 327.67
+      east_wind_speed: 327.67
+      battery_voltage: 65.535
+  - name: min_payload_battery_only
+    description: "Minimum payload: only the last sensor group present"
+    payload: "02123400020BF5"
+    expected:
+      device_id: 4660
+      protocol_version: 2
+      battery_voltage: 3.061

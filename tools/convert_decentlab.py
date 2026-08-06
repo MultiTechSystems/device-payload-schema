@@ -83,12 +83,22 @@ def parse_convert_expression(name, display_name, expr, unit, group_length):
     
     # Common patterns:
     # x[0] / 1000                           → u16, div: 1000
-    # (x[0] - 32768) / 100                  → u16, add: -32768, div: 100  (or: s16, div: 100)
-    # x[0] / 10 - 273.15                    → u16, div: 10, add: -273.15
-    # (x[0] - 32768) / 10                   → s16, div: 10
+    # (x[0] - 32768) / 100                  → u16 + transform [add -32768, div 100]
+    # x[0] / 10 - 273.15                    → u16 + transform [div 10, add -273.15]
     # x[0]                                  → u16 (raw)
     # x[0] + x[1] * 65536                   → u32 (two u16s combined)
     # (x[0] - 32768) / 100 * ... complex    → formula
+    #
+    # Decentlab transmits offset-binary values: the sensor subtracts 32768 from
+    # the unsigned word. That is NOT the same as a two's-complement s16 read --
+    # for a word w, offset-binary gives w - 32768 while s16 gives w - 65536 when
+    # w >= 32768 and w otherwise. Emitting `s16` for these fields decodes every
+    # real payload wrongly, so they use an explicit ordered transform.
+    #
+    # Any pattern with more than one operation is emitted as `transform` rather
+    # than as bare mult/div/add keys, because the interpreter applies those keys
+    # in YAML key order -- a schema whose meaning depends on key order is not
+    # safe to round-trip through other languages' YAML/JSON parsers.
     
     # Determine which x[i] indices are used
     indices = [int(m) for m in re.findall(r'x\[(\d+)\]', expr)]
@@ -108,46 +118,45 @@ def parse_convert_expression(name, display_name, expr, unit, group_length):
         field['mult'] = _num(m.group(1))
         return field
     
-    # (x[N] - 32768) / divisor → signed interpretation
+    # (x[N] - 32768) / divisor → offset-binary, then scale
     m = re.match(r'\(x\[\d+\]\s*-\s*32768\)\s*/\s*([\d.]+)\s*$', expr)
     if m:
-        field['type'] = 's16'
-        field['div'] = _num(m.group(1))
+        field['type'] = 'u16'
+        field['transform'] = [{'add': -32768}, {'div': _num(m.group(1))}]
         return field
-    
+
     # (x[N] - 32768) / divisor * multiplier
     m = re.match(r'\(x\[\d+\]\s*-\s*32768\)\s*/\s*([\d.]+)\s*\*\s*([\d.]+)\s*$', expr)
     if m:
-        field['type'] = 's16'
-        d = _num(m.group(1))
-        mult = _num(m.group(2))
-        field['mult'] = mult / d if d != 0 else mult
+        field['type'] = 'u16'
+        field['transform'] = [
+            {'add': -32768},
+            {'div': _num(m.group(1))},
+            {'mult': _num(m.group(2))},
+        ]
         return field
-    
+
     # x[N] / divisor - offset (e.g., x[0] / 10 - 273.15 for Kelvin→Celsius)
     m = re.match(r'x\[\d+\]\s*/\s*([\d.]+)\s*-\s*([\d.]+)\s*$', expr)
     if m:
         field['type'] = 'u16'
-        field['div'] = _num(m.group(1))
-        field['add'] = -_num(m.group(2))
+        field['transform'] = [{'div': _num(m.group(1))}, {'add': -_num(m.group(2))}]
         return field
-    
+
     # x[N] / divisor + offset
     m = re.match(r'x\[\d+\]\s*/\s*([\d.]+)\s*\+\s*([\d.]+)\s*$', expr)
     if m:
         field['type'] = 'u16'
-        field['div'] = _num(m.group(1))
-        field['add'] = _num(m.group(2))
+        field['transform'] = [{'div': _num(m.group(1))}, {'add': _num(m.group(2))}]
         return field
-    
+
     # x[N] * multiplier - offset
     m = re.match(r'x\[\d+\]\s*\*\s*([\d.]+)\s*-\s*([\d.]+)\s*$', expr)
     if m:
         field['type'] = 'u16'
-        field['mult'] = _num(m.group(1))
-        field['add'] = -_num(m.group(2))
+        field['transform'] = [{'mult': _num(m.group(1))}, {'add': -_num(m.group(2))}]
         return field
-    
+
     # x[N] - offset (simple subtraction)
     m = re.match(r'x\[\d+\]\s*-\s*([\d.]+)\s*$', expr)
     if m:
@@ -233,6 +242,11 @@ def generate_schema(js_code, filename):
                 lines.append(f'              div: {field["div"]}')
             if 'add' in field:
                 lines.append(f'              add: {field["add"]}')
+            if 'transform' in field:
+                lines.append(f'              transform:')
+                for op in field['transform']:
+                    key, value = next(iter(op.items()))
+                    lines.append(f'                - {key}: {value}')
             if field.get('unit'):
                 lines.append(f'              unit: "{field["unit"]}"')
             if '_formula' in field:
