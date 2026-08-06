@@ -1008,14 +1008,25 @@ class TestNewTypes:
         assert result.data['name'] == 'TEST'
     
     def test_hex_type(self):
-        """Test hex string output."""
+        """PS-074: hex output MUST be lowercase without separators.
+
+        This asserted uppercase, which disagreed with the specification, with the
+        Go and Java interpreters, and with every vendor decoder.
+        """
         schema = {'fields': [{'name': 'mac', 'type': 'hex', 'length': 4}]}
         interpreter = SchemaInterpreter(schema)
-        
+
         result = interpreter.decode(bytes([0xDE, 0xAD, 0xBE, 0xEF]))
         assert result.success
+        assert result.data['mac'] == 'deadbeef'
+
+    def test_hex_upper_type(self):
+        """Uppercase is the separate `hex:upper` type, not the default."""
+        schema = {'fields': [{'name': 'mac', 'type': 'hex:upper', 'length': 4}]}
+        result = SchemaInterpreter(schema).decode(bytes([0xDE, 0xAD, 0xBE, 0xEF]))
+        assert result.success
         assert result.data['mac'] == 'DEADBEEF'
-    
+
     def test_base64_type(self):
         """Test base64 string output."""
         schema = {'fields': [{'name': 'data', 'type': 'base64', 'length': 3}]}

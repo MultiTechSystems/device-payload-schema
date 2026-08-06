@@ -15,27 +15,40 @@ fields:
         # IPSO VERSION
         "[255, 1]":
           - name: ipso_version
-            type: u8
+            type: bitfield_string
+            length: 1
+            parts: [[4, 4, decimal], [0, 4, decimal]]
+            prefix: "v"
             # raw: readProtocolVersion(bytes[i])
         # HARDWARE VERSION
         "[255, 9]":
           - name: hardware_version
-            type: u8
+            type: bitfield_string
+            length: 2
+            parts: [[0, 8, hex], [12, 4, decimal]]
+            prefix: "v"
             # raw: readHardwareVersion(bytes.slice(i, i + 2))
         # FIRMWARE VERSION
         "[255, 10]":
           - name: firmware_version
-            type: u8
+            type: bitfield_string
+            length: 2
+            parts: [[0, 8, hex], [8, 8, hex]]
+            prefix: "v"
             # raw: readFirmwareVersion(bytes.slice(i, i + 2))
         # TSL VERSION
         "[255, 255]":
           - name: tsl_version
-            type: u8
+            type: bitfield_string
+            length: 2
+            parts: [[0, 8, decimal], [8, 8, decimal]]
+            prefix: "v"
             # raw: readTslVersion(bytes.slice(i, i + 2))
         # SERIAL NUMBER
         "[255, 22]":
           - name: sn
-            type: u8
+            type: hex
+            length: 8
             # raw: readSerialNumber(bytes.slice(i, i + 8))
         # LORAWAN CLASS TYPE
         "[255, 15]":
@@ -105,6 +118,41 @@ fields:
             # raw: readTemperatureAlarm(3)
 
 test_vectors:
+  - name: ch255_type1_midscale
+    description: "Channel 255 type 1, midscale bytes, decoded by the vendor's own decoder"
+    payload: "FF0111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      ipso_version: "v1.1"
+  - name: ch255_type9_midscale
+    description: "Channel 255 type 9, midscale bytes, decoded by the vendor's own decoder"
+    payload: "FF091111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      hardware_version: "v11.1"
+  - name: ch255_type10_midscale
+    description: "Channel 255 type 10, midscale bytes, decoded by the vendor's own decoder"
+    payload: "FF0A1111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      firmware_version: "v11.11"
+  - name: ch255_type255_midscale
+    description: "Channel 255 type 255, midscale bytes, decoded by the vendor's own decoder"
+    payload: "FFFF1111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      tsl_version: "v17.17"
+  - name: ch255_type22_midscale
+    description: "Channel 255 type 22, midscale bytes, decoded by the vendor's own decoder"
+    payload: "FF161111111111111111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      sn: "1111111111111111"
   - name: ch3_type116_midscale
     description: "Channel 3 type 116, midscale bytes, decoded by the vendor's own decoder"
     payload: "03741111"
@@ -140,73 +188,38 @@ test_vectors:
     source: vendor-codec
     expected:
       current: 4369
-  - name: ch3_type116_zero_values
-    description: "Channel 3 type 116, zero values bytes, decoded by the vendor's own decoder"
-    payload: "03740000"
+  - name: ch255_type1_zero_values
+    description: "Channel 255 type 1, zero values bytes, decoded by the vendor's own decoder"
+    payload: "FF0100"
     fPort: 85
     source: vendor-codec
     expected:
-      voltage: 0
-  - name: ch4_type128_zero_values
-    description: "Channel 4 type 128, zero values bytes, decoded by the vendor's own decoder"
-    payload: "048000000000"
+      ipso_version: "v0.0"
+  - name: ch255_type9_zero_values
+    description: "Channel 255 type 9, zero values bytes, decoded by the vendor's own decoder"
+    payload: "FF090000"
     fPort: 85
     source: vendor-codec
     expected:
-      active_power: 0
-  - name: ch5_type129_zero_values
-    description: "Channel 5 type 129, zero values bytes, decoded by the vendor's own decoder"
-    payload: "058100"
+      hardware_version: "v0.0"
+  - name: ch255_type10_zero_values
+    description: "Channel 255 type 10, zero values bytes, decoded by the vendor's own decoder"
+    payload: "FF0A0000"
     fPort: 85
     source: vendor-codec
     expected:
-      power_factor: 0
-  - name: ch6_type131_zero_values
-    description: "Channel 6 type 131, zero values bytes, decoded by the vendor's own decoder"
-    payload: "068300000000"
+      firmware_version: "v0.0"
+  - name: ch255_type255_zero_values
+    description: "Channel 255 type 255, zero values bytes, decoded by the vendor's own decoder"
+    payload: "FFFF0000"
     fPort: 85
     source: vendor-codec
     expected:
-      power_consumption: 0
-  - name: ch7_type201_zero_values
-    description: "Channel 7 type 201, zero values bytes, decoded by the vendor's own decoder"
-    payload: "07C90000"
+      tsl_version: "v0.0"
+  - name: ch255_type22_zero_values
+    description: "Channel 255 type 22, zero values bytes, decoded by the vendor's own decoder"
+    payload: "FF160000000000000000"
     fPort: 85
     source: vendor-codec
     expected:
-      current: 0
-  - name: ch3_type116_max_values
-    description: "Channel 3 type 116, max values bytes, decoded by the vendor's own decoder"
-    payload: "0374FFFF"
-    fPort: 85
-    source: vendor-codec
-    expected:
-      voltage: 6553.5
-  - name: ch4_type128_max_values
-    description: "Channel 4 type 128, max values bytes, decoded by the vendor's own decoder"
-    payload: "0480FFFFFFFF"
-    fPort: 85
-    source: vendor-codec
-    expected:
-      active_power: 4294967295
-  - name: ch5_type129_max_values
-    description: "Channel 5 type 129, max values bytes, decoded by the vendor's own decoder"
-    payload: "0581FF"
-    fPort: 85
-    source: vendor-codec
-    expected:
-      power_factor: 255
-  - name: ch6_type131_max_values
-    description: "Channel 6 type 131, max values bytes, decoded by the vendor's own decoder"
-    payload: "0683FFFFFFFF"
-    fPort: 85
-    source: vendor-codec
-    expected:
-      power_consumption: 4294967295
-  - name: ch7_type201_max_values
-    description: "Channel 7 type 201, max values bytes, decoded by the vendor's own decoder"
-    payload: "07C9FFFF"
-    fPort: 85
-    source: vendor-codec
-    expected:
-      current: 65535
+      sn: "0000000000000000"

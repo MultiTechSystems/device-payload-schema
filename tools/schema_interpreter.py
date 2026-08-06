@@ -54,6 +54,10 @@ class EncodeResult:
         return len(self.errors) == 0
 
 
+#: String types whose name contains a colon, so that the bitfield parser does not
+#: mistake them for a bit range such as ``u8:3``.
+_COLON_STRING_TYPES = frozenset({'hex:upper'})
+
 #: Order in which the bare `mult`, `div` and `add` modifiers are applied,
 #: irrespective of the order the keys appear in the source document (PS-101).
 #: Order-dependent arithmetic uses the `transform` array instead (PS-102).
@@ -495,8 +499,11 @@ class SchemaInterpreter:
         field_type = field_def.get('type', 'u8')
         consume = field_def.get('consume', None)
         
-        # Handle bitfields
-        if any(c in str(field_type) for c in ['[', ':', '<']):
+        # Handle bitfields. `hex:upper` is a string type, not a bit range, so it
+        # must not be parsed as one just because it contains a colon.
+        if field_type not in _COLON_STRING_TYPES and any(
+            c in str(field_type) for c in ['[', ':', '<']
+        ):
             base_size, bit_offset, bit_width = self._parse_bitfield_type(field_type)
             value, new_pos, auto_consumed = self._extract_bits(
                 buf, pos, bit_offset, bit_width, base_size
@@ -601,11 +608,16 @@ class SchemaInterpreter:
             value = buf[pos:pos + length].decode('ascii', errors='replace').rstrip('\x00')
             return value, pos + length
         
-        if field_type == 'hex':
+        if field_type in ('hex', 'hex:upper'):
             length = field_def.get('length', 1)
             if pos + length > len(buf):
                 raise ValueError("Buffer too short for hex")
-            value = buf[pos:pos + length].hex().upper()
+            # PS-074: `hex` output MUST be lowercase without separators. This
+            # emitted uppercase, so it disagreed with the specification, with the
+            # Go and Java interpreters, and with every vendor decoder. Uppercase
+            # is the separate `hex:upper` type.
+            raw = buf[pos:pos + length].hex()
+            value = raw.upper() if field_type == 'hex:upper' else raw
             return value, pos + length
         
         if field_type == 'base64':
@@ -1591,7 +1603,7 @@ class SchemaInterpreter:
                         break  # Can't skip without length
                 elif unknown_mode == 'raw':
                     if data_length is not None:
-                        raw = buf[pos:pos + data_length].hex().upper()
+                        raw = buf[pos:pos + data_length].hex()
                         channels.append({'tag': list(tag_tuple), 'raw': raw})
                         pos += data_length
                     else:

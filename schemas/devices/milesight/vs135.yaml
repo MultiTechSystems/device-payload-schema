@@ -15,22 +15,32 @@ fields:
         # IPSO VERSION
         "[255, 1]":
           - name: ipso_version
-            type: u8
+            type: bitfield_string
+            length: 1
+            parts: [[4, 4, decimal], [0, 4, decimal]]
+            prefix: "v"
             # raw: readProtocolVersion(bytes[i])
         # HARDWARE VERSION
         "[255, 9]":
           - name: hardware_version
-            type: u8
+            type: bitfield_string
+            length: 2
+            parts: [[0, 8, hex], [12, 4, decimal]]
+            prefix: "v"
             # raw: readHardwareVersion(bytes.slice(i, i + 2))
         # FIRMWARE VERSION
         "[255, 31]":
           - name: firmware_version
-            type: u8
+            type: bitfield_string
+            length: 2
+            parts: [[0, 8, hex], [8, 8, hex]]
+            prefix: "v"
             # raw: readFirmwareVersion(bytes.slice(i, i + 4))
         # SERIAL NUMBER
         "[255, 22]":
           - name: sn
-            type: u8
+            type: hex
+            length: 8
             # raw: readSerialNumber(bytes.slice(i, i + 8))
         # REGION COUNT
         "[15, 227]":
@@ -67,6 +77,20 @@ fields:
             # raw: decoded.history || []
 
 test_vectors:
+  - name: ch255_type1_midscale
+    description: "Channel 255 type 1, midscale bytes, decoded by the vendor's own decoder"
+    payload: "FF0111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      ipso_version: "v1.1"
+  - name: ch255_type22_midscale
+    description: "Channel 255 type 22, midscale bytes, decoded by the vendor's own decoder"
+    payload: "FF161111111111111111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      sn: "1111111111111111"
   - name: ch15_type227_midscale
     description: "Channel 15 type 227, midscale bytes, decoded by the vendor's own decoder"
     payload: "0FE311111111"
@@ -87,6 +111,27 @@ test_vectors:
       region_2_child_count: 17
       region_3_child_count: 17
       region_4_child_count: 17
+  - name: ch255_type1_zero_values
+    description: "Channel 255 type 1, zero values bytes, decoded by the vendor's own decoder"
+    payload: "FF0100"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      ipso_version: "v0.0"
+  - name: ch255_type9_zero_values
+    description: "Channel 255 type 9, zero values bytes, decoded by the vendor's own decoder"
+    payload: "FF090000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      hardware_version: "v0.0"
+  - name: ch255_type22_zero_values
+    description: "Channel 255 type 22, zero values bytes, decoded by the vendor's own decoder"
+    payload: "FF160000000000000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      sn: "0000000000000000"
   - name: ch15_type227_zero_values
     description: "Channel 15 type 227, zero values bytes, decoded by the vendor's own decoder"
     payload: "0FE300000000"
@@ -107,6 +152,20 @@ test_vectors:
       region_2_child_count: 0
       region_3_child_count: 0
       region_4_child_count: 0
+  - name: ch255_type1_max_values
+    description: "Channel 255 type 1, max values bytes, decoded by the vendor's own decoder"
+    payload: "FF01FF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      ipso_version: "v15.15"
+  - name: ch255_type22_max_values
+    description: "Channel 255 type 22, max values bytes, decoded by the vendor's own decoder"
+    payload: "FF16FFFFFFFFFFFFFFFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      sn: "ffffffffffffffff"
   - name: ch15_type227_max_values
     description: "Channel 15 type 227, max values bytes, decoded by the vendor's own decoder"
     payload: "0FE3FFFFFFFF"

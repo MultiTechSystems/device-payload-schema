@@ -216,20 +216,19 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   fixture must still decode identically. `validate_schema.py` warns when a field
   carries two or more bare modifiers, since the intent reads better as a
   `transform`.
-- **Many published schemas are still unverified.** 78 of 158 device schemas ship
+- **Many published schemas are still unverified.** 62 of 158 device schemas ship
   with no test vectors and are therefore Rejected. See the per-device table in
   [`docs/INDEX.md`](docs/INDEX.md). The decentlab and milesight families have been
   through a vendor cross-validation pass; the rest have not.
-- **Milesight schemas decode values but do not label or annotate them.** 50 of the
-  84 still disagree with the vendor's own decoder, in four distinct ways worth
-  knowing before picking one up: 19+ emit a raw integer where the vendor renders a
-  label (they need `lookup:` tables), 13+ never decode some TLV channels at all,
-  5 emit a scalar where the vendor emits an array or object (a language gap), and
-  3 fail to decode a vendor payload outright. Separately, several fields declare
-  `type: u8` where the vendor consumes two bytes (version and serial-number
-  channels), so those channels are wrong even when the rest of the schema is
-  right. None of the milesight schemas declare `unit:`, which is why they carry no
-  semantic annotations and stop at Silver.
+- **Milesight schemas are verified but unannotated.** 41 of the 84 still disagree
+  with the vendor's own decoder, in three remaining ways worth knowing before
+  picking one up: TLV channels that are never decoded at all, fields where the
+  vendor emits an array or object and we emit a scalar (a language gap), and three
+  schemas that fail to decode a vendor payload outright. Enum labels and the
+  version/serial channels are done. None of these schemas declare `unit:`, so they
+  carry no semantic annotations and stop at Silver; the scorer's keyword heuristic
+  would read milesight `battery` as IPSO 3316 voltage when it is a percentage, so
+  units have to be established per device before annotating.
 - **The JS TS013 generator has a shared-byte bug.** `generate_ts013_codec.py`
   can drop bare bit-range fields and fail to advance the cursor. The Python
   interpreter path is correct; only generated JavaScript is affected.
