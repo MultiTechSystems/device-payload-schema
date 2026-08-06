@@ -638,6 +638,19 @@ def check_best_practices(schema: Dict[str, Any], result: ValidationResult) -> No
                         )
                     break
             
+            # Multiple bare modifiers: the arithmetic is applied in the canonical
+            # order (mult, div, add) whatever order the keys appear in, so a
+            # reader cannot tell the intent from the source. PS-262.
+            bare_modifiers = [key for key in ('mult', 'div', 'add') if key in fld]
+            if len(bare_modifiers) >= 2:
+                result.add_warning(
+                    "Uses %s together; these apply in the canonical order "
+                    "mult, div, add regardless of key order. Write the intended "
+                    "sequence as a transform array to make it explicit."
+                    % ", ".join(bare_modifiers),
+                    f"{name}"
+                )
+
             # Check for numeric fields without valid_range
             if ftype in ('u8', 'u16', 'u32', 's8', 's16', 's32', 'f32', 'f64'):
                 if 'valid_range' not in fld and not name.startswith('_'):

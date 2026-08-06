@@ -1,9 +1,9 @@
 {
-  "timestamp": "2026-08-06T10:11:24.026685-05:00",
+  "timestamp": "2026-08-06T10:43:35.455394-05:00",
   "schemas": [
     {
       "schema_path": "schemas/devices/decentlab/dl-5tm.yaml",
-      "timestamp": "2026-08-06T10:11:23.147948-05:00",
+      "timestamp": "2026-08-06T10:43:34.558868-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -51,7 +51,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-alb.yaml",
-      "timestamp": "2026-08-06T10:11:23.174998-05:00",
+      "timestamp": "2026-08-06T10:43:34.587553-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -99,7 +99,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-atm22.yaml",
-      "timestamp": "2026-08-06T10:11:23.199364-05:00",
+      "timestamp": "2026-08-06T10:43:34.612262-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -147,7 +147,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-atm41.yaml",
-      "timestamp": "2026-08-06T10:11:23.226102-05:00",
+      "timestamp": "2026-08-06T10:43:34.637452-05:00",
       "score": 92.0,
       "tier": "GOLD",
       "details": {
@@ -210,7 +210,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-atm41g2.yaml",
-      "timestamp": "2026-08-06T10:11:23.255675-05:00",
+      "timestamp": "2026-08-06T10:43:34.666827-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -296,7 +296,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-blg.yaml",
-      "timestamp": "2026-08-06T10:11:23.259984-05:00",
+      "timestamp": "2026-08-06T10:43:34.671758-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -372,7 +372,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-ctd10.yaml",
-      "timestamp": "2026-08-06T10:11:23.261638-05:00",
+      "timestamp": "2026-08-06T10:43:34.673492-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -431,7 +431,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-cws.yaml",
-      "timestamp": "2026-08-06T10:11:23.283810-05:00",
+      "timestamp": "2026-08-06T10:43:34.698792-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -510,7 +510,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-cws2.yaml",
-      "timestamp": "2026-08-06T10:11:23.286095-05:00",
+      "timestamp": "2026-08-06T10:43:34.701372-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -593,7 +593,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-002.yaml",
-      "timestamp": "2026-08-06T10:11:23.288845-05:00",
+      "timestamp": "2026-08-06T10:43:34.704534-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -663,7 +663,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-003.yaml",
-      "timestamp": "2026-08-06T10:11:23.290378-05:00",
+      "timestamp": "2026-08-06T10:43:34.706494-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -711,7 +711,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-004-10.yaml",
-      "timestamp": "2026-08-06T10:11:23.311626-05:00",
+      "timestamp": "2026-08-06T10:43:34.727160-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -785,7 +785,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-005.yaml",
-      "timestamp": "2026-08-06T10:11:23.313135-05:00",
+      "timestamp": "2026-08-06T10:43:34.728576-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -859,7 +859,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-006.yaml",
-      "timestamp": "2026-08-06T10:11:23.314695-05:00",
+      "timestamp": "2026-08-06T10:43:34.729871-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -929,7 +929,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-008-2000.yaml",
-      "timestamp": "2026-08-06T10:11:23.316159-05:00",
+      "timestamp": "2026-08-06T10:43:34.731117-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -1003,7 +1003,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-009-2000.yaml",
-      "timestamp": "2026-08-06T10:11:23.317700-05:00",
+      "timestamp": "2026-08-06T10:43:34.732478-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -1077,7 +1077,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-010.yaml",
-      "timestamp": "2026-08-06T10:11:23.319356-05:00",
+      "timestamp": "2026-08-06T10:43:34.734037-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -1147,7 +1147,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-011.yaml",
-      "timestamp": "2026-08-06T10:11:23.321604-05:00",
+      "timestamp": "2026-08-06T10:43:34.736138-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -1195,7 +1195,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-012.yaml",
-      "timestamp": "2026-08-06T10:11:23.342721-05:00",
+      "timestamp": "2026-08-06T10:43:34.756188-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -1265,7 +1265,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-ds18.yaml",
-      "timestamp": "2026-08-06T10:11:23.344097-05:00",
+      "timestamp": "2026-08-06T10:43:34.757517-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -1313,7 +1313,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dws-232263168-0000302459-1370.yaml",
-      "timestamp": "2026-08-06T10:11:23.365667-05:00",
+      "timestamp": "2026-08-06T10:43:34.779181-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -1389,7 +1389,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-gmm.yaml",
-      "timestamp": "2026-08-06T10:11:23.367397-05:00",
+      "timestamp": "2026-08-06T10:43:34.780688-05:00",
       "score": 92.0,
       "tier": "GOLD",
       "details": {
@@ -1450,7 +1450,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-iam.yaml",
-      "timestamp": "2026-08-06T10:11:23.391759-05:00",
+      "timestamp": "2026-08-06T10:43:34.807448-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -1537,7 +1537,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-ifd.yaml",
-      "timestamp": "2026-08-06T10:11:23.395144-05:00",
+      "timestamp": "2026-08-06T10:43:34.811007-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -1585,7 +1585,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-ilt.yaml",
-      "timestamp": "2026-08-06T10:11:23.416217-05:00",
+      "timestamp": "2026-08-06T10:43:34.832741-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -1633,7 +1633,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-isd.yaml",
-      "timestamp": "2026-08-06T10:11:23.437013-05:00",
+      "timestamp": "2026-08-06T10:43:34.853344-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -1681,7 +1681,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-isf.yaml",
-      "timestamp": "2026-08-06T10:11:23.459042-05:00",
+      "timestamp": "2026-08-06T10:43:34.875199-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -1758,7 +1758,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-itst.yaml",
-      "timestamp": "2026-08-06T10:11:23.462785-05:00",
+      "timestamp": "2026-08-06T10:43:34.879333-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -1834,7 +1834,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-kl66-1538372-464859.yaml",
-      "timestamp": "2026-08-06T10:11:23.464261-05:00",
+      "timestamp": "2026-08-06T10:43:34.880776-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -1910,7 +1910,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-lid.yaml",
-      "timestamp": "2026-08-06T10:11:23.466389-05:00",
+      "timestamp": "2026-08-06T10:43:34.882893-05:00",
       "score": 80.0,
       "tier": "SILVER",
       "details": {
@@ -1985,7 +1985,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-lp8p.yaml",
-      "timestamp": "2026-08-06T10:11:23.489683-05:00",
+      "timestamp": "2026-08-06T10:43:34.907801-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -2076,7 +2076,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-lpw.yaml",
-      "timestamp": "2026-08-06T10:11:23.493497-05:00",
+      "timestamp": "2026-08-06T10:43:34.911547-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -2146,7 +2146,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-lws.yaml",
-      "timestamp": "2026-08-06T10:11:23.494888-05:00",
+      "timestamp": "2026-08-06T10:43:34.912816-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -2216,7 +2216,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-mbx.yaml",
-      "timestamp": "2026-08-06T10:11:23.496219-05:00",
+      "timestamp": "2026-08-06T10:43:34.914008-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -2273,7 +2273,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-mes5.yaml",
-      "timestamp": "2026-08-06T10:11:23.517304-05:00",
+      "timestamp": "2026-08-06T10:43:34.936620-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -2321,7 +2321,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-ntu.yaml",
-      "timestamp": "2026-08-06T10:11:23.540991-05:00",
+      "timestamp": "2026-08-06T10:43:34.961411-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -2369,7 +2369,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-optod.yaml",
-      "timestamp": "2026-08-06T10:11:23.563023-05:00",
+      "timestamp": "2026-08-06T10:43:34.985851-05:00",
       "score": 94.0,
       "tier": "GOLD",
       "details": {
@@ -2426,7 +2426,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-par.yaml",
-      "timestamp": "2026-08-06T10:11:23.586051-05:00",
+      "timestamp": "2026-08-06T10:43:35.013281-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -2496,7 +2496,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pheht.yaml",
-      "timestamp": "2026-08-06T10:11:23.587411-05:00",
+      "timestamp": "2026-08-06T10:43:35.014859-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -2551,7 +2551,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pm.yaml",
-      "timestamp": "2026-08-06T10:11:23.611812-05:00",
+      "timestamp": "2026-08-06T10:43:35.038051-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -2647,7 +2647,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pr21-1-10.yaml",
-      "timestamp": "2026-08-06T10:11:23.615685-05:00",
+      "timestamp": "2026-08-06T10:43:35.042010-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -2723,7 +2723,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pr26-0-1.yaml",
-      "timestamp": "2026-08-06T10:11:23.617160-05:00",
+      "timestamp": "2026-08-06T10:43:35.043485-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -2799,7 +2799,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pr36-8192.yaml",
-      "timestamp": "2026-08-06T10:11:23.618712-05:00",
+      "timestamp": "2026-08-06T10:43:35.044963-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -2874,7 +2874,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pr36ctd-8192-1024.yaml",
-      "timestamp": "2026-08-06T10:11:23.620173-05:00",
+      "timestamp": "2026-08-06T10:43:35.046412-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -2952,7 +2952,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pyr.yaml",
-      "timestamp": "2026-08-06T10:11:23.622002-05:00",
+      "timestamp": "2026-08-06T10:43:35.048251-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -3022,7 +3022,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-rad.yaml",
-      "timestamp": "2026-08-06T10:11:23.623264-05:00",
+      "timestamp": "2026-08-06T10:43:35.049505-05:00",
       "score": 92.0,
       "tier": "GOLD",
       "details": {
@@ -3079,7 +3079,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-rhc.yaml",
-      "timestamp": "2026-08-06T10:11:23.649925-05:00",
+      "timestamp": "2026-08-06T10:43:35.073946-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -3154,7 +3154,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-sdd.yaml",
-      "timestamp": "2026-08-06T10:11:23.651636-05:00",
+      "timestamp": "2026-08-06T10:43:35.075565-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -3297,7 +3297,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-sht35.yaml",
-      "timestamp": "2026-08-06T10:11:23.660850-05:00",
+      "timestamp": "2026-08-06T10:43:35.084667-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -3373,7 +3373,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-smtp.yaml",
-      "timestamp": "2026-08-06T10:11:23.662296-05:00",
+      "timestamp": "2026-08-06T10:43:35.086111-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -3476,7 +3476,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-tbrg-01.yaml",
-      "timestamp": "2026-08-06T10:11:23.666574-05:00",
+      "timestamp": "2026-08-06T10:43:35.089905-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -3546,7 +3546,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-tp.yaml",
-      "timestamp": "2026-08-06T10:11:23.668227-05:00",
+      "timestamp": "2026-08-06T10:43:35.091474-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -3594,7 +3594,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-trs11.yaml",
-      "timestamp": "2026-08-06T10:11:23.701637-05:00",
+      "timestamp": "2026-08-06T10:43:35.124669-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -3667,7 +3667,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-trs12.yaml",
-      "timestamp": "2026-08-06T10:11:23.703359-05:00",
+      "timestamp": "2026-08-06T10:43:35.126380-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -3741,7 +3741,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-trs21.yaml",
-      "timestamp": "2026-08-06T10:11:23.705237-05:00",
+      "timestamp": "2026-08-06T10:43:35.128195-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -3814,7 +3814,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-wrm.yaml",
-      "timestamp": "2026-08-06T10:11:23.706699-05:00",
+      "timestamp": "2026-08-06T10:43:35.129630-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -3894,7 +3894,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-zn1.yaml",
-      "timestamp": "2026-08-06T10:11:23.708676-05:00",
+      "timestamp": "2026-08-06T10:43:35.131450-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -3964,7 +3964,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-zn2.yaml",
-      "timestamp": "2026-08-06T10:11:23.709972-05:00",
+      "timestamp": "2026-08-06T10:43:35.132693-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4034,7 +4034,7 @@
     },
     {
       "schema_path": "schemas/devices/digital-matter/oyster.yaml",
-      "timestamp": "2026-08-06T10:11:23.711434-05:00",
+      "timestamp": "2026-08-06T10:43:35.134107-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -4084,7 +4084,7 @@
     },
     {
       "schema_path": "schemas/devices/dragino/laq4.yaml",
-      "timestamp": "2026-08-06T10:11:23.738028-05:00",
+      "timestamp": "2026-08-06T10:43:35.160213-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -4134,7 +4134,7 @@
     },
     {
       "schema_path": "schemas/devices/elsys/ers.yaml",
-      "timestamp": "2026-08-06T10:11:23.762132-05:00",
+      "timestamp": "2026-08-06T10:43:35.183591-05:00",
       "score": 56.0,
       "tier": "REJECTED",
       "details": {
@@ -4196,7 +4196,7 @@
     },
     {
       "schema_path": "schemas/devices/hbi/mla20.yaml",
-      "timestamp": "2026-08-06T10:11:23.786934-05:00",
+      "timestamp": "2026-08-06T10:43:35.210402-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4258,7 +4258,7 @@
     },
     {
       "schema_path": "schemas/devices/makerfabs/4-channel-adc.yaml",
-      "timestamp": "2026-08-06T10:11:23.789744-05:00",
+      "timestamp": "2026-08-06T10:43:35.212794-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4328,7 +4328,7 @@
     },
     {
       "schema_path": "schemas/devices/makerfabs/ath20.yaml",
-      "timestamp": "2026-08-06T10:11:23.791500-05:00",
+      "timestamp": "2026-08-06T10:43:35.214415-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -4403,7 +4403,7 @@
     },
     {
       "schema_path": "schemas/devices/makerfabs/gps-tracker.yaml",
-      "timestamp": "2026-08-06T10:11:23.792416-05:00",
+      "timestamp": "2026-08-06T10:43:35.215262-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4480,7 +4480,7 @@
     },
     {
       "schema_path": "schemas/devices/makerfabs/leaf-moisture-sn-3001.yaml",
-      "timestamp": "2026-08-06T10:11:23.795144-05:00",
+      "timestamp": "2026-08-06T10:43:35.217808-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -4555,7 +4555,7 @@
     },
     {
       "schema_path": "schemas/devices/makerfabs/pipe-pressure.yaml",
-      "timestamp": "2026-08-06T10:11:23.796513-05:00",
+      "timestamp": "2026-08-06T10:43:35.218909-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4629,7 +4629,7 @@
     },
     {
       "schema_path": "schemas/devices/makerfabs/soil-monitor.yaml",
-      "timestamp": "2026-08-06T10:11:23.797424-05:00",
+      "timestamp": "2026-08-06T10:43:35.219629-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -4705,7 +4705,7 @@
     },
     {
       "schema_path": "schemas/devices/mclimate/flood-sensor.yaml",
-      "timestamp": "2026-08-06T10:11:23.799009-05:00",
+      "timestamp": "2026-08-06T10:43:35.221035-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4779,7 +4779,7 @@
     },
     {
       "schema_path": "schemas/devices/mclimate/t-valve.yaml",
-      "timestamp": "2026-08-06T10:11:23.800428-05:00",
+      "timestamp": "2026-08-06T10:43:35.222106-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4849,7 +4849,7 @@
     },
     {
       "schema_path": "schemas/devices/mclimate/vicki.yaml",
-      "timestamp": "2026-08-06T10:11:23.802490-05:00",
+      "timestamp": "2026-08-06T10:43:35.223863-05:00",
       "score": 85.0,
       "tier": "GOLD",
       "details": {
@@ -4902,7 +4902,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am102.yaml",
-      "timestamp": "2026-08-06T10:11:23.838005-05:00",
+      "timestamp": "2026-08-06T10:43:35.259953-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -4963,7 +4963,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am102l.yaml",
-      "timestamp": "2026-08-06T10:11:23.840436-05:00",
+      "timestamp": "2026-08-06T10:43:35.262201-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -5024,7 +5024,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am103.yaml",
-      "timestamp": "2026-08-06T10:11:23.842638-05:00",
+      "timestamp": "2026-08-06T10:43:35.264368-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -5085,7 +5085,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am103l.yaml",
-      "timestamp": "2026-08-06T10:11:23.844365-05:00",
+      "timestamp": "2026-08-06T10:43:35.266236-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -5146,7 +5146,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am104.yaml",
-      "timestamp": "2026-08-06T10:11:23.846080-05:00",
+      "timestamp": "2026-08-06T10:43:35.268102-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -5207,7 +5207,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am107.yaml",
-      "timestamp": "2026-08-06T10:11:23.847409-05:00",
+      "timestamp": "2026-08-06T10:43:35.269554-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -5268,7 +5268,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am307.yaml",
-      "timestamp": "2026-08-06T10:11:23.849108-05:00",
+      "timestamp": "2026-08-06T10:43:35.271402-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -5329,7 +5329,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am307l.yaml",
-      "timestamp": "2026-08-06T10:11:23.851337-05:00",
+      "timestamp": "2026-08-06T10:43:35.273795-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -5390,7 +5390,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am308.yaml",
-      "timestamp": "2026-08-06T10:11:23.853522-05:00",
+      "timestamp": "2026-08-06T10:43:35.276281-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -5451,7 +5451,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am308l.yaml",
-      "timestamp": "2026-08-06T10:11:23.855897-05:00",
+      "timestamp": "2026-08-06T10:43:35.278924-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -5512,7 +5512,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am319.yaml",
-      "timestamp": "2026-08-06T10:11:23.858194-05:00",
+      "timestamp": "2026-08-06T10:43:35.281560-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -5573,7 +5573,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am319l.yaml",
-      "timestamp": "2026-08-06T10:11:23.861301-05:00",
+      "timestamp": "2026-08-06T10:43:35.285129-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -5634,7 +5634,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/at101-fh.yaml",
-      "timestamp": "2026-08-06T10:11:23.864390-05:00",
+      "timestamp": "2026-08-06T10:43:35.288775-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -5695,7 +5695,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/at101.yaml",
-      "timestamp": "2026-08-06T10:11:23.867291-05:00",
+      "timestamp": "2026-08-06T10:43:35.292331-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -5756,7 +5756,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ct101.yaml",
-      "timestamp": "2026-08-06T10:11:23.869705-05:00",
+      "timestamp": "2026-08-06T10:43:35.295161-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -5817,7 +5817,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ct103.yaml",
-      "timestamp": "2026-08-06T10:11:23.872373-05:00",
+      "timestamp": "2026-08-06T10:43:35.298428-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -5878,7 +5878,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ct105.yaml",
-      "timestamp": "2026-08-06T10:11:23.875049-05:00",
+      "timestamp": "2026-08-06T10:43:35.301799-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -5939,7 +5939,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ct303.yaml",
-      "timestamp": "2026-08-06T10:11:23.877710-05:00",
+      "timestamp": "2026-08-06T10:43:35.304425-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -6000,7 +6000,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ct305.yaml",
-      "timestamp": "2026-08-06T10:11:23.879633-05:00",
+      "timestamp": "2026-08-06T10:43:35.306307-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -6061,7 +6061,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ct310.yaml",
-      "timestamp": "2026-08-06T10:11:23.881573-05:00",
+      "timestamp": "2026-08-06T10:43:35.308490-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -6122,7 +6122,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em300-di.yaml",
-      "timestamp": "2026-08-06T10:11:23.883497-05:00",
+      "timestamp": "2026-08-06T10:43:35.310463-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -6183,7 +6183,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em300-mcs.yaml",
-      "timestamp": "2026-08-06T10:11:23.884658-05:00",
+      "timestamp": "2026-08-06T10:43:35.311620-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -6244,7 +6244,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em300-mld.yaml",
-      "timestamp": "2026-08-06T10:11:23.886729-05:00",
+      "timestamp": "2026-08-06T10:43:35.313648-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -6306,7 +6306,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em300-sld.yaml",
-      "timestamp": "2026-08-06T10:11:23.887485-05:00",
+      "timestamp": "2026-08-06T10:43:35.314398-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -6367,7 +6367,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em300-th.yaml",
-      "timestamp": "2026-08-06T10:11:23.888539-05:00",
+      "timestamp": "2026-08-06T10:43:35.315426-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -6428,7 +6428,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em300-zld.yaml",
-      "timestamp": "2026-08-06T10:11:23.889469-05:00",
+      "timestamp": "2026-08-06T10:43:35.316341-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -6489,7 +6489,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em310-tilt.yaml",
-      "timestamp": "2026-08-06T10:11:23.890526-05:00",
+      "timestamp": "2026-08-06T10:43:35.317378-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -6550,7 +6550,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em310-udl.yaml",
-      "timestamp": "2026-08-06T10:11:23.892839-05:00",
+      "timestamp": "2026-08-06T10:43:35.319640-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -6612,7 +6612,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em320-th.yaml",
-      "timestamp": "2026-08-06T10:11:23.894809-05:00",
+      "timestamp": "2026-08-06T10:43:35.321511-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -6673,7 +6673,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em320-tilt.yaml",
-      "timestamp": "2026-08-06T10:11:23.895759-05:00",
+      "timestamp": "2026-08-06T10:43:35.322428-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -6734,7 +6734,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em400-mud.yaml",
-      "timestamp": "2026-08-06T10:11:23.897041-05:00",
+      "timestamp": "2026-08-06T10:43:35.323679-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -6795,7 +6795,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em400-tld.yaml",
-      "timestamp": "2026-08-06T10:11:23.898484-05:00",
+      "timestamp": "2026-08-06T10:43:35.325106-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -6856,7 +6856,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em400-udl.yaml",
-      "timestamp": "2026-08-06T10:11:23.899929-05:00",
+      "timestamp": "2026-08-06T10:43:35.326517-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -6917,7 +6917,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em410-rdl.yaml",
-      "timestamp": "2026-08-06T10:11:23.901373-05:00",
+      "timestamp": "2026-08-06T10:43:35.327930-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -6978,7 +6978,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-co2.yaml",
-      "timestamp": "2026-08-06T10:11:23.903587-05:00",
+      "timestamp": "2026-08-06T10:43:35.330094-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -7039,7 +7039,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-lgt.yaml",
-      "timestamp": "2026-08-06T10:11:23.904785-05:00",
+      "timestamp": "2026-08-06T10:43:35.331269-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -7101,7 +7101,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-pp.yaml",
-      "timestamp": "2026-08-06T10:11:23.905542-05:00",
+      "timestamp": "2026-08-06T10:43:35.332042-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -7162,7 +7162,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-pt100.yaml",
-      "timestamp": "2026-08-06T10:11:23.906281-05:00",
+      "timestamp": "2026-08-06T10:43:35.332777-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -7223,7 +7223,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-smt.yaml",
-      "timestamp": "2026-08-06T10:11:23.907053-05:00",
+      "timestamp": "2026-08-06T10:43:35.333545-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -7285,7 +7285,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-smtc.yaml",
-      "timestamp": "2026-08-06T10:11:23.907971-05:00",
+      "timestamp": "2026-08-06T10:43:35.334449-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -7346,7 +7346,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-swl.yaml",
-      "timestamp": "2026-08-06T10:11:23.909142-05:00",
+      "timestamp": "2026-08-06T10:43:35.335609-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -7408,7 +7408,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-udl.yaml",
-      "timestamp": "2026-08-06T10:11:23.909884-05:00",
+      "timestamp": "2026-08-06T10:43:35.336345-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -7469,7 +7469,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/gs101.yaml",
-      "timestamp": "2026-08-06T10:11:23.910660-05:00",
+      "timestamp": "2026-08-06T10:43:35.337106-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -7531,7 +7531,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/gs301.yaml",
-      "timestamp": "2026-08-06T10:11:23.911773-05:00",
+      "timestamp": "2026-08-06T10:43:35.338174-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -7592,7 +7592,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ts101.yaml",
-      "timestamp": "2026-08-06T10:11:23.914529-05:00",
+      "timestamp": "2026-08-06T10:43:35.340821-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -7653,7 +7653,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ts201.yaml",
-      "timestamp": "2026-08-06T10:11:23.916046-05:00",
+      "timestamp": "2026-08-06T10:43:35.342288-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -7714,7 +7714,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ts201v2.yaml",
-      "timestamp": "2026-08-06T10:11:23.917857-05:00",
+      "timestamp": "2026-08-06T10:43:35.344078-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -7775,7 +7775,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ts30x.yaml",
-      "timestamp": "2026-08-06T10:11:23.919898-05:00",
+      "timestamp": "2026-08-06T10:43:35.346100-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -7836,7 +7836,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/uc100.yaml",
-      "timestamp": "2026-08-06T10:11:23.923453-05:00",
+      "timestamp": "2026-08-06T10:43:35.349618-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -7898,7 +7898,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/uc1114.yaml",
-      "timestamp": "2026-08-06T10:11:23.924633-05:00",
+      "timestamp": "2026-08-06T10:43:35.350766-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -7960,7 +7960,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/uc1152.yaml",
-      "timestamp": "2026-08-06T10:11:23.925388-05:00",
+      "timestamp": "2026-08-06T10:43:35.351515-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -8022,7 +8022,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/uc300.yaml",
-      "timestamp": "2026-08-06T10:11:23.926014-05:00",
+      "timestamp": "2026-08-06T10:43:35.352148-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -8083,7 +8083,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/uc50x.yaml",
-      "timestamp": "2026-08-06T10:11:23.928637-05:00",
+      "timestamp": "2026-08-06T10:43:35.354743-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -8145,7 +8145,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/uc51x.yaml",
-      "timestamp": "2026-08-06T10:11:23.930302-05:00",
+      "timestamp": "2026-08-06T10:43:35.356377-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -8207,7 +8207,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs121.yaml",
-      "timestamp": "2026-08-06T10:11:23.933094-05:00",
+      "timestamp": "2026-08-06T10:43:35.359147-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -8269,7 +8269,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs135.yaml",
-      "timestamp": "2026-08-06T10:11:23.933886-05:00",
+      "timestamp": "2026-08-06T10:43:35.359930-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -8331,7 +8331,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs321.yaml",
-      "timestamp": "2026-08-06T10:11:23.935816-05:00",
+      "timestamp": "2026-08-06T10:43:35.361844-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -8392,7 +8392,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs330.yaml",
-      "timestamp": "2026-08-06T10:11:23.938660-05:00",
+      "timestamp": "2026-08-06T10:43:35.364649-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -8454,7 +8454,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs340.yaml",
-      "timestamp": "2026-08-06T10:11:23.939625-05:00",
+      "timestamp": "2026-08-06T10:43:35.365605-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -8516,7 +8516,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs341.yaml",
-      "timestamp": "2026-08-06T10:11:23.940359-05:00",
+      "timestamp": "2026-08-06T10:43:35.366328-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -8578,7 +8578,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs350.yaml",
-      "timestamp": "2026-08-06T10:11:23.941084-05:00",
+      "timestamp": "2026-08-06T10:43:35.367044-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -8639,7 +8639,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs351.yaml",
-      "timestamp": "2026-08-06T10:11:23.944144-05:00",
+      "timestamp": "2026-08-06T10:43:35.370070-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -8700,7 +8700,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs360.yaml",
-      "timestamp": "2026-08-06T10:11:23.947320-05:00",
+      "timestamp": "2026-08-06T10:43:35.373212-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -8762,7 +8762,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs370.yaml",
-      "timestamp": "2026-08-06T10:11:23.950207-05:00",
+      "timestamp": "2026-08-06T10:43:35.376017-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -8824,7 +8824,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs373.yaml",
-      "timestamp": "2026-08-06T10:11:23.952121-05:00",
+      "timestamp": "2026-08-06T10:43:35.377884-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -8886,7 +8886,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws101.yaml",
-      "timestamp": "2026-08-06T10:11:23.955978-05:00",
+      "timestamp": "2026-08-06T10:43:35.381687-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -8948,7 +8948,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws136.yaml",
-      "timestamp": "2026-08-06T10:11:23.956720-05:00",
+      "timestamp": "2026-08-06T10:43:35.382420-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -9010,7 +9010,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws156.yaml",
-      "timestamp": "2026-08-06T10:11:23.957337-05:00",
+      "timestamp": "2026-08-06T10:43:35.383033-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -9072,7 +9072,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws201.yaml",
-      "timestamp": "2026-08-06T10:11:23.957949-05:00",
+      "timestamp": "2026-08-06T10:43:35.383637-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -9134,7 +9134,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws202.yaml",
-      "timestamp": "2026-08-06T10:11:23.958793-05:00",
+      "timestamp": "2026-08-06T10:43:35.384468-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -9196,7 +9196,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws203.yaml",
-      "timestamp": "2026-08-06T10:11:23.959628-05:00",
+      "timestamp": "2026-08-06T10:43:35.385286-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -9257,7 +9257,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws301.yaml",
-      "timestamp": "2026-08-06T10:11:23.960884-05:00",
+      "timestamp": "2026-08-06T10:43:35.386510-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -9319,7 +9319,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws302.yaml",
-      "timestamp": "2026-08-06T10:11:23.961723-05:00",
+      "timestamp": "2026-08-06T10:43:35.387328-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -9381,7 +9381,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws303.yaml",
-      "timestamp": "2026-08-06T10:11:23.962985-05:00",
+      "timestamp": "2026-08-06T10:43:35.388570-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -9443,7 +9443,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws50x.yaml",
-      "timestamp": "2026-08-06T10:11:23.963719-05:00",
+      "timestamp": "2026-08-06T10:43:35.389301-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -9505,7 +9505,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws515.yaml",
-      "timestamp": "2026-08-06T10:11:23.965913-05:00",
+      "timestamp": "2026-08-06T10:43:35.391450-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -9566,7 +9566,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws52x.yaml",
-      "timestamp": "2026-08-06T10:11:23.968952-05:00",
+      "timestamp": "2026-08-06T10:43:35.394383-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -9628,7 +9628,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws558.yaml",
-      "timestamp": "2026-08-06T10:11:23.971200-05:00",
+      "timestamp": "2026-08-06T10:43:35.396604-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -9690,7 +9690,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/wt101.yaml",
-      "timestamp": "2026-08-06T10:11:23.972330-05:00",
+      "timestamp": "2026-08-06T10:43:35.397713-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -9751,7 +9751,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/wt201v1.yaml",
-      "timestamp": "2026-08-06T10:11:23.975355-05:00",
+      "timestamp": "2026-08-06T10:43:35.400700-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -9812,7 +9812,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/wt201v2.yaml",
-      "timestamp": "2026-08-06T10:11:23.978884-05:00",
+      "timestamp": "2026-08-06T10:43:35.404129-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -9873,7 +9873,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/wts305.yaml",
-      "timestamp": "2026-08-06T10:11:23.982568-05:00",
+      "timestamp": "2026-08-06T10:43:35.407699-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -9934,7 +9934,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/wts505.yaml",
-      "timestamp": "2026-08-06T10:11:23.984189-05:00",
+      "timestamp": "2026-08-06T10:43:35.409287-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -9995,7 +9995,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/wts506.yaml",
-      "timestamp": "2026-08-06T10:11:23.985787-05:00",
+      "timestamp": "2026-08-06T10:43:35.410853-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -10056,7 +10056,7 @@
     },
     {
       "schema_path": "schemas/devices/radio-bridge/rbs30x.yaml",
-      "timestamp": "2026-08-06T10:11:23.987382-05:00",
+      "timestamp": "2026-08-06T10:43:35.412436-05:00",
       "score": 68.0,
       "tier": "BRONZE",
       "details": {
@@ -10128,7 +10128,7 @@
     },
     {
       "schema_path": "schemas/devices/radionode/rn320bth.yaml",
-      "timestamp": "2026-08-06T10:11:24.023423-05:00",
+      "timestamp": "2026-08-06T10:43:35.451303-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -10189,7 +10189,7 @@
     },
     {
       "schema_path": "schemas/devices/rakwireless/qingping.yaml",
-      "timestamp": "2026-08-06T10:11:24.025162-05:00",
+      "timestamp": "2026-08-06T10:43:35.453600-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {

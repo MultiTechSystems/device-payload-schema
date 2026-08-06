@@ -56,8 +56,11 @@ fields:
   - name: _tempFw35
     type: number
     ref: $sensorTemperatureRaw
-    add: -28.33333
-    div: 5.66666
+    # The offset applies before the division, which the canonical modifier order
+    # (mult, div, add) does not express, so this uses an explicit transform.
+    transform:
+      - add: -28.33333
+      - div: 5.66666
     guard:
       when:
         - field: $reason

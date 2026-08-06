@@ -188,11 +188,18 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   bare string. It accepts an unknown wire type such as `s17`, a field with no
   `name`, and `mult: "0.1"`. For real structural checking use
   `tools/validate_schema.py`, which knows the type vocabulary.
-- **Bare `mult`/`div`/`add` keys are applied in YAML key order.** `{div: 10,
-  add: -5}` and `{add: -5, div: 10}` decode differently, so a schema's meaning
-  depends on key order — which another language's YAML or JSON parser is not
-  obliged to preserve. Prefer an explicit ordered `transform:` list whenever more
-  than one operation applies.
+- **Modifier order is being changed by CR-2026-002, and the interpreters do not
+  agree yet.** The specification now fixes the canonical order for bare
+  `mult`/`div`/`add` at *mult, div, add* regardless of key order, with `transform`
+  as the only way to express another order. The Python interpreter still applies
+  source key order, and `go/schema/schema.go` uses three different orders
+  depending on the input format and code path (a `ModOrder` field for YAML,
+  add-mult-div for JSON, mult-div-add for computed fields). Bringing the six
+  interpreters onto the canonical order is outstanding work. Meanwhile: **always
+  write multi-operation arithmetic as a `transform` array**, which every
+  implementation applies in list order. No schema in the repository depends on key
+  order any more; `validate_schema.py` warns when a field carries two or more bare
+  modifiers.
 - **Most published schemas are unverified.** 134 of 158 device schemas ship with
   no test vectors and are therefore Rejected. See the per-device table in
   [`docs/INDEX.md`](docs/INDEX.md).
