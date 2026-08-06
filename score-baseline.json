@@ -1,9 +1,9 @@
 {
-  "timestamp": "2026-08-06T10:43:35.455394-05:00",
+  "timestamp": "2026-08-06T12:28:56.541730-05:00",
   "schemas": [
     {
       "schema_path": "schemas/devices/decentlab/dl-5tm.yaml",
-      "timestamp": "2026-08-06T10:43:34.558868-05:00",
+      "timestamp": "2026-08-06T12:28:54.492997-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -51,7 +51,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-alb.yaml",
-      "timestamp": "2026-08-06T10:43:34.587553-05:00",
+      "timestamp": "2026-08-06T12:28:54.518157-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -99,7 +99,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-atm22.yaml",
-      "timestamp": "2026-08-06T10:43:34.612262-05:00",
+      "timestamp": "2026-08-06T12:28:54.545169-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -147,7 +147,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-atm41.yaml",
-      "timestamp": "2026-08-06T10:43:34.637452-05:00",
+      "timestamp": "2026-08-06T12:28:54.569853-05:00",
       "score": 92.0,
       "tier": "GOLD",
       "details": {
@@ -210,7 +210,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-atm41g2.yaml",
-      "timestamp": "2026-08-06T10:43:34.666827-05:00",
+      "timestamp": "2026-08-06T12:28:54.601638-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -296,7 +296,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-blg.yaml",
-      "timestamp": "2026-08-06T10:43:34.671758-05:00",
+      "timestamp": "2026-08-06T12:28:54.605902-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -372,7 +372,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-ctd10.yaml",
-      "timestamp": "2026-08-06T10:43:34.673492-05:00",
+      "timestamp": "2026-08-06T12:28:54.607530-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -431,7 +431,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-cws.yaml",
-      "timestamp": "2026-08-06T10:43:34.698792-05:00",
+      "timestamp": "2026-08-06T12:28:54.629389-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -510,7 +510,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-cws2.yaml",
-      "timestamp": "2026-08-06T10:43:34.701372-05:00",
+      "timestamp": "2026-08-06T12:28:54.631617-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -593,7 +593,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-002.yaml",
-      "timestamp": "2026-08-06T10:43:34.704534-05:00",
+      "timestamp": "2026-08-06T12:28:54.634370-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -663,7 +663,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-003.yaml",
-      "timestamp": "2026-08-06T10:43:34.706494-05:00",
+      "timestamp": "2026-08-06T12:28:54.635874-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -711,7 +711,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-004-10.yaml",
-      "timestamp": "2026-08-06T10:43:34.727160-05:00",
+      "timestamp": "2026-08-06T12:28:54.657656-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -785,7 +785,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-005.yaml",
-      "timestamp": "2026-08-06T10:43:34.728576-05:00",
+      "timestamp": "2026-08-06T12:28:54.658920-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -859,7 +859,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-006.yaml",
-      "timestamp": "2026-08-06T10:43:34.729871-05:00",
+      "timestamp": "2026-08-06T12:28:54.660156-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -929,7 +929,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-008-2000.yaml",
-      "timestamp": "2026-08-06T10:43:34.731117-05:00",
+      "timestamp": "2026-08-06T12:28:54.661341-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -1003,7 +1003,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-009-2000.yaml",
-      "timestamp": "2026-08-06T10:43:34.732478-05:00",
+      "timestamp": "2026-08-06T12:28:54.662615-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -1077,7 +1077,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-010.yaml",
-      "timestamp": "2026-08-06T10:43:34.734037-05:00",
+      "timestamp": "2026-08-06T12:28:54.664078-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -1147,7 +1147,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-011.yaml",
-      "timestamp": "2026-08-06T10:43:34.736138-05:00",
+      "timestamp": "2026-08-06T12:28:54.666136-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -1195,7 +1195,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-012.yaml",
-      "timestamp": "2026-08-06T10:43:34.756188-05:00",
+      "timestamp": "2026-08-06T12:28:54.689096-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -1265,7 +1265,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-ds18.yaml",
-      "timestamp": "2026-08-06T10:43:34.757517-05:00",
+      "timestamp": "2026-08-06T12:28:54.690378-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -1313,7 +1313,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dws-232263168-0000302459-1370.yaml",
-      "timestamp": "2026-08-06T10:43:34.779181-05:00",
+      "timestamp": "2026-08-06T12:28:54.713096-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -1389,7 +1389,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-gmm.yaml",
-      "timestamp": "2026-08-06T10:43:34.780688-05:00",
+      "timestamp": "2026-08-06T12:28:54.714863-05:00",
       "score": 92.0,
       "tier": "GOLD",
       "details": {
@@ -1450,7 +1450,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-iam.yaml",
-      "timestamp": "2026-08-06T10:43:34.807448-05:00",
+      "timestamp": "2026-08-06T12:28:54.740165-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -1537,7 +1537,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-ifd.yaml",
-      "timestamp": "2026-08-06T10:43:34.811007-05:00",
+      "timestamp": "2026-08-06T12:28:54.743793-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -1585,7 +1585,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-ilt.yaml",
-      "timestamp": "2026-08-06T10:43:34.832741-05:00",
+      "timestamp": "2026-08-06T12:28:54.763613-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -1633,7 +1633,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-isd.yaml",
-      "timestamp": "2026-08-06T10:43:34.853344-05:00",
+      "timestamp": "2026-08-06T12:28:54.785178-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -1681,7 +1681,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-isf.yaml",
-      "timestamp": "2026-08-06T10:43:34.875199-05:00",
+      "timestamp": "2026-08-06T12:28:54.806763-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -1758,7 +1758,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-itst.yaml",
-      "timestamp": "2026-08-06T10:43:34.879333-05:00",
+      "timestamp": "2026-08-06T12:28:54.810870-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -1834,7 +1834,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-kl66-1538372-464859.yaml",
-      "timestamp": "2026-08-06T10:43:34.880776-05:00",
+      "timestamp": "2026-08-06T12:28:54.812318-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -1910,7 +1910,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-lid.yaml",
-      "timestamp": "2026-08-06T10:43:34.882893-05:00",
+      "timestamp": "2026-08-06T12:28:54.814411-05:00",
       "score": 80.0,
       "tier": "SILVER",
       "details": {
@@ -1985,7 +1985,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-lp8p.yaml",
-      "timestamp": "2026-08-06T10:43:34.907801-05:00",
+      "timestamp": "2026-08-06T12:28:54.837903-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -2076,7 +2076,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-lpw.yaml",
-      "timestamp": "2026-08-06T10:43:34.911547-05:00",
+      "timestamp": "2026-08-06T12:28:54.842162-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -2146,7 +2146,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-lws.yaml",
-      "timestamp": "2026-08-06T10:43:34.912816-05:00",
+      "timestamp": "2026-08-06T12:28:54.843585-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -2216,7 +2216,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-mbx.yaml",
-      "timestamp": "2026-08-06T10:43:34.914008-05:00",
+      "timestamp": "2026-08-06T12:28:54.844949-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -2273,7 +2273,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-mes5.yaml",
-      "timestamp": "2026-08-06T10:43:34.936620-05:00",
+      "timestamp": "2026-08-06T12:28:54.866193-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -2321,7 +2321,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-ntu.yaml",
-      "timestamp": "2026-08-06T10:43:34.961411-05:00",
+      "timestamp": "2026-08-06T12:28:54.888592-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -2369,7 +2369,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-optod.yaml",
-      "timestamp": "2026-08-06T10:43:34.985851-05:00",
+      "timestamp": "2026-08-06T12:28:54.910476-05:00",
       "score": 94.0,
       "tier": "GOLD",
       "details": {
@@ -2426,7 +2426,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-par.yaml",
-      "timestamp": "2026-08-06T10:43:35.013281-05:00",
+      "timestamp": "2026-08-06T12:28:54.934904-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -2496,7 +2496,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pheht.yaml",
-      "timestamp": "2026-08-06T10:43:35.014859-05:00",
+      "timestamp": "2026-08-06T12:28:54.936651-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -2551,7 +2551,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pm.yaml",
-      "timestamp": "2026-08-06T10:43:35.038051-05:00",
+      "timestamp": "2026-08-06T12:28:54.962229-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -2647,7 +2647,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pr21-1-10.yaml",
-      "timestamp": "2026-08-06T10:43:35.042010-05:00",
+      "timestamp": "2026-08-06T12:28:54.966512-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -2723,7 +2723,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pr26-0-1.yaml",
-      "timestamp": "2026-08-06T10:43:35.043485-05:00",
+      "timestamp": "2026-08-06T12:28:54.968067-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -2799,7 +2799,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pr36-8192.yaml",
-      "timestamp": "2026-08-06T10:43:35.044963-05:00",
+      "timestamp": "2026-08-06T12:28:54.969609-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -2874,7 +2874,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pr36ctd-8192-1024.yaml",
-      "timestamp": "2026-08-06T10:43:35.046412-05:00",
+      "timestamp": "2026-08-06T12:28:54.971210-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -2952,7 +2952,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pyr.yaml",
-      "timestamp": "2026-08-06T10:43:35.048251-05:00",
+      "timestamp": "2026-08-06T12:28:54.973299-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -3022,7 +3022,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-rad.yaml",
-      "timestamp": "2026-08-06T10:43:35.049505-05:00",
+      "timestamp": "2026-08-06T12:28:54.974690-05:00",
       "score": 92.0,
       "tier": "GOLD",
       "details": {
@@ -3079,7 +3079,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-rhc.yaml",
-      "timestamp": "2026-08-06T10:43:35.073946-05:00",
+      "timestamp": "2026-08-06T12:28:54.998676-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -3154,7 +3154,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-sdd.yaml",
-      "timestamp": "2026-08-06T10:43:35.075565-05:00",
+      "timestamp": "2026-08-06T12:28:55.000416-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -3297,7 +3297,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-sht35.yaml",
-      "timestamp": "2026-08-06T10:43:35.084667-05:00",
+      "timestamp": "2026-08-06T12:28:55.009803-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -3373,7 +3373,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-smtp.yaml",
-      "timestamp": "2026-08-06T10:43:35.086111-05:00",
+      "timestamp": "2026-08-06T12:28:55.011251-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -3476,7 +3476,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-tbrg-01.yaml",
-      "timestamp": "2026-08-06T10:43:35.089905-05:00",
+      "timestamp": "2026-08-06T12:28:55.015061-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -3546,7 +3546,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-tp.yaml",
-      "timestamp": "2026-08-06T10:43:35.091474-05:00",
+      "timestamp": "2026-08-06T12:28:55.016656-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -3594,7 +3594,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-trs11.yaml",
-      "timestamp": "2026-08-06T10:43:35.124669-05:00",
+      "timestamp": "2026-08-06T12:28:55.049391-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -3667,7 +3667,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-trs12.yaml",
-      "timestamp": "2026-08-06T10:43:35.126380-05:00",
+      "timestamp": "2026-08-06T12:28:55.051231-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -3741,7 +3741,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-trs21.yaml",
-      "timestamp": "2026-08-06T10:43:35.128195-05:00",
+      "timestamp": "2026-08-06T12:28:55.053191-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -3814,7 +3814,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-wrm.yaml",
-      "timestamp": "2026-08-06T10:43:35.129630-05:00",
+      "timestamp": "2026-08-06T12:28:55.054751-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -3894,7 +3894,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-zn1.yaml",
-      "timestamp": "2026-08-06T10:43:35.131450-05:00",
+      "timestamp": "2026-08-06T12:28:55.057034-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -3964,7 +3964,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-zn2.yaml",
-      "timestamp": "2026-08-06T10:43:35.132693-05:00",
+      "timestamp": "2026-08-06T12:28:55.058538-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4034,7 +4034,7 @@
     },
     {
       "schema_path": "schemas/devices/digital-matter/oyster.yaml",
-      "timestamp": "2026-08-06T10:43:35.134107-05:00",
+      "timestamp": "2026-08-06T12:28:55.060194-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -4084,7 +4084,7 @@
     },
     {
       "schema_path": "schemas/devices/dragino/laq4.yaml",
-      "timestamp": "2026-08-06T10:43:35.160213-05:00",
+      "timestamp": "2026-08-06T12:28:55.085652-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -4134,7 +4134,7 @@
     },
     {
       "schema_path": "schemas/devices/elsys/ers.yaml",
-      "timestamp": "2026-08-06T10:43:35.183591-05:00",
+      "timestamp": "2026-08-06T12:28:55.108682-05:00",
       "score": 56.0,
       "tier": "REJECTED",
       "details": {
@@ -4196,7 +4196,7 @@
     },
     {
       "schema_path": "schemas/devices/hbi/mla20.yaml",
-      "timestamp": "2026-08-06T10:43:35.210402-05:00",
+      "timestamp": "2026-08-06T12:28:55.132138-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4258,7 +4258,7 @@
     },
     {
       "schema_path": "schemas/devices/makerfabs/4-channel-adc.yaml",
-      "timestamp": "2026-08-06T10:43:35.212794-05:00",
+      "timestamp": "2026-08-06T12:28:55.134571-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4328,7 +4328,7 @@
     },
     {
       "schema_path": "schemas/devices/makerfabs/ath20.yaml",
-      "timestamp": "2026-08-06T10:43:35.214415-05:00",
+      "timestamp": "2026-08-06T12:28:55.136215-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -4403,7 +4403,7 @@
     },
     {
       "schema_path": "schemas/devices/makerfabs/gps-tracker.yaml",
-      "timestamp": "2026-08-06T10:43:35.215262-05:00",
+      "timestamp": "2026-08-06T12:28:55.137066-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4480,7 +4480,7 @@
     },
     {
       "schema_path": "schemas/devices/makerfabs/leaf-moisture-sn-3001.yaml",
-      "timestamp": "2026-08-06T10:43:35.217808-05:00",
+      "timestamp": "2026-08-06T12:28:55.139585-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -4555,7 +4555,7 @@
     },
     {
       "schema_path": "schemas/devices/makerfabs/pipe-pressure.yaml",
-      "timestamp": "2026-08-06T10:43:35.218909-05:00",
+      "timestamp": "2026-08-06T12:28:55.140691-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4629,7 +4629,7 @@
     },
     {
       "schema_path": "schemas/devices/makerfabs/soil-monitor.yaml",
-      "timestamp": "2026-08-06T10:43:35.219629-05:00",
+      "timestamp": "2026-08-06T12:28:55.141416-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -4705,7 +4705,7 @@
     },
     {
       "schema_path": "schemas/devices/mclimate/flood-sensor.yaml",
-      "timestamp": "2026-08-06T10:43:35.221035-05:00",
+      "timestamp": "2026-08-06T12:28:55.142814-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4779,7 +4779,7 @@
     },
     {
       "schema_path": "schemas/devices/mclimate/t-valve.yaml",
-      "timestamp": "2026-08-06T10:43:35.222106-05:00",
+      "timestamp": "2026-08-06T12:28:55.143907-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4849,7 +4849,7 @@
     },
     {
       "schema_path": "schemas/devices/mclimate/vicki.yaml",
-      "timestamp": "2026-08-06T10:43:35.223863-05:00",
+      "timestamp": "2026-08-06T12:28:55.145663-05:00",
       "score": 85.0,
       "tier": "GOLD",
       "details": {
@@ -4902,39 +4902,31 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am102.yaml",
-      "timestamp": "2026-08-06T10:43:35.259953-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.179839-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 10,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 10,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -4946,56 +4938,44 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 1,
+            "vendor-codec": 9
+          },
+          "independent_vectors": 10,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/am102l.yaml",
-      "timestamp": "2026-08-06T10:43:35.262201-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.201070-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 10,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 10,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -5007,55 +4987,44 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 1,
+            "vendor-codec": 9
+          },
+          "independent_vectors": 10,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/am103.yaml",
-      "timestamp": "2026-08-06T10:43:35.264368-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.223108-05:00",
+      "score": 76.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 15,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 15,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
         "edge_cases_missing": [
-          "zero values",
           "maximum values",
-          "negative values",
-          "minimum payload length"
+          "negative values"
         ],
         "semantic_annotations": {
           "total_fields": 1,
@@ -5068,55 +5037,47 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 1,
+            "vendor-codec": 14
+          },
+          "independent_vectors": 15,
+          "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
+        "Add test vector for negative values"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/am103l.yaml",
-      "timestamp": "2026-08-06T10:43:35.266236-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.247288-05:00",
+      "score": 76.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 15,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 15,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
         "edge_cases_missing": [
-          "zero values",
           "maximum values",
-          "negative values",
-          "minimum payload length"
+          "negative values"
         ],
         "semantic_annotations": {
           "total_fields": 1,
@@ -5129,56 +5090,47 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 1,
+            "vendor-codec": 14
+          },
+          "independent_vectors": 15,
+          "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
+        "Add test vector for negative values"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/am104.yaml",
-      "timestamp": "2026-08-06T10:43:35.268102-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.273752-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 15,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 15,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -5190,55 +5142,44 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 2,
+            "vendor-codec": 13
+          },
+          "independent_vectors": 15,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/am107.yaml",
-      "timestamp": "2026-08-06T10:43:35.269554-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.295026-05:00",
+      "score": 76.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 15,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 15,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
         "edge_cases_missing": [
-          "zero values",
           "maximum values",
-          "negative values",
-          "minimum payload length"
+          "negative values"
         ],
         "semantic_annotations": {
           "total_fields": 1,
@@ -5251,55 +5192,47 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 3,
+            "vendor-codec": 12
+          },
+          "independent_vectors": 15,
+          "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
+        "Add test vector for negative values"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/am307.yaml",
-      "timestamp": "2026-08-06T10:43:35.271402-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.318629-05:00",
+      "score": 76.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 15,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 15,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
         "edge_cases_missing": [
-          "zero values",
           "maximum values",
-          "negative values",
-          "minimum payload length"
+          "negative values"
         ],
         "semantic_annotations": {
           "total_fields": 1,
@@ -5312,55 +5245,47 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 2,
+            "vendor-codec": 13
+          },
+          "independent_vectors": 15,
+          "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
+        "Add test vector for negative values"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/am307l.yaml",
-      "timestamp": "2026-08-06T10:43:35.273795-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.342277-05:00",
+      "score": 76.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 15,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 15,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
         "edge_cases_missing": [
-          "zero values",
           "maximum values",
-          "negative values",
-          "minimum payload length"
+          "negative values"
         ],
         "semantic_annotations": {
           "total_fields": 1,
@@ -5373,55 +5298,47 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 2,
+            "vendor-codec": 13
+          },
+          "independent_vectors": 15,
+          "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
+        "Add test vector for negative values"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/am308.yaml",
-      "timestamp": "2026-08-06T10:43:35.276281-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.366140-05:00",
+      "score": 76.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 15,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 15,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
         "edge_cases_missing": [
-          "zero values",
           "maximum values",
-          "negative values",
-          "minimum payload length"
+          "negative values"
         ],
         "semantic_annotations": {
           "total_fields": 1,
@@ -5434,55 +5351,47 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 2,
+            "vendor-codec": 13
+          },
+          "independent_vectors": 15,
+          "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
+        "Add test vector for negative values"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/am308l.yaml",
-      "timestamp": "2026-08-06T10:43:35.278924-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.390290-05:00",
+      "score": 76.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 15,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 15,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
         "edge_cases_missing": [
-          "zero values",
           "maximum values",
-          "negative values",
-          "minimum payload length"
+          "negative values"
         ],
         "semantic_annotations": {
           "total_fields": 1,
@@ -5495,55 +5404,47 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 2,
+            "vendor-codec": 13
+          },
+          "independent_vectors": 15,
+          "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
+        "Add test vector for negative values"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/am319.yaml",
-      "timestamp": "2026-08-06T10:43:35.281560-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.416903-05:00",
+      "score": 76.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 15,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 15,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
         "edge_cases_missing": [
-          "zero values",
           "maximum values",
-          "negative values",
-          "minimum payload length"
+          "negative values"
         ],
         "semantic_annotations": {
           "total_fields": 1,
@@ -5556,55 +5457,46 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 15
+          },
+          "independent_vectors": 15,
+          "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
+        "Add test vector for negative values"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/am319l.yaml",
-      "timestamp": "2026-08-06T10:43:35.285129-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.442773-05:00",
+      "score": 76.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 15,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 15,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
         "edge_cases_missing": [
-          "zero values",
           "maximum values",
-          "negative values",
-          "minimum payload length"
+          "negative values"
         ],
         "semantic_annotations": {
           "total_fields": 1,
@@ -5617,56 +5509,46 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 15
+          },
+          "independent_vectors": 15,
+          "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
+        "Add test vector for negative values"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/at101-fh.yaml",
-      "timestamp": "2026-08-06T10:43:35.288775-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.466966-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 8,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 8,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -5678,56 +5560,43 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 8
+          },
+          "independent_vectors": 8,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/at101.yaml",
-      "timestamp": "2026-08-06T10:43:35.292331-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.488661-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 6,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 6,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -5739,24 +5608,19 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 6
+          },
+          "independent_vectors": 6,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/ct101.yaml",
-      "timestamp": "2026-08-06T10:43:35.295161-05:00",
+      "timestamp": "2026-08-06T12:28:55.510128-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -5817,7 +5681,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ct103.yaml",
-      "timestamp": "2026-08-06T10:43:35.298428-05:00",
+      "timestamp": "2026-08-06T12:28:55.513549-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -5878,7 +5742,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ct105.yaml",
-      "timestamp": "2026-08-06T10:43:35.301799-05:00",
+      "timestamp": "2026-08-06T12:28:55.516580-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -5939,7 +5803,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ct303.yaml",
-      "timestamp": "2026-08-06T10:43:35.304425-05:00",
+      "timestamp": "2026-08-06T12:28:55.519438-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -6000,7 +5864,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ct305.yaml",
-      "timestamp": "2026-08-06T10:43:35.306307-05:00",
+      "timestamp": "2026-08-06T12:28:55.521526-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -6061,7 +5925,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ct310.yaml",
-      "timestamp": "2026-08-06T10:43:35.308490-05:00",
+      "timestamp": "2026-08-06T12:28:55.523600-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -6122,39 +5986,31 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em300-di.yaml",
-      "timestamp": "2026-08-06T10:43:35.310463-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.525699-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 15,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 15,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -6166,56 +6022,44 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 1,
+            "vendor-codec": 14
+          },
+          "independent_vectors": 15,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/em300-mcs.yaml",
-      "timestamp": "2026-08-06T10:43:35.311620-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.547435-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 9,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 9,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -6227,24 +6071,19 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 9
+          },
+          "independent_vectors": 9,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/em300-mld.yaml",
-      "timestamp": "2026-08-06T10:43:35.313648-05:00",
+      "timestamp": "2026-08-06T12:28:55.569090-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -6306,39 +6145,31 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em300-sld.yaml",
-      "timestamp": "2026-08-06T10:43:35.314398-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.569953-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 9,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 9,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -6350,56 +6181,43 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 9
+          },
+          "independent_vectors": 9,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/em300-th.yaml",
-      "timestamp": "2026-08-06T10:43:35.315426-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.589144-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 10,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 10,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -6411,56 +6229,44 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 1,
+            "vendor-codec": 9
+          },
+          "independent_vectors": 10,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/em300-zld.yaml",
-      "timestamp": "2026-08-06T10:43:35.316341-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.610579-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 9,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 9,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -6472,24 +6278,19 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 9
+          },
+          "independent_vectors": 9,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/em310-tilt.yaml",
-      "timestamp": "2026-08-06T10:43:35.317378-05:00",
+      "timestamp": "2026-08-06T12:28:55.629638-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -6550,40 +6351,31 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em310-udl.yaml",
-      "timestamp": "2026-08-06T10:43:35.319640-05:00",
-      "score": 16.5,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.632664-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 6,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 6,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
-        ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
         "edge_cases_covered": [
-          "negative"
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -6595,56 +6387,43 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 6
+          },
+          "independent_vectors": 6,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/em320-th.yaml",
-      "timestamp": "2026-08-06T10:43:35.321511-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.653400-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 10,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 10,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -6656,24 +6435,20 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 1,
+            "vendor-codec": 9
+          },
+          "independent_vectors": 10,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/em320-tilt.yaml",
-      "timestamp": "2026-08-06T10:43:35.322428-05:00",
+      "timestamp": "2026-08-06T12:28:55.673555-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -6734,39 +6509,34 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em400-mud.yaml",
-      "timestamp": "2026-08-06T10:43:35.323679-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.674932-05:00",
+      "score": 65.0,
+      "tier": "BRONZE",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 11,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 11,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
-        ],
-        "js_status": "skipped",
+        "python_errors": [],
+        "js_status": "fail",
         "js_tests_pass": false,
         "js_errors": [
-          "No test vectors for JS validation"
+          "ch131_type103_zero_values: temperature_abnormal=0, expected false",
+          "ch132_type130_zero_values: distance_alarming=0, expected false"
         ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -6778,56 +6548,48 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 11
+          },
+          "independent_vectors": 11,
+          "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
+        "Generated JS codec disagrees with the test vectors"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/em400-tld.yaml",
-      "timestamp": "2026-08-06T10:43:35.325106-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.699794-05:00",
+      "score": 65.0,
+      "tier": "BRONZE",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 11,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 11,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
-        ],
-        "js_status": "skipped",
+        "python_errors": [],
+        "js_status": "fail",
         "js_tests_pass": false,
         "js_errors": [
-          "No test vectors for JS validation"
+          "ch131_type103_zero_values: temperature_abnormal=0, expected false",
+          "ch132_type130_zero_values: distance_alarming=0, expected false"
         ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -6839,56 +6601,48 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 11
+          },
+          "independent_vectors": 11,
+          "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
+        "Generated JS codec disagrees with the test vectors"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/em400-udl.yaml",
-      "timestamp": "2026-08-06T10:43:35.326517-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.721514-05:00",
+      "score": 65.0,
+      "tier": "BRONZE",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 11,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 11,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
-        ],
-        "js_status": "skipped",
+        "python_errors": [],
+        "js_status": "fail",
         "js_tests_pass": false,
         "js_errors": [
-          "No test vectors for JS validation"
+          "ch131_type103_zero_values: temperature_abnormal=0, expected false",
+          "ch132_type130_zero_values: distance_alarming=0, expected false"
         ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -6900,56 +6654,45 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 11
+          },
+          "independent_vectors": 11,
+          "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
+        "Generated JS codec disagrees with the test vectors"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/em410-rdl.yaml",
-      "timestamp": "2026-08-06T10:43:35.327930-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.742071-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 12,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 12,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -6961,24 +6704,19 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 12
+          },
+          "independent_vectors": 12,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/em500-co2.yaml",
-      "timestamp": "2026-08-06T10:43:35.330094-05:00",
+      "timestamp": "2026-08-06T12:28:55.764163-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -7039,40 +6777,31 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-lgt.yaml",
-      "timestamp": "2026-08-06T10:43:35.331269-05:00",
-      "score": 16.5,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.765507-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 7,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 7,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
-        ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
         "edge_cases_covered": [
-          "negative"
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -7084,56 +6813,44 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 2,
+            "vendor-codec": 5
+          },
+          "independent_vectors": 7,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/em500-pp.yaml",
-      "timestamp": "2026-08-06T10:43:35.332042-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.785710-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 8,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 8,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -7145,56 +6862,44 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 2,
+            "vendor-codec": 6
+          },
+          "independent_vectors": 8,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/em500-pt100.yaml",
-      "timestamp": "2026-08-06T10:43:35.332777-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.806396-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 7,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 7,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -7206,57 +6911,44 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 1,
+            "vendor-codec": 6
+          },
+          "independent_vectors": 7,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/em500-smt.yaml",
-      "timestamp": "2026-08-06T10:43:35.333545-05:00",
-      "score": 16.5,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.826633-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 9,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 9,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
-        ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
         "edge_cases_covered": [
-          "negative"
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -7268,56 +6960,43 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 9
+          },
+          "independent_vectors": 9,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/em500-smtc.yaml",
-      "timestamp": "2026-08-06T10:43:35.334449-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.847106-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 15,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 15,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -7329,57 +7008,44 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 1,
+            "vendor-codec": 14
+          },
+          "independent_vectors": 15,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/em500-swl.yaml",
-      "timestamp": "2026-08-06T10:43:35.335609-05:00",
-      "score": 16.5,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.868966-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 7,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 7,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
-        ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
         "edge_cases_covered": [
-          "negative"
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -7391,24 +7057,20 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 1,
+            "vendor-codec": 6
+          },
+          "independent_vectors": 7,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/em500-udl.yaml",
-      "timestamp": "2026-08-06T10:43:35.336345-05:00",
+      "timestamp": "2026-08-06T12:28:55.891546-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -7469,7 +7131,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/gs101.yaml",
-      "timestamp": "2026-08-06T10:43:35.337106-05:00",
+      "timestamp": "2026-08-06T12:28:55.892587-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -7531,39 +7193,31 @@
     },
     {
       "schema_path": "schemas/devices/milesight/gs301.yaml",
-      "timestamp": "2026-08-06T10:43:35.338174-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.893915-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 12,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 12,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -7575,56 +7229,43 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 12
+          },
+          "independent_vectors": 12,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/ts101.yaml",
-      "timestamp": "2026-08-06T10:43:35.340821-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.916384-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 7,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 7,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -7636,56 +7277,44 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 1,
+            "vendor-codec": 6
+          },
+          "independent_vectors": 7,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/ts201.yaml",
-      "timestamp": "2026-08-06T10:43:35.342288-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.938190-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 6,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 6,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -7697,56 +7326,43 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 6
+          },
+          "independent_vectors": 6,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/ts201v2.yaml",
-      "timestamp": "2026-08-06T10:43:35.344078-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.958324-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 9,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 9,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -7758,56 +7374,43 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 9
+          },
+          "independent_vectors": 9,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/ts30x.yaml",
-      "timestamp": "2026-08-06T10:43:35.346100-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:55.980235-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 10,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 10,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -7819,24 +7422,20 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 1,
+            "vendor-codec": 9
+          },
+          "independent_vectors": 10,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/uc100.yaml",
-      "timestamp": "2026-08-06T10:43:35.349618-05:00",
+      "timestamp": "2026-08-06T12:28:56.003134-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -7898,7 +7497,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/uc1114.yaml",
-      "timestamp": "2026-08-06T10:43:35.350766-05:00",
+      "timestamp": "2026-08-06T12:28:56.004659-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -7960,7 +7559,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/uc1152.yaml",
-      "timestamp": "2026-08-06T10:43:35.351515-05:00",
+      "timestamp": "2026-08-06T12:28:56.005550-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -8022,38 +7621,37 @@
     },
     {
       "schema_path": "schemas/devices/milesight/uc300.yaml",
-      "timestamp": "2026-08-06T10:43:35.352148-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:56.006258-05:00",
+      "score": 61.0,
+      "tier": "BRONZE",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 15,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 15,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
-        ],
-        "js_status": "skipped",
+        "python_errors": [],
+        "js_status": "fail",
         "js_tests_pass": false,
         "js_errors": [
-          "No test vectors for JS validation"
+          "vendor_reference: digital_input_2=0, expected false",
+          "vendor_reference: digital_input_3=0, expected false",
+          "vendor_reference: digital_input_4=1, expected true",
+          "vendor_reference: digital_output_1=0, expected false",
+          "vendor_reference: digital_output_2=1, expected true"
         ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "min_payload"
         ],
-        "edge_cases_covered": [],
         "edge_cases_missing": [
-          "zero values",
           "maximum values",
-          "negative values",
-          "minimum payload length"
+          "negative values"
         ],
         "semantic_annotations": {
           "total_fields": 1,
@@ -8066,24 +7664,24 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 1,
+            "vendor-codec": 14
+          },
+          "independent_vectors": 15,
+          "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
+        "Generated JS codec disagrees with the test vectors",
         "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
+        "Add test vector for negative values"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/uc50x.yaml",
-      "timestamp": "2026-08-06T10:43:35.354743-05:00",
+      "timestamp": "2026-08-06T12:28:56.032633-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -8145,40 +7743,31 @@
     },
     {
       "schema_path": "schemas/devices/milesight/uc51x.yaml",
-      "timestamp": "2026-08-06T10:43:35.356377-05:00",
-      "score": 16.5,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:56.034489-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 12,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 12,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
-        ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
         "edge_cases_covered": [
-          "negative"
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -8190,24 +7779,19 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 12
+          },
+          "independent_vectors": 12,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/vs121.yaml",
-      "timestamp": "2026-08-06T10:43:35.359147-05:00",
+      "timestamp": "2026-08-06T12:28:56.057795-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -8269,40 +7853,31 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs135.yaml",
-      "timestamp": "2026-08-06T10:43:35.359930-05:00",
-      "score": 16.5,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:56.058650-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 6,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 6,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
-        ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
         "edge_cases_covered": [
-          "negative"
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -8314,55 +7889,43 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 6
+          },
+          "independent_vectors": 6,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/vs321.yaml",
-      "timestamp": "2026-08-06T10:43:35.361844-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:56.082367-05:00",
+      "score": 78.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 9,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 9,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
         "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
+          "negative values"
         ],
         "semantic_annotations": {
           "total_fields": 1,
@@ -8375,57 +7938,45 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 9
+          },
+          "independent_vectors": 9,
+          "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
+        "Add test vector for negative values"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/vs330.yaml",
-      "timestamp": "2026-08-06T10:43:35.364649-05:00",
-      "score": 16.5,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:56.110453-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 6,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 6,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
-        ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
         "edge_cases_covered": [
-          "negative"
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -8437,24 +7988,19 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 6
+          },
+          "independent_vectors": 6,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/vs340.yaml",
-      "timestamp": "2026-08-06T10:43:35.365605-05:00",
+      "timestamp": "2026-08-06T12:28:56.130761-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -8516,7 +8062,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs341.yaml",
-      "timestamp": "2026-08-06T10:43:35.366328-05:00",
+      "timestamp": "2026-08-06T12:28:56.131642-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -8578,39 +8124,31 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs350.yaml",
-      "timestamp": "2026-08-06T10:43:35.367044-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:56.132436-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 15,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 15,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -8622,56 +8160,43 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 15
+          },
+          "independent_vectors": 15,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/vs351.yaml",
-      "timestamp": "2026-08-06T10:43:35.370070-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:56.156214-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 15,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 15,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -8683,57 +8208,44 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 1,
+            "vendor-codec": 14
+          },
+          "independent_vectors": 15,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/vs360.yaml",
-      "timestamp": "2026-08-06T10:43:35.373212-05:00",
-      "score": 16.5,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:56.183614-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 15,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 15,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
-        ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
         "edge_cases_covered": [
-          "negative"
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -8745,24 +8257,20 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 1,
+            "vendor-codec": 14
+          },
+          "independent_vectors": 15,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/vs370.yaml",
-      "timestamp": "2026-08-06T10:43:35.376017-05:00",
+      "timestamp": "2026-08-06T12:28:56.207853-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -8824,40 +8332,31 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs373.yaml",
-      "timestamp": "2026-08-06T10:43:35.377884-05:00",
-      "score": 16.5,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:56.210266-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 5,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 5,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
-        ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
         "edge_cases_covered": [
-          "negative"
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -8869,24 +8368,19 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 5
+          },
+          "independent_vectors": 5,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/ws101.yaml",
-      "timestamp": "2026-08-06T10:43:35.381687-05:00",
+      "timestamp": "2026-08-06T12:28:56.233851-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -8948,7 +8442,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws136.yaml",
-      "timestamp": "2026-08-06T10:43:35.382420-05:00",
+      "timestamp": "2026-08-06T12:28:56.234750-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -9010,7 +8504,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws156.yaml",
-      "timestamp": "2026-08-06T10:43:35.383033-05:00",
+      "timestamp": "2026-08-06T12:28:56.235411-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -9072,40 +8566,31 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws201.yaml",
-      "timestamp": "2026-08-06T10:43:35.383637-05:00",
-      "score": 16.5,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:56.236061-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 10,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 10,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
-        ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
         "edge_cases_covered": [
-          "negative"
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -9117,24 +8602,20 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 1,
+            "vendor-codec": 9
+          },
+          "independent_vectors": 10,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/ws202.yaml",
-      "timestamp": "2026-08-06T10:43:35.384468-05:00",
+      "timestamp": "2026-08-06T12:28:56.254957-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -9196,39 +8677,31 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws203.yaml",
-      "timestamp": "2026-08-06T10:43:35.385286-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:56.256046-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 9,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 9,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -9240,24 +8713,19 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 9
+          },
+          "independent_vectors": 9,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/ws301.yaml",
-      "timestamp": "2026-08-06T10:43:35.386510-05:00",
+      "timestamp": "2026-08-06T12:28:56.278025-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -9319,7 +8787,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws302.yaml",
-      "timestamp": "2026-08-06T10:43:35.387328-05:00",
+      "timestamp": "2026-08-06T12:28:56.279029-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -9381,7 +8849,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws303.yaml",
-      "timestamp": "2026-08-06T10:43:35.388570-05:00",
+      "timestamp": "2026-08-06T12:28:56.280373-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -9443,7 +8911,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws50x.yaml",
-      "timestamp": "2026-08-06T10:43:35.389301-05:00",
+      "timestamp": "2026-08-06T12:28:56.281153-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -9505,38 +8973,31 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws515.yaml",
-      "timestamp": "2026-08-06T10:43:35.391450-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:56.283427-05:00",
+      "score": 78.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 15,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 15,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
         "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
+          "negative values"
         ],
         "semantic_annotations": {
           "total_fields": 1,
@@ -9549,57 +9010,47 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 15
+          },
+          "independent_vectors": 15,
+          "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
+        "Add test vector for negative values"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/ws52x.yaml",
-      "timestamp": "2026-08-06T10:43:35.394383-05:00",
-      "score": 16.5,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:56.311958-05:00",
+      "score": 65.0,
+      "tier": "BRONZE",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 15,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 15,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
-        ],
-        "js_status": "skipped",
+        "python_errors": [],
+        "js_status": "fail",
         "js_tests_pass": false,
         "js_errors": [
-          "No test vectors for JS validation"
+          "vendor_reference_3: socket_status=1, expected true"
         ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
         "edge_cases_covered": [
-          "negative"
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -9611,57 +9062,46 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 3,
+            "vendor-codec": 12
+          },
+          "independent_vectors": 15,
+          "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
-        "Add test vectors covering all switch/flagged branches"
+        "Generated JS codec disagrees with the test vectors"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/ws558.yaml",
-      "timestamp": "2026-08-06T10:43:35.396604-05:00",
-      "score": 16.5,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:56.336242-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 15,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 15,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
-        ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
         "edge_cases_covered": [
-          "negative"
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -9673,56 +9113,44 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 2,
+            "vendor-codec": 13
+          },
+          "independent_vectors": 15,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/wt101.yaml",
-      "timestamp": "2026-08-06T10:43:35.397713-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:56.357450-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 15,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 15,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -9734,56 +9162,44 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 1,
+            "vendor-codec": 14
+          },
+          "independent_vectors": 15,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/wt201v1.yaml",
-      "timestamp": "2026-08-06T10:43:35.400700-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:56.382430-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 9,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 9,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -9795,56 +9211,43 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 9
+          },
+          "independent_vectors": 9,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/wt201v2.yaml",
-      "timestamp": "2026-08-06T10:43:35.404129-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:56.407285-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 12,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 12,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
-        "edge_cases_missing": [
-          "zero values",
-          "maximum values",
-          "negative values",
-          "minimum payload length"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 1,
           "ipso_mapped": 0,
@@ -9856,55 +9259,43 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 12
+          },
+          "independent_vectors": 12,
+          "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/wts305.yaml",
-      "timestamp": "2026-08-06T10:43:35.407699-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:56.431500-05:00",
+      "score": 76.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 15,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 15,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
         "edge_cases_missing": [
-          "zero values",
           "maximum values",
-          "negative values",
-          "minimum payload length"
+          "negative values"
         ],
         "semantic_annotations": {
           "total_fields": 1,
@@ -9917,55 +9308,47 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 1,
+            "vendor-codec": 14
+          },
+          "independent_vectors": 15,
+          "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
+        "Add test vector for negative values"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/wts505.yaml",
-      "timestamp": "2026-08-06T10:43:35.409287-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:56.456834-05:00",
+      "score": 76.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 15,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 15,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
         "edge_cases_missing": [
-          "zero values",
           "maximum values",
-          "negative values",
-          "minimum payload length"
+          "negative values"
         ],
         "semantic_annotations": {
           "total_fields": 1,
@@ -9978,55 +9361,47 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 1,
+            "vendor-codec": 14
+          },
+          "independent_vectors": 15,
+          "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
+        "Add test vector for negative values"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/wts506.yaml",
-      "timestamp": "2026-08-06T10:43:35.410853-05:00",
-      "score": 14.1,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-06T12:28:56.480115-05:00",
+      "score": 76.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
-        "vector_issues": [
-          "No test vectors defined"
-        ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "has_test_vectors": true,
+        "test_count": 15,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 15,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "min_payload"
         ],
-        "js_status": "skipped",
-        "js_tests_pass": false,
-        "js_errors": [
-          "No test vectors for JS validation"
-        ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
-        "edge_cases_covered": [],
         "edge_cases_missing": [
-          "zero values",
           "maximum values",
-          "negative values",
-          "minimum payload length"
+          "negative values"
         ],
         "semantic_annotations": {
           "total_fields": 1,
@@ -10039,24 +9414,23 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-doc": 1,
+            "vendor-codec": 14
+          },
+          "independent_vectors": 15,
+          "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
-        "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches"
+        "Add test vector for negative values"
       ]
     },
     {
       "schema_path": "schemas/devices/radio-bridge/rbs30x.yaml",
-      "timestamp": "2026-08-06T10:43:35.412436-05:00",
+      "timestamp": "2026-08-06T12:28:56.501986-05:00",
       "score": 68.0,
       "tier": "BRONZE",
       "details": {
@@ -10128,7 +9502,7 @@
     },
     {
       "schema_path": "schemas/devices/radionode/rn320bth.yaml",
-      "timestamp": "2026-08-06T10:43:35.451303-05:00",
+      "timestamp": "2026-08-06T12:28:56.538151-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -10189,7 +9563,7 @@
     },
     {
       "schema_path": "schemas/devices/rakwireless/qingping.yaml",
-      "timestamp": "2026-08-06T10:43:35.453600-05:00",
+      "timestamp": "2026-08-06T12:28:56.540073-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {

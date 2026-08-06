@@ -77,3 +77,115 @@ fields:
           - name: modbus_channels
             type: u8
             # raw: []
+
+test_vectors:
+  - name: vendor_reference
+    description: "Example declared by the vendor in the TTN device repository"
+    payload: "03C816000000040000050000060001070100080101"
+    fPort: 85
+    source: vendor-doc
+    expected:
+      digital_input_2: false
+      digital_input_3: false
+      digital_input_4: true
+      digital_output_1: false
+      digital_output_2: true
+      pulse_count_1: 22
+  - name: ch3_type200_midscale
+    description: "Channel 3 type 200, midscale bytes, decoded by the vendor's own decoder"
+    payload: "03C811111111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      pulse_count_1: 286331153
+  - name: ch4_type200_midscale
+    description: "Channel 4 type 200, midscale bytes, decoded by the vendor's own decoder"
+    payload: "04C811111111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      pulse_count_2: 286331153
+  - name: ch5_type200_midscale
+    description: "Channel 5 type 200, midscale bytes, decoded by the vendor's own decoder"
+    payload: "05C811111111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      pulse_count_3: 286331153
+  - name: ch6_type200_midscale
+    description: "Channel 6 type 200, midscale bytes, decoded by the vendor's own decoder"
+    payload: "06C811111111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      pulse_count_4: 286331153
+  - name: ch9_type103_midscale
+    description: "Channel 9 type 103, midscale bytes, decoded by the vendor's own decoder"
+    payload: "09671111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      pt100_1: 436.9
+  - name: ch10_type103_midscale
+    description: "Channel 10 type 103, midscale bytes, decoded by the vendor's own decoder"
+    payload: "0A671111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      pt100_2: 436.9
+  - name: ch3_type200_zero_values
+    description: "Channel 3 type 200, zero values bytes, decoded by the vendor's own decoder"
+    payload: "03C800000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      pulse_count_1: 0
+  - name: ch4_type200_zero_values
+    description: "Channel 4 type 200, zero values bytes, decoded by the vendor's own decoder"
+    payload: "04C800000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      pulse_count_2: 0
+  - name: ch5_type200_zero_values
+    description: "Channel 5 type 200, zero values bytes, decoded by the vendor's own decoder"
+    payload: "05C800000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      pulse_count_3: 0
+  - name: ch6_type200_zero_values
+    description: "Channel 6 type 200, zero values bytes, decoded by the vendor's own decoder"
+    payload: "06C800000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      pulse_count_4: 0
+  - name: ch9_type103_zero_values
+    description: "Channel 9 type 103, zero values bytes, decoded by the vendor's own decoder"
+    payload: "09670000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      pt100_1: 0
+  - name: ch10_type103_zero_values
+    description: "Channel 10 type 103, zero values bytes, decoded by the vendor's own decoder"
+    payload: "0A670000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      pt100_2: 0
+  - name: ch11_type2_zero_values
+    description: "Channel 11 type 2, zero values bytes, decoded by the vendor's own decoder"
+    payload: "0B0200000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      analog_input_adc_1: 0
+  - name: ch12_type2_zero_values
+    description: "Channel 12 type 2, zero values bytes, decoded by the vendor's own decoder"
+    payload: "0C0200000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      analog_input_adc_2: 0

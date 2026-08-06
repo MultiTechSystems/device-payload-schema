@@ -110,3 +110,115 @@ fields:
           - name: heating_schedule
             type: u8
             # raw: decoded.heating_schedule || []
+
+test_vectors:
+  - name: vendor_reference
+    description: "Example declared by the vendor in the TTN device repository"
+    payload: "01756104672C0103670A01059264099000000B900000"
+    fPort: 85
+    source: vendor-doc
+    expected:
+      battery: 97
+      target_temperature: 30
+      temperature: 26.6
+      valve_opening: 100
+      motor_stroke: 0
+      motor_position: 0
+  - name: ch1_type117_midscale
+    description: "Channel 1 type 117, midscale bytes, decoded by the vendor's own decoder"
+    payload: "017511"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      battery: 17
+  - name: ch3_type103_midscale
+    description: "Channel 3 type 103, midscale bytes, decoded by the vendor's own decoder"
+    payload: "03671111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 436.9
+  - name: ch4_type103_midscale
+    description: "Channel 4 type 103, midscale bytes, decoded by the vendor's own decoder"
+    payload: "04671111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      target_temperature: 436.9
+  - name: ch5_type146_midscale
+    description: "Channel 5 type 146, midscale bytes, decoded by the vendor's own decoder"
+    payload: "059211"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      valve_opening: 17
+  - name: ch9_type144_midscale
+    description: "Channel 9 type 144, midscale bytes, decoded by the vendor's own decoder"
+    payload: "09901111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      motor_stroke: 4369
+  - name: ch11_type144_midscale
+    description: "Channel 11 type 144, midscale bytes, decoded by the vendor's own decoder"
+    payload: "0B901111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      motor_position: 4369
+  - name: ch1_type117_zero_values
+    description: "Channel 1 type 117, zero values bytes, decoded by the vendor's own decoder"
+    payload: "017500"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      battery: 0
+  - name: ch3_type103_zero_values
+    description: "Channel 3 type 103, zero values bytes, decoded by the vendor's own decoder"
+    payload: "03670000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 0
+  - name: ch4_type103_zero_values
+    description: "Channel 4 type 103, zero values bytes, decoded by the vendor's own decoder"
+    payload: "04670000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      target_temperature: 0
+  - name: ch5_type146_zero_values
+    description: "Channel 5 type 146, zero values bytes, decoded by the vendor's own decoder"
+    payload: "059200"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      valve_opening: 0
+  - name: ch9_type144_zero_values
+    description: "Channel 9 type 144, zero values bytes, decoded by the vendor's own decoder"
+    payload: "09900000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      motor_stroke: 0
+  - name: ch11_type144_zero_values
+    description: "Channel 11 type 144, zero values bytes, decoded by the vendor's own decoder"
+    payload: "0B900000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      motor_position: 0
+  - name: ch1_type117_max_values
+    description: "Channel 1 type 117, max values bytes, decoded by the vendor's own decoder"
+    payload: "0175FF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      battery: 255
+  - name: ch3_type103_max_values
+    description: "Channel 3 type 103, max values bytes, decoded by the vendor's own decoder"
+    payload: "0367FFFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: -0.1

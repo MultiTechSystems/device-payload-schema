@@ -61,6 +61,7 @@ fields:
         "[3, 104]":
           - name: humidity
             type: u8
+            div: 2
             # raw: readUInt8(bytes[i]) / 2
         # NH3
         "[4, 125]":
@@ -69,6 +70,7 @@ fields:
             # raw: readSensorStatus(nh3_raw_data)
           - name: nh3
             type: u8
+            div: 100
             # raw: nh3_raw_data / 100
         # H2S
         "[5, 125]":
@@ -77,6 +79,7 @@ fields:
             # raw: readSensorStatus(h2s_raw_data)
           - name: h2s
             type: u8
+            div: 100
             # raw: h2s_raw_data / 100
         # H2S (@since v1.2)
         "[6, 125]":
@@ -85,6 +88,7 @@ fields:
             # raw: readSensorStatus(h2s_raw_data)
           - name: h2s
             type: u8
+            div: 1000
             # raw: h2s_raw_data / 1000
         # SENSOR CALIBRATION RESULT (@since v1.2)
         "[7, 234]":
@@ -96,3 +100,89 @@ fields:
           - name: sensor_id
             type: u8
             # raw: readAscii(bytes.slice(i, i + 43))
+
+test_vectors:
+  - name: ch1_type117_midscale
+    description: "Channel 1 type 117, midscale bytes, decoded by the vendor's own decoder"
+    payload: "017511"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      battery: 17
+  - name: ch2_type103_midscale
+    description: "Channel 2 type 103, midscale bytes, decoded by the vendor's own decoder"
+    payload: "02671111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 436.9
+  - name: ch3_type104_midscale
+    description: "Channel 3 type 104, midscale bytes, decoded by the vendor's own decoder"
+    payload: "036811"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      humidity: 8.5
+  - name: ch1_type117_zero_values
+    description: "Channel 1 type 117, zero values bytes, decoded by the vendor's own decoder"
+    payload: "017500"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      battery: 0
+  - name: ch2_type103_zero_values
+    description: "Channel 2 type 103, zero values bytes, decoded by the vendor's own decoder"
+    payload: "02670000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 0
+  - name: ch3_type104_zero_values
+    description: "Channel 3 type 104, zero values bytes, decoded by the vendor's own decoder"
+    payload: "036800"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      humidity: 0
+  - name: ch4_type125_zero_values
+    description: "Channel 4 type 125, zero values bytes, decoded by the vendor's own decoder"
+    payload: "047D0000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      nh3: 0
+  - name: ch5_type125_zero_values
+    description: "Channel 5 type 125, zero values bytes, decoded by the vendor's own decoder"
+    payload: "057D0000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      h2s: 0
+  - name: ch6_type125_zero_values
+    description: "Channel 6 type 125, zero values bytes, decoded by the vendor's own decoder"
+    payload: "067D0000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      h2s: 0
+  - name: ch1_type117_max_values
+    description: "Channel 1 type 117, max values bytes, decoded by the vendor's own decoder"
+    payload: "0175FF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      battery: 255
+  - name: ch2_type103_max_values
+    description: "Channel 2 type 103, max values bytes, decoded by the vendor's own decoder"
+    payload: "0267FFFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: -0.1
+  - name: ch3_type104_max_values
+    description: "Channel 3 type 104, max values bytes, decoded by the vendor's own decoder"
+    payload: "0368FF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      humidity: 127.5

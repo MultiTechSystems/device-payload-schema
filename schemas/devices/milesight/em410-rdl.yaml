@@ -76,3 +76,89 @@ fields:
           - name: radar_signal_rssi
             type: s16
             div: 100
+
+test_vectors:
+  - name: ch1_type117_midscale
+    description: "Channel 1 type 117, midscale bytes, decoded by the vendor's own decoder"
+    payload: "017511"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      battery: 17
+  - name: ch3_type103_midscale
+    description: "Channel 3 type 103, midscale bytes, decoded by the vendor's own decoder"
+    payload: "03671111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 436.9
+  - name: ch4_type130_midscale
+    description: "Channel 4 type 130, midscale bytes, decoded by the vendor's own decoder"
+    payload: "04821111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      distance: 4369
+  - name: ch6_type199_midscale
+    description: "Channel 6 type 199, midscale bytes, decoded by the vendor's own decoder"
+    payload: "06C71111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      radar_signal_rssi: 43.69
+  - name: ch1_type117_zero_values
+    description: "Channel 1 type 117, zero values bytes, decoded by the vendor's own decoder"
+    payload: "017500"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      battery: 0
+  - name: ch3_type103_zero_values
+    description: "Channel 3 type 103, zero values bytes, decoded by the vendor's own decoder"
+    payload: "03670000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 0
+  - name: ch4_type130_zero_values
+    description: "Channel 4 type 130, zero values bytes, decoded by the vendor's own decoder"
+    payload: "04820000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      distance: 0
+  - name: ch6_type199_zero_values
+    description: "Channel 6 type 199, zero values bytes, decoded by the vendor's own decoder"
+    payload: "06C70000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      radar_signal_rssi: 0
+  - name: ch1_type117_max_values
+    description: "Channel 1 type 117, max values bytes, decoded by the vendor's own decoder"
+    payload: "0175FF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      battery: 255
+  - name: ch3_type103_max_values
+    description: "Channel 3 type 103, max values bytes, decoded by the vendor's own decoder"
+    payload: "0367FFFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: -0.1
+  - name: ch4_type130_max_values
+    description: "Channel 4 type 130, max values bytes, decoded by the vendor's own decoder"
+    payload: "0482FFFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      distance: -1
+  - name: ch6_type199_max_values
+    description: "Channel 6 type 199, max values bytes, decoded by the vendor's own decoder"
+    payload: "06C7FFFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      radar_signal_rssi: -0.01

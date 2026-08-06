@@ -34,3 +34,112 @@ fields:
         "[5, 127]":
           - name: conductivity
             type: u16
+
+test_vectors:
+  - name: vendor_reference
+    description: "Example declared by the vendor in the TTN device repository"
+    payload: "01755C03673401046865057FF000"
+    fPort: 85
+    source: vendor-doc
+    expected:
+      battery: 92
+      temperature: 30.8
+      humidity: 50.5
+  - name: ch1_type117_midscale
+    description: "Channel 1 type 117, midscale bytes, decoded by the vendor's own decoder"
+    payload: "017511"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      battery: 17
+  - name: ch3_type103_midscale
+    description: "Channel 3 type 103, midscale bytes, decoded by the vendor's own decoder"
+    payload: "03671111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 436.9
+  - name: ch4_type104_midscale
+    description: "Channel 4 type 104, midscale bytes, decoded by the vendor's own decoder"
+    payload: "046811"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      humidity: 8.5
+  - name: ch4_type202_midscale
+    description: "Channel 4 type 202, midscale bytes, decoded by the vendor's own decoder"
+    payload: "04CA11"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      humidity: 8.5
+  - name: ch5_type127_midscale
+    description: "Channel 5 type 127, midscale bytes, decoded by the vendor's own decoder"
+    payload: "057F1111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      conductivity: 4369
+  - name: ch1_type117_zero_values
+    description: "Channel 1 type 117, zero values bytes, decoded by the vendor's own decoder"
+    payload: "017500"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      battery: 0
+  - name: ch3_type103_zero_values
+    description: "Channel 3 type 103, zero values bytes, decoded by the vendor's own decoder"
+    payload: "03670000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 0
+  - name: ch4_type104_zero_values
+    description: "Channel 4 type 104, zero values bytes, decoded by the vendor's own decoder"
+    payload: "046800"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      humidity: 0
+  - name: ch4_type202_zero_values
+    description: "Channel 4 type 202, zero values bytes, decoded by the vendor's own decoder"
+    payload: "04CA00"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      humidity: 0
+  - name: ch5_type127_zero_values
+    description: "Channel 5 type 127, zero values bytes, decoded by the vendor's own decoder"
+    payload: "057F0000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      conductivity: 0
+  - name: ch1_type117_max_values
+    description: "Channel 1 type 117, max values bytes, decoded by the vendor's own decoder"
+    payload: "0175FF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      battery: 255
+  - name: ch3_type103_max_values
+    description: "Channel 3 type 103, max values bytes, decoded by the vendor's own decoder"
+    payload: "0367FFFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: -0.1
+  - name: ch4_type104_max_values
+    description: "Channel 4 type 104, max values bytes, decoded by the vendor's own decoder"
+    payload: "0468FF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      humidity: 127.5
+  - name: ch4_type202_max_values
+    description: "Channel 4 type 202, max values bytes, decoded by the vendor's own decoder"
+    payload: "04CAFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      humidity: 127.5

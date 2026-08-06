@@ -97,6 +97,7 @@ fields:
         "[9, 104]":
           - name: humidity
             type: u8
+            div: 2
             # raw: readUInt8(bytes[i]) / 2
         # RELAY STATUS
         "[10, 110]":
@@ -129,3 +130,89 @@ fields:
           - name: humidity_sensor_status
             type: u8
             # raw: readSensorStatus(bytes[i])
+
+test_vectors:
+  - name: ch3_type103_midscale
+    description: "Channel 3 type 103, midscale bytes, decoded by the vendor's own decoder"
+    payload: "03671111"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      temperature: 436.9
+  - name: ch4_type103_midscale
+    description: "Channel 4 type 103, midscale bytes, decoded by the vendor's own decoder"
+    payload: "04671111"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      target_temperature: 436.9
+  - name: ch11_type103_midscale
+    description: "Channel 11 type 103, midscale bytes, decoded by the vendor's own decoder"
+    payload: "0B671111"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      target_temperature_2: 436.9
+  - name: ch9_type104_midscale
+    description: "Channel 9 type 104, midscale bytes, decoded by the vendor's own decoder"
+    payload: "096811"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      humidity: 8.5
+  - name: ch3_type103_zero_values
+    description: "Channel 3 type 103, zero values bytes, decoded by the vendor's own decoder"
+    payload: "03670000"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      temperature: 0
+  - name: ch4_type103_zero_values
+    description: "Channel 4 type 103, zero values bytes, decoded by the vendor's own decoder"
+    payload: "04670000"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      target_temperature: 0
+  - name: ch11_type103_zero_values
+    description: "Channel 11 type 103, zero values bytes, decoded by the vendor's own decoder"
+    payload: "0B670000"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      target_temperature_2: 0
+  - name: ch9_type104_zero_values
+    description: "Channel 9 type 104, zero values bytes, decoded by the vendor's own decoder"
+    payload: "096800"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      humidity: 0
+  - name: ch3_type103_max_values
+    description: "Channel 3 type 103, max values bytes, decoded by the vendor's own decoder"
+    payload: "0367FFFF"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      temperature: -0.1
+  - name: ch4_type103_max_values
+    description: "Channel 4 type 103, max values bytes, decoded by the vendor's own decoder"
+    payload: "0467FFFF"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      target_temperature: -0.1
+  - name: ch11_type103_max_values
+    description: "Channel 11 type 103, max values bytes, decoded by the vendor's own decoder"
+    payload: "0B67FFFF"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      target_temperature_2: -0.1
+  - name: ch9_type104_max_values
+    description: "Channel 9 type 104, max values bytes, decoded by the vendor's own decoder"
+    payload: "0968FF"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      humidity: 127.5

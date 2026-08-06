@@ -127,3 +127,53 @@ fields:
           - name: respiratory_rate
             type: u16
             div: 100
+
+test_vectors:
+  - name: ch5_type250_midscale
+    description: "Channel 5 type 250, midscale bytes, decoded by the vendor's own decoder"
+    payload: "05FA1111111111111111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      region_1_out_of_bed_time: 4369
+      region_2_out_of_bed_time: 4369
+      region_3_out_of_bed_time: 4369
+      region_4_out_of_bed_time: 4369
+  - name: ch5_type250_zero_values
+    description: "Channel 5 type 250, zero values bytes, decoded by the vendor's own decoder"
+    payload: "05FA0000000000000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      region_1_out_of_bed_time: 0
+      region_2_out_of_bed_time: 0
+      region_3_out_of_bed_time: 0
+      region_4_out_of_bed_time: 0
+  - name: ch11_type180_zero_values
+    description: "Channel 11 type 180, zero values bytes, decoded by the vendor's own decoder"
+    payload: "0BB4000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      region_1_out_of_bed_time: 0
+      region_2_out_of_bed_time: 0
+      region_3_out_of_bed_time: 0
+  - name: ch12_type180_zero_values
+    description: "Channel 12 type 180, zero values bytes, decoded by the vendor's own decoder"
+    payload: "0CB4000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      region_4_out_of_bed_time: 0
+      region_5_out_of_bed_time: 0
+      region_6_out_of_bed_time: 0
+  - name: ch5_type250_max_values
+    description: "Channel 5 type 250, max values bytes, decoded by the vendor's own decoder"
+    payload: "05FAFFFFFFFFFFFFFFFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      region_1_out_of_bed_time: 65535
+      region_2_out_of_bed_time: 65535
+      region_3_out_of_bed_time: 65535
+      region_4_out_of_bed_time: 65535

@@ -51,3 +51,119 @@ fields:
           - name: pressure
             type: u16
             div: 10
+
+test_vectors:
+  - name: vendor_reference
+    description: "Example declared by the vendor in the TTN device repository"
+    payload: "01755C03673401046865056A4900"
+    fPort: 85
+    source: vendor-doc
+    expected:
+      battery: 92
+      temperature: 30.8
+      humidity: 50.5
+      activity: 73
+  - name: vendor_reference_2
+    description: "Example declared by the vendor in the TTN device repository"
+    payload: "06651C0079001400"
+    fPort: 85
+    source: vendor-doc
+    expected:
+      illumination: 28
+      infrared: 20
+      infrared_and_visible: 121
+  - name: vendor_reference_3
+    description: "Example declared by the vendor in the TTN device repository"
+    payload: "077DE704087D070009733F27"
+    fPort: 85
+    source: vendor-doc
+    expected:
+      co2: 1255
+      tvoc: 7
+      pressure: 1004.7
+  - name: ch1_type117_midscale
+    description: "Channel 1 type 117, midscale bytes, decoded by the vendor's own decoder"
+    payload: "017511"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      battery: 17
+  - name: ch3_type103_midscale
+    description: "Channel 3 type 103, midscale bytes, decoded by the vendor's own decoder"
+    payload: "03671111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 436.9
+  - name: ch4_type104_midscale
+    description: "Channel 4 type 104, midscale bytes, decoded by the vendor's own decoder"
+    payload: "046811"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      humidity: 8.5
+  - name: ch5_type106_midscale
+    description: "Channel 5 type 106, midscale bytes, decoded by the vendor's own decoder"
+    payload: "056A1111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      activity: 4369
+  - name: ch6_type101_midscale
+    description: "Channel 6 type 101, midscale bytes, decoded by the vendor's own decoder"
+    payload: "0665111111111111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      illumination: 4369
+      infrared_and_visible: 4369
+      infrared: 4369
+  - name: ch7_type125_midscale
+    description: "Channel 7 type 125, midscale bytes, decoded by the vendor's own decoder"
+    payload: "077D1111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      co2: 4369
+  - name: ch8_type125_midscale
+    description: "Channel 8 type 125, midscale bytes, decoded by the vendor's own decoder"
+    payload: "087D1111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      tvoc: 4369
+  - name: ch9_type115_midscale
+    description: "Channel 9 type 115, midscale bytes, decoded by the vendor's own decoder"
+    payload: "09731111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      pressure: 436.9
+  - name: ch1_type117_zero_values
+    description: "Channel 1 type 117, zero values bytes, decoded by the vendor's own decoder"
+    payload: "017500"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      battery: 0
+  - name: ch3_type103_zero_values
+    description: "Channel 3 type 103, zero values bytes, decoded by the vendor's own decoder"
+    payload: "03670000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 0
+  - name: ch4_type104_zero_values
+    description: "Channel 4 type 104, zero values bytes, decoded by the vendor's own decoder"
+    payload: "046800"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      humidity: 0
+  - name: ch5_type106_zero_values
+    description: "Channel 5 type 106, zero values bytes, decoded by the vendor's own decoder"
+    payload: "056A0000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      activity: 0

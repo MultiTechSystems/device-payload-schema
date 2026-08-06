@@ -150,8 +150,17 @@ Three things to internalise before doing schema work:
 ```bash
 python3 tools/score_schema.py schemas/devices --all --baseline score-baseline.json
 python3 tools/score_schema.py <schema> --require-provenance
+
+# Independent oracles. Use these before trusting a score.
 python3 tools/crossvalidate_decentlab.py --vendor-dir ../decentlab-decoders
+python3 tools/crossvalidate_ttn.py --devices-repo ../lorawan-devices \
+    --vendor milesight-iot --schema-dir schemas/devices/milesight
 ```
+
+The TTN device repository (`TheThingsNetwork/lorawan-devices`) carries, for most
+vendors, both a declared set of input/output examples and the vendor's own
+JavaScript decoder. Both are independent of this implementation, so they are the
+right source for `test_vectors` on any of its 152 vendors — not our own output.
 
 `score-baseline.json` is the committed baseline; CI fails on a *regression*
 rather than on the backlog. Refresh it deliberately when scores legitimately
@@ -207,9 +216,20 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   fixture must still decode identically. `validate_schema.py` warns when a field
   carries two or more bare modifiers, since the intent reads better as a
   `transform`.
-- **Most published schemas are unverified.** 134 of 158 device schemas ship with
-  no test vectors and are therefore Rejected. See the per-device table in
-  [`docs/INDEX.md`](docs/INDEX.md).
+- **Many published schemas are still unverified.** 78 of 158 device schemas ship
+  with no test vectors and are therefore Rejected. See the per-device table in
+  [`docs/INDEX.md`](docs/INDEX.md). The decentlab and milesight families have been
+  through a vendor cross-validation pass; the rest have not.
+- **Milesight schemas decode values but do not label or annotate them.** 50 of the
+  84 still disagree with the vendor's own decoder, in four distinct ways worth
+  knowing before picking one up: 19+ emit a raw integer where the vendor renders a
+  label (they need `lookup:` tables), 13+ never decode some TLV channels at all,
+  5 emit a scalar where the vendor emits an array or object (a language gap), and
+  3 fail to decode a vendor payload outright. Separately, several fields declare
+  `type: u8` where the vendor consumes two bytes (version and serial-number
+  channels), so those channels are wrong even when the rest of the schema is
+  right. None of the milesight schemas declare `unit:`, which is why they carry no
+  semantic annotations and stop at Silver.
 - **The JS TS013 generator has a shared-byte bug.** `generate_ts013_codec.py`
   can drop bare bit-range fields and fail to advance the cursor. The Python
   interpreter path is correct; only generated JavaScript is affected.

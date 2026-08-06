@@ -79,3 +79,110 @@ fields:
           - name: socket_status
             type: u8
             # raw: readSocketStatus(data & 0x01)
+
+test_vectors:
+  - name: vendor_reference
+    description: "Example declared by the vendor in the TTN device repository"
+    payload: "0374ED08"
+    fPort: 85
+    source: vendor-doc
+    expected:
+      voltage: 228.5
+  - name: vendor_reference_2
+    description: "Example declared by the vendor in the TTN device repository"
+    payload: "068356040000"
+    fPort: 85
+    source: vendor-doc
+    expected:
+      power_consumption: 1110
+  - name: vendor_reference_3
+    description: "Example declared by the vendor in the TTN device repository"
+    payload: "087001"
+    fPort: 85
+    source: vendor-doc
+    expected:
+      socket_status: true
+  - name: ch3_type116_midscale
+    description: "Channel 3 type 116, midscale bytes, decoded by the vendor's own decoder"
+    payload: "03741111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      voltage: 436.9
+  - name: ch4_type128_midscale
+    description: "Channel 4 type 128, midscale bytes, decoded by the vendor's own decoder"
+    payload: "048011111111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      active_power: 286331153
+  - name: ch5_type129_midscale
+    description: "Channel 5 type 129, midscale bytes, decoded by the vendor's own decoder"
+    payload: "058111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      power_factor: 17
+  - name: ch6_type131_midscale
+    description: "Channel 6 type 131, midscale bytes, decoded by the vendor's own decoder"
+    payload: "068311111111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      power_consumption: 286331153
+  - name: ch7_type201_midscale
+    description: "Channel 7 type 201, midscale bytes, decoded by the vendor's own decoder"
+    payload: "07C91111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      current: 4369
+  - name: ch3_type116_zero_values
+    description: "Channel 3 type 116, zero values bytes, decoded by the vendor's own decoder"
+    payload: "03740000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      voltage: 0
+  - name: ch4_type128_zero_values
+    description: "Channel 4 type 128, zero values bytes, decoded by the vendor's own decoder"
+    payload: "048000000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      active_power: 0
+  - name: ch5_type129_zero_values
+    description: "Channel 5 type 129, zero values bytes, decoded by the vendor's own decoder"
+    payload: "058100"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      power_factor: 0
+  - name: ch6_type131_zero_values
+    description: "Channel 6 type 131, zero values bytes, decoded by the vendor's own decoder"
+    payload: "068300000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      power_consumption: 0
+  - name: ch7_type201_zero_values
+    description: "Channel 7 type 201, zero values bytes, decoded by the vendor's own decoder"
+    payload: "07C90000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      current: 0
+  - name: ch3_type116_max_values
+    description: "Channel 3 type 116, max values bytes, decoded by the vendor's own decoder"
+    payload: "0374FFFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      voltage: 6553.5
+  - name: ch4_type128_max_values
+    description: "Channel 4 type 128, max values bytes, decoded by the vendor's own decoder"
+    payload: "0480FFFFFFFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      active_power: 4294967295

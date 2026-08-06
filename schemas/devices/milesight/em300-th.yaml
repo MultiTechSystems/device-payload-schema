@@ -26,3 +26,77 @@ fields:
           - name: humidity
             type: u8
             div: 2
+
+test_vectors:
+  - name: vendor_reference
+    description: "Example declared by the vendor in the TTN device repository"
+    payload: "0175320367C80004683C"
+    fPort: 1
+    source: vendor-doc
+    expected:
+      battery: 50
+      temperature: 20.0
+      humidity: 30.0
+  - name: ch1_type117_midscale
+    description: "Channel 1 type 117, midscale bytes, decoded by the vendor's own decoder"
+    payload: "017511"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      battery: 17
+  - name: ch3_type103_midscale
+    description: "Channel 3 type 103, midscale bytes, decoded by the vendor's own decoder"
+    payload: "03671111"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      temperature: 436.9
+  - name: ch4_type104_midscale
+    description: "Channel 4 type 104, midscale bytes, decoded by the vendor's own decoder"
+    payload: "046811"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      humidity: 8.5
+  - name: ch1_type117_zero_values
+    description: "Channel 1 type 117, zero values bytes, decoded by the vendor's own decoder"
+    payload: "017500"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      battery: 0
+  - name: ch3_type103_zero_values
+    description: "Channel 3 type 103, zero values bytes, decoded by the vendor's own decoder"
+    payload: "03670000"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      temperature: 0
+  - name: ch4_type104_zero_values
+    description: "Channel 4 type 104, zero values bytes, decoded by the vendor's own decoder"
+    payload: "046800"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      humidity: 0
+  - name: ch1_type117_max_values
+    description: "Channel 1 type 117, max values bytes, decoded by the vendor's own decoder"
+    payload: "0175FF"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      battery: 255
+  - name: ch3_type103_max_values
+    description: "Channel 3 type 103, max values bytes, decoded by the vendor's own decoder"
+    payload: "0367FFFF"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      temperature: -0.1
+  - name: ch4_type104_max_values
+    description: "Channel 4 type 104, max values bytes, decoded by the vendor's own decoder"
+    payload: "0468FF"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      humidity: 127.5

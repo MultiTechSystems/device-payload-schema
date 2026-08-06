@@ -109,3 +109,119 @@ fields:
         "[10, 239]":
           - name: timestamp
             type: u32
+
+test_vectors:
+  - name: vendor_reference
+    description: "Example declared by the vendor in the TTN device repository"
+    payload: "04CC1200160005CC13001400"
+    fPort: 85
+    source: vendor-doc
+    expected:
+      total_in: 18
+      total_out: 22
+      period_in: 19
+      period_out: 20
+  - name: ch1_type117_midscale
+    description: "Channel 1 type 117, midscale bytes, decoded by the vendor's own decoder"
+    payload: "017511"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      battery: 17
+  - name: ch3_type103_midscale
+    description: "Channel 3 type 103, midscale bytes, decoded by the vendor's own decoder"
+    payload: "03671111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 436.9
+  - name: ch4_type204_midscale
+    description: "Channel 4 type 204, midscale bytes, decoded by the vendor's own decoder"
+    payload: "04CC11111111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      total_in: 4369
+      total_out: 4369
+  - name: ch5_type204_midscale
+    description: "Channel 5 type 204, midscale bytes, decoded by the vendor's own decoder"
+    payload: "05CC11111111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      period_in: 4369
+      period_out: 4369
+  - name: ch10_type239_midscale
+    description: "Channel 10 type 239, midscale bytes, decoded by the vendor's own decoder"
+    payload: "0AEF11111111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      timestamp: 286331153
+  - name: ch1_type117_zero_values
+    description: "Channel 1 type 117, zero values bytes, decoded by the vendor's own decoder"
+    payload: "017500"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      battery: 0
+  - name: ch3_type103_zero_values
+    description: "Channel 3 type 103, zero values bytes, decoded by the vendor's own decoder"
+    payload: "03670000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 0
+  - name: ch4_type204_zero_values
+    description: "Channel 4 type 204, zero values bytes, decoded by the vendor's own decoder"
+    payload: "04CC00000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      total_in: 0
+      total_out: 0
+  - name: ch5_type204_zero_values
+    description: "Channel 5 type 204, zero values bytes, decoded by the vendor's own decoder"
+    payload: "05CC00000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      period_in: 0
+      period_out: 0
+  - name: ch10_type239_zero_values
+    description: "Channel 10 type 239, zero values bytes, decoded by the vendor's own decoder"
+    payload: "0AEF00000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      timestamp: 0
+  - name: ch1_type117_max_values
+    description: "Channel 1 type 117, max values bytes, decoded by the vendor's own decoder"
+    payload: "0175FF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      battery: 255
+  - name: ch3_type103_max_values
+    description: "Channel 3 type 103, max values bytes, decoded by the vendor's own decoder"
+    payload: "0367FFFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: -0.1
+  - name: ch4_type204_max_values
+    description: "Channel 4 type 204, max values bytes, decoded by the vendor's own decoder"
+    payload: "04CCFFFFFFFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      total_in: 65535
+      total_out: 65535
+  - name: ch5_type204_max_values
+    description: "Channel 5 type 204, max values bytes, decoded by the vendor's own decoder"
+    payload: "05CCFFFFFFFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      period_in: 65535
+      period_out: 65535

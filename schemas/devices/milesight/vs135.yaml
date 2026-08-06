@@ -65,3 +65,65 @@ fields:
           - name: history
             type: u8
             # raw: decoded.history || []
+
+test_vectors:
+  - name: ch15_type227_midscale
+    description: "Channel 15 type 227, midscale bytes, decoded by the vendor's own decoder"
+    payload: "0FE311111111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      region_1_count: 17
+      region_2_count: 17
+      region_3_count: 17
+      region_4_count: 17
+  - name: ch29_type227_midscale
+    description: "Channel 29 type 227, midscale bytes, decoded by the vendor's own decoder"
+    payload: "1DE311111111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      region_1_child_count: 17
+      region_2_child_count: 17
+      region_3_child_count: 17
+      region_4_child_count: 17
+  - name: ch15_type227_zero_values
+    description: "Channel 15 type 227, zero values bytes, decoded by the vendor's own decoder"
+    payload: "0FE300000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      region_1_count: 0
+      region_2_count: 0
+      region_3_count: 0
+      region_4_count: 0
+  - name: ch29_type227_zero_values
+    description: "Channel 29 type 227, zero values bytes, decoded by the vendor's own decoder"
+    payload: "1DE300000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      region_1_child_count: 0
+      region_2_child_count: 0
+      region_3_child_count: 0
+      region_4_child_count: 0
+  - name: ch15_type227_max_values
+    description: "Channel 15 type 227, max values bytes, decoded by the vendor's own decoder"
+    payload: "0FE3FFFFFFFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      region_1_count: 255
+      region_2_count: 255
+      region_3_count: 255
+      region_4_count: 255
+  - name: ch29_type227_max_values
+    description: "Channel 29 type 227, max values bytes, decoded by the vendor's own decoder"
+    payload: "1DE3FFFFFFFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      region_1_child_count: 255
+      region_2_child_count: 255
+      region_3_child_count: 255
+      region_4_child_count: 255
