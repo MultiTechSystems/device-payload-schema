@@ -23,9 +23,9 @@ import (
 
 // corpusFloor is the number of corpus vectors this interpreter is known to decode
 // correctly. Raise it as gaps close.
-// Gaps behind the 87 failures: no `hex` field type, no `u8[lo:hi]` bit ranges, and
-// booleans reported as integers. Each is visible in the test log.
-const corpusFloor = 1035
+// The remaining 15 are byte_group and computed-field constructs (oyster, ers) plus
+// a missing `round` transform op. Named in the test output.
+const corpusFloor = 1101
 
 type corpusVector struct {
 	Name     string         `yaml:"name"`

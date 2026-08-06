@@ -182,14 +182,15 @@ Every implementation has a runner that reads the same YAML and the same vectors:
 | Python | `tests/test_corpus_conformance.py` | 1116 / 1116 |
 | C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 1080 |
 | Java | `bindings/java/.../CorpusConformanceTest.java` | 1052 |
-| Go | `go/schema/corpus_conformance_test.go` | 1035 |
+| Go | `go/schema/corpus_conformance_test.go` | 1101 |
 | C | none - consumes a binary schema, not YAML | n/a |
 
 Each non-Python runner compares its pass count against a committed floor rather than
 requiring the whole corpus, so the known gaps stay visible and a regression fails the
 build. **Raise the floor whenever you close a gap.** The remaining gaps are named in
-each runner's output: Go lacks the `hex` type and `u8[lo:hi]` bit ranges, Java does
-not evaluate computed `ref` fields, and both Java and C# lack bit ranges.
+each runner's output: Go is missing the `round` transform op and the `byte_group`
+construct, Java does not evaluate computed `ref` fields, and both Java and C# lack
+`u8[lo:hi]` bit ranges.
 
 Run them all with `make test-languages`. This suite is why the Go and Java TLV
 defects were found: those implementations returned an empty result for every

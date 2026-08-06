@@ -35,6 +35,10 @@ const (
 	TypeBits    FieldType = "Bits"
 	TypeAscii   FieldType = "Ascii"
 	TypeHex     FieldType = "Hex"
+	// Schemas are written in lowercase; without these aliases a `type: hex` field
+	// was reported as an unknown type and the whole schema failed to decode.
+	TypeHexLower      FieldType = "hex"
+	TypeHexUpperLower FieldType = "hex:upper"
 	TypeBase64  FieldType = "Base64"
 	TypeSkip    FieldType = "Skip"
 	TypeString  FieldType = "String"
@@ -1507,7 +1511,61 @@ func decodeFlagged(fd *FlaggedDef, ctx *DecodeContext) (map[string]any, error) {
 	return result, nil
 }
 
+// bitRangePattern matches a bit-range type such as u8[0:0] or u16[4:11].
+var bitRangePattern = regexp.MustCompile(`^([usf]\d+)\[(\d+):(\d+)\]$`)
+
+// decodeBitRange extracts a contiguous bit range from an unsigned base value.
+//
+// An explicit range does not advance the read position by itself: several fields
+// share one byte, and the last of them declares `consume` (PS-102 in practice, and
+// how every flag byte in the corpus is written). Without this, a `u8[0:0]` field was
+// reported as an unknown type and the whole schema failed to decode.
+func decodeBitRange(field Field, ctx *DecodeContext, match []string) (any, int, error) {
+	width := map[string]int{"u8": 1, "s8": 1, "u16": 2, "s16": 2, "u24": 3, "u32": 4, "s32": 4}[match[1]]
+	if width == 0 {
+		width = 1
+	}
+	data, err := ctx.Peek(width, 0)
+	if err != nil {
+		return nil, 0, err
+	}
+	base := uint64(0)
+	if ctx.Endian == "little" {
+		for i := width - 1; i >= 0; i-- {
+			base = base<<8 | uint64(data[i])
+		}
+	} else {
+		for i := 0; i < width; i++ {
+			base = base<<8 | uint64(data[i])
+		}
+	}
+	low, high := 0, 0
+	fmt.Sscanf(match[2], "%d", &low)
+	fmt.Sscanf(match[3], "%d", &high)
+	if high < low {
+		low, high = high, low
+	}
+	bits := high - low + 1
+	mask := uint64(1)<<bits - 1
+	return float64((base >> uint(low)) & mask), field.Consume, nil
+}
+
 func decodeField(field Field, ctx *DecodeContext) (any, error) {
+	// Bit ranges are handled before the type switch: the type string carries the
+	// range, so it never matches a plain type name.
+	if match := bitRangePattern.FindStringSubmatch(string(field.Type)); match != nil {
+		value, consume, err := decodeBitRange(field, ctx, match)
+		if err != nil {
+			return nil, err
+		}
+		if consume > 0 {
+			if _, err := ctx.Read(consume); err != nil {
+				return nil, err
+			}
+		}
+		return applyLookupAndModifiers(value, field, ctx)
+	}
+
 	length := field.Length
 	if length == 0 {
 		// Infer length from shorthand type names
@@ -1625,12 +1683,17 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 			value = intVal
 		}
 
-	case TypeHex:
+	case TypeHex, TypeHexLower, TypeHexUpperLower:
 		data, err := ctx.Read(length)
 		if err != nil {
 			return nil, err
 		}
-		value = hex.EncodeToString(data)
+		// PS-074: `hex` is lowercase without separators; uppercase is `hex:upper`.
+		encoded := hex.EncodeToString(data)
+		if field.Type == TypeHexUpperLower {
+			encoded = strings.ToUpper(encoded)
+		}
+		value = encoded
 
 	case TypeSkip, TypeSkipLower:
 		_, err := ctx.Read(length)
@@ -1725,12 +1788,20 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 
 			value = numVal
 		} else if field.Compute != nil {
-			// Binary operation
-			result, err := evaluateCompute(field.Compute, ctx)
-			if err != nil {
-				return nil, err
+			// A guard exists to avoid an invalid computation, so its conditions are
+			// checked before evaluating one. Evaluating first made a guarded
+			// division by zero abort the whole payload - dl-alb and vicki guard
+			// exactly that case and decoded nothing here while other
+			// implementations returned the guard's else value.
+			if field.Guard != nil && !guardConditionsHold(field.Guard, ctx) {
+				value = field.Guard.Else
+			} else {
+				result, err := evaluateCompute(field.Compute, ctx)
+				if err != nil {
+					return nil, err
+				}
+				value = result
 			}
-			value = result
 		} else if field.Formula != "" {
 			// Legacy formula support
 			val, err := evaluateFormula(field.Formula, 0, ctx)
@@ -1768,6 +1839,13 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		return nil, fmt.Errorf("unknown field type: %s", field.Type)
 	}
 
+	return applyLookupAndModifiers(value, field, ctx)
+}
+
+// applyLookupAndModifiers runs the shared post-decode pipeline: formula, modifiers,
+// transform, lookup and variable capture. Extracted so the bit-range path uses the
+// same tail as the type switch rather than duplicating it.
+func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, error) {
 	// Formula takes precedence over top-level modifiers (per spec section 03)
 	// For TypeNumber with ref, transform is already applied in the ref block
 	if field.Formula != "" && field.Type != TypeNumber {
@@ -3016,6 +3094,37 @@ func resolveOperand(op string, ctx *DecodeContext) (float64, error) {
 }
 
 // evaluateGuard applies guard conditions, returning value if all pass or else.
+// guardConditionsHold reports whether every condition of a guard is satisfied.
+func guardConditionsHold(gd *GuardDef, ctx *DecodeContext) bool {
+	for _, cond := range gd.When {
+		fieldName := strings.TrimPrefix(cond.Field, "$")
+		fieldVal, ok := ctx.Variables[fieldName]
+		if !ok {
+			return false
+		}
+		fv, ok := toFloat64(fieldVal)
+		if !ok {
+			return false
+		}
+		if cond.Gt != nil && !(fv > *cond.Gt) {
+			return false
+		}
+		if cond.Gte != nil && !(fv >= *cond.Gte) {
+			return false
+		}
+		if cond.Lt != nil && !(fv < *cond.Lt) {
+			return false
+		}
+		if cond.Lte != nil && !(fv <= *cond.Lte) {
+			return false
+		}
+		if cond.Eq != nil && !(fv == *cond.Eq) {
+			return false
+		}
+	}
+	return true
+}
+
 func evaluateGuard(gd *GuardDef, value float64, ctx *DecodeContext) float64 {
 	for _, cond := range gd.When {
 		fieldName := strings.TrimPrefix(cond.Field, "$")
