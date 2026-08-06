@@ -1,9 +1,9 @@
 {
-  "timestamp": "2026-08-06T13:57:29.067287-05:00",
+  "timestamp": "2026-08-06T14:06:35.500294-05:00",
   "schemas": [
     {
       "schema_path": "schemas/devices/decentlab/dl-5tm.yaml",
-      "timestamp": "2026-08-06T13:57:26.445844-05:00",
+      "timestamp": "2026-08-06T14:06:32.922652-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -51,7 +51,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-alb.yaml",
-      "timestamp": "2026-08-06T13:57:26.472149-05:00",
+      "timestamp": "2026-08-06T14:06:32.948440-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -99,7 +99,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-atm22.yaml",
-      "timestamp": "2026-08-06T13:57:26.496093-05:00",
+      "timestamp": "2026-08-06T14:06:32.975363-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -147,7 +147,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-atm41.yaml",
-      "timestamp": "2026-08-06T13:57:26.521862-05:00",
+      "timestamp": "2026-08-06T14:06:32.998613-05:00",
       "score": 92.0,
       "tier": "GOLD",
       "details": {
@@ -210,7 +210,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-atm41g2.yaml",
-      "timestamp": "2026-08-06T13:57:26.551200-05:00",
+      "timestamp": "2026-08-06T14:06:33.032334-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -296,7 +296,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-blg.yaml",
-      "timestamp": "2026-08-06T13:57:26.555433-05:00",
+      "timestamp": "2026-08-06T14:06:33.036930-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -372,7 +372,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-ctd10.yaml",
-      "timestamp": "2026-08-06T13:57:26.557049-05:00",
+      "timestamp": "2026-08-06T14:06:33.038586-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -431,7 +431,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-cws.yaml",
-      "timestamp": "2026-08-06T13:57:26.582850-05:00",
+      "timestamp": "2026-08-06T14:06:33.060097-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -510,7 +510,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-cws2.yaml",
-      "timestamp": "2026-08-06T13:57:26.585634-05:00",
+      "timestamp": "2026-08-06T14:06:33.062825-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -593,7 +593,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-002.yaml",
-      "timestamp": "2026-08-06T13:57:26.588643-05:00",
+      "timestamp": "2026-08-06T14:06:33.066194-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -663,7 +663,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-003.yaml",
-      "timestamp": "2026-08-06T13:57:26.590326-05:00",
+      "timestamp": "2026-08-06T14:06:33.067723-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -711,7 +711,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-004-10.yaml",
-      "timestamp": "2026-08-06T13:57:26.611100-05:00",
+      "timestamp": "2026-08-06T14:06:33.088406-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -785,7 +785,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-005.yaml",
-      "timestamp": "2026-08-06T13:57:26.612452-05:00",
+      "timestamp": "2026-08-06T14:06:33.089974-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -859,7 +859,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-006.yaml",
-      "timestamp": "2026-08-06T13:57:26.613677-05:00",
+      "timestamp": "2026-08-06T14:06:33.091412-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -929,7 +929,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-008-2000.yaml",
-      "timestamp": "2026-08-06T13:57:26.614874-05:00",
+      "timestamp": "2026-08-06T14:06:33.092741-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -1003,7 +1003,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-009-2000.yaml",
-      "timestamp": "2026-08-06T13:57:26.616210-05:00",
+      "timestamp": "2026-08-06T14:06:33.094164-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -1077,7 +1077,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-010.yaml",
-      "timestamp": "2026-08-06T13:57:26.617681-05:00",
+      "timestamp": "2026-08-06T14:06:33.095800-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -1147,7 +1147,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-011.yaml",
-      "timestamp": "2026-08-06T13:57:26.619693-05:00",
+      "timestamp": "2026-08-06T14:06:33.098416-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -1195,7 +1195,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-012.yaml",
-      "timestamp": "2026-08-06T13:57:26.641619-05:00",
+      "timestamp": "2026-08-06T14:06:33.119479-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -1265,7 +1265,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-ds18.yaml",
-      "timestamp": "2026-08-06T13:57:26.643253-05:00",
+      "timestamp": "2026-08-06T14:06:33.121219-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -1313,7 +1313,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dws-232263168-0000302459-1370.yaml",
-      "timestamp": "2026-08-06T13:57:26.664650-05:00",
+      "timestamp": "2026-08-06T14:06:33.141912-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -1389,7 +1389,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-gmm.yaml",
-      "timestamp": "2026-08-06T13:57:26.666345-05:00",
+      "timestamp": "2026-08-06T14:06:33.143458-05:00",
       "score": 92.0,
       "tier": "GOLD",
       "details": {
@@ -1450,7 +1450,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-iam.yaml",
-      "timestamp": "2026-08-06T13:57:26.694002-05:00",
+      "timestamp": "2026-08-06T14:06:33.168863-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -1537,7 +1537,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-ifd.yaml",
-      "timestamp": "2026-08-06T13:57:26.697282-05:00",
+      "timestamp": "2026-08-06T14:06:33.172471-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -1585,7 +1585,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-ilt.yaml",
-      "timestamp": "2026-08-06T13:57:26.717953-05:00",
+      "timestamp": "2026-08-06T14:06:33.193220-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -1633,7 +1633,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-isd.yaml",
-      "timestamp": "2026-08-06T13:57:26.738964-05:00",
+      "timestamp": "2026-08-06T14:06:33.214416-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -1681,7 +1681,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-isf.yaml",
-      "timestamp": "2026-08-06T13:57:26.759709-05:00",
+      "timestamp": "2026-08-06T14:06:33.234712-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -1758,7 +1758,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-itst.yaml",
-      "timestamp": "2026-08-06T13:57:26.763325-05:00",
+      "timestamp": "2026-08-06T14:06:33.238482-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -1834,7 +1834,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-kl66-1538372-464859.yaml",
-      "timestamp": "2026-08-06T13:57:26.764763-05:00",
+      "timestamp": "2026-08-06T14:06:33.239956-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -1910,7 +1910,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-lid.yaml",
-      "timestamp": "2026-08-06T13:57:26.766847-05:00",
+      "timestamp": "2026-08-06T14:06:33.242092-05:00",
       "score": 80.0,
       "tier": "SILVER",
       "details": {
@@ -1985,7 +1985,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-lp8p.yaml",
-      "timestamp": "2026-08-06T13:57:26.792540-05:00",
+      "timestamp": "2026-08-06T14:06:33.266570-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -2076,7 +2076,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-lpw.yaml",
-      "timestamp": "2026-08-06T13:57:26.795956-05:00",
+      "timestamp": "2026-08-06T14:06:33.269975-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -2146,7 +2146,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-lws.yaml",
-      "timestamp": "2026-08-06T13:57:26.797248-05:00",
+      "timestamp": "2026-08-06T14:06:33.271241-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -2216,7 +2216,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-mbx.yaml",
-      "timestamp": "2026-08-06T13:57:26.798434-05:00",
+      "timestamp": "2026-08-06T14:06:33.272464-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -2273,7 +2273,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-mes5.yaml",
-      "timestamp": "2026-08-06T13:57:26.823721-05:00",
+      "timestamp": "2026-08-06T14:06:33.293507-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -2321,7 +2321,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-ntu.yaml",
-      "timestamp": "2026-08-06T13:57:26.847932-05:00",
+      "timestamp": "2026-08-06T14:06:33.316294-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -2369,7 +2369,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-optod.yaml",
-      "timestamp": "2026-08-06T13:57:26.870460-05:00",
+      "timestamp": "2026-08-06T14:06:33.339503-05:00",
       "score": 94.0,
       "tier": "GOLD",
       "details": {
@@ -2426,7 +2426,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-par.yaml",
-      "timestamp": "2026-08-06T13:57:26.894348-05:00",
+      "timestamp": "2026-08-06T14:06:33.362997-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -2496,7 +2496,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pheht.yaml",
-      "timestamp": "2026-08-06T13:57:26.895914-05:00",
+      "timestamp": "2026-08-06T14:06:33.364389-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -2551,7 +2551,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pm.yaml",
-      "timestamp": "2026-08-06T13:57:26.918513-05:00",
+      "timestamp": "2026-08-06T14:06:33.387707-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -2647,7 +2647,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pr21-1-10.yaml",
-      "timestamp": "2026-08-06T13:57:26.922692-05:00",
+      "timestamp": "2026-08-06T14:06:33.392433-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -2723,7 +2723,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pr26-0-1.yaml",
-      "timestamp": "2026-08-06T13:57:26.924138-05:00",
+      "timestamp": "2026-08-06T14:06:33.394055-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -2799,7 +2799,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pr36-8192.yaml",
-      "timestamp": "2026-08-06T13:57:26.925566-05:00",
+      "timestamp": "2026-08-06T14:06:33.395528-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -2874,7 +2874,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pr36ctd-8192-1024.yaml",
-      "timestamp": "2026-08-06T13:57:26.926980-05:00",
+      "timestamp": "2026-08-06T14:06:33.396997-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -2952,7 +2952,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pyr.yaml",
-      "timestamp": "2026-08-06T13:57:26.928782-05:00",
+      "timestamp": "2026-08-06T14:06:33.398861-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -3022,7 +3022,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-rad.yaml",
-      "timestamp": "2026-08-06T13:57:26.930015-05:00",
+      "timestamp": "2026-08-06T14:06:33.400157-05:00",
       "score": 92.0,
       "tier": "GOLD",
       "details": {
@@ -3079,7 +3079,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-rhc.yaml",
-      "timestamp": "2026-08-06T13:57:26.956568-05:00",
+      "timestamp": "2026-08-06T14:06:33.423947-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -3154,7 +3154,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-sdd.yaml",
-      "timestamp": "2026-08-06T13:57:26.958494-05:00",
+      "timestamp": "2026-08-06T14:06:33.425593-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -3297,7 +3297,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-sht35.yaml",
-      "timestamp": "2026-08-06T13:57:26.968690-05:00",
+      "timestamp": "2026-08-06T14:06:33.434872-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -3373,7 +3373,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-smtp.yaml",
-      "timestamp": "2026-08-06T13:57:26.970277-05:00",
+      "timestamp": "2026-08-06T14:06:33.436335-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -3476,7 +3476,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-tbrg-01.yaml",
-      "timestamp": "2026-08-06T13:57:26.974134-05:00",
+      "timestamp": "2026-08-06T14:06:33.440156-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -3546,7 +3546,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-tp.yaml",
-      "timestamp": "2026-08-06T13:57:26.975717-05:00",
+      "timestamp": "2026-08-06T14:06:33.441744-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -3594,7 +3594,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-trs11.yaml",
-      "timestamp": "2026-08-06T13:57:27.008962-05:00",
+      "timestamp": "2026-08-06T14:06:33.475318-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -3667,7 +3667,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-trs12.yaml",
-      "timestamp": "2026-08-06T13:57:27.010606-05:00",
+      "timestamp": "2026-08-06T14:06:33.477187-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -3741,7 +3741,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-trs21.yaml",
-      "timestamp": "2026-08-06T13:57:27.012397-05:00",
+      "timestamp": "2026-08-06T14:06:33.479097-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -3814,7 +3814,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-wrm.yaml",
-      "timestamp": "2026-08-06T13:57:27.013829-05:00",
+      "timestamp": "2026-08-06T14:06:33.480615-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -3894,7 +3894,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-zn1.yaml",
-      "timestamp": "2026-08-06T13:57:27.015650-05:00",
+      "timestamp": "2026-08-06T14:06:33.482601-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -3964,7 +3964,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-zn2.yaml",
-      "timestamp": "2026-08-06T13:57:27.016885-05:00",
+      "timestamp": "2026-08-06T14:06:33.483978-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4034,7 +4034,7 @@
     },
     {
       "schema_path": "schemas/devices/digital-matter/oyster.yaml",
-      "timestamp": "2026-08-06T13:57:27.018292-05:00",
+      "timestamp": "2026-08-06T14:06:33.485768-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -4084,7 +4084,7 @@
     },
     {
       "schema_path": "schemas/devices/dragino/laq4.yaml",
-      "timestamp": "2026-08-06T13:57:27.046290-05:00",
+      "timestamp": "2026-08-06T14:06:33.512499-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -4134,7 +4134,7 @@
     },
     {
       "schema_path": "schemas/devices/elsys/ers.yaml",
-      "timestamp": "2026-08-06T13:57:27.071170-05:00",
+      "timestamp": "2026-08-06T14:06:33.535476-05:00",
       "score": 56.0,
       "tier": "REJECTED",
       "details": {
@@ -4231,7 +4231,7 @@
     },
     {
       "schema_path": "schemas/devices/hbi/mla20.yaml",
-      "timestamp": "2026-08-06T13:57:27.099343-05:00",
+      "timestamp": "2026-08-06T14:06:33.560320-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4305,7 +4305,7 @@
     },
     {
       "schema_path": "schemas/devices/makerfabs/4-channel-adc.yaml",
-      "timestamp": "2026-08-06T13:57:27.102320-05:00",
+      "timestamp": "2026-08-06T14:06:33.563083-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4375,7 +4375,7 @@
     },
     {
       "schema_path": "schemas/devices/makerfabs/ath20.yaml",
-      "timestamp": "2026-08-06T13:57:27.104058-05:00",
+      "timestamp": "2026-08-06T14:06:33.564745-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -4450,7 +4450,7 @@
     },
     {
       "schema_path": "schemas/devices/makerfabs/gps-tracker.yaml",
-      "timestamp": "2026-08-06T13:57:27.104969-05:00",
+      "timestamp": "2026-08-06T14:06:33.565608-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4527,7 +4527,7 @@
     },
     {
       "schema_path": "schemas/devices/makerfabs/leaf-moisture-sn-3001.yaml",
-      "timestamp": "2026-08-06T13:57:27.107705-05:00",
+      "timestamp": "2026-08-06T14:06:33.568195-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -4602,7 +4602,7 @@
     },
     {
       "schema_path": "schemas/devices/makerfabs/pipe-pressure.yaml",
-      "timestamp": "2026-08-06T13:57:27.109226-05:00",
+      "timestamp": "2026-08-06T14:06:33.569303-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4676,7 +4676,7 @@
     },
     {
       "schema_path": "schemas/devices/makerfabs/soil-monitor.yaml",
-      "timestamp": "2026-08-06T13:57:27.110097-05:00",
+      "timestamp": "2026-08-06T14:06:33.570035-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -4752,7 +4752,7 @@
     },
     {
       "schema_path": "schemas/devices/mclimate/flood-sensor.yaml",
-      "timestamp": "2026-08-06T13:57:27.111729-05:00",
+      "timestamp": "2026-08-06T14:06:33.571456-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4826,7 +4826,7 @@
     },
     {
       "schema_path": "schemas/devices/mclimate/t-valve.yaml",
-      "timestamp": "2026-08-06T13:57:27.112926-05:00",
+      "timestamp": "2026-08-06T14:06:33.572553-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4896,7 +4896,7 @@
     },
     {
       "schema_path": "schemas/devices/mclimate/vicki.yaml",
-      "timestamp": "2026-08-06T13:57:27.114800-05:00",
+      "timestamp": "2026-08-06T14:06:33.574317-05:00",
       "score": 85.0,
       "tier": "GOLD",
       "details": {
@@ -4949,7 +4949,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am102.yaml",
-      "timestamp": "2026-08-06T13:57:27.149936-05:00",
+      "timestamp": "2026-08-06T14:06:33.608441-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -4998,7 +4998,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am102l.yaml",
-      "timestamp": "2026-08-06T13:57:27.178297-05:00",
+      "timestamp": "2026-08-06T14:06:33.635255-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -5047,7 +5047,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am103.yaml",
-      "timestamp": "2026-08-06T13:57:27.206793-05:00",
+      "timestamp": "2026-08-06T14:06:33.663754-05:00",
       "score": 94.0,
       "tier": "GOLD",
       "details": {
@@ -5105,7 +5105,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am103l.yaml",
-      "timestamp": "2026-08-06T13:57:27.231574-05:00",
+      "timestamp": "2026-08-06T14:06:33.687955-05:00",
       "score": 94.0,
       "tier": "GOLD",
       "details": {
@@ -5163,7 +5163,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am104.yaml",
-      "timestamp": "2026-08-06T13:57:27.260110-05:00",
+      "timestamp": "2026-08-06T14:06:33.713400-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -5212,7 +5212,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am107.yaml",
-      "timestamp": "2026-08-06T13:57:27.285483-05:00",
+      "timestamp": "2026-08-06T14:06:33.738465-05:00",
       "score": 94.0,
       "tier": "GOLD",
       "details": {
@@ -5270,7 +5270,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am307.yaml",
-      "timestamp": "2026-08-06T13:57:27.312810-05:00",
+      "timestamp": "2026-08-06T14:06:33.764295-05:00",
       "score": 91.0,
       "tier": "GOLD",
       "details": {
@@ -5333,7 +5333,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am307l.yaml",
-      "timestamp": "2026-08-06T13:57:27.338338-05:00",
+      "timestamp": "2026-08-06T14:06:33.790103-05:00",
       "score": 91.0,
       "tier": "GOLD",
       "details": {
@@ -5396,7 +5396,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am308.yaml",
-      "timestamp": "2026-08-06T13:57:27.364895-05:00",
+      "timestamp": "2026-08-06T14:06:33.820292-05:00",
       "score": 91.0,
       "tier": "GOLD",
       "details": {
@@ -5459,7 +5459,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am308l.yaml",
-      "timestamp": "2026-08-06T13:57:27.391758-05:00",
+      "timestamp": "2026-08-06T14:06:33.847654-05:00",
       "score": 91.0,
       "tier": "GOLD",
       "details": {
@@ -5522,7 +5522,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am319.yaml",
-      "timestamp": "2026-08-06T13:57:27.419939-05:00",
+      "timestamp": "2026-08-06T14:06:33.873382-05:00",
       "score": 91.0,
       "tier": "GOLD",
       "details": {
@@ -5585,7 +5585,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am319l.yaml",
-      "timestamp": "2026-08-06T13:57:27.451043-05:00",
+      "timestamp": "2026-08-06T14:06:33.902588-05:00",
       "score": 91.0,
       "tier": "GOLD",
       "details": {
@@ -5648,8 +5648,8 @@
     },
     {
       "schema_path": "schemas/devices/milesight/at101-fh.yaml",
-      "timestamp": "2026-08-06T13:57:27.481489-05:00",
-      "score": 89.0,
+      "timestamp": "2026-08-06T14:06:33.933681-05:00",
+      "score": 91.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
@@ -5677,18 +5677,16 @@
           "total_fields": 29,
           "ipso_mapped": 3,
           "ipso_missing": [
-            "temperature_alarm: add ipso: {object: 3303}",
             "history.longitude: add ipso: {object: 3336}",
             "history.latitude: add ipso: {object: 3336}"
           ],
           "senml_mapped": 3,
           "senml_missing": [
-            "temperature_alarm: add senml: {unit: \"Cel\"}",
             "history.longitude: add senml: {unit: \"lon\"}",
             "history.latitude: add senml: {unit: \"lat\"}"
           ],
           "semantic_mapped": 3,
-          "detectable_sensors": 6,
+          "detectable_sensors": 5,
           "annotation_errors": []
         },
         "provenance": {
@@ -5701,19 +5699,19 @@
         }
       },
       "recommendations": [
-        "Add IPSO object mappings for standard sensors (3 fields)",
-        "  \u2192 temperature_alarm: add ipso: {object: 3303}",
+        "Add IPSO object mappings for standard sensors (2 fields)",
         "  \u2192 history.longitude: add ipso: {object: 3336}",
-        "Add SenML units for standard sensors (3 fields)",
-        "  \u2192 temperature_alarm: add senml: {unit: \"Cel\"}",
-        "  \u2192 history.longitude: add senml: {unit: \"lon\"}"
+        "  \u2192 history.latitude: add ipso: {object: 3336}",
+        "Add SenML units for standard sensors (2 fields)",
+        "  \u2192 history.longitude: add senml: {unit: \"lon\"}",
+        "  \u2192 history.latitude: add senml: {unit: \"lat\"}"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/at101.yaml",
-      "timestamp": "2026-08-06T13:57:27.510567-05:00",
-      "score": 94.0,
-      "tier": "GOLD",
+      "timestamp": "2026-08-06T14:06:33.962191-05:00",
+      "score": 100.0,
+      "tier": "PLATINUM",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
@@ -5739,15 +5737,11 @@
         "semantic_annotations": {
           "total_fields": 14,
           "ipso_mapped": 3,
-          "ipso_missing": [
-            "temperature_alarm: add ipso: {object: 3303}"
-          ],
+          "ipso_missing": [],
           "senml_mapped": 3,
-          "senml_missing": [
-            "temperature_alarm: add senml: {unit: \"Cel\"}"
-          ],
+          "senml_missing": [],
           "semantic_mapped": 3,
-          "detectable_sensors": 4,
+          "detectable_sensors": 3,
           "annotation_errors": []
         },
         "provenance": {
@@ -5759,17 +5753,12 @@
           "issues": []
         }
       },
-      "recommendations": [
-        "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 temperature_alarm: add ipso: {object: 3303}",
-        "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 temperature_alarm: add senml: {unit: \"Cel\"}"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/ct101.yaml",
-      "timestamp": "2026-08-06T13:57:27.537506-05:00",
-      "score": 78.0,
+      "timestamp": "2026-08-06T14:06:33.989212-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -5799,27 +5788,21 @@
           "ipso_mapped": 1,
           "ipso_missing": [
             "total_current: add ipso: {object: 3317}",
-            "current_sensor_status: add ipso: {object: 3317}",
-            "temperature_sensor_status: add ipso: {object: 3303}",
             "current_max: add ipso: {object: 3317}",
             "current_min: add ipso: {object: 3317}",
             "current: add ipso: {object: 3317}",
-            "current_alarm: add ipso: {object: 3317}",
-            "temperature_alarm: add ipso: {object: 3303}"
+            "current_alarm: add ipso: {object: 3317}"
           ],
           "senml_mapped": 1,
           "senml_missing": [
             "total_current: add senml: {unit: \"A\"}",
-            "current_sensor_status: add senml: {unit: \"A\"}",
-            "temperature_sensor_status: add senml: {unit: \"Cel\"}",
             "current_max: add senml: {unit: \"A\"}",
             "current_min: add senml: {unit: \"A\"}",
             "current: add senml: {unit: \"A\"}",
-            "current_alarm: add senml: {unit: \"A\"}",
-            "temperature_alarm: add senml: {unit: \"Cel\"}"
+            "current_alarm: add senml: {unit: \"A\"}"
           ],
           "semantic_mapped": 1,
-          "detectable_sensors": 9,
+          "detectable_sensors": 6,
           "annotation_errors": []
         },
         "provenance": {
@@ -5833,18 +5816,18 @@
       },
       "recommendations": [
         "Add test vector for negative values",
-        "Add IPSO object mappings for standard sensors (8 fields)",
+        "Add IPSO object mappings for standard sensors (5 fields)",
         "  \u2192 total_current: add ipso: {object: 3317}",
-        "  \u2192 current_sensor_status: add ipso: {object: 3317}",
-        "Add SenML units for standard sensors (8 fields)",
+        "  \u2192 current_max: add ipso: {object: 3317}",
+        "Add SenML units for standard sensors (5 fields)",
         "  \u2192 total_current: add senml: {unit: \"A\"}",
-        "  \u2192 current_sensor_status: add senml: {unit: \"A\"}"
+        "  \u2192 current_max: add senml: {unit: \"A\"}"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/ct103.yaml",
-      "timestamp": "2026-08-06T13:57:27.567560-05:00",
-      "score": 78.0,
+      "timestamp": "2026-08-06T14:06:34.016234-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -5874,27 +5857,21 @@
           "ipso_mapped": 1,
           "ipso_missing": [
             "total_current: add ipso: {object: 3317}",
-            "current_sensor_status: add ipso: {object: 3317}",
-            "temperature_sensor_status: add ipso: {object: 3303}",
             "current_max: add ipso: {object: 3317}",
             "current_min: add ipso: {object: 3317}",
             "current: add ipso: {object: 3317}",
-            "current_alarm: add ipso: {object: 3317}",
-            "temperature_alarm: add ipso: {object: 3303}"
+            "current_alarm: add ipso: {object: 3317}"
           ],
           "senml_mapped": 1,
           "senml_missing": [
             "total_current: add senml: {unit: \"A\"}",
-            "current_sensor_status: add senml: {unit: \"A\"}",
-            "temperature_sensor_status: add senml: {unit: \"Cel\"}",
             "current_max: add senml: {unit: \"A\"}",
             "current_min: add senml: {unit: \"A\"}",
             "current: add senml: {unit: \"A\"}",
-            "current_alarm: add senml: {unit: \"A\"}",
-            "temperature_alarm: add senml: {unit: \"Cel\"}"
+            "current_alarm: add senml: {unit: \"A\"}"
           ],
           "semantic_mapped": 1,
-          "detectable_sensors": 9,
+          "detectable_sensors": 6,
           "annotation_errors": []
         },
         "provenance": {
@@ -5908,18 +5885,18 @@
       },
       "recommendations": [
         "Add test vector for negative values",
-        "Add IPSO object mappings for standard sensors (8 fields)",
+        "Add IPSO object mappings for standard sensors (5 fields)",
         "  \u2192 total_current: add ipso: {object: 3317}",
-        "  \u2192 current_sensor_status: add ipso: {object: 3317}",
-        "Add SenML units for standard sensors (8 fields)",
+        "  \u2192 current_max: add ipso: {object: 3317}",
+        "Add SenML units for standard sensors (5 fields)",
         "  \u2192 total_current: add senml: {unit: \"A\"}",
-        "  \u2192 current_sensor_status: add senml: {unit: \"A\"}"
+        "  \u2192 current_max: add senml: {unit: \"A\"}"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/ct105.yaml",
-      "timestamp": "2026-08-06T13:57:27.594684-05:00",
-      "score": 78.0,
+      "timestamp": "2026-08-06T14:06:34.043749-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -5949,27 +5926,21 @@
           "ipso_mapped": 1,
           "ipso_missing": [
             "total_current: add ipso: {object: 3317}",
-            "current_sensor_status: add ipso: {object: 3317}",
-            "temperature_sensor_status: add ipso: {object: 3303}",
             "current_max: add ipso: {object: 3317}",
             "current_min: add ipso: {object: 3317}",
             "current: add ipso: {object: 3317}",
-            "current_alarm: add ipso: {object: 3317}",
-            "temperature_alarm: add ipso: {object: 3303}"
+            "current_alarm: add ipso: {object: 3317}"
           ],
           "senml_mapped": 1,
           "senml_missing": [
             "total_current: add senml: {unit: \"A\"}",
-            "current_sensor_status: add senml: {unit: \"A\"}",
-            "temperature_sensor_status: add senml: {unit: \"Cel\"}",
             "current_max: add senml: {unit: \"A\"}",
             "current_min: add senml: {unit: \"A\"}",
             "current: add senml: {unit: \"A\"}",
-            "current_alarm: add senml: {unit: \"A\"}",
-            "temperature_alarm: add senml: {unit: \"Cel\"}"
+            "current_alarm: add senml: {unit: \"A\"}"
           ],
           "semantic_mapped": 1,
-          "detectable_sensors": 9,
+          "detectable_sensors": 6,
           "annotation_errors": []
         },
         "provenance": {
@@ -5983,18 +5954,18 @@
       },
       "recommendations": [
         "Add test vector for negative values",
-        "Add IPSO object mappings for standard sensors (8 fields)",
+        "Add IPSO object mappings for standard sensors (5 fields)",
         "  \u2192 total_current: add ipso: {object: 3317}",
-        "  \u2192 current_sensor_status: add ipso: {object: 3317}",
-        "Add SenML units for standard sensors (8 fields)",
+        "  \u2192 current_max: add ipso: {object: 3317}",
+        "Add SenML units for standard sensors (5 fields)",
         "  \u2192 total_current: add senml: {unit: \"A\"}",
-        "  \u2192 current_sensor_status: add senml: {unit: \"A\"}"
+        "  \u2192 current_max: add senml: {unit: \"A\"}"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/ct303.yaml",
-      "timestamp": "2026-08-06T13:57:27.622328-05:00",
-      "score": 84.0,
+      "timestamp": "2026-08-06T14:06:34.070785-05:00",
+      "score": 98.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -6022,17 +5993,11 @@
         "semantic_annotations": {
           "total_fields": 11,
           "ipso_mapped": 1,
-          "ipso_missing": [
-            "temperature_sensor_status: add ipso: {object: 3303}",
-            "temperature_alarm: add ipso: {object: 3303}"
-          ],
+          "ipso_missing": [],
           "senml_mapped": 1,
-          "senml_missing": [
-            "temperature_sensor_status: add senml: {unit: \"Cel\"}",
-            "temperature_alarm: add senml: {unit: \"Cel\"}"
-          ],
+          "senml_missing": [],
           "semantic_mapped": 1,
-          "detectable_sensors": 3,
+          "detectable_sensors": 1,
           "annotation_errors": []
         },
         "provenance": {
@@ -6042,22 +6007,20 @@
           "independent_vectors": 15,
           "verification": "independent",
           "issues": []
-        }
+        },
+        "tier_capped_by": [
+          "missing edge case vectors (PS-239)"
+        ]
       },
       "recommendations": [
-        "Add test vector for negative values",
-        "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 temperature_sensor_status: add ipso: {object: 3303}",
-        "  \u2192 temperature_alarm: add ipso: {object: 3303}",
-        "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 temperature_sensor_status: add senml: {unit: \"Cel\"}",
-        "  \u2192 temperature_alarm: add senml: {unit: \"Cel\"}"
+        "Tier capped: missing edge case vectors (PS-239)",
+        "Add test vector for negative values"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/ct305.yaml",
-      "timestamp": "2026-08-06T13:57:27.647026-05:00",
-      "score": 84.0,
+      "timestamp": "2026-08-06T14:06:34.096618-05:00",
+      "score": 98.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -6085,17 +6048,11 @@
         "semantic_annotations": {
           "total_fields": 11,
           "ipso_mapped": 1,
-          "ipso_missing": [
-            "temperature_sensor_status: add ipso: {object: 3303}",
-            "temperature_alarm: add ipso: {object: 3303}"
-          ],
+          "ipso_missing": [],
           "senml_mapped": 1,
-          "senml_missing": [
-            "temperature_sensor_status: add senml: {unit: \"Cel\"}",
-            "temperature_alarm: add senml: {unit: \"Cel\"}"
-          ],
+          "senml_missing": [],
           "semantic_mapped": 1,
-          "detectable_sensors": 3,
+          "detectable_sensors": 1,
           "annotation_errors": []
         },
         "provenance": {
@@ -6105,22 +6062,20 @@
           "independent_vectors": 15,
           "verification": "independent",
           "issues": []
-        }
+        },
+        "tier_capped_by": [
+          "missing edge case vectors (PS-239)"
+        ]
       },
       "recommendations": [
-        "Add test vector for negative values",
-        "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 temperature_sensor_status: add ipso: {object: 3303}",
-        "  \u2192 temperature_alarm: add ipso: {object: 3303}",
-        "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 temperature_sensor_status: add senml: {unit: \"Cel\"}",
-        "  \u2192 temperature_alarm: add senml: {unit: \"Cel\"}"
+        "Tier capped: missing edge case vectors (PS-239)",
+        "Add test vector for negative values"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/ct310.yaml",
-      "timestamp": "2026-08-06T13:57:27.673264-05:00",
-      "score": 84.0,
+      "timestamp": "2026-08-06T14:06:34.122232-05:00",
+      "score": 98.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -6148,17 +6103,11 @@
         "semantic_annotations": {
           "total_fields": 11,
           "ipso_mapped": 1,
-          "ipso_missing": [
-            "temperature_sensor_status: add ipso: {object: 3303}",
-            "temperature_alarm: add ipso: {object: 3303}"
-          ],
+          "ipso_missing": [],
           "senml_mapped": 1,
-          "senml_missing": [
-            "temperature_sensor_status: add senml: {unit: \"Cel\"}",
-            "temperature_alarm: add senml: {unit: \"Cel\"}"
-          ],
+          "senml_missing": [],
           "semantic_mapped": 1,
-          "detectable_sensors": 3,
+          "detectable_sensors": 1,
           "annotation_errors": []
         },
         "provenance": {
@@ -6168,21 +6117,19 @@
           "independent_vectors": 15,
           "verification": "independent",
           "issues": []
-        }
+        },
+        "tier_capped_by": [
+          "missing edge case vectors (PS-239)"
+        ]
       },
       "recommendations": [
-        "Add test vector for negative values",
-        "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 temperature_sensor_status: add ipso: {object: 3303}",
-        "  \u2192 temperature_alarm: add ipso: {object: 3303}",
-        "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 temperature_sensor_status: add senml: {unit: \"Cel\"}",
-        "  \u2192 temperature_alarm: add senml: {unit: \"Cel\"}"
+        "Tier capped: missing edge case vectors (PS-239)",
+        "Add test vector for negative values"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/em300-di.yaml",
-      "timestamp": "2026-08-06T13:57:27.699385-05:00",
+      "timestamp": "2026-08-06T14:06:34.145639-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -6231,7 +6178,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em300-mcs.yaml",
-      "timestamp": "2026-08-06T13:57:27.723791-05:00",
+      "timestamp": "2026-08-06T14:06:34.169049-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -6280,7 +6227,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em300-mld.yaml",
-      "timestamp": "2026-08-06T13:57:27.753045-05:00",
+      "timestamp": "2026-08-06T14:06:34.197228-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -6329,7 +6276,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em300-sld.yaml",
-      "timestamp": "2026-08-06T13:57:27.772849-05:00",
+      "timestamp": "2026-08-06T14:06:34.216354-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -6378,7 +6325,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em300-th.yaml",
-      "timestamp": "2026-08-06T13:57:27.795127-05:00",
+      "timestamp": "2026-08-06T14:06:34.240789-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -6427,7 +6374,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em300-zld.yaml",
-      "timestamp": "2026-08-06T13:57:27.817859-05:00",
+      "timestamp": "2026-08-06T14:06:34.261721-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -6476,7 +6423,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em310-tilt.yaml",
-      "timestamp": "2026-08-06T13:57:27.839509-05:00",
+      "timestamp": "2026-08-06T14:06:34.284929-05:00",
       "score": 98.0,
       "tier": "SILVER",
       "details": {
@@ -6531,7 +6478,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em310-udl.yaml",
-      "timestamp": "2026-08-06T13:57:27.869772-05:00",
+      "timestamp": "2026-08-06T14:06:34.311798-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -6589,7 +6536,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em320-th.yaml",
-      "timestamp": "2026-08-06T13:57:27.897022-05:00",
+      "timestamp": "2026-08-06T14:06:34.338259-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -6638,7 +6585,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em320-tilt.yaml",
-      "timestamp": "2026-08-06T13:57:27.918186-05:00",
+      "timestamp": "2026-08-06T14:06:34.359456-05:00",
       "score": 37.6,
       "tier": "REJECTED",
       "details": {
@@ -6699,7 +6646,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em400-mud.yaml",
-      "timestamp": "2026-08-06T13:57:27.920636-05:00",
+      "timestamp": "2026-08-06T14:06:34.361433-05:00",
       "score": 73.0,
       "tier": "SILVER",
       "details": {
@@ -6769,7 +6716,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em400-tld.yaml",
-      "timestamp": "2026-08-06T13:57:27.945012-05:00",
+      "timestamp": "2026-08-06T14:06:34.384360-05:00",
       "score": 73.0,
       "tier": "SILVER",
       "details": {
@@ -6839,7 +6786,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em400-udl.yaml",
-      "timestamp": "2026-08-06T13:57:27.967727-05:00",
+      "timestamp": "2026-08-06T14:06:34.409265-05:00",
       "score": 73.0,
       "tier": "SILVER",
       "details": {
@@ -6909,7 +6856,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em410-rdl.yaml",
-      "timestamp": "2026-08-06T13:57:27.991530-05:00",
+      "timestamp": "2026-08-06T14:06:34.436966-05:00",
       "score": 92.0,
       "tier": "GOLD",
       "details": {
@@ -6967,7 +6914,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-co2.yaml",
-      "timestamp": "2026-08-06T13:57:28.017488-05:00",
+      "timestamp": "2026-08-06T14:06:34.463491-05:00",
       "score": 30.6,
       "tier": "REJECTED",
       "details": {
@@ -7036,7 +6983,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-lgt.yaml",
-      "timestamp": "2026-08-06T13:57:28.020558-05:00",
+      "timestamp": "2026-08-06T14:06:34.466232-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -7094,7 +7041,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-pp.yaml",
-      "timestamp": "2026-08-06T13:57:28.040472-05:00",
+      "timestamp": "2026-08-06T14:06:34.485790-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -7152,7 +7099,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-pt100.yaml",
-      "timestamp": "2026-08-06T13:57:28.062488-05:00",
+      "timestamp": "2026-08-06T14:06:34.505919-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -7201,7 +7148,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-smt.yaml",
-      "timestamp": "2026-08-06T13:57:28.083644-05:00",
+      "timestamp": "2026-08-06T14:06:34.525388-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -7249,7 +7196,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-smtc.yaml",
-      "timestamp": "2026-08-06T13:57:28.106567-05:00",
+      "timestamp": "2026-08-06T14:06:34.546315-05:00",
       "score": 94.0,
       "tier": "GOLD",
       "details": {
@@ -7303,7 +7250,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-swl.yaml",
-      "timestamp": "2026-08-06T13:57:28.128947-05:00",
+      "timestamp": "2026-08-06T14:06:34.572212-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -7361,7 +7308,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-udl.yaml",
-      "timestamp": "2026-08-06T13:57:28.150510-05:00",
+      "timestamp": "2026-08-06T14:06:34.592959-05:00",
       "score": 24.7,
       "tier": "REJECTED",
       "details": {
@@ -7430,7 +7377,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/gs101.yaml",
-      "timestamp": "2026-08-06T13:57:28.152013-05:00",
+      "timestamp": "2026-08-06T14:06:34.594308-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -7500,7 +7447,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/gs301.yaml",
-      "timestamp": "2026-08-06T13:57:28.153827-05:00",
+      "timestamp": "2026-08-06T14:06:34.595901-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -7548,7 +7495,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ts101.yaml",
-      "timestamp": "2026-08-06T13:57:28.181657-05:00",
+      "timestamp": "2026-08-06T14:06:34.622084-05:00",
       "score": 91.0,
       "tier": "GOLD",
       "details": {
@@ -7612,7 +7559,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ts201.yaml",
-      "timestamp": "2026-08-06T13:57:28.203168-05:00",
+      "timestamp": "2026-08-06T14:06:34.644336-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -7638,7 +7585,7 @@
         ],
         "edge_cases_missing": [],
         "semantic_annotations": {
-          "total_fields": 10,
+          "total_fields": 11,
           "ipso_mapped": 2,
           "ipso_missing": [],
           "senml_mapped": 2,
@@ -7660,7 +7607,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ts201v2.yaml",
-      "timestamp": "2026-08-06T13:57:28.230132-05:00",
+      "timestamp": "2026-08-06T14:06:34.671211-05:00",
       "score": 94.0,
       "tier": "GOLD",
       "details": {
@@ -7686,17 +7633,17 @@
         ],
         "edge_cases_missing": [],
         "semantic_annotations": {
-          "total_fields": 12,
-          "ipso_mapped": 3,
+          "total_fields": 16,
+          "ipso_mapped": 4,
           "ipso_missing": [
             "temperature_unit: add ipso: {object: 3303}"
           ],
-          "senml_mapped": 3,
+          "senml_mapped": 4,
           "senml_missing": [
             "temperature_unit: add senml: {unit: \"Cel\"}"
           ],
-          "semantic_mapped": 3,
-          "detectable_sensors": 4,
+          "semantic_mapped": 4,
+          "detectable_sensors": 5,
           "annotation_errors": []
         },
         "provenance": {
@@ -7717,7 +7664,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ts30x.yaml",
-      "timestamp": "2026-08-06T13:57:28.256787-05:00",
+      "timestamp": "2026-08-06T14:06:34.699826-05:00",
       "score": 80.0,
       "tier": "SILVER",
       "details": {
@@ -7749,33 +7696,25 @@
             "temperature_chn1: add ipso: {object: 3303}",
             "temperature_chn2: add ipso: {object: 3303}",
             "temperature_chn1: add ipso: {object: 3303}",
-            "temperature_chn1_alarm: add ipso: {object: 3303}",
             "temperature_chn1: add ipso: {object: 3303}",
             "temperature_chn1_mutation: add ipso: {object: 3303}",
-            "temperature_chn1_alarm: add ipso: {object: 3303}",
             "temperature_chn2: add ipso: {object: 3303}",
-            "temperature_chn2_alarm: add ipso: {object: 3303}",
             "temperature_chn2: add ipso: {object: 3303}",
-            "temperature_chn2_mutation: add ipso: {object: 3303}",
-            "temperature_chn2_alarm: add ipso: {object: 3303}"
+            "temperature_chn2_mutation: add ipso: {object: 3303}"
           ],
           "senml_mapped": 1,
           "senml_missing": [
             "temperature_chn1: add senml: {unit: \"Cel\"}",
             "temperature_chn2: add senml: {unit: \"Cel\"}",
             "temperature_chn1: add senml: {unit: \"Cel\"}",
-            "temperature_chn1_alarm: add senml: {unit: \"Cel\"}",
             "temperature_chn1: add senml: {unit: \"Cel\"}",
             "temperature_chn1_mutation: add senml: {unit: \"Cel\"}",
-            "temperature_chn1_alarm: add senml: {unit: \"Cel\"}",
             "temperature_chn2: add senml: {unit: \"Cel\"}",
-            "temperature_chn2_alarm: add senml: {unit: \"Cel\"}",
             "temperature_chn2: add senml: {unit: \"Cel\"}",
-            "temperature_chn2_mutation: add senml: {unit: \"Cel\"}",
-            "temperature_chn2_alarm: add senml: {unit: \"Cel\"}"
+            "temperature_chn2_mutation: add senml: {unit: \"Cel\"}"
           ],
           "semantic_mapped": 1,
-          "detectable_sensors": 13,
+          "detectable_sensors": 9,
           "annotation_errors": []
         },
         "provenance": {
@@ -7789,17 +7728,17 @@
         }
       },
       "recommendations": [
-        "Add IPSO object mappings for standard sensors (12 fields)",
+        "Add IPSO object mappings for standard sensors (8 fields)",
         "  \u2192 temperature_chn1: add ipso: {object: 3303}",
         "  \u2192 temperature_chn2: add ipso: {object: 3303}",
-        "Add SenML units for standard sensors (12 fields)",
+        "Add SenML units for standard sensors (8 fields)",
         "  \u2192 temperature_chn1: add senml: {unit: \"Cel\"}",
         "  \u2192 temperature_chn2: add senml: {unit: \"Cel\"}"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/uc100.yaml",
-      "timestamp": "2026-08-06T13:57:28.285575-05:00",
+      "timestamp": "2026-08-06T14:06:34.728643-05:00",
       "score": 78.0,
       "tier": "SILVER",
       "details": {
@@ -7858,7 +7797,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/uc1114.yaml",
-      "timestamp": "2026-08-06T13:57:28.307007-05:00",
+      "timestamp": "2026-08-06T14:06:34.750598-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -7920,7 +7859,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/uc1152.yaml",
-      "timestamp": "2026-08-06T13:57:28.308016-05:00",
+      "timestamp": "2026-08-06T14:06:34.751570-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -7982,7 +7921,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/uc300.yaml",
-      "timestamp": "2026-08-06T13:57:28.308738-05:00",
+      "timestamp": "2026-08-06T14:06:34.752466-05:00",
       "score": 80.0,
       "tier": "SILVER",
       "details": {
@@ -8045,7 +7984,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/uc50x.yaml",
-      "timestamp": "2026-08-06T13:57:28.332921-05:00",
+      "timestamp": "2026-08-06T14:06:34.778208-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -8093,8 +8032,8 @@
     },
     {
       "schema_path": "schemas/devices/milesight/uc51x.yaml",
-      "timestamp": "2026-08-06T13:57:28.357766-05:00",
-      "score": 80.0,
+      "timestamp": "2026-08-06T14:06:34.803581-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -8122,8 +8061,6 @@
           "total_fields": 20,
           "ipso_mapped": 1,
           "ipso_missing": [
-            "valve_1_result: add ipso: {object: 3337}",
-            "valve_2_result: add ipso: {object: 3337}",
             "valve_1_pulse: add ipso: {object: 3337}",
             "valve_2_pulse: add ipso: {object: 3337}",
             "pressure: add ipso: {object: 3323}",
@@ -8132,8 +8069,6 @@
           ],
           "senml_mapped": 1,
           "senml_missing": [
-            "valve_1_result: add senml: {unit: \"%\"}",
-            "valve_2_result: add senml: {unit: \"%\"}",
             "valve_1_pulse: add senml: {unit: \"%\"}",
             "valve_2_pulse: add senml: {unit: \"%\"}",
             "pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating",
@@ -8141,7 +8076,7 @@
             "history.pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
           ],
           "semantic_mapped": 1,
-          "detectable_sensors": 8,
+          "detectable_sensors": 6,
           "annotation_errors": []
         },
         "provenance": {
@@ -8154,17 +8089,17 @@
         }
       },
       "recommendations": [
-        "Add IPSO object mappings for standard sensors (7 fields)",
-        "  \u2192 valve_1_result: add ipso: {object: 3337}",
-        "  \u2192 valve_2_result: add ipso: {object: 3337}",
-        "Add SenML units for standard sensors (7 fields)",
-        "  \u2192 valve_1_result: add senml: {unit: \"%\"}",
-        "  \u2192 valve_2_result: add senml: {unit: \"%\"}"
+        "Add IPSO object mappings for standard sensors (5 fields)",
+        "  \u2192 valve_1_pulse: add ipso: {object: 3337}",
+        "  \u2192 valve_2_pulse: add ipso: {object: 3337}",
+        "Add SenML units for standard sensors (5 fields)",
+        "  \u2192 valve_1_pulse: add senml: {unit: \"%\"}",
+        "  \u2192 valve_2_pulse: add senml: {unit: \"%\"}"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/vs121.yaml",
-      "timestamp": "2026-08-06T13:57:28.385665-05:00",
+      "timestamp": "2026-08-06T14:06:34.830824-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -8226,7 +8161,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs135.yaml",
-      "timestamp": "2026-08-06T13:57:28.386848-05:00",
+      "timestamp": "2026-08-06T14:06:34.831988-05:00",
       "score": 80.0,
       "tier": "SILVER",
       "details": {
@@ -8274,8 +8209,8 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs321.yaml",
-      "timestamp": "2026-08-06T13:57:28.412084-05:00",
-      "score": 84.0,
+      "timestamp": "2026-08-06T14:06:34.854654-05:00",
+      "score": 98.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -8303,23 +8238,11 @@
         "semantic_annotations": {
           "total_fields": 19,
           "ipso_mapped": 3,
-          "ipso_missing": [
-            "temperature_sensor_status: add ipso: {object: 3303}",
-            "humidity_sensor_status: add ipso: {object: 3304}",
-            "illuminance_status: add ipso: {object: 3301}",
-            "temperature_alarm: add ipso: {object: 3303}",
-            "humidity_alarm: add ipso: {object: 3304}"
-          ],
+          "ipso_missing": [],
           "senml_mapped": 3,
-          "senml_missing": [
-            "temperature_sensor_status: add senml: {unit: \"Cel\"}",
-            "humidity_sensor_status: add senml: {unit: \"%RH\"}",
-            "illuminance_status: add senml: {unit: \"lx\"}",
-            "temperature_alarm: add senml: {unit: \"Cel\"}",
-            "humidity_alarm: add senml: {unit: \"%RH\"}"
-          ],
+          "senml_missing": [],
           "semantic_mapped": 3,
-          "detectable_sensors": 8,
+          "detectable_sensors": 3,
           "annotation_errors": []
         },
         "provenance": {
@@ -8329,21 +8252,19 @@
           "independent_vectors": 15,
           "verification": "independent",
           "issues": []
-        }
+        },
+        "tier_capped_by": [
+          "missing edge case vectors (PS-239)"
+        ]
       },
       "recommendations": [
-        "Add test vector for negative values",
-        "Add IPSO object mappings for standard sensors (5 fields)",
-        "  \u2192 temperature_sensor_status: add ipso: {object: 3303}",
-        "  \u2192 humidity_sensor_status: add ipso: {object: 3304}",
-        "Add SenML units for standard sensors (5 fields)",
-        "  \u2192 temperature_sensor_status: add senml: {unit: \"Cel\"}",
-        "  \u2192 humidity_sensor_status: add senml: {unit: \"%RH\"}"
+        "Tier capped: missing edge case vectors (PS-239)",
+        "Add test vector for negative values"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/vs330.yaml",
-      "timestamp": "2026-08-06T13:57:28.440194-05:00",
+      "timestamp": "2026-08-06T14:06:34.883979-05:00",
       "score": 86.0,
       "tier": "GOLD",
       "details": {
@@ -8403,7 +8324,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs340.yaml",
-      "timestamp": "2026-08-06T13:57:28.461091-05:00",
+      "timestamp": "2026-08-06T14:06:34.905580-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -8457,7 +8378,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs341.yaml",
-      "timestamp": "2026-08-06T13:57:28.482747-05:00",
+      "timestamp": "2026-08-06T14:06:34.927533-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -8511,7 +8432,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs350.yaml",
-      "timestamp": "2026-08-06T13:57:28.501876-05:00",
+      "timestamp": "2026-08-06T14:06:34.946983-05:00",
       "score": 94.0,
       "tier": "GOLD",
       "details": {
@@ -8568,8 +8489,8 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs351.yaml",
-      "timestamp": "2026-08-06T13:57:28.530894-05:00",
-      "score": 91.0,
+      "timestamp": "2026-08-06T14:06:34.975405-05:00",
+      "score": 94.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
@@ -8597,16 +8518,14 @@
           "total_fields": 24,
           "ipso_mapped": 3,
           "ipso_missing": [
-            "power_status: add ipso: {object: 3328}",
             "temperature_alarm: add ipso: {object: 3303}"
           ],
           "senml_mapped": 3,
           "senml_missing": [
-            "power_status: add senml: {unit: \"W\"}",
             "temperature_alarm: add senml: {unit: \"Cel\"}"
           ],
           "semantic_mapped": 3,
-          "detectable_sensors": 5,
+          "detectable_sensors": 4,
           "annotation_errors": []
         },
         "provenance": {
@@ -8620,17 +8539,15 @@
         }
       },
       "recommendations": [
-        "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 power_status: add ipso: {object: 3328}",
+        "Add IPSO object mappings for standard sensors (1 fields)",
         "  \u2192 temperature_alarm: add ipso: {object: 3303}",
-        "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 power_status: add senml: {unit: \"W\"}",
+        "Add SenML units for standard sensors (1 fields)",
         "  \u2192 temperature_alarm: add senml: {unit: \"Cel\"}"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/vs360.yaml",
-      "timestamp": "2026-08-06T13:57:28.558735-05:00",
+      "timestamp": "2026-08-06T14:06:35.004895-05:00",
       "score": 80.0,
       "tier": "SILVER",
       "details": {
@@ -8692,7 +8609,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs370.yaml",
-      "timestamp": "2026-08-06T13:57:28.585773-05:00",
+      "timestamp": "2026-08-06T14:06:35.033388-05:00",
       "score": 92.0,
       "tier": "GOLD",
       "details": {
@@ -8745,7 +8662,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs373.yaml",
-      "timestamp": "2026-08-06T13:57:28.609783-05:00",
+      "timestamp": "2026-08-06T14:06:35.058668-05:00",
       "score": 80.0,
       "tier": "SILVER",
       "details": {
@@ -8774,20 +8691,15 @@
           "total_fields": 31,
           "ipso_mapped": 0,
           "ipso_missing": [
-            "target_status: add ipso: {object: 3308}",
-            "target_status: add ipso: {object: 3308}",
             "region_1_occupancy: add ipso: {object: 3302}",
             "region_2_occupancy: add ipso: {object: 3302}",
             "region_3_occupancy: add ipso: {object: 3302}",
             "region_4_occupancy: add ipso: {object: 3302}"
           ],
           "senml_mapped": 0,
-          "senml_missing": [
-            "target_status: add senml: {unit: \"Cel\"}",
-            "target_status: add senml: {unit: \"Cel\"}"
-          ],
+          "senml_missing": [],
           "semantic_mapped": 0,
-          "detectable_sensors": 6,
+          "detectable_sensors": 4,
           "annotation_errors": []
         },
         "provenance": {
@@ -8800,17 +8712,14 @@
         }
       },
       "recommendations": [
-        "Add IPSO object mappings for standard sensors (6 fields)",
-        "  \u2192 target_status: add ipso: {object: 3308}",
-        "  \u2192 target_status: add ipso: {object: 3308}",
-        "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 target_status: add senml: {unit: \"Cel\"}",
-        "  \u2192 target_status: add senml: {unit: \"Cel\"}"
+        "Add IPSO object mappings for standard sensors (4 fields)",
+        "  \u2192 region_1_occupancy: add ipso: {object: 3302}",
+        "  \u2192 region_2_occupancy: add ipso: {object: 3302}"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/ws101.yaml",
-      "timestamp": "2026-08-06T13:57:28.640639-05:00",
+      "timestamp": "2026-08-06T14:06:35.090304-05:00",
       "score": 27.1,
       "tier": "REJECTED",
       "details": {
@@ -8876,7 +8785,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws136.yaml",
-      "timestamp": "2026-08-06T13:57:28.641965-05:00",
+      "timestamp": "2026-08-06T14:06:35.091535-05:00",
       "score": 40.0,
       "tier": "REJECTED",
       "details": {
@@ -8938,7 +8847,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws156.yaml",
-      "timestamp": "2026-08-06T13:57:28.642956-05:00",
+      "timestamp": "2026-08-06T14:06:35.092527-05:00",
       "score": 40.0,
       "tier": "REJECTED",
       "details": {
@@ -9000,7 +8909,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws201.yaml",
-      "timestamp": "2026-08-06T13:57:28.643941-05:00",
+      "timestamp": "2026-08-06T14:06:35.093493-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -9058,7 +8967,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws202.yaml",
-      "timestamp": "2026-08-06T13:57:28.664462-05:00",
+      "timestamp": "2026-08-06T14:06:35.114217-05:00",
       "score": 86.0,
       "tier": "GOLD",
       "details": {
@@ -9118,8 +9027,8 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws203.yaml",
-      "timestamp": "2026-08-06T13:57:28.684068-05:00",
-      "score": 92.0,
+      "timestamp": "2026-08-06T14:06:35.134340-05:00",
+      "score": 94.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
@@ -9147,15 +9056,12 @@
           "total_fields": 6,
           "ipso_mapped": 4,
           "ipso_missing": [
-            "occupancy: add ipso: {object: 3302}",
-            "temperature_abnormal: add ipso: {object: 3303}"
+            "occupancy: add ipso: {object: 3302}"
           ],
           "senml_mapped": 4,
-          "senml_missing": [
-            "temperature_abnormal: add senml: {unit: \"Cel\"}"
-          ],
+          "senml_missing": [],
           "semantic_mapped": 4,
-          "detectable_sensors": 6,
+          "detectable_sensors": 5,
           "annotation_errors": []
         },
         "provenance": {
@@ -9169,16 +9075,13 @@
         }
       },
       "recommendations": [
-        "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 occupancy: add ipso: {object: 3302}",
-        "  \u2192 temperature_abnormal: add ipso: {object: 3303}",
-        "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 temperature_abnormal: add senml: {unit: \"Cel\"}"
+        "Add IPSO object mappings for standard sensors (1 fields)",
+        "  \u2192 occupancy: add ipso: {object: 3302}"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/ws301.yaml",
-      "timestamp": "2026-08-06T13:57:28.707638-05:00",
+      "timestamp": "2026-08-06T14:06:35.156707-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -9227,7 +9130,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws302.yaml",
-      "timestamp": "2026-08-06T13:57:28.729906-05:00",
+      "timestamp": "2026-08-06T14:06:35.177094-05:00",
       "score": 23.5,
       "tier": "REJECTED",
       "details": {
@@ -9301,7 +9204,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws303.yaml",
-      "timestamp": "2026-08-06T13:57:28.732006-05:00",
+      "timestamp": "2026-08-06T14:06:35.179136-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -9350,7 +9253,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws50x.yaml",
-      "timestamp": "2026-08-06T13:57:28.751848-05:00",
+      "timestamp": "2026-08-06T14:06:35.198164-05:00",
       "score": 78.0,
       "tier": "SILVER",
       "details": {
@@ -9411,7 +9314,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws515.yaml",
-      "timestamp": "2026-08-06T13:57:28.777749-05:00",
+      "timestamp": "2026-08-06T14:06:35.225064-05:00",
       "score": 81.0,
       "tier": "SILVER",
       "details": {
@@ -9446,10 +9349,7 @@
             "power_factor: add ipso: {object: 3328}",
             "power_consumption: add ipso: {object: 3328}",
             "current: add ipso: {object: 3317}",
-            "temperature_sensor_status: add ipso: {object: 3303}",
-            "temperature_alarm: add ipso: {object: 3303}",
-            "temperature_mutation: add ipso: {object: 3303}",
-            "temperature_alarm: add ipso: {object: 3303}"
+            "temperature_mutation: add ipso: {object: 3303}"
           ],
           "senml_mapped": 2,
           "senml_missing": [
@@ -9458,13 +9358,10 @@
             "power_factor: add senml: {unit: \"W\"}",
             "power_consumption: add senml: {unit: \"W\"}",
             "current: add senml: {unit: \"A\"}",
-            "temperature_sensor_status: add senml: {unit: \"Cel\"}",
-            "temperature_alarm: add senml: {unit: \"Cel\"}",
-            "temperature_mutation: add senml: {unit: \"Cel\"}",
-            "temperature_alarm: add senml: {unit: \"Cel\"}"
+            "temperature_mutation: add senml: {unit: \"Cel\"}"
           ],
           "semantic_mapped": 2,
-          "detectable_sensors": 11,
+          "detectable_sensors": 8,
           "annotation_errors": []
         },
         "provenance": {
@@ -9479,17 +9376,17 @@
       },
       "recommendations": [
         "Add test vector for negative values",
-        "Add IPSO object mappings for standard sensors (9 fields)",
+        "Add IPSO object mappings for standard sensors (6 fields)",
         "  \u2192 voltage: add ipso: {object: 3316}",
         "  \u2192 active_power: add ipso: {object: 3328}",
-        "Add SenML units for standard sensors (9 fields)",
+        "Add SenML units for standard sensors (6 fields)",
         "  \u2192 voltage: add senml: {unit: \"V\"}",
         "  \u2192 active_power: add senml: {unit: \"W\"}"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/ws52x.yaml",
-      "timestamp": "2026-08-06T13:57:28.807334-05:00",
+      "timestamp": "2026-08-06T14:06:35.251807-05:00",
       "score": 80.0,
       "tier": "SILVER",
       "details": {
@@ -9557,7 +9454,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws558.yaml",
-      "timestamp": "2026-08-06T13:57:28.835087-05:00",
+      "timestamp": "2026-08-06T14:06:35.276253-05:00",
       "score": 80.0,
       "tier": "SILVER",
       "details": {
@@ -9625,7 +9522,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/wt101.yaml",
-      "timestamp": "2026-08-06T13:57:28.856609-05:00",
+      "timestamp": "2026-08-06T14:06:35.298288-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -9687,9 +9584,9 @@
     },
     {
       "schema_path": "schemas/devices/milesight/wt201v1.yaml",
-      "timestamp": "2026-08-06T13:57:28.886305-05:00",
-      "score": 83.0,
-      "tier": "SILVER",
+      "timestamp": "2026-08-06T14:06:35.326687-05:00",
+      "score": 86.0,
+      "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
@@ -9717,8 +9614,6 @@
           "ipso_mapped": 3,
           "ipso_missing": [
             "target_temperature: add ipso: {object: 3303}",
-            "temperature_control_mode: add ipso: {object: 3303}",
-            "temperature_control_status: add ipso: {object: 3303}",
             "temperature_control_support_mode: add ipso: {object: 3303}",
             "temperature_control_support_status: add ipso: {object: 3303}",
             "temperature_alarm: add ipso: {object: 3303}",
@@ -9728,8 +9623,6 @@
           "senml_mapped": 3,
           "senml_missing": [
             "target_temperature: add senml: {unit: \"Cel\"}",
-            "temperature_control_mode: add senml: {unit: \"Cel\"}",
-            "temperature_control_status: add senml: {unit: \"Cel\"}",
             "temperature_control_support_mode: add senml: {unit: \"Cel\"}",
             "temperature_control_support_status: add senml: {unit: \"Cel\"}",
             "temperature_alarm: add senml: {unit: \"Cel\"}",
@@ -9737,7 +9630,7 @@
             "humidity_sensor_status: add senml: {unit: \"%RH\"}"
           ],
           "semantic_mapped": 3,
-          "detectable_sensors": 11,
+          "detectable_sensors": 9,
           "annotation_errors": []
         },
         "provenance": {
@@ -9750,19 +9643,19 @@
         }
       },
       "recommendations": [
-        "Add IPSO object mappings for standard sensors (8 fields)",
+        "Add IPSO object mappings for standard sensors (6 fields)",
         "  \u2192 target_temperature: add ipso: {object: 3303}",
-        "  \u2192 temperature_control_mode: add ipso: {object: 3303}",
-        "Add SenML units for standard sensors (8 fields)",
+        "  \u2192 temperature_control_support_mode: add ipso: {object: 3303}",
+        "Add SenML units for standard sensors (6 fields)",
         "  \u2192 target_temperature: add senml: {unit: \"Cel\"}",
-        "  \u2192 temperature_control_mode: add senml: {unit: \"Cel\"}"
+        "  \u2192 temperature_control_support_mode: add senml: {unit: \"Cel\"}"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/wt201v2.yaml",
-      "timestamp": "2026-08-06T13:57:28.915980-05:00",
-      "score": 83.0,
-      "tier": "SILVER",
+      "timestamp": "2026-08-06T14:06:35.355585-05:00",
+      "score": 85.0,
+      "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
@@ -9791,8 +9684,6 @@
           "ipso_missing": [
             "target_temperature: add ipso: {object: 3303}",
             "target_temperature_2: add ipso: {object: 3303}",
-            "temperature_control_mode: add ipso: {object: 3303}",
-            "temperature_control_status: add ipso: {object: 3303}",
             "temperature_control_support_mode: add ipso: {object: 3303}",
             "temperature_control_support_status: add ipso: {object: 3303}",
             "temperature_alarm: add ipso: {object: 3303}",
@@ -9803,8 +9694,6 @@
           "senml_missing": [
             "target_temperature: add senml: {unit: \"Cel\"}",
             "target_temperature_2: add senml: {unit: \"Cel\"}",
-            "temperature_control_mode: add senml: {unit: \"Cel\"}",
-            "temperature_control_status: add senml: {unit: \"Cel\"}",
             "temperature_control_support_mode: add senml: {unit: \"Cel\"}",
             "temperature_control_support_status: add senml: {unit: \"Cel\"}",
             "temperature_alarm: add senml: {unit: \"Cel\"}",
@@ -9812,7 +9701,7 @@
             "humidity_sensor_status: add senml: {unit: \"%RH\"}"
           ],
           "semantic_mapped": 3,
-          "detectable_sensors": 12,
+          "detectable_sensors": 10,
           "annotation_errors": []
         },
         "provenance": {
@@ -9825,17 +9714,17 @@
         }
       },
       "recommendations": [
-        "Add IPSO object mappings for standard sensors (9 fields)",
+        "Add IPSO object mappings for standard sensors (7 fields)",
         "  \u2192 target_temperature: add ipso: {object: 3303}",
         "  \u2192 target_temperature_2: add ipso: {object: 3303}",
-        "Add SenML units for standard sensors (9 fields)",
+        "Add SenML units for standard sensors (7 fields)",
         "  \u2192 target_temperature: add senml: {unit: \"Cel\"}",
         "  \u2192 target_temperature_2: add senml: {unit: \"Cel\"}"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/wts305.yaml",
-      "timestamp": "2026-08-06T13:57:28.947742-05:00",
+      "timestamp": "2026-08-06T14:06:35.384843-05:00",
       "score": 91.0,
       "tier": "GOLD",
       "details": {
@@ -9897,7 +9786,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/wts505.yaml",
-      "timestamp": "2026-08-06T13:57:28.972070-05:00",
+      "timestamp": "2026-08-06T14:06:35.409092-05:00",
       "score": 91.0,
       "tier": "GOLD",
       "details": {
@@ -9959,7 +9848,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/wts506.yaml",
-      "timestamp": "2026-08-06T13:57:29.003199-05:00",
+      "timestamp": "2026-08-06T14:06:35.433308-05:00",
       "score": 91.0,
       "tier": "GOLD",
       "details": {
@@ -10021,7 +9910,7 @@
     },
     {
       "schema_path": "schemas/devices/radio-bridge/rbs30x.yaml",
-      "timestamp": "2026-08-06T13:57:29.027171-05:00",
+      "timestamp": "2026-08-06T14:06:35.458701-05:00",
       "score": 68.0,
       "tier": "BRONZE",
       "details": {
@@ -10093,7 +9982,7 @@
     },
     {
       "schema_path": "schemas/devices/radionode/rn320bth.yaml",
-      "timestamp": "2026-08-06T13:57:29.063898-05:00",
+      "timestamp": "2026-08-06T14:06:35.496606-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -10154,7 +10043,7 @@
     },
     {
       "schema_path": "schemas/devices/rakwireless/qingping.yaml",
-      "timestamp": "2026-08-06T13:57:29.065708-05:00",
+      "timestamp": "2026-08-06T14:06:35.498504-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {

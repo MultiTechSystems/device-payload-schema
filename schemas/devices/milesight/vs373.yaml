@@ -40,6 +40,7 @@ fields:
         "[255, 11]":
           - name: device_status
             type: u8
+            sensor: none
             lookup: ["off", "on"]
             # raw: readDeviceStatus(bytes[i])
         # LORAWAN CLASS
@@ -66,10 +67,12 @@ fields:
         "[3, 248]":
           - name: detection_status
             type: u8
+            sensor: none
             lookup: ["normal", "vacant", "in_bed", "out_of_bed", "fall"]
             # raw: readDetectionStatus(bytes[i])
           - name: target_status
             type: u8
+            sensor: none
             lookup: ["normal", "motionless", "abnormal", "lying_down"]
             # raw: readTargetStatus(bytes[i + 1])
           - name: use_time_now
@@ -80,10 +83,12 @@ fields:
         "[7, 176]":
           - name: detection_status
             type: u8
+            sensor: none
             lookup: ["normal", "vacant", "in_bed", "out_of_bed", "fall"]
             # raw: readDetectionStatus(bytes[i])
           - name: target_status
             type: u8
+            sensor: none
             lookup: ["normal", "motionless", "abnormal", "lying_down"]
             # raw: readTargetStatus(bytes[i + 1])
           - name: use_time_now

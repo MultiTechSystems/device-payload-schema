@@ -60,12 +60,14 @@ fields:
         "[255, 254]":
           - name: reset_event
             type: u8
+            sensor: none
             lookup: ["normal", "reset"]
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
+            sensor: none
             lookup: ["off", "on"]
             # raw: readDeviceStatus(1)
         # BATTERY
@@ -102,6 +104,7 @@ fields:
         "[6, 0]":
           - name: tamper_status
             type: u8
+            sensor: none
             lookup: ["installed", "uninstalled"]
             # raw: readTamperStatus(bytes[i])
         # WINDOW DETECTION
@@ -114,6 +117,7 @@ fields:
         "[8, 229]":
           - name: motor_calibration_result
             type: u8
+            sensor: none
             lookup: ["success", "fail: out of range", "fail: uninstalled", "calibration cleared", "temperature control disabled"]
             # raw: readMotorCalibrationResult(bytes[i])
         # MOTOR STROKE

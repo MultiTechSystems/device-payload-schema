@@ -40,6 +40,7 @@ fields:
         "[255, 11]":
           - name: device_status
             type: u8
+            sensor: none
             lookup: ["offline", "online"]
             # raw: readDeviceStatus(bytes[i])
         # LORAWAN CLASS
@@ -150,6 +151,7 @@ fields:
         "[14, 1]":
           - name: buzzer_status
             type: u8
+            sensor: none
             lookup: ["off", "on"]
             # raw: readBuzzerStatus(bytes[i])
 

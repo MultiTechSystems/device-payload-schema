@@ -60,12 +60,14 @@ fields:
         "[255, 254]":
           - name: reset_event
             type: u8
+            sensor: none
             lookup: ["normal", "reset"]
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
+            sensor: none
             lookup: ["off", "on"]
             # raw: readDeviceStatus(1)
         # BATTERY
@@ -107,6 +109,7 @@ fields:
             div: 10
           - name: temperature_chn1_alarm
             type: u8
+            sensor: none
             lookup: ["threshold_alarm_release", "threshold_alarm", "mutation_alarm"]
             # raw: readAlarmType(bytes[i + 2])
         # TEMPERATURE(CHANNEL 1 SENSOR) ALARM
@@ -119,6 +122,7 @@ fields:
             div: 100
           - name: temperature_chn1_alarm
             type: u8
+            sensor: none
             lookup: ["threshold_alarm_release", "threshold_alarm", "mutation_alarm"]
             # raw: readAlarmType(bytes[i + 4])
         # TEMPERATURE(CHANNEL 2 SENSOR) ALARM
@@ -128,6 +132,7 @@ fields:
             div: 10
           - name: temperature_chn2_alarm
             type: u8
+            sensor: none
             lookup: ["threshold_alarm_release", "threshold_alarm", "mutation_alarm"]
             # raw: readAlarmType(bytes[i + 2])
         # TEMPERATURE(CHANNEL 2 SENSOR) ALARM
@@ -140,6 +145,7 @@ fields:
             div: 100
           - name: temperature_chn2_alarm
             type: u8
+            sensor: none
             lookup: ["threshold_alarm_release", "threshold_alarm", "mutation_alarm"]
             # raw: readAlarmType(bytes[i + 4])
 

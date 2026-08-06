@@ -60,12 +60,14 @@ fields:
         "[255, 254]":
           - name: reset_event
             type: u8
+            sensor: none
             lookup: ["normal", "reset"]
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
+            sensor: none
             lookup: ["off", "on"]
             # raw: readDeviceStatus(1)
         # TEMPERATURE
@@ -87,10 +89,12 @@ fields:
         "[5, 231]":
           - name: temperature_control_mode
             type: u8[0:1]
+            sensor: none
             lookup: ["heat", "em_heat", "cool", "auto"]
             # raw: readTemperatureControlMode((temperature_control_value >>> 0) & 0x03)
           - name: temperature_control_status
             type: u8[4:7]
+            sensor: none
             lookup: ["standby", "stage-1 heat", "stage-2 heat", "stage-3 heat", "stage-4 heat", "em_heat", "stage-1 cool", "stage-2 cool"]
             # raw: readTemperatureControlStatus((temperature_control_value >>> 4) & 0x0f)
             consume: 1
@@ -98,10 +102,12 @@ fields:
         "[6, 232]":
           - name: fan_mode
             type: u8[0:1]
+            sensor: none
             lookup: ["auto", "on", "circulate", "disable"]
             # raw: readFanMode((fan_value >>> 0) & 0x03)
           - name: fan_status
             type: u8[2:3]
+            sensor: none
             lookup: ["standby", "high speed", "low speed", "on"]
             # raw: readFanStatus((fan_value >>> 2) & 0x03)
             consume: 1
@@ -115,6 +121,7 @@ fields:
         "[8, 142]":
           - name: system_status
             type: u8
+            sensor: none
             lookup: ["off", "on"]
             # raw: readOnOffStatus(bytes[i])
         # HUMIDITY

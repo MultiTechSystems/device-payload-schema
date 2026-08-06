@@ -40,6 +40,7 @@ fields:
         "[255, 11]":
           - name: device_status
             type: u8
+            sensor: none
             lookup: ["off", "on"]
             # raw: readOnOffStatus(1)
         # LORAWAN CLASS

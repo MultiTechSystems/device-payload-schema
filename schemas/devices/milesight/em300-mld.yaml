@@ -25,6 +25,7 @@ fields:
         "[5, 0]":
           - name: leakage_status
             type: u8
+            sensor: none
             lookup: ["normal", "leak"]
 
 test_vectors:

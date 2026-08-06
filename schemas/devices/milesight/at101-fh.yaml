@@ -60,12 +60,14 @@ fields:
         "[255, 254]":
           - name: reset_event
             type: u8
+            sensor: none
             lookup: ["normal", "reset"]
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
+            sensor: none
             lookup: ["off", "on"]
             # raw: readDeviceStatus(1)
         # BATTERY
@@ -98,6 +100,7 @@ fields:
         "[7, 0]":
           - name: tamper_status
             type: u8
+            sensor: none
             lookup: ["install", "uninstall"]
             # raw: readTamperStatus(bytes[i])
         # ANGLE
@@ -132,6 +135,7 @@ fields:
             div: 10
           - name: temperature_alarm
             type: u8
+            sensor: none
             lookup: ["normal", "abnormal"]
             # raw: readTemperatureAlarm(bytes[i + 2])
         "[32, 206]":

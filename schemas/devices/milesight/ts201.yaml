@@ -60,12 +60,14 @@ fields:
         "[255, 254]":
           - name: reset_event
             type: u8
+            sensor: none
             lookup: ["normal", "reset"]
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
+            sensor: none
             lookup: ["off", "on"]
             # raw: readOnOffStatus(1)
         # BATTERY
@@ -88,6 +90,14 @@ fields:
             semantic: "temperature"
             type: s16
             div: 10
+        "[179, 103]":
+          - name: event
+            type: object
+            fields:
+              - name: temperature_sensor_status
+                type: u8
+                sensor: none
+                lookup: ["read error", "out of range"]
 
 test_vectors:
   - name: ch255_type1_midscale

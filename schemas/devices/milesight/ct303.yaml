@@ -60,18 +60,21 @@ fields:
         "[255, 254]":
           - name: reset_event
             type: u8
+            sensor: none
             lookup: ["normal", "reset"]
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
+            sensor: none
             lookup: ["off", "on"]
             # raw: readDeviceStatus(1)
         # TEMPERATURE
         "[9, 103]":
           - name: temperature_sensor_status
             type: u8
+            sensor: none
             lookup: ["normal", "over range alarm", "read failed"]
             # raw: readSensorStatus(1)
         # TEMPERATURE ALARM
@@ -86,6 +89,7 @@ fields:
             div: 10
           - name: temperature_alarm
             type: u8
+            sensor: none
             lookup: ["temperature threshold alarm release", "temperature threshold alarm"]
             # raw: readTemperatureAlarm(bytes[i + 2])
 

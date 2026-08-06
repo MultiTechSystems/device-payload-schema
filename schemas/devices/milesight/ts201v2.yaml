@@ -60,12 +60,14 @@ fields:
         "[255, 254]":
           - name: reset_event
             type: u8
+            sensor: none
             lookup: ["normal", "reset"]
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
+            sensor: none
             lookup: ["off", "on"]
             # raw: readOnOffStatus(1)
         # BATTERY
@@ -105,6 +107,38 @@ fields:
             type: u8
             lookup: ["celsius", "fahrenheit"]
             # raw: readTemperatureUnit(bytes[i])
+        "[132, 104]":
+          - name: event
+            type: object
+            fields:
+              - name: humidity
+                unit: "%"
+                sensor: humidity
+                ipso: {object: 3304, instance: 0, resource: 5700}
+                senml: {name: "humidity", unit: "%RH"}
+                semantic: "humidity"
+                type: u8
+                div: 2
+              - name: humidity_alarm
+                type: u8
+                sensor: none
+                lookup: ["threshold alarm release", "threshold alarm", "mutation alarm"]
+        "[179, 103]":
+          - name: event
+            type: object
+            fields:
+              - name: temperature_sensor_status
+                type: u8
+                sensor: none
+                lookup: ["read error", "out of range"]
+        "[180, 104]":
+          - name: event
+            type: object
+            fields:
+              - name: humidity_sensor_status
+                type: u8
+                sensor: none
+                lookup: ["read error", "out of range"]
 
 test_vectors:
   - name: ch255_type1_midscale

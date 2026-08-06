@@ -25,6 +25,7 @@ fields:
         "[3, 0]":
           - name: leak_status
             type: u8
+            sensor: none
             lookup: ["no leak", "leak"]
             # raw: (bytes[i] === 0) ? 'no leak' : 'leak'
 

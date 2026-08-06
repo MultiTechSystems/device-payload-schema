@@ -60,18 +60,21 @@ fields:
         "[255, 254]":
           - name: reset_event
             type: u8
+            sensor: none
             lookup: ["normal", "reset"]
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
+            sensor: none
             lookup: ["off", "on"]
             # raw: readDeviceStatus(1)
         # POWER STATUS
         "[255, 204]":
           - name: power_status
             type: u8
+            sensor: none
             lookup: ["battery supply", "external power supply", "battery charging"]
             # raw: readPowerStatus(bytes[i])
         # BATTERY

@@ -58,6 +58,7 @@ fields:
             div: 10
           - name: temperature_abnormal
             type: u8
+            sensor: none
             lookup: ["normal", "abnormal"]
 
 test_vectors:

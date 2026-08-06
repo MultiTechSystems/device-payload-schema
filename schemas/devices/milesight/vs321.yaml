@@ -60,12 +60,14 @@ fields:
         "[255, 254]":
           - name: reset_event
             type: u8
+            sensor: none
             lookup: ["normal", "reset"]
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
+            sensor: none
             lookup: ["off", "on"]
             # raw: readDeviceStatus(1)
         # BATTERY
@@ -82,12 +84,14 @@ fields:
         "[3, 103]":
           - name: temperature_sensor_status
             type: u8
+            sensor: none
             lookup: ["normal", "over_range", "read_failed"]
             # raw: readSensorStatus(2)
         # HUMIDITY
         "[4, 104]":
           - name: humidity_sensor_status
             type: u8
+            sensor: none
             lookup: ["normal", "over_range", "read_failed"]
             # raw: readSensorStatus(2)
         # PEOPLE TOTAL COUNTS
@@ -98,12 +102,14 @@ fields:
         "[7, 255]":
           - name: illuminance_status
             type: u8
+            sensor: none
             lookup: ["dim", "bright"]
             # raw: readIlluminanceStatus(bytes[i])
         # CONFIDENCE STATUS
         "[8, 244]":
           - name: detection_status
             type: u8
+            sensor: none
             lookup: ["normal", "unavailable"]
             # raw: readDetectionStatus(bytes[i + 1])
         # TIMESTAMP
@@ -122,6 +128,7 @@ fields:
             div: 10
           - name: temperature_alarm
             type: u8
+            sensor: none
             lookup: ["threshold_alarm_release", "threshold_alarm"]
             # raw: readTemperatureAlarm(bytes[i + 2])
         # HUMIDITY ALARM
@@ -137,6 +144,7 @@ fields:
             # raw: readUInt8(bytes[i]) / 2
           - name: humidity_alarm
             type: u8
+            sensor: none
             lookup: ["threshold_alarm_release", "threshold_alarm"]
             # raw: readHumidityAlarm(bytes[i + 1])
 

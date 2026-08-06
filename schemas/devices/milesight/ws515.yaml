@@ -60,12 +60,14 @@ fields:
         "[255, 254]":
           - name: reset_event
             type: u8
+            sensor: none
             lookup: ["normal", "reset"]
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
+            sensor: none
             lookup: ["off", "on"]
             # raw: readDeviceStatus(1)
         # VOLTAGE
@@ -94,12 +96,14 @@ fields:
         "[8, 112]":
           - name: socket_status
             type: u8
+            sensor: none
             lookup: ["off", "on"]
             # raw: readSocketStatus(bytes[i])
         # TEMPERATURE (@since v1.9)
         "[9, 103]":
           - name: temperature_sensor_status
             type: u8
+            sensor: none
             lookup: ["normal", "over range alarm", "read failed"]
             # raw: readSensorStatus(1)
         # TEMPERATURE THRESHOLD ALARM (@since v2.1)
@@ -114,6 +118,7 @@ fields:
             div: 10
           - name: temperature_alarm
             type: u8
+            sensor: none
             lookup: ["threshold alarm release", "threshold alarm", "overheat alarm", "mutation alarm"]
             # raw: readTemperatureAlarm(bytes[i + 2])
         # TEMPERATURE MUTATION ALARM (@since v1.9 @deprecated v2.1)
@@ -131,6 +136,7 @@ fields:
             div: 10
           - name: temperature_alarm
             type: u8
+            sensor: none
             lookup: ["threshold alarm release", "threshold alarm", "overheat alarm", "mutation alarm"]
             # raw: readTemperatureAlarm(3)
 
