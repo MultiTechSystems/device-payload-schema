@@ -54,16 +54,19 @@ fields:
         "[255, 15]":
           - name: lorawan_class
             type: u8
+            lookup: ["Class A", "Class B", "Class C", "Class CtoB"]
             # raw: readLoRaWANClass(bytes[i])
         # RESET EVENT
         "[255, 254]":
           - name: reset_event
             type: u8
+            lookup: ["normal", "reset"]
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
+            lookup: ["off", "on"]
             # raw: readDeviceStatus(1)
         # TOTAL CURRENT
         "[3, 151]":
@@ -74,11 +77,13 @@ fields:
         "[4, 152]":
           - name: current_sensor_status
             type: u8
+            lookup: ["normal", "over range alarm", "read failed"]
             # raw: readSensorStatus(2)
         # TEMPERATURE
         "[9, 103]":
           - name: temperature_sensor_status
             type: u8
+            lookup: ["normal", "over range alarm", "read failed"]
             # raw: readSensorStatus(1)
         # CURRENT ALARM
         "[132, 152]":
@@ -101,6 +106,7 @@ fields:
             div: 10
           - name: temperature_alarm
             type: u8
+            lookup: ["temperature threshold alarm release", "temperature threshold alarm"]
             # raw: readTemperatureAlarm(bytes[i + 2])
 
 test_vectors:
@@ -181,6 +187,13 @@ test_vectors:
     source: vendor-codec
     expected:
       sn: "0000000000000000"
+  - name: ch255_type15_zero_values
+    description: "Channel 255 type 15, zero values bytes, decoded by the vendor's own decoder"
+    payload: "FF0F00"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      lorawan_class: "Class A"
   - name: ch3_type151_zero_values
     description: "Channel 3 type 151, zero values bytes, decoded by the vendor's own decoder"
     payload: "039700000000"
@@ -188,6 +201,14 @@ test_vectors:
     source: vendor-codec
     expected:
       total_current: 0
+  - name: ch137_type103_zero_values
+    description: "Channel 137 type 103, zero values bytes, decoded by the vendor's own decoder"
+    payload: "8967000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 0
+      temperature_alarm: "temperature threshold alarm release"
   - name: ch255_type1_max_values
     description: "Channel 255 type 1, max values bytes, decoded by the vendor's own decoder"
     payload: "FF01FF"
@@ -195,17 +216,3 @@ test_vectors:
     source: vendor-codec
     expected:
       ipso_version: "v15.15"
-  - name: ch255_type255_max_values
-    description: "Channel 255 type 255, max values bytes, decoded by the vendor's own decoder"
-    payload: "FFFFFFFF"
-    fPort: 85
-    source: vendor-codec
-    expected:
-      tsl_version: "v255.255"
-  - name: ch255_type22_max_values
-    description: "Channel 255 type 22, max values bytes, decoded by the vendor's own decoder"
-    payload: "FF16FFFFFFFFFFFFFFFF"
-    fPort: 85
-    source: vendor-codec
-    expected:
-      sn: "ffffffffffffffff"

@@ -54,16 +54,19 @@ fields:
         "[255, 15]":
           - name: lorawan_class
             type: u8
+            lookup: ["Class A", "Class B", "Class C", "Class CtoB"]
             # raw: readLoRaWANClass(bytes[i])
         # RESET EVENT
         "[255, 254]":
           - name: reset_event
             type: u8
+            lookup: ["normal", "reset"]
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
+            lookup: ["off", "on"]
             # raw: readDeviceStatus(1)
         # BATTERY
         "[1, 117]":
@@ -74,11 +77,13 @@ fields:
         "[3, 1]":
           - name: valve_1_result
             type: u8
+            lookup: ["success", "failed"]
             # raw: readDelayControlResult(1)
         # VALVE 2
         "[5, 1]":
           - name: valve_2_result
             type: u8
+            lookup: ["success", "failed"]
             # raw: readDelayControlResult(1)
         # VALVE 1 Pulse
         "[4, 200]":
@@ -92,11 +97,13 @@ fields:
         "[7, 1]":
           - name: gpio_1
             type: u8
+            lookup: ["off", "on"]
             # raw: readGpioStatus(bytes[i])
         # GPIO 2 (hardware_version >= v2.0 and firmware_version >= v2.4)
         "[8, 1]":
           - name: gpio_2
             type: u8
+            lookup: ["off", "on"]
             # raw: readGpioStatus(bytes[i])
         # PRESSURE (hardware_version >= v4.0 and firmware_version >= v1.2)
         "[9, 123]":
@@ -212,10 +219,10 @@ test_vectors:
     source: vendor-codec
     expected:
       sn: "0000000000000000"
-  - name: ch1_type117_zero_values
-    description: "Channel 1 type 117, zero values bytes, decoded by the vendor's own decoder"
-    payload: "017500"
+  - name: ch255_type15_zero_values
+    description: "Channel 255 type 15, zero values bytes, decoded by the vendor's own decoder"
+    payload: "FF0F00"
     fPort: 85
     source: vendor-codec
     expected:
-      battery: 0
+      lorawan_class: "Class A"

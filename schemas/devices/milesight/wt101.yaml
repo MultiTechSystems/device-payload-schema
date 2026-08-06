@@ -54,16 +54,19 @@ fields:
         "[255, 15]":
           - name: lorawan_class
             type: u8
+            lookup: ["Class A", "Class B", "Class C", "Class CtoB"]
             # raw: readLoRaWANClass(bytes[i])
         # RESET EVENT
         "[255, 254]":
           - name: reset_event
             type: u8
+            lookup: ["normal", "reset"]
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
+            lookup: ["off", "on"]
             # raw: readDeviceStatus(1)
         # BATTERY
         "[1, 117]":
@@ -89,16 +92,19 @@ fields:
         "[6, 0]":
           - name: tamper_status
             type: u8
+            lookup: ["installed", "uninstalled"]
             # raw: readTamperStatus(bytes[i])
         # WINDOW DETECTION
         "[7, 0]":
           - name: window_detection
             type: u8
+            lookup: ["normal", "open"]
             # raw: readWindowDetectionStatus(bytes[i])
         # MOTOR STROKE CALIBRATION RESULT
         "[8, 229]":
           - name: motor_calibration_result
             type: u8
+            lookup: ["success", "fail: out of range", "fail: uninstalled", "calibration cleared", "temperature control disabled"]
             # raw: readMotorCalibrationResult(bytes[i])
         # MOTOR STROKE
         "[9, 144]":
@@ -108,6 +114,7 @@ fields:
         "[10, 0]":
           - name: freeze_protection
             type: u8
+            lookup: ["normal", "triggered"]
             # raw: readFreezeProtectionStatus(bytes[i])
         # MOTOR CURRENT POSITION
         "[11, 144]":

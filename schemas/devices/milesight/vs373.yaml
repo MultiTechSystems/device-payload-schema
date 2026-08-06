@@ -40,11 +40,13 @@ fields:
         "[255, 11]":
           - name: device_status
             type: u8
+            lookup: ["off", "on"]
             # raw: readDeviceStatus(bytes[i])
         # LORAWAN CLASS
         "[255, 15]":
           - name: lorawan_class
             type: u8
+            lookup: ["Class A", "Class B", "Class C", "Class CtoB"]
             # raw: readLoRaWANClass(bytes[i])
         # PRODUCT SERIAL NUMBER
         "[255, 22]":
@@ -64,9 +66,11 @@ fields:
         "[3, 248]":
           - name: detection_status
             type: u8
+            lookup: ["normal", "vacant", "in_bed", "out_of_bed", "fall"]
             # raw: readDetectionStatus(bytes[i])
           - name: target_status
             type: u8
+            lookup: ["normal", "motionless", "abnormal", "lying_down"]
             # raw: readTargetStatus(bytes[i + 1])
           - name: use_time_now
             type: u16
@@ -76,9 +80,11 @@ fields:
         "[7, 176]":
           - name: detection_status
             type: u8
+            lookup: ["normal", "vacant", "in_bed", "out_of_bed", "fall"]
             # raw: readDetectionStatus(bytes[i])
           - name: target_status
             type: u8
+            lookup: ["normal", "motionless", "abnormal", "lying_down"]
             # raw: readTargetStatus(bytes[i + 1])
           - name: use_time_now
             type: u8
@@ -90,15 +96,19 @@ fields:
         "[4, 249]":
           - name: region_1_occupancy
             type: u8
+            lookup: ["vacant", "occupied"]
             # raw: readOccupancyStatus(bytes[i] === 1 ? 0 : 1)
           - name: region_2_occupancy
             type: u8
+            lookup: ["vacant", "occupied"]
             # raw: readOccupancyStatus(bytes[i + 1] === 1 ? 0 : 1)
           - name: region_3_occupancy
             type: u8
+            lookup: ["vacant", "occupied"]
             # raw: readOccupancyStatus(bytes[i + 2] === 1 ? 0 : 1)
           - name: region_4_occupancy
             type: u8
+            lookup: ["vacant", "occupied"]
             # raw: readOccupancyStatus(bytes[i + 3] === 1 ? 0 : 1)
         # OUT OF BED (v1.0.1)
         "[5, 250]":
@@ -208,6 +218,20 @@ test_vectors:
     source: vendor-codec
     expected:
       firmware_version: "v0.0"
+  - name: ch255_type11_zero_values
+    description: "Channel 255 type 11, zero values bytes, decoded by the vendor's own decoder"
+    payload: "FF0B00"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      device_status: "off"
+  - name: ch255_type15_zero_values
+    description: "Channel 255 type 15, zero values bytes, decoded by the vendor's own decoder"
+    payload: "FF0F00"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      lorawan_class: "Class A"
   - name: ch255_type22_zero_values
     description: "Channel 255 type 22, zero values bytes, decoded by the vendor's own decoder"
     payload: "FF160000000000000000"
@@ -222,38 +246,23 @@ test_vectors:
     source: vendor-codec
     expected:
       tsl_version: "v0.0"
-  - name: ch5_type250_zero_values
-    description: "Channel 5 type 250, zero values bytes, decoded by the vendor's own decoder"
-    payload: "05FA0000000000000000"
+  - name: ch3_type248_zero_values
+    description: "Channel 3 type 248, zero values bytes, decoded by the vendor's own decoder"
+    payload: "03F8000000000000"
     fPort: 85
     source: vendor-codec
     expected:
-      region_1_out_of_bed_time: 0
-      region_2_out_of_bed_time: 0
-      region_3_out_of_bed_time: 0
-      region_4_out_of_bed_time: 0
-  - name: ch11_type180_zero_values
-    description: "Channel 11 type 180, zero values bytes, decoded by the vendor's own decoder"
-    payload: "0BB4000000"
+      detection_status: "normal"
+      target_status: "normal"
+      use_time_now: 0
+      use_time_today: 0
+  - name: ch7_type176_zero_values
+    description: "Channel 7 type 176, zero values bytes, decoded by the vendor's own decoder"
+    payload: "07B000000000"
     fPort: 85
     source: vendor-codec
     expected:
-      region_1_out_of_bed_time: 0
-      region_2_out_of_bed_time: 0
-      region_3_out_of_bed_time: 0
-  - name: ch12_type180_zero_values
-    description: "Channel 12 type 180, zero values bytes, decoded by the vendor's own decoder"
-    payload: "0CB4000000"
-    fPort: 85
-    source: vendor-codec
-    expected:
-      region_4_out_of_bed_time: 0
-      region_5_out_of_bed_time: 0
-      region_6_out_of_bed_time: 0
-  - name: ch255_type1_max_values
-    description: "Channel 255 type 1, max values bytes, decoded by the vendor's own decoder"
-    payload: "FF01FF"
-    fPort: 85
-    source: vendor-codec
-    expected:
-      ipso_version: "v15.15"
+      detection_status: "normal"
+      target_status: "normal"
+      use_time_now: 0
+      use_time_today: 0

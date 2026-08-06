@@ -220,12 +220,22 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   with no test vectors and are therefore Rejected. See the per-device table in
   [`docs/INDEX.md`](docs/INDEX.md). The decentlab and milesight families have been
   through a vendor cross-validation pass; the rest have not.
-- **Milesight schemas are verified but unannotated.** 41 of the 84 still disagree
-  with the vendor's own decoder, in three remaining ways worth knowing before
-  picking one up: TLV channels that are never decoded at all, fields where the
-  vendor emits an array or object and we emit a scalar (a language gap), and three
-  schemas that fail to decode a vendor payload outright. Enum labels and the
-  version/serial channels are done. None of these schemas declare `unit:`, so they
+- **Milesight schemas are verified but unannotated.** 35 of the 84 still disagree
+  with the vendor's own decoder, in two remaining ways worth knowing before picking
+  one up: TLV channels that are never decoded at all, and fields where the vendor
+  emits an array or object and we emit a scalar - the latter is a language gap, not
+  a schema fix. Enum labels (ternary and status-map forms), the version and serial
+  channels, and packed flag bytes are all done.
+- **Flags packed into a byte need `consume: 1` on the last field.** An explicit bit
+  range (`u8[4:4]`) never advances the read position by itself, so a channel of bit
+  ranges consumes nothing and the TLV loop reads the value byte as the next tag.
+  `ws50x` and three others failed to decode the vendor's own payload for this
+  reason. One case remains unsolved: `em320-tilt` packs a flag into bit 0 of bytes
+  already consumed by its angle fields, which no current construct expresses.
+- **Some TTN declared examples are stale.** For `ws50x`, TTN's declared example
+  says `switch_1: true` where the vendor's own decoder in the same repository says
+  `"on"`. `crossvalidate_ttn.py` reports the two oracles separately for this
+  reason; when they disagree, the vendor's decoder is the better authority. None of these schemas declare `unit:`, so they
   carry no semantic annotations and stop at Silver; the scorer's keyword heuristic
   would read milesight `battery` as IPSO 3316 voltage when it is a percentage, so
   units have to be established per device before annotating.

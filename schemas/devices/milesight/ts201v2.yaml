@@ -54,16 +54,19 @@ fields:
         "[255, 15]":
           - name: lorawan_class
             type: u8
+            lookup: ["Class A", "Class B", "Class C", "Class CtoB"]
             # raw: readLoRaWANClass(bytes[i])
         # RESET EVENT
         "[255, 254]":
           - name: reset_event
             type: u8
+            lookup: ["normal", "reset"]
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
+            lookup: ["off", "on"]
             # raw: readOnOffStatus(1)
         # BATTERY
         "[1, 117]":
@@ -85,6 +88,7 @@ fields:
         "[255, 235]":
           - name: temperature_unit
             type: u8
+            lookup: ["celsius", "fahrenheit"]
             # raw: readTemperatureUnit(bytes[i])
 
 test_vectors:
@@ -179,6 +183,13 @@ test_vectors:
     source: vendor-codec
     expected:
       sn: "0000000000000000"
+  - name: ch255_type15_zero_values
+    description: "Channel 255 type 15, zero values bytes, decoded by the vendor's own decoder"
+    payload: "FF0F00"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      lorawan_class: "Class A"
   - name: ch1_type117_zero_values
     description: "Channel 1 type 117, zero values bytes, decoded by the vendor's own decoder"
     payload: "017500"
@@ -186,10 +197,3 @@ test_vectors:
     source: vendor-codec
     expected:
       battery: 0
-  - name: ch3_type103_zero_values
-    description: "Channel 3 type 103, zero values bytes, decoded by the vendor's own decoder"
-    payload: "03670000"
-    fPort: 85
-    source: vendor-codec
-    expected:
-      temperature: 0

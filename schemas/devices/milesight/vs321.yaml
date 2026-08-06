@@ -54,16 +54,19 @@ fields:
         "[255, 15]":
           - name: lorawan_class
             type: u8
+            lookup: ["Class A", "Class B", "Class C", "Class CtoB"]
             # raw: readLoRaWANClass(bytes[i])
         # RESET EVENT
         "[255, 254]":
           - name: reset_event
             type: u8
+            lookup: ["normal", "reset"]
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
+            lookup: ["off", "on"]
             # raw: readDeviceStatus(1)
         # BATTERY
         "[1, 117]":
@@ -74,11 +77,13 @@ fields:
         "[3, 103]":
           - name: temperature_sensor_status
             type: u8
+            lookup: ["normal", "over_range", "read_failed"]
             # raw: readSensorStatus(2)
         # HUMIDITY
         "[4, 104]":
           - name: humidity_sensor_status
             type: u8
+            lookup: ["normal", "over_range", "read_failed"]
             # raw: readSensorStatus(2)
         # PEOPLE TOTAL COUNTS
         "[5, 253]":
@@ -88,11 +93,13 @@ fields:
         "[7, 255]":
           - name: illuminance_status
             type: u8
+            lookup: ["dim", "bright"]
             # raw: readIlluminanceStatus(bytes[i])
         # CONFIDENCE STATUS
         "[8, 244]":
           - name: detection_status
             type: u8
+            lookup: ["normal", "unavailable"]
             # raw: readDetectionStatus(bytes[i + 1])
         # TIMESTAMP
         "[10, 239]":
@@ -105,6 +112,7 @@ fields:
             div: 10
           - name: temperature_alarm
             type: u8
+            lookup: ["threshold_alarm_release", "threshold_alarm"]
             # raw: readTemperatureAlarm(bytes[i + 2])
         # HUMIDITY ALARM
         "[132, 104]":
@@ -114,6 +122,7 @@ fields:
             # raw: readUInt8(bytes[i]) / 2
           - name: humidity_alarm
             type: u8
+            lookup: ["threshold_alarm_release", "threshold_alarm"]
             # raw: readHumidityAlarm(bytes[i + 1])
 
 test_vectors:
@@ -208,6 +217,13 @@ test_vectors:
     source: vendor-codec
     expected:
       sn: "0000000000000000"
+  - name: ch255_type15_zero_values
+    description: "Channel 255 type 15, zero values bytes, decoded by the vendor's own decoder"
+    payload: "FF0F00"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      lorawan_class: "Class A"
   - name: ch1_type117_zero_values
     description: "Channel 1 type 117, zero values bytes, decoded by the vendor's own decoder"
     payload: "017500"
@@ -215,10 +231,3 @@ test_vectors:
     source: vendor-codec
     expected:
       battery: 0
-  - name: ch5_type253_zero_values
-    description: "Channel 5 type 253, zero values bytes, decoded by the vendor's own decoder"
-    payload: "05FD0000"
-    fPort: 85
-    source: vendor-codec
-    expected:
-      people_total_counts: 0

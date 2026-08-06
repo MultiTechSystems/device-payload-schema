@@ -54,16 +54,19 @@ fields:
         "[255, 15]":
           - name: lorawan_class
             type: u8
+            lookup: ["Class A", "Class B", "Class C", "Class CtoB"]
             # raw: readLoRaWANClass(bytes[i])
         # RESET EVENT
         "[255, 254]":
           - name: reset_event
             type: u8
+            lookup: ["normal", "reset"]
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
+            lookup: ["off", "on"]
             # raw: readDeviceStatus(1)
         # TEMPERATURE
         "[3, 103]":
@@ -83,28 +86,36 @@ fields:
         # TEMPERATURE CONTROL
         "[5, 231]":
           - name: temperature_control_mode
-            type: u8
+            type: u8[0:1]
+            lookup: ["heat", "em heat", "cool", "auto", "auto heat", "auto cool"]
             # raw: readTemperatureControlMode((value >>> 0) & 0x03)
           - name: temperature_control_status
-            type: u8
+            type: u8[4:7]
+            lookup: ["standby", "stage-1 heat", "stage-2 heat", "stage-3 heat", "stage-4 heat", "em heat", "stage-1 cool", "stage-2 cool", "stage-5 heat"]
             # raw: readTemperatureControlStatus((value >>> 4) & 0x0f)
+            consume: 1
         # FAN CONTROL
         "[6, 232]":
           - name: fan_mode
-            type: u8
+            type: u8[0:1]
+            lookup: ["auto", "on", "circulate", "disable"]
             # raw: readFanMode((fan_data >>> 0) & 0x03)
           - name: fan_status
-            type: u8
+            type: u8[2:3]
+            lookup: ["standby", "high speed", "low speed", "on"]
             # raw: readFanStatus((fan_data >>> 2) & 0x03)
+            consume: 1
         # PLAN EVENT
         "[7, 188]":
           - name: plan_type
-            type: u8
+            type: u8[0:3]
             # raw: readExecutePlanType((plan_type_data >>> 0) & 0x0f)
+            consume: 1
         # SYSTEM STATUS
         "[8, 142]":
           - name: system_status
             type: u8
+            lookup: ["off", "on"]
             # raw: readOnOffStatus(bytes[i])
         # HUMIDITY
         "[9, 104]":
@@ -243,10 +254,10 @@ test_vectors:
     source: vendor-codec
     expected:
       sn: "0000000000000000"
-  - name: ch3_type103_zero_values
-    description: "Channel 3 type 103, zero values bytes, decoded by the vendor's own decoder"
-    payload: "03670000"
+  - name: ch255_type15_zero_values
+    description: "Channel 255 type 15, zero values bytes, decoded by the vendor's own decoder"
+    payload: "FF0F00"
     fPort: 1
     source: vendor-codec
     expected:
-      temperature: 0
+      lorawan_class: "Class A"

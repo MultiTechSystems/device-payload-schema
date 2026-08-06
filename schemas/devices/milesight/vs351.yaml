@@ -54,21 +54,25 @@ fields:
         "[255, 15]":
           - name: lorawan_class
             type: u8
+            lookup: ["Class A", "Class B", "Class C", "Class CtoB"]
             # raw: readLoRaWANClass(bytes[i])
         # RESET EVENT
         "[255, 254]":
           - name: reset_event
             type: u8
+            lookup: ["normal", "reset"]
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
+            lookup: ["off", "on"]
             # raw: readDeviceStatus(1)
         # POWER STATUS
         "[255, 204]":
           - name: power_status
             type: u8
+            lookup: ["battery supply", "external power supply", "battery charging"]
             # raw: readPowerStatus(bytes[i])
         # BATTERY
         "[1, 117]":

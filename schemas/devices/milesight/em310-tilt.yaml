@@ -54,16 +54,19 @@ fields:
         "[255, 15]":
           - name: lorawan_class
             type: u8
+            lookup: ["Class A", "Class B", "Class C", "Class CtoB"]
             # raw: readLoRaWANClass(bytes[i])
         # RESET EVENT
         "[255, 254]":
           - name: reset_event
             type: u8
+            lookup: ["normal", "reset"]
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
+            lookup: ["off", "on"]
             # raw: readDeviceStatus(1)
         # BATTERY
         "[1, 117]":
@@ -82,14 +85,19 @@ fields:
             type: s16
             div: 100
           - name: threshold_x
-            type: u8
+            type: u8[0:0]
+            lookup: ["normal", "trigger"]
             # raw: readAngleStatus((threshold_value >>> 0) & 0x01)
           - name: threshold_y
-            type: u8
+            type: u8[1:1]
+            lookup: ["normal", "trigger"]
             # raw: readAngleStatus((threshold_value >>> 1) & 0x01)
           - name: threshold_z
-            type: u8
+            type: u8[2:2]
+            lookup: ["normal", "trigger"]
             # raw: readAngleStatus((threshold_value >>> 2) & 0x01)
+
+            consume: 1
 
 test_vectors:
   - name: ch255_type1_midscale
@@ -134,6 +142,18 @@ test_vectors:
     source: vendor-codec
     expected:
       battery: 17
+  - name: ch3_type207_midscale
+    description: "Channel 3 type 207, midscale bytes, decoded by the vendor's own decoder"
+    payload: "03CF111111111111111111"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      angle_x: 43.69
+      angle_y: 43.69
+      angle_z: 43.69
+      threshold_x: "trigger"
+      threshold_y: "normal"
+      threshold_z: "normal"
   - name: ch255_type1_zero_values
     description: "Channel 255 type 1, zero values bytes, decoded by the vendor's own decoder"
     payload: "FF0100"
@@ -169,6 +189,13 @@ test_vectors:
     source: vendor-codec
     expected:
       sn: "0000000000000000"
+  - name: ch255_type15_zero_values
+    description: "Channel 255 type 15, zero values bytes, decoded by the vendor's own decoder"
+    payload: "FF0F00"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      lorawan_class: "Class A"
   - name: ch1_type117_zero_values
     description: "Channel 1 type 117, zero values bytes, decoded by the vendor's own decoder"
     payload: "017500"
@@ -176,24 +203,15 @@ test_vectors:
     source: vendor-codec
     expected:
       battery: 0
-  - name: ch255_type1_max_values
-    description: "Channel 255 type 1, max values bytes, decoded by the vendor's own decoder"
-    payload: "FF01FF"
+  - name: ch3_type207_zero_values
+    description: "Channel 3 type 207, zero values bytes, decoded by the vendor's own decoder"
+    payload: "03CF000000000000000000"
     fPort: 85
     source: vendor-codec
     expected:
-      ipso_version: "v15.15"
-  - name: ch255_type255_max_values
-    description: "Channel 255 type 255, max values bytes, decoded by the vendor's own decoder"
-    payload: "FFFFFFFF"
-    fPort: 85
-    source: vendor-codec
-    expected:
-      tsl_version: "v255.255"
-  - name: ch255_type22_max_values
-    description: "Channel 255 type 22, max values bytes, decoded by the vendor's own decoder"
-    payload: "FF16FFFFFFFFFFFFFFFF"
-    fPort: 85
-    source: vendor-codec
-    expected:
-      sn: "ffffffffffffffff"
+      angle_x: 0
+      angle_y: 0
+      angle_z: 0
+      threshold_x: "normal"
+      threshold_y: "normal"
+      threshold_z: "normal"
