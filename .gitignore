@@ -61,3 +61,9 @@ htmlcov/
 
 # Local-only documentation (not for upstream)
 docs/local/
+
+# Toolchain caches for the containerised language tests (make test-go etc.)
+.cache/
+
+# Maven build output for the Java binding
+bindings/java/target/

@@ -1350,90 +1350,122 @@ fields:
 	}
 }
 
-func TestModifierYAMLKeyOrder(t *testing.T) {
-	// YAML key order: add first, then div → (raw - 400) / 10
-	// This is the Decentlab DL-5TM soil_temperature pattern
-	schemaYAML := `
-name: yaml_order_test
+// TestModifierCanonicalOrder covers PS-101: bare modifiers apply in the canonical
+// order mult, div, add, whatever order the keys appear in. This test previously
+// asserted the opposite -- that key order chose the arithmetic -- which Go cannot
+// honour for JSON input, and which made this package disagree with the C and
+// Python interpreters. See CR-2026-002.
+func TestModifierCanonicalOrder(t *testing.T) {
+	// The same two modifiers written both ways round. raw=625 (0x0271), so the
+	// canonical result is (625 / 10) - 400 = -337.5 for both.
+	for _, schemaYAML := range []string{`
+name: canonical_add_first
 endian: big
 fields:
   - name: soil_temperature
     type: u16
     add: -400
     div: 10
-`
+`, `
+name: canonical_div_first
+endian: big
+fields:
+  - name: soil_temperature
+    type: u16
+    div: 10
+    add: -400
+`} {
+		schema, err := ParseSchema(schemaYAML)
+		if err != nil {
+			t.Fatalf("ParseSchema() error = %v", err)
+		}
+		result, err := schema.Decode([]byte{0x02, 0x71})
+		if err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		if math.Abs(result["soil_temperature"].(float64)-(-337.5)) > 0.01 {
+			t.Errorf("soil_temperature = %v, want -337.5 regardless of key order",
+				result["soil_temperature"])
+		}
+	}
 
-	schema, err := ParseSchema(schemaYAML)
+	// Applying the offset before the division -- the Decentlab DL-5TM
+	// soil_temperature pattern -- now requires an explicit transform (PS-102).
+	schema, err := ParseSchema(`
+name: transform_order
+endian: big
+fields:
+  - name: soil_temperature
+    type: u16
+    transform:
+      - add: -400
+      - div: 10
+`)
 	if err != nil {
 		t.Fatalf("ParseSchema() error = %v", err)
 	}
-
-	// raw=625 (0x0271), (625 - 400) / 10 = 22.5
 	result, err := schema.Decode([]byte{0x02, 0x71})
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
 	if math.Abs(result["soil_temperature"].(float64)-22.5) > 0.01 {
-		t.Errorf("soil_temperature = %v, want 22.5 (add-then-div order)", result["soil_temperature"])
-	}
-
-	// Verify different order gives different result: div first, then add → (raw / 10) - 400
-	schemaYAML2 := `
-name: yaml_order_test2
-endian: big
-fields:
-  - name: soil_temperature
-    type: u16
-    div: 10
-    add: -400
-`
-	schema2, err := ParseSchema(schemaYAML2)
-	if err != nil {
-		t.Fatalf("ParseSchema() error = %v", err)
-	}
-
-	// raw=625, (625 / 10) - 400 = -337.5
-	result2, err := schema2.Decode([]byte{0x02, 0x71})
-	if err != nil {
-		t.Fatalf("Decode() error = %v", err)
-	}
-	if math.Abs(result2["soil_temperature"].(float64)-(-337.5)) > 0.01 {
-		t.Errorf("soil_temperature = %v, want -337.5 (div-then-add order)", result2["soil_temperature"])
+		t.Errorf("soil_temperature = %v, want 22.5 ((625 - 400) / 10)",
+			result["soil_temperature"])
 	}
 }
 
-func TestModifierYAMLKeyOrderRoundtrip(t *testing.T) {
-	// add-then-div pattern should roundtrip correctly
-	schemaYAML := `
-name: roundtrip_order
+// TestModifierCanonicalOrderRoundtrip checks that encoding inverts the canonical
+// decode order: decoding computes ((raw * mult) / div) + add, so encoding must
+// subtract add, multiply by div, then divide by mult.
+func TestModifierCanonicalOrderRoundtrip(t *testing.T) {
+	// Bare modifiers: canonical decode of 0x0271 is (625 / 10) - 400 = -337.5.
+	schema, err := ParseSchema(`
+name: roundtrip_canonical
 endian: big
 fields:
   - name: soil_temperature
     type: u16
     add: -400
     div: 10
-`
-	schema, err := ParseSchema(schemaYAML)
+`)
 	if err != nil {
 		t.Fatalf("ParseSchema() error = %v", err)
 	}
-
-	// Encode 22.5 → raw 625 → bytes 0x02 0x71
-	encoded, err := schema.Encode(map[string]any{"soil_temperature": 22.5})
+	encoded, err := schema.Encode(map[string]any{"soil_temperature": -337.5})
 	if err != nil {
 		t.Fatalf("Encode() error = %v", err)
 	}
 	if len(encoded) != 2 || encoded[0] != 0x02 || encoded[1] != 0x71 {
 		t.Errorf("Encode = %x, want 0271", encoded)
 	}
-
-	// Decode back to 22.5
 	result, err := schema.Decode(encoded)
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if math.Abs(result["soil_temperature"].(float64)-22.5) > 0.01 {
-		t.Errorf("roundtrip soil_temperature = %v, want 22.5", result["soil_temperature"])
+	if math.Abs(result["soil_temperature"].(float64)-(-337.5)) > 0.01 {
+		t.Errorf("roundtrip soil_temperature = %v, want -337.5", result["soil_temperature"])
+	}
+
+	// The transform form must round-trip too, reversing its stages.
+	schemaTransform, err := ParseSchema(`
+name: roundtrip_transform
+endian: big
+fields:
+  - name: soil_temperature
+    type: u16
+    transform:
+      - add: -400
+      - div: 10
+`)
+	if err != nil {
+		t.Fatalf("ParseSchema() error = %v", err)
+	}
+	encoded, err = schemaTransform.Encode(map[string]any{"soil_temperature": 22.5})
+	if err != nil {
+		t.Fatalf("Encode() error = %v", err)
+	}
+	if len(encoded) != 2 || encoded[0] != 0x02 || encoded[1] != 0x71 {
+		t.Errorf("transform Encode = %x, want 0271", encoded)
 	}
 }
 

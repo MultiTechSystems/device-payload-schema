@@ -26,6 +26,50 @@ jobs:
             - name: Run tests
               run: python -m pytest tests/ -q
 
+    # One job per implementation. Modifier order and other shared decode
+    # behaviour must agree across all of them (PS-101); Go, Java and C# each
+    # carried a different order until CR-2026-002 was implemented, and Java had
+    # no tests at all, so nothing caught it.
+    go:
+        name: Go interpreter
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-go@v5
+              with:
+                  go-version: "1.22"
+            - name: Vet and test
+              working-directory: go/schema
+              run: |
+                  go vet ./...
+                  go test ./...
+
+    java:
+        name: Java interpreter
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-java@v4
+              with:
+                  distribution: temurin
+                  java-version: "21"
+                  cache: maven
+            - name: Test
+              working-directory: bindings/java
+              run: mvn -B test
+
+    dotnet:
+        name: C# interpreter
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-dotnet@v4
+              with:
+                  dotnet-version: "8.0"
+            - name: Test
+              working-directory: dotnet
+              run: dotnet test --nologo
+
     schemas:
         name: Schema validation and scoring
         runs-on: ubuntu-latest

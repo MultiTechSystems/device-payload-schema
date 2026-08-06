@@ -59,7 +59,7 @@ PROTO_C = $(patsubst proto/%.proto,src/%.pb.c,$(PROTO_SRCS))
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra -O3 -Iinclude
 
-.PHONY: all clean test selftest coverage proto help codec benchmark generate-codec pytest pytest-cov coverage-html coverage-all validate fuzz fuzz-quick fuzz-hypothesis fuzz-go fuzz-c
+.PHONY: all clean test selftest coverage proto help codec benchmark generate-codec pytest pytest-cov coverage-html coverage-all validate fuzz fuzz-quick fuzz-hypothesis fuzz-go fuzz-c test-go test-java test-dotnet test-languages
 
 all: $(TEST_BIN)
 
@@ -86,6 +86,36 @@ selftest: $(TEST_BIN)
 
 test: selftest pytest
 	@echo "All tests complete."
+
+# Tests for the Go, Java and C# interpreters, run in containers so no local
+# toolchain is needed. Caches live under .cache/ so repeat runs are quick.
+# Use test-languages to check that every implementation still agrees, which
+# matters most when changing shared decode behaviour (see AGENTS.md).
+DOCKER ?= docker
+DOCKER_RUN = $(DOCKER) run --rm -v "$(CURDIR)":/work
+CACHE_DIR = $(CURDIR)/.cache
+
+test-go:
+	@mkdir -p $(CACHE_DIR)/go
+	$(DOCKER_RUN) -w /work/go/schema \
+		-v $(CACHE_DIR)/go:/tmp/gocache \
+		-e GOFLAGS=-mod=mod -e GOCACHE=/tmp/gocache \
+		golang:1.22 sh -c "go vet ./... && go test ./..."
+
+test-java:
+	@mkdir -p $(CACHE_DIR)/m2
+	$(DOCKER_RUN) -w /work/bindings/java \
+		-v $(CACHE_DIR)/m2:/root/.m2 \
+		maven:3.9-eclipse-temurin-21 mvn -B test
+
+test-dotnet:
+	@mkdir -p $(CACHE_DIR)/nuget
+	$(DOCKER_RUN) -w /work/dotnet \
+		-v $(CACHE_DIR)/nuget:/root/.nuget \
+		mcr.microsoft.com/dotnet/sdk:8.0 dotnet test --nologo
+
+test-languages: test selftest test-go test-java test-dotnet
+	@echo "Python, C, Go, Java and C# implementations all pass."
 
 # Python virtual environment
 VENV = .venv
@@ -276,6 +306,10 @@ help:
 	@echo "  fuzz-go       Go fuzz tests (requires Go 1.18+)"
 	@echo "  fuzz-c        C libFuzzer tests (requires clang)"
 	@echo "  fuzz-all      Run all Python fuzz methods"
+	@echo "  test-go       Go interpreter tests (in docker)"
+	@echo "  test-java     Java interpreter tests (in docker)"
+	@echo "  test-dotnet   C# interpreter tests (in docker)"
+	@echo "  test-languages Every implementation: Python, C, Go, Java, C#"
 	@echo "  clean         Remove build artifacts"
 	@echo "  help          Show this help"
 	@echo ""

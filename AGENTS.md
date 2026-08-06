@@ -56,6 +56,12 @@ make test          # C self-tests + pytest
 make pytest        # Python only
 make fuzz-quick    # 10-second fuzz, cheap enough for every commit
 
+# The Go, Java and C# interpreters, in containers - no local toolchain needed
+make test-go
+make test-java
+make test-dotnet
+make test-languages   # every implementation: Python, C, Go, Java, C#
+
 # Regenerate the repository index after adding docs, tools or schemas
 python3 tools/generate_docs_index.py
 ```
