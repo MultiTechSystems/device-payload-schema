@@ -71,11 +71,17 @@ fields:
         # BATTERY
         "[1, 117]":
           - name: battery
+            unit: "%"
+            sensor: percentage
+            ipso: {object: 3320, instance: 0, resource: 5700}
+            senml: {name: "battery", unit: "%"}
+            semantic: "battery"
             type: u8
             # raw: readUInt8(bytes[i])
         # DISTANCE
         "[3, 130]":
           - name: distance
+            unit: "mm"
             type: u16
         # POSITION
         "[4, 0]":
@@ -178,13 +184,6 @@ test_vectors:
     source: vendor-codec
     expected:
       sn: "0000000000000000"
-  - name: ch255_type15_zero_values
-    description: "Channel 255 type 15, zero values bytes, decoded by the vendor's own decoder"
-    payload: "FF0F00"
-    fPort: 85
-    source: vendor-codec
-    expected:
-      lorawan_class: "Class A"
   - name: ch1_type117_zero_values
     description: "Channel 1 type 117, zero values bytes, decoded by the vendor's own decoder"
     payload: "017500"
@@ -192,3 +191,10 @@ test_vectors:
     source: vendor-codec
     expected:
       battery: 0
+  - name: ch255_type1_max_values
+    description: "Channel 255 type 1, max values bytes, decoded by the vendor's own decoder"
+    payload: "FF01FF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      ipso_version: "v15.15"

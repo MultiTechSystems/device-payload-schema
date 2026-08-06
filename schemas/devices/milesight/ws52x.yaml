@@ -189,17 +189,17 @@ test_vectors:
     source: vendor-codec
     expected:
       ipso_version: "v0.0"
-  - name: ch255_type9_zero_values
-    description: "Channel 255 type 9, zero values bytes, decoded by the vendor's own decoder"
-    payload: "FF090000"
+  - name: ch3_type116_zero_values
+    description: "Channel 3 type 116, zero values bytes, decoded by the vendor's own decoder"
+    payload: "03740000"
     fPort: 85
     source: vendor-codec
     expected:
-      hardware_version: "v0.0"
-  - name: ch255_type10_zero_values
-    description: "Channel 255 type 10, zero values bytes, decoded by the vendor's own decoder"
-    payload: "FF0A0000"
+      voltage: 0
+  - name: ch255_type1_max_values
+    description: "Channel 255 type 1, max values bytes, decoded by the vendor's own decoder"
+    payload: "FF01FF"
     fPort: 85
     source: vendor-codec
     expected:
-      firmware_version: "v0.0"
+      ipso_version: "v15.15"

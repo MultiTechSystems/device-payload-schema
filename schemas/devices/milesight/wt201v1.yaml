@@ -71,6 +71,11 @@ fields:
         # TEMPERATURE
         "[3, 103]":
           - name: temperature
+            unit: "°C"
+            sensor: temperature
+            ipso: {object: 3303, instance: 0, resource: 5700}
+            senml: {name: "temperature", unit: "Cel"}
+            semantic: "temperature"
             type: s16
             div: 10
         # TARGET TEMPERATURE
@@ -115,6 +120,11 @@ fields:
         # HUMIDITY
         "[9, 104]":
           - name: humidity
+            unit: "%"
+            sensor: humidity
+            ipso: {object: 3304, instance: 0, resource: 5700}
+            senml: {name: "humidity", unit: "%RH"}
+            semantic: "humidity"
             type: u8
             div: 2
             # raw: readUInt8(bytes[i]) / 2
@@ -134,6 +144,11 @@ fields:
         # TEMPERATURE ALARM
         "[131, 103]":
           - name: temperature
+            unit: "°C"
+            sensor: temperature
+            ipso: {object: 3303, instance: 0, resource: 5700}
+            senml: {name: "temperature", unit: "Cel"}
+            semantic: "temperature"
             type: s16
             div: 10
           - name: temperature_alarm
@@ -242,13 +257,6 @@ test_vectors:
     source: vendor-codec
     expected:
       sn: "0000000000000000"
-  - name: ch255_type15_zero_values
-    description: "Channel 255 type 15, zero values bytes, decoded by the vendor's own decoder"
-    payload: "FF0F00"
-    fPort: 1
-    source: vendor-codec
-    expected:
-      lorawan_class: "Class A"
   - name: ch3_type103_zero_values
     description: "Channel 3 type 103, zero values bytes, decoded by the vendor's own decoder"
     payload: "03670000"
@@ -256,3 +264,10 @@ test_vectors:
     source: vendor-codec
     expected:
       temperature: 0
+  - name: ch3_type103_max_values
+    description: "Channel 3 type 103, max values bytes, decoded by the vendor's own decoder"
+    payload: "0367FFFF"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      temperature: -0.1

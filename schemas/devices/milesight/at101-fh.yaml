@@ -71,11 +71,21 @@ fields:
         # BATTERY
         "[1, 117]":
           - name: battery
+            unit: "%"
+            sensor: percentage
+            ipso: {object: 3320, instance: 0, resource: 5700}
+            senml: {name: "battery", unit: "%"}
+            semantic: "battery"
             type: u8
             # raw: readUInt8(bytes[i])
         # TEMPERATURE
         "[3, 103]":
           - name: temperature
+            unit: "°C"
+            sensor: temperature
+            ipso: {object: 3303, instance: 0, resource: 5700}
+            senml: {name: "temperature", unit: "Cel"}
+            semantic: "temperature"
             type: s16
             div: 10
         # DEVICE POSITION
@@ -113,6 +123,11 @@ fields:
         # TEMPERATURE WITH ABNORMAL
         "[131, 103]":
           - name: temperature
+            unit: "°C"
+            sensor: temperature
+            ipso: {object: 3303, instance: 0, resource: 5700}
+            senml: {name: "temperature", unit: "Cel"}
+            semantic: "temperature"
             type: s16
             div: 10
           - name: temperature_alarm
@@ -217,13 +232,6 @@ test_vectors:
     source: vendor-codec
     expected:
       sn: "0000000000000000"
-  - name: ch255_type15_zero_values
-    description: "Channel 255 type 15, zero values bytes, decoded by the vendor's own decoder"
-    payload: "FF0F00"
-    fPort: 85
-    source: vendor-codec
-    expected:
-      lorawan_class: "Class A"
   - name: ch1_type117_zero_values
     description: "Channel 1 type 117, zero values bytes, decoded by the vendor's own decoder"
     payload: "017500"
@@ -231,3 +239,10 @@ test_vectors:
     source: vendor-codec
     expected:
       battery: 0
+  - name: ch3_type103_max_values
+    description: "Channel 3 type 103, max values bytes, decoded by the vendor's own decoder"
+    payload: "0367FFFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: -0.1

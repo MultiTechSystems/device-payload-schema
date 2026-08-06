@@ -102,6 +102,11 @@ fields:
         # TEMPERATURE ALARM
         "[137, 103]":
           - name: temperature
+            unit: "°C"
+            sensor: temperature
+            ipso: {object: 3303, instance: 0, resource: 5700}
+            senml: {name: "temperature", unit: "Cel"}
+            semantic: "temperature"
             type: s16
             div: 10
           - name: temperature_alarm
@@ -194,13 +199,6 @@ test_vectors:
     source: vendor-codec
     expected:
       lorawan_class: "Class A"
-  - name: ch3_type151_zero_values
-    description: "Channel 3 type 151, zero values bytes, decoded by the vendor's own decoder"
-    payload: "039700000000"
-    fPort: 85
-    source: vendor-codec
-    expected:
-      total_current: 0
   - name: ch137_type103_zero_values
     description: "Channel 137 type 103, zero values bytes, decoded by the vendor's own decoder"
     payload: "8967000000"
@@ -209,6 +207,13 @@ test_vectors:
     expected:
       temperature: 0
       temperature_alarm: "temperature threshold alarm release"
+  - name: ch3_type151_zero_values
+    description: "Channel 3 type 151, zero values bytes, decoded by the vendor's own decoder"
+    payload: "039700000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      total_current: 0
   - name: ch255_type1_max_values
     description: "Channel 255 type 1, max values bytes, decoded by the vendor's own decoder"
     payload: "FF01FF"

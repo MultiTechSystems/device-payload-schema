@@ -77,6 +77,11 @@ fields:
         # TEMPERATURE ALARM
         "[137, 103]":
           - name: temperature
+            unit: "°C"
+            sensor: temperature
+            ipso: {object: 3303, instance: 0, resource: 5700}
+            senml: {name: "temperature", unit: "Cel"}
+            semantic: "temperature"
             type: s16
             div: 10
           - name: temperature_alarm

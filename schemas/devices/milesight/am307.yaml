@@ -15,15 +15,30 @@ fields:
         # BATTERY
         "[1, 117]":
           - name: battery
+            unit: "%"
+            sensor: percentage
+            ipso: {object: 3320, instance: 0, resource: 5700}
+            senml: {name: "battery", unit: "%"}
+            semantic: "battery"
             type: u8
         # TEMPERATURE
         "[3, 103]":
           - name: temperature
+            unit: "°C"
+            sensor: temperature
+            ipso: {object: 3303, instance: 0, resource: 5700}
+            senml: {name: "temperature", unit: "Cel"}
+            semantic: "temperature"
             type: s16
             div: 10
         # HUMIDITY
         "[4, 104]":
           - name: humidity
+            unit: "%"
+            sensor: humidity
+            ipso: {object: 3304, instance: 0, resource: 5700}
+            senml: {name: "humidity", unit: "%RH"}
+            semantic: "humidity"
             type: u8
             div: 2
         # PIR
@@ -38,32 +53,43 @@ fields:
         # CO2
         "[7, 125]":
           - name: co2
+            unit: "ppm"
+            sensor: co2
+            ipso: {object: 3325, instance: 0, resource: 5700}
+            senml: {name: "co2", unit: "ppm"}
+            semantic: "co2"
             type: u16
         # TVOC
         "[8, 125]":
           - name: tvoc
+            unit: "ppb"
             type: u16
         # PRESSURE
         "[9, 115]":
           - name: pressure
+            unit: "hPa"
             type: u16
             div: 10
         # HCHO
         "[10, 125]":
           - name: hcho
+            unit: "mg/m³"
             type: u16
             div: 100
         # PM2.5
         "[11, 125]":
           - name: pm2_5
+            unit: "µg/m³"
             type: u16
         # PM10
         "[12, 125]":
           - name: pm10
+            unit: "µg/m³"
             type: u16
         # O3
         "[13, 125]":
           - name: o3
+            unit: "ppm"
             type: u16
             div: 100
         # BEEP
@@ -175,10 +201,10 @@ test_vectors:
     source: vendor-codec
     expected:
       battery: 0
-  - name: ch3_type103_zero_values
-    description: "Channel 3 type 103, zero values bytes, decoded by the vendor's own decoder"
-    payload: "03670000"
+  - name: ch3_type103_max_values
+    description: "Channel 3 type 103, max values bytes, decoded by the vendor's own decoder"
+    payload: "0367FFFF"
     fPort: 85
     source: vendor-codec
     expected:
-      temperature: 0
+      temperature: -0.1

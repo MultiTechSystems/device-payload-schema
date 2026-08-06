@@ -15,10 +15,16 @@ fields:
         # BATTERY
         "[1, 117]":
           - name: battery
+            unit: "%"
+            sensor: percentage
+            ipso: {object: 3320, instance: 0, resource: 5700}
+            senml: {name: "battery", unit: "%"}
+            semantic: "battery"
             type: u8
         # DISTANCE
         "[3, 130]":
           - name: distance
+            unit: "mm"
             type: u16
         # REMAINING AMOUNT
         "[4, 214]":

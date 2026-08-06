@@ -71,16 +71,27 @@ fields:
         # BATTERY
         "[1, 117]":
           - name: battery
+            unit: "%"
+            sensor: percentage
+            ipso: {object: 3320, instance: 0, resource: 5700}
+            senml: {name: "battery", unit: "%"}
+            semantic: "battery"
             type: u8
             # raw: readUInt8(bytes[i])
         # TEMPERATURE
         "[3, 103]":
           - name: temperature
+            unit: "°C"
+            sensor: temperature
+            ipso: {object: 3303, instance: 0, resource: 5700}
+            senml: {name: "temperature", unit: "Cel"}
+            semantic: "temperature"
             type: s16
             div: 10
         # DISTANCE
         "[4, 130]":
           - name: distance
+            unit: "mm"
             type: s16
         # POSITION
         "[5, 0]":
@@ -190,17 +201,17 @@ test_vectors:
     source: vendor-codec
     expected:
       firmware_version: "v0.0"
-  - name: ch255_type255_zero_values
-    description: "Channel 255 type 255, zero values bytes, decoded by the vendor's own decoder"
-    payload: "FFFF0000"
+  - name: ch1_type117_zero_values
+    description: "Channel 1 type 117, zero values bytes, decoded by the vendor's own decoder"
+    payload: "017500"
     fPort: 85
     source: vendor-codec
     expected:
-      tsl_version: "v0.0"
-  - name: ch255_type22_zero_values
-    description: "Channel 255 type 22, zero values bytes, decoded by the vendor's own decoder"
-    payload: "FF160000000000000000"
+      battery: 0
+  - name: ch3_type103_max_values
+    description: "Channel 3 type 103, max values bytes, decoded by the vendor's own decoder"
+    payload: "0367FFFF"
     fPort: 85
     source: vendor-codec
     expected:
-      sn: "0000000000000000"
+      temperature: -0.1

@@ -71,6 +71,11 @@ fields:
         # BATTERY
         "[1, 117]":
           - name: battery
+            unit: "%"
+            sensor: percentage
+            ipso: {object: 3320, instance: 0, resource: 5700}
+            senml: {name: "battery", unit: "%"}
+            semantic: "battery"
             type: u8
             # raw: readUInt8(bytes[i])
         # OCCUPANCY
@@ -82,6 +87,11 @@ fields:
         # ILLUMINANCE
         "[4, 0]":
           - name: illuminance
+            unit: "lux"
+            sensor: illuminance
+            ipso: {object: 3301, instance: 0, resource: 5700}
+            senml: {name: "illuminance", unit: "lx"}
+            semantic: "illuminance"
             type: u8
             # raw: readIlluminanceStatus(readUInt8(bytes[i]))
 
@@ -170,13 +180,6 @@ test_vectors:
     source: vendor-codec
     expected:
       lorawan_class: "Class A"
-  - name: ch1_type117_zero_values
-    description: "Channel 1 type 117, zero values bytes, decoded by the vendor's own decoder"
-    payload: "017500"
-    fPort: 85
-    source: vendor-codec
-    expected:
-      battery: 0
   - name: ch3_type0_zero_values
     description: "Channel 3 type 0, zero values bytes, decoded by the vendor's own decoder"
     payload: "030000"
@@ -184,6 +187,13 @@ test_vectors:
     source: vendor-codec
     expected:
       occupancy: "vacant"
+  - name: ch1_type117_zero_values
+    description: "Channel 1 type 117, zero values bytes, decoded by the vendor's own decoder"
+    payload: "017500"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      battery: 0
   - name: ch255_type1_max_values
     description: "Channel 255 type 1, max values bytes, decoded by the vendor's own decoder"
     payload: "FF01FF"

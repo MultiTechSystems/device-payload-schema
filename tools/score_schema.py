@@ -775,7 +775,19 @@ def check_semantic_annotations(schema: Dict[str, Any]) -> Tuple[Dict[str, Any], 
                     if 'fields' in group:
                         scan_fields(group['fields'], prefix)
                 continue
-            
+
+            # Handle tlv dispatch. Without this, every field of a TLV schema was
+            # invisible here: annotation scoring saw one field and no detectable
+            # sensors, so a fully annotated channel/type schema scored zero
+            # semantic points. This is the shape most of the corpus uses.
+            if 'tlv' in field:
+                for case_def in (field['tlv'].get('cases') or {}).values():
+                    if isinstance(case_def, dict) and 'fields' in case_def:
+                        scan_fields(case_def['fields'], prefix)
+                    elif isinstance(case_def, list):
+                        scan_fields(case_def, prefix)
+                continue
+
             # Handle nested structures
             if field_type in ('object', 'match'):
                 if 'fields' in field:

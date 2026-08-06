@@ -220,12 +220,20 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   with no test vectors and are therefore Rejected. See the per-device table in
   [`docs/INDEX.md`](docs/INDEX.md). The decentlab and milesight families have been
   through a vendor cross-validation pass; the rest have not.
-- **Milesight schemas are verified but unannotated.** 35 of the 84 still disagree
-  with the vendor's own decoder, in two remaining ways worth knowing before picking
-  one up: TLV channels that are never decoded at all, and fields where the vendor
-  emits an array or object and we emit a scalar - the latter is a language gap, not
-  a schema fix. Enum labels (ternary and status-map forms), the version and serial
-  channels, and packed flag bytes are all done.
+- **Milesight schemas are annotated where the unit allows it.** 35 of the 84 still
+  disagree with the vendor's own decoder, in two remaining ways worth knowing
+  before picking one up: TLV channels that are never decoded at all, and fields
+  where the vendor emits an array or object and we emit a scalar - the latter is a
+  language gap, not a schema fix. Enum labels, version and serial channels, packed
+  flag bytes, units and annotations are done.
+- **Units come from TTN's payload schema, not from guesswork.** `lib/payload.json`
+  in the device repository documents each normalized measurement and its unit, and
+  the vendor's raw values are already in those units. Note that TTN's normalized
+  `battery` is a *voltage* while the milesight raw field is a percentage 0-100, so
+  those fields declare `sensor: percentage` to stop the scorer detecting them as
+  IPSO 3316 voltage. Quantities whose SenML unit is a different scale (pressure in
+  hPa against SenML's Pa, distance in mm against m) carry a `unit:` but no
+  annotation, because a mismatched annotation misdeclares the value.
 - **Flags packed into a byte need `consume: 1` on the last field.** An explicit bit
   range (`u8[4:4]`) never advances the read position by itself, so a channel of bit
   ranges consumes nothing and the TLV loop reads the value byte as the next tag.

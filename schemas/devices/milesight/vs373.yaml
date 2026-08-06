@@ -256,13 +256,10 @@ test_vectors:
       target_status: "normal"
       use_time_now: 0
       use_time_today: 0
-  - name: ch7_type176_zero_values
-    description: "Channel 7 type 176, zero values bytes, decoded by the vendor's own decoder"
-    payload: "07B000000000"
+  - name: ch255_type1_max_values
+    description: "Channel 255 type 1, max values bytes, decoded by the vendor's own decoder"
+    payload: "FF01FF"
     fPort: 85
     source: vendor-codec
     expected:
-      detection_status: "normal"
-      target_status: "normal"
-      use_time_now: 0
-      use_time_today: 0
+      ipso_version: "v15.15"

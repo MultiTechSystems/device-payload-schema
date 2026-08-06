@@ -105,6 +105,11 @@ fields:
         # TEMPERATURE THRESHOLD ALARM (@since v2.1)
         "[137, 103]":
           - name: temperature
+            unit: "°C"
+            sensor: temperature
+            ipso: {object: 3303, instance: 0, resource: 5700}
+            senml: {name: "temperature", unit: "Cel"}
+            semantic: "temperature"
             type: s16
             div: 10
           - name: temperature_alarm
@@ -114,6 +119,11 @@ fields:
         # TEMPERATURE MUTATION ALARM (@since v1.9 @deprecated v2.1)
         "[153, 103]":
           - name: temperature
+            unit: "°C"
+            sensor: temperature
+            ipso: {object: 3303, instance: 0, resource: 5700}
+            senml: {name: "temperature", unit: "Cel"}
+            semantic: "temperature"
             type: s16
             div: 10
           - name: temperature_mutation
@@ -221,17 +231,17 @@ test_vectors:
     source: vendor-codec
     expected:
       hardware_version: "v0.0"
-  - name: ch255_type10_zero_values
-    description: "Channel 255 type 10, zero values bytes, decoded by the vendor's own decoder"
-    payload: "FF0A0000"
+  - name: ch3_type116_zero_values
+    description: "Channel 3 type 116, zero values bytes, decoded by the vendor's own decoder"
+    payload: "03740000"
     fPort: 85
     source: vendor-codec
     expected:
-      firmware_version: "v0.0"
-  - name: ch255_type255_zero_values
-    description: "Channel 255 type 255, zero values bytes, decoded by the vendor's own decoder"
-    payload: "FFFF0000"
+      voltage: 0
+  - name: ch255_type1_max_values
+    description: "Channel 255 type 1, max values bytes, decoded by the vendor's own decoder"
+    payload: "FF01FF"
     fPort: 85
     source: vendor-codec
     expected:
-      tsl_version: "v0.0"
+      ipso_version: "v15.15"

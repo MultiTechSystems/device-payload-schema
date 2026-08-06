@@ -169,13 +169,6 @@ test_vectors:
     source: vendor-codec
     expected:
       digital_output_2: "off"
-  - name: ch3_type200_zero_values
-    description: "Channel 3 type 200, zero values bytes, decoded by the vendor's own decoder"
-    payload: "03C800000000"
-    fPort: 85
-    source: vendor-codec
-    expected:
-      pulse_count_1: 0
   - name: ch4_type200_zero_values
     description: "Channel 4 type 200, zero values bytes, decoded by the vendor's own decoder"
     payload: "04C800000000"
@@ -183,10 +176,17 @@ test_vectors:
     source: vendor-codec
     expected:
       pulse_count_2: 0
-  - name: ch5_type200_zero_values
-    description: "Channel 5 type 200, zero values bytes, decoded by the vendor's own decoder"
-    payload: "05C800000000"
+  - name: ch3_type200_zero_values
+    description: "Channel 3 type 200, zero values bytes, decoded by the vendor's own decoder"
+    payload: "03C800000000"
     fPort: 85
     source: vendor-codec
     expected:
-      pulse_count_3: 0
+      pulse_count_1: 0
+  - name: ch9_type103_max_values
+    description: "Channel 9 type 103, max values bytes, decoded by the vendor's own decoder"
+    payload: "0967FFFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      pt100_1: -0.1
