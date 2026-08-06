@@ -1,5 +1,9 @@
 # LoRaWAN Payload Schema Development Rules
 
+> `AGENTS.md` holds the full working instructions and `docs/INDEX.md` the
+> generated repository index. This file remains as a short summary; AGENTS.md is
+> the source of truth.
+
 ## Project Context
 
 This is the reference implementation of the LoRaWAN Payload Schema specification.
