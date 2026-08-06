@@ -113,6 +113,10 @@ type Field struct {
 	Modifiers   []Transform    `json:"modifiers,omitempty" yaml:"modifiers,omitempty"` // Legacy support
 	Lookup      map[int]string `json:"lookup,omitempty" yaml:"lookup,omitempty"`
 	LookupArray []any          `json:"lookup_array,omitempty" yaml:"lookup_array,omitempty"`
+	// Fallback for a mapping lookup with no entry for the decoded value (PS-269).
+	LookupDefault *string `json:"-" yaml:"-"`
+	// Output key template resolved against earlier fields (PS-265).
+	NameFrom string `json:"name_from,omitempty" yaml:"name_from,omitempty"`
 	Var         string         `json:"var,omitempty" yaml:"var,omitempty"`
 	Value       any            `json:"value,omitempty" yaml:"value,omitempty"`
 	Fields      []Field        `json:"fields,omitempty" yaml:"fields,omitempty"`
@@ -685,6 +689,16 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 		f.On = on
 	}
 	
+	// Sequence form: `lookup: ["off", "on"]`, indexed from zero (PS-104). This was
+	// unparsed, so every schema using the sequence form decoded a raw integer here
+	// while the map form worked - the mirror image of the Python interpreter, which
+	// supported sequences and mis-decoded maps.
+	if lookup, ok := fm["lookup"].([]any); ok {
+		f.LookupArray = lookup
+	}
+	if template, ok := fm["name_from"].(string); ok {
+		f.NameFrom = template
+	}
 	// Lookup table - handle both string and int keys
 	if lookup, ok := fm["lookup"].(map[string]any); ok {
 		f.Lookup = make(map[int]string)
@@ -692,6 +706,11 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 			if key, err := strconv.Atoi(k); err == nil {
 				if str, ok := v.(string); ok {
 					f.Lookup[key] = str
+				}
+			} else if k == "default" {
+				if str, ok := v.(string); ok {
+					fallback := str
+					f.LookupDefault = &fallback
 				}
 			}
 		}
@@ -716,6 +735,13 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 			case float64:
 				key = int(kv)
 			case string:
+				if kv == "default" {
+					if str, ok := v.(string); ok {
+						fallback := str
+						f.LookupDefault = &fallback
+					}
+					continue
+				}
 				key, _ = strconv.Atoi(kv)
 			}
 			if str, ok := v.(string); ok {
@@ -885,13 +911,26 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 		f.Ref2 = ref2
 	}
 
-	// TLV cases (map format)
-	if f.Type == TypeTLV || f.Type == "tlv" {
+	// TLV cases. These are parsed whenever `cases` is present alongside tag
+	// fields, not only when the type is already known to be tlv: an inline
+	// `- tlv: {...}` block is parsed here before its caller sets the type, so
+	// requiring the type first left TLVCases empty and every TLV schema in the
+	// corpus decoded to an empty result with no error.
+	if f.Type == TypeTLV || f.Type == "tlv" || fm["tag_fields"] != nil || fm["tag_key"] != nil {
 		if casesMap, ok := fm["cases"].(map[string]any); ok {
 			f.TLVCases = make(map[string][]Field)
 			for key, value := range casesMap {
 				if caseFieldsRaw, ok := value.([]any); ok {
 					f.TLVCases[key] = parseFieldsRaw(caseFieldsRaw)
+				}
+			}
+		}
+		// YAML may hand back map[any]any for a mapping with non-string keys.
+		if casesMap, ok := fm["cases"].(map[any]any); ok {
+			f.TLVCases = make(map[string][]Field)
+			for key, value := range casesMap {
+				if caseFieldsRaw, ok := value.([]any); ok {
+					f.TLVCases[fmt.Sprintf("%v", key)] = parseFieldsRaw(caseFieldsRaw)
 				}
 			}
 		}
@@ -1341,8 +1380,20 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 			return nil, err
 		}
 
+		if value == omitted {
+			// A lookup with no entry and no default: the device reported nothing
+			// this schema can name, so the field is left out (PS-269).
+			continue
+		}
+
 		if value != nil && field.Name != "" {
-			result[field.Name] = value
+			outputName, err := resolveFieldName(field, ctx)
+			if err != nil {
+				return nil, err
+			}
+			result[outputName] = value
+			// Keyed by the schema-level name so $references keep working when
+			// name_from is in play (PS-267).
 			ctx.Variables[field.Name] = value
 			// Check valid_range and update quality
 			if len(field.ValidRange) >= 2 {
@@ -1759,11 +1810,19 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		value = numVal
 	}
 
-	// Apply lookup
+	// Apply lookup. A mapping is matched on its keys, which need not start at
+	// zero or be contiguous (PS-268); an unmatched value omits the field rather
+	// than reporting the raw integer under a name that promises a label, unless a
+	// default is declared (PS-269). A sequence stays indexed from zero (PS-104)
+	// and keeps the raw value when out of range.
 	if field.Lookup != nil {
 		if intVal, ok := toInt(value); ok {
 			if lookup, found := field.Lookup[intVal]; found {
 				value = lookup
+			} else if field.LookupDefault != nil {
+				value = *field.LookupDefault
+			} else {
+				return omitted, nil
 			}
 		}
 	}
@@ -2002,7 +2061,95 @@ func findTLVCaseKey(cases map[string][]Field, tag []int) string {
 		return tagStr
 	}
 
+	// Compare composite keys numerically rather than as strings. json.Marshal
+	// renders a tag as "[1,117]" while schemas are written "[1, 117]", so the
+	// string comparison above missed every composite key -- which is why TLV
+	// schemas decoded to an empty result here. This also handles keys that exclude
+	// a value with `!` or ignore a tag field with `*`, taking exact keys first,
+	// then negated, then wildcard, so a specific case is never shadowed (PS-270).
+	for _, wanted := range []int{0, 1, 2} {
+		for key := range cases {
+			if matched, specificity := matchCompositeCaseKey(key, tag); matched && specificity == wanted {
+				return key
+			}
+		}
+	}
+
 	return ""
+}
+
+// omitted marks a field that produced no value and is left out of the output.
+var omitted = &struct{ name string }{"omitted"}
+
+// nameFromPattern matches the ${field} references in a name_from template.
+var nameFromPattern = regexp.MustCompile(`\$\{(\w+)\}`)
+
+// matchCompositeCaseKey matches a composite TLV case key against a tag, allowing
+// `!value` to exclude and `*` to ignore a tag field. The returned specificity is 0
+// for an exact key, 1 when any element is negated and 2 when any is a wildcard.
+func matchCompositeCaseKey(key string, tag []int) (bool, int) {
+	trimmed := strings.TrimSpace(key)
+	if !strings.HasPrefix(trimmed, "[") {
+		return false, 0
+	}
+	trimmed = strings.TrimPrefix(trimmed, "[")
+	trimmed = strings.TrimSuffix(trimmed, "]")
+	parts := strings.Split(trimmed, ",")
+	if len(parts) != len(tag) {
+		return false, 0
+	}
+	specificity := 0
+	for index, part := range parts {
+		part = strings.Trim(strings.TrimSpace(part), `"'`)
+		if part == "*" {
+			if specificity < 2 {
+				specificity = 2
+			}
+			continue
+		}
+		negated := strings.HasPrefix(part, "!")
+		text := strings.TrimSpace(strings.TrimPrefix(part, "!"))
+		expected, err := strconv.ParseInt(text, 0, 32)
+		if err != nil {
+			return false, 0
+		}
+		if negated {
+			if specificity < 1 {
+				specificity = 1
+			}
+			if tag[index] == int(expected) {
+				return false, 0
+			}
+		} else if tag[index] != int(expected) {
+			return false, 0
+		}
+	}
+	return true, specificity
+}
+
+// resolveFieldName resolves a field's output key, honouring name_from (PS-265).
+func resolveFieldName(field Field, ctx *DecodeContext) (string, error) {
+	if field.NameFrom == "" {
+		return field.Name, nil
+	}
+	var missing []string
+	resolved := nameFromPattern.ReplaceAllStringFunc(field.NameFrom, func(match string) string {
+		reference := match[2 : len(match)-1]
+		value, ok := ctx.Variables[reference]
+		if !ok {
+			missing = append(missing, reference)
+			return ""
+		}
+		if number, ok := toFloat64(value); ok && number == float64(int64(number)) {
+			return strconv.FormatInt(int64(number), 10)
+		}
+		return fmt.Sprintf("%v", value)
+	})
+	if len(missing) > 0 {
+		return "", fmt.Errorf("name_from for %q references %s, which has not been decoded",
+			field.Name, strings.Join(missing, ", "))
+	}
+	return resolved, nil
 }
 
 // formatBytes formats a byte slice according to the specified format option.

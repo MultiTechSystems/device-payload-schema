@@ -5805,15 +5805,39 @@ fields:
 		t.Fatalf("ParseSchema() error = %v", err)
 	}
 
-	// Value 99 not in lookup - should return raw value
+	// PS-269: a mapping with no entry for the decoded value omits the field. It
+	// previously reported the raw 99 under a name that promises a label, which
+	// misdescribes it; a schema wanting a fallback declares `default`.
 	decoded, err := schema.Decode([]byte{99})
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	// When not found, returns the raw numeric value
-	if decoded["status"] != float64(99) {
-		t.Errorf("status = %v, want 99", decoded["status"])
+	if value, present := decoded["status"]; present {
+		t.Errorf("status = %v, want the field to be omitted", value)
+	}
+}
+
+func TestDecodeWithLookupDefault(t *testing.T) {
+	schema, err := ParseSchema(`
+name: lookup_default_test
+fields:
+  - name: status
+    type: u8
+    lookup:
+      0: "off"
+      1: "on"
+      default: "unknown"
+`)
+	if err != nil {
+		t.Fatalf("ParseSchema() error = %v", err)
+	}
+	decoded, err := schema.Decode([]byte{99})
+	if err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if decoded["status"] != "unknown" {
+		t.Errorf("status = %v, want \"unknown\"", decoded["status"])
 	}
 }
 
