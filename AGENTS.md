@@ -220,12 +220,26 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   with no test vectors and are therefore Rejected. See the per-device table in
   [`docs/INDEX.md`](docs/INDEX.md). The decentlab and milesight families have been
   through a vendor cross-validation pass; the rest have not.
-- **Milesight schemas are annotated where the unit allows it.** 35 of the 84 still
-  disagree with the vendor's own decoder, in two remaining ways worth knowing
-  before picking one up: TLV channels that are never decoded at all, and fields
-  where the vendor emits an array or object and we emit a scalar - the latter is a
-  language gap, not a schema fix. Enum labels, version and serial channels, packed
-  flag bytes, units and annotations are done.
+- **Milesight's remaining gaps are language features, not schema neglect.** 32 of
+  the 84 still disagree with the vendor's decoder. The missing TLV channels were
+  measured: of 790 channels the vendor decodes, 724 are covered and 66 are not, and
+  **none of the 66 is a plain scalar channel that was simply forgotten**:
+  - 54 are history records - the vendor builds `{timestamp, temperature, ...}` and
+    pushes it into an array, which needs array/object output;
+  - 10 build field *names* from payload content (`"region_" + n + "_avg_dwell"`,
+    `"sdi12_" + n`), which needs computed keys;
+  - 2 (`ws136`, `ws156` channel 255/52) are commented out in the vendor's own
+    decoder, so it emits nothing there either and omitting them is correct.
+  Two further gaps block individual schemas: `ws101` needs a sparse, 1-based lookup
+  (its `button` is `1: short, 2: long, 3: double` with no case 0, and our `lookup`
+  is a zero-based list), and `uc1114`/`uc1152` match a channel by *negated* type
+  (`channel_type !== 0x00`), which an exact `[channel, type]` case key cannot
+  express. Enum labels, version and serial channels, packed flag bytes, units and
+  annotations are done.
+- **Three TTN declared examples are stale, not two.** `ws50x`, `uc1114` and
+  `uc1152` all declare values their own vendor decoder does not produce - `true`
+  where the decoder yields `"on"`. Always prefer the decoder; `crossvalidate_ttn.py`
+  reports the two oracles separately so the difference is visible.
 - **Units come from TTN's payload schema, not from guesswork.** `lib/payload.json`
   in the device repository documents each normalized measurement and its unit, and
   the vendor's raw values are already in those units. Note that TTN's normalized

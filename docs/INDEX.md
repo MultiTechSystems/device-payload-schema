@@ -109,13 +109,13 @@ Generated inventory of this repository: what lives where, what each document cov
 ## Device schemas
 
 158 schemas under `schemas/devices/`.
-Mean quality score 62.4% (PLATINUM 30, GOLD 40, SILVER 25, BRONZE 1, REJECTED 62). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+Mean quality score 62.8% (PLATINUM 31, GOLD 40, SILVER 25, BRONZE 1, REJECTED 61). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
-| milesight | 84 | 934 | PLATINUM 16, GOLD 32, SILVER 24, REJECTED 12 |
+| milesight | 84 | 943 | PLATINUM 17, GOLD 32, SILVER 24, REJECTED 11 |
 | decentlab | 58 | 120 | PLATINUM 12, GOLD 7, SILVER 1, REJECTED 38 |
 | makerfabs | 6 | 0 | REJECTED 6 |
 | mclimate | 3 | 11 | GOLD 1, REJECTED 2 |
@@ -227,9 +227,9 @@ Mean quality score 62.4% (PLATINUM 30, GOLD 40, SILVER 25, BRONZE 1, REJECTED 62
 | `milesight/em300-di` | 10 | 15 | fields | 100% | PLATINUM |
 | `milesight/em300-mcs` | 17 | 15 | fields | 100% | PLATINUM |
 | `milesight/em300-mld` | 5 | 6 | fields | 100% | PLATINUM |
-| `milesight/em300-sld` | 9 | 9 | fields | 100% | PLATINUM |
+| `milesight/em300-sld` | 9 | 11 | fields | 100% | PLATINUM |
 | `milesight/em300-th` | 8 | 10 | fields | 100% | PLATINUM |
-| `milesight/em300-zld` | 9 | 9 | fields | 100% | PLATINUM |
+| `milesight/em300-zld` | 9 | 11 | fields | 100% | PLATINUM |
 | `milesight/em310-tilt` | 18 | 15 | fields | 98% | SILVER |
 | `milesight/em310-udl` | 14 | 15 | fields | 89% | GOLD |
 | `milesight/em320-th` | 8 | 10 | fields | 100% | PLATINUM |
@@ -277,7 +277,7 @@ Mean quality score 62.4% (PLATINUM 30, GOLD 40, SILVER 25, BRONZE 1, REJECTED 62
 | `milesight/ws203` | 12 | 12 | fields | 92% | GOLD |
 | `milesight/ws301` | 6 | 6 | fields | 100% | PLATINUM |
 | `milesight/ws302` | 10 | 0 | fields | 24% | REJECTED |
-| `milesight/ws303` | 5 | 0 | fields | 40% | REJECTED |
+| `milesight/ws303` | 5 | 5 | fields | 100% | PLATINUM |
 | `milesight/ws50x` | 17 | 13 | fields | 78% | SILVER |
 | `milesight/ws515` | 24 | 15 | fields | 81% | SILVER |
 | `milesight/ws52x` | 16 | 15 | fields | 80% | SILVER |

@@ -45,9 +45,24 @@ fields:
         "[5, 0]":
           - name: water
             type: u8
+            lookup: ["normal", "leak"]
             # raw: (bytes[i] === 0) ? 'normal' : 'leak'
 
 test_vectors:
+  - name: vendor_reference
+    description: "Example declared by the vendor in the TTN device repository"
+    payload: "050000"
+    fPort: 85
+    source: vendor-doc
+    expected:
+      water: "normal"
+  - name: vendor_reference_2
+    description: "Example declared by the vendor in the TTN device repository"
+    payload: "050001"
+    fPort: 85
+    source: vendor-doc
+    expected:
+      water: "leak"
   - name: ch1_type117_midscale
     description: "Channel 1 type 117, midscale bytes, decoded by the vendor's own decoder"
     payload: "017511"
