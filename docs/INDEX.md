@@ -253,8 +253,8 @@ Mean quality score 63.3% (PLATINUM 32, GOLD 41, SILVER 23, BRONZE 1, REJECTED 61
 | `milesight/ts201v2` | 25 | 15 | fields | 94% | GOLD |
 | `milesight/ts30x` | 26 | 15 | fields | 80% | SILVER |
 | `milesight/uc100` | 7 | 7 | fields | 78% | SILVER |
-| `milesight/uc1114` | 4 | 0 | fields | 16% | REJECTED |
-| `milesight/uc1152` | 3 | 0 | fields | 16% | REJECTED |
+| `milesight/uc1114` | 6 | 0 | fields | 16% | REJECTED |
+| `milesight/uc1152` | 4 | 0 | fields | 16% | REJECTED |
 | `milesight/uc300` | 19 | 15 | fields | 80% | SILVER |
 | `milesight/uc50x` | 12 | 15 | fields | 100% | PLATINUM |
 | `milesight/uc51x` | 24 | 15 | fields | 83% | SILVER |

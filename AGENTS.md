@@ -74,9 +74,12 @@ explicitly.
 
 ```
 TYPES:        u8 u16 u24 u32 u64 | s8 s16 s24 s32 s64 | f16 f32 f64 | bool
-              ascii hex bytes base64 | number string | skip enum
+              ascii hex hex:upper bytes base64 | number string | skip enum
 STRUCTURES:   object | repeat | byte_group | tlv
-MODIFIERS:    add mult div | lookup | polynomial | compute | guard | transform
+NAMING:       name | name_from ("region_${region_id}_dwell")
+TAG KEYS:     "[1, 200]" exact | "[1, !0]" excluding | "[2, *]" any
+MODIFIERS:    add mult div | lookup (sequence or sparse mapping) | polynomial
+              | compute | guard | transform
 CONDITIONALS: match (value) | flagged (bitmask) | tlv (tag dispatch)
 TRANSFORMS:   sqrt abs pow floor ceiling clamp log10 log
 COMPUTE OPS:  add sub mul div mod idiv
@@ -234,11 +237,8 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
     `"sdi12_" + n`), which needs computed keys - see CR-2026-004;
   - 2 (`ws136`, `ws156` channel 255/52) are commented out in the vendor's own
     decoder, so it emits nothing there either and omitting them is correct.
-  Two further gaps block individual schemas: `ws101` needs a sparse, 1-based lookup
-  (its `button` is `1: short, 2: long, 3: double` with no case 0, and our `lookup`
-  is a zero-based list), and `uc1114`/`uc1152` match a channel by *negated* type
-  (`channel_type !== 0x00`), which an exact `[channel, type]` case key cannot
-  express. Enum labels, version and serial channels, packed flag bytes, units and
+  Those two blockers are now resolved by CR-2026-004: `ws101` uses a sparse mapping
+  `lookup`, and `uc1114`/`uc1152` use `"[1, !0]"` and `"[9, *]"` case keys. Enum labels, version and serial channels, packed flag bytes, units and
   annotations are done.
 - **Three TTN declared examples are stale, not two.** `ws50x`, `uc1114` and
   `uc1152` all declare values their own vendor decoder does not produce - `true`

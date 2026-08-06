@@ -20,3 +20,16 @@ fields:
         "[2, 200]":
           - name: pulse_count_2
             type: u32
+        "[1, !0]":
+          - name: digital_input_1
+            type: u8
+            # vendor: channel_id === 0x01 && channel_type !== 0x00.
+            # The vendor's loop has no else-break, so an unmatched channel leaves
+            # its cursor mid-payload and the next pass reads past the end, which
+            # makes its decoder report this field for type 0x00 too. Not copied.
+            lookup: ["off", "on"]
+        "[2, !0]":
+          - name: digital_input_2
+            type: u8
+            # vendor: channel_id === 0x02 && channel_type !== 0x00
+            lookup: ["off", "on"]

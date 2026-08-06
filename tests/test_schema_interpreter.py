@@ -3717,7 +3717,13 @@ class TestLookupModifier:
         assert result.data['mode'] == 'standby'
 
     def test_lookup_unknown(self):
-        """Lookup with unknown value."""
+        """PS-269: an unmapped value omits the field rather than leaking the integer.
+
+        This previously asserted that 153 came through as the value of a field whose
+        lookup only defines 0 and 1. Reporting a raw integer under a name that
+        promises a label misdescribes it, so the field is now omitted; a schema that
+        wants a fallback declares `default`.
+        """
         schema = {
             'fields': [{
                 'name': 'status',
@@ -3725,12 +3731,22 @@ class TestLookupModifier:
                 'lookup': {0: 'ok', 1: 'error'}
             }]
         }
-        interp = SchemaInterpreter(schema)
-        
-        result = interp.decode(bytes([0x99]))
+        result = SchemaInterpreter(schema).decode(bytes([0x99]))
         assert result.success
-        # Should return raw value or unknown marker
-        assert '153' in str(result.data['status']) or result.data['status'] == 153
+        assert 'status' not in result.data
+
+    def test_lookup_unknown_with_default(self):
+        """A declared default is used in place of omitting the field."""
+        schema = {
+            'fields': [{
+                'name': 'status',
+                'type': 'u8',
+                'lookup': {0: 'ok', 1: 'error', 'default': 'unknown'}
+            }]
+        }
+        result = SchemaInterpreter(schema).decode(bytes([0x99]))
+        assert result.success
+        assert result.data['status'] == 'unknown'
 
 
 class TestTransformOperations:

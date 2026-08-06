@@ -25,4 +25,10 @@ fields:
         "[255, 46]":
           - name: button
             type: u8
+            # The vendor's switch defines 1, 2 and 3 with no case 0, so this is a
+            # sparse mapping rather than a zero-based list (PS-268).
+            lookup:
+              1: short
+              2: long
+              3: double
             # raw: "short"

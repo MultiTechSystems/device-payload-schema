@@ -58,6 +58,91 @@ class EncodeResult:
 #: mistake them for a bit range such as ``u8:3``.
 _COLON_STRING_TYPES = frozenset({'hex:upper'})
 
+#: Sentinel meaning "this field produced no value and is omitted from the output".
+OMITTED = object()
+
+
+def apply_lookup(value, lookup):
+    """Map a decoded integer through a ``lookup`` table (PS-103..PS-107, PS-268).
+
+    A sequence is indexed from zero. A mapping is matched against its keys, which
+    need be neither contiguous nor start at zero -- a device reporting 1=short,
+    2=long, 3=double has no entry for 0, and a zero-based list cannot express that
+    without inventing a label. Where a mapping has no entry and declares no
+    ``default``, the field is omitted rather than reported as its raw value, since
+    the device did not report a value the schema can name.
+
+    The mapping form was previously accepted and mis-decoded: the guard
+    ``0 <= value < len(lookup)`` was written for a list, so the last entry of any
+    mapping was unreachable and leaked through as a raw integer.
+    """
+    if not lookup or isinstance(value, bool) or not isinstance(value, int):
+        return value
+    if isinstance(lookup, dict):
+        for key, label in lookup.items():
+            try:
+                if int(key) == value:
+                    return label
+            except (TypeError, ValueError):
+                continue
+        if 'default' in lookup:
+            return lookup['default']
+        return OMITTED
+    if 0 <= value < len(lookup):
+        return lookup[value]
+    return value
+
+
+def _match_composite_key(case_key: str, tag_tuple):
+    """Match a composite TLV case key against a tag, supporting `!` and `*`.
+
+    Returns (matched, specificity) where specificity is 0 for an exact key, 1 when
+    any element is negated, and 2 when any element is a wildcard. Vendors dispatch
+    on one tag field while excluding or ignoring another -- "channel 1, any type but
+    0" - which an exact key cannot express and enumerating 256 type values would not
+    sensibly cover (PS-270).
+    """
+    body = case_key.strip()[1:-1] if case_key.strip().endswith(']') else case_key.strip()[1:]
+    parts = [part.strip().strip('"\'') for part in body.split(',')]
+    if len(parts) != len(tag_tuple):
+        return False, 0
+    specificity = 0
+    for part, actual in zip(parts, tag_tuple):
+        if part == '*':
+            specificity = max(specificity, 2)
+            continue
+        negated = part.startswith('!')
+        text = part[1:].strip() if negated else part
+        try:
+            expected = int(text, 0)
+        except (TypeError, ValueError):
+            return False, 0
+        if negated:
+            specificity = max(specificity, 1)
+            if actual == expected:
+                return False, 0
+        elif actual != expected:
+            return False, 0
+    return True, specificity
+
+
+def reverse_lookup(value, lookup):
+    """Map a label back to its integer for encoding."""
+    if not lookup:
+        return value
+    if isinstance(lookup, dict):
+        for key, label in lookup.items():
+            if label == value:
+                try:
+                    return int(key)
+                except (TypeError, ValueError):
+                    return value
+        return value
+    try:
+        return lookup.index(value)
+    except (ValueError, AttributeError):
+        return value
+
 #: Order in which the bare `mult`, `div` and `add` modifiers are applied,
 #: irrespective of the order the keys appear in the source document (PS-101).
 #: Order-dependent arithmetic uses the `transform` array instead (PS-102).
@@ -1354,6 +1439,38 @@ class SchemaInterpreter:
         
         return value
     
+    def _resolve_field_name(self, field_def: Dict[str, Any], name: str) -> str:
+        """Resolve a field's output key, honouring `name_from` (PS-265, PS-266).
+
+        The payload often identifies which instance a reading belongs to, and the
+        vendor puts that in the key: "region_3_avg_dwell", "channel_2_error". The
+        template's ${...} references name fields decoded earlier in this payload.
+        """
+        template = field_def.get('name_from')
+        if not template:
+            return name
+
+        missing = []
+
+        def substitute(match):
+            reference = match.group(1)
+            if reference in self._variables:
+                value = self._variables[reference]
+                if isinstance(value, float) and value == int(value):
+                    value = int(value)
+                return str(value)
+            missing.append(reference)
+            return ''
+
+        resolved = re.sub(r'\$\{(\w+)\}', substitute, str(template))
+        if missing:
+            raise ValueError(
+                "name_from for %r references %s, which %s not been decoded"
+                % (name, ", ".join(repr(m) for m in missing),
+                   "have" if len(missing) > 1 else "has")
+            )
+        return resolved
+
     def _apply_transform(self, value: float, transform_ops: List[Dict[str, Any]]) -> float:
         """
         Apply transform operations sequentially.
@@ -1570,27 +1687,32 @@ class SchemaInterpreter:
                         data_length = (buf[pos] << 8) | buf[pos + 1]
                 pos += length_size
             
-            # Find matching case
+            # Find matching case. Exact keys are tried first, then negated, then
+            # wildcard, so a specific case is never shadowed by a broader one
+            # (PS-270).
             matched_fields = None
-            for case_key, case_fields in cases.items():
-                if case_key == 'default':
-                    continue
-                # Normalize case key for comparison
-                if isinstance(case_key, (list, tuple)):
-                    if tuple(case_key) == tag_tuple:
-                        matched_fields = case_fields
-                        break
-                elif isinstance(case_key, str) and case_key.startswith('['):
-                    # Parse string representation of composite tag e.g. "[1, 117]"
-                    try:
-                        parsed = tuple(json.loads(case_key))
-                        if parsed == tag_tuple:
+            for specificity in (0, 1, 2):
+                for case_key, case_fields in cases.items():
+                    if case_key == 'default':
+                        continue
+                    # Normalize case key for comparison
+                    if isinstance(case_key, (list, tuple)):
+                        if specificity == 0 and tuple(case_key) == tag_tuple:
                             matched_fields = case_fields
                             break
-                    except (json.JSONDecodeError, TypeError):
-                        pass
-                elif len(tag_tuple) == 1 and self._match_case_pattern(tag_tuple[0], case_key):
-                    matched_fields = case_fields
+                    elif isinstance(case_key, str) and case_key.startswith('['):
+                        matched, key_specificity = _match_composite_key(case_key, tag_tuple)
+                        if matched and key_specificity == specificity:
+                            matched_fields = case_fields
+                            break
+                    elif (
+                        specificity == 0
+                        and len(tag_tuple) == 1
+                        and self._match_case_pattern(tag_tuple[0], case_key)
+                    ):
+                        matched_fields = case_fields
+                        break
+                if matched_fields is not None:
                     break
             
             if matched_fields is None:
@@ -1703,9 +1825,7 @@ class SchemaInterpreter:
             value = self._apply_transform(float(value), transform)
         
         # Apply lookup table
-        lookup = field_def.get('lookup')
-        if lookup and isinstance(value, int) and 0 <= value < len(lookup):
-            value = lookup[value]
+        value = apply_lookup(value, field_def.get('lookup'))
         
         return value
     
@@ -1885,15 +2005,23 @@ class SchemaInterpreter:
                         value = self._evaluate_formula(field_def['formula'], value)
                     else:
                         value = self._apply_modifiers(value, field_def)
-                    result.data[name] = value
+                    if value is OMITTED:
+                        # A lookup with no entry for this value: the device did not
+                        # report anything the schema can name, so the field is left
+                        # out rather than reported as a raw integer (PS-269).
+                        continue
+                    output_name = self._resolve_field_name(field_def, name)
+                    result.data[output_name] = value
                     # Check valid_range and update quality
                     if field_def.get('valid_range'):
                         quality = self._check_valid_range(value, field_def, result)
-                        result.quality[name] = quality
+                        result.quality[output_name] = quality
                     # Store variable if var: specified (Option B)
                     if field_def.get('var'):
                         self._variables[field_def['var']] = value
-                    # Always store by field name (for flagged/formula lookups)
+                    # Always store by field name (for flagged/formula lookups). The
+                    # schema-level name is used here, not the resolved output name,
+                    # so $references keep working when name_from is in play.
                     self._variables[name] = value
             except Exception as e:
                 result.errors.append(f"Error decoding {name}: {e}")
@@ -2175,13 +2303,8 @@ class SchemaInterpreter:
             return int(round(self._evaluate_encode_formula(encode_formula, value)))
         
         # Reverse lookup
-        lookup = field_def.get('lookup')
-        if lookup:
-            try:
-                value = lookup.index(value)
-            except ValueError:
-                pass
-        
+        value = reverse_lookup(value, field_def.get('lookup'))
+
         value = reverse_canonical_modifiers(value, field_def)
         
         # Float types should preserve fractional values

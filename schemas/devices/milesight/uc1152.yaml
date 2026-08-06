@@ -17,3 +17,8 @@ fields:
           - name: channels
             type: u8
             # raw: []
+        "[9, *]":
+          - name: digital_output
+            type: u8
+            # vendor: channel_id === 0x09, with no condition on the type byte
+            lookup: ["off", "on"]

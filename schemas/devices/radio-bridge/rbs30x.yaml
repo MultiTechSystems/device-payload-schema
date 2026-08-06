@@ -378,9 +378,10 @@ test_vectors:
 
   - name: "Both buttons held"
     payload: "10 06 12 02"
+    source: vendor-codec
     expected:
       event_type: 6
-      button_id: 18
+      button_id: "Both Buttons"
       button_state: "Held"
 
   - name: "Contact shorted"
@@ -492,9 +493,10 @@ test_vectors:
 
   - name: "Downlink ACK valid"
     payload: "10 FF 02"
+    source: vendor-codec
     expected:
       event_type: 255
-      downlink_ack: 2
+      downlink_ack: "Message Valid"
 
   - name: "Downlink ACK invalid"
     payload: "10 FF 01"
