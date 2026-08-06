@@ -99,6 +99,28 @@ fields:
             type: u8
             div: 2
             # raw: readUInt8(bytes[i]) / 2
+        "[32, 206]":
+          - name: history
+            type: object
+            fields:
+              - name: timestamp
+                type: u32
+              - name: temperature
+                unit: "°C"
+                sensor: temperature
+                ipso: {object: 3303, instance: 0, resource: 5700}
+                senml: {name: "temperature", unit: "Cel"}
+                semantic: "temperature"
+                type: s16
+                div: 10
+              - name: humidity
+                unit: "%"
+                sensor: humidity
+                ipso: {object: 3304, instance: 0, resource: 5700}
+                senml: {name: "humidity", unit: "%RH"}
+                semantic: "humidity"
+                type: u8
+                div: 2
 
 test_vectors:
   - name: vendor_reference

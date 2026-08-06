@@ -224,10 +224,14 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   the 84 still disagree with the vendor's decoder. The missing TLV channels were
   measured: of 790 channels the vendor decodes, 724 are covered and 66 are not, and
   **none of the 66 is a plain scalar channel that was simply forgotten**:
-  - 54 are history records - the vendor builds `{timestamp, temperature, ...}` and
-    pushes it into an array, which needs array/object output;
-  - 10 build field *names* from payload content (`"region_" + n + "_avg_dwell"`,
-    `"sdi12_" + n`), which needs computed keys;
+  - 54 are history records. These ARE expressible: a tlv case holding one
+    `type: object` field reproduces the vendor's
+    `history: [{timestamp, temperature, ...}]` exactly, because PS-157 collects
+    repeated tags into an array. Four are done; of the rest, 21 need the vendor's
+    label maps applied as `lookup` tables, 11 need padding modelled with `skip`,
+    and the remainder build their output key from payload content (below);
+  - 27 build field *names* from payload content (`"region_" + n + "_avg_dwell"`,
+    `"sdi12_" + n`), which needs computed keys - see CR-2026-004;
   - 2 (`ws136`, `ws156` channel 255/52) are commented out in the vendor's own
     decoder, so it emits nothing there either and omitting them is correct.
   Two further gaps block individual schemas: `ws101` needs a sparse, 1-based lookup

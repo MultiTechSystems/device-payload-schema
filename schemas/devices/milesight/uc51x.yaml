@@ -125,6 +125,15 @@ fields:
           - name: custom_message
             type: u8
             # raw: readAscii(bytes.slice(i, bytes.length))
+        "[33, 206]":
+          - name: history
+            type: object
+            fields:
+              - name: timestamp
+                type: u32
+              - name: pressure
+                unit: "hPa"
+                type: u16
 
 test_vectors:
   - name: ch255_type1_midscale

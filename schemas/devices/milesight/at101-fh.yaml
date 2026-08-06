@@ -134,6 +134,30 @@ fields:
             type: u8
             lookup: ["normal", "abnormal"]
             # raw: readTemperatureAlarm(bytes[i + 2])
+        "[32, 206]":
+          - name: history
+            type: object
+            fields:
+              - name: timestamp
+                type: u32
+              - name: longitude
+                type: s32
+                div: 1000000
+              - name: latitude
+                type: s32
+                div: 1000000
+              - name: initial_angle_x
+                type: s8
+              - name: initial_angle_y
+                type: s8
+              - name: initial_angle_z
+                type: s8
+              - name: inclination_angle_x
+                type: s8
+              - name: inclination_angle_y
+                type: s8
+              - name: inclination_angle_z
+                type: s8
 
 test_vectors:
   - name: ch255_type1_midscale

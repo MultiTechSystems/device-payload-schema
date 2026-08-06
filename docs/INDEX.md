@@ -204,8 +204,8 @@ Mean quality score 62.8% (PLATINUM 31, GOLD 40, SILVER 25, BRONZE 1, REJECTED 61
 | `mclimate/flood-sensor` | 5 | 0 | fields | 16% | REJECTED |
 | `mclimate/t-valve` | 11 | 0 | fields | 16% | REJECTED |
 | `mclimate/vicki` | 31 | 11 | fields | 85% | GOLD |
-| `milesight/am102` | 16 | 15 | fields | 100% | PLATINUM |
-| `milesight/am102l` | 16 | 15 | fields | 100% | PLATINUM |
+| `milesight/am102` | 22 | 15 | fields | 100% | PLATINUM |
+| `milesight/am102l` | 22 | 15 | fields | 100% | PLATINUM |
 | `milesight/am103` | 16 | 15 | fields | 94% | GOLD |
 | `milesight/am103l` | 16 | 15 | fields | 94% | GOLD |
 | `milesight/am104` | 12 | 15 | fields | 100% | PLATINUM |
@@ -216,7 +216,7 @@ Mean quality score 62.8% (PLATINUM 31, GOLD 40, SILVER 25, BRONZE 1, REJECTED 61
 | `milesight/am308l` | 20 | 15 | fields | 91% | GOLD |
 | `milesight/am319` | 26 | 15 | fields | 91% | GOLD |
 | `milesight/am319l` | 26 | 15 | fields | 91% | GOLD |
-| `milesight/at101-fh` | 25 | 15 | fields | 94% | GOLD |
+| `milesight/at101-fh` | 35 | 15 | fields | 89% | GOLD |
 | `milesight/at101` | 19 | 15 | fields | 94% | GOLD |
 | `milesight/ct101` | 20 | 15 | fields | 78% | SILVER |
 | `milesight/ct103` | 20 | 15 | fields | 78% | SILVER |
@@ -257,7 +257,7 @@ Mean quality score 62.8% (PLATINUM 31, GOLD 40, SILVER 25, BRONZE 1, REJECTED 61
 | `milesight/uc1152` | 3 | 0 | fields | 16% | REJECTED |
 | `milesight/uc300` | 19 | 15 | fields | 80% | SILVER |
 | `milesight/uc50x` | 12 | 15 | fields | 100% | PLATINUM |
-| `milesight/uc51x` | 21 | 15 | fields | 82% | SILVER |
+| `milesight/uc51x` | 24 | 15 | fields | 80% | SILVER |
 | `milesight/vs121` | 5 | 0 | fields | 16% | REJECTED |
 | `milesight/vs135` | 15 | 13 | fields | 80% | SILVER |
 | `milesight/vs321` | 24 | 15 | fields | 84% | SILVER |
