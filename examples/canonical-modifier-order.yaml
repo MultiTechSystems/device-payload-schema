@@ -1,0 +1,76 @@
+# Cross-language conformance fixture for PS-101 / PS-102.
+#
+# Every implementation must decode this schema identically. The two scaled fields
+# carry the same modifiers written in opposite key order and MUST produce the same
+# value, because the canonical order (mult, div, add) applies regardless of how
+# the source was written. The offset-binary field shows the only way to express a
+# different order: an explicit transform array.
+#
+# Run against any interpreter, e.g.:
+#   python3 tools/schema_interpreter.py decode examples/canonical-modifier-order.yaml "03E8 03E8 8009 0064"
+name: canonical_modifier_order
+version: 1
+endian: big
+description: Fixture pinning canonical modifier order across implementations
+
+fields:
+  # div written first
+  - name: scaled_div_first
+    type: u16
+    div: 10
+    add: -40
+    unit: "°C"
+
+  # add written first - same arithmetic, same result
+  - name: scaled_add_first
+    type: u16
+    add: -40
+    div: 10
+    unit: "°C"
+
+  # Offset applies BEFORE the division, which the canonical order cannot
+  # express, so it is written as an ordered transform.
+  - name: offset_binary
+    type: u16
+    transform:
+      - add: -32768
+      - div: 100
+    unit: "m⋅s⁻¹"
+
+  # mult and div together, plus an offset
+  - name: scaled_mult_div
+    type: u16
+    mult: 3
+    div: 2
+    add: 1
+
+test_vectors:
+  - name: canonical_order_is_key_order_independent
+    description: "Both scaled fields decode to (1000 / 10) - 40 = 60"
+    payload: "03E8 03E8 8009 0064"
+    source: spec-example
+    expected:
+      scaled_div_first: 60.0
+      scaled_add_first: 60.0
+      offset_binary: 0.09
+      scaled_mult_div: 151.0
+
+  - name: zero_words
+    description: "All-zero words: offset-binary reads its minimum"
+    payload: "0000 0000 0000 0000"
+    source: spec-example
+    expected:
+      scaled_div_first: -40.0
+      scaled_add_first: -40.0
+      offset_binary: -327.68
+      scaled_mult_div: 1.0
+
+  - name: max_words
+    description: "All-ones words at the top of the u16 range"
+    payload: "FFFF FFFF FFFF FFFF"
+    source: spec-example
+    expected:
+      scaled_div_first: 6513.5
+      scaled_add_first: 6513.5
+      offset_binary: 327.67
+      scaled_mult_div: 98303.5

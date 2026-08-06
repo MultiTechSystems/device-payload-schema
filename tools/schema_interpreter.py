@@ -54,6 +54,55 @@ class EncodeResult:
         return len(self.errors) == 0
 
 
+#: Order in which the bare `mult`, `div` and `add` modifiers are applied,
+#: irrespective of the order the keys appear in the source document (PS-101).
+#: Order-dependent arithmetic uses the `transform` array instead (PS-102).
+CANONICAL_MODIFIER_ORDER = ('mult', 'div', 'add')
+
+
+def apply_canonical_modifiers(value, field_def: Dict[str, Any]):
+    """Apply `mult`, `div` and `add` to a value in the canonical order.
+
+    Previously each call site iterated the field dict, so the arithmetic followed
+    the order the keys happened to appear in the YAML. That made a schema's
+    meaning depend on key order, which a decoder targeting a struct (Go, Java,
+    C#, C), Protocol Buffers or the binary schema form cannot preserve -- and the
+    implementations of this specification consequently disagreed with each other.
+    An absent modifier is the identity operation.
+    """
+    for key in CANONICAL_MODIFIER_ORDER:
+        operand = field_def.get(key)
+        if operand is None:
+            continue
+        if key == 'mult':
+            value = value * operand
+        elif key == 'div':
+            if operand != 0:
+                value = value / operand
+        else:
+            value = value + operand
+    return value
+
+
+def reverse_canonical_modifiers(value, field_def: Dict[str, Any]):
+    """Invert :func:`apply_canonical_modifiers` for encoding.
+
+    Decoding computes ``((raw * mult) / div) + add``, so encoding subtracts
+    ``add``, multiplies by ``div``, then divides by ``mult``.
+    """
+    for key in reversed(CANONICAL_MODIFIER_ORDER):
+        operand = field_def.get(key)
+        if operand is None:
+            continue
+        if key == 'add':
+            value = value - operand
+        elif key == 'div':
+            value = value * operand
+        elif operand != 0:
+            value = value / operand
+    return value
+
+
 class SchemaInterpreter:
     """
     Runtime interpreter for Payload Schema definitions.
@@ -1285,15 +1334,8 @@ class SchemaInterpreter:
             if isinstance(coeffs, list) and len(coeffs) >= 2:
                 value = self._evaluate_polynomial(coeffs, value)
         
-        # Apply basic modifiers (mult, div, add) in YAML key order
-        for key in field_def:
-            if key == 'mult' and field_def['mult'] is not None:
-                value = value * field_def['mult']
-            elif key == 'div' and field_def['div'] is not None and field_def['div'] != 0:
-                value = value / field_def['div']
-            elif key == 'add' and field_def['add'] is not None:
-                value = value + field_def['add']
-        
+        value = apply_canonical_modifiers(value, field_def)
+
         # Apply transform array if present
         if 'transform' in field_def:
             value = self._apply_transform(value, field_def['transform'])
@@ -1328,12 +1370,13 @@ class SchemaInterpreter:
                 value = math.log10(max(1e-10, value))  # Avoid domain error
             elif 'log' in op and op['log']:
                 value = math.log(max(1e-10, value))  # Natural log
-            elif 'add' in op:
-                value = value + float(op['add'])
-            elif 'mult' in op:
-                value = value * float(op['mult'])
-            elif 'div' in op and float(op['div']) != 0:
-                value = value / float(op['div'])
+            elif any(key in op for key in CANONICAL_MODIFIER_ORDER):
+                # A stage normally carries one arithmetic op. Where it carries
+                # several, they are applied in the canonical order so that a
+                # stage cannot mean different things in different languages --
+                # and so that none of them is silently dropped, which an
+                # either/or chain here used to do.
+                value = apply_canonical_modifiers(value, op)
             elif 'round' in op:
                 decimals = op['round']
                 if decimals is True or decimals == 0:
@@ -1640,15 +1683,8 @@ class SchemaInterpreter:
                 pass  # Keep original value on formula error
             return value
         
-        # Apply modifiers in YAML key order (dict preserves insertion order in Python 3.7+)
-        for key in field_def:
-            if key == 'mult' and field_def['mult'] is not None:
-                value = value * field_def['mult']
-            elif key == 'div' and field_def['div'] is not None and field_def['div'] != 0:
-                value = value / field_def['div']
-            elif key == 'add' and field_def['add'] is not None:
-                value = value + field_def['add']
-        
+        value = apply_canonical_modifiers(value, field_def)
+
         # Apply transform array (new declarative constructs)
         transform = field_def.get('transform')
         if transform and isinstance(transform, list):
@@ -2134,15 +2170,7 @@ class SchemaInterpreter:
             except ValueError:
                 pass
         
-        # Reverse modifiers in reverse YAML key order with inverse operations
-        mod_keys = [k for k in field_def if k in ('add', 'mult', 'div')]
-        for key in reversed(mod_keys):
-            if key == 'add' and field_def['add'] is not None:
-                value = value - field_def['add']
-            elif key == 'div' and field_def['div'] is not None and field_def['div'] != 0:
-                value = value * field_def['div']
-            elif key == 'mult' and field_def['mult'] is not None and field_def['mult'] != 0:
-                value = value / field_def['mult']
+        value = reverse_canonical_modifiers(value, field_def)
         
         # Float types should preserve fractional values
         field_type = field_def.get('type', 'u8')

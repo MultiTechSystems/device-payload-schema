@@ -116,13 +116,8 @@ public static class SchemaParser
         if (fm.TryGetValue("endian", out var endian))
             f.Endian = Scalar(endian);
 
-        // Modifiers -- track YAML key order
-        foreach (var kv in fm.Children)
-        {
-            var key = Scalar(kv.Key);
-            if (key is "add" or "mult" or "div")
-                f.ModOrder.Add(key);
-        }
+        // Modifier key order is deliberately not tracked: the canonical order
+        // (mult, div, add) applies however the source was written (PS-101).
         if (fm.TryGetValue("add", out var addV))
             f.Add = Double(addV);
         if (fm.TryGetValue("mult", out var multV))

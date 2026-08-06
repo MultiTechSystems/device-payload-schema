@@ -188,18 +188,19 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   bare string. It accepts an unknown wire type such as `s17`, a field with no
   `name`, and `mult: "0.1"`. For real structural checking use
   `tools/validate_schema.py`, which knows the type vocabulary.
-- **Modifier order is being changed by CR-2026-002, and the interpreters do not
-  agree yet.** The specification now fixes the canonical order for bare
-  `mult`/`div`/`add` at *mult, div, add* regardless of key order, with `transform`
-  as the only way to express another order. The Python interpreter still applies
-  source key order, and `go/schema/schema.go` uses three different orders
-  depending on the input format and code path (a `ModOrder` field for YAML,
-  add-mult-div for JSON, mult-div-add for computed fields). Bringing the six
-  interpreters onto the canonical order is outstanding work. Meanwhile: **always
-  write multi-operation arithmetic as a `transform` array**, which every
-  implementation applies in list order. No schema in the repository depends on key
-  order any more; `validate_schema.py` warns when a field carries two or more bare
-  modifiers.
+- **Modifier order is now canonical everywhere — do not reintroduce key order.**
+  Per CR-2026-002 (PS-101/PS-102), bare `mult`/`div`/`add` apply in the order
+  *mult, div, add* regardless of how the keys were written, and `transform` is the
+  only way to express another order. All implementations were brought onto this:
+  Python, Go, Java, C#, the TS013 JS generator and the firmware C generator were
+  applying source key order (or, in Go/Java/C#, three different orders depending
+  on input format and code path); the C interpreter, its node/python/go FFI
+  bindings, and the binary schema form were already canonical.
+  `examples/canonical-modifier-order.yaml` is the cross-language fixture that pins
+  this and is checked in CI — if you touch modifier handling in any language, that
+  fixture must still decode identically. `validate_schema.py` warns when a field
+  carries two or more bare modifiers, since the intent reads better as a
+  `transform`.
 - **Most published schemas are unverified.** 134 of 158 device schemas ship with
   no test vectors and are therefore Rejected. See the per-device table in
   [`docs/INDEX.md`](docs/INDEX.md).

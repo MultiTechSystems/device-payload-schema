@@ -61,6 +61,15 @@ jobs:
                   done
                   exit $status
 
+            # Pins canonical modifier order (PS-101) across implementations. The
+            # score drops below Silver if the generated JS codec stops agreeing
+            # with the Python interpreter on this fixture.
+            - name: Check cross-language modifier order
+              run: |
+                  python tools/validate_schema.py examples/canonical-modifier-order.yaml
+                  python tools/score_schema.py examples/canonical-modifier-order.yaml \
+                      --min-tier SILVER --quiet
+
             # The backlog of unverified schemas must not fail the build, so the
             # gate is "nothing got worse", not "everything is good".
             - name: Check for quality regressions

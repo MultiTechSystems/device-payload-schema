@@ -106,7 +106,9 @@ type Field struct {
 	Add         *float64       `json:"add,omitempty" yaml:"add,omitempty"`
 	Mult        *float64       `json:"mult,omitempty" yaml:"mult,omitempty"`
 	Div         *float64       `json:"div,omitempty" yaml:"div,omitempty"`
-	ModOrder    []string       `json:"-" yaml:"-"` // YAML key order for add/mult/div
+	// Deprecated: retained so existing callers still compile. Modifier order is
+	// fixed by PS-101 and this field is no longer read.
+	ModOrder []string `json:"-" yaml:"-"`
 	Transform   []Transform    `json:"transform,omitempty" yaml:"transform,omitempty"`
 	Modifiers   []Transform    `json:"modifiers,omitempty" yaml:"modifiers,omitempty"` // Legacy support
 	Lookup      map[int]string `json:"lookup,omitempty" yaml:"lookup,omitempty"`
@@ -362,20 +364,41 @@ func (ctx *DecodeContext) Peek(n int, offset int) ([]byte, error) {
 	return ctx.Data[pos : pos+n], nil
 }
 
-// extractModOrder extracts the YAML key order of modifier keys (add, mult, div)
-// from a yaml.Node mapping node.
-func extractModOrder(node *yaml.Node) []string {
-	if node == nil || node.Kind != yaml.MappingNode {
-		return nil
+// applyCanonicalModifiers applies the bare mult, div and add modifiers in the
+// canonical order defined by PS-101: mult, then div, then add, whatever order the
+// keys appear in the source document. An absent modifier is the identity.
+//
+// The previous implementation carried the YAML key order in a ModOrder field and
+// applied the modifiers in that order, which JSON input could not supply -- so
+// this path and the JSON fallback disagreed with each other and with the other
+// language implementations. Order-dependent arithmetic uses Transform instead.
+func applyCanonicalModifiers(value float64, field Field) float64 {
+	if field.Mult != nil {
+		value = value * *field.Mult
 	}
-	var order []string
-	for i := 0; i < len(node.Content)-1; i += 2 {
-		key := node.Content[i].Value
-		if key == "add" || key == "mult" || key == "div" {
-			order = append(order, key)
-		}
+	if field.Div != nil && *field.Div != 0 {
+		value = value / *field.Div
 	}
-	return order
+	if field.Add != nil {
+		value = value + *field.Add
+	}
+	return value
+}
+
+// reverseCanonicalModifiers inverts applyCanonicalModifiers for encoding:
+// decoding computes ((raw * mult) / div) + add, so encoding subtracts add, then
+// multiplies by div, then divides by mult.
+func reverseCanonicalModifiers(value float64, field Field) float64 {
+	if field.Add != nil {
+		value = value - *field.Add
+	}
+	if field.Div != nil {
+		value = value * *field.Div
+	}
+	if field.Mult != nil && *field.Mult != 0 {
+		value = value / *field.Mult
+	}
+	return value
 }
 
 // findFieldNodes returns a mapping from field index to its yaml.Node for a fields sequence.
@@ -590,8 +613,8 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 		a := float64(add)
 		f.Add = &a
 	}
-	// Extract modifier key order from YAML node
-	f.ModOrder = extractModOrder(node)
+	// Modifier key order is deliberately not captured: the canonical order
+	// (mult, div, add) applies regardless of how the source was written.
 
 	// Parse transform array
 	if transformRaw, ok := fm["transform"].([]any); ok {
@@ -1636,16 +1659,8 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 				}
 			}
 
-			// Apply top-level modifiers (mult, add, div) for number fields with ref
-			if field.Mult != nil {
-				numVal = numVal * *field.Mult
-			}
-			if field.Div != nil && *field.Div != 0 {
-				numVal = numVal / *field.Div
-			}
-			if field.Add != nil {
-				numVal = numVal + *field.Add
-			}
+			// Canonical order: mult, div, add (PS-101)
+			numVal = applyCanonicalModifiers(numVal, field)
 
 			value = numVal
 		} else if field.Compute != nil {
@@ -1734,35 +1749,12 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 					numVal = numVal / *stage.Div
 				}
 			}
-		// Top-level shortcuts — apply in YAML key order (ModOrder)
-		} else if len(field.ModOrder) > 0 {
-			for _, key := range field.ModOrder {
-				switch key {
-				case "add":
-					if field.Add != nil {
-						numVal = numVal + *field.Add
-					}
-				case "mult":
-					if field.Mult != nil {
-						numVal = numVal * *field.Mult
-					}
-				case "div":
-					if field.Div != nil && *field.Div != 0 {
-						numVal = numVal / *field.Div
-					}
-				}
-			}
-		// Fallback for fields without ModOrder (e.g. from JSON)
+		// Top-level shortcuts — canonical order: mult, div, add (PS-101).
+		// This no longer depends on the source key order, which JSON input and
+		// struct-based decoding cannot preserve, and which made this path
+		// disagree with the JSON fallback and with the other interpreters.
 		} else {
-			if field.Add != nil {
-				numVal = numVal + *field.Add
-			}
-			if field.Mult != nil {
-				numVal = numVal * *field.Mult
-			}
-			if field.Div != nil && *field.Div != 0 {
-				numVal = numVal / *field.Div
-			}
+			numVal = applyCanonicalModifiers(numVal, field)
 		}
 		value = numVal
 	}
@@ -2408,35 +2400,11 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 					numVal = numVal - *stage.Add
 				}
 			}
-		// Top-level shortcuts — reverse YAML key order (ModOrder)
-		} else if len(field.ModOrder) > 0 {
-			for i := len(field.ModOrder) - 1; i >= 0; i-- {
-				switch field.ModOrder[i] {
-				case "add":
-					if field.Add != nil {
-						numVal = numVal - *field.Add
-					}
-				case "mult":
-					if field.Mult != nil {
-						numVal = numVal / *field.Mult
-					}
-				case "div":
-					if field.Div != nil {
-						numVal = numVal * *field.Div
-					}
-				}
-			}
-		// Fallback for fields without ModOrder
+		// Top-level shortcuts — inverse of the canonical decode order. Decoding
+		// computes ((raw * mult) / div) + add, so encoding subtracts add first,
+		// then multiplies by div, then divides by mult (PS-101).
 		} else {
-			if field.Div != nil {
-				numVal = numVal * *field.Div
-			}
-			if field.Mult != nil {
-				numVal = numVal / *field.Mult
-			}
-			if field.Add != nil {
-				numVal = numVal - *field.Add
-			}
+			numVal = reverseCanonicalModifiers(numVal, field)
 		}
 		value = numVal
 	}

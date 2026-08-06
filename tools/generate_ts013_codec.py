@@ -191,6 +191,30 @@ def guard_to_js(guard: Dict[str, Any], value_expr: str) -> str:
     return f'({cond_js}) ? {value_expr} : {else_value}'
 
 
+def canonical_modifiers_to_js(field: Dict[str, Any], input_expr: str) -> str:
+    """Emit JS applying the bare modifiers in the canonical order: mult, div, add.
+
+    Both call sites previously iterated the field dict, so the generated codec
+    followed the source key order while the C interpreter applied mult, div, add.
+    The generated JavaScript and the reference interpreter therefore disagreed for
+    any field carrying `add` before `div` -- the shared conformance fixture
+    examples/canonical-modifier-order.yaml pins this (PS-101).
+    """
+    expr = input_expr
+    for key in ('mult', 'div', 'add'):
+        operand = field.get(key)
+        if operand is None:
+            continue
+        if key == 'mult':
+            expr = f'({expr} * {operand})'
+        elif key == 'div':
+            if operand != 0:
+                expr = f'({expr} / {operand})'
+        else:
+            expr = f'({expr} + {operand})'
+    return expr
+
+
 def transform_to_js(transform_ops: List[Dict[str, Any]], input_expr: str) -> str:
     """Generate JS for transform array operations."""
     result = input_expr
@@ -433,14 +457,7 @@ function writeS(buf, pos, size, value, endian) {
                 if 'polynomial' in field:
                     value_expr = polynomial_to_js(field['polynomial'], ref_expr)
                 
-                # Apply basic modifiers (mult, div, add) in field key order
-                for key in field:
-                    if key == 'mult' and field['mult'] is not None:
-                        value_expr = f'({value_expr} * {field["mult"]})'
-                    elif key == 'div' and field['div'] is not None and field['div'] != 0:
-                        value_expr = f'({value_expr} / {field["div"]})'
-                    elif key == 'add' and field['add'] is not None:
-                        value_expr = f'({value_expr} + {field["add"]})'
+                value_expr = canonical_modifiers_to_js(field, value_expr)
                 
                 # Apply transform array if present
                 if 'transform' in field:
@@ -601,15 +618,7 @@ function writeS(buf, pos, size, value, endian) {
             js = re.sub(r'\bx\b', raw_var, js)
             return js
         
-        expr = raw_var
-        # Apply modifiers in YAML key order (dict preserves insertion order)
-        for key in field:
-            if key == 'mult':
-                expr = f'({expr} * {field["mult"]})'
-            elif key == 'div':
-                expr = f'({expr} / {field["div"]})'
-            elif key == 'add':
-                expr = f'({expr} + {field["add"]})'
+        expr = canonical_modifiers_to_js(field, raw_var)
         
         # Apply transform array if present (new declarative approach)
         if 'transform' in field:

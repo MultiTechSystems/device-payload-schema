@@ -144,15 +144,9 @@ public class Schema {
             f.setAdd(toDouble(fm.get("add")));
         }
         
-        // Track modifier order from map key order
-        List<String> modOrder = new ArrayList<>();
-        for (String key : fm.keySet()) {
-            if (key.equals("add") || key.equals("mult") || key.equals("div")) {
-                modOrder.add(key);
-            }
-        }
-        f.setModOrder(modOrder);
-        
+        // Modifier key order is deliberately not tracked: the canonical order
+        // (mult, div, add) applies however the source was written (PS-101).
+
         f.setVar((String) fm.get("var"));
         f.setOn((String) fm.get("on"));
         f.setValue(fm.get("value"));
@@ -526,23 +520,21 @@ public class Schema {
             double numVal = ((Number) value).doubleValue();
             
             if (field.getTransform() != null && !field.getTransform().isEmpty()) {
+                // Stages apply in list order; ops within a stage in canonical order.
                 for (Field.Transform t : field.getTransform()) {
-                    if (t.getAdd() != null) numVal += t.getAdd();
                     if (t.getMult() != null) numVal *= t.getMult();
                     if (t.getDiv() != null && t.getDiv() != 0) numVal /= t.getDiv();
-                }
-            } else if (!field.getModOrder().isEmpty()) {
-                for (String mod : field.getModOrder()) {
-                    switch (mod) {
-                        case "add" -> { if (field.getAdd() != null) numVal += field.getAdd(); }
-                        case "mult" -> { if (field.getMult() != null) numVal *= field.getMult(); }
-                        case "div" -> { if (field.getDiv() != null && field.getDiv() != 0) numVal /= field.getDiv(); }
-                    }
+                    if (t.getAdd() != null) numVal += t.getAdd();
                 }
             } else {
-                if (field.getAdd() != null) numVal += field.getAdd();
+                // Canonical order: mult, div, add, whatever order the keys were
+                // written in (PS-101). Order-dependent arithmetic uses transform.
+                // The previous getModOrder() path applied source key order, which
+                // JSON input cannot supply and which disagreed with the fallback
+                // below and with the other language implementations.
                 if (field.getMult() != null) numVal *= field.getMult();
                 if (field.getDiv() != null && field.getDiv() != 0) numVal /= field.getDiv();
+                if (field.getAdd() != null) numVal += field.getAdd();
             }
             
             value = numVal;

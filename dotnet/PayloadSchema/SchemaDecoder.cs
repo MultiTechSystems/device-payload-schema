@@ -419,30 +419,24 @@ public static class SchemaDecoder
     {
         if (field.Transform.Count > 0)
         {
+            // Stages apply in list order; ops within a stage in canonical order.
             foreach (var stage in field.Transform)
             {
-                if (stage.Add.HasValue) numVal += stage.Add.Value;
                 if (stage.Mult.HasValue) numVal *= stage.Mult.Value;
                 if (stage.Div.HasValue && stage.Div.Value != 0) numVal /= stage.Div.Value;
-            }
-        }
-        else if (field.ModOrder.Count > 0)
-        {
-            foreach (var key in field.ModOrder)
-            {
-                switch (key)
-                {
-                    case "add" when field.Add.HasValue: numVal += field.Add.Value; break;
-                    case "mult" when field.Mult.HasValue: numVal *= field.Mult.Value; break;
-                    case "div" when field.Div.HasValue && field.Div.Value != 0: numVal /= field.Div.Value; break;
-                }
+                if (stage.Add.HasValue) numVal += stage.Add.Value;
             }
         }
         else
         {
-            if (field.Add.HasValue) numVal += field.Add.Value;
+            // Canonical order: mult, div, add, whatever order the keys were
+            // written in (PS-101). Order-dependent arithmetic uses transform.
+            // The removed ModOrder path applied source key order, which JSON
+            // input cannot supply and which disagreed with the fallback below
+            // and with the other language implementations.
             if (field.Mult.HasValue) numVal *= field.Mult.Value;
             if (field.Div.HasValue && field.Div.Value != 0) numVal /= field.Div.Value;
+            if (field.Add.HasValue) numVal += field.Add.Value;
         }
         return numVal;
     }

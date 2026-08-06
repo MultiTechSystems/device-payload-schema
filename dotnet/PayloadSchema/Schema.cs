@@ -90,6 +90,8 @@ public class SchemaField
     public double? Add { get; set; }
     public double? Mult { get; set; }
     public double? Div { get; set; }
+    /// <summary>Modifier order is fixed by PS-101; this is no longer read.</summary>
+    [Obsolete("Modifier order is fixed by PS-101 (mult, div, add); no longer read.")]
     public List<string> ModOrder { get; set; } = new();
     public List<TransformStage> Transform { get; set; } = new();
     public Dictionary<int, string>? Lookup { get; set; }

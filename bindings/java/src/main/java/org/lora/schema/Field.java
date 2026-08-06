@@ -91,7 +91,11 @@ public class Field {
     public Double getDiv() { return div; }
     public void setDiv(Double div) { this.div = div; }
     
+    /** @deprecated Modifier order is fixed by PS-101; no longer read. */
+    @Deprecated
     public List<String> getModOrder() { return modOrder; }
+    /** @deprecated Modifier order is fixed by PS-101; no longer read. */
+    @Deprecated
     public void setModOrder(List<String> modOrder) { this.modOrder = modOrder; }
     
     public List<Transform> getTransform() { return transform; }

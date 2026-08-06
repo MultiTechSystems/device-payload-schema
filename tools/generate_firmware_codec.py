@@ -733,16 +733,20 @@ static inline void put_u64_le(uint8_t *buf, size_t *pos, uint64_t v) {
                 elif 'sub' in op:
                     result = f'({result} + ({float(op["sub"])}f))'
 
-        # Then reverse top-level modifiers in YAML key order (reversed)
-        mod_keys = [k for k in field if k in ('add', 'mult', 'div')]
-        for key in reversed(mod_keys):
+        # Then invert the canonical decode order. Decoding computes
+        # ((raw * mult) / div) + add, so encoding subtracts add, multiplies by
+        # div, then divides by mult (PS-101).
+        for key in ('add', 'div', 'mult'):
+            if field.get(key) is None:
+                continue
             needs_float = True
+            operand = float(field[key])
             if key == 'add':
-                result = f'({result} - ({float(field["add"])}f))'
+                result = f'({result} - ({operand}f))'
             elif key == 'div':
-                result = f'({result} * {float(field["div"])}f)'
-            elif key == 'mult':
-                result = f'({result} / {float(field["mult"])}f)'
+                result = f'({result} * {operand}f)'
+            elif operand != 0:
+                result = f'({result} / {operand}f)'
 
         # If any modifier was applied, we need rounding for integer output
         if needs_float:
@@ -922,14 +926,20 @@ static inline void put_u64_le(uint8_t *buf, size_t *pos, uint64_t v) {
         if 'formula' in field:
             return raw_expr  # Application computes
         expr = raw_expr
-        # Apply modifiers in YAML key order (dict preserves insertion order)
-        for key in field:
+        # Canonical order: mult, div, add, whatever order the keys were written
+        # in (PS-101). Iterating the field dict here made the generated firmware
+        # disagree with the C interpreter, which already applied this order.
+        for key in ('mult', 'div', 'add'):
+            if field.get(key) is None:
+                continue
+            operand = float(field[key])
             if key == 'mult':
-                expr = f'({expr} * {float(field["mult"])}f)'
+                expr = f'({expr} * {operand}f)'
             elif key == 'div':
-                expr = f'({expr} / {float(field["div"])}f)'
-            elif key == 'add':
-                expr = f'({expr} + {float(field["add"])}f)'
+                if operand != 0:
+                    expr = f'({expr} / {operand}f)'
+            else:
+                expr = f'({expr} + {operand}f)'
         
         # Apply transform array if present
         if 'transform' in field:
