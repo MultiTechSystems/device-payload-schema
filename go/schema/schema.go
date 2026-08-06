@@ -348,8 +348,15 @@ func (ctx *DecodeContext) Remaining() int {
 	return len(ctx.Data) - ctx.Offset
 }
 
-// Read reads n bytes and advances the offset.
+// Read reads n bytes and advances the offset. A negative n means "the remainder of
+// the payload", the convention `length: -1` uses for a trailing bytes field.
 func (ctx *DecodeContext) Read(n int) ([]byte, error) {
+	if n < 0 {
+		// Guarded because the bounds check below passes for a negative n and the
+		// slice expression then panics with "slice bounds out of range", taking the
+		// caller down rather than returning an error.
+		n = ctx.Remaining()
+	}
 	if ctx.Offset+n > len(ctx.Data) {
 		return nil, fmt.Errorf("buffer underflow: need %d bytes at offset %d, but only %d remaining",
 			n, ctx.Offset, ctx.Remaining())
@@ -362,6 +369,9 @@ func (ctx *DecodeContext) Read(n int) ([]byte, error) {
 // Peek reads n bytes without advancing the offset.
 func (ctx *DecodeContext) Peek(n int, offset int) ([]byte, error) {
 	pos := ctx.Offset + offset
+	if n < 0 || pos < 0 {
+		return nil, fmt.Errorf("invalid peek of %d bytes at offset %d", n, pos)
+	}
 	if pos+n > len(ctx.Data) {
 		return nil, fmt.Errorf("buffer underflow at peek offset %d", pos)
 	}

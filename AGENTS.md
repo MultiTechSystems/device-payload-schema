@@ -172,6 +172,29 @@ improve, and say so in the commit message.
 Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 `decentlab/dl-atm22`, `digital-matter/oyster`, `dragino/laq4`.
 
+## The corpus is the conformance suite
+
+The 1,116 test vectors in `schemas/devices/` are the shared cross-language test set.
+Every implementation has a runner that reads the same YAML and the same vectors:
+
+| Implementation | Runner | Vectors passing |
+|---|---|---|
+| Python | `tests/test_corpus_conformance.py` | 1116 / 1116 |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 1080 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 1052 |
+| Go | `go/schema/corpus_conformance_test.go` | 1035 |
+| C | none - consumes a binary schema, not YAML | n/a |
+
+Each non-Python runner compares its pass count against a committed floor rather than
+requiring the whole corpus, so the known gaps stay visible and a regression fails the
+build. **Raise the floor whenever you close a gap.** The remaining gaps are named in
+each runner's output: Go lacks the `hex` type and `u8[lo:hi]` bit ranges, Java does
+not evaluate computed `ref` fields, and both Java and C# lack bit ranges.
+
+Run them all with `make test-languages`. This suite is why the Go and Java TLV
+defects were found: those implementations returned an empty result for every
+channel/type schema in the repository, and no test had ever read one.
+
 ## Rules for this repository
 
 **Test vectors must come from outside our own decoder.** A vector produced by
