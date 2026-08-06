@@ -733,9 +733,12 @@ static inline int decode_field(
                         return SCHEMA_OK;
                     }
                 }
-                /* Unknown enum value - store raw */
-                snprintf(out->value.str, SCHEMA_MAX_NAME_LEN, "unknown(%d)", (int)raw_value);
-                out->valid = true;
+                /* No entry for this value: omit the field rather than reporting a
+                 * placeholder under a name that promises a label (PS-269). This
+                 * emitted "unknown(N)", a fourth behaviour on top of the three the
+                 * other interpreters each had for the same case. The variable is
+                 * still recorded so $references keep working. */
+                out->valid = false;
                 if (field->var_name[0]) var_set(vars, field->var_name, raw_value);
                 return SCHEMA_OK;
             }

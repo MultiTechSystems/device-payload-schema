@@ -16,6 +16,12 @@ public class Field {
     private List<String> modOrder;
     private List<Transform> transform;
     private Map<Integer, String> lookup;
+    /** True when `lookup` was written as a sequence, indexed from zero (PS-104). */
+    private boolean lookupIsSequence;
+    /** Fallback for a mapping lookup with no entry for the value (PS-269). */
+    private String lookupDefault;
+    /** Output key template resolved against earlier fields (PS-265). */
+    private String nameFrom;
     private String var;
     private Object value;
     private List<Field> fields;
@@ -102,6 +108,12 @@ public class Field {
     public void setTransform(List<Transform> transform) { this.transform = transform; }
     
     public Map<Integer, String> getLookup() { return lookup; }
+    public boolean isLookupSequence() { return lookupIsSequence; }
+    public void setLookupSequence(boolean value) { this.lookupIsSequence = value; }
+    public String getLookupDefault() { return lookupDefault; }
+    public void setLookupDefault(String value) { this.lookupDefault = value; }
+    public String getNameFrom() { return nameFrom; }
+    public void setNameFrom(String value) { this.nameFrom = value; }
     public void setLookup(Map<Integer, String> lookup) { this.lookup = lookup; }
     
     public String getVar() { return var; }

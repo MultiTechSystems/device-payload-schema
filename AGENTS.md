@@ -206,6 +206,12 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   bare string. It accepts an unknown wire type such as `s17`, a field with no
   `name`, and `mult: "0.1"`. For real structural checking use
   `tools/validate_schema.py`, which knows the type vocabulary.
+- **CR-2026-004 is implemented in Python, Go, Java and C#, not in C.** `name_from`
+  and `!`/`*` case keys do not apply to the C interpreter: it has no TLV support and
+  fixed-size name buffers, and it consumes a binary schema with no place for a
+  template. It does honour PS-269 (an unmatched lookup omits the field). A `default`
+  on a mapping lookup is Python, Go, Java and C# only, because the binary schema has
+  no slot for it.
 - **Modifier order is now canonical everywhere — do not reintroduce key order.**
   Per CR-2026-002 (PS-101/PS-102), bare `mult`/`div`/`add` apply in the order
   *mult, div, add* regardless of how the keys were written, and `transform` is the

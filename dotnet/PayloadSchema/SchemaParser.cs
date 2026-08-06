@@ -157,17 +157,26 @@ public static class SchemaParser
                 f.Lookup = new Dictionary<int, string>();
                 foreach (var kv in lookupMap.Children)
                 {
-                    if (int.TryParse(Scalar(kv.Key), out int key))
+                    var keyText = Scalar(kv.Key);
+                    if (int.TryParse(keyText, out int key))
                         f.Lookup[key] = Scalar(kv.Value);
+                    else if (keyText == "default")
+                        f.LookupDefault = Scalar(kv.Value);
                 }
             }
             else if (lookupNode is YamlSequenceNode lookupArr)
             {
                 f.Lookup = new Dictionary<int, string>();
+                // A sequence is indexed from zero and keeps the raw value when out
+                // of range (PS-104), unlike a mapping which omits (PS-269).
+                f.LookupIsSequence = true;
                 for (int i = 0; i < lookupArr.Children.Count; i++)
                     f.Lookup[i] = Scalar(lookupArr.Children[i]);
             }
         }
+
+        if (fm.TryGetValue("name_from", out var nameFromNode))
+            f.NameFrom = Scalar(nameFromNode);
 
         // Nested fields
         if (fm.TryGetValue("fields", out var fieldsNode) && fieldsNode is YamlSequenceNode fieldsSeq)

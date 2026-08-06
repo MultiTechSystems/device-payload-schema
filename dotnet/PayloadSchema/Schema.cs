@@ -95,6 +95,12 @@ public class SchemaField
     public List<string> ModOrder { get; set; } = new();
     public List<TransformStage> Transform { get; set; } = new();
     public Dictionary<int, string>? Lookup { get; set; }
+    /// <summary>True when `lookup` was written as a sequence, indexed from zero (PS-104).</summary>
+    public bool LookupIsSequence { get; set; }
+    /// <summary>Fallback for a mapping lookup with no entry for the value (PS-269).</summary>
+    public string? LookupDefault { get; set; }
+    /// <summary>Output key template resolved against earlier fields (PS-265).</summary>
+    public string? NameFrom { get; set; }
 
     // Variable
     public string? Var { get; set; }

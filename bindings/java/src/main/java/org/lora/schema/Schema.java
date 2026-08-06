@@ -174,10 +174,28 @@ public class Schema {
         if (lookupRaw instanceof Map) {
             Map<Integer, String> lookup = new HashMap<>();
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) lookupRaw).entrySet()) {
+                if ("default".equals(String.valueOf(entry.getKey()))) {
+                    f.setLookupDefault(String.valueOf(entry.getValue()));
+                    continue;
+                }
                 int key = toInt(entry.getKey(), 0);
                 lookup.put(key, String.valueOf(entry.getValue()));
             }
             f.setLookup(lookup);
+        } else if (lookupRaw instanceof List) {
+            // Sequence form, indexed from zero (PS-104). This was unparsed, so a
+            // schema using it decoded a raw integer instead of its label.
+            List<?> items = (List<?>) lookupRaw;
+            Map<Integer, String> lookup = new HashMap<>();
+            for (int i = 0; i < items.size(); i++) {
+                lookup.put(i, String.valueOf(items.get(i)));
+            }
+            f.setLookup(lookup);
+            f.setLookupSequence(true);
+        }
+        Object nameFromRaw = fm.get("name_from");
+        if (nameFromRaw != null) {
+            f.setNameFrom(String.valueOf(nameFromRaw));
         }
         
         // Nested fields
@@ -206,8 +224,13 @@ public class Schema {
             f.setCases(cases);
         }
         
-        // TLV cases (map format)
-        if (f.getType() == FieldType.TLV && casesRaw instanceof Map) {
+        // TLV cases (map format). Parsed whenever `cases` appears alongside tag
+        // fields, not only when the type is already TLV: an inline `- tlv: {...}`
+        // block is parsed here before its caller sets the type, so requiring the
+        // type first left tlvCases null and every TLV schema decoded to an empty
+        // result with no error.
+        if ((f.getType() == FieldType.TLV || fm.containsKey("tag_fields") || fm.containsKey("tag_key"))
+                && casesRaw instanceof Map) {
             Map<String, List<Field>> tlvCases = new HashMap<>();
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) casesRaw).entrySet()) {
                 String key = String.valueOf(entry.getKey());
@@ -378,9 +401,16 @@ public class Schema {
             }
             
             Object value = decodeField(field, ctx);
-            
+
+            if (value == OMITTED) {
+                // A mapping lookup with no entry and no default (PS-269).
+                continue;
+            }
+
             if (value != null && field.getName() != null && !field.getName().isEmpty()) {
-                result.put(field.getName(), value);
+                // Variables are keyed by the schema-level name so $references keep
+                // working when name_from is in play (PS-267).
+                result.put(resolveFieldName(field, ctx), value);
                 ctx.setVariable(field.getName(), value);
             }
         }
@@ -540,11 +570,18 @@ public class Schema {
             value = numVal;
         }
         
-        // Apply lookup
+        // Apply lookup. A mapping's keys need not start at zero or be contiguous
+        // (PS-268); an unmatched value omits the field rather than reporting the raw
+        // integer under a name that promises a label, unless a default is declared
+        // (PS-269). A sequence keeps the raw value when out of range (PS-104).
         if (field.getLookup() != null && value instanceof Number) {
             int intVal = ((Number) value).intValue();
             if (field.getLookup().containsKey(intVal)) {
                 value = field.getLookup().get(intVal);
+            } else if (field.getLookupDefault() != null) {
+                value = field.getLookupDefault();
+            } else if (!field.isLookupSequence()) {
+                return OMITTED;
             }
         }
         
@@ -714,8 +751,105 @@ public class Schema {
         if (cases.containsKey(tagJson)) {
             return tagJson;
         }
-        
+
+        // Compare composite keys numerically so that spacing does not matter, and
+        // so a key may exclude a value with `!` or ignore a tag field with `*`.
+        // Exact keys first, then negated, then wildcard (PS-270).
+        for (int wanted = 0; wanted <= 2; wanted++) {
+            for (String candidate : cases.keySet()) {
+                int specificity = matchCompositeCaseKey(candidate, tag);
+                if (specificity == wanted) {
+                    return candidate;
+                }
+            }
+        }
+
         return null;
+    }
+
+    /** Sentinel for a field that produced no value and is left out of the output. */
+    private static final Object OMITTED = new Object();
+
+    private static final java.util.regex.Pattern NAME_FROM_PATTERN =
+            java.util.regex.Pattern.compile("\\$\\{(\\w+)\\}");
+
+    /** Resolves a field's output key, honouring name_from (PS-265, PS-266). */
+    private String resolveFieldName(Field field, DecodeContext ctx) {
+        String template = field.getNameFrom();
+        if (template == null || template.isEmpty()) {
+            return field.getName();
+        }
+        java.util.regex.Matcher matcher = NAME_FROM_PATTERN.matcher(template);
+        StringBuilder resolved = new StringBuilder();
+        List<String> missing = new ArrayList<>();
+        while (matcher.find()) {
+            String reference = matcher.group(1);
+            Object value = ctx.getVariable(reference);
+            String replacement;
+            if (value == null) {
+                missing.add(reference);
+                replacement = "";
+            } else if (value instanceof Number
+                    && ((Number) value).doubleValue() == ((Number) value).longValue()) {
+                replacement = String.valueOf(((Number) value).longValue());
+            } else {
+                replacement = String.valueOf(value);
+            }
+            matcher.appendReplacement(resolved, java.util.regex.Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(resolved);
+        if (!missing.isEmpty()) {
+            throw new SchemaException("name_from for '" + field.getName() + "' references "
+                    + String.join(", ", missing) + ", which has not been decoded");
+        }
+        return resolved.toString();
+    }
+
+    /**
+     * Matches a composite TLV case key against a tag, allowing `!value` to exclude
+     * and `*` to ignore a tag field. Returns 0 for an exact match, 1 when any
+     * element is negated, 2 when any is a wildcard, and -1 for no match.
+     */
+    private int matchCompositeCaseKey(String key, List<Integer> tag) {
+        String trimmed = key.trim();
+        if (!trimmed.startsWith("[")) {
+            return -1;
+        }
+        trimmed = trimmed.substring(1);
+        if (trimmed.endsWith("]")) {
+            trimmed = trimmed.substring(0, trimmed.length() - 1);
+        }
+        String[] parts = trimmed.split(",");
+        if (parts.length != tag.size()) {
+            return -1;
+        }
+        int specificity = 0;
+        for (int i = 0; i < parts.length; i++) {
+            String part = parts[i].trim().replaceAll("^[\"']|[\"']$", "");
+            if ("*".equals(part)) {
+                specificity = Math.max(specificity, 2);
+                continue;
+            }
+            boolean negated = part.startsWith("!");
+            String text = negated ? part.substring(1).trim() : part;
+            int expected;
+            try {
+                expected = text.startsWith("0x") || text.startsWith("0X")
+                        ? Integer.parseInt(text.substring(2), 16)
+                        : Integer.parseInt(text);
+            } catch (NumberFormatException e) {
+                return -1;
+            }
+            if (negated) {
+                specificity = Math.max(specificity, 1);
+                if (tag.get(i) == expected) {
+                    return -1;
+                }
+            } else if (tag.get(i) != expected) {
+                return -1;
+            }
+        }
+        return specificity;
     }
 
     private List<Map<String, Object>> decodeRepeat(Field field, DecodeContext ctx) {

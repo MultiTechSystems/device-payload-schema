@@ -133,9 +133,18 @@ public static class SchemaDecoder
 
             var value = DecodeField(field, ctx, schema);
 
+            if (ReferenceEquals(value, Omitted))
+            {
+                // A mapping lookup with no entry and no default: the device
+                // reported nothing this schema can name (PS-269).
+                continue;
+            }
+
             if (value != null && !string.IsNullOrEmpty(field.Name))
             {
-                result[field.Name] = value;
+                // Keyed by the schema-level name in Variables so $references keep
+                // working when name_from is in play (PS-267).
+                result[ResolveFieldName(field, ctx)] = value;
                 ctx.Variables[field.Name] = value;
                 if (field.ValidRange is { Length: >= 2 })
                     ctx.CheckValidRange(value, field);
@@ -400,12 +409,22 @@ public static class SchemaDecoder
             }
         }
 
-        // Apply lookup
+        // Apply lookup. A mapping is matched on its keys, which need not start at
+        // zero or be contiguous (PS-268). An unmatched value omits the field rather
+        // than reporting the raw integer under a name that promises a label, unless
+        // a default is declared (PS-269).
         if (field.Lookup != null)
         {
             var (ok, intVal) = Helpers.ToInt(value);
-            if (ok && field.Lookup.TryGetValue(intVal, out var lookupStr))
-                value = lookupStr;
+            if (ok)
+            {
+                if (field.Lookup.TryGetValue(intVal, out var lookupStr))
+                    value = lookupStr;
+                else if (field.LookupDefault != null)
+                    value = field.LookupDefault;
+                else if (!field.LookupIsSequence)
+                    return Omitted;
+            }
         }
 
         // Store variable
@@ -728,7 +747,98 @@ public static class SchemaDecoder
         var tagJson = $"[{string.Join(",", tag)}]";
         if (cases.ContainsKey(tagJson)) return tagJson;
 
+        // Compare composite keys numerically. The rendering above has no space
+        // after the comma while schemas are written "[1, 117]", so the exact
+        // comparison missed every composite key. This also handles keys that
+        // exclude a value with `!` or ignore a tag field with `*`, taking exact
+        // keys first, then negated, then wildcard (PS-270).
+        for (int wanted = 0; wanted <= 2; wanted++)
+        {
+            foreach (var candidate in cases.Keys)
+            {
+                var (matched, specificity) = MatchCompositeCaseKey(candidate, tag);
+                if (matched && specificity == wanted) return candidate;
+            }
+        }
+
         return null;
+    }
+
+    /// <summary>Sentinel for a field that produced no value and is left out.</summary>
+    internal static readonly object Omitted = new();
+
+    static readonly System.Text.RegularExpressions.Regex NameFromPattern =
+        new(@"\$\{(\w+)\}");
+
+    /// <summary>Resolves a field's output key, honouring name_from (PS-265, PS-266).</summary>
+    static string ResolveFieldName(SchemaField field, DecodeContext ctx)
+    {
+        if (string.IsNullOrEmpty(field.NameFrom)) return field.Name;
+
+        var missing = new List<string>();
+        var resolved = NameFromPattern.Replace(field.NameFrom, match =>
+        {
+            var reference = match.Groups[1].Value;
+            if (!ctx.Variables.TryGetValue(reference, out var value))
+            {
+                missing.Add(reference);
+                return string.Empty;
+            }
+            var (ok, intVal) = Helpers.ToInt(value);
+            return ok ? intVal.ToString() : value?.ToString() ?? string.Empty;
+        });
+        if (missing.Count > 0)
+            throw new InvalidOperationException(
+                $"name_from for '{field.Name}' references {string.Join(", ", missing)}, " +
+                "which has not been decoded");
+        return resolved;
+    }
+
+    /// <summary>
+    /// Matches a composite TLV case key against a tag, allowing `!value` to exclude
+    /// and `*` to ignore a tag field. Specificity is 0 exact, 1 negated, 2 wildcard.
+    /// </summary>
+    static (bool, int) MatchCompositeCaseKey(string key, List<int> tag)
+    {
+        var trimmed = key.Trim();
+        if (!trimmed.StartsWith("[")) return (false, 0);
+        trimmed = trimmed.TrimStart('[').TrimEnd(']');
+        var parts = trimmed.Split(',');
+        if (parts.Length != tag.Count) return (false, 0);
+
+        int specificity = 0;
+        for (int i = 0; i < parts.Length; i++)
+        {
+            var part = parts[i].Trim().Trim('"', '\'');
+            if (part == "*")
+            {
+                specificity = Math.Max(specificity, 2);
+                continue;
+            }
+            bool negated = part.StartsWith("!");
+            var text = negated ? part.Substring(1).Trim() : part;
+            int expected;
+            if (text.StartsWith("0x") || text.StartsWith("0X"))
+            {
+                if (!int.TryParse(text.Substring(2),
+                        System.Globalization.NumberStyles.HexNumber, null, out expected))
+                    return (false, 0);
+            }
+            else if (!int.TryParse(text, out expected))
+            {
+                return (false, 0);
+            }
+            if (negated)
+            {
+                specificity = Math.Max(specificity, 1);
+                if (tag[i] == expected) return (false, 0);
+            }
+            else if (tag[i] != expected)
+            {
+                return (false, 0);
+            }
+        }
+        return (true, specificity);
     }
 
     static List<object?> DecodeRepeat(SchemaField field, DecodeContext ctx, PayloadSchemaDefinition? schema)
