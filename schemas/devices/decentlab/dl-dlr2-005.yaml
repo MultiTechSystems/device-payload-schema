@@ -16,10 +16,30 @@ fields:
       groups:
         - bit: 0
           fields:
-            - name: voltage
+            # The vendor reads this as x[0] + x[1] * 65536: two 16-bit words,
+            # low word first, so those four bytes are not a big-endian u32 and
+            # cannot be read as one field. Reading only the low word also left the
+            # high word unconsumed, misaligning every group after it.
+            - name: _voltage_low
               type: u16
+            - name: _voltage_high
+              type: u16
+            - name: _voltage_high_scaled
+              type: number
+              compute:
+                op: mul
+                a: $_voltage_high
+                b: 65536
+            - name: voltage
+              type: number
+              compute:
+                op: add
+                a: $_voltage_low
+                b: $_voltage_high_scaled
+              transform:
+                - mult: 3.5762786865234375e-07
+                - add: -3
               unit: "V"
-              # formula: 3 * ((x[0] + x[1]*65536) / 8388608 - 1)
         - bit: 1
           fields:
             - name: battery_voltage

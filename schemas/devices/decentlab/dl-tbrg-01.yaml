@@ -24,10 +24,29 @@ fields:
             - name: precipitation_interval
               type: u16
               unit: "s"
-            - name: cumulative_precipitation
+            # The vendor reads this as x[2] + x[3] * 65536: two 16-bit words,
+            # low word first, so those four bytes are not a big-endian u32 and
+            # cannot be read as one field. Reading only the low word also left the
+            # high word unconsumed, misaligning every group after it.
+            - name: _cumulative_precipitation_low
               type: u16
+            - name: _cumulative_precipitation_high
+              type: u16
+            - name: _cumulative_precipitation_high_scaled
+              type: number
+              compute:
+                op: mul
+                a: $_cumulative_precipitation_high
+                b: 65536
+            - name: cumulative_precipitation
+              type: number
+              compute:
+                op: add
+                a: $_cumulative_precipitation_low
+                b: $_cumulative_precipitation_high_scaled
+              transform:
+                - div: 10
               unit: "mm"
-              # formula: (x[2] + x[3] * 65536) * this.PARAMETERS.resolution
         - bit: 1
           fields:
             - name: battery_voltage

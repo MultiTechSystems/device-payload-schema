@@ -16,9 +16,29 @@ fields:
       groups:
         - bit: 0
           fields:
-            - name: potentiometer_position
+            # The vendor reads this as x[0] + x[1] * 65536: two 16-bit words,
+            # low word first, so those four bytes are not a big-endian u32 and
+            # cannot be read as one field. Reading only the low word also left the
+            # high word unconsumed, misaligning every group after it.
+            - name: _potentiometer_position_low
               type: u16
-              # formula: ((x[0] + x[1]*65536) / 8388608 - 1) * 1
+            - name: _potentiometer_position_high
+              type: u16
+            - name: _potentiometer_position_high_scaled
+              type: number
+              compute:
+                op: mul
+                a: $_potentiometer_position_high
+                b: 65536
+            - name: potentiometer_position
+              type: number
+              compute:
+                op: add
+                a: $_potentiometer_position_low
+                b: $_potentiometer_position_high_scaled
+              transform:
+                - div: 8388608
+                - add: -1
         - bit: 1
           fields:
             - name: battery_voltage

@@ -21,9 +21,26 @@ fields:
             - name: ch0_pulse_interval
               type: u16
               unit: "s"
-            - name: ch0_cumulative_pulse_count
+            # The vendor reads this as x[2] + x[3] * 65536: two 16-bit words,
+            # low word first, so those four bytes are not a big-endian u32 and
+            # cannot be read as one field. Reading only the low word also left the
+            # high word unconsumed, misaligning every group after it.
+            - name: _ch0_cumulative_pulse_count_low
               type: u16
-              # formula: (x[2] + x[3] * 65536)
+            - name: _ch0_cumulative_pulse_count_high
+              type: u16
+            - name: _ch0_cumulative_pulse_count_high_scaled
+              type: number
+              compute:
+                op: mul
+                a: $_ch0_cumulative_pulse_count_high
+                b: 65536
+            - name: ch0_cumulative_pulse_count
+              type: number
+              compute:
+                op: add
+                a: $_ch0_cumulative_pulse_count_low
+                b: $_ch0_cumulative_pulse_count_high_scaled
         - bit: 1
           fields:
             - name: ch1_pulse_count
@@ -31,9 +48,26 @@ fields:
             - name: ch1_pulse_interval
               type: u16
               unit: "s"
-            - name: ch1_cumulative_pulse_count
+            # The vendor reads this as x[2] + x[3] * 65536: two 16-bit words,
+            # low word first, so those four bytes are not a big-endian u32 and
+            # cannot be read as one field. Reading only the low word also left the
+            # high word unconsumed, misaligning every group after it.
+            - name: _ch1_cumulative_pulse_count_low
               type: u16
-              # formula: (x[2] + x[3] * 65536)
+            - name: _ch1_cumulative_pulse_count_high
+              type: u16
+            - name: _ch1_cumulative_pulse_count_high_scaled
+              type: number
+              compute:
+                op: mul
+                a: $_ch1_cumulative_pulse_count_high
+                b: 65536
+            - name: ch1_cumulative_pulse_count
+              type: number
+              compute:
+                op: add
+                a: $_ch1_cumulative_pulse_count_low
+                b: $_ch1_cumulative_pulse_count_high_scaled
         - bit: 2
           fields:
             - name: battery_voltage

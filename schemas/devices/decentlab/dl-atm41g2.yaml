@@ -76,10 +76,29 @@ fields:
               type: u16
               add: -32768
               unit: "µS⋅cm⁻¹"
-            - name: cumulative_precipitation
+            # The vendor reads this as x[15] + x[16] * 65536: two 16-bit words,
+            # low word first, so those four bytes are not a big-endian u32 and
+            # cannot be read as one field. Reading only the low word also left the
+            # high word unconsumed, misaligning every group after it.
+            - name: _cumulative_precipitation_low
               type: u16
+            - name: _cumulative_precipitation_high
+              type: u16
+            - name: _cumulative_precipitation_high_scaled
+              type: number
+              compute:
+                op: mul
+                a: $_cumulative_precipitation_high
+                b: 65536
+            - name: cumulative_precipitation
+              type: number
+              compute:
+                op: add
+                a: $_cumulative_precipitation_low
+                b: $_cumulative_precipitation_high_scaled
+              transform:
+                - div: 1000
               unit: "mm"
-              # formula: (x[15] + x[16] * 65536) / 1000
         - bit: 1
           fields:
             - name: battery_voltage
