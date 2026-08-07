@@ -18,10 +18,9 @@ namespace PayloadSchema.Tests;
 /// </summary>
 public class CorpusConformanceTests
 {
-    // Raise as gaps close.
-    // Gaps behind the remaining 34: rbs30x's match cases are not decoded, and vicki
-    // needs the `round` transform op and a computed-field fix. Named in the output.
-    const int CorpusFloor = 1082;
+    // This implementation now decodes the whole corpus, so the floor is the full
+    // count and any failure is a regression rather than a known gap.
+    const int CorpusFloor = 1116;
 
     readonly ITestOutputHelper _output;
 

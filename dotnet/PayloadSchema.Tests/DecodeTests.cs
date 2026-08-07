@@ -263,9 +263,12 @@ fields:
     }
 
     [Fact]
-    public void YamlKeyOrderMatters()
+    public void ModifiersApplyInCanonicalOrder()
     {
-        // div then add: (raw / 10) + (-40)
+        // The canonical order is mult, div, add (PS-101), so this is (raw / 10) - 40
+        // whatever order the keys appear in. The test was named YamlKeyOrderMatters
+        // and its comment read "div then add", asserting the contract CR-2026-002
+        // removed; the assertion held either way, so only the name misled.
         var schema = SchemaParser.Parse(@"
 name: test
 endian: big

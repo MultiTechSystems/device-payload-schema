@@ -438,30 +438,44 @@ public static class SchemaDecoder
         return value;
     }
 
-    static double ApplyModifiers(double numVal, SchemaField field)
+    /// <summary>
+    /// Applies a transform array in list order. A stage normally carries one
+    /// arithmetic op; where it carries several they run in the canonical order
+    /// mult, div, add, so a stage cannot mean different things in different
+    /// languages. A stage may instead name an operation, as {op: round, decimals: N}.
+    /// </summary>
+    static double ApplyTransformStages(double numVal, List<TransformStage> stages)
     {
-        if (field.Transform.Count > 0)
+        foreach (var stage in stages)
         {
-            // Stages apply in list order; ops within a stage in canonical order.
-            foreach (var stage in field.Transform)
+            if (stage.Op == "round")
             {
-                if (stage.Mult.HasValue) numVal *= stage.Mult.Value;
-                if (stage.Div.HasValue && stage.Div.Value != 0) numVal /= stage.Div.Value;
-                if (stage.Add.HasValue) numVal += stage.Add.Value;
+                // Half-to-even, matching the interpreter. Half-up would disagree
+                // with it on exact halves, which the corpus vectors contain.
+                numVal = Math.Round(numVal, stage.Decimals, MidpointRounding.ToEven);
+                continue;
             }
-        }
-        else
-        {
-            // Canonical order: mult, div, add, whatever order the keys were
-            // written in (PS-101). Order-dependent arithmetic uses transform.
-            // The removed ModOrder path applied source key order, which JSON
-            // input cannot supply and which disagreed with the fallback below
-            // and with the other language implementations.
-            if (field.Mult.HasValue) numVal *= field.Mult.Value;
-            if (field.Div.HasValue && field.Div.Value != 0) numVal /= field.Div.Value;
-            if (field.Add.HasValue) numVal += field.Add.Value;
+            if (stage.Mult.HasValue) numVal *= stage.Mult.Value;
+            if (stage.Div.HasValue && stage.Div.Value != 0) numVal /= stage.Div.Value;
+            if (stage.Sub.HasValue) numVal -= stage.Sub.Value;
+            if (stage.Add.HasValue) numVal += stage.Add.Value;
         }
         return numVal;
+    }
+
+    /// <summary>
+    /// Applies a field's bare modifiers and then its transform stages. Both run
+    /// when both are present - a field may scale with `mult` and then round with a
+    /// stage - which an either/or chain here used to get wrong, dropping the
+    /// modifier. The modifiers run in the canonical order mult, div, add, whatever
+    /// order the keys were written in (PS-101).
+    /// </summary>
+    static double ApplyModifiers(double numVal, SchemaField field)
+    {
+        if (field.Mult.HasValue) numVal *= field.Mult.Value;
+        if (field.Div.HasValue && field.Div.Value != 0) numVal /= field.Div.Value;
+        if (field.Add.HasValue) numVal += field.Add.Value;
+        return ApplyTransformStages(numVal, field.Transform);
     }
 
     static object? DecodeNumber(SchemaField field, DecodeContext ctx)
@@ -480,29 +494,20 @@ public static class SchemaDecoder
             if (field.Polynomial is { Length: > 0 })
                 numVal = Helpers.EvaluatePolynomial(field.Polynomial, numVal);
 
-            // Transform for ref fields
-            if (field.Transform.Count > 0)
-            {
-                foreach (var stage in field.Transform)
-                {
-                    if (stage.Sub.HasValue) numVal -= stage.Sub.Value;
-                    if (stage.Add.HasValue) numVal += stage.Add.Value;
-                    if (stage.Mult.HasValue) numVal *= stage.Mult.Value;
-                    if (stage.Div.HasValue && stage.Div.Value != 0) numVal /= stage.Div.Value;
-                }
-            }
-
-            // Top-level modifiers for number with ref
-            if (field.Mult.HasValue) numVal *= field.Mult.Value;
-            if (field.Div.HasValue && field.Div.Value != 0) numVal /= field.Div.Value;
-            if (field.Add.HasValue) numVal += field.Add.Value;
+            // Modifiers first, then the transform stages - the order the interpreter
+            // uses. Running the stages first made a field that scales with `mult` and
+            // then rounds with a stage round before it had scaled.
+            numVal = ApplyModifiers(numVal, field);
         }
         else if (field.Compute != null)
         {
             // Guard must be checked before compute to prevent e.g. div-by-zero
             if (field.Guard != null && !EvaluateGuardConditions(field.Guard, ctx))
                 return field.Guard.ElseValue;
-            numVal = EvaluateCompute(field.Compute, ctx);
+            // A compute takes its transform stages and no bare modifiers, as the
+            // interpreter does. These were not applied at all, so a computed field
+            // asking to be rounded was reported unrounded.
+            numVal = ApplyTransformStages(EvaluateCompute(field.Compute, ctx), field.Transform);
         }
         else
         {
@@ -563,6 +568,7 @@ public static class SchemaDecoder
             if (cond.Lt.HasValue && !(fv < cond.Lt.Value)) return false;
             if (cond.Lte.HasValue && !(fv <= cond.Lte.Value)) return false;
             if (cond.Eq.HasValue && fv != cond.Eq.Value) return false;
+            if (cond.Ne.HasValue && fv == cond.Ne.Value) return false;
         }
         return true;
     }
@@ -583,6 +589,7 @@ public static class SchemaDecoder
             if (cond.Lt.HasValue && !(fv < cond.Lt.Value)) return gd.ElseValue;
             if (cond.Lte.HasValue && !(fv <= cond.Lte.Value)) return gd.ElseValue;
             if (cond.Eq.HasValue && fv != cond.Eq.Value) return gd.ElseValue;
+            if (cond.Ne.HasValue && fv == cond.Ne.Value) return gd.ElseValue;
         }
         return value;
     }

@@ -31,6 +31,9 @@ public class TransformStage
     public double? Sub { get; set; }
     public double? Mult { get; set; }
     public double? Div { get; set; }
+    /// <summary>Named operation form, e.g. {op: round, decimals: 2}.</summary>
+    public string? Op { get; set; }
+    public int Decimals { get; set; }
 }
 
 public class MatchCase
@@ -55,6 +58,7 @@ public class GuardCondition
     public double? Lt { get; set; }
     public double? Lte { get; set; }
     public double? Eq { get; set; }
+    public double? Ne { get; set; }
 }
 
 public class GuardDef

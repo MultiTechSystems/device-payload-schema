@@ -271,8 +271,13 @@ public class Schema {
                 }
             }
             f.setCases(cases);
+        } else if (casesRaw instanceof Map && (f.getType() == FieldType.MATCH
+                || f.getType() == FieldType.SWITCH)) {
+            // Map-shaped cases on a declared match field, the same form the inline
+            // block uses. Only the list form was read here.
+            f.setCases(parseCaseMap(casesRaw));
         }
-        
+
         // TLV cases (map format). Parsed whenever `cases` appears alongside anything
         // that marks the block as TLV, not only when the type is already TLV: an
         // inline `- tlv: {...}` block is parsed here before its caller sets the type,
@@ -371,6 +376,22 @@ public class Schema {
             f.setFlagged(fd);
         }
         
+        // Match inline: `- match: {field: $evt, cases: {0x00: [...], ...}}`. This form
+        // was not parsed at all, so a schema written with it decoded only the fields
+        // ahead of the block and reported nothing for any case - the whole of
+        // radio-bridge/rbs30x past its header.
+        Object matchRaw = fm.get("match");
+        if (matchRaw instanceof Map<?, ?> matchMap) {
+            Field matchField = new Field();
+            matchField.setType(FieldType.MATCH);
+            Object on = matchMap.get("field");
+            if (on instanceof String) {
+                matchField.setOn((String) on);
+            }
+            matchField.setCases(parseCaseMap(matchMap.get("cases")));
+            f.setMatchInline(matchField);
+        }
+
         // TLV inline
         Object tlvRaw = fm.get("tlv");
         if (tlvRaw instanceof Map) {
@@ -455,6 +476,20 @@ public class Schema {
                 continue;
             }
             
+            // Handle an inline match block. Its selected case contributes its fields
+            // flat alongside the block's siblings, as the interpreter does.
+            if (field.getMatchInline() != null) {
+                Object matchResult = decodeMatch(field.getMatchInline(), ctx);
+                if (matchResult instanceof Map<?, ?> matchMap) {
+                    for (Map.Entry<?, ?> entry : matchMap.entrySet()) {
+                        String key = String.valueOf(entry.getKey());
+                        result.put(key, entry.getValue());
+                        ctx.setVariable(key, entry.getValue());
+                    }
+                }
+                continue;
+            }
+
             // Handle byte_group: every member reads from the group's first byte, and
             // the cursor advances once, by the group's size, after all of them.
             if (field.getByteGroup() != null) {
@@ -1086,6 +1121,32 @@ public class Schema {
 
         ctx.setOffset(start + group.getByteGroupSize());
         return result;
+    }
+
+    /**
+     * Parse map-shaped match cases, {@code cases: {0x00: [...], default: [...]}}.
+     * SnakeYAML resolves a {@code 0x00} key to an Integer, so the case value arrives
+     * already numeric and needs no hex handling of its own.
+     */
+    @SuppressWarnings("unchecked")
+    private static List<Field.Case> parseCaseMap(Object casesRaw) {
+        List<Field.Case> cases = new ArrayList<>();
+        if (!(casesRaw instanceof Map<?, ?> casesMap)) return cases;
+        for (Map.Entry<?, ?> entry : casesMap.entrySet()) {
+            if (!(entry.getValue() instanceof List<?> caseFields)) continue;
+            Field.Case c = new Field.Case();
+            if ("default".equals(String.valueOf(entry.getKey()))) {
+                c.setDefault(true);
+            } else {
+                c.setCaseValue(entry.getKey());
+            }
+            c.setFields(parseFields((List<Map<String, Object>>) caseFields));
+            cases.add(c);
+        }
+        // A default must be tried only after every explicit case, whatever order the
+        // document lists them in; decodeMatch returns on the first match it sees.
+        cases.sort(Comparator.comparing(Field.Case::isDefault));
+        return cases;
     }
 
     /** The comparison operators a guard condition may carry, in precedence order. */

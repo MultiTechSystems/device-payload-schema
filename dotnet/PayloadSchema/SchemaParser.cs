@@ -144,6 +144,10 @@ public static class SchemaParser
                     if (tMap.TryGetValue("sub", out var ts)) stage.Sub = Double(ts);
                     if (tMap.TryGetValue("mult", out var tm)) stage.Mult = Double(tm);
                     if (tMap.TryGetValue("div", out var td)) stage.Div = Double(td);
+                    // {op: round, decimals: N}. Unparsed until now, so a schema
+                    // rounding its output reported the unrounded value instead.
+                    if (tMap.TryGetValue("op", out var top)) stage.Op = Scalar(top);
+                    if (tMap.TryGetValue("decimals", out var tdec)) stage.Decimals = (int)Double(tdec);
                     f.Transform.Add(stage);
                 }
             }
@@ -165,10 +169,13 @@ public static class SchemaParser
                 foreach (var kv in lookupMap.Children)
                 {
                     var keyText = Scalar(kv.Key);
-                    if (int.TryParse(keyText, out int key))
-                        f.Lookup[key] = Scalar(kv.Value);
-                    else if (keyText == "default")
+                    if (keyText == "default")
                         f.LookupDefault = Scalar(kv.Value);
+                    // int.TryParse does not read `0x01`, so a table written in hex
+                    // parsed to no entries at all and the field reported its raw
+                    // integer - or, with no default, nothing (PS-269).
+                    else if (ParseScalarValue(kv.Key) is int key)
+                        f.Lookup[key] = Scalar(kv.Value);
                 }
             }
             else if (lookupNode is YamlSequenceNode lookupArr)
@@ -233,12 +240,14 @@ public static class SchemaParser
             }
             else if (casesNode is YamlMappingNode casesMap)
             {
-                // Option B: map-style cases for match
+                // Option B: map-style cases for match. The key goes through
+                // ParseScalarValue because int.TryParse does not read `0x00`, so a
+                // schema writing its cases in hex kept them as strings and no case
+                // ever matched the integer being switched on.
                 foreach (var kv in casesMap.Children)
                 {
                     var c = new MatchCase();
-                    var keyStr = Scalar(kv.Key);
-                    c.CaseValue = int.TryParse(keyStr, out int ki) ? (object)ki : keyStr;
+                    c.CaseValue = ParseScalarValue(kv.Key);
                     if (kv.Value is YamlSequenceNode cfSeq)
                         c.Fields = ParseFields(cfSeq);
                     f.Cases.Add(c);
@@ -388,6 +397,11 @@ public static class SchemaParser
                         if (wm.TryGetValue("lt", out var lt)) gc.Lt = Double(lt);
                         if (wm.TryGetValue("lte", out var lte)) gc.Lte = Double(lte);
                         if (wm.TryGetValue("eq", out var eq)) gc.Eq = Double(eq);
+                        // ne was neither parsed nor evaluated, so a guard written with
+                        // it could never fail: vicki's _tempStandard stayed live on the
+                        // firmware 3.5 path and was added to _tempFw35, reporting 46.95
+                        // where the vendor gives 14.76.
+                        if (wm.TryGetValue("ne", out var ne)) gc.Ne = Double(ne);
                         gd.When.Add(gc);
                     }
                 }
@@ -437,11 +451,11 @@ public static class SchemaParser
             if (matchMap.TryGetValue("field", out var mf)) matchField.On = Scalar(mf);
             if (matchMap.TryGetValue("cases", out var mc) && mc is YamlMappingNode mcMap)
             {
+                // As above: hex keys need ParseScalarValue, not int.TryParse.
                 foreach (var kv in mcMap.Children)
                 {
                     var c = new MatchCase();
-                    var keyStr = Scalar(kv.Key);
-                    c.CaseValue = int.TryParse(keyStr, out int ki) ? (object)ki : keyStr;
+                    c.CaseValue = ParseScalarValue(kv.Key);
                     if (kv.Value is YamlSequenceNode cfSeq)
                         c.Fields = ParseFields(cfSeq);
                     matchField.Cases.Add(c);

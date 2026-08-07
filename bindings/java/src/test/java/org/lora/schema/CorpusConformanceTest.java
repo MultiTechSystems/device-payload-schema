@@ -23,9 +23,9 @@ import org.yaml.snakeyaml.Yaml;
 class CorpusConformanceTest {
 
     /** Vectors this interpreter is known to decode correctly. Raise as gaps close. */
-    // Gaps behind the remaining 35: ers's TLV cases with length_size 0, rbs30x's
-    // match cases, and laq4's tvoc and temp_min. Each is named in the test output.
-    private static final int CORPUS_FLOOR = 1081;
+    // This binding now decodes the whole corpus, so the floor is the full count and
+    // any failure is a regression rather than a known gap.
+    private static final int CORPUS_FLOOR = 1116;
 
     @Test
     void corpusVectorsDecodeAsExpected() throws IOException {

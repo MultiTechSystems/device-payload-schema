@@ -78,6 +78,9 @@ public class Field {
     // TLV inline
     private Field tlvInline;
 
+    /** Inline `- match: {field: $x, cases: {...}}` block. */
+    private Field matchInline;
+
     /** Fields sharing one run of bytes, each read from the group's start. */
     private List<Field> byteGroup;
     /** Bytes the group occupies; the cursor advances by this once, at the end. */
@@ -226,6 +229,9 @@ public class Field {
     
     public Field getTlvInline() { return tlvInline; }
     public void setTlvInline(Field tlvInline) { this.tlvInline = tlvInline; }
+
+    public Field getMatchInline() { return matchInline; }
+    public void setMatchInline(Field matchInline) { this.matchInline = matchInline; }
 
     public List<Field> getByteGroup() { return byteGroup; }
     public void setByteGroup(List<Field> byteGroup) { this.byteGroup = byteGroup; }

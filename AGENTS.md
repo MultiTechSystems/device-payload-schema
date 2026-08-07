@@ -183,16 +183,15 @@ Every implementation has a runner that reads the same YAML and the same vectors:
 |---|---|---|
 | Python | `tests/test_corpus_conformance.py` | 1116 / 1116 |
 | Go | `go/schema/corpus_conformance_test.go` | 1116 / 1116 |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 1082 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 1083 |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 1116 / 1116 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 1116 / 1116 |
 | C | none - consumes a binary schema, not YAML | n/a |
 
-Each non-Python runner compares its pass count against a committed floor rather than
-requiring the whole corpus, so the known gaps stay visible and a regression fails the
-build. **Raise the floor whenever you close a gap.** The remaining gaps are named in
-each runner's output: C# and Java need the `match` cases rbs30x uses, C# the `round`
-transform op, and Java laq4's `tvoc` and `temp_min`. Go and Python now decode the
-whole corpus, so for those two any failure is a regression, not a known gap.
+Every runner compares its pass count against a committed floor rather than requiring
+the whole corpus, so any gap stays visible and a regression fails the build. All four
+YAML implementations now decode the entire corpus, so **every floor is the full 1116
+and any failure is a regression, not a known gap.** If you add a construct that one
+implementation cannot express yet, lower its floor deliberately and say why here.
 
 A vector's port is written `fPort` or `fport`, and a runner that reads only one
 spelling decodes a port-based schema with no port at all - every field of it then
