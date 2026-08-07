@@ -1,5 +1,106 @@
 # Session Notes
 
+## Session: Aug 7, 2026 (later)
+
+### Completed
+
+**Decentlab: vendor agreement 21 -> 55 of 58**
+- `convert_decentlab.py` translated a vendor `convert` with a chain of regexes and
+  parked anything unmatched in a `# formula:` comment, emitting a bare u16. That is
+  a deliberate handoff, not a bug - the script gets close and the remaining syntax
+  is ours to write - but 80 fields across 36 schemas were still sitting on it.
+- Added a general affine fitter: evaluate the vendor expression at two points, fit
+  `a*x + b`, confirm at a third so a polynomial or logarithm is rejected rather than
+  silently linearised. Exact to 8.3e-16 against a 1e-3 tolerance. 52 fields.
+- Wrote the real syntax by hand for the rest: `compute` for two-word values,
+  `polynomial` for cubics, chained `ref` for derived values. 13 + 12 more fields.
+- Two shapes were *wrongly* matched rather than unmatched, so no hint warned anyone:
+  52 offset-binary fields declared `s16` (for word 0x8a77 that is -300.89 where the
+  device means 26.79), and `x[i] + x[j]*65536` emitted as a big-endian `u32`.
+- Three schemas remain on hints: `dl-blg` (needs a natural log), `dl-iam` (`max()`
+  of two linear combinations), `dl-zn2` (difference of two two-word values).
+
+**All four YAML implementations reached the full device corpus, then it grew**
+- Java 1052 -> full, C# 1082 -> full, Go 1101 -> full, via computed fields, bit
+  ranges, `byte_group`, `s24`, inline `match`, hex case/lookup keys, `ne` guards,
+  the `round` transform and simple-tag TLV.
+- Two runner defects mimicked interpreter gaps: `fPort` vs `fport` (oyster decoded
+  with no port at all), and `byte_group` assembling bytes little-endian in Go and C#.
+
+**Bitfields crossing a byte boundary were silently wrong in three languages**
+- `u24[0:11]` returned 11 where the device means 1320. Python, Java and C# read
+  `buf[pos]` alone and discarded the declared base width; only Go used it.
+- `rakwireless/qingping` depended on it, *and* declared its temperature as
+  `u24[4:23]` where the vendor reads 12 bits at `[12:23]`, *and* had no consumer for
+  either raw field - so it reported no temperature or humidity at all. Fixed, with a
+  vector from the vendor decoder. Note that decoder is broken as published
+  (`Decoder(bytes, port)` then reads `data[...]`); TTN's own live page returns
+  `{"error": "data is not defined"}`, so nobody has ever run it.
+
+**Corpus coverage sweep: 1116 -> 1166 vectors**
+- Asked which constructs no vector exercises. Answer: repeat, name_from,
+  bitfield_string, formula, until, byte_length, merge, unknown, default, skip,
+  header, enum. Fixtures for each now live in
+  `schemas/devices/_language-conformance/`.
+- That found two spec violations: PS-067 (Java had no `enum` type at all, reporting
+  the raw integer) and PS-068 (`default:` on an enum ignored by Python, Go *and* C#).
+- `tools/compose_library_vectors.py` makes `schemas/library/` runnable. Those files
+  are definition catalogues, not schemas, so nothing could decode them and their
+  vectors were verified by nothing. 42 composed in; 7 quarantined into
+  KNOWN-ISSUES.md because they do not decode and had never been executed.
+
+**CR-2026-005 submitted** (in la-payload-schema): `u32le16`/`s32le16` for a 32-bit
+value carried as two 16-bit units, low unit first. Not an endianness variant - the
+payload is a word stream with no 32-bit field on the wire - but the bytes do land
+in a recognisable CDAB order, and 30 occurrences across 16 vendor decoders make it
+worth a type. 17 values currently spend 14 lines of `compute` each.
+
+### Next
+
+1. **Settle the bitfield form.** The specification lists five spellings and the
+   direction under discussion is to keep only the bracket form `u8[3:4]`. If that is
+   settled, the work is to drop the other four from the spec and the Python
+   interpreter, and rewrite `lorawan/lorawan_frames.yaml`, the only file using the
+   sequential form. That rewrite is mechanical and verified equivalent, and it
+   returns Go, Java and C# to the full 1166 without touching an interpreter. **Do
+   not close that gap by implementing `u8:N` three more times.**
+2. **Work through `_library-composed/KNOWN-ISSUES.md`** - 7 vectors. Two are
+   representation mismatches (a vector says `[1,2,...]` where the field decodes to
+   bytes, so probably a vector-format question rather than a decode bug), one wants
+   a `type: array` that does not exist, and four disagree numerically.
+   `lorawan_mac_commands__device_time_ans` matches neither endianness, so its
+   expected value is simply wrong.
+3. **Decide `header:`.** Undocumented, unused by any schema, honoured by Java and C#
+   and ignored by Python and Go. The library's own `common/headers.yaml` implements
+   headers as `definitions:`, and `definitions` + `$ref` covers the use case more
+   generally, so the likely answer is to delete it - or define it as sugar.
+4. **The three remaining Decentlab hints.** Only `dl-blg` needs a language feature:
+   `log` exists as a transform stage in Python but not in Go, Java or C#. Adding
+   `pow`/`log`/`sqrt` to those three would also let squares stop going through
+   `compute`.
+5. **Wire the preprocessor into validate and score.** A library-composed schema
+   cannot be scored today; `validate_schema` rejects an unflattened `$ref` schema
+   (correctly, and loudly - the one tool that behaved well all session).
+6. **Push.** 16 commits in payload-codec-proto, 1 in la-payload-schema, and the
+   three td-tools branches are on the fork with no PRs opened.
+
+### Notes for whoever picks this up
+
+- **The requirements extractor misses 21 of the 270 PS ids** in the spec - a second
+  id on a line, a line ending in a colon, or no modal verb - so the traceability
+  appendix under-reports by 7.8% and any audit built on it inherits the blind spot.
+- **Corpus runners walk `schemas/devices/` only.** A fixture anywhere else is read
+  by nothing and looks like coverage while proving nothing. That is why both
+  `_language-conformance/` and `_library-composed/` sit inside the device tree.
+- **Cross-file `$ref` is a pre-step, by design.** The interpreters resolve only
+  local `#/definitions/...`; `schema_preprocessor.py` inlines the rest so they stay
+  free of a loader. It is wired into `fuzz.yml` and nothing else.
+- When inlining a definition, **splice its `fields:` rather than nesting them** - a
+  nested container without `type: object` is never descended into and every field
+  reports as missing.
+- Vendor data is not automatically the better authority: the qingping datasheet
+  contradicts itself on every sensor range, and its published decoder cannot run.
+
 ## Session: Aug 7, 2026
 
 ### Completed

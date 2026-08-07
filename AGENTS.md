@@ -214,12 +214,26 @@ vectors had never been executed, so each is either a wrong expected value or a
 wrong schema and needs a source to tell apart. Regenerate with the tool; `--check`
 verifies it is current.
 
-**The sequential bitfield form `u8:3` is Python-only.** Go, Java and C# support
-only the bracket form `u8[5:7]`. Go and Java let the type fall through to a plain
-u8, so each field reads a whole byte and a one-byte LoRaWAN MHDR underflows; C#
-at least reports `Unknown field type`. The specification lists both forms, so this
-is a real gap in three implementations, not a schema defect. All three floors sit
-at 1163 rather than 1166 for this reason.
+**The sequential bitfield form `u8:3` is Python-only — and probably should not be
+implemented.** Go, Java and C# support only the bracket form `u8[5:7]`. Go and
+Java let the type fall through to a plain u8, so each field reads a whole byte and
+a one-byte LoRaWAN MHDR underflows; C# reports `Unknown field type`. Three floors
+sit at 1163 rather than 1166 for this reason.
+
+Do not close that gap by adding `u8:N` to three languages. The specification lists
+five bitfield spellings — `u8[3:4]`, `u8[3+:2]`, `bits<3,2>`, `bits:2@3`, `u8:2` —
+and carrying all five was deliberate, to keep the options open while the group
+decided. **The direction under discussion is to keep only the bracket form**, so
+schemas read the same way everywhere. If that is settled, the work is the reverse:
+drop the other four from the specification and from the Python interpreter, and
+rewrite the schemas that use them.
+
+Only `schemas/library/lorawan/lorawan_frames.yaml` uses the sequential form, in
+three definitions. The rewrite is mechanical and verified equivalent — a field
+with `type: u8:3` and `bit_offset: 5` becomes `type: u8[5:7]`, and `u8:2` at
+offset 0 becomes `u8[0:1]`; both spellings decode payloads 40 and A0 identically.
+Doing that returns every floor to the full 1166 without touching an interpreter.
+The device corpus uses only `u8[...]` and `u24[...]`, so nothing else is affected.
 
 `schemas/devices/_language-conformance/` holds fixtures rather than devices: one
 schema per construct that no device schema uses, so the four interpreters are held
