@@ -343,9 +343,12 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
     question. The Decentlab payload is a stream of big-endian 16-bit words on
     2-byte boundaries, and there is no 32-bit field on the wire to have a byte
     order: a wide value is arithmetic over two independent words, with the low
-    word first. That convention contradicts the big-endian word stream it sits on,
-    which is what makes it a packing mistake carried forward by legacy devices
-    rather than a format worth modelling. So no integer type can read it — express
+    word first, which contradicts the big-endian word stream it sits on. (The
+    bytes do happen to form a recognisable CDAB order, so a mixed-endian 32-bit
+    read would reproduce them; that is a coincidence of this case, not the format's
+    grammar, and modelling it that way invents a 32-bit field the protocol does not
+    have. Why the convention is inverted is not documented anywhere we can see.)
+    No integer type can read it — express
     it with `compute`, which states plainly that two words were read and combined.
     Emitting `u32` gave `dl-rhc` a sensor id of 2851930420 instead of 20228605 for
     words `a9fd 0134`. `dl-isf` carried the same defect while still passing

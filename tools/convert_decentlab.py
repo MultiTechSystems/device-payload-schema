@@ -302,10 +302,12 @@ def parse_convert_expression(name, display_name, expr, unit, group_length, param
     # Two-word combination: x[i] + x[j] * 65536.
     #
     # This is NOT a u32. The payload is a stream of big-endian 16-bit words on
-    # 2-byte boundaries, so there is no 32-bit field on the wire to have a byte
-    # order - the value is arithmetic over two independent words, low word first,
-    # a convention that contradicts the big-endian stream it sits on. Emitting u32
-    # read the halves the wrong way round and said nothing about it: dl-rhc
+    # 2-byte boundaries, so there is no 32-bit field on the wire - the value is
+    # arithmetic over two independent words, low word first, which contradicts the
+    # big-endian stream it sits on. The four bytes do happen to land in a
+    # recognisable CDAB order, so a mixed-endian read would reproduce them, but
+    # that is a coincidence of this case rather than the format's grammar.
+    # Emitting u32 read the halves the wrong way round and said nothing: dl-rhc
     # reported a sensor id of 2851930420 instead of 20228605, and dl-isf carried
     # the same defect while still passing cross-validation, because the vendor's
     # test payload never exercised the field.
