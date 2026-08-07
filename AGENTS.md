@@ -339,13 +339,18 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
     read. For word `0x8a77` an s16 gives -300.89 where the device means 26.79. 52
     fields were declared this way. It is the same defect that let `dl-alb` hold a
     100% Platinum score while mis-decoding every payload.
-  - *`x[i] + x[j] * 65536` read as a big-endian `u32`.* The vendor puts the low
-    word first, so a u32 takes the halves the wrong way round: for words
-    `a9fd 0134`, `dl-rhc` reported a sensor id of 2851930420 instead of 20228605.
-    Read the two words and combine them with `compute`. `dl-isf` carried the same
-    defect while still passing cross-validation, because the vendor's own test
-    payload does not exercise that field — passing cross-validation means only
-    that the payloads you have agree.
+  - *`x[i] + x[j] * 65536` emitted as a `u32`.* This is not an endianness
+    question. The Decentlab payload is a stream of big-endian 16-bit words on
+    2-byte boundaries, and there is no 32-bit field on the wire to have a byte
+    order: a wide value is arithmetic over two independent words, with the low
+    word first. That convention contradicts the big-endian word stream it sits on,
+    which is what makes it a packing mistake carried forward by legacy devices
+    rather than a format worth modelling. So no integer type can read it — express
+    it with `compute`, which states plainly that two words were read and combined.
+    Emitting `u32` gave `dl-rhc` a sensor id of 2851930420 instead of 20228605 for
+    words `a9fd 0134`. `dl-isf` carried the same defect while still passing
+    cross-validation, because the vendor's own test payload does not exercise that
+    field — agreement covers only the payloads you have.
 - **Milesight's remaining gaps are language features, not schema neglect.** 32 of
   the 84 still disagree with the vendor's decoder. The missing TLV channels were
   measured: of 790 channels the vendor decodes, 724 are covered and 66 are not, and

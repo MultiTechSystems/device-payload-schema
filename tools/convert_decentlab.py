@@ -299,14 +299,24 @@ def parse_convert_expression(name, display_name, expr, unit, group_length, param
         field['type'] = 'u16'
         return field
     
-    # Two-word combination: x[0] + x[1] * 65536 (u32 from two u16s)
+    # Two-word combination: x[i] + x[j] * 65536.
+    #
+    # This is NOT a u32. The payload is a stream of big-endian 16-bit words on
+    # 2-byte boundaries, so there is no 32-bit field on the wire to have a byte
+    # order - the value is arithmetic over two independent words, low word first,
+    # a convention that contradicts the big-endian stream it sits on. Emitting u32
+    # read the halves the wrong way round and said nothing about it: dl-rhc
+    # reported a sensor id of 2851930420 instead of 20228605, and dl-isf carried
+    # the same defect while still passing cross-validation, because the vendor's
+    # test payload never exercised the field.
+    #
+    # Leave it as a hint. Combining two words takes a `compute` chain that this
+    # converter does not emit, and a hint says "unfinished" where a wrong type
+    # says "done".
     m = re.match(r'x\[\d+\]\s*\+\s*x\[\d+\]\s*\*\s*65536', expr)
     if m:
-        field['type'] = 'u32'
-        # Check for additional operations after the combination
-        rest = expr[m.end():].strip()
-        if rest:
-            field['_formula'] = expr
+        field['type'] = 'u16'
+        field['_formula'] = expr
         return field
     
     # Complex expression → use formula
