@@ -177,9 +177,22 @@ public static class SchemaDecoder
         var data = ctx.Read(size);
         var result = new Dictionary<string, object?>();
 
+        // The group's bytes are assembled in the schema's byte order - big-endian
+        // unless the document says otherwise. Assembling little-endian
+        // unconditionally was invisible while every multi-byte group happened to
+        // carry no bit range: rakwireless/qingping packs a 12-bit temperature as
+        // u24[12:23], and bytes 2D F1 C4 became 0xC4F12D rather than 0x2DF1C4.
         ulong rawVal = 0;
-        for (int i = 0; i < data.Length; i++)
-            rawVal |= (ulong)data[i] << (8 * i);
+        if (ctx.Endian == "little")
+        {
+            for (int i = data.Length - 1; i >= 0; i--)
+                rawVal = (rawVal << 8) | data[i];
+        }
+        else
+        {
+            foreach (var b in data)
+                rawVal = (rawVal << 8) | b;
+        }
 
         foreach (var subfield in field.ByteGroup)
         {
@@ -279,9 +292,17 @@ public static class SchemaDecoder
 
             case FieldType.Bits:
             {
-                var data = ctx.Peek(1, field.ByteOffset);
+                // Read the whole base width, not just the first byte: a range wider
+                // than a byte (u24[0:11] for a packed 12-bit humidity) decoded from
+                // byte zero alone and reported a value with no error.
+                int baseBytes = field.BitBaseBytes > 0 ? field.BitBaseBytes : 1;
+                var data = ctx.Peek(baseBytes, field.ByteOffset);
+                long baseValue = 0;
+                foreach (var bt in data)
+                    baseValue = (baseValue << 8) | bt;
                 int bits = field.BitCount > 0 ? field.BitCount : 1;
-                value = (double)Helpers.DecodeBits(data[0], field.BitOffset, bits);
+                long mask = bits >= 63 ? long.MaxValue : (1L << bits) - 1;
+                value = (double)((baseValue >> field.BitOffset) & mask);
                 // An explicit range does not advance the cursor by itself: several
                 // fields share one byte and the last of them declares `consume`.
                 if (field.Consume > 0)

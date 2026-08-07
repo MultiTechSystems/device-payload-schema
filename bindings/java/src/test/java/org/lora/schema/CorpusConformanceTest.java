@@ -25,7 +25,7 @@ class CorpusConformanceTest {
     /** Vectors this interpreter is known to decode correctly. Raise as gaps close. */
     // This binding now decodes the whole corpus, so the floor is the full count and
     // any failure is a regression rather than a known gap.
-    private static final int CORPUS_FLOOR = 1116;
+    private static final int CORPUS_FLOOR = 1117;
 
     @Test
     void corpusVectorsDecodeAsExpected() throws IOException {

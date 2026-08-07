@@ -1,0 +1,117 @@
+# MultiTech Gateway Binary Telemetry Frame v1
+#
+# Compact binary status report sent periodically by gateways.
+# Uses the payload-schema interpreter for decoding, replacing the
+# legacy JSON+zip status upload path with ~90% bandwidth savings.
+#
+# Wire format: fixed header + variable-count metric entries.
+# Each metric entry is a (metric_id, f32_value) pair.
+# Metric IDs are mapped to slash-style paths via a separate registry.
+
+name: multitech_gateway_telemetry
+version: 1
+endian: big
+description: "MultiTech gateway periodic telemetry report (binary)"
+
+fields:
+  - name: schema_version
+    type: u8
+    description: "Frame format version (1)"
+
+  - name: timestamp
+    type: u32
+    description: "UTC epoch seconds when the report was generated"
+
+  - name: metric_count
+    type: u8
+    description: "Number of metric entries following"
+
+  - name: metrics
+    type: repeat
+    count: $metric_count
+    fields:
+      - name: metric_id
+        type: u16
+        description: "Metric identifier (maps to path via telemetry dictionary)"
+      - name: value
+        type: f32
+        description: "Metric value as IEEE 754 float32"
+
+# ===========================================================================
+# Telemetry Dictionary (metric_id -> path mapping)
+#
+# This is the canonical registry. Gateways and cloud use the same IDs.
+# Categories: system (0x00xx), cellular (0x01xx), lora (0x02xx),
+#             network (0x03xx), storage (0x04xx), gps (0x05xx)
+# ===========================================================================
+#
+# 0x0001  /tel/system/cpu_percent        %
+# 0x0002  /tel/system/mem_used_percent   %
+# 0x0003  /tel/system/mem_free_kb        KB
+# 0x0004  /tel/system/uptime_seconds     s
+# 0x0005  /tel/system/load_1m            -
+# 0x0006  /tel/system/load_5m            -
+# 0x0007  /tel/system/load_15m           -
+# 0x0008  /tel/system/cpu_temp_c         °C
+# 0x0100  /tel/cellular/rssi             dBm
+# 0x0101  /tel/cellular/rsrp             dBm
+# 0x0102  /tel/cellular/rsrq             dB
+# 0x0103  /tel/cellular/sinr             dB
+# 0x0200  /tel/lora/rx_packets           count
+# 0x0201  /tel/lora/tx_packets           count
+# 0x0202  /tel/lora/rx_bytes             bytes
+# 0x0203  /tel/lora/tx_bytes             bytes
+# 0x0204  /tel/lora/join_requests        count
+# 0x0205  /tel/lora/join_accepts         count
+# 0x0206  /tel/lora/avg_rssi             dBm
+# 0x0207  /tel/lora/avg_snr              dB
+# 0x0300  /tel/network/eth0_rx_bytes     bytes
+# 0x0301  /tel/network/eth0_tx_bytes     bytes
+# 0x0400  /tel/storage/root_used_percent %
+# 0x0401  /tel/storage/root_free_mb      MB
+# 0x0500  /tel/gps/latitude              °
+# 0x0501  /tel/gps/longitude             °
+# 0x0502  /tel/gps/altitude_m            m
+# 0x0503  /tel/gps/hdop                  -
+
+test_vectors:
+  - name: basic_system_telemetry
+    description: "3 system metrics: CPU 45.2%, memory 62.1%, uptime 86400s"
+    # Header: version=1, timestamp=0x66500000 (2024-05-24 ~midnight), count=3
+    # Metric 0: id=0x0001, value=45.2 (0x42348CCD ≈ 45.2187... but we use exact)
+    # Metric 1: id=0x0002, value=62.1 (0x42786666)
+    # Metric 2: id=0x0004, value=86400.0 (0x47A8C000)
+    payload: "01 66500000 03 0001 42348CCD 0002 42786666 0004 47A8C000"
+    expected:
+      schema_version: 1
+      timestamp: 1716453376
+      metric_count: 3
+
+  - name: lora_and_cellular
+    description: "LoRa rx_packets=1500, cellular RSSI=-85.5"
+    # Header: version=1, timestamp=0x66600000, count=2
+    # Metric 0: id=0x0200, value=1500.0 (0x44BB8000)
+    # Metric 1: id=0x0100, value=-85.5 (0xC2AB0000)
+    payload: "01 66600000 02 0200 44BB8000 0100 C2AB0000"
+    expected:
+      schema_version: 1
+      timestamp: 1717501952
+      metric_count: 2
+
+  - name: empty_report
+    description: "Zero metrics (heartbeat only)"
+    payload: "01 66700000 00"
+    expected:
+      schema_version: 1
+      timestamp: 1718550528
+      metric_count: 0
+
+  - name: single_gps
+    description: "GPS latitude only"
+    # id=0x0500, value=43.6532 (0x422EA3D7 ≈ 43.66...)
+    # Actually 43.6532 as f32: let's use exact
+    payload: "01 66800000 01 0500 422EA1EC"
+    expected:
+      schema_version: 1
+      timestamp: 1719599104
+      metric_count: 1

@@ -1530,10 +1530,21 @@ func decodeByteGroup(field Field, ctx *DecodeContext) (map[string]any, error) {
 			}
 		}
 		
-		// Extract bits from the data
+		// Extract bits from the data. The group's bytes are assembled in the
+		// schema's byte order - big-endian unless the document says otherwise.
+		// Assembling little-endian unconditionally was invisible while every
+		// multi-byte group happened to carry no bit range: rakwireless/qingping
+		// packs a 12-bit temperature as u24[12:23], and bytes 2D F1 C4 became
+		// 0xC4F12D rather than 0x2DF1C4, reporting 265.1 C for 23.5 C.
 		var rawVal uint64
-		for i, b := range data {
-			rawVal |= uint64(b) << (8 * i)
+		if ctx.Endian == "little" {
+			for i := len(data) - 1; i >= 0; i-- {
+				rawVal = rawVal<<8 | uint64(data[i])
+			}
+		} else {
+			for _, b := range data {
+				rawVal = rawVal<<8 | uint64(b)
+			}
 		}
 		
 		bitLen := bitEnd - bitStart + 1

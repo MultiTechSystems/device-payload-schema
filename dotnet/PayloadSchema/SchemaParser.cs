@@ -106,6 +106,12 @@ public static class SchemaParser
             {
                 f.BitOffset = bitRange.Value.start;
                 f.BitCount = bitRange.Value.end - bitRange.Value.start + 1;
+                // The base width is part of the type: u24[4:23] takes bits 4-23 of a
+                // 24-bit big-endian value, so all three bytes are read before masking.
+                var digits = new string(baseType.TakeWhile(char.IsDigit).ToArray());
+                if (baseType.Length > 1)
+                    digits = new string(baseType[1..].TakeWhile(char.IsDigit).ToArray());
+                f.BitBaseBytes = int.TryParse(digits, out var wide) && wide >= 8 ? wide / 8 : 1;
             }
 
             f.Type = Helpers.ParseFieldType(f.RawType);

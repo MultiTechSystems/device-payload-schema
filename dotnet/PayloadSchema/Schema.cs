@@ -88,6 +88,12 @@ public class SchemaField
     public int ByteOffset { get; set; }
     public int BitOffset { get; set; }
     public int BitCount { get; set; }
+    /// <summary>
+    /// Bytes the bit range is taken from. `u24[4:23]` means bits 4-23 of a 24-bit
+    /// big-endian value, so all three bytes are read before masking. Defaults to 1,
+    /// which is what every `u8[lo:hi]` range needs.
+    /// </summary>
+    public int BitBaseBytes { get; set; } = 1;
     public string? Endian { get; set; }
 
     // Modifiers

@@ -573,9 +573,18 @@ class SchemaInterpreter:
             consumed = self._bit_pos == 0
             return value, pos, consumed
         else:
-            # Explicit offset mode
+            # Explicit offset mode. The base width is part of the type - `u24[4:23]`
+            # means bits 4-23 of a 24-bit big-endian value - so read that many bytes
+            # before masking. Reading only buf[pos] made every range wider than one
+            # byte decode from the first byte alone: rakwireless/qingping declares a
+            # 12-bit humidity as u24[0:11] and got 11 where the device means 1320.
+            if pos + base_size > len(buf):
+                raise ValueError(
+                    "Buffer too short for %d-bit bitfield at pos %d" % (base_size * 8, pos)
+                )
+            raw = int.from_bytes(buf[pos:pos + base_size], 'big')
             mask = (1 << bit_width) - 1
-            value = (byte_val >> bit_offset) & mask
+            value = (raw >> bit_offset) & mask
             return value, pos, False
     
     def _decode_field(self, field_def: Dict[str, Any], buf: bytes, 

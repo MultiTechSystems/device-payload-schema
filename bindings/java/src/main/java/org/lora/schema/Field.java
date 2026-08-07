@@ -15,6 +15,12 @@ public class Field {
      * the last of them declares {@code consume}. Zero means this field advances nothing.
      */
     private int consume;
+    /**
+     * Bytes the bit range is taken from. `u24[4:23]` means bits 4 to 23 of a 24-bit
+     * big-endian value, so the whole 3 bytes must be read before masking. Defaults
+     * to 1, which is what every `u8[lo:hi]` range needs.
+     */
+    private int bitBaseBytes = 1;
     private String endian;
     private Double add;
     private Double mult;
@@ -111,6 +117,9 @@ public class Field {
 
     public int getConsume() { return consume; }
     public void setConsume(int consume) { this.consume = consume; }
+
+    public int getBitBaseBytes() { return bitBaseBytes; }
+    public void setBitBaseBytes(int bitBaseBytes) { this.bitBaseBytes = bitBaseBytes; }
 
     public String getEndian() { return endian; }
     public void setEndian(String endian) { this.endian = endian; }

@@ -6296,14 +6296,21 @@ fields:
 }
 
 func TestByteGroupWith16BitValue(t *testing.T) {
+	// The base width is part of the type, so a range spanning two bytes says u16.
+	// This test previously declared a u8 base with bits 8-15, which is meaningful
+	// only if the group is assembled little-endian, and pinned exactly that: for
+	// bytes 12 34 it asserted bits 0-7 were 0x12. Bit 0 is the least significant
+	// bit of the value, so bits 0-7 of big-endian 0x1234 are 0x34, and the Python
+	// interpreter reading a u8 base would have taken one byte and returned 0 for
+	// bits 8-15. The two implementations disagreed and no shared vector said so.
 	schemaYAML := `
 name: byte_group_16_test
 fields:
   - byte_group:
       - name: high_byte
-        type: u8[0:7]
+        type: u16[8:15]
       - name: low_byte
-        type: u8[8:15]
+        type: u16[0:7]
     size: 2
 `
 	schema, err := ParseSchema(schemaYAML)

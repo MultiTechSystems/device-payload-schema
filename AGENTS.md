@@ -181,20 +181,20 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 1,116 test vectors in `schemas/devices/` are the shared cross-language test set.
+The 1,117 test vectors in `schemas/devices/` are the shared cross-language test set.
 Every implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Vectors passing |
 |---|---|---|
-| Python | `tests/test_corpus_conformance.py` | 1116 / 1116 |
-| Go | `go/schema/corpus_conformance_test.go` | 1116 / 1116 |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 1116 / 1116 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 1116 / 1116 |
+| Python | `tests/test_corpus_conformance.py` | 1117 / 1117 |
+| Go | `go/schema/corpus_conformance_test.go` | 1117 / 1117 |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 1117 / 1117 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 1117 / 1117 |
 | C | none - consumes a binary schema, not YAML | n/a |
 
 Every runner compares its pass count against a committed floor rather than requiring
 the whole corpus, so any gap stays visible and a regression fails the build. All four
-YAML implementations now decode the entire corpus, so **every floor is the full 1116
+YAML implementations now decode the entire corpus, so **every floor is the full 1117
 and any failure is a regression, not a known gap.** If you add a construct that one
 implementation cannot express yet, lower its floor deliberately and say why here.
 

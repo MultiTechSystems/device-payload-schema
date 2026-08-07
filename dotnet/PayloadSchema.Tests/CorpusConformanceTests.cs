@@ -20,7 +20,7 @@ public class CorpusConformanceTests
 {
     // This implementation now decodes the whole corpus, so the floor is the full
     // count and any failure is a regression rather than a known gap.
-    const int CorpusFloor = 1116;
+    const int CorpusFloor = 1117;
 
     readonly ITestOutputHelper _output;
 

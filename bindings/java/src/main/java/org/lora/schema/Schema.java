@@ -152,6 +152,9 @@ public class Schema {
             int end = Integer.parseInt(bitRange.group(3));
             f.setBitOffset(start);
             f.setBits(end - start + 1);
+            // The base width is part of the type: u24[4:23] takes bits 4-23 of a
+            // 24-bit big-endian value, so all three bytes are read before masking.
+            f.setBitBaseBytes(Math.max(1, Integer.parseInt(bitRange.group(1)) / 8));
             f.setType(FieldType.BITS);
         }
         
@@ -590,9 +593,18 @@ public class Schema {
             }
             
             case BITS -> {
-                byte[] data = ctx.peek(1, field.getByteOffset());
+                // Read the whole base width, not just the first byte: a range wider
+                // than a byte (u24[0:11] for a packed 12-bit humidity) decoded from
+                // byte zero alone and reported a value with no error.
+                int baseBytes = Math.max(1, field.getBitBaseBytes());
+                byte[] data = ctx.peek(baseBytes, field.getByteOffset());
+                long base = 0;
+                for (byte b : data) {
+                    base = (base << 8) | (b & 0xFF);
+                }
                 int numBits = field.getBits() > 0 ? field.getBits() : 1;
-                value = (long) ctx.decodeBits(data[0] & 0xFF, field.getBitOffset(), numBits);
+                long mask = numBits >= 64 ? -1L : (1L << numBits) - 1;
+                value = (base >>> field.getBitOffset()) & mask;
                 // An explicit range does not advance the cursor by itself: several
                 // fields share one byte and the last of them declares `consume`.
                 if (field.getConsume() > 0) {
