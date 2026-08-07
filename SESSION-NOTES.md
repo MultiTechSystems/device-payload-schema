@@ -1,5 +1,79 @@
 # Session Notes
 
+## Session: Aug 7, 2026
+
+### Completed
+
+**All four YAML implementations now decode the whole corpus**
+- Python 1116, Go 1101 -> 1116, C# 1082 -> 1116, Java 1052 -> 1116. Every floor is
+  now the full 1116, so any failure anywhere is a regression, not a known gap.
+- Java gained the most: computed fields (`ref`, `polynomial`, `compute`, `guard`) were
+  not parsed at all, `u8[lo:hi]` fell through to U8 and read the whole byte, `consume`
+  was unmodelled, `byte_group` was absent, `s24` resolved to U8 and misaligned
+  everything after it, and there was no inline `- match:` block or map-shaped cases.
+- Go: TLV cases were parsed only when the block had `tag_fields`/`tag_key`, so a plain
+  `tag_size` block (elsys/ers) had no cases and decoded nothing. `ne` in a guard was
+  neither parsed nor evaluated. `{op: round}` was dropped.
+- C#: match case keys and lookup keys went through `int.TryParse`, which does not read
+  `0x01`, so hex-written cases and lookups never matched - rbs30x reported nothing
+  past its header. Same `ne` and `round` defects as Go.
+
+**Two bugs worth remembering because they mimic interpreter gaps**
+- The Java and Go *runners* read a vector's port as `fPort` only, while oyster writes
+  `fport`. Its seven vectors decoded with no port at all, so every field reported
+  missing and it read as an interpreter gap. Python and C# already read both.
+- A guard's fallback must be reported exactly as declared. Java briefly applied the
+  field's modifiers to it, which turned vicki's `else: 0` into `(0 - 28.33333) /
+  5.66666` and put sensorTemperature 5 degrees low.
+
+**Modifier/transform ordering unified**
+- All four now apply bare modifiers *then* transform stages, both when both are
+  present. Go, C# and Java each had an either/or chain that silently dropped the
+  modifier on a field that scales and then rounds. Rounding is half-to-even
+  everywhere, matching the interpreter; half-up disagrees on exact halves the vectors
+  contain.
+
+**CR-2026-002 and CR-2026-003 accepted**
+- Both moved to `change-requests/implemented/` in la-payload-schema; their spec text
+  was already applied in 24c819e. `CR-tracking.md` rewritten - its summary counts,
+  tables and statistics had all drifted apart.
+- PS-264 is now enforced by default in `score_schema.py`: the gate existed behind
+  `--require-provenance`, which was right while the CR was a proposal and wrong once
+  it was normative. Flag inverted to `--no-require-provenance`.
+- Three schemas capped at Silver as a result - `digital-matter/oyster`,
+  `dragino/laq4`, `mclimate/vicki` - all because no vector declares a `source`. No
+  provenance was invented for them; that is the point of the requirement.
+- `payload-schema.json` gained `source` with the five PS-263 values.
+
+**Everything pushed**
+- `payload-codec-proto` master and `la-payload-schema` main are pushed; the three
+  td-tools branches are on the MultiTech fork with conventional-commit messages and
+  ECA sign-off, no PRs opened yet.
+
+### Next
+
+1. **Decentlab is the largest correctness debt**: 37 of 58 still disagree with the
+   vendor decoder, untouched since the offset-binary fix. Re-clone the oracle first.
+2. **Provenance for the three capped schemas** - cross-check oyster, laq4 and vicki
+   against vendor docs or decoders and declare the real `source`. Do not guess one.
+3. **`name_from` unlocks 27 milesight channels** blocked on computed keys.
+4. **Milesight leftovers**: 26 channels need per-device modelling; 11 schemas are
+   still Rejected for want of 5 verified vectors.
+5. **Open the three td-tools PRs**, catalog fix first - without it the conformance
+   suite runs on 6 conversions instead of 163 and still passes.
+
+### Notes for whoever picks this up
+
+- The repo `.venv` was dead (built June 3 for Python 3.12 at an old path, no pip), so
+  `make test-languages` failed at the pytest step. Rebuilt from requirements.txt.
+  `hypothesis` was missing from the user environment too; test_hypothesis.py could not
+  even be collected.
+- The C# test `YamlKeyOrderMatters` was renamed to `ModifiersApplyInCanonicalOrder`.
+  Its assertion held either way, but the name asserted the contract CR-2026-002
+  removed.
+- Everything in the Aug 6 "Next" list is now done except the schema-coverage items,
+  which are items 1-4 above.
+
 ## Session: Aug 6, 2026
 
 ### Completed
@@ -69,6 +143,7 @@
    offset-binary fix.
 7. **CR-2026-002 and CR-2026-003** are in `change-requests/submitted/` awaiting WG
    review. 004 is implemented.
+   *(Aug 7: both accepted and implemented - see the session above.)*
 
 ### Notes for whoever picks this up
 
