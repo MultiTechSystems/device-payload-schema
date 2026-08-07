@@ -17,6 +17,8 @@ public enum FieldType {
     OBJECT, MATCH, SWITCH, TLV, REPEAT,
     // Computed
     NUMBER,
+    // Enumeration
+    ENUM,
     // Bitfield string
     BITFIELD_STRING,
     // Legacy names
@@ -57,6 +59,7 @@ public enum FieldType {
             case "tlv" -> TLV;
             case "repeat" -> REPEAT;
             case "number" -> NUMBER;
+            case "enum" -> ENUM;
             case "bitfield_string" -> BITFIELD_STRING;
             case "uint" -> UINT;
             case "sint" -> SINT;

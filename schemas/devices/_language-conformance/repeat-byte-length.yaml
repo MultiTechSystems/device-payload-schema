@@ -1,0 +1,21 @@
+name: probe_repeat_byte_length
+endian: big
+fields:
+- name: len
+  type: u8
+  var: len
+- name: items
+  type: repeat
+  byte_length: $len
+  fields:
+  - name: v
+    type: u8
+- name: tail
+  type: u8
+test_vectors:
+- name: repeat_byte_length
+  payload: 02 0A 14 FF
+  source: generated
+  expected:
+    len: 2
+    tail: 255

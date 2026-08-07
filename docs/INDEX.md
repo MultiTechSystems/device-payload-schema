@@ -108,8 +108,8 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Device schemas
 
-158 schemas under `schemas/devices/`.
-Mean quality score 63.4% (PLATINUM 30, GOLD 40, SILVER 27, BRONZE 1, REJECTED 60). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+165 schemas under `schemas/devices/`.
+Mean quality score 63.4% (PLATINUM 30, GOLD 40, SILVER 31, BRONZE 1, REJECTED 63). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
@@ -117,6 +117,7 @@ Mean quality score 63.4% (PLATINUM 30, GOLD 40, SILVER 27, BRONZE 1, REJECTED 60
 |---|---|---|---|
 | milesight | 84 | 943 | PLATINUM 18, GOLD 33, SILVER 22, REJECTED 11 |
 | decentlab | 58 | 120 | PLATINUM 12, GOLD 7, SILVER 1, REJECTED 38 |
+| _language-conformance | 7 | 7 | SILVER 4, REJECTED 3 |
 | makerfabs | 6 | 0 | REJECTED 6 |
 | mclimate | 3 | 11 | SILVER 1, REJECTED 2 |
 | digital-matter | 1 | 7 | SILVER 1 |
@@ -133,6 +134,13 @@ Mean quality score 63.4% (PLATINUM 30, GOLD 40, SILVER 27, BRONZE 1, REJECTED 60
 
 | Schema | Fields | Vectors | Constructs | Score | Tier |
 |---|---|---|---|---|---|
+| `_language-conformance/bitfield-string` | 1 | 1 | fields | 71% | SILVER |
+| `_language-conformance/enum-spec-default` | 2 | 1 | fields | 71% | SILVER |
+| `_language-conformance/lookup-default` | 1 | 1 | fields | 56% | REJECTED |
+| `_language-conformance/name-from` | 2 | 1 | fields | 56% | REJECTED |
+| `_language-conformance/repeat-byte-length` | 4 | 1 | fields | 58% | REJECTED |
+| `_language-conformance/repeat-count` | 3 | 1 | fields | 71% | SILVER |
+| `_language-conformance/skip-type` | 3 | 1 | fields | 71% | SILVER |
 | `decentlab/dl-5tm` | 10 | 7 | fields | 100% | PLATINUM |
 | `decentlab/dl-alb` | 11 | 6 | fields | 100% | PLATINUM |
 | `decentlab/dl-atm22` | 15 | 6 | fields | 100% | PLATINUM |

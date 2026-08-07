@@ -139,6 +139,9 @@ public class SchemaField
     // Enum
     public string? Base { get; set; }
     public Dictionary<int, string>? Values { get; set; }
+    /// <summary>Value an unmapped enum reports (PS-068). Distinct from
+    /// LookupDefault, which serves the `lookup` construct.</summary>
+    public string? EnumDefault { get; set; }
 
     // Byte group
     public List<SchemaField> ByteGroup { get; set; } = new();

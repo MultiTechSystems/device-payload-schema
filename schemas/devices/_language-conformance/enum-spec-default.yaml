@@ -1,0 +1,26 @@
+# PS-067: decoders MUST output the string name for known values.
+# PS-068: decoders MUST handle unknown values according to `default`.
+# Expected values are taken from the specification, not from any implementation.
+name: probe_enum_spec_default
+endian: big
+fields:
+  - name: known
+    type: enum
+    base: u8
+    values:
+      0: ok
+      1: running
+    default: unmapped
+  - name: unknown_value
+    type: enum
+    base: u8
+    values:
+      0: ok
+    default: unmapped
+test_vectors:
+  - name: ps_067_and_ps_068
+    payload: "0109"
+    source: spec-example
+    expected:
+      known: running
+      unknown_value: unmapped

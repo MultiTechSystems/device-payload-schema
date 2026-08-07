@@ -774,11 +774,18 @@ class SchemaInterpreter:
             if raw_value in values_map:
                 return values_map[raw_value], new_pos
             else:
-                # Unknown value - return raw with warning marker
+                # An unmapped value takes the declared `default` (PS-068). Only
+                # where none is declared does it fall back to the marker below,
+                # which was previously returned unconditionally and ignored the
+                # default the schema asked for.
+                if 'default' in field_def:
+                    return field_def['default'], new_pos
                 return f"unknown({raw_value})", new_pos
         elif isinstance(values, list):
             if 0 <= raw_value < len(values):
                 return values[raw_value], new_pos
+            elif 'default' in field_def:
+                return field_def['default'], new_pos
             else:
                 return f"unknown({raw_value})", new_pos
         

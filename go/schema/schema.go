@@ -138,6 +138,9 @@ type Field struct {
 	// Enum field options
 	Base       string         `json:"base,omitempty" yaml:"base,omitempty"`     // Base type (u8, u16, etc.)
 	Values     map[int]string `json:"values,omitempty" yaml:"values,omitempty"` // Enum value mapping
+	// EnumDefault is the value an unmapped enum reports (PS-068). Distinct from
+	// LookupDefault, which serves the `lookup` construct.
+	EnumDefault *string `json:"-" yaml:"-"`
 	// Bool field options
 	Bit     int  `json:"bit,omitempty" yaml:"bit,omitempty"`         // Bit position for bool extraction
 	Consume int  `json:"consume,omitempty" yaml:"consume,omitempty"` // Bytes to consume after reading
@@ -902,6 +905,10 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	// Enum field options
 	if base, ok := fm["base"].(string); ok {
 		f.Base = base
+	}
+	if def, ok := fm["default"].(string); ok && fm["values"] != nil {
+		fallback := def
+		f.EnumDefault = &fallback
 	}
 	if valuesRaw, ok := fm["values"].(map[string]any); ok {
 		f.Values = make(map[int]string)
@@ -1749,8 +1756,12 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		if field.Values != nil {
 			if str, ok := field.Values[intVal]; ok {
 				value = str
+			} else if field.EnumDefault != nil {
+				// An unmapped value takes the declared default (PS-068). Returning
+				// the raw integer here ignored the default the schema asked for.
+				value = *field.EnumDefault
 			} else {
-				value = intVal // Return raw value if not in enum
+				value = intVal
 			}
 		} else {
 			value = intVal

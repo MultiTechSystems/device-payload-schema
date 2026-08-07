@@ -1,0 +1,16 @@
+name: probe_name_from
+endian: big
+fields:
+- name: idx
+  type: u8
+  var: idx
+- name: reading
+  type: u8
+  name_from: channel_${idx}_reading
+test_vectors:
+- name: name_from
+  payload: 03 2A
+  source: generated
+  expected:
+    idx: 3
+    channel_3_reading: 42

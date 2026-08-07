@@ -1,0 +1,21 @@
+name: probe_bitfield_string
+endian: big
+fields:
+- name: version
+  type: bitfield_string
+  length: 2
+  parts:
+  - - 12
+    - 4
+  - - 8
+    - 4
+  - - 0
+    - 8
+  delimiter: .
+  prefix: v
+test_vectors:
+- name: bitfield_string
+  payload: '1234'
+  source: generated
+  expected:
+    version: v1.2.52

@@ -87,6 +87,14 @@ public class Field {
     /** Inline `- match: {field: $x, cases: {...}}` block. */
     private Field matchInline;
 
+    // Enumeration type (PS-067, PS-068)
+    /** Underlying integer type an `enum` reads before mapping. */
+    private String base;
+    /** Integer-to-name mapping for an `enum` field. */
+    private Map<Integer, String> values;
+    /** Name an unmapped enum value reports (PS-068). */
+    private String enumDefault;
+
     /** Fields sharing one run of bytes, each read from the group's start. */
     private List<Field> byteGroup;
     /** Bytes the group occupies; the cursor advances by this once, at the end. */
@@ -241,6 +249,15 @@ public class Field {
 
     public Field getMatchInline() { return matchInline; }
     public void setMatchInline(Field matchInline) { this.matchInline = matchInline; }
+
+    public String getBase() { return base; }
+    public void setBase(String base) { this.base = base; }
+
+    public Map<Integer, String> getValues() { return values; }
+    public void setValues(Map<Integer, String> values) { this.values = values; }
+
+    public String getEnumDefault() { return enumDefault; }
+    public void setEnumDefault(String enumDefault) { this.enumDefault = enumDefault; }
 
     public List<Field> getByteGroup() { return byteGroup; }
     public void setByteGroup(List<Field> byteGroup) { this.byteGroup = byteGroup; }

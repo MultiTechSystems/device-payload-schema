@@ -303,6 +303,10 @@ public static class SchemaParser
                 if (int.TryParse(Scalar(kv.Key), out int vk))
                     f.Values[vk] = Scalar(kv.Value);
             }
+            // The value an unmapped enum reports (PS-068), read only alongside
+            // `values` so it is not confused with a lookup's default.
+            if (fm.TryGetValue("default", out var enumDefault))
+                f.EnumDefault = Scalar(enumDefault);
         }
 
         // Byte group

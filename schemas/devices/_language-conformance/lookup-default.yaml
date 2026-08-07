@@ -1,0 +1,14 @@
+name: probe_lookup_default
+endian: big
+fields:
+- name: mode
+  type: u8
+  lookup:
+    1: alpha
+    default: unknown
+test_vectors:
+- name: lookup_default
+  payload: 09
+  source: generated
+  expected:
+    mode: unknown

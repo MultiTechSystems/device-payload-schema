@@ -177,6 +177,27 @@ public class Schema {
         f.setValue(fm.get("value"));
         f.setFormula((String) fm.get("formula"));
 
+        // Enumeration type: base integer plus an integer-to-name mapping (PS-067),
+        // with `default` naming what an unmapped value reports (PS-068). None of
+        // this was parsed, so an `enum` field fell through to u8 and reported the
+        // raw number.
+        f.setBase((String) fm.get("base"));
+        if (fm.get("values") instanceof Map<?, ?> valuesRaw) {
+            Map<Integer, String> values = new HashMap<>();
+            for (Map.Entry<?, ?> entry : valuesRaw.entrySet()) {
+                Object label = entry.getValue();
+                // A value may be a plain name or a {name, description} mapping.
+                if (label instanceof Map<?, ?> described) {
+                    label = described.get("name");
+                }
+                values.put(toInt(entry.getKey(), 0), String.valueOf(label));
+            }
+            f.setValues(values);
+            if (fm.get("default") != null) {
+                f.setEnumDefault(String.valueOf(fm.get("default")));
+            }
+        }
+
         // Computed fields (type: number). None of this was parsed, so every schema
         // deriving a value from an earlier field reported nothing for it.
         if (fm.get("ref") != null) {
@@ -649,6 +670,26 @@ public class Schema {
             
             case NUMBER -> {
                 value = decodeComputed(field, ctx);
+            }
+
+            case ENUM -> {
+                int baseLength = switch (field.getBase() == null ? "u8" : field.getBase()) {
+                    case "u16", "s16" -> 2;
+                    case "u24", "s24" -> 3;
+                    case "u32", "s32" -> 4;
+                    default -> 1;
+                };
+                byte[] data = ctx.read(baseLength);
+                int raw = (int) ctx.decodeUnsigned(data, fieldEndian);
+                Map<Integer, String> values = field.getValues();
+                if (values != null && values.containsKey(raw)) {
+                    value = values.get(raw);
+                } else if (field.getEnumDefault() != null) {
+                    // An unmapped value reports the declared default (PS-068).
+                    value = field.getEnumDefault();
+                } else {
+                    value = (long) raw;
+                }
             }
             
             case OBJECT -> {

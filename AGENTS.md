@@ -181,20 +181,20 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 1,117 test vectors in `schemas/devices/` are the shared cross-language test set.
+The 1,124 test vectors in `schemas/devices/` are the shared cross-language test set.
 Every implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Vectors passing |
 |---|---|---|
-| Python | `tests/test_corpus_conformance.py` | 1117 / 1117 |
-| Go | `go/schema/corpus_conformance_test.go` | 1117 / 1117 |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 1117 / 1117 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 1117 / 1117 |
+| Python | `tests/test_corpus_conformance.py` | 1124 / 1124 |
+| Go | `go/schema/corpus_conformance_test.go` | 1124 / 1124 |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 1124 / 1124 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 1124 / 1124 |
 | C | none - consumes a binary schema, not YAML | n/a |
 
 Every runner compares its pass count against a committed floor rather than requiring
 the whole corpus, so any gap stays visible and a regression fails the build. All four
-YAML implementations now decode the entire corpus, so **every floor is the full 1117
+YAML implementations now decode the entire corpus, so **every floor is the full 1124
 and any failure is a regression, not a known gap.** If you add a construct that one
 implementation cannot express yet, lower its floor deliberately and say why here.
 
@@ -202,6 +202,19 @@ A vector's port is written `fPort` or `fport`, and a runner that reads only one
 spelling decodes a port-based schema with no port at all - every field of it then
 reports as missing, which reads as an interpreter gap rather than a runner defect.
 Read both, as all four runners now do.
+
+`schemas/devices/_language-conformance/` holds fixtures rather than devices: one
+schema per construct that no device schema uses, so the four interpreters are held
+to the same behaviour for it. It sits in the device tree because that is the only
+tree the runners walk — a fixture in `examples/` is read by nothing. Adding it
+found `enum` unimplemented in Java (PS-067) and `default:` on an enum ignored by
+Python, Go and C# (PS-068).
+
+**The `header:` block is undocumented and implementations disagree.** Java and C#
+honour it — the header field is emitted and consumes its bytes; Python and Go
+ignore it entirely, so the field is absent and everything after it reads from the
+wrong offset. The specification does not define `header:` anywhere, so there is no
+authority to say which is right. Decide and write it down before any schema uses it.
 
 Run them all with `make test-languages`. This suite is why the Go and Java TLV
 defects were found: those implementations returned an empty result for every

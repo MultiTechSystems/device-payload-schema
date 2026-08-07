@@ -25,7 +25,7 @@ import (
 // correctly. Raise it as gaps close.
 // Go now decodes the whole corpus, so this is the full count and any failure is a
 // regression rather than a known gap.
-const corpusFloor = 1117
+const corpusFloor = 1124
 
 type corpusVector struct {
 	Name    string `yaml:"name"`

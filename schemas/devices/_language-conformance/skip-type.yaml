@@ -1,0 +1,17 @@
+name: probe_skip
+endian: big
+fields:
+- name: a
+  type: u8
+- name: pad
+  type: skip
+  length: 2
+- name: b
+  type: u8
+test_vectors:
+- name: skip_type
+  payload: 01 FF FF 02
+  source: generated
+  expected:
+    a: 1
+    b: 2

@@ -343,6 +343,10 @@ public static class SchemaDecoder
                 int intVal = (int)Helpers.DecodeUint(data, endian);
                 if (field.Values != null && field.Values.TryGetValue(intVal, out var enumStr))
                     value = enumStr;
+                // An unmapped value takes the declared default (PS-068). Returning
+                // the raw integer ignored the default the schema asked for.
+                else if (field.EnumDefault != null)
+                    value = field.EnumDefault;
                 else
                     value = (double)intVal;
                 break;
