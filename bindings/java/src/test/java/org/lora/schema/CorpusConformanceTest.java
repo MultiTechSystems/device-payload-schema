@@ -23,9 +23,12 @@ import org.yaml.snakeyaml.Yaml;
 class CorpusConformanceTest {
 
     /** Vectors this interpreter is known to decode correctly. Raise as gaps close. */
-    // This binding now decodes the whole corpus, so the floor is the full count and
-    // any failure is a regression rather than a known gap.
-    private static final int CORPUS_FLOOR = 1124;
+    // 1166 of 1166 except three: this binding does not support the sequential
+    // bitfield form `u8:3`, only the bracket form `u8[5:7]`. The type falls through
+    // to a plain u8, so each field reads a whole byte and a one-byte LoRaWAN MHDR
+    // underflows. Deliberately lowered rather than dropping the vectors, so the gap
+    // stays visible - see AGENTS.md.
+    private static final int CORPUS_FLOOR = 1163;
 
     @Test
     void corpusVectorsDecodeAsExpected() throws IOException {

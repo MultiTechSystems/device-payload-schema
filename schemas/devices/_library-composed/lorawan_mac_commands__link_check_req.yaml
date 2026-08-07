@@ -1,0 +1,370 @@
+name: lorawan_mac_commands__link_check_req
+description: Composed from schemas/library/lorawan/lorawan_mac_commands.yaml#/definitions/link_check_req
+  so the library's test vectors run in every implementation.
+endian: big
+fields: &id001
+- name: cid
+  type: u8
+  value: 2
+definitions:
+  link_check_req:
+    name: LinkCheckReq
+    cid: 2
+    direction: uplink
+    version: 1.0.0+
+    description: End-device requests link check from network
+    fields: *id001
+  link_check_ans:
+    name: LinkCheckAns
+    cid: 2
+    direction: downlink
+    version: 1.0.0+
+    description: Network responds with link margin and gateway count
+    fields:
+    - name: cid
+      type: u8
+      value: 2
+    - name: margin
+      type: u8
+      unit: dB
+      description: Link margin (0-254 dB, 255=reserved)
+    - name: gw_cnt
+      type: u8
+      description: Number of gateways that received the uplink
+  link_adr_req:
+    name: LinkADRReq
+    cid: 3
+    direction: downlink
+    version: 1.0.0+
+    description: Network requests data rate and TX power change
+    fields:
+    - name: cid
+      type: u8
+      value: 3
+    - name: data_rate_tx_power
+      type: u8
+      description: DataRate[7:4] | TXPower[3:0]
+    - name: ch_mask
+      type: u16
+      description: Channel mask (1=enabled)
+    - name: redundancy
+      type: u8
+      description: ChMaskCntl[6:4] | NbTrans[3:0]
+  link_adr_ans:
+    name: LinkADRAns
+    cid: 3
+    direction: uplink
+    version: 1.0.0+
+    description: End-device acknowledges ADR request
+    fields:
+    - name: cid
+      type: u8
+      value: 3
+    - name: status
+      type: u8
+      description: PowerACK[2] | DataRateACK[1] | ChannelMaskACK[0]
+  duty_cycle_req:
+    name: DutyCycleReq
+    cid: 4
+    direction: downlink
+    version: 1.0.0+
+    description: Network sets maximum aggregated duty cycle
+    fields:
+    - name: cid
+      type: u8
+      value: 4
+    - name: duty_cycle_pl
+      type: u8
+      description: MaxDCycle[3:0] - duty cycle = 1/(2^MaxDCycle)
+  duty_cycle_ans:
+    name: DutyCycleAns
+    cid: 4
+    direction: uplink
+    version: 1.0.0+
+    description: End-device acknowledges duty cycle setting
+    fields:
+    - name: cid
+      type: u8
+      value: 4
+  rx_param_setup_req:
+    name: RXParamSetupReq
+    cid: 5
+    direction: downlink
+    version: 1.0.0+
+    description: Network configures RX2 window parameters
+    fields:
+    - name: cid
+      type: u8
+      value: 5
+    - name: dl_settings
+      type: u8
+      description: RX1DRoffset[6:4] | RX2DataRate[3:0]
+    - name: frequency
+      type: u24
+      description: RX2 frequency (Hz = value * 100)
+  rx_param_setup_ans:
+    name: RXParamSetupAns
+    cid: 5
+    direction: uplink
+    version: 1.0.0+
+    description: End-device acknowledges RX param setup
+    fields:
+    - name: cid
+      type: u8
+      value: 5
+    - name: status
+      type: u8
+      description: RX1DRoffsetACK[2] | RX2DataRateACK[1] | ChannelACK[0]
+  dev_status_req:
+    name: DevStatusReq
+    cid: 6
+    direction: downlink
+    version: 1.0.0+
+    description: Network requests device status
+    fields:
+    - name: cid
+      type: u8
+      value: 6
+  dev_status_ans:
+    name: DevStatusAns
+    cid: 6
+    direction: uplink
+    version: 1.0.0+
+    description: End-device reports battery and margin
+    fields:
+    - name: cid
+      type: u8
+      value: 6
+    - name: battery
+      type: u8
+      description: 0=external, 1-254=level, 255=unable to measure
+    - name: margin
+      type: u8
+      description: SNR margin [5:0] signed (-32 to +31 dB)
+  new_channel_req:
+    name: NewChannelReq
+    cid: 7
+    direction: downlink
+    version: 1.0.0+
+    description: Network creates or modifies a channel
+    fields:
+    - name: cid
+      type: u8
+      value: 7
+    - name: ch_index
+      type: u8
+      description: Channel index to create/modify
+    - name: frequency
+      type: u24
+      description: Channel frequency (Hz = value * 100, 0=disable)
+    - name: dr_range
+      type: u8
+      description: MaxDR[7:4] | MinDR[3:0]
+  new_channel_ans:
+    name: NewChannelAns
+    cid: 7
+    direction: uplink
+    version: 1.0.0+
+    description: End-device acknowledges channel change
+    fields:
+    - name: cid
+      type: u8
+      value: 7
+    - name: status
+      type: u8
+      description: DataRateRangeOK[1] | ChannelFreqOK[0]
+  rx_timing_setup_req:
+    name: RXTimingSetupReq
+    cid: 8
+    direction: downlink
+    version: 1.0.0+
+    description: Network sets RX1 delay
+    fields:
+    - name: cid
+      type: u8
+      value: 8
+    - name: settings
+      type: u8
+      description: Del[3:0] - RX1 delay = Del seconds (0=1s)
+  rx_timing_setup_ans:
+    name: RXTimingSetupAns
+    cid: 8
+    direction: uplink
+    version: 1.0.0+
+    description: End-device acknowledges RX timing
+    fields:
+    - name: cid
+      type: u8
+      value: 8
+  tx_param_setup_req:
+    name: TxParamSetupReq
+    cid: 9
+    direction: downlink
+    version: 1.0.2+
+    description: Network sets max EIRP and dwell time limits
+    fields:
+    - name: cid
+      type: u8
+      value: 9
+    - name: eirp_dwell_time
+      type: u8
+      description: DownlinkDwellTime[5] | UplinkDwellTime[4] | MaxEIRP[3:0]
+  tx_param_setup_ans:
+    name: TxParamSetupAns
+    cid: 9
+    direction: uplink
+    version: 1.0.2+
+    description: End-device acknowledges TX param setup
+    fields:
+    - name: cid
+      type: u8
+      value: 9
+  dl_channel_req:
+    name: DlChannelReq
+    cid: 10
+    direction: downlink
+    version: 1.0.2+
+    description: Network sets downlink channel frequency
+    fields:
+    - name: cid
+      type: u8
+      value: 10
+    - name: ch_index
+      type: u8
+      description: Channel index
+    - name: frequency
+      type: u24
+      description: Downlink frequency (Hz = value * 100)
+  dl_channel_ans:
+    name: DlChannelAns
+    cid: 10
+    direction: uplink
+    version: 1.0.2+
+    description: End-device acknowledges DL channel
+    fields:
+    - name: cid
+      type: u8
+      value: 10
+    - name: status
+      type: u8
+      description: UplinkFreqExists[1] | ChannelFreqOK[0]
+  rekey_ind:
+    name: RekeyInd
+    cid: 11
+    direction: uplink
+    version: 1.1.0+
+    description: End-device indicates rekey complete
+    fields:
+    - name: cid
+      type: u8
+      value: 11
+    - name: minor_version
+      type: u8
+      description: LoRaWAN minor version (1 for 1.1)
+  rekey_conf:
+    name: RekeyConf
+    cid: 11
+    direction: downlink
+    version: 1.1.0+
+    description: Network confirms rekey
+    fields:
+    - name: cid
+      type: u8
+      value: 11
+    - name: serv_lorawan_version
+      type: u8
+      description: Server LoRaWAN minor version
+  adr_param_setup_req:
+    name: ADRParamSetupReq
+    cid: 12
+    direction: downlink
+    version: 1.1.0+
+    description: Network configures ADR parameters
+    fields:
+    - name: cid
+      type: u8
+      value: 12
+    - name: adr_param
+      type: u8
+      description: Limit_exp[7:4] | Delay_exp[3:0]
+  adr_param_setup_ans:
+    name: ADRParamSetupAns
+    cid: 12
+    direction: uplink
+    version: 1.1.0+
+    description: End-device acknowledges ADR param setup
+    fields:
+    - name: cid
+      type: u8
+      value: 12
+  device_time_req:
+    name: DeviceTimeReq
+    cid: 13
+    direction: uplink
+    version: 1.1.0+
+    description: End-device requests current time
+    fields:
+    - name: cid
+      type: u8
+      value: 13
+  device_time_ans:
+    name: DeviceTimeAns
+    cid: 13
+    direction: downlink
+    version: 1.1.0+
+    description: Network provides GPS epoch time
+    fields:
+    - name: cid
+      type: u8
+      value: 13
+    - name: seconds
+      type: u32
+      description: Seconds since GPS epoch (Jan 6, 1980)
+    - name: fractional_second
+      type: u8
+      description: Fractional second (1/256 s resolution)
+  force_rejoin_req:
+    name: ForceRejoinReq
+    cid: 14
+    direction: downlink
+    version: 1.1.0+
+    description: Network forces device to rejoin
+    fields:
+    - name: cid
+      type: u8
+      value: 14
+    - name: rejoin_param
+      type: u16
+      description: Period[13:10] | Max_Retries[9:7] | RejoinType[6:4] | DR[3:0]
+  rejoin_param_setup_req:
+    name: RejoinParamSetupReq
+    cid: 15
+    direction: downlink
+    version: 1.1.0+
+    description: Network configures rejoin parameters
+    fields:
+    - name: cid
+      type: u8
+      value: 15
+    - name: rejoin_param
+      type: u8
+      description: MaxTimeN[7:4] | MaxCountN[3:0]
+  rejoin_param_setup_ans:
+    name: RejoinParamSetupAns
+    cid: 15
+    direction: uplink
+    version: 1.1.0+
+    description: End-device acknowledges rejoin param setup
+    fields:
+    - name: cid
+      type: u8
+      value: 15
+    - name: status
+      type: u8
+      description: TimeOK[0]
+test_vectors:
+- name: link_check_req
+  payload: '02'
+  source: spec-example
+  expected:
+    cid: 2

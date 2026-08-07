@@ -1,0 +1,157 @@
+name: gps_tracker__request_position
+description: Composed from schemas/library/commands/gps_tracker.yaml#/definitions/request_position_req
+  so the library's test vectors run in every implementation.
+endian: big
+fields: &id001
+- name: category
+  type: u8
+  value: 2
+- name: cid
+  type: u8
+  value: 3
+- name: timeout_sec
+  type: u8
+  description: Max time to wait for fix (0=device default)
+definitions:
+  set_geofence_req:
+    name: SetGeofenceReq
+    cid: 0
+    direction: downlink
+    description: Set geofence center and radius
+    fields:
+    - name: category
+      type: u8
+      value: 2
+    - name: cid
+      type: u8
+      value: 0
+    - name: fence_id
+      type: u8
+      description: Geofence identifier (0-15)
+    - name: latitude
+      type: s32
+      div: 10000000
+      unit: degrees
+      description: Latitude in degrees (7 decimal places)
+    - name: longitude
+      type: s32
+      div: 10000000
+      unit: degrees
+      description: Longitude in degrees (7 decimal places)
+    - name: radius
+      type: u16
+      unit: meters
+      description: Geofence radius in meters
+  set_geofence_ans:
+    name: SetGeofenceAns
+    cid: 0
+    direction: uplink
+    fields:
+    - name: category
+      type: u8
+      value: 2
+    - name: cid
+      type: u8
+      value: 0
+    - name: status
+      type: u8
+      description: 0=success, 1=invalid params, 2=too many fences
+  clear_geofence_req:
+    name: ClearGeofenceReq
+    cid: 1
+    direction: downlink
+    description: Clear geofence
+    fields:
+    - name: category
+      type: u8
+      value: 2
+    - name: cid
+      type: u8
+      value: 1
+    - name: fence_id
+      type: u8
+      description: Geofence to clear (0xFF=all)
+  clear_geofence_ans:
+    name: ClearGeofenceAns
+    cid: 1
+    direction: uplink
+    fields:
+    - name: category
+      type: u8
+      value: 2
+    - name: cid
+      type: u8
+      value: 1
+    - name: status
+      type: u8
+      description: 0=success, 1=invalid fence_id
+  set_motion_mode_req:
+    name: SetMotionModeReq
+    cid: 2
+    direction: downlink
+    description: Configure motion-based behavior
+    fields:
+    - name: category
+      type: u8
+      value: 2
+    - name: cid
+      type: u8
+      value: 2
+    - name: mode
+      type: u8
+      description: 0=continuous, 1=motion-triggered, 2=stationary-optimized
+    - name: motion_threshold
+      type: u8
+      description: Motion detection sensitivity (device-specific)
+  set_motion_mode_ans:
+    name: SetMotionModeAns
+    cid: 2
+    direction: uplink
+    fields:
+    - name: category
+      type: u8
+      value: 2
+    - name: cid
+      type: u8
+      value: 2
+    - name: status
+      type: u8
+      description: 0=success, 1=invalid mode
+  request_position_req:
+    name: RequestPositionReq
+    cid: 3
+    direction: downlink
+    description: Force immediate GPS fix
+    fields: *id001
+  request_position_ans:
+    name: RequestPositionAns
+    cid: 3
+    direction: uplink
+    fields:
+    - name: category
+      type: u8
+      value: 2
+    - name: cid
+      type: u8
+      value: 3
+    - name: status
+      type: u8
+      description: 0=fix acquired, 1=no fix, 2=timeout
+    - name: latitude
+      type: s32
+      div: 10000000
+      unit: degrees
+      description: Latitude (only if status=0)
+    - name: longitude
+      type: s32
+      div: 10000000
+      unit: degrees
+      description: Longitude (only if status=0)
+test_vectors:
+- name: request_position
+  payload: 02 03 3C
+  source: spec-example
+  expected:
+    category: 2
+    cid: 3
+    timeout_sec: 60

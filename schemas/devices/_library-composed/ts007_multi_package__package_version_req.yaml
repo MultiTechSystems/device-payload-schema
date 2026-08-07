@@ -1,0 +1,40 @@
+name: ts007_multi_package__package_version_req
+description: Composed from schemas/library/commands/ts007_multi_package.yaml#/definitions/package_version_req
+  so the library's test vectors run in every implementation.
+endian: big
+fields: &id001
+- name: cid
+  type: u8
+  value: 0
+definitions:
+  package_version_req:
+    name: PackageVersionReq
+    cid: 0
+    direction: downlink
+    description: Request all supported package versions from device
+    fields: *id001
+  package_version_ans:
+    name: PackageVersionAns
+    cid: 0
+    direction: uplink
+    description: List of supported packages and versions
+    fields:
+    - name: cid
+      type: u8
+      value: 0
+    - name: packages
+      type: array
+      description: Array of (PackageID, PackageVersion) pairs
+      items:
+      - name: package_id
+        type: u8
+        description: Package identifier
+      - name: package_version
+        type: u8
+        description: Package version
+test_vectors:
+- name: package_version_req
+  payload: '00'
+  source: spec-example
+  expected:
+    cid: 0

@@ -1,0 +1,147 @@
+name: data_logging__enable_logging
+description: Composed from schemas/library/commands/data_logging.yaml#/definitions/set_config_req
+  so the library's test vectors run in every implementation.
+endian: big
+fields: &id001
+- name: category
+  type: u8
+  value: 17
+- name: cid
+  type: u8
+  value: 0
+- name: enable
+  type: u8
+  description: 0=disable, 1=enable logging
+  valid_range:
+  - 0
+  - 1
+- name: max_records
+  type: u16
+  description: Maximum records to store (0=device default)
+definitions:
+  set_config_req:
+    name: SetConfigReq
+    cid: 0
+    direction: downlink
+    description: Configure on-device data logging
+    fields: *id001
+  set_config_ans:
+    name: SetConfigAns
+    cid: 0
+    direction: uplink
+    fields:
+    - name: category
+      type: u8
+      value: 17
+    - name: cid
+      type: u8
+      value: 0
+    - name: status
+      type: u8
+      description: 0=success, 1=invalid param, 2=not supported
+  fetch_req:
+    name: FetchReq
+    cid: 1
+    direction: downlink
+    description: Request historical data from device
+    fields:
+    - name: category
+      type: u8
+      value: 17
+    - name: cid
+      type: u8
+      value: 1
+    - name: start_time
+      type: u32
+      description: Unix timestamp - start of range (0=oldest)
+    - name: end_time
+      type: u32
+      description: Unix timestamp - end of range (0=newest)
+  fetch_ans:
+    name: FetchAns
+    cid: 1
+    direction: uplink
+    fields:
+    - name: category
+      type: u8
+      value: 17
+    - name: cid
+      type: u8
+      value: 1
+    - name: status
+      type: u8
+      description: 0=success, 1=no data, 2=busy, 3=error
+    - name: record_count
+      type: u16
+      description: Number of records to be sent
+  clear_req:
+    name: ClearReq
+    cid: 2
+    direction: downlink
+    description: Clear stored data log
+    fields:
+    - name: category
+      type: u8
+      value: 17
+    - name: cid
+      type: u8
+      value: 2
+    - name: confirm
+      type: u8
+      value: 170
+      description: Confirmation byte (must be 0xAA)
+  clear_ans:
+    name: ClearAns
+    cid: 2
+    direction: uplink
+    fields:
+    - name: category
+      type: u8
+      value: 17
+    - name: cid
+      type: u8
+      value: 2
+    - name: status
+      type: u8
+      description: 0=success, 1=invalid confirm, 2=error
+  get_status_req:
+    name: GetStatusReq
+    cid: 3
+    direction: downlink
+    description: Query data log storage status
+    fields:
+    - name: category
+      type: u8
+      value: 17
+    - name: cid
+      type: u8
+      value: 3
+  get_status_ans:
+    name: GetStatusAns
+    cid: 3
+    direction: uplink
+    fields:
+    - name: category
+      type: u8
+      value: 17
+    - name: cid
+      type: u8
+      value: 3
+    - name: record_count
+      type: u16
+      description: Number of stored records
+    - name: oldest_timestamp
+      type: u32
+      description: Unix timestamp of oldest record
+    - name: newest_timestamp
+      type: u32
+      description: Unix timestamp of newest record
+test_vectors:
+- name: enable_logging
+  payload: 11 00 01 0100
+  source: spec-example
+  expected:
+    category: 17
+    cid: 0
+    enable: 1
+    max_records: 256

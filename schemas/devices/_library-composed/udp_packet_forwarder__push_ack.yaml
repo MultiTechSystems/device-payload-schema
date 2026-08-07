@@ -1,0 +1,274 @@
+name: udp_packet_forwarder__push_ack
+description: Composed from schemas/library/gateway/udp_packet_forwarder.yaml#/definitions/packet_header
+  so the library's test vectors run in every implementation.
+endian: big
+fields: &id001
+- name: protocol_version
+  type: u8
+  value: 2
+  description: Protocol version (always 2)
+- name: random_token
+  type: u16
+  description: Random token for request/response matching
+- name: packet_type
+  type: u8
+  description: Packet type identifier
+definitions:
+  packet_header:
+    name: PacketHeader
+    description: 4-byte header for all UDP packets (12 bytes for PUSH_DATA/PULL_DATA)
+    fields: *id001
+  push_data_header:
+    name: PushDataHeader
+    description: 12-byte header for PUSH_DATA
+    fields:
+    - name: protocol_version
+      type: u8
+      value: 2
+    - name: random_token
+      type: u16
+    - name: packet_type
+      type: u8
+      value: 0
+    - name: gateway_eui
+      type: bytes
+      length: 8
+      description: Gateway EUI (big-endian)
+  pull_data_header:
+    name: PullDataHeader
+    description: 12-byte header for PULL_DATA
+    fields:
+    - name: protocol_version
+      type: u8
+      value: 2
+    - name: random_token
+      type: u16
+    - name: packet_type
+      type: u8
+      value: 2
+    - name: gateway_eui
+      type: bytes
+      length: 8
+      description: Gateway EUI (big-endian)
+  push_data_payload:
+    name: PushDataPayload
+    description: JSON payload for PUSH_DATA
+    fields:
+    - name: rxpk
+      type: array
+      description: Array of received packets
+      optional: true
+      items:
+        $ref: '#/definitions/rx_packet'
+    - name: stat
+      type: object
+      description: Gateway status
+      optional: true
+      $ref: '#/definitions/gateway_status'
+  rx_packet:
+    name: RxPacket
+    description: Received LoRaWAN packet (uplink)
+    fields:
+    - name: time
+      type: string
+      description: UTC time of pkt RX (ISO 8601 expanded)
+      example: '2024-01-15T12:34:56.789Z'
+      optional: true
+    - name: tmms
+      type: u64
+      description: GPS time of pkt RX (ms since GPS epoch)
+      optional: true
+    - name: tmst
+      type: u32
+      description: Internal timestamp of RX (32-bit counter, us)
+    - name: freq
+      type: f64
+      description: RX central frequency (MHz)
+      example: 868.1
+    - name: chan
+      type: u8
+      description: Concentrator IF channel
+    - name: rfch
+      type: u8
+      description: Concentrator RF chain
+    - name: stat
+      type: s8
+      description: 'CRC status: 1=OK, -1=fail, 0=no CRC'
+    - name: modu
+      type: string
+      description: 'Modulation: ''LORA'' or ''FSK'''
+      enum:
+      - LORA
+      - FSK
+    - name: datr
+      type: string
+      description: 'Data rate (LoRa: ''SFxxBWyyy'', FSK: bitrate)'
+      example: SF7BW125
+    - name: codr
+      type: string
+      description: LoRa coding rate
+      example: 4/5
+      optional: true
+    - name: rssi
+      type: s16
+      description: RSSI (dBm)
+    - name: lsnr
+      type: f32
+      description: LoRa SNR (dB)
+      optional: true
+    - name: size
+      type: u16
+      description: RF packet payload size (bytes)
+    - name: data
+      type: string
+      description: Base64 encoded RF packet payload
+  gateway_status:
+    name: GatewayStatus
+    description: Gateway status report
+    fields:
+    - name: time
+      type: string
+      description: UTC time of status (ISO 8601)
+      optional: true
+    - name: lati
+      type: f64
+      description: GPS latitude (degrees)
+      optional: true
+    - name: long
+      type: f64
+      description: GPS longitude (degrees)
+      optional: true
+    - name: alti
+      type: s32
+      description: GPS altitude (meters)
+      optional: true
+    - name: rxnb
+      type: u32
+      description: Number of radio packets received
+    - name: rxok
+      type: u32
+      description: Number of radio packets with valid CRC
+    - name: rxfw
+      type: u32
+      description: Number of radio packets forwarded
+    - name: ackr
+      type: f32
+      description: Percentage of upstream datagrams ACKed
+    - name: dwnb
+      type: u32
+      description: Number of downlink datagrams received
+    - name: txnb
+      type: u32
+      description: Number of packets emitted
+    - name: pfrm
+      type: string
+      description: Platform description
+      optional: true
+    - name: mail
+      type: string
+      description: Contact email
+      optional: true
+    - name: desc
+      type: string
+      description: Station description
+      optional: true
+  pull_resp_payload:
+    name: PullRespPayload
+    description: JSON payload for PULL_RESP (downlink)
+    fields:
+    - name: txpk
+      type: object
+      description: Transmit packet
+      $ref: '#/definitions/tx_packet'
+  tx_packet:
+    name: TxPacket
+    description: Downlink packet to transmit
+    fields:
+    - name: imme
+      type: bool
+      description: Send immediately (ignore tmst/tmms)
+      optional: true
+    - name: tmst
+      type: u32
+      description: Transmit at this timestamp (us)
+      optional: true
+    - name: tmms
+      type: u64
+      description: Transmit at this GPS time (ms)
+      optional: true
+    - name: freq
+      type: f64
+      description: TX central frequency (MHz)
+    - name: rfch
+      type: u8
+      description: Concentrator RF chain
+    - name: powe
+      type: u8
+      description: TX output power (dBm)
+    - name: modu
+      type: string
+      description: 'Modulation: ''LORA'' or ''FSK'''
+      enum:
+      - LORA
+      - FSK
+    - name: datr
+      type: string
+      description: Data rate
+      example: SF7BW125
+    - name: codr
+      type: string
+      description: LoRa coding rate
+      example: 4/5
+      optional: true
+    - name: fdev
+      type: u32
+      description: FSK frequency deviation (Hz)
+      optional: true
+    - name: ipol
+      type: bool
+      description: LoRa inverted polarity
+      optional: true
+    - name: prea
+      type: u16
+      description: RF preamble size
+      optional: true
+    - name: size
+      type: u16
+      description: RF packet payload size (bytes)
+    - name: data
+      type: string
+      description: Base64 encoded RF packet payload
+    - name: ncrc
+      type: bool
+      description: No CRC (for beacon)
+      optional: true
+  tx_ack_payload:
+    name: TxAckPayload
+    description: JSON payload for TX_ACK
+    fields:
+    - name: txpk_ack
+      type: object
+      description: Transmission result
+      fields:
+      - name: error
+        type: string
+        description: Error code if transmission failed
+        optional: true
+        enum:
+        - NONE
+        - TOO_LATE
+        - TOO_EARLY
+        - COLLISION_PACKET
+        - COLLISION_BEACON
+        - TX_FREQ
+        - TX_POWER
+        - GPS_UNLOCKED
+test_vectors:
+- name: push_ack
+  payload: 02 1234 01
+  description: PUSH_ACK response
+  source: spec-example
+  expected:
+    protocol_version: 2
+    random_token: 4660
+    packet_type: 1

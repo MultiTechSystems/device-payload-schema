@@ -1,0 +1,109 @@
+name: ts003_clock_sync__app_time_ans_negative_correction
+description: Composed from schemas/library/commands/ts003_clock_sync.yaml#/definitions/app_time_ans
+  so the library's test vectors run in every implementation.
+endian: big
+fields: &id001
+- name: cid
+  type: u8
+  value: 1
+- name: time_correction
+  type: s32
+  unit: s
+  description: Signed seconds correction to apply
+- name: param
+  type: u8
+  description: TokenAns[3:0] - must match TokenReq for validation
+definitions:
+  package_version_req:
+    name: PackageVersionReq
+    cid: 0
+    direction: downlink
+    description: Request package version from device
+    fields:
+    - name: cid
+      type: u8
+      value: 0
+  package_version_ans:
+    name: PackageVersionAns
+    cid: 0
+    direction: uplink
+    description: Package version response
+    fields:
+    - name: cid
+      type: u8
+      value: 0
+    - name: package_identifier
+      type: u8
+      value: 1
+      description: Clock Sync package ID
+    - name: package_version
+      type: u8
+      description: Package version (2 for TS003 v2.0.0)
+  app_time_req:
+    name: AppTimeReq
+    cid: 1
+    direction: uplink
+    description: Device requests time correction
+    fields:
+    - name: cid
+      type: u8
+      value: 1
+    - name: device_time
+      type: u32
+      description: Current device clock (GPS epoch, modulo 2^32)
+    - name: param
+      type: u8
+      description: TokenReq[3:0] | AnsRequired[4]
+  app_time_ans:
+    name: AppTimeAns
+    cid: 1
+    direction: downlink
+    description: Server provides time correction
+    fields: *id001
+  device_app_time_periodicity_req:
+    name: DeviceAppTimePeriodicityReq
+    cid: 2
+    direction: downlink
+    description: Set automatic time sync periodicity
+    fields:
+    - name: cid
+      type: u8
+      value: 2
+    - name: periodicity
+      type: u8
+      description: Sync period = 128 * 2^periodicity seconds (0-15)
+      valid_range:
+      - 0
+      - 15
+  device_app_time_periodicity_ans:
+    name: DeviceAppTimePeriodicityAns
+    cid: 2
+    direction: uplink
+    description: Confirmation of periodicity setting
+    fields:
+    - name: cid
+      type: u8
+      value: 2
+    - name: status
+      type: u8
+      description: 0=success, 1=not supported
+    - name: time
+      type: u32
+      description: Current device time (GPS epoch)
+  force_device_resync_cmd:
+    name: ForceDeviceResyncCmd
+    cid: 3
+    direction: downlink
+    description: Force device to request time sync
+    fields:
+    - name: cid
+      type: u8
+      value: 3
+test_vectors:
+- name: app_time_ans_negative_correction
+  payload: 01 FFFFFFC4 05
+  source: spec-example
+  expected:
+    cid: 1
+    time_correction: -60
+    param: 5

@@ -1,0 +1,172 @@
+name: device_management__factory_reset
+description: Composed from schemas/library/commands/device_management.yaml#/definitions/factory_reset_req
+  so the library's test vectors run in every implementation.
+endian: big
+fields: &id001
+- name: category
+  type: u8
+  value: 18
+- name: cid
+  type: u8
+  value: 0
+- name: magic
+  type: u32
+  value: 3735928559
+  description: Safety magic number (must be 0xDEADBEEF)
+definitions:
+  factory_reset_req:
+    name: FactoryResetReq
+    cid: 0
+    direction: downlink
+    description: Factory reset device to default settings
+    fields: *id001
+  factory_reset_ans:
+    name: FactoryResetAns
+    cid: 0
+    direction: uplink
+    fields:
+    - name: category
+      type: u8
+      value: 18
+    - name: cid
+      type: u8
+      value: 0
+    - name: status
+      type: u8
+      description: 0=resetting, 1=invalid magic, 2=not supported
+  get_config_req:
+    name: GetConfigReq
+    cid: 1
+    direction: downlink
+    description: Request device configuration dump
+    fields:
+    - name: category
+      type: u8
+      value: 18
+    - name: cid
+      type: u8
+      value: 1
+  get_config_ans:
+    name: GetConfigAns
+    cid: 1
+    direction: uplink
+    fields:
+    - name: category
+      type: u8
+      value: 18
+    - name: cid
+      type: u8
+      value: 1
+    - name: config_version
+      type: u8
+      description: Config format version
+    - name: config_data
+      type: bytes
+      description: Configuration payload (variable length)
+  identify_req:
+    name: IdentifyReq
+    cid: 2
+    direction: downlink
+    description: Trigger visual/audio identification (LED blink, beep)
+    fields:
+    - name: category
+      type: u8
+      value: 18
+    - name: cid
+      type: u8
+      value: 2
+    - name: duration_sec
+      type: u8
+      description: Identification duration in seconds (0=stop)
+      valid_range:
+      - 0
+      - 255
+  identify_ans:
+    name: IdentifyAns
+    cid: 2
+    direction: uplink
+    fields:
+    - name: category
+      type: u8
+      value: 18
+    - name: cid
+      type: u8
+      value: 2
+    - name: status
+      type: u8
+      description: 0=success, 1=not supported, 2=busy
+  reboot_req:
+    name: RebootReq
+    cid: 3
+    direction: downlink
+    description: Reboot device
+    fields:
+    - name: category
+      type: u8
+      value: 18
+    - name: cid
+      type: u8
+      value: 3
+    - name: delay_sec
+      type: u8
+      description: Delay before reboot (0=immediate)
+  reboot_ans:
+    name: RebootAns
+    cid: 3
+    direction: uplink
+    fields:
+    - name: category
+      type: u8
+      value: 18
+    - name: cid
+      type: u8
+      value: 3
+    - name: status
+      type: u8
+      description: 0=rebooting, 1=not supported
+  get_info_req:
+    name: GetInfoReq
+    cid: 4
+    direction: downlink
+    description: Request device information
+    fields:
+    - name: category
+      type: u8
+      value: 18
+    - name: cid
+      type: u8
+      value: 4
+  get_info_ans:
+    name: GetInfoAns
+    cid: 4
+    direction: uplink
+    fields:
+    - name: category
+      type: u8
+      value: 18
+    - name: cid
+      type: u8
+      value: 4
+    - name: fw_major
+      type: u8
+      description: Firmware major version
+    - name: fw_minor
+      type: u8
+      description: Firmware minor version
+    - name: fw_patch
+      type: u8
+      description: Firmware patch version
+    - name: hw_version
+      type: u8
+      description: Hardware revision
+    - name: uptime_hours
+      type: u16
+      description: Device uptime in hours
+test_vectors:
+- name: factory_reset
+  payload: 12 00 DEADBEEF
+  source: spec-example
+  expected:
+    category: 18
+    cid: 0
+    magic: 3735928559

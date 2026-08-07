@@ -82,6 +82,7 @@ Generated inventory of this repository: what lives where, what each document cov
 | `tools/binary_schema.py` | Binary Schema Encoder/Decoder for OTA Schema Transfer |
 | `tools/binary_schema_loader.py` | Load binary schemas for fast interpretation |
 | `tools/binary_schema_v2.py` | Extended Binary Schema Encoder/Decoder |
+| `tools/compose_library_vectors.py` | Make the schema library's test vectors runnable. |
 | `tools/convert_decentlab.py` | Decentlab Protocol V2 Codec → Payload Schema Schema Converter |
 | `tools/convert_milesight.py` | Milesight IoT Codec → Payload Schema Schema Converter |
 | `tools/crossvalidate_decentlab.py` | Check decentlab schemas against the vendor's decoders. |
@@ -108,8 +109,8 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Device schemas
 
-165 schemas under `schemas/devices/`.
-Mean quality score 63.4% (PLATINUM 30, GOLD 40, SILVER 31, BRONZE 1, REJECTED 63). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+207 schemas under `schemas/devices/`.
+Mean quality score 65.0% (PLATINUM 30, GOLD 40, SILVER 69, BRONZE 2, REJECTED 66). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
@@ -117,6 +118,7 @@ Mean quality score 63.4% (PLATINUM 30, GOLD 40, SILVER 31, BRONZE 1, REJECTED 63
 |---|---|---|---|
 | milesight | 84 | 943 | PLATINUM 18, GOLD 33, SILVER 22, REJECTED 11 |
 | decentlab | 58 | 120 | PLATINUM 12, GOLD 7, SILVER 1, REJECTED 38 |
+| _library-composed | 42 | 42 | SILVER 38, BRONZE 1, REJECTED 3 |
 | _language-conformance | 7 | 7 | SILVER 4, REJECTED 3 |
 | makerfabs | 6 | 0 | REJECTED 6 |
 | mclimate | 3 | 11 | SILVER 1, REJECTED 2 |
@@ -141,6 +143,48 @@ Mean quality score 63.4% (PLATINUM 30, GOLD 40, SILVER 31, BRONZE 1, REJECTED 63
 | `_language-conformance/repeat-byte-length` | 4 | 1 | fields | 58% | REJECTED |
 | `_language-conformance/repeat-count` | 3 | 1 | fields | 71% | SILVER |
 | `_language-conformance/skip-type` | 3 | 1 | fields | 71% | SILVER |
+| `_library-composed/alarm_config__set_delta_threshold` | 4 | 1 | fields | 71% | SILVER |
+| `_library-composed/alarm_config__set_temp_alarm` | 5 | 1 | fields | 71% | SILVER |
+| `_library-composed/data_logging__clear_log` | 3 | 1 | fields | 71% | SILVER |
+| `_library-composed/data_logging__enable_logging` | 4 | 1 | fields | 73% | SILVER |
+| `_library-composed/data_logging__fetch_all` | 4 | 1 | fields | 73% | SILVER |
+| `_library-composed/device_management__factory_reset` | 3 | 1 | fields | 73% | SILVER |
+| `_library-composed/device_management__identify_10sec` | 3 | 1 | fields | 71% | SILVER |
+| `_library-composed/device_management__reboot_immediate` | 3 | 1 | fields | 73% | SILVER |
+| `_library-composed/gps_tracker__clear_all_geofences` | 3 | 1 | fields | 73% | SILVER |
+| `_library-composed/gps_tracker__request_position` | 3 | 1 | fields | 71% | SILVER |
+| `_library-composed/lorawan_frames__fctrl_uplink_adr_ack` | 5 | 1 | fields | 58% | REJECTED |
+| `_library-composed/lorawan_frames__mhdr_confirmed_down` | 3 | 1 | fields | 58% | REJECTED |
+| `_library-composed/lorawan_frames__mhdr_unconfirmed_up` | 3 | 1 | fields | 58% | REJECTED |
+| `_library-composed/lorawan_mac_commands__dev_status_ans` | 3 | 1 | fields | 71% | SILVER |
+| `_library-composed/lorawan_mac_commands__link_check_ans` | 3 | 1 | fields | 71% | SILVER |
+| `_library-composed/lorawan_mac_commands__link_check_req` | 1 | 1 | fields | 71% | SILVER |
+| `_library-composed/sensor_config__read_all_sensors` | 3 | 1 | fields | 73% | SILVER |
+| `_library-composed/sensor_config__set_interval_5min` | 3 | 1 | fields | 73% | SILVER |
+| `_library-composed/sensor_config__set_temp_calibration` | 4 | 1 | fields | 73% | SILVER |
+| `_library-composed/ts003_clock_sync__app_time_ans_negative_correction` | 3 | 1 | fields | 73% | SILVER |
+| `_library-composed/ts003_clock_sync__app_time_ans_positive_correction` | 3 | 1 | fields | 69% | BRONZE |
+| `_library-composed/ts003_clock_sync__force_resync` | 1 | 1 | fields | 71% | SILVER |
+| `_library-composed/ts003_clock_sync__package_version_req` | 1 | 1 | fields | 73% | SILVER |
+| `_library-composed/ts003_clock_sync__set_periodicity_daily` | 2 | 1 | fields | 71% | SILVER |
+| `_library-composed/ts004_fragmentation__frag_session_delete` | 2 | 1 | fields | 73% | SILVER |
+| `_library-composed/ts004_fragmentation__frag_session_status_query` | 2 | 1 | fields | 73% | SILVER |
+| `_library-composed/ts004_fragmentation__package_version_req` | 1 | 1 | fields | 73% | SILVER |
+| `_library-composed/ts005_multicast__mc_group_delete_0` | 2 | 1 | fields | 73% | SILVER |
+| `_library-composed/ts005_multicast__mc_group_status_all` | 2 | 1 | fields | 71% | SILVER |
+| `_library-composed/ts005_multicast__package_version_req` | 1 | 1 | fields | 73% | SILVER |
+| `_library-composed/ts006_firmware_mgmt__delete_any_image` | 2 | 1 | fields | 73% | SILVER |
+| `_library-composed/ts006_firmware_mgmt__dev_version_req` | 1 | 1 | fields | 71% | SILVER |
+| `_library-composed/ts006_firmware_mgmt__package_version_req` | 1 | 1 | fields | 73% | SILVER |
+| `_library-composed/ts006_firmware_mgmt__reboot_cancel` | 2 | 1 | fields | 73% | SILVER |
+| `_library-composed/ts006_firmware_mgmt__reboot_countdown_5min` | 2 | 1 | fields | 71% | SILVER |
+| `_library-composed/ts006_firmware_mgmt__reboot_immediate` | 2 | 1 | fields | 73% | SILVER |
+| `_library-composed/ts006_firmware_mgmt__upgrade_image_query` | 1 | 1 | fields | 71% | SILVER |
+| `_library-composed/ts007_multi_package__package_version_req` | 1 | 1 | fields | 73% | SILVER |
+| `_library-composed/udp_packet_forwarder__push_ack` | 3 | 1 | fields | 71% | SILVER |
+| `_library-composed/utility_meter__reset_all_counters` | 3 | 1 | fields | 73% | SILVER |
+| `_library-composed/utility_meter__set_ct_100_1` | 3 | 1 | fields | 71% | SILVER |
+| `_library-composed/utility_meter__set_tariff` | 3 | 1 | fields | 73% | SILVER |
 | `decentlab/dl-5tm` | 10 | 7 | fields | 100% | PLATINUM |
 | `decentlab/dl-alb` | 11 | 6 | fields | 100% | PLATINUM |
 | `decentlab/dl-atm22` | 15 | 6 | fields | 100% | PLATINUM |

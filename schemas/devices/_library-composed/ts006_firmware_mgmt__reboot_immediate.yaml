@@ -1,0 +1,161 @@
+name: ts006_firmware_mgmt__reboot_immediate
+description: Composed from schemas/library/commands/ts006_firmware_mgmt.yaml#/definitions/dev_reboot_time_req
+  so the library's test vectors run in every implementation.
+endian: big
+fields: &id001
+- name: cid
+  type: u8
+  value: 2
+- name: reboot_time
+  type: u32
+  description: GPS epoch time (0=immediate, 0xFFFFFFFF=cancel)
+definitions:
+  package_version_req:
+    name: PackageVersionReq
+    cid: 0
+    direction: downlink
+    description: Request package version from device
+    fields:
+    - name: cid
+      type: u8
+      value: 0
+  package_version_ans:
+    name: PackageVersionAns
+    cid: 0
+    direction: uplink
+    description: Package version response
+    fields:
+    - name: cid
+      type: u8
+      value: 0
+    - name: package_identifier
+      type: u8
+      value: 4
+      description: Firmware management package ID
+    - name: package_version
+      type: u8
+      description: Package version (1 for TS006 v1.0.0)
+  dev_version_req:
+    name: DevVersionReq
+    cid: 1
+    direction: downlink
+    description: Query device firmware and hardware version
+    fields:
+    - name: cid
+      type: u8
+      value: 1
+  dev_version_ans:
+    name: DevVersionAns
+    cid: 1
+    direction: uplink
+    description: Device version response
+    fields:
+    - name: cid
+      type: u8
+      value: 1
+    - name: fw_version
+      type: u32
+      description: Firmware version (vendor-specific encoding)
+    - name: hw_version
+      type: u32
+      description: Hardware version (vendor-specific encoding)
+  dev_reboot_time_req:
+    name: DevRebootTimeReq
+    cid: 2
+    direction: downlink
+    description: Schedule device reboot at specific time
+    fields: *id001
+  dev_reboot_time_ans:
+    name: DevRebootTimeAns
+    cid: 2
+    direction: uplink
+    description: Reboot time response
+    fields:
+    - name: cid
+      type: u8
+      value: 2
+    - name: reboot_time
+      type: u32
+      description: Scheduled reboot time (0 if cancelled)
+  dev_reboot_countdown_req:
+    name: DevRebootCountdownReq
+    cid: 3
+    direction: downlink
+    description: Schedule device reboot after delay
+    fields:
+    - name: cid
+      type: u8
+      value: 3
+    - name: countdown
+      type: u32
+      unit: s
+      description: Seconds until reboot (0=cancel)
+  dev_reboot_countdown_ans:
+    name: DevRebootCountdownAns
+    cid: 3
+    direction: uplink
+    description: Reboot countdown response
+    fields:
+    - name: cid
+      type: u8
+      value: 3
+    - name: countdown
+      type: u32
+      unit: s
+      description: Remaining seconds (0 if cancelled)
+  dev_upgrade_image_req:
+    name: DevUpgradeImageReq
+    cid: 4
+    direction: downlink
+    description: Query upgrade image status
+    fields:
+    - name: cid
+      type: u8
+      value: 4
+  dev_upgrade_image_ans:
+    name: DevUpgradeImageAns
+    cid: 4
+    direction: uplink
+    description: Upgrade image status response
+    fields:
+    - name: cid
+      type: u8
+      value: 4
+    - name: up_image_status
+      type: u8
+      description: 0=none, 1=corrupted, 2=wrong HW, 3=valid
+    - name: up_image_version
+      type: u32
+      description: Upgrade image version (if present)
+      conditional: up_image_status != 0
+  dev_delete_image_req:
+    name: DevDeleteImageReq
+    cid: 5
+    direction: downlink
+    description: Delete upgrade image from device
+    fields:
+    - name: cid
+      type: u8
+      value: 5
+    - name: firmware_to_delete_version
+      type: u32
+      description: Version to delete (0xFFFFFFFF=any)
+  dev_delete_image_ans:
+    name: DevDeleteImageAns
+    cid: 5
+    direction: uplink
+    description: Delete image response
+    fields:
+    - name: cid
+      type: u8
+      value: 5
+    - name: status
+      type: u8
+      description: 0=success, 1=no matching image, 2=delete error
+test_vectors:
+- name: reboot_immediate
+  payload: 02 00000000
+  source: spec-example
+  expected:
+    cid: 2
+    reboot_time: 0

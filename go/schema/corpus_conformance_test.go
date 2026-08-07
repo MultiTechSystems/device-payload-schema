@@ -25,7 +25,10 @@ import (
 // correctly. Raise it as gaps close.
 // Go now decodes the whole corpus, so this is the full count and any failure is a
 // regression rather than a known gap.
-const corpusFloor = 1124
+// known gap: the sequential bitfield form `u8:3` is not supported here, only
+// the bracket form `u8[5:7]`, so three one-byte LoRaWAN frame vectors fail.
+// Deliberately lowered rather than dropping them - see AGENTS.md.
+const corpusFloor = 1163
 
 type corpusVector struct {
 	Name    string `yaml:"name"`

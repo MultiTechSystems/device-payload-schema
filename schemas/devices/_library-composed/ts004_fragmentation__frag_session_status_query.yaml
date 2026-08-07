@@ -1,0 +1,173 @@
+name: ts004_fragmentation__frag_session_status_query
+description: Composed from schemas/library/commands/ts004_fragmentation.yaml#/definitions/frag_session_status_req
+  so the library's test vectors run in every implementation.
+endian: big
+fields: &id001
+- name: cid
+  type: u8
+  value: 1
+- name: frag_index
+  type: u8
+  description: Session index [1:0] + Participants [4]
+definitions:
+  package_version_req:
+    name: PackageVersionReq
+    cid: 0
+    direction: downlink
+    description: Request package version from device
+    fields:
+    - name: cid
+      type: u8
+      value: 0
+  package_version_ans:
+    name: PackageVersionAns
+    cid: 0
+    direction: uplink
+    description: Package version response
+    fields:
+    - name: cid
+      type: u8
+      value: 0
+    - name: package_identifier
+      type: u8
+      value: 3
+      description: Fragmentation package ID
+    - name: package_version
+      type: u8
+      description: Package version (2 for TS004 v2.0.0)
+  frag_session_status_req:
+    name: FragSessionStatusReq
+    cid: 1
+    direction: downlink
+    description: Query fragmentation session status
+    fields: *id001
+  frag_session_status_ans:
+    name: FragSessionStatusAns
+    cid: 1
+    direction: uplink
+    description: Fragmentation session status response
+    fields:
+    - name: cid
+      type: u8
+      value: 1
+    - name: received_and_index
+      type: u8
+      description: FragIndex[1:0] | NotAllReceived[2] | MissingFrag[3]
+    - name: missing_frag
+      type: u8
+      description: Number of missing fragments
+    - name: status
+      type: u8
+      description: Status bits - MemoryError[0], MICError[1], etc.
+  frag_session_setup_req:
+    name: FragSessionSetupReq
+    cid: 2
+    direction: downlink
+    description: Create fragmentation session
+    fields:
+    - name: cid
+      type: u8
+      value: 2
+    - name: frag_session
+      type: u8
+      description: FragIndex[1:0] | McGroupBitMask[5:2]
+    - name: nb_frag
+      type: u16
+      description: Number of uncoded fragments (max 16383)
+    - name: frag_size
+      type: u8
+      description: Size of each fragment in octets
+    - name: control
+      type: u8
+      description: FragAlgo[2:0] | AckReception[3] | BlockAckDelay[6:4]
+    - name: padding
+      type: u8
+      description: Padding bytes count in last fragment
+    - name: descriptor
+      type: bytes
+      length: 4
+      description: 4-byte vendor-specific descriptor
+    - name: session_cnt
+      type: u16
+      description: Session counter for replay protection
+    - name: mic
+      type: bytes
+      length: 4
+      description: 4-byte AES-CMAC integrity check
+  frag_session_setup_ans:
+    name: FragSessionSetupAns
+    cid: 2
+    direction: uplink
+    description: Fragmentation session setup response
+    fields:
+    - name: cid
+      type: u8
+      value: 2
+    - name: status_and_index
+      type: u8
+      description: FragIndex[1:0] | WrongDescriptor[2] | FragSessionCntReplay[3] |
+        NotEnoughMem[4] | EncodingUnsupported[5] | MICError[6]
+  frag_session_delete_req:
+    name: FragSessionDeleteReq
+    cid: 3
+    direction: downlink
+    description: Delete fragmentation session
+    fields:
+    - name: cid
+      type: u8
+      value: 3
+    - name: param
+      type: u8
+      description: FragIndex[1:0]
+  frag_session_delete_ans:
+    name: FragSessionDeleteAns
+    cid: 3
+    direction: uplink
+    description: Fragmentation session delete response
+    fields:
+    - name: cid
+      type: u8
+      value: 3
+    - name: status_and_index
+      type: u8
+      description: FragIndex[1:0] | SessionNotExist[2]
+  data_block_received_req:
+    name: DataBlockReceivedReq
+    cid: 4
+    direction: uplink
+    description: Device signals data block reception complete
+    fields:
+    - name: cid
+      type: u8
+      value: 4
+    - name: param
+      type: u8
+      description: FragIndex[1:0]
+  data_block_received_ans:
+    name: DataBlockReceivedAns
+    cid: 4
+    direction: downlink
+    description: Server acknowledges data block reception
+    fields:
+    - name: cid
+      type: u8
+      value: 4
+  data_fragment:
+    name: DataFragment
+    cid: 8
+    direction: downlink
+    description: Fragment payload data
+    fields:
+    - name: cid_and_index
+      type: u16
+      description: CID[7:0]=0x08 | FragIndex_high[9:8] | FragN[21:10]
+    - name: data
+      type: bytes
+      description: Fragment data (length = FragSize)
+test_vectors:
+- name: frag_session_status_query
+  payload: 01 00
+  source: spec-example
+  expected:
+    cid: 1
+    frag_index: 0
