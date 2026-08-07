@@ -320,23 +320,20 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   with no test vectors and are therefore Rejected. See the per-device table in
   [`docs/INDEX.md`](docs/INDEX.md). The decentlab and milesight families have been
   through a vendor cross-validation pass; the rest have not.
-- **Decentlab: 39 of 58 agree with the vendor decoder.** The remaining 19 are two
-  distinct problems. 14 fields still carry `# formula:` hints needing more than
-  affine arithmetic — a ratio of two words, several squares, a thermistor
-  logarithm, and one `max()` of two linear combinations; all but the `max()` look
-  expressible with `polynomial` and the transform ops the interpreter already has
-  (`pow`, `log`, `sqrt`). Separately, some fields are declared `s16` where the
-  vendor uses offset-binary `(x - 32768)`: for word `0x8a77` an s16 read gives
-  -300.89 where the device means 26.79. These were pattern-matched by the
-  converter, just wrongly, so **no hint was left to warn you** — the same defect
-  that made `dl-alb` hold a 100% Platinum score while mis-decoding every payload.
-  Check a field's declared type against the vendor expression, not only its
-  arithmetic.
-- **A `_`-prefixed field inside a `flagged` group is still emitted.** Every other
-  construct treats a leading underscore as internal and omits it from the output;
-  the flagged handler in `schema_interpreter.py` does not. Intermediate fields used
-  to combine two words therefore appear in the decoded result. Fixing it means
-  matching the behaviour in all four interpreters at once.
+- **Decentlab: 47 of 58 agree with the vendor decoder.** The remaining 11 are
+  fields still carrying `# formula:` hints that need more than affine arithmetic —
+  a ratio of two words, several squares, a thermistor logarithm, and one `max()`
+  of two linear combinations. All but the `max()` look expressible with
+  `polynomial` and the transform ops the interpreter already has (`pow`, `log`,
+  `sqrt`).
+- **Offset-binary is not `s16` — check the declared type, not just the arithmetic.**
+  Decentlab sensors subtract 32768 from an unsigned word, so the value is
+  `u16` with `add: -32768`, not a two's-complement read. For word `0x8a77` an s16
+  gives -300.89 where the device means 26.79. 44 fields were declared this way;
+  they were pattern-matched by the converter, just wrongly, so **no hint was left
+  to warn anyone** — the same defect that let `dl-alb` hold a 100% Platinum score
+  while mis-decoding every payload. A wrongly matched field is more dangerous than
+  an unmatched one, because nothing marks it as unfinished.
 - **Milesight's remaining gaps are language features, not schema neglect.** 32 of
   the 84 still disagree with the vendor's decoder. The missing TLV channels were
   measured: of 790 channels the vendor decodes, 724 are covered and 66 are not, and

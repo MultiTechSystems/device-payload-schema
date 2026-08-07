@@ -51,8 +51,10 @@ fields:
               add: -32768
               unit: "ppm"
             - name: co2_sensor_temperature
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - div: 100
+                - add: -327.68
               unit: "°C"
             - name: capacitor_voltage_1
               type: u16

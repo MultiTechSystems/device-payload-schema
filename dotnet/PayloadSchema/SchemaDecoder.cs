@@ -142,9 +142,14 @@ public static class SchemaDecoder
 
             if (value != null && !string.IsNullOrEmpty(field.Name))
             {
+                // A leading underscore marks an internal field: it becomes a
+                // variable later fields can reference, but is not reported.
+                // Without this an intermediate used to combine two words appeared
+                // in the decoded output.
+                if (!field.Name.StartsWith("_"))
+                    result[ResolveFieldName(field, ctx)] = value;
                 // Keyed by the schema-level name in Variables so $references keep
                 // working when name_from is in play (PS-267).
-                result[ResolveFieldName(field, ctx)] = value;
                 ctx.Variables[field.Name] = value;
                 if (field.ValidRange is { Length: >= 2 })
                     ctx.CheckValidRange(value, field);

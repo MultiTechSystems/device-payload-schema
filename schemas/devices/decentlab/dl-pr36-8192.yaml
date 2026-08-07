@@ -23,8 +23,10 @@ fields:
                 - add: -4
               unit: "bar"
             - name: temperature
-              type: s16
-              div: 256
+              type: u16
+              transform:
+                - div: 256
+                - add: -128
               unit: "°C"
         - bit: 1
           fields:

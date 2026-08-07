@@ -26,8 +26,10 @@ fields:
                 - add: -0.6956
               unit: "m³⋅m⁻³"
             - name: soil_temperature
-              type: s16
-              div: 10
+              type: u16
+              transform:
+                - div: 10
+                - add: -3276.8
               unit: "°C"
             - name: electrical_conductivity
               type: u16

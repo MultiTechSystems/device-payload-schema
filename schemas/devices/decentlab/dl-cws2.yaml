@@ -31,20 +31,28 @@ fields:
         - bit: 1
           fields:
             - name: surface_temperature
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - div: 100
+                - add: -327.68
               unit: "°C"
             - name: air_temperature
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - div: 100
+                - add: -327.68
               unit: "°C"
             - name: air_humidity
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - div: 100
+                - add: -327.68
               unit: "%"
             - name: dew_point
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - div: 100
+                - add: -327.68
               unit: "°C"
             - name: angle
               type: u16
@@ -52,8 +60,10 @@ fields:
                 - add: -32768
               unit: "°"
             - name: sensor_temperature
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - div: 100
+                - add: -327.68
               unit: "°C"
         - bit: 2
           fields:

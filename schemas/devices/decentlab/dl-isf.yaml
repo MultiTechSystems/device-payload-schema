@@ -65,16 +65,22 @@ fields:
                 - div: 500
               unit: "s"
             - name: temperature_outer
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - div: 100
+                - add: -327.68
               unit: "°C"
             - name: max_voltage
-              type: s16
-              div: 1000
+              type: u16
+              transform:
+                - div: 1000
+                - add: -32.768
               unit: "V"
             - name: min_voltage
-              type: s16
-              div: 1000
+              type: u16
+              transform:
+                - div: 1000
+                - add: -32.768
               unit: "V"
             - name: diagnostic
               type: u32

@@ -17,8 +17,10 @@ fields:
         - bit: 0
           fields:
             - name: solar_radiation
-              type: s16
-              div: 10
+              type: u16
+              transform:
+                - div: 10
+                - add: -3276.8
               unit: "W⋅m⁻²"
             - name: precipitation
               type: u16
@@ -33,44 +35,64 @@ fields:
               add: -32768
               unit: "km"
             - name: wind_speed
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - div: 100
+                - add: -327.68
               unit: "m⋅s⁻¹"
             - name: wind_direction
-              type: s16
-              div: 10
+              type: u16
+              transform:
+                - div: 10
+                - add: -3276.8
               unit: "°"
             - name: maximum_wind_speed
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - div: 100
+                - add: -327.68
               unit: "m⋅s⁻¹"
             - name: air_temperature
-              type: s16
-              div: 10
+              type: u16
+              transform:
+                - div: 10
+                - add: -3276.8
               unit: "°C"
             - name: vapor_pressure
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - div: 100
+                - add: -327.68
               unit: "kPa"
             - name: barometric_pressure
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - div: 100
+                - add: -327.68
               unit: "kPa"
             - name: relative_humidity
-              type: s16
-              div: 10
+              type: u16
+              transform:
+                - div: 10
+                - add: -3276.8
               unit: "%"
             - name: internal_temperature
-              type: s16
-              div: 10
+              type: u16
+              transform:
+                - div: 10
+                - add: -3276.8
               unit: "°C"
             - name: tilt_angle_x_orientation
-              type: s16
-              div: 10
+              type: u16
+              transform:
+                - div: 10
+                - add: -3276.8
               unit: "°"
             - name: tilt_angle_y_orientation
-              type: s16
-              div: 10
+              type: u16
+              transform:
+                - div: 10
+                - add: -3276.8
               unit: "°"
             - name: precipitation_electrical_conductivity
               type: u16

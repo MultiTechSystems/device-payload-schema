@@ -1133,14 +1133,21 @@ class SchemaInterpreter:
                     gf_name = gf.get('name', 'unknown')
                     gf_type = gf.get('type', 'u8')
                     
+                    # A leading underscore marks an internal field: it becomes a
+                    # variable that later fields can reference, but is not reported.
+                    # Every other construct already did this; flagged did not, so an
+                    # intermediate used to combine two words appeared in the output.
+                    internal = gf_name.startswith('_')
+
                     # Handle computed fields (type: number)
                     if gf_type == 'number':
                         value = self._decode_computed_field(gf)
                         if value is not None:
-                            result[gf_name] = value
+                            if not internal:
+                                result[gf_name] = value
                             self._variables[gf_name] = value
                         continue
-                    
+
                     value, pos = self._decode_field(gf, buf, pos)
                     if value is not None:
                         if gf.get('formula'):
@@ -1149,7 +1156,8 @@ class SchemaInterpreter:
                             value = self._evaluate_formula(gf['formula'], value)
                         else:
                             value = self._apply_modifiers(value, gf)
-                        result[gf_name] = value
+                        if not internal:
+                            result[gf_name] = value
                         self._variables[gf_name] = value
         
         return result, pos

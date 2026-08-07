@@ -23,12 +23,16 @@ fields:
                 - add: -4
               unit: "bar"
             - name: temperature_electronics
-              type: s16
-              div: 256
+              type: u16
+              transform:
+                - div: 256
+                - add: -128
               unit: "°C"
             - name: temperature_pt1000
-              type: s16
-              div: 256
+              type: u16
+              transform:
+                - div: 256
+                - add: -128
               unit: "°C"
             - name: electrical_conductivity
               type: u16

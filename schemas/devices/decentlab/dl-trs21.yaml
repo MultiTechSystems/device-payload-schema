@@ -22,8 +22,10 @@ fields:
                 - div: -10
               unit: "kPa"
             - name: soil_temperature
-              type: s16
-              div: 10
+              type: u16
+              transform:
+                - div: 10
+                - add: -3276.8
               unit: "°C"
         - bit: 1
           fields:

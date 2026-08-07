@@ -1461,7 +1461,13 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 			if err != nil {
 				return nil, err
 			}
-			result[outputName] = value
+			// A leading underscore marks an internal field: it becomes a variable
+			// later fields can reference, but is not reported. The encode path
+			// already honoured this; decoding did not, so an intermediate used to
+			// combine two words appeared in the decoded result.
+			if !strings.HasPrefix(field.Name, "_") {
+				result[outputName] = value
+			}
 			// Keyed by the schema-level name so $references keep working when
 			// name_from is in play (PS-267).
 			ctx.Variables[field.Name] = value

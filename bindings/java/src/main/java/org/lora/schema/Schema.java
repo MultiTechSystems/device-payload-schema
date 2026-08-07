@@ -516,9 +516,14 @@ public class Schema {
             }
 
             if (value != null && field.getName() != null && !field.getName().isEmpty()) {
+                // A leading underscore marks an internal field: it becomes a variable
+                // later fields can reference, but is not reported. Without this an
+                // intermediate used to combine two words appeared in the output.
+                if (!field.getName().startsWith("_")) {
+                    result.put(resolveFieldName(field, ctx), value);
+                }
                 // Variables are keyed by the schema-level name so $references keep
                 // working when name_from is in play (PS-267).
-                result.put(resolveFieldName(field, ctx), value);
                 ctx.setVariable(field.getName(), value);
             }
         }

@@ -23,8 +23,10 @@ fields:
               div: 100
               unit: "%"
             - name: air_temperature
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - div: 100
+                - add: -327.68
               unit: "°C"
         - bit: 1
           fields:
