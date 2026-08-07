@@ -109,7 +109,7 @@ Generated inventory of this repository: what lives where, what each document cov
 ## Device schemas
 
 158 schemas under `schemas/devices/`.
-Mean quality score 63.3% (PLATINUM 32, GOLD 41, SILVER 23, BRONZE 1, REJECTED 61). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+Mean quality score 63.3% (PLATINUM 30, GOLD 40, SILVER 26, BRONZE 1, REJECTED 61). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
@@ -118,9 +118,9 @@ Mean quality score 63.3% (PLATINUM 32, GOLD 41, SILVER 23, BRONZE 1, REJECTED 61
 | milesight | 84 | 943 | PLATINUM 18, GOLD 33, SILVER 22, REJECTED 11 |
 | decentlab | 58 | 120 | PLATINUM 12, GOLD 7, SILVER 1, REJECTED 38 |
 | makerfabs | 6 | 0 | REJECTED 6 |
-| mclimate | 3 | 11 | GOLD 1, REJECTED 2 |
-| digital-matter | 1 | 7 | PLATINUM 1 |
-| dragino | 1 | 5 | PLATINUM 1 |
+| mclimate | 3 | 11 | SILVER 1, REJECTED 2 |
+| digital-matter | 1 | 7 | SILVER 1 |
+| dragino | 1 | 5 | SILVER 1 |
 | elsys | 1 | 2 | REJECTED 1 |
 | hbi | 1 | 0 | REJECTED 1 |
 | radio-bridge | 1 | 28 | BRONZE 1 |
@@ -191,8 +191,8 @@ Mean quality score 63.3% (PLATINUM 32, GOLD 41, SILVER 23, BRONZE 1, REJECTED 61
 | `decentlab/dl-wrm` | 8 | 0 | fields | 16% | REJECTED |
 | `decentlab/dl-zn1` | 5 | 0 | fields | 16% | REJECTED |
 | `decentlab/dl-zn2` | 6 | 0 | fields | 16% | REJECTED |
-| `digital-matter/oyster` | 24 | 7 | ports | 100% | PLATINUM |
-| `dragino/laq4` | 14 | 5 | fields | 100% | PLATINUM |
+| `digital-matter/oyster` | 24 | 7 | ports | 100% | SILVER |
+| `dragino/laq4` | 14 | 5 | fields | 100% | SILVER |
 | `elsys/ers` | 32 | 2 | fields | 56% | REJECTED |
 | `hbi/mla20` | 18 | 0 | fields | 16% | REJECTED |
 | `makerfabs/4-channel-adc` | 8 | 0 | fields | 16% | REJECTED |
@@ -203,7 +203,7 @@ Mean quality score 63.3% (PLATINUM 32, GOLD 41, SILVER 23, BRONZE 1, REJECTED 61
 | `makerfabs/soil-monitor` | 8 | 0 | fields | 14% | REJECTED |
 | `mclimate/flood-sensor` | 5 | 0 | fields | 16% | REJECTED |
 | `mclimate/t-valve` | 11 | 0 | fields | 16% | REJECTED |
-| `mclimate/vicki` | 31 | 11 | fields | 85% | GOLD |
+| `mclimate/vicki` | 31 | 11 | fields | 85% | SILVER |
 | `milesight/am102` | 22 | 15 | fields | 100% | PLATINUM |
 | `milesight/am102l` | 22 | 15 | fields | 100% | PLATINUM |
 | `milesight/am103` | 16 | 15 | fields | 94% | GOLD |

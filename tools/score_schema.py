@@ -7,19 +7,21 @@ Section 10 (Conformance): Platinum 95-100%, Gold 85-94%, Silver 70-84%,
 Bronze 60-69%, Rejected below 60%.
 
 Gold and Platinum additionally have MUST requirements (PS-239): certification
-passes, at least 5 test vectors, every conditional branch covered, and edge case
-vectors present. Those are gates, not points -- a schema missing any of them is
-capped below Gold however high its weighted score.
+passes, at least 5 test vectors, every conditional branch covered, edge case
+vectors present, and at least one test vector with an independent `source:`.
+Those are gates, not points -- a schema missing any of them is capped below Gold
+however high its weighted score (PS-264).
 
 What this tool can and cannot tell you:
 
     It runs a schema against its OWN test vectors, so it measures internal
     consistency. It cannot tell whether the vectors themselves are right. A
     schema whose vectors were generated from this interpreter's output scores
-    perfectly while mis-decoding every real payload. Vectors should therefore
-    declare where their expected values came from (`source:` on each vector) and
-    --require-provenance makes independent provenance a condition for Platinum.
-    For a genuinely independent check, compare against a vendor decoder (see
+    perfectly while mis-decoding every real payload. Vectors therefore declare
+    where their expected values came from (`source:` on each vector), and a
+    schema with no independently sourced vector is capped at Silver. Pass
+    --no-require-provenance to score without that gate. For a genuinely
+    independent check, compare against a vendor decoder (see
     tools/crossvalidate_decentlab.py).
 
 Usage:
@@ -1062,7 +1064,7 @@ def check_provenance(schema: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def calculate_score(
-    results: Dict[str, Any], require_provenance: bool = False
+    results: Dict[str, Any], require_provenance: bool = True
 ) -> Tuple[float, str]:
     """Calculate the weighted score and the resulting tier.
 
@@ -1188,14 +1190,14 @@ def calculate_score(
     if results.get('semantic_annotations', {}).get('annotation_errors'):
         gates.append("incorrect semantic annotations (PS-238)")
 
-    # Platinum claims cross-validation. Without independent provenance the
+    # Gold and Platinum claim the schema was checked against something other than
+    # an implementation of this specification. Without independent provenance the
     # vectors may have been generated from this interpreter, in which case the
-    # score only shows self-consistency. Opt-in so the published rubric is not
-    # changed silently.
+    # score only shows self-consistency (PS-264).
     if require_provenance and results.get('provenance', {}).get(
         'verification'
     ) != 'independent':
-        gates.append("no independently sourced test vectors")
+        gates.append("no independently sourced test vectors (PS-264)")
 
     if gates and tier in ('PLATINUM', 'GOLD'):
         tier = 'SILVER' if pct >= 70 else tier
@@ -1269,7 +1271,7 @@ def generate_recommendations(results: Dict[str, Any]) -> List[str]:
 
 
 def score_schema(
-    schema_path: str, verbose: bool = False, require_provenance: bool = False
+    schema_path: str, verbose: bool = False, require_provenance: bool = True
 ) -> ScoringResult:
     """Run all quality scoring checks on a schema."""
     
@@ -1443,10 +1445,13 @@ def main():
         help='Fail if any schema scores below this tier',
     )
     parser.add_argument(
-        '--require-provenance',
-        action='store_true',
-        help='Cap the tier unless a test vector declares an independent source',
+        '--no-require-provenance',
+        dest='require_provenance',
+        action='store_false',
+        help='Score without the PS-264 gate, which otherwise caps a schema at '
+             'Silver unless a test vector declares an independent source',
     )
+    parser.set_defaults(require_provenance=True)
 
     args = parser.parse_args()
 

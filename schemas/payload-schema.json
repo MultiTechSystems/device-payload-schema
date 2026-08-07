@@ -233,6 +233,17 @@
           "input_metadata": {
             "type": "object",
             "description": "TS013 input metadata for testing"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "vendor-doc",
+              "vendor-codec",
+              "field-capture",
+              "spec-example",
+              "generated"
+            ],
+            "description": "Provenance of the expected values (PS-263). Absent means unknown, which certification treats as 'generated'."
           }
         },
         "required": [

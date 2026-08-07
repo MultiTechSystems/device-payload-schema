@@ -131,10 +131,10 @@ because they ship no test vectors.
 | 5 | At least 5 vectors |
 | 20 | Correct IPSO + SenML + semantic annotation of detectable sensor fields |
 
-Gold and Platinum additionally have **gates** (PS-239), not just points. A schema
-missing any of these is capped below Gold however high it scores: at least 5
-vectors, vectors passing, every branch covered, edge case vectors present, and no
-incorrect annotations.
+Gold and Platinum additionally have **gates** (PS-239, PS-264), not just points. A
+schema missing any of these is capped below Gold however high it scores: at least
+5 vectors, vectors passing, every branch covered, edge case vectors present, no
+incorrect annotations, and at least one vector with an independent `source:`.
 
 Three things to internalise before doing schema work:
 
@@ -147,12 +147,14 @@ Three things to internalise before doing schema work:
    is not hypothetical, it is how a schema that mis-decoded every real payload
    held a 100% Platinum score. Declare `source:` on every vector
    (`vendor-doc`, `vendor-codec`, `field-capture`, `spec-example`, or
-   `generated`) and run `--require-provenance` to make independent provenance a
-   condition for Platinum.
+   `generated`). Scoring enforces this by default: with no independently sourced
+   vector a schema is capped at Silver (PS-264).
 
 ```bash
 python3 tools/score_schema.py schemas/devices --all --baseline score-baseline.json
-python3 tools/score_schema.py <schema> --require-provenance
+
+# Score the rubric without the PS-264 provenance gate.
+python3 tools/score_schema.py <schema> --no-require-provenance
 
 # Independent oracles. Use these before trusting a score.
 python3 tools/crossvalidate_decentlab.py --vendor-dir ../decentlab-decoders

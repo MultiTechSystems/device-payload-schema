@@ -367,8 +367,20 @@ class TestTiers:
         failing = calculate_score(self._perfect_results(js_status="fail"))[0]
         assert failing < calculate_score(self._perfect_results())[0]
 
-    def test_provenance_gate_is_opt_in(self):
+    def test_self_sourced_vectors_cap_below_gold(self):
+        """PS-264: a schema whose vectors all came from this implementation
+        cannot be certified above Silver, however high its weighted score."""
         results = self._perfect_results(provenance={"verification": "self"})
-        assert calculate_score(dict(results))[1] == "PLATINUM"
-        capped = calculate_score(dict(results), require_provenance=True)[1]
-        assert capped != "PLATINUM"
+        _score, tier = calculate_score(dict(results))
+        assert tier == "SILVER"
+
+    def test_provenance_gate_can_be_disabled(self):
+        """--no-require-provenance scores the rubric without the PS-264 gate."""
+        results = self._perfect_results(provenance={"verification": "self"})
+        tier = calculate_score(dict(results), require_provenance=False)[1]
+        assert tier == "PLATINUM"
+
+    def test_provenance_gate_is_reported(self):
+        results = self._perfect_results(provenance={"verification": "self"})
+        calculate_score(results)
+        assert any("PS-264" in gate for gate in results["tier_capped_by"])
