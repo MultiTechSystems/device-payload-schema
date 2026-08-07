@@ -23,9 +23,9 @@ import (
 
 // corpusFloor is the number of corpus vectors this interpreter is known to decode
 // correctly. Raise it as gaps close.
-// The remaining 8 are ers's TLV cases with length_size 0, and vicki's valveOpenness,
-// which needs the `round` transform op. Named in the test output.
-const corpusFloor = 1108
+// Go now decodes the whole corpus, so this is the full count and any failure is a
+// regression rather than a known gap.
+const corpusFloor = 1116
 
 type corpusVector struct {
 	Name    string `yaml:"name"`

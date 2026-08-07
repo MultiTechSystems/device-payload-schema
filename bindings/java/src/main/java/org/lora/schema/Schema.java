@@ -273,12 +273,15 @@ public class Schema {
             f.setCases(cases);
         }
         
-        // TLV cases (map format). Parsed whenever `cases` appears alongside tag
-        // fields, not only when the type is already TLV: an inline `- tlv: {...}`
-        // block is parsed here before its caller sets the type, so requiring the
-        // type first left tlvCases null and every TLV schema decoded to an empty
-        // result with no error.
-        if ((f.getType() == FieldType.TLV || fm.containsKey("tag_fields") || fm.containsKey("tag_key"))
+        // TLV cases (map format). Parsed whenever `cases` appears alongside anything
+        // that marks the block as TLV, not only when the type is already TLV: an
+        // inline `- tlv: {...}` block is parsed here before its caller sets the type,
+        // so requiring the type first left tlvCases null and every TLV schema decoded
+        // to an empty result with no error. `tag_size` counts as such a marker - a
+        // block with a simple one-byte tag has neither tag_fields nor tag_key, which
+        // is why elsys/ers decoded to nothing.
+        if ((f.getType() == FieldType.TLV || fm.containsKey("tag_fields")
+                || fm.containsKey("tag_key") || fm.containsKey("tag_size"))
                 && casesRaw instanceof Map) {
             Map<String, List<Field>> tlvCases = new HashMap<>();
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) casesRaw).entrySet()) {

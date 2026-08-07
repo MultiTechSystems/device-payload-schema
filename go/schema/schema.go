@@ -183,6 +183,9 @@ type Transform struct {
 	Sub  *float64 `json:"sub,omitempty" yaml:"sub,omitempty"`
 	Mult *float64 `json:"mult,omitempty" yaml:"mult,omitempty"`
 	Div  *float64 `json:"div,omitempty" yaml:"div,omitempty"`
+	// Named operation form, e.g. {op: round, decimals: 2}.
+	Op       string `json:"op,omitempty" yaml:"op,omitempty"`
+	Decimals int    `json:"decimals,omitempty" yaml:"decimals,omitempty"`
 }
 
 // Case represents a match case in conditional parsing.
@@ -208,6 +211,7 @@ type GuardCondition struct {
 	Lt    *float64 `json:"lt,omitempty" yaml:"lt,omitempty"`
 	Lte   *float64 `json:"lte,omitempty" yaml:"lte,omitempty"`
 	Eq    *float64 `json:"eq,omitempty" yaml:"eq,omitempty"`
+	Ne    *float64 `json:"ne,omitempty" yaml:"ne,omitempty"`
 }
 
 // GuardDef represents conditional evaluation with fallback.
@@ -399,6 +403,35 @@ func applyCanonicalModifiers(value float64, field Field) float64 {
 	}
 	if field.Add != nil {
 		value = value + *field.Add
+	}
+	return value
+}
+
+// applyTransformStages applies a transform array in list order. A stage normally
+// carries one arithmetic op; where it carries several they apply in the canonical
+// order mult, div, add, so a stage cannot mean different things in different
+// languages. A stage may instead name an operation, as {op: round, decimals: N}.
+func applyTransformStages(value float64, stages []Transform) float64 {
+	for _, stage := range stages {
+		if stage.Op == "round" {
+			// Half-to-even, matching the interpreter. Half-up would disagree with
+			// it on exact halves, which the corpus vectors do contain.
+			scale := math.Pow(10, float64(stage.Decimals))
+			value = math.RoundToEven(value*scale) / scale
+			continue
+		}
+		if stage.Mult != nil {
+			value = value * *stage.Mult
+		}
+		if stage.Div != nil && *stage.Div != 0 {
+			value = value / *stage.Div
+		}
+		if stage.Sub != nil {
+			value = value - *stage.Sub
+		}
+		if stage.Add != nil {
+			value = value + *stage.Add
+		}
 	}
 	return value
 }
@@ -663,6 +696,16 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 					d := float64(div)
 					t.Div = &d
 				}
+				// {op: round, decimals: N}. Unparsed until now, so a schema
+				// rounding its output reported the unrounded value instead.
+				if op, ok := tm["op"].(string); ok {
+					t.Op = op
+				}
+				if decimals, ok := tm["decimals"].(int); ok {
+					t.Decimals = decimals
+				} else if decimals, ok := tm["decimals"].(float64); ok {
+					t.Decimals = int(decimals)
+				}
 				f.Transform = append(f.Transform, t)
 			}
 		}
@@ -925,12 +968,15 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 		f.Ref2 = ref2
 	}
 
-	// TLV cases. These are parsed whenever `cases` is present alongside tag
-	// fields, not only when the type is already known to be tlv: an inline
-	// `- tlv: {...}` block is parsed here before its caller sets the type, so
-	// requiring the type first left TLVCases empty and every TLV schema in the
-	// corpus decoded to an empty result with no error.
-	if f.Type == TypeTLV || f.Type == "tlv" || fm["tag_fields"] != nil || fm["tag_key"] != nil {
+	// TLV cases. These are parsed whenever `cases` is present alongside anything
+	// marking the block as tlv, not only when the type is already known to be tlv:
+	// an inline `- tlv: {...}` block is parsed here before its caller sets the
+	// type, so requiring the type first left TLVCases empty and every TLV schema in
+	// the corpus decoded to an empty result with no error. tag_size counts as such
+	// a marker - a block with a simple one-byte tag has neither tag_fields nor
+	// tag_key, which is why elsys/ers decoded to nothing.
+	if f.Type == TypeTLV || f.Type == "tlv" || fm["tag_fields"] != nil ||
+		fm["tag_key"] != nil || fm["tag_size"] != nil {
 		if casesMap, ok := fm["cases"].(map[string]any); ok {
 			f.TLVCases = make(map[string][]Field)
 			for key, value := range casesMap {
@@ -1069,6 +1115,16 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 					} else if eq, ok := wm["eq"].(int); ok {
 						eqf := float64(eq)
 						gc.Eq = &eqf
+					}
+					// ne was neither parsed nor evaluated, so a guard written with
+					// it never failed and its field kept a value it should not
+					// have had: vicki's _tempStandard stayed live on the firmware
+					// 3.5 path and was added to _tempFw35, giving 46.95 for 14.76.
+					if ne, ok := wm["ne"].(float64); ok {
+						gc.Ne = &ne
+					} else if ne, ok := wm["ne"].(int); ok {
+						nef := float64(ne)
+						gc.Ne = &nef
 					}
 					gd.When = append(gd.When, gc)
 				}
@@ -1765,26 +1821,11 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 				numVal = evaluatePolynomial(field.Polynomial, numVal)
 			}
 
-			// Apply transform array (for ref fields, transform comes before guard)
-			if len(field.Transform) > 0 {
-				for _, stage := range field.Transform {
-					if stage.Sub != nil {
-						numVal = numVal - *stage.Sub
-					}
-					if stage.Add != nil {
-						numVal = numVal + *stage.Add
-					}
-					if stage.Mult != nil {
-						numVal = numVal * *stage.Mult
-					}
-					if stage.Div != nil && *stage.Div != 0 {
-						numVal = numVal / *stage.Div
-					}
-				}
-			}
-
-			// Canonical order: mult, div, add (PS-101)
+			// Modifiers first, then the transform stages - the order the
+			// interpreter uses. Running the stages first made a field that scales
+			// with mult and then rounds with a stage round before it had scaled.
 			numVal = applyCanonicalModifiers(numVal, field)
+			numVal = applyTransformStages(numVal, field.Transform)
 
 			value = numVal
 		} else if field.Compute != nil {
@@ -1800,7 +1841,10 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 				if err != nil {
 					return nil, err
 				}
-				value = result
+				// A compute takes its transform stages and no bare modifiers,
+				// as the interpreter does. These were not applied at all, so a
+				// computed field asking to be rounded was reported unrounded.
+				value = applyTransformStages(result, field.Transform)
 			}
 		} else if field.Formula != "" {
 			// Legacy formula support
@@ -3121,6 +3165,9 @@ func guardConditionsHold(gd *GuardDef, ctx *DecodeContext) bool {
 		if cond.Eq != nil && !(fv == *cond.Eq) {
 			return false
 		}
+		if cond.Ne != nil && !(fv != *cond.Ne) {
+			return false
+		}
 	}
 	return true
 }
@@ -3151,6 +3198,9 @@ func evaluateGuard(gd *GuardDef, value float64, ctx *DecodeContext) float64 {
 			return gd.Else
 		}
 		if cond.Eq != nil && fv != *cond.Eq {
+			return gd.Else
+		}
+		if cond.Ne != nil && fv == *cond.Ne {
 			return gd.Else
 		}
 	}

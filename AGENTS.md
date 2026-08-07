@@ -182,17 +182,17 @@ Every implementation has a runner that reads the same YAML and the same vectors:
 | Implementation | Runner | Vectors passing |
 |---|---|---|
 | Python | `tests/test_corpus_conformance.py` | 1116 / 1116 |
-| Go | `go/schema/corpus_conformance_test.go` | 1108 |
+| Go | `go/schema/corpus_conformance_test.go` | 1116 / 1116 |
 | C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 1082 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 1081 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 1083 |
 | C | none - consumes a binary schema, not YAML | n/a |
 
 Each non-Python runner compares its pass count against a committed floor rather than
 requiring the whole corpus, so the known gaps stay visible and a regression fails the
 build. **Raise the floor whenever you close a gap.** The remaining gaps are named in
-each runner's output: every implementation still misses ers's TLV cases with
-`length_size: 0`; Go and C# need the `round` transform op; C# and Java need the
-`match` cases rbs30x uses; and Java also needs laq4's `tvoc` and `temp_min`.
+each runner's output: C# and Java need the `match` cases rbs30x uses, C# the `round`
+transform op, and Java laq4's `tvoc` and `temp_min`. Go and Python now decode the
+whole corpus, so for those two any failure is a regression, not a known gap.
 
 A vector's port is written `fPort` or `fport`, and a runner that reads only one
 spelling decodes a port-based schema with no port at all - every field of it then
