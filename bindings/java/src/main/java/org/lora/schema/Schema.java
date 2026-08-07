@@ -8,6 +8,13 @@ import java.util.*;
 import java.util.regex.*;
 
 public class Schema {
+    /**
+     * Bit-range type, e.g. {@code u8[4:7]} - bits 4 to 7 inclusive. This is the only
+     * bitfield spelling the device corpus uses; the interpreter also accepts
+     * {@code u8[3+:2]}, {@code bits<3,2>} and {@code u8:2}, which this binding does not.
+     */
+    private static final Pattern BIT_RANGE = Pattern.compile("u(\\d+)\\[(\\d+):(\\d+)\\]");
+
     private String name;
     private int version;
     private String description;
@@ -126,12 +133,27 @@ public class Schema {
         Field f = new Field();
         
         f.setName((String) fm.get("name"));
-        f.setType(FieldType.fromString((String) fm.get("type")));
+        String rawType = (String) fm.get("type");
+        f.setType(FieldType.fromString(rawType));
         f.setLength(toInt(fm.get("length"), 0));
         f.setByteOffset(toInt(fm.get("byte_offset"), 0));
         f.setBitOffset(toInt(fm.get("bit_offset"), 0));
         f.setBits(toInt(fm.get("bits"), 0));
+        f.setConsume(toInt(fm.get("consume"), 0));
         f.setEndian((String) fm.get("endian"));
+
+        // A `u8[lo:hi]` range is a bit field. FieldType.fromString does not recognise
+        // the bracket form and fell through to U8, so the whole byte was read instead
+        // of the bits: a packed flag byte reported its raw value, which is why
+        // em310-tilt's threshold_x decoded as 17 rather than "trigger".
+        Matcher bitRange = BIT_RANGE.matcher(rawType == null ? "" : rawType.trim());
+        if (bitRange.matches()) {
+            int start = Integer.parseInt(bitRange.group(2));
+            int end = Integer.parseInt(bitRange.group(3));
+            f.setBitOffset(start);
+            f.setBits(end - start + 1);
+            f.setType(FieldType.BITS);
+        }
         
         // Modifiers
         if (fm.containsKey("mult")) {
@@ -151,6 +173,29 @@ public class Schema {
         f.setOn((String) fm.get("on"));
         f.setValue(fm.get("value"));
         f.setFormula((String) fm.get("formula"));
+
+        // Computed fields (type: number). None of this was parsed, so every schema
+        // deriving a value from an earlier field reported nothing for it.
+        if (fm.get("ref") != null) {
+            f.setRef(String.valueOf(fm.get("ref")));
+        }
+        if (fm.get("polynomial") instanceof List<?> coefficients) {
+            List<Double> parsed = new ArrayList<>();
+            for (Object coefficient : coefficients) {
+                parsed.add(toDouble(coefficient));
+            }
+            f.setPolynomial(parsed);
+        }
+        if (fm.get("compute") instanceof Map<?, ?> computeRaw) {
+            Field.Compute compute = new Field.Compute();
+            if (computeRaw.get("op") != null) compute.setOp(String.valueOf(computeRaw.get("op")));
+            compute.setA(computeRaw.get("a"));
+            compute.setB(computeRaw.get("b"));
+            f.setCompute(compute);
+        }
+        if (fm.get("guard") instanceof Map<?, ?> guardRaw) {
+            f.setGuard(parseGuard(guardRaw));
+        }
         
         // Transform array
         Object transformRaw = fm.get("transform");
@@ -163,6 +208,10 @@ public class Schema {
                     if (tm.containsKey("add")) t.setAdd(toDouble(tm.get("add")));
                     if (tm.containsKey("mult")) t.setMult(toDouble(tm.get("mult")));
                     if (tm.containsKey("div")) t.setDiv(toDouble(tm.get("div")));
+                    // {op: round, decimals: N}. Unparsed until now, so a schema
+                    // rounding its output reported the unrounded value instead.
+                    if (tm.containsKey("op")) t.setOp(String.valueOf(tm.get("op")));
+                    if (tm.containsKey("decimals")) t.setDecimals(toInt(tm.get("decimals"), 0));
                     transforms.add(t);
                 }
             }
@@ -279,6 +328,19 @@ public class Schema {
             f.setParts(parts);
         }
         
+        // byte_group: fields packed into shared bytes. Written either as a list of
+        // fields with a sibling `size`, or as {size: N, fields: [...]}.
+        Object byteGroupRaw = fm.get("byte_group");
+        if (byteGroupRaw instanceof Map<?, ?> groupMap) {
+            if (groupMap.get("fields") instanceof List<?> groupFields) {
+                f.setByteGroup(parseFields((List<Map<String, Object>>) groupFields));
+            }
+            f.setByteGroupSize(toInt(groupMap.get("size"), 1));
+        } else if (byteGroupRaw instanceof List<?> groupFields) {
+            f.setByteGroup(parseFields((List<Map<String, Object>>) groupFields));
+            f.setByteGroupSize(toInt(fm.get("size"), 1));
+        }
+
         // Flagged construct
         Object flaggedRaw = fm.get("flagged");
         if (flaggedRaw instanceof Map) {
@@ -390,6 +452,14 @@ public class Schema {
                 continue;
             }
             
+            // Handle byte_group: every member reads from the group's first byte, and
+            // the cursor advances once, by the group's size, after all of them.
+            if (field.getByteGroup() != null) {
+                Map<String, Object> groupResult = decodeByteGroup(field, ctx);
+                result.putAll(groupResult);
+                continue;
+            }
+
             // Handle flagged construct
             if (field.getFlagged() != null) {
                 Map<String, Object> flaggedResult = decodeFlagged(field.getFlagged(), ctx);
@@ -445,12 +515,12 @@ public class Schema {
         Object value = null;
         
         switch (field.getType()) {
-            case U8, U16, U32, U64, BYTE, UINT -> {
+            case U8, U16, U24, U32, U64, BYTE, UINT -> {
                 byte[] data = ctx.read(length);
                 value = ctx.decodeUnsigned(data, fieldEndian);
             }
-            
-            case I8, I16, I32, I64, S8, S16, S32, S64, SINT -> {
+
+            case I8, I16, I24, I32, I64, S8, S16, S24, S32, S64, SINT -> {
                 byte[] data = ctx.read(length);
                 value = ctx.decodeSigned(data, fieldEndian);
             }
@@ -480,6 +550,11 @@ public class Schema {
                 byte[] data = ctx.peek(1, field.getByteOffset());
                 int numBits = field.getBits() > 0 ? field.getBits() : 1;
                 value = (long) ctx.decodeBits(data[0] & 0xFF, field.getBitOffset(), numBits);
+                // An explicit range does not advance the cursor by itself: several
+                // fields share one byte and the last of them declares `consume`.
+                if (field.getConsume() > 0) {
+                    ctx.read(field.getConsume());
+                }
             }
             
             case ASCII -> {
@@ -518,11 +593,7 @@ public class Schema {
             }
             
             case NUMBER -> {
-                if (field.getFormula() != null && !field.getFormula().isEmpty()) {
-                    value = FormulaEvaluator.evaluate(field.getFormula(), 0, ctx);
-                } else {
-                    value = field.getValue();
-                }
+                value = decodeComputed(field, ctx);
             }
             
             case OBJECT -> {
@@ -540,34 +611,17 @@ public class Schema {
             default -> throw new SchemaException.DecodeException("Unknown field type: " + field.getType());
         }
         
-        // Apply formula if present (takes precedence)
+        // Apply formula if present (takes precedence). A computed field has already
+        // had its own arithmetic applied by decodeComputed, in the order the
+        // interpreter uses: polynomial, then modifiers, then transform. Running the
+        // block below over it again would apply the modifiers twice, and would apply
+        // them to a guard's fallback, which must be reported as declared.
         if (field.getFormula() != null && !field.getFormula().isEmpty() && field.getType() != FieldType.NUMBER) {
             if (value instanceof Number) {
                 value = FormulaEvaluator.evaluate(field.getFormula(), ((Number) value).doubleValue(), ctx);
             }
-        } else if (value instanceof Number) {
-            // Apply transformations
-            double numVal = ((Number) value).doubleValue();
-            
-            if (field.getTransform() != null && !field.getTransform().isEmpty()) {
-                // Stages apply in list order; ops within a stage in canonical order.
-                for (Field.Transform t : field.getTransform()) {
-                    if (t.getMult() != null) numVal *= t.getMult();
-                    if (t.getDiv() != null && t.getDiv() != 0) numVal /= t.getDiv();
-                    if (t.getAdd() != null) numVal += t.getAdd();
-                }
-            } else {
-                // Canonical order: mult, div, add, whatever order the keys were
-                // written in (PS-101). Order-dependent arithmetic uses transform.
-                // The previous getModOrder() path applied source key order, which
-                // JSON input cannot supply and which disagreed with the fallback
-                // below and with the other language implementations.
-                if (field.getMult() != null) numVal *= field.getMult();
-                if (field.getDiv() != null && field.getDiv() != 0) numVal /= field.getDiv();
-                if (field.getAdd() != null) numVal += field.getAdd();
-            }
-            
-            value = numVal;
+        } else if (value instanceof Number && field.getType() != FieldType.NUMBER) {
+            value = applyArithmetic(((Number) value).doubleValue(), field);
         }
         
         // Apply lookup. A mapping's keys need not start at zero or be contiguous
@@ -995,6 +1049,192 @@ public class Schema {
             sb.append(String.format("%02x", b));
         }
         return sb.toString();
+    }
+
+    /**
+     * Decode a byte_group: several fields packed into the same byte or bytes.
+     *
+     * <p>Each member reads from the group's starting position and consumes nothing of
+     * its own; the cursor advances once, by the group's size, when they are all done.
+     * Members are emitted flat alongside their siblings, and recorded as variables so
+     * later computed fields can reference them. A name beginning with an underscore is
+     * internal: it becomes a variable but is not reported.
+     */
+    private Map<String, Object> decodeByteGroup(Field group, DecodeContext ctx) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        int start = ctx.getOffset();
+
+        for (Field member : group.getByteGroup()) {
+            ctx.setOffset(start);
+            String name = member.getName();
+            if (name == null || name.isEmpty()) continue;
+            try {
+                Object value = decodeField(member, ctx);
+                if (value == OMITTED || value == null) continue;
+                ctx.setVariable(name, value);
+                if (!name.startsWith("_")) {
+                    result.put(resolveFieldName(member, ctx), value);
+                }
+            } catch (RuntimeException e) {
+                // One unreadable member must not abandon the rest of the payload.
+                continue;
+            }
+        }
+
+        ctx.setOffset(start + group.getByteGroupSize());
+        return result;
+    }
+
+    /** The comparison operators a guard condition may carry, in precedence order. */
+    private static final List<String> GUARD_OPS = List.of("gt", "gte", "lt", "lte", "eq", "ne");
+
+    private static Field.Guard parseGuard(Map<?, ?> guardRaw) {
+        Field.Guard guard = new Field.Guard();
+        if (guardRaw.containsKey("else")) {
+            guard.setHasElse(true);
+            guard.setElseValue(guardRaw.get("else"));
+        }
+        if (guardRaw.get("when") instanceof List<?> conditions) {
+            for (Object conditionRaw : conditions) {
+                if (!(conditionRaw instanceof Map<?, ?> cm)) continue;
+                Object fieldRef = cm.get("field");
+                if (!(fieldRef instanceof String reference)) continue;
+                for (String op : GUARD_OPS) {
+                    if (!cm.containsKey(op)) continue;
+                    Field.Condition condition = new Field.Condition();
+                    condition.setField(reference);
+                    condition.setOp(op);
+                    condition.setOperand(toDouble(cm.get(op)));
+                    guard.getWhen().add(condition);
+                    break;
+                }
+            }
+        }
+        return guard;
+    }
+
+    /**
+     * Resolve a computed field (type: number): ref, polynomial, compute, guard.
+     *
+     * <p>This applies the field's own arithmetic, because the order differs from an
+     * ordinary field's: a ref runs polynomial, then modifiers, then transform, while a
+     * compute runs transform alone. A guard's fallback is reported exactly as declared.
+     */
+    private Object decodeComputed(Field field, DecodeContext ctx) {
+        if (field.getFormula() != null && !field.getFormula().isEmpty()) {
+            return FormulaEvaluator.evaluate(field.getFormula(), 0, ctx);
+        }
+
+        boolean computed = field.getRef() != null || field.getCompute() != null;
+        if (computed && field.getGuard() != null && !guardPasses(field.getGuard(), ctx)) {
+            // A failing guard reports the declared fallback untouched - no modifiers,
+            // no transform. Checking the guard first is also what keeps a guarded
+            // division by zero from ever running.
+            return field.getGuard().hasElse() ? field.getGuard().getElseValue() : Double.NaN;
+        }
+
+        if (field.getRef() != null) {
+            double value = resolveOperand(field.getRef(), ctx);
+            if (field.getPolynomial() != null && !field.getPolynomial().isEmpty()) {
+                value = evaluatePolynomial(field.getPolynomial(), value);
+            }
+            return applyArithmetic(value, field);
+        }
+
+        if (field.getCompute() != null) {
+            double value = evaluateCompute(field.getCompute(), ctx);
+            return applyTransform(value, field.getTransform());
+        }
+
+        return field.getValue();
+    }
+
+    /**
+     * Apply a field's bare modifiers and then its transform stages. Both run when both
+     * are present - a field may scale with `mult` and then round with a stage - which
+     * an either/or chain here used to get wrong, dropping the modifier. The modifiers
+     * run in the canonical order mult, div, add, whatever order the keys were written
+     * in (PS-101); the stages run in list order.
+     */
+    private static double applyArithmetic(double value, Field field) {
+        if (field.getMult() != null) value *= field.getMult();
+        if (field.getDiv() != null && field.getDiv() != 0) value /= field.getDiv();
+        if (field.getAdd() != null) value += field.getAdd();
+        return applyTransform(value, field.getTransform());
+    }
+
+    private static double applyTransform(double value, List<Field.Transform> stages) {
+        if (stages == null) return value;
+        for (Field.Transform stage : stages) {
+            if ("round".equals(stage.getOp())) {
+                int decimals = stage.getDecimals() == null ? 0 : stage.getDecimals();
+                // Half-to-even, matching the interpreter's rounding. Half-up would
+                // disagree with it on exact halves, which test vectors do contain.
+                value = new java.math.BigDecimal(value)
+                        .setScale(decimals, java.math.RoundingMode.HALF_EVEN)
+                        .doubleValue();
+                continue;
+            }
+            if (stage.getMult() != null) value *= stage.getMult();
+            if (stage.getDiv() != null && stage.getDiv() != 0) value /= stage.getDiv();
+            if (stage.getAdd() != null) value += stage.getAdd();
+        }
+        return value;
+    }
+
+    /** Horner's method over coefficients in descending power order. */
+    private static double evaluatePolynomial(List<Double> coefficients, double x) {
+        double result = coefficients.get(0) == null ? 0.0 : coefficients.get(0);
+        for (int i = 1; i < coefficients.size(); i++) {
+            Double coefficient = coefficients.get(i);
+            result = result * x + (coefficient == null ? 0.0 : coefficient);
+        }
+        return result;
+    }
+
+    private double evaluateCompute(Field.Compute compute, DecodeContext ctx) {
+        double a = resolveOperand(compute.getA(), ctx);
+        double b = resolveOperand(compute.getB(), ctx);
+        return switch (compute.getOp()) {
+            case "add" -> a + b;
+            case "sub" -> a - b;
+            case "mul" -> a * b;
+            case "div" -> b == 0 ? Double.NaN : a / b;
+            case "mod" -> b == 0 ? Double.NaN : (double) ((long) a % (long) b);
+            case "idiv" -> b == 0 ? Double.NaN : (double) Math.floorDiv((long) a, (long) b);
+            default -> throw new SchemaException.DecodeException(
+                    "Unknown compute op: " + compute.getOp());
+        };
+    }
+
+    /** Resolve a {@code $field} reference against decoded variables, or a literal. */
+    private double resolveOperand(Object spec, DecodeContext ctx) {
+        if (spec instanceof String text && text.startsWith("$")) {
+            Object value = ctx.getVariable(text.substring(1));
+            return value instanceof Number number ? number.doubleValue() : 0.0;
+        }
+        Double literal = toDouble(spec);
+        return literal == null ? 0.0 : literal;
+    }
+
+    private boolean guardPasses(Field.Guard guard, DecodeContext ctx) {
+        for (Field.Condition condition : guard.getWhen()) {
+            if (!condition.getField().startsWith("$")) continue;
+            Object raw = ctx.getVariable(condition.getField().substring(1));
+            double value = raw instanceof Number number ? number.doubleValue() : 0.0;
+            double operand = condition.getOperand() == null ? 0.0 : condition.getOperand();
+            boolean passed = switch (condition.getOp()) {
+                case "gt" -> value > operand;
+                case "gte" -> value >= operand;
+                case "lt" -> value < operand;
+                case "lte" -> value <= operand;
+                case "eq" -> value == operand;
+                case "ne" -> value != operand;
+                default -> true;
+            };
+            if (!passed) return false;
+        }
+        return true;
     }
 
     private static int toInt(Object obj, int defaultValue) {

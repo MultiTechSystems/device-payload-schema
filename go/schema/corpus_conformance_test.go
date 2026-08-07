@@ -23,15 +23,27 @@ import (
 
 // corpusFloor is the number of corpus vectors this interpreter is known to decode
 // correctly. Raise it as gaps close.
-// The remaining 15 are byte_group and computed-field constructs (oyster, ers) plus
-// a missing `round` transform op. Named in the test output.
-const corpusFloor = 1101
+// The remaining 8 are ers's TLV cases with length_size 0, and vicki's valveOpenness,
+// which needs the `round` transform op. Named in the test output.
+const corpusFloor = 1108
 
 type corpusVector struct {
-	Name     string         `yaml:"name"`
-	Payload  string         `yaml:"payload"`
-	FPort    *int           `yaml:"fPort"`
-	Expected map[string]any `yaml:"expected"`
+	Name    string `yaml:"name"`
+	Payload string `yaml:"payload"`
+	FPort   *int   `yaml:"fPort"`
+	// Both spellings occur in the corpus. Reading only fPort meant a port-based
+	// schema was decoded with no port at all, so every field of it was reported
+	// missing - a runner defect that looked like an interpreter gap.
+	FPortLower *int           `yaml:"fport"`
+	Expected   map[string]any `yaml:"expected"`
+}
+
+// port returns the vector's fPort under either spelling.
+func (v corpusVector) port() *int {
+	if v.FPort != nil {
+		return v.FPort
+	}
+	return v.FPortLower
 }
 
 type corpusSchema struct {
@@ -93,8 +105,8 @@ func TestCorpusConformance(t *testing.T) {
 						err = fmt.Errorf("panic: %v", recovered)
 					}
 				}()
-				if vector.FPort != nil {
-					return parsed.DecodeWithPort(payload, *vector.FPort)
+				if fport := vector.port(); fport != nil {
+					return parsed.DecodeWithPort(payload, *fport)
 				}
 				return parsed.Decode(payload)
 			}()

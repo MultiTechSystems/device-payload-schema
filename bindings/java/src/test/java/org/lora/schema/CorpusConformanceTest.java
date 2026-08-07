@@ -23,10 +23,9 @@ import org.yaml.snakeyaml.Yaml;
 class CorpusConformanceTest {
 
     /** Vectors this interpreter is known to decode correctly. Raise as gaps close. */
-    // Gaps behind the 70 failures: computed fields with `ref` are not evaluated,
-    // `u8[lo:hi]` bit ranges are unsupported, and booleans are reported as numbers.
-    // Each is named in the test output.
-    private static final int CORPUS_FLOOR = 1052;
+    // Gaps behind the remaining 35: ers's TLV cases with length_size 0, rbs30x's
+    // match cases, and laq4's tvoc and temp_min. Each is named in the test output.
+    private static final int CORPUS_FLOOR = 1081;
 
     @Test
     void corpusVectorsDecodeAsExpected() throws IOException {
@@ -70,7 +69,12 @@ class CorpusConformanceTest {
                 if (!(expectedRaw instanceof Map<?, ?> expected)) continue;
                 try {
                     byte[] payload = hexToBytes(payloadHex);
+                    // Both spellings occur in the corpus. Reading only `fPort` meant
+                    // a port-based schema was decoded with no port at all, so every
+                    // field of it was reported missing - a runner defect that looked
+                    // like an interpreter gap.
                     Object fport = vector.get("fPort");
+                    if (fport == null) fport = vector.get("fport");
                     Map<String, Object> out = fport instanceof Number n
                             ? schema.decodeWithPort(payload, n.intValue())
                             : schema.decode(payload);

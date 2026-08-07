@@ -9,6 +9,12 @@ public class Field {
     private int byteOffset;
     private int bitOffset;
     private int bits;
+    /**
+     * Bytes to advance after reading a bit field. An explicit {@code u8[lo:hi]} range
+     * does not advance the cursor by itself, because several fields share one byte and
+     * the last of them declares {@code consume}. Zero means this field advances nothing.
+     */
+    private int consume;
     private String endian;
     private Double add;
     private Double mult;
@@ -55,12 +61,27 @@ public class Field {
     
     // Formula
     private String formula;
+
+    // Computed fields (type: number)
+    /** Source of a computed value: {@code $field_name}, or a literal number. */
+    private String ref;
+    /** Coefficients in descending power order, evaluated by Horner's method. */
+    private List<Double> polynomial;
+    /** Cross-field binary operation. */
+    private Compute compute;
+    /** Conditions that must hold, else the field takes the guard's fallback. */
+    private Guard guard;
     
     // Flagged construct
     private FlaggedDef flagged;
     
     // TLV inline
     private Field tlvInline;
+
+    /** Fields sharing one run of bytes, each read from the group's start. */
+    private List<Field> byteGroup;
+    /** Bytes the group occupies; the cursor advances by this once, at the end. */
+    private int byteGroupSize = 1;
 
     public Field() {
         this.modOrder = new ArrayList<>();
@@ -84,7 +105,10 @@ public class Field {
     
     public int getBits() { return bits; }
     public void setBits(int bits) { this.bits = bits; }
-    
+
+    public int getConsume() { return consume; }
+    public void setConsume(int consume) { this.consume = consume; }
+
     public String getEndian() { return endian; }
     public void setEndian(String endian) { this.endian = endian; }
     
@@ -184,12 +208,30 @@ public class Field {
     
     public String getFormula() { return formula; }
     public void setFormula(String formula) { this.formula = formula; }
+
+    public String getRef() { return ref; }
+    public void setRef(String ref) { this.ref = ref; }
+
+    public List<Double> getPolynomial() { return polynomial; }
+    public void setPolynomial(List<Double> polynomial) { this.polynomial = polynomial; }
+
+    public Compute getCompute() { return compute; }
+    public void setCompute(Compute compute) { this.compute = compute; }
+
+    public Guard getGuard() { return guard; }
+    public void setGuard(Guard guard) { this.guard = guard; }
     
     public FlaggedDef getFlagged() { return flagged; }
     public void setFlagged(FlaggedDef flagged) { this.flagged = flagged; }
     
     public Field getTlvInline() { return tlvInline; }
     public void setTlvInline(Field tlvInline) { this.tlvInline = tlvInline; }
+
+    public List<Field> getByteGroup() { return byteGroup; }
+    public void setByteGroup(List<Field> byteGroup) { this.byteGroup = byteGroup; }
+
+    public int getByteGroupSize() { return byteGroupSize; }
+    public void setByteGroupSize(int byteGroupSize) { this.byteGroupSize = byteGroupSize; }
 
     public int getEffectiveLength() {
         if (length > 0) {
@@ -206,15 +248,24 @@ public class Field {
         private Double add;
         private Double mult;
         private Double div;
+        /** Named operation form, e.g. {@code {op: round, decimals: 2}}. */
+        private String op;
+        private Integer decimals;
 
         public Double getAdd() { return add; }
         public void setAdd(Double add) { this.add = add; }
-        
+
         public Double getMult() { return mult; }
         public void setMult(Double mult) { this.mult = mult; }
-        
+
         public Double getDiv() { return div; }
         public void setDiv(Double div) { this.div = div; }
+
+        public String getOp() { return op; }
+        public void setOp(String op) { this.op = op; }
+
+        public Integer getDecimals() { return decimals; }
+        public void setDecimals(Integer decimals) { this.decimals = decimals; }
     }
 
     public static class Case {
@@ -249,8 +300,60 @@ public class Field {
 
         public int getBit() { return bit; }
         public void setBit(int bit) { this.bit = bit; }
-        
+
         public List<Field> getFields() { return fields; }
         public void setFields(List<Field> fields) { this.fields = fields; }
+    }
+
+    /** A cross-field binary operation: {@code {op: div, a: $numerator, b: $denominator}}. */
+    public static class Compute {
+        private String op = "add";
+        private Object a;
+        private Object b;
+
+        public String getOp() { return op; }
+        public void setOp(String op) { this.op = op; }
+
+        public Object getA() { return a; }
+        public void setA(Object a) { this.a = a; }
+
+        public Object getB() { return b; }
+        public void setB(Object b) { this.b = b; }
+    }
+
+    /**
+     * Conditions a computed field requires, with the value to report when one fails:
+     * {@code {when: [{field: $x, gt: 0}], else: null}}. Conditions are checked before
+     * the computation runs, so a guarded division by zero never happens.
+     */
+    public static class Guard {
+        private List<Condition> when = new ArrayList<>();
+        private Object elseValue;
+        private boolean hasElse;
+
+        public List<Condition> getWhen() { return when; }
+        public void setWhen(List<Condition> when) { this.when = when; }
+
+        public Object getElseValue() { return elseValue; }
+        public void setElseValue(Object elseValue) { this.elseValue = elseValue; }
+
+        public boolean hasElse() { return hasElse; }
+        public void setHasElse(boolean hasElse) { this.hasElse = hasElse; }
+    }
+
+    /** One comparison in a guard: a field reference and a single operator. */
+    public static class Condition {
+        private String field;
+        private String op;
+        private Double operand;
+
+        public String getField() { return field; }
+        public void setField(String field) { this.field = field; }
+
+        public String getOp() { return op; }
+        public void setOp(String op) { this.op = op; }
+
+        public Double getOperand() { return operand; }
+        public void setOperand(Double operand) { this.operand = operand; }
     }
 }
