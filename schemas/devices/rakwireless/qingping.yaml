@@ -27,6 +27,13 @@ fields:
           type: u24[12:23]
         - name: _humi_raw
           type: u24[0:11]
+  # valid_range comes from the QingPing LoRaWAN CO2 Sensor datasheet, "Sensor
+  # Characteristics". Note the same datasheet's "Features" section gives narrower
+  # figures - CO2 400-5000, temperature -10 to 50, humidity 0-95 - so it disagrees
+  # with itself. The wider sensor figures are used here, because a plausibility
+  # bound that fires on a legitimate reading is worse than one that is loose.
+  # The datasheet documents no payload format, so it says nothing about the bit
+  # layout below; it bounds the values only.
   - name: temperature
     type: number
     ref: $_temp_raw
@@ -34,6 +41,7 @@ fields:
       - add: -500
       - div: 10
     unit: "°C"
+    valid_range: [-20, 50]
     ipso: 3303
     senml: {unit: "Cel"}
     semantic: "temperature.ambient"
@@ -43,15 +51,20 @@ fields:
     transform:
       - div: 10
     unit: "%"
+    valid_range: [0, 99.9]
     ipso: 3304
     senml: {unit: "%RH"}
     semantic: "humidity.relative"
   - name: co2
     type: u16
     unit: "ppm"
+    valid_range: [400, 9999]
+    ipso: 3325
+    semantic: "gas.co2"
   - name: battery
     type: u8
     unit: "%"
+    valid_range: [0, 100]
 
 test_vectors:
   # Expected values produced by the vendor's own decoder, decoder-qingping.js in

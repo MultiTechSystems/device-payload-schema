@@ -109,7 +109,7 @@ Generated inventory of this repository: what lives where, what each document cov
 ## Device schemas
 
 158 schemas under `schemas/devices/`.
-Mean quality score 63.3% (PLATINUM 30, GOLD 40, SILVER 27, BRONZE 1, REJECTED 60). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+Mean quality score 63.4% (PLATINUM 30, GOLD 40, SILVER 27, BRONZE 1, REJECTED 60). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
@@ -290,7 +290,7 @@ Mean quality score 63.3% (PLATINUM 30, GOLD 40, SILVER 27, BRONZE 1, REJECTED 60
 | `milesight/wts506` | 13 | 15 | fields | 91% | GOLD |
 | `radio-bridge/rbs30x` | 52 | 28 | fields | 68% | BRONZE |
 | `radionode/rn320bth` | 13 | 0 | fields | 14% | REJECTED |
-| `rakwireless/qingping` | 11 | 1 | fields | 78% | SILVER |
+| `rakwireless/qingping` | 11 | 1 | fields | 81% | SILVER |
 
 ## Other schema files
 
