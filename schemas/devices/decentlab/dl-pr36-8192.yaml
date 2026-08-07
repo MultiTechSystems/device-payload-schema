@@ -18,8 +18,10 @@ fields:
           fields:
             - name: pressure
               type: u16
+              transform:
+                - div: 8192
+                - add: -4
               unit: "bar"
-              # formula: (x[0] - 32768) / this.PARAMETERS.kp
             - name: temperature
               type: s16
               div: 256

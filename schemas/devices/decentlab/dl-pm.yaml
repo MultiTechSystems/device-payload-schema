@@ -65,12 +65,16 @@ fields:
           fields:
             - name: air_temperature
               type: u16
+              transform:
+                - mult: 0.0026812744140625
+                - add: -46.85
               unit: "°C"
-              # formula: 175.72 * x[0] / 65536 - 46.85
             - name: air_humidity
               type: u16
+              transform:
+                - mult: 0.0019073486328125
+                - add: -6
               unit: "%"
-              # formula: 125 * x[1] / 65536 - 6
         - bit: 3
           fields:
             - name: barometric_pressure

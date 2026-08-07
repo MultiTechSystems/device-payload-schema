@@ -18,12 +18,16 @@ fields:
           fields:
             - name: air_temperature_radiation_shield
               type: u16
+              transform:
+                - mult: 0.002670328831921874
+                - add: -45
               unit: "°C"
-              # formula: 175 * x[0] / 65535 - 45
             - name: air_humidity_radiation_shield
               type: u16
+              transform:
+                - mult: 0.0015259021896696424
+                - add: -2.220446049250313e-16
               unit: "%"
-              # formula: 100 * x[1] / 65535
         - bit: 1
           fields:
             - name: surface_temperature
@@ -44,8 +48,9 @@ fields:
               unit: "°C"
             - name: angle
               type: u16
+              transform:
+                - add: -32768
               unit: "°"
-              # formula: (x[4] - 32768)
             - name: sensor_temperature
               type: s16
               div: 100

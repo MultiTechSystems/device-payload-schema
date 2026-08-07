@@ -18,56 +18,72 @@ fields:
           fields:
             - name: soil_moisture_at_depth_0
               type: u16
-              # formula: (x[0] - 2500) / 500
+              transform:
+                - div: 500
+                - add: -5
             - name: soil_temperature_at_depth_0
               type: s16
               div: 100
               unit: "°C"
             - name: soil_moisture_at_depth_1
               type: u16
-              # formula: (x[2] - 2500) / 500
+              transform:
+                - div: 500
+                - add: -5
             - name: soil_temperature_at_depth_1
               type: s16
               div: 100
               unit: "°C"
             - name: soil_moisture_at_depth_2
               type: u16
-              # formula: (x[4] - 2500) / 500
+              transform:
+                - div: 500
+                - add: -5
             - name: soil_temperature_at_depth_2
               type: s16
               div: 100
               unit: "°C"
             - name: soil_moisture_at_depth_3
               type: u16
-              # formula: (x[6] - 2500) / 500
+              transform:
+                - div: 500
+                - add: -5
             - name: soil_temperature_at_depth_3
               type: s16
               div: 100
               unit: "°C"
             - name: soil_moisture_at_depth_4
               type: u16
-              # formula: (x[8] - 2500) / 500
+              transform:
+                - div: 500
+                - add: -5
             - name: soil_temperature_at_depth_4
               type: s16
               div: 100
               unit: "°C"
             - name: soil_moisture_at_depth_5
               type: u16
-              # formula: (x[10] - 2500) / 500
+              transform:
+                - div: 500
+                - add: -5
             - name: soil_temperature_at_depth_5
               type: s16
               div: 100
               unit: "°C"
             - name: soil_moisture_at_depth_6
               type: u16
-              # formula: (x[12] - 2500) / 500
+              transform:
+                - div: 500
+                - add: -5
             - name: soil_temperature_at_depth_6
               type: s16
               div: 100
               unit: "°C"
             - name: soil_moisture_at_depth_7
               type: u16
-              # formula: (x[14] - 2500) / 500
+              transform:
+                - div: 500
+                - add: -5
             - name: soil_temperature_at_depth_7
               type: s16
               div: 100

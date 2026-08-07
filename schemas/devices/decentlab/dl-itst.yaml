@@ -18,12 +18,16 @@ fields:
           fields:
             - name: temperature_target
               type: u16
+              transform:
+                - div: 10
+                - add: -100
               unit: "°C"
-              # formula: (x[0] - 1000) / 10
             - name: temperature_head
               type: u16
+              transform:
+                - div: 10
+                - add: -100
               unit: "°C"
-              # formula: (x[1] - 1000) / 10
         - bit: 1
           fields:
             - name: battery_voltage

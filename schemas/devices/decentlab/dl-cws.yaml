@@ -34,8 +34,9 @@ fields:
               unit: "°C"
             - name: angle
               type: u16
+              transform:
+                - add: -32768
               unit: "°"
-              # formula: (x[4] - 32768)
             - name: sensor_temperature
               type: s16
               div: 100

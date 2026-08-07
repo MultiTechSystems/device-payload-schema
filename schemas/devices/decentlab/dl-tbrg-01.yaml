@@ -18,8 +18,9 @@ fields:
           fields:
             - name: precipitation
               type: u16
+              transform:
+                - div: 10
               unit: "mm"
-              # formula: x[0] * this.PARAMETERS.resolution
             - name: precipitation_interval
               type: u16
               unit: "s"

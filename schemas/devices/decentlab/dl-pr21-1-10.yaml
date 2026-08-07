@@ -18,12 +18,16 @@ fields:
           fields:
             - name: pressure
               type: u16
+              transform:
+                - mult: 0.000335693359375
+                - add: -6.5
               unit: "bar"
-              # formula: (x[0] - 16384) / 32768 * (this.PARAMETERS.Pmax - this.PARAMETERS.Pmin) + this.PARAMETERS.Pmin
             - name: temperature
               type: u16
+              transform:
+                - div: 320
+                - add: -51.2
               unit: "°C"
-              # formula: (x[1] - 384) * 0.003125 - 50
         - bit: 1
           fields:
             - name: battery_voltage

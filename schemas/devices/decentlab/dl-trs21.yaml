@@ -18,8 +18,9 @@ fields:
           fields:
             - name: water_potential
               type: u16
+              transform:
+                - div: -10
               unit: "kPa"
-              # formula: -(x[0] / 10)
             - name: soil_temperature
               type: s16
               div: 10

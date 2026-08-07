@@ -18,36 +18,52 @@ fields:
           fields:
             - name: sap_flow
               type: u16
+              transform:
+                - mult: 0.016
+                - add: -50
               unit: "l⋅h⁻¹"
-              # formula: (x[0] * 16 - 50000) / 1000
             - name: heat_velocity_outer
               type: u16
+              transform:
+                - mult: 0.016
+                - add: -50
               unit: "cm⋅h⁻¹"
-              # formula: (x[1] * 16 - 50000) / 1000
             - name: heat_velocity_inner
               type: u16
+              transform:
+                - mult: 0.016
+                - add: -50
               unit: "cm⋅h⁻¹"
-              # formula: (x[2] * 16 - 50000) / 1000
             - name: alpha_outer
               type: u16
-              # formula: (x[3] * 32 - 1000000) / 100000
+              transform:
+                - mult: 0.00032
+                - add: -10
             - name: alpha_inner
               type: u16
-              # formula: (x[4] * 32 - 1000000) / 100000
+              transform:
+                - mult: 0.00032
+                - add: -10
             - name: beta_outer
               type: u16
-              # formula: (x[5] * 32 - 1000000) / 100000
+              transform:
+                - mult: 0.00032
+                - add: -10
             - name: beta_inner
               type: u16
-              # formula: (x[6] * 32 - 1000000) / 100000
+              transform:
+                - mult: 0.00032
+                - add: -10
             - name: tmax_outer
               type: u16
+              transform:
+                - div: 500
               unit: "s"
-              # formula: (x[7] * 2) / 1000
             - name: tmax_inner
               type: u16
+              transform:
+                - div: 500
               unit: "s"
-              # formula: (x[8] * 2) / 1000
             - name: temperature_outer
               type: s16
               div: 100
@@ -64,12 +80,14 @@ fields:
               type: u32
             - name: upstream_tmax_outer
               type: u16
+              transform:
+                - div: 500
               unit: "s"
-              # formula: (x[14] * 2) / 1000
             - name: upstream_tmax_inner
               type: u16
+              transform:
+                - div: 500
               unit: "s"
-              # formula: (x[15] * 2) / 1000
         - bit: 1
           fields:
             - name: battery_voltage

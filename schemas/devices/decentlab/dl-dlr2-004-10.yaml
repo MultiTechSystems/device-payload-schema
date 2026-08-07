@@ -18,8 +18,10 @@ fields:
           fields:
             - name: current
               type: u16
+              transform:
+                - mult: 0.00457763671875
+                - add: -150
               unit: "mA"
-              # formula: 3 * (x[0] - 32768) / 32768 / 2 / this.PARAMETERS.R * 1000
         - bit: 1
           fields:
             - name: battery_voltage

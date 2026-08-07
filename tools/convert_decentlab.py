@@ -16,6 +16,7 @@ Usage:
     python convert_decentlab.py --batch <vendor_dir> -o <dir> # All Decentlab codecs
 """
 
+import math
 import re
 import sys
 import os
@@ -24,7 +25,7 @@ import argparse
 from pathlib import Path
 
 
-def extract_sensor_groups(js_code):
+def extract_sensor_groups(js_code, params=None):
     """Extract SENSORS array from Decentlab JS codec."""
     groups = []
     
@@ -61,7 +62,7 @@ def extract_sensor_groups(js_code):
             convert_expr = fm.group(3).strip().rstrip(';').strip()
             unit = fm.group(4) if fm.group(4) else None
             
-            field = parse_convert_expression(name, display_name, convert_expr, unit, length)
+            field = parse_convert_expression(name, display_name, convert_expr, unit, length, params)
             fields.append(field)
         
         groups.append({
@@ -72,7 +73,120 @@ def extract_sensor_groups(js_code):
     return groups
 
 
-def parse_convert_expression(name, display_name, expr, unit, group_length):
+#: Vendor expressions are JavaScript; these rewrites make them evaluable as Python
+#: so a conversion can be characterised by running it rather than pattern-matched.
+_JS_TO_PY = (
+    ('Math.pow', 'pow'),
+    ('Math.log10', 'log10'),
+    ('Math.log', 'log'),
+    ('Math.max', 'max'),
+    ('Math.min', 'min'),
+    ('Math.abs', 'abs'),
+    ('Math.sqrt', 'sqrt'),
+)
+
+_EVAL_NAMES = {
+    'pow': pow, 'log': math.log, 'log10': math.log10, 'sqrt': math.sqrt,
+    'max': max, 'min': min, 'abs': abs,
+}
+
+
+def extract_parameters(js_code):
+    """Extract the device-specific PARAMETERS block from a vendor codec."""
+    block = re.search(r'PARAMETERS:\s*\{(.*?)\}', js_code, re.DOTALL)
+    if not block:
+        return {}
+    params = {}
+    for key, value in re.findall(r"(\w+)\s*:\s*(-?[\d.eE+-]+)", block.group(1)):
+        try:
+            params[key] = float(value)
+        except ValueError:
+            continue
+    return params
+
+
+def _to_python(expr, params):
+    """Rewrite a vendor convert expression into an evaluable Python expression."""
+    out = expr.strip().rstrip(';').strip()
+    for js, py in _JS_TO_PY:
+        out = out.replace(js, py)
+    # this.PARAMETERS.foo (JS) and PARAMETERS['foo'] (Python decoders)
+    for key, value in params.items():
+        out = out.replace('this.PARAMETERS.%s' % key, repr(value))
+        out = out.replace("PARAMETERS['%s']" % key, repr(value))
+    return out
+
+
+def _eval_at(expr_py, index, value, width=32):
+    """Evaluate the expression with x[index] set to `value`, others held at 1."""
+    xs = [1.0] * width
+    xs[index] = float(value)
+    return eval(expr_py, {'__builtins__': {}}, dict(_EVAL_NAMES, x=xs))  # noqa: S307
+
+
+def affine_fit(expr, index, params, tolerance=1e-9):
+    """Fit value = a * x[index] + b, returning (a, b), or None if not affine.
+
+    Two probes determine the line and a third confirms it, so a polynomial or a
+    logarithm is rejected rather than silently linearised. Unresolvable
+    expressions -- and there are a few genuinely non-linear ones -- are left for
+    the caller to report rather than approximated.
+    """
+    expr_py = _to_python(expr, params)
+    probes = (1000.0, 20000.0, 45000.0)
+    try:
+        y0, y1, y2 = (_eval_at(expr_py, index, p) for p in probes)
+    except Exception:
+        return None
+    if probes[1] == probes[0]:
+        return None
+    a = (y1 - y0) / (probes[1] - probes[0])
+    b = y0 - a * probes[0]
+    predicted = a * probes[2] + b
+    scale = max(1.0, abs(y2))
+    if abs(predicted - y2) > tolerance * scale:
+        return None
+    return a, b
+
+
+def _round_clean(value):
+    """Shorten a fitted coefficient without changing it.
+
+    Only a rounding that reproduces the value exactly is kept, so 0.30000000000004
+    becomes 0.3 while 175.72 / 65536 -- exact in binary, because the divisor is a
+    power of two -- keeps every digit it needs. Rounding to a fixed number of
+    places would quietly perturb the second kind.
+    """
+    if value == int(value):
+        return int(value)
+    for places in range(1, 16):
+        rounded = round(value, places)
+        if rounded == value:
+            return rounded
+    return value
+
+
+def _affine_stages(a, b):
+    """Express value = a * x + b as transform stages, omitting the identity ones.
+
+    A reciprocal coefficient is written as `div` so the schema reads the way the
+    vendor wrote it (`/ 1000` rather than `* 0.001`).
+    """
+    stages = []
+    a = _round_clean(a)
+    b = _round_clean(b)
+    if a != 1:
+        reciprocal = _round_clean(1 / a) if a else 0
+        if a != 0 and abs(reciprocal) >= 1 and reciprocal == int(reciprocal):
+            stages.append({'div': int(reciprocal)})
+        else:
+            stages.append({'mult': a})
+    if b != 0:
+        stages.append({'add': b})
+    return stages
+
+
+def parse_convert_expression(name, display_name, expr, unit, group_length, params=None):
     """Parse a Decentlab convert function expression into schema field definition."""
     field = {
         'name': name,
@@ -103,7 +217,22 @@ def parse_convert_expression(name, display_name, expr, unit, group_length):
     # Determine which x[i] indices are used
     indices = [int(m) for m in re.findall(r'x\[(\d+)\]', expr)]
     field['_x_indices'] = indices
-    
+
+    # Most conversions are affine in a single word: value = a * x[i] + b. Fitting
+    # that directly covers every shape of it at once, including the ones the regex
+    # chain below never matched -- and an unmatched expression used to fall through
+    # to a bare u16 with the arithmetic parked in a YAML comment, so the schema
+    # reported the raw sensor word and nothing said so.
+    if len(set(indices)) == 1:
+        fit = affine_fit(expr, indices[0], params or {})
+        if fit is not None:
+            a, b = fit
+            field['type'] = 'u16'
+            stages = _affine_stages(a, b)
+            if stages:
+                field['transform'] = stages
+            return field
+
     # Simple: x[N] / divisor
     m = re.match(r'x\[\d+\]\s*/\s*([\d.]+)\s*$', expr)
     if m:
@@ -202,7 +331,8 @@ def extract_product_url(js_code):
 
 def generate_schema(js_code, filename):
     """Generate a Payload Schema YAML schema from a Decentlab codec."""
-    groups = extract_sensor_groups(js_code)
+    params = extract_parameters(js_code)
+    groups = extract_sensor_groups(js_code, params)
     if groups is None:
         return None
     

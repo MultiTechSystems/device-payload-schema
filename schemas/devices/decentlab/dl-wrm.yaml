@@ -18,22 +18,30 @@ fields:
           fields:
             - name: air_temperature
               type: u16
+              transform:
+                - mult: 0.002670328831921874
+                - add: -45
               unit: "°C"
-              # formula: 175 * x[0] / 65535 - 45
             - name: air_humidity
               type: u16
+              transform:
+                - mult: 0.0015259021896696424
+                - add: -2.220446049250313e-16
               unit: "%"
-              # formula: 100 * x[1] / 65535
         - bit: 1
           fields:
             - name: surface_temperature
               type: u16
+              transform:
+                - div: 10
+                - add: -100
               unit: "°C"
-              # formula: (x[0] - 1000) / 10
             - name: head_temperature
               type: u16
+              transform:
+                - div: 10
+                - add: -100
               unit: "°C"
-              # formula: (x[1] - 1000) / 10
         - bit: 2
           fields:
             - name: battery_voltage
