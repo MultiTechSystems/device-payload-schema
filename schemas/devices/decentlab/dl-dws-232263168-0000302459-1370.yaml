@@ -16,14 +16,41 @@ fields:
       groups:
         - bit: 0
           fields:
+            # Both outputs derive from the ratio of two words, and the group is
+            # three words wide even though the vendor reads only the first two, so
+            # the third is consumed explicitly to keep the next group aligned.
+            - name: _counter
+              type: u16
+            - name: _interval
+              type: u16
+            - name: _reserved_w2
+              type: u16
             - name: frequency
-              type: u16
+              type: number
+              compute:
+                op: div
+                a: $_counter
+                b: $_interval
+              transform:
+                - mult: 32768
               unit: "Hz"
-              # formula: x[0] / x[1] * 32768
+            # The vendor squares the frequency. A `compute` multiplication rather
+            # than a `pow` transform stage, because pow exists only in the Python
+            # interpreter and this must decode the same in all of them.
+            - name: _frequency_squared
+              type: number
+              compute:
+                op: mul
+                a: $frequency
+                b: $frequency
             - name: weight
-              type: u16
+              type: number
+              ref: $_frequency_squared
+              transform:
+                - add: -232263168
+                - mult: 0.000302459
+                - add: 1370
               unit: "g"
-              # formula: (Math.pow(x[0] / x[1] * 32768, 2) - this.PARAMETERS.f02) * this.PARAMETERS.s + this.PARAMETERS.m0
         - bit: 1
           fields:
             - name: battery_voltage

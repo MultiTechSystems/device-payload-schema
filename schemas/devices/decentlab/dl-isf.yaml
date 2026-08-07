@@ -82,8 +82,25 @@ fields:
                 - div: 1000
                 - add: -32.768
               unit: "V"
+            # x[12] + x[13] * 65536, low word first, so a big-endian u32 takes the
+            # halves the wrong way round. The vendor's own test payload happens not
+            # to expose the difference, so cross-validation passed either way.
+            - name: _diagnostic_low
+              type: u16
+            - name: _diagnostic_high
+              type: u16
+            - name: _diagnostic_high_scaled
+              type: number
+              compute:
+                op: mul
+                a: $_diagnostic_high
+                b: 65536
             - name: diagnostic
-              type: u32
+              type: number
+              compute:
+                op: add
+                a: $_diagnostic_low
+                b: $_diagnostic_high_scaled
             - name: upstream_tmax_outer
               type: u16
               transform:

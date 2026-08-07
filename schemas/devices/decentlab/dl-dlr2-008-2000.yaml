@@ -16,10 +16,50 @@ fields:
       groups:
         - bit: 0
           fields:
-            - name: temperature
+            # One ratio built from two words, low word first, then a resistance
+            # divider and a quadratic in it. R = 2000 for this variant.
+            - name: _ratio_low
               type: u16
+            - name: _ratio_high
+              type: u16
+            - name: _ratio_high_scaled
+              type: number
+              compute:
+                op: mul
+                a: $_ratio_high
+                b: 65536
+            # (raw / 8388608 - 1) / 2, folded into one pair of stages.
+            - name: _half_ratio
+              type: number
+              compute:
+                op: add
+                a: $_ratio_low
+                b: $_ratio_high_scaled
+              transform:
+                - div: 16777216
+                - add: -0.5
+            - name: _one_minus_half_ratio
+              type: number
+              compute:
+                op: sub
+                a: 1
+                b: $_half_ratio
+            - name: _half_ratio_scaled
+              type: number
+              ref: $_half_ratio
+              transform:
+                - mult: 2000
+            - name: _resistance
+              type: number
+              compute:
+                op: div
+                a: $_half_ratio_scaled
+                b: $_one_minus_half_ratio
+            - name: temperature
+              type: number
+              ref: $_resistance
+              polynomial: [0.0010664, 2.3419, -244.83]
               unit: "°C"
-              # formula: -244.83 + 2.3419 * ((((x[0] + x[1]*65536) / 8388608 - 1) / 2) * this.PARAMETERS.R / (1 - (((x[0] + x[1]*65536) / 8388608 - 1) / 2))) + 0.0010664 * Math.pow((((x[0] + x[1]*65536) / 8388608 - 1) / 2) * this.PARAMETERS.R / (1 - (((x[0] + x[1]*65536) / 8388608 - 1) / 2)), 2)
         - bit: 1
           fields:
             - name: battery_voltage

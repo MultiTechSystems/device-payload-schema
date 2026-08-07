@@ -16,8 +16,27 @@ fields:
       groups:
         - bit: 0
           fields:
+            # The vendor reads this as x[0] + x[1] * 65536 - low word first - so a
+            # big-endian u32 takes the two halves the wrong way round: for words
+            # a9fd 0134 it gave 2851930420 where the sensor id is 20228605. The
+            # converter matched the expression and emitted u32 confidently, so no
+            # hint was left to warn anyone.
+            - name: _sensor_id_low
+              type: u16
+            - name: _sensor_id_high
+              type: u16
+            - name: _sensor_id_high_scaled
+              type: number
+              compute:
+                op: mul
+                a: $_sensor_id_high
+                b: 65536
             - name: sensor_id
-              type: u32
+              type: number
+              compute:
+                op: add
+                a: $_sensor_id_low
+                b: $_sensor_id_high_scaled
             - name: air_humidity
               type: u16
               div: 100

@@ -16,27 +16,62 @@ fields:
       groups:
         - bit: 0
           fields:
+            # Four of these outputs derive from the same two words, so the words are
+            # read once and everything else is computed from them. The group is
+            # three words wide though the vendor reads only the first two, so the
+            # third is consumed explicitly to keep the next group aligned.
             - name: counter_reading
               type: u16
+            - name: _interval_raw
+              type: u16
+            - name: _reserved_w2
+              type: u16
             - name: measurement_interval
-              type: u16
-              div: 32768
+              type: number
+              ref: $_interval_raw
+              transform:
+                - div: 32768
             - name: frequency
-              type: u16
+              type: number
+              compute:
+                op: div
+                a: $counter_reading
+                b: $_interval_raw
+              transform:
+                - mult: 32768
               unit: "Hz"
-              # formula: x[0] / x[1] * 32768
+            # The vendor squares the frequency. A `compute` multiplication rather
+            # than a `pow` transform stage, because pow exists only in the Python
+            # interpreter and this must decode the same in all of them.
+            - name: _frequency_squared
+              type: number
+              compute:
+                op: mul
+                a: $frequency
+                b: $frequency
+            # f0 = 15383.72, so f0^2 = 236658841.0384; k = 46.4859.
             - name: weight
-              type: u16
+              type: number
+              ref: $_frequency_squared
+              transform:
+                - add: -236658841.0384
+                - mult: 46.4859
+                - div: 1000000
               unit: "g"
-              # formula: (Math.pow(x[0] / x[1] * 32768, 2) - Math.pow(this.PARAMETERS.f0, 2)) * this.PARAMETERS.k / 1000000
+            # Elongation and strain are the weight scaled again, so they chain from
+            # it rather than repeating the whole computation.
             - name: elongation
-              type: u16
+              type: number
+              ref: $weight
+              transform:
+                - mult: -0.014710049999999999
               unit: "µm"
-              # formula: (Math.pow(x[0] / x[1] * 32768, 2) - Math.pow(this.PARAMETERS.f0, 2)) * this.PARAMETERS.k / 1000000 * (-1.5) / 1000 * 9.8067
             - name: strain
-              type: u16
+              type: number
+              ref: $elongation
+              transform:
+                - div: 0.066
               unit: "µm⋅m⁻¹"
-              # formula: (Math.pow(x[0] / x[1] * 32768, 2) - Math.pow(this.PARAMETERS.f0, 2)) * this.PARAMETERS.k / 1000000 * (-1.5) / 1000 * 9.8067 / 0.066
         - bit: 1
           fields:
             - name: battery_voltage

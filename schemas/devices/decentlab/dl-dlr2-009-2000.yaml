@@ -16,14 +16,54 @@ fields:
       groups:
         - bit: 0
           fields:
+            # Both outputs come from one ratio built out of two words, low word
+            # first, so the four bytes are not a big-endian u32 and are read as two.
+            - name: _ratio_low
+              type: u16
+            - name: _ratio_high
+              type: u16
+            - name: _ratio_high_scaled
+              type: number
+              compute:
+                op: mul
+                a: $_ratio_high
+                b: 65536
+            - name: _ratio
+              type: number
+              compute:
+                op: add
+                a: $_ratio_low
+                b: $_ratio_high_scaled
+              transform:
+                - div: 8388608
+                - add: -1
+            # resistance = ratio * 2000 / (1 - ratio). The denominator is a compute
+            # against a literal, so this needs no new language feature.
+            - name: _one_minus_ratio
+              type: number
+              compute:
+                op: sub
+                a: 1
+                b: $_ratio
+            - name: _ratio_scaled
+              type: number
+              ref: $_ratio
+              transform:
+                - mult: 2000
             - name: thermistor_resistance
-              type: u16
+              type: number
+              compute:
+                op: div
+                a: $_ratio_scaled
+                b: $_one_minus_ratio
               unit: "Ω"
-              # formula: ((x[0] + x[1]*65536) / 8388608 - 1) * 2000 / (1 - ((x[0] + x[1]*65536) / 8388608 - 1))
+            # temperature is a quadratic in that resistance, so `polynomial` states
+            # it directly: 0.0000104876 R^2 + 0.23469 R - 245.18.
             - name: temperature
-              type: u16
+              type: number
+              ref: $thermistor_resistance
+              polynomial: [0.0000104876, 0.23469, -245.18]
               unit: "°C"
-              # formula: -245.18 + 0.23469 * (((x[0] + x[1]*65536) / 8388608 - 1) * 2000 / (1 - ((x[0] + x[1]*65536) / 8388608 - 1))) + 0.0000104876 * Math.pow(((x[0] + x[1]*65536) / 8388608 - 1) * 2000 / (1 - ((x[0] + x[1]*65536) / 8388608 - 1)), 2)
         - bit: 1
           fields:
             - name: battery_voltage

@@ -22,8 +22,10 @@ fields:
                 - div: 500
                 - add: -5
             - name: soil_temperature_at_depth_0
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - div: 100
+                - add: -327.68
               unit: "°C"
             - name: soil_moisture_at_depth_1
               type: u16
@@ -31,8 +33,10 @@ fields:
                 - div: 500
                 - add: -5
             - name: soil_temperature_at_depth_1
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - div: 100
+                - add: -327.68
               unit: "°C"
             - name: soil_moisture_at_depth_2
               type: u16
@@ -40,8 +44,10 @@ fields:
                 - div: 500
                 - add: -5
             - name: soil_temperature_at_depth_2
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - div: 100
+                - add: -327.68
               unit: "°C"
             - name: soil_moisture_at_depth_3
               type: u16
@@ -49,8 +55,10 @@ fields:
                 - div: 500
                 - add: -5
             - name: soil_temperature_at_depth_3
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - div: 100
+                - add: -327.68
               unit: "°C"
             - name: soil_moisture_at_depth_4
               type: u16
@@ -58,8 +66,10 @@ fields:
                 - div: 500
                 - add: -5
             - name: soil_temperature_at_depth_4
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - div: 100
+                - add: -327.68
               unit: "°C"
             - name: soil_moisture_at_depth_5
               type: u16
@@ -67,8 +77,10 @@ fields:
                 - div: 500
                 - add: -5
             - name: soil_temperature_at_depth_5
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - div: 100
+                - add: -327.68
               unit: "°C"
             - name: soil_moisture_at_depth_6
               type: u16
@@ -76,8 +88,10 @@ fields:
                 - div: 500
                 - add: -5
             - name: soil_temperature_at_depth_6
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - div: 100
+                - add: -327.68
               unit: "°C"
             - name: soil_moisture_at_depth_7
               type: u16
@@ -85,8 +99,10 @@ fields:
                 - div: 500
                 - add: -5
             - name: soil_temperature_at_depth_7
-              type: s16
-              div: 100
+              type: u16
+              transform:
+                - div: 100
+                - add: -327.68
               unit: "°C"
         - bit: 1
           fields:
