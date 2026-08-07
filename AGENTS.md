@@ -51,6 +51,11 @@ python3 tools/score_schema.py schemas/devices --all --report score-report.json
 # Generate a TS013 JavaScript codec (ChirpStack / TTN)
 python3 tools/generate_ts013_codec.py <schema.yaml> -o <output-dir>
 
+# First-pass conversion from a vendor codec - a starting point, not a finished
+# schema. See "Converting a vendor codec" below before trusting the output.
+python3 tools/convert_decentlab.py <vendor-codec.js>
+python3 tools/convert_milesight.py <vendor-codec.js>
+
 # Tests
 make test          # C self-tests + pytest
 make pytest        # Python only
@@ -202,6 +207,62 @@ Run them all with `make test-languages`. This suite is why the Go and Java TLV
 defects were found: those implementations returned an empty result for every
 channel/type schema in the repository, and no test had ever read one.
 
+## Converting a vendor codec
+
+The converters in `tools/` (`convert_decentlab.py`, `convert_milesight.py`) do the
+mechanical part: they read a vendor's JavaScript codec and emit a schema that is
+*close*. Finishing it is your job, and the process is documented in
+[`docs/SCHEMA-DEVELOPMENT-GUIDE.md`](docs/SCHEMA-DEVELOPMENT-GUIDE.md).
+
+**A `# formula:` comment is a handoff, not a leftover.** Where a converter cannot
+translate a vendor expression, it emits the field with a plain type and leaves the
+expression in a comment beside it:
+
+```yaml
+- name: cumulative_precipitation
+  type: u16
+  # formula: (x[2] + x[3] * 65536) * this.PARAMETERS.resolution
+```
+
+That comment is the hint you finish. The field as it stands reports a raw sensor
+word, so a schema still carrying hints is not done, whatever it scores. Write the
+real syntax — `compute` for values spanning two words, `polynomial` for a fitted
+curve, `ref` plus `transform` for anything affine — and remove the comment only
+once the field is right. Do not delete a hint you have not implemented: it is the
+record of what the device actually does.
+
+The example above is not hypothetical. Reading only `x[2]` also left `x[3]`
+unconsumed, so every group after it decoded from the wrong offset, and the battery
+voltage in the next group read as 0 despite its own definition being correct. An
+unfinished hint is not a contained problem.
+
+**If an automatic conversion does not agree with the vendor, put the hint back.**
+When you extend a converter and the field it now translates still disagrees on the
+vendor's payloads, revert that field to its `# formula:` comment and let it go
+through the next pass. Do not leave the failed attempt in place: a hint advertises
+that the field is unfinished, whereas plausible-looking arithmetic that happens to
+be wrong reads as finished work and will be trusted. The hint is the safe state,
+so falling back to it is progress, not a retreat.
+
+**The vendor's decoder is the oracle, and comparing against it is the loop.** Run
+the vendor codec and the schema over the same payloads and diff the outputs:
+
+```bash
+python3 tools/crossvalidate_decentlab.py --vendor-dir ../decentlab-decoders
+python3 tools/crossvalidate_ttn.py --devices-repo ../lorawan-devices \
+    --vendor milesight-iot --schema-dir schemas/devices/milesight
+```
+
+Every payload the two agree on is a test vector you have earned: record it with
+`source: vendor-codec`, which is independent provenance under PS-264 and the
+honest way for one of these schemas to leave Rejected tier. A disagreement is a
+finding to investigate, not a number to overwrite — and vendor data can be wrong
+too, so check the decoder against the vendor's own documentation when they differ.
+
+**Re-clone the Decentlab oracle when you need it**; it is not vendored here:
+`git clone --depth 1 https://github.com/decentlab/decentlab-decoders`. The TTN
+checkout at `../lorawan-devices` is permanent.
+
 ## Rules for this repository
 
 **Test vectors must come from outside our own decoder.** A vector produced by
@@ -259,6 +320,23 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   with no test vectors and are therefore Rejected. See the per-device table in
   [`docs/INDEX.md`](docs/INDEX.md). The decentlab and milesight families have been
   through a vendor cross-validation pass; the rest have not.
+- **Decentlab: 39 of 58 agree with the vendor decoder.** The remaining 19 are two
+  distinct problems. 14 fields still carry `# formula:` hints needing more than
+  affine arithmetic — a ratio of two words, several squares, a thermistor
+  logarithm, and one `max()` of two linear combinations; all but the `max()` look
+  expressible with `polynomial` and the transform ops the interpreter already has
+  (`pow`, `log`, `sqrt`). Separately, some fields are declared `s16` where the
+  vendor uses offset-binary `(x - 32768)`: for word `0x8a77` an s16 read gives
+  -300.89 where the device means 26.79. These were pattern-matched by the
+  converter, just wrongly, so **no hint was left to warn you** — the same defect
+  that made `dl-alb` hold a 100% Platinum score while mis-decoding every payload.
+  Check a field's declared type against the vendor expression, not only its
+  arithmetic.
+- **A `_`-prefixed field inside a `flagged` group is still emitted.** Every other
+  construct treats a leading underscore as internal and omits it from the output;
+  the flagged handler in `schema_interpreter.py` does not. Intermediate fields used
+  to combine two words therefore appear in the decoded result. Fixing it means
+  matching the behaviour in all four interpreters at once.
 - **Milesight's remaining gaps are language features, not schema neglect.** 32 of
   the 84 still disagree with the vendor's decoder. The missing TLV channels were
   measured: of 790 channels the vendor decodes, 724 are covered and 66 are not, and

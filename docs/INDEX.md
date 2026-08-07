@@ -109,7 +109,7 @@ Generated inventory of this repository: what lives where, what each document cov
 ## Device schemas
 
 158 schemas under `schemas/devices/`.
-Mean quality score 63.3% (PLATINUM 30, GOLD 40, SILVER 26, BRONZE 1, REJECTED 61). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+Mean quality score 63.0% (PLATINUM 30, GOLD 40, SILVER 26, BRONZE 1, REJECTED 61). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
@@ -137,21 +137,21 @@ Mean quality score 63.3% (PLATINUM 30, GOLD 40, SILVER 26, BRONZE 1, REJECTED 61
 | `decentlab/dl-alb` | 11 | 6 | fields | 100% | PLATINUM |
 | `decentlab/dl-atm22` | 15 | 6 | fields | 100% | PLATINUM |
 | `decentlab/dl-atm41` | 27 | 6 | fields | 92% | GOLD |
-| `decentlab/dl-atm41g2` | 20 | 0 | fields | 14% | REJECTED |
-| `decentlab/dl-blg` | 7 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-atm41g2` | 23 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-blg` | 10 | 0 | fields | 14% | REJECTED |
 | `decentlab/dl-ctd10` | 10 | 6 | fields | 89% | GOLD |
 | `decentlab/dl-cws` | 10 | 0 | fields | 14% | REJECTED |
 | `decentlab/dl-cws2` | 12 | 0 | fields | 14% | REJECTED |
-| `decentlab/dl-dlr2-002` | 7 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-dlr2-002` | 10 | 0 | fields | 14% | REJECTED |
 | `decentlab/dl-dlr2-003` | 6 | 5 | fields | 100% | PLATINUM |
-| `decentlab/dl-dlr2-004-10` | 5 | 0 | fields | 16% | REJECTED |
-| `decentlab/dl-dlr2-005` | 5 | 0 | fields | 16% | REJECTED |
-| `decentlab/dl-dlr2-006` | 5 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-dlr2-004-10` | 5 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-dlr2-005` | 8 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-dlr2-006` | 8 | 0 | fields | 14% | REJECTED |
 | `decentlab/dl-dlr2-008-2000` | 5 | 0 | fields | 16% | REJECTED |
 | `decentlab/dl-dlr2-009-2000` | 6 | 0 | fields | 16% | REJECTED |
-| `decentlab/dl-dlr2-010` | 10 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-dlr2-010` | 16 | 0 | fields | 14% | REJECTED |
 | `decentlab/dl-dlr2-011` | 7 | 6 | fields | 100% | PLATINUM |
-| `decentlab/dl-dlr2-012` | 5 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-dlr2-012` | 8 | 0 | fields | 14% | REJECTED |
 | `decentlab/dl-ds18` | 7 | 6 | fields | 100% | PLATINUM |
 | `decentlab/dl-dws-232263168-0000302459-1370` | 6 | 0 | fields | 16% | REJECTED |
 | `decentlab/dl-gmm` | 15 | 6 | fields | 92% | GOLD |
@@ -160,37 +160,37 @@ Mean quality score 63.3% (PLATINUM 30, GOLD 40, SILVER 26, BRONZE 1, REJECTED 61
 | `decentlab/dl-ilt` | 7 | 6 | fields | 100% | PLATINUM |
 | `decentlab/dl-isd` | 6 | 6 | fields | 100% | PLATINUM |
 | `decentlab/dl-isf` | 19 | 0 | fields | 14% | REJECTED |
-| `decentlab/dl-itst` | 6 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-itst` | 6 | 0 | fields | 14% | REJECTED |
 | `decentlab/dl-kl66-1538372-464859` | 10 | 0 | fields | 16% | REJECTED |
 | `decentlab/dl-lid` | 16 | 6 | fields | 80% | SILVER |
 | `decentlab/dl-lp8p` | 16 | 0 | fields | 14% | REJECTED |
-| `decentlab/dl-lpw` | 5 | 0 | fields | 16% | REJECTED |
-| `decentlab/dl-lws` | 5 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-lpw` | 8 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-lws` | 8 | 0 | fields | 14% | REJECTED |
 | `decentlab/dl-mbx` | 7 | 6 | fields | 89% | GOLD |
 | `decentlab/dl-mes5` | 11 | 6 | fields | 100% | PLATINUM |
 | `decentlab/dl-ntu` | 11 | 6 | fields | 100% | PLATINUM |
 | `decentlab/dl-optod` | 12 | 6 | fields | 94% | GOLD |
-| `decentlab/dl-par` | 5 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-par` | 5 | 0 | fields | 14% | REJECTED |
 | `decentlab/dl-pheht` | 11 | 6 | fields | 89% | GOLD |
-| `decentlab/dl-pm` | 17 | 0 | fields | 16% | REJECTED |
-| `decentlab/dl-pr21-1-10` | 6 | 0 | fields | 16% | REJECTED |
-| `decentlab/dl-pr26-0-1` | 6 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-pm` | 17 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-pr21-1-10` | 6 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-pr26-0-1` | 6 | 0 | fields | 14% | REJECTED |
 | `decentlab/dl-pr36-8192` | 6 | 0 | fields | 14% | REJECTED |
 | `decentlab/dl-pr36ctd-8192-1024` | 8 | 0 | fields | 14% | REJECTED |
-| `decentlab/dl-pyr` | 5 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-pyr` | 5 | 0 | fields | 14% | REJECTED |
 | `decentlab/dl-rad` | 10 | 6 | fields | 92% | GOLD |
 | `decentlab/dl-rhc` | 7 | 0 | fields | 14% | REJECTED |
 | `decentlab/dl-sdd` | 40 | 0 | fields | 14% | REJECTED |
-| `decentlab/dl-sht35` | 6 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-sht35` | 6 | 0 | fields | 14% | REJECTED |
 | `decentlab/dl-smtp` | 20 | 0 | fields | 14% | REJECTED |
-| `decentlab/dl-tbrg-01` | 7 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-tbrg-01` | 10 | 0 | fields | 14% | REJECTED |
 | `decentlab/dl-tp` | 37 | 6 | fields | 100% | PLATINUM |
 | `decentlab/dl-trs11` | 7 | 0 | fields | 14% | REJECTED |
 | `decentlab/dl-trs12` | 8 | 0 | fields | 14% | REJECTED |
 | `decentlab/dl-trs21` | 6 | 0 | fields | 14% | REJECTED |
-| `decentlab/dl-wrm` | 8 | 0 | fields | 16% | REJECTED |
-| `decentlab/dl-zn1` | 5 | 0 | fields | 16% | REJECTED |
-| `decentlab/dl-zn2` | 6 | 0 | fields | 16% | REJECTED |
+| `decentlab/dl-wrm` | 8 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-zn1` | 8 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-zn2` | 9 | 0 | fields | 14% | REJECTED |
 | `digital-matter/oyster` | 24 | 7 | ports | 100% | SILVER |
 | `dragino/laq4` | 14 | 5 | fields | 100% | SILVER |
 | `elsys/ers` | 32 | 2 | fields | 56% | REJECTED |
