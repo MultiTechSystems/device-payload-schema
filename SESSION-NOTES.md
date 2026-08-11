@@ -393,6 +393,31 @@ withdrawing it in favour of the raw fallback; implementing it kept the output sc
 closed `enum` and the label set for 260 corpus fields. See the section above for what that
 took.
 
+### The spec's conformance tables are generated now
+
+Reported as a known gap when CR-2026-009 went in, and now closed. The M/R/O tables in
+clause 10 of `la-payload-schema` were extracted once and hand-maintained, so they had
+drifted: rows quoting wording CRs had replaced, source line references about twenty lines
+out, and **no rows at all for roughly fifty requirements** added from CR-2026-002 onwards
+(213/36/27 became 238/52/29 when regenerated).
+
+`tools/generate-conformance-tables.py` builds them from the sections, reusing
+`extract-requirements.py` as a library so there is one definition of "a normative
+statement" for both artifacts. `--check` is wired into `make quality-all`.
+
+Two things worth carrying forward:
+
+- **My earlier caution was wrong.** I said the M-numbers were referenced by certification
+  tests, so renumbering would be risky. Nothing references them - not a test, not a tool,
+  only a historical notes file in this repo citing a different range (M001-M234). Checking
+  took one grep and would have saved the hedge.
+- **The extractor deleted HTML comments before counting lines**, so every requirement below
+  a multi-line comment was reported early - four lines, in `07-output-formats.md`. Found
+  because those six were the only requirements my by-line verification could not match to a
+  row; the fix was to blank comments in place. The verification was worth more than the
+  generator: it is what turned "the table looks right" into 274 of 274 bullets matched to a
+  row at its exact line.
+
 ### Known gap: `length: $variable`
 
 The specification allows `length` to be an integer, a `$variable` reference, or
