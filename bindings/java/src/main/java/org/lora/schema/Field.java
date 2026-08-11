@@ -269,6 +269,12 @@ public class Field {
         if (length > 0) {
             return length;
         }
+        if (length < 0) {
+            // `length: remaining` sentinel - passed through so DecodeContext.read
+            // resolves it against the payload rather than falling back to the type
+            // default, which would read a single byte.
+            return length;
+        }
         return type.defaultLength();
     }
 

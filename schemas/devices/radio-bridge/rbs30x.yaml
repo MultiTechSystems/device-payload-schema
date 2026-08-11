@@ -283,7 +283,7 @@ fields:
             type: u8
           - name: stored_downlink
             type: bytes
-            length: -1
+            length: remaining
 
         # LINK QUALITY (0xFB)
         0xFB:
@@ -509,3 +509,13 @@ test_vectors:
     expected:
       event_type: 250
       info_header: 0x23
+      stored_downlink: "010009"
+
+  # PS-014: `remaining` at the end of the payload yields an empty value rather
+  # than an error or a one-byte read.
+  - name: "Device info packet with no stored downlink"
+    payload: "10 FA 23"
+    expected:
+      event_type: 250
+      info_header: 0x23
+      stored_downlink: ""

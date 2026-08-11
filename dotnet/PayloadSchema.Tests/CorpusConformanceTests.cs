@@ -23,10 +23,10 @@ public class CorpusConformanceTests
     // frame vectors that used to fail here needed the sequential bitfield form
     // `u8:3`, which CR-2026-006 withdrew in favour of the bracket form `u8[5:7]`
     // this implementation already had.
-    // 1184 of 1188. The four short are the negative-operand compute vectors: this
-    // implementation truncates `idiv` and `mod` where the fixture asserts the
-    // floored convention. Awaiting the CR that settles which is normative.
-    const int CorpusFloor = 1189;
+    // CR-2026-007 settled the floored `idiv`/`mod` convention and this
+    // implementation follows it, so the negative-operand vectors pass and the floor
+    // is the full corpus.
+    const int CorpusFloor = 1190;
 
     readonly ITestOutputHelper _output;
 

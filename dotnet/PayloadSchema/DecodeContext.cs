@@ -22,6 +22,10 @@ public class DecodeContext
 
     public ReadOnlySpan<byte> Read(int n)
     {
+        // `length: remaining` (PS-014). Guarded here because the bounds check below
+        // passes for a negative n and AsSpan then throws ArgumentOutOfRange.
+        if (n < 0)
+            n = Remaining;
         if (Offset + n > Data.Length)
             throw new InvalidOperationException(
                 $"Buffer underflow: need {n} bytes at offset {Offset}, but only {Remaining} remaining");

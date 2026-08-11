@@ -63,6 +63,27 @@ _COLON_STRING_TYPES = frozenset({'hex:upper'})
 OMITTED = object()
 
 
+def resolve_length(field_def, buf, pos, default=1):
+    """Resolve a field's byte count, honouring `length: remaining` (PS-014).
+
+    `remaining` consumes every byte from the read position to the end of the
+    payload. It is the only spelling the specification defines for that; a
+    negative integer is the shared internal sentinel the parsers map it to, so
+    all five implementations agree without needing a string in their field
+    structs. `buf[pos:pos + -1]` used to yield an empty slice *and* rewind the
+    cursor by a byte, which is how radio-bridge's stored downlink decoded as
+    empty.
+    """
+    raw = field_def.get('length', default)
+    if isinstance(raw, str):
+        if raw.strip().lower() == 'remaining':
+            return max(0, len(buf) - pos)
+        raw = int(raw)
+    if raw < 0:
+        return max(0, len(buf) - pos)
+    return int(raw)
+
+
 def normalize_output(value):
     """Bring one decoded value to its reported JSON representation (CR-2026-008).
 
@@ -689,28 +710,28 @@ class SchemaInterpreter:
             return value, pos
         
         if field_type == 'bytes':
-            length = field_def.get('length', 1)
+            length = resolve_length(field_def, buf, pos)
             if pos + length > len(buf):
                 raise ValueError("Buffer too short for bytes")
             value = buf[pos:pos + length]
             return value, pos + length
         
         if field_type == 'string':
-            length = field_def.get('length', 1)
+            length = resolve_length(field_def, buf, pos)
             if pos + length > len(buf):
                 raise ValueError("Buffer too short for string")
             value = buf[pos:pos + length].decode('utf-8', errors='replace').rstrip('\x00')
             return value, pos + length
         
         if field_type == 'ascii':
-            length = field_def.get('length', 1)
+            length = resolve_length(field_def, buf, pos)
             if pos + length > len(buf):
                 raise ValueError("Buffer too short for ascii")
             value = buf[pos:pos + length].decode('ascii', errors='replace').rstrip('\x00')
             return value, pos + length
         
         if field_type in ('hex', 'hex:upper'):
-            length = field_def.get('length', 1)
+            length = resolve_length(field_def, buf, pos)
             if pos + length > len(buf):
                 raise ValueError("Buffer too short for hex")
             # PS-074: `hex` output MUST be lowercase without separators. This
@@ -723,7 +744,7 @@ class SchemaInterpreter:
         
         if field_type == 'base64':
             import base64 as b64
-            length = field_def.get('length', 1)
+            length = resolve_length(field_def, buf, pos)
             if pos + length > len(buf):
                 raise ValueError("Buffer too short for base64")
             value = b64.b64encode(buf[pos:pos + length]).decode('ascii')
@@ -731,7 +752,7 @@ class SchemaInterpreter:
         
         if field_type == 'skip':
             # Padding/reserved bytes - advance position but don't output
-            length = field_def.get('length', 1)
+            length = resolve_length(field_def, buf, pos)
             return None, pos + length
         
         if field_type == 'version_string':
@@ -2274,6 +2295,8 @@ class SchemaInterpreter:
             # Skip type: emit zero bytes, no input needed
             if field_type == 'skip':
                 length = field_def.get('length', 1)
+                # `remaining` gives no count to pad on encode (PS-014).
+                length = 0 if isinstance(length, str) else max(0, int(length))
                 output.extend(bytes(length))
                 continue
             
@@ -2444,6 +2467,7 @@ class SchemaInterpreter:
         
         if field_type == 'skip':
             length = field_def.get('length', 1)
+            length = 0 if isinstance(length, str) else max(0, int(length))
             return bytes(length)
         
         if field_type == 'bytes':

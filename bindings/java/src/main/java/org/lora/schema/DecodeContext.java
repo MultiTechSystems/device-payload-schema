@@ -23,6 +23,11 @@ public class DecodeContext {
     }
 
     public byte[] read(int n) {
+        if (n < 0) {
+            // `length: remaining` (PS-014). Guarded here because `new byte[-1]` throws
+            // NegativeArraySizeException, which is not a decode error a caller can read.
+            n = remaining();
+        }
         if (offset + n > data.length) {
             throw new SchemaException.DecodeException(
                 String.format("Buffer underflow: need %d bytes at offset %d, but only %d remaining",

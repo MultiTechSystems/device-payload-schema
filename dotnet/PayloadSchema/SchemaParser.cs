@@ -129,7 +129,12 @@ public static class SchemaParser
         }
 
         if (fm.TryGetValue("length", out var len))
-            f.Length = Int(len);
+            // `length: remaining` consumes to the end of the payload (PS-014), carried
+            // as a negative sentinel. Int() would return its 0 default for the word and
+            // the field would silently read a single byte.
+            f.Length = string.Equals(Scalar(len).Trim(), "remaining", StringComparison.OrdinalIgnoreCase)
+                ? -1
+                : Int(len);
         if (fm.TryGetValue("endian", out var endian))
             f.Endian = Scalar(endian);
 

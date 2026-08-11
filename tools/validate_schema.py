@@ -543,6 +543,104 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                                 errors.append(f"{path}[{i}] ({name}): transform[{ti}].clamp must be [min, max]")
 
 
+# Types whose byte count can be "everything that is left". `length: remaining` is
+# meaningless on a fixed-width type, whose width is its name.
+REMAINING_TYPES = frozenset({
+    'bytes', 'ascii', 'string', 'hex', 'hex:upper', 'base64', 'repeat', 'array',
+})
+
+
+def iter_field_lists(schema: Dict[str, Any]):
+    """Yield every (path, fields) list in a schema, at every nesting level.
+
+    `check_fields` in check_best_practices descends into `fields`, `byte_group` and
+    `flagged.groups`, but not into TLV `cases` - which is exactly where the field
+    that prompted this walk lives. A rule that has to hold everywhere needs a walk
+    that reaches everywhere.
+    """
+    def visit_fields(fields, path):
+        if not isinstance(fields, list):
+            return
+        yield path, fields
+        for i, fld in enumerate(fields):
+            if not isinstance(fld, dict):
+                continue
+            fpath = f"{path}[{i}]"
+            for key in ('fields', 'byte_group', 'items', 'tag_fields'):
+                if key in fld:
+                    yield from visit_fields(fld[key], f"{fpath}.{key}")
+            for container in ('cases', 'tag_cases'):
+                cases = fld.get(container)
+                if isinstance(cases, dict):
+                    for ck, cv in cases.items():
+                        if isinstance(cv, list):
+                            yield from visit_fields(cv, f"{fpath}.{container}[{ck}]")
+                        elif isinstance(cv, dict) and isinstance(cv.get('fields'), list):
+                            yield from visit_fields(
+                                cv['fields'], f"{fpath}.{container}[{ck}].fields")
+            groups = (fld.get('flagged') or {}).get('groups') if isinstance(
+                fld.get('flagged'), dict) else fld.get('groups')
+            if isinstance(groups, list):
+                for gi, group in enumerate(groups):
+                    if isinstance(group, dict) and isinstance(group.get('fields'), list):
+                        yield from visit_fields(
+                            group['fields'], f"{fpath}.groups[{gi}].fields")
+
+    if isinstance(schema.get('fields'), list):
+        yield from visit_fields(schema['fields'], 'fields')
+    ports = schema.get('ports')
+    if isinstance(ports, dict):
+        for pk, pdef in ports.items():
+            if isinstance(pdef, dict) and isinstance(pdef.get('fields'), list):
+                yield from visit_fields(pdef['fields'], f"ports.{pk}.fields")
+    definitions = schema.get('definitions')
+    if isinstance(definitions, dict):
+        for dk, ddef in definitions.items():
+            if isinstance(ddef, list):
+                yield from visit_fields(ddef, f"definitions.{dk}")
+            elif isinstance(ddef, dict) and isinstance(ddef.get('fields'), list):
+                yield from visit_fields(ddef['fields'], f"definitions.{dk}.fields")
+
+
+def check_remaining_length(schema: Dict[str, Any]) -> List[str]:
+    """PS-014/PS-015: where `length: remaining` may appear, and how often.
+
+    `remaining` is the only spelling for "to the end of the payload". A negative
+    integer is the internal sentinel the parsers map it to; written in a schema it
+    used to decode as an empty value while rewinding the read cursor by a byte, and
+    the implementations did not agree on it.
+    """
+    errors = []
+    for path, fields in iter_field_lists(schema):
+        seen = []
+        for i, fld in enumerate(fields):
+            if not isinstance(fld, dict):
+                continue
+            length = fld.get('length')
+            name = fld.get('name') or f"{path}[{i}]"
+            ftype = str(fld.get('type', ''))
+            if isinstance(length, str) and length.strip().lower() == 'remaining':
+                seen.append(name)
+                if ftype not in REMAINING_TYPES:
+                    errors.append(
+                        f"{name}: length: remaining is not valid on type '{ftype}'; it "
+                        f"applies to variable-length and array types "
+                        f"({', '.join(sorted(REMAINING_TYPES))}). PS-014"
+                    )
+            elif isinstance(length, int) and not isinstance(length, bool) and length < 0:
+                errors.append(
+                    f"{name}: length: {length} is not valid; use the keyword "
+                    "'remaining' to consume to the end of the payload. PS-014"
+                )
+        if len(seen) > 1:
+            errors.append(
+                f"{path}: length: remaining appears on more than one field at the same "
+                f"level ({', '.join(seen)}); only one field can consume the "
+                "remainder. PS-015"
+            )
+    return errors
+
+
 def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
     """Validate schema structure and return list of errors."""
     errors = []
@@ -814,6 +912,7 @@ def validate_schema(schema: Dict[str, Any]) -> ValidationResult:
     
     # Validate structure (errors only)
     structure_errors = validate_schema_structure(schema)
+    structure_errors = structure_errors + check_remaining_length(schema)
     if structure_errors:
         result.schema_valid = False
         result.schema_errors = structure_errors

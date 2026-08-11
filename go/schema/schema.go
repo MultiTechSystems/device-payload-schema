@@ -703,6 +703,11 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	if length, ok := fm["length"].(float64); ok {
 		f.Length = int(length)
 	}
+	// `length: remaining` consumes to the end of the payload (PS-014). It is stored
+	// as the negative sentinel Read already resolves, so Length can stay an int.
+	if length, ok := fm["length"].(string); ok && strings.EqualFold(strings.TrimSpace(length), "remaining") {
+		f.Length = -1
+	}
 	if endian, ok := fm["endian"].(string); ok {
 		f.Endian = endian
 	}

@@ -231,7 +231,9 @@ public static class SchemaDecoder
 
     static object? DecodeField(SchemaField field, DecodeContext ctx, PayloadSchemaDefinition? schema)
     {
-        int length = field.Length > 0 ? field.Length : Helpers.InferLengthFromType(field.Type);
+        // A negative Length is the `remaining` sentinel and is passed through to
+        // Read, which resolves it; only an absent length infers from the type.
+        int length = field.Length != 0 ? field.Length : Helpers.InferLengthFromType(field.Type);
         string endian = field.Endian ?? ctx.Endian;
         object? value = null;
 

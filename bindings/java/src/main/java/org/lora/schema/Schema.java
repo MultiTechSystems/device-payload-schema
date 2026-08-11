@@ -199,7 +199,14 @@ public class Schema {
         f.setName((String) fm.get("name"));
         String rawType = (String) fm.get("type");
         f.setType(FieldType.fromString(rawType));
-        f.setLength(toInt(fm.get("length"), 0));
+        // `length: remaining` (PS-014) is carried as a negative sentinel; toInt would
+        // otherwise silently return the 0 default and the field would read one byte.
+        Object lengthSpec = fm.get("length");
+        if (lengthSpec instanceof String s && s.trim().equalsIgnoreCase("remaining")) {
+            f.setLength(-1);
+        } else {
+            f.setLength(toInt(lengthSpec, 0));
+        }
         f.setByteOffset(toInt(fm.get("byte_offset"), 0));
         f.setBitOffset(toInt(fm.get("bit_offset"), 0));
         f.setBits(toInt(fm.get("bits"), 0));

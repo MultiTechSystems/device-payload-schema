@@ -27,10 +27,10 @@ class CorpusConformanceTest {
     // three LoRaWAN frame vectors that used to fail here needed the sequential
     // bitfield form `u8:3`, which CR-2026-006 withdrew in favour of the bracket form
     // `u8[5:7]` this binding already supported.
-    // 1186 of 1188. The two short are `mod` with a negative operand: this binding
-    // uses Math.floorDiv for `idiv` but a truncated `%` for `mod`, so its own two
-    // operators disagree. Awaiting the CR that settles the convention.
-    private static final int CORPUS_FLOOR = 1189;
+    // CR-2026-007 settled the floored convention and this binding now uses
+    // Math.floorMod for `mod` as well as Math.floorDiv for `idiv`, so its two
+    // operators agree and the floor is the full corpus.
+    private static final int CORPUS_FLOOR = 1190;
 
     @Test
     void corpusVectorsDecodeAsExpected() throws IOException {
