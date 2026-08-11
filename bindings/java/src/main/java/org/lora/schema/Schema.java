@@ -603,7 +603,10 @@ public class Schema {
                 // later fields can reference, but is not reported. Without this an
                 // intermediate used to combine two words appeared in the output.
                 if (!field.getName().startsWith("_")) {
-                    result.put(resolveFieldName(field, ctx), value);
+                    Object reported = normalizeOutput(value);
+                    if (reported != null) {
+                        result.put(resolveFieldName(field, ctx), reported);
+                    }
                 }
                 // Variables are keyed by the schema-level name so $references keep
                 // working when name_from is in play (PS-267).
@@ -1301,6 +1304,62 @@ public class Schema {
      * ordinary field's: a ref runs polynomial, then modifiers, then transform, while a
      * compute runs transform alone. A guard's fallback is reported exactly as declared.
      */
+    /**
+     * Brings one decoded value to its reported JSON representation (CR-2026-008).
+     *
+     * <p>PS-279 makes the declared type decide the reported type, and PS-280 makes an
+     * integral value serialize without a fraction. This binding widened every integer:
+     * {@code applyArithmetic} takes and returns a double and was called for any numeric
+     * field, so a plain {@code u8} came back as {@code Double} 5.0 and Jackson wrote it
+     * as {@code 5.0} where the interpreters and every deployed JS codec write {@code 5}.
+     * Narrowing here rather than skipping the arithmetic also covers a scaled field
+     * whose reading happens to be whole.
+     *
+     * <p>PS-282: NaN and the infinities are not JSON values, so a value holding one is
+     * reported absent - returns null.
+     */
+    private static Object normalizeOutput(Object value) {
+        if (value instanceof Double || value instanceof Float) {
+            double d = ((Number) value).doubleValue();
+            if (Double.isNaN(d) || Double.isInfinite(d)) {
+                return null;
+            }
+            if (d == Math.rint(d) && Math.abs(d) <= 9.007199254740992E15) {
+                return (long) d;
+            }
+            return d;
+        }
+        if (value instanceof byte[] raw) {
+            // PS-281: a byte sequence reports as a lowercase hex string.
+            StringBuilder sb = new StringBuilder(raw.length * 2);
+            for (byte b : raw) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                Object v = normalizeOutput(e.getValue());
+                if (v != null) {
+                    out.put(String.valueOf(e.getKey()), v);
+                }
+            }
+            return out;
+        }
+        if (value instanceof List<?> list) {
+            List<Object> out = new ArrayList<>(list.size());
+            for (Object item : list) {
+                Object v = normalizeOutput(item);
+                if (v != null) {
+                    out.add(v);
+                }
+            }
+            return out;
+        }
+        return value;
+    }
+
     private Object decodeComputed(Field field, DecodeContext ctx) {
         if (field.getFormula() != null && !field.getFormula().isEmpty()) {
             return FormulaEvaluator.evaluate(field.getFormula(), 0, ctx);
