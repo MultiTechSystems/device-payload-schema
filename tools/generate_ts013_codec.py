@@ -273,7 +273,21 @@ def transform_to_js(transform_ops: List[Dict[str, Any]], input_expr: str) -> str
 
 
 def ref_to_js(ref: str) -> str:
-    """Convert ref to JS expression."""
+    """Convert a `$field` reference to a JS expression.
+
+    A `$field` reference resolves against `d`, the reported output.
+
+    This is known to be wrong for an internal field - a name beginning with an
+    underscore is recorded only in `vars`, never in `d`, so a ref to one resolves to
+    undefined and rakwireless/qingping reports no humidity or temperature. Switching to
+    `vars` was tried and is a net loss: `vars` holds the value *before* modifiers, while
+    the interpreters' variable table holds it after, so every ref to a scaled field then
+    resolved to the unscaled one. Doing it properly means making all five `vars`
+    emitters record the post-modifier value - the two plain-type paths, the bit-range
+    path, the enum path and the byte_group path - and it also surfaces the interpreter
+    reporting `_`-prefixed fields out of `flagged` groups, which looks like a separate
+    defect. Left as it is until that is untangled; see SESSION-NOTES.md.
+    """
     if isinstance(ref, str) and ref.startswith('$'):
         return f'd.{ref[1:]}'
     return str(ref)
@@ -414,12 +428,49 @@ function writeS(buf, pos, size, value, endian) {
             parts.append(self._gen_decode_fn('decodePayload', fields))
         return '\n\n'.join(parts)
 
+    def _expand_refs(self, fields: List[Dict], depth: int = 0) -> List[Dict]:
+        """Splice `$ref: '#/definitions/name'` entries into the list they appear in.
+
+        Resolved at generation time, and the referenced definition's `fields:` are
+        spliced rather than nested - a nested container with no `type: object` is never
+        descended into, so every field inside it would go missing.
+
+        Unhandled until now, so a `$ref` emitted nothing and every field after it read
+        from the wrong offset: ref-header.yaml reported a reading of 515 rather than 772.
+        Only local `#/definitions/...` references resolve, matching the interpreters;
+        cross-file references are a pre-step (tools/schema_preprocessor.py).
+        """
+        out: List[Dict] = []
+        if depth > 16:   # a definition that refers to itself, directly or in a cycle
+            return list(fields)
+        definitions = self.schema.get('definitions') or {}
+        for field in fields:
+            if not isinstance(field, dict):
+                continue
+            ref = field.get('$ref')
+            if not isinstance(ref, str):
+                out.append(field)
+                continue
+            prefix = '#/definitions/'
+            target = None
+            if ref.startswith(prefix):
+                definition = definitions.get(ref[len(prefix):])
+                if isinstance(definition, dict):
+                    target = definition.get('fields')
+            if not isinstance(target, list):
+                # Unresolvable: keep the entry so it produces nothing, rather than
+                # dropping it and shifting every later offset.
+                out.append(field)
+                continue
+            out.extend(self._expand_refs(target, depth + 1))
+        return out
+
     def _gen_decode_fn(self, fname: str, fields: List[Dict]) -> str:
         lines = [f'function {fname}(buf, endian) {{']
         lines.append(f'  var pos = 0, d = {{}}, vars = {{}};')
         lines.append(f'  endian = endian || "{self.endian}";')
         self.indent = 1
-        for field in fields:
+        for field in self._expand_refs(fields):
             lines.extend(self._gen_decode_field(field))
         lines.append('  return { data: d, pos: pos };')
         lines.append('}')
@@ -700,8 +751,32 @@ function writeS(buf, pos, size, value, endian) {
             expr = transform_to_js(field['transform'], expr)
         
         if 'lookup' in field:
-            lk = json.dumps(field['lookup'])
-            expr = f'(({lk})[{expr}] !== undefined ? ({lk})[{expr}] : {expr})'
+            lookup = field['lookup']
+            if isinstance(lookup, dict):
+                # `default` is a fallback, not a key. It used to be serialized into the
+                # table, so a miss found nothing and fell through to the raw integer -
+                # `mode` reported 9 where the schema says `unknown`.
+                default = None
+                has_default = False
+                table = {}
+                for key, mapped in lookup.items():
+                    if str(key) == 'default':
+                        default, has_default = mapped, True
+                    else:
+                        table[key] = mapped
+                lk = json.dumps(table)
+                if has_default:
+                    fallback = json.dumps(default)
+                else:
+                    # PS-269: an unmatched mapping omits the field rather than reporting
+                    # the raw integer under a name that promises a label. `undefined` is
+                    # dropped by JSON.stringify, which is what absent means here.
+                    fallback = 'undefined'
+                expr = f'(({lk})[{expr}] !== undefined ? ({lk})[{expr}] : {fallback})'
+            else:
+                # PS-104: a sequence keeps the raw value when the index is out of range.
+                lk = json.dumps(lookup)
+                expr = f'(({lk})[{expr}] !== undefined ? ({lk})[{expr}] : {expr})'
         return expr
 
     def _reverse_modifiers_expr(self, val_var: str, field: Dict) -> str:
