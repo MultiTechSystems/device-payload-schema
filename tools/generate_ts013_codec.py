@@ -592,6 +592,72 @@ function writeS(buf, pos, size, value, endian) {
         if 'match' in field:
             return self._gen_decode_match(field['match'])
 
+        # repeat - a sequence of records, bounded by a count, a byte length, or the
+        # end of the payload.
+        #
+        # Unimplemented until now despite the module docstring claiming otherwise, so
+        # `type: repeat` fell through to the integer path: it read a single byte as a
+        # number, emitted no array, and left the read position short. repeat-byte-length
+        # reported a `tail` of 10 rather than 255 because of it.
+        #
+        # Members decode into the flat `d`, then each iteration lifts them into a record
+        # and deletes them, the same approach the nested `object` support uses - so their
+        # modifiers, lookups and bitfields keep working through the existing generators.
+        if field.get('type') == 'repeat' and field.get('fields'):
+            arr = to_js_name(field.get('name', '_items'))
+            members = [m for m in field['fields']
+                       if isinstance(m, dict) and m.get('name')]
+            lines.append(f'{i}  var {arr} = [];')
+            lines.append(f'{i}  var {arr}_start = pos;')
+
+            count = field.get('count')
+            byte_length = field.get('byte_length')
+            until = field.get('until')
+            if count is not None:
+                bound = ref_to_js(count) if isinstance(count, str) else str(int(count))
+                lines.append(f'{i}  var {arr}_n = {bound};')
+                condition = f'{arr}.length < {arr}_n'
+            elif byte_length is not None:
+                bound = (ref_to_js(byte_length) if isinstance(byte_length, str)
+                         else str(int(byte_length)))
+                lines.append(f'{i}  var {arr}_len = {bound};')
+                condition = f'pos < {arr}_start + {arr}_len'
+            elif until == 'end':
+                condition = 'pos < buf.length'
+            else:
+                # No bound declared. Emit nothing rather than guess, and say so in the
+                # generated source so it is visible where it matters.
+                lines.append(f'{i}  // repeat {field.get("name")}: no count, '
+                             f'byte_length or until - nothing to iterate')
+                lines.append(f'{i}  d.{arr} = {arr};')
+                return lines
+
+            # A member set that consumes nothing would spin forever; bound the loop by
+            # the payload as well and stop if the position does not advance.
+            lines.append(f'{i}  while ({condition}) {{')
+            lines.append(f'{i}    var {arr}_before = pos;')
+            self.indent += 1
+            for member in members:
+                lines.extend(self._gen_decode_field(member))
+            self.indent -= 1
+            lines.append(f'{i}    var {arr}_rec = {{}};')
+            for member in members:
+                mjs = to_js_name(member['name'])
+                if member['name'].startswith('_'):
+                    # Internal members stay out of the record but must not leak either.
+                    lines.append(f'{i}    delete d.{mjs};')
+                    continue
+                lines.append(f'{i}    if (d.{mjs} !== undefined) '
+                             f'{{ {arr}_rec.{mjs} = d.{mjs}; delete d.{mjs}; }}')
+            lines.append(f'{i}    {arr}.push({arr}_rec);')
+            lines.append(f'{i}    if (pos <= {arr}_before) break;')
+            lines.append(f'{i}    if (pos >= buf.length && !({condition})) break;')
+            lines.append(f'{i}  }}')
+            lines.append(f'{i}  vars.{arr} = {arr};')
+            if not str(field.get('name', '')).startswith('_'):
+                lines.append(f'{i}  d.{arr} = {arr};')
+            return lines
+
         # object - a nested group reported under its own key.
         #
         # Unhandled until now, so a schema using one produced no key at all: the

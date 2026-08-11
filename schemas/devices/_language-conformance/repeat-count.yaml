@@ -16,3 +16,8 @@ test_vectors:
   source: generated
   expected:
     n: 2
+    # The record shape was asserted by nothing, which is why the TS013 generator could
+    # omit `repeat` entirely and no runner noticed.
+    items:
+    - v: 10
+    - v: 20
