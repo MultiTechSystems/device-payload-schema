@@ -281,10 +281,57 @@ Patterns are scoped: one inside a nested `object` attaches to that object, not t
 **The corpus is now fully described: all 174 schemas that decode a vector report zero
 undeclared keys**, so `KNOWN_UNDECLARED` in the corpus test is empty.
 
-Two things left deliberately imprecise, both correct as they stand: a `valid_range` field
+One thing left deliberately imprecise, and correct as it stands: a `valid_range` field
 with `name_from` still gets the permissive `_quality` form (values constrained, keys open)
-rather than the enumerated keys, and `field_to_json_schema` still types a dict `lookup` as
-`["string", "integer"]` where PS-269 means only the label can be reported.
+rather than the enumerated keys.
+
+### Typing `lookup` and `enum` in the output schema
+
+**PS-106: "Lookup values MAY be numbers or strings."** The generator assumed otherwise. A
+mapping was declared `["string", "integer"]` whatever it mapped to - too loose for the 23
+string-valued mappings in the corpus, and outright wrong for a mapping to floats, which it
+typed as an integer. A sequence was declared `{"type": "string", "enum": [...]}` even when
+its entries were numbers.
+
+The type now comes from the values, and both `lookup` forms are closed sets, so the values
+are declared as an `enum`:
+
+- A **mapping** omits the field where the value is not a key and no `default` is declared
+  (PS-269), so a raw number is never reported. A `default:` label joins the set.
+- A **sequence** is indexed from zero (PS-104) and an out-of-bounds index MUST be an error
+  (PS-105).
+
+`type: enum` splits on its `default`: with one, an unmapped value is reported as that
+default (PS-068) and the set is closed; without one it is reported as the **string**
+`"unknown(9)"`, so the set is open, no enum is declared, and `string` belongs in the type
+even where every declared value is a number. I loosened all three corpus enums before
+noticing they declare defaults, and put the enum back.
+
+Effect: 7 schemas change, all in the intended direction - `["string", "integer"]` becomes
+`"string"` plus the real label set. The corpus test grew a fourth guard that every reported
+value is in its declared `enum`, which is what actually tests the closed-set claim against
+real data rather than against my reading of the code.
+
+### PS-105 is violated by every implementation
+
+Measured while typing sequence lookups: **an out-of-bounds sequence index silently reports
+the raw index value** instead of erroring. PS-105 says implementations MUST emit an error.
+Python does it (verified by running it), and the Go, Java and C# sources say the same in
+their own comments - Java: "A sequence keeps the raw value when out of range (PS-104)".
+
+No corpus vector exercises it, which is why nothing has caught it.
+
+The output schema deliberately does **not** accommodate that output: it declares the
+sequence's entries as a closed `enum`, so validating a raw-index value fails. That is the
+useful behaviour - such a payload is malformed per PS-105 - but it is a decision worth
+revisiting, and the two ways out differ:
+
+- implement PS-105 in all five interpreters (an error, and the field omitted), or
+- withdraw PS-105 and make the raw fallback normative, in which case the declaration must
+  loosen to `["string", "integer"]` and lose the label set for 260 corpus fields.
+
+`tests/test_output_schema_lookup_types.py` pins the current behaviour with a test named
+after the gap, so whichever way it is settled the test has to be edited deliberately.
 
 ### Known gap: `length: $variable`
 

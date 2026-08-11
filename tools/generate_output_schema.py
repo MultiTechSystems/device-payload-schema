@@ -19,6 +19,72 @@ import yaml
 from typing import Any, Dict, List, Optional, Tuple
 
 
+def scalar_json_type(value: Any) -> str:
+    """The JSON Schema type name for a literal from a schema (a lookup value, say)."""
+    if isinstance(value, bool):     # before int - a bool is an int in Python
+        return 'boolean'
+    if isinstance(value, int):
+        return 'integer'
+    if isinstance(value, float):
+        return 'number'
+    if value is None:
+        return 'null'
+    return 'string'
+
+
+def union_types(values: List[Any]) -> List[str]:
+    """The distinct JSON Schema types a set of literals needs, in first-seen order."""
+    types: List[str] = []
+    for value in values:
+        candidate = scalar_json_type(value)
+        if candidate not in types:
+            types.append(candidate)
+    if 'number' in types and 'integer' in types:
+        # Every integer is a JSON number, so the union is redundant.
+        types.remove('integer')
+    return types
+
+
+def lookup_json_schema(lookup: Any) -> Optional[Dict[str, Any]]:
+    """The schema for a field's reported value once its `lookup` is applied.
+
+    PS-106: lookup values MAY be numbers or strings, so the type comes from the values
+    rather than being assumed. This used to declare a mapping as
+    `["string", "integer"]` - too loose for the 23 string-valued mappings in the corpus,
+    and wrong for a mapping to floats, which it typed as an integer.
+
+    Both forms are closed:
+
+    - A mapping omits the field entirely where the value is not a key and no `default`
+      is declared (PS-269), so the raw number is never reported and cannot be a type. A
+      `default` supplies one more possible value.
+    - A sequence is indexed from zero (PS-104) and an out-of-bounds index MUST be an
+      error (PS-105), so only its entries can be reported.
+
+    Note that all five implementations *silently report the raw index* on an
+    out-of-bounds sequence lookup instead of erroring - measured, not assumed. That is a
+    PS-105 conformance gap in the implementations rather than a reason to loosen this
+    declaration: validating such output should fail, because the payload is malformed.
+    SESSION-NOTES.md records it.
+    """
+    if isinstance(lookup, dict):
+        values = list(lookup.values())      # a `default:` label is one of these
+    elif isinstance(lookup, list):
+        values = list(lookup)
+    else:
+        return None
+    if not values:
+        return None
+    types = union_types(values)
+    schema: Dict[str, Any] = {"type": types[0] if len(types) == 1 else types}
+    unique: List[Any] = []
+    for value in values:
+        if value not in unique:
+            unique.append(value)
+    schema['enum'] = unique
+    return schema
+
+
 def yaml_type_to_json_schema(field_type: str, field_def: Dict[str, Any]) -> Dict[str, Any]:
     """Convert YAML field type to JSON Schema type definition."""
     
@@ -100,7 +166,25 @@ def yaml_type_to_json_schema(field_type: str, field_def: Dict[str, Any]) -> Dict
     if base_type == 'enum':
         values = field_def.get('values', {})
         if values:
-            return {"type": "string", "enum": list(values.values())}
+            listed = list(values.values()) if isinstance(values, dict) else list(values)
+            fallback = field_def.get('default')
+            if fallback is not None:
+                # PS-068: an unmapped value is reported as `default`, so the set is
+                # closed and can be enumerated.
+                listed = listed + [fallback]
+                types = union_types(listed)
+                schema = {"type": types[0] if len(types) == 1 else types}
+                unique = []
+                for value in listed:
+                    if value not in unique:
+                        unique.append(value)
+                schema['enum'] = unique
+                return schema
+            # With no `default`, an unmapped value is reported as the string
+            # "unknown(<n>)", so the set is open: no `enum`, and `string` belongs in the
+            # type even where every declared value is a number.
+            types = union_types(listed + ['unknown(0)'])
+            return {"type": types[0] if len(types) == 1 else types}
         return {"type": ["string", "integer"]}
     
     # Default to number (most fields with modifiers become numbers)
@@ -129,14 +213,11 @@ def field_to_json_schema(field_def: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if has_modifiers(field_def) and schema.get('type') == 'integer':
         schema = {"type": "number"}
     
-    # Handle lookup - converts to string or keeps original
+    # Handle lookup - the reported value is the mapped one, typed from the mapping
     if 'lookup' in field_def:
-        lookup = field_def['lookup']
-        if isinstance(lookup, dict):
-            # Lookup values become the output
-            schema = {"type": ["string", "integer"]}
-        elif isinstance(lookup, list):
-            schema = {"type": "string", "enum": lookup}
+        looked_up = lookup_json_schema(field_def['lookup'])
+        if looked_up:
+            schema = looked_up
     
     # Add description from field
     if field_def.get('description'):

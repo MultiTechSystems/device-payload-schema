@@ -163,3 +163,30 @@ def test_reported_values_satisfy_their_declared_type():
                     )
     assert not problems, {k: sorted(v)[:4] for k, v in problems.items()}
     assert checked >= 2832, checked
+
+
+def test_reported_values_are_in_their_declared_enum():
+    """A declared `enum` must contain every value the decoder actually reports.
+
+    This is what tests the claim behind typing a `lookup` from its values: a mapping is
+    a closed set because PS-269 omits the field rather than reporting an unmapped raw
+    number, and a sequence is closed because an out-of-bounds index is an error
+    (PS-105). If either were open, an enum would reject real output.
+    """
+    problems = {}
+    checked = 0
+    for path, output_schema, decoded in decoded_corpus():
+        for data in decoded:
+            for key, value in data.items():
+                if key == "_quality":
+                    continue
+                subschema = property_for(output_schema, key)
+                if not subschema or "enum" not in subschema:
+                    continue
+                checked += 1
+                if value not in subschema["enum"]:
+                    problems.setdefault(path.name, set()).add(
+                        f"{key}: {value!r} not in {subschema['enum'][:6]}"
+                    )
+    assert not problems, {k: sorted(v)[:4] for k, v in problems.items()}
+    assert checked >= 100, checked
