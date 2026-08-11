@@ -439,11 +439,17 @@ at the pre-session commit):
 | `pytest tools/tests` | 433 passed, **2 failed** |
 | `make test` (`self-test.sh`) | 68 passed, **3 failed**, 13 skipped |
 
-- The two pytest failures are `test_assemble_slides.py`. `tools/assemble-slides.py` was
-  changed by commit `ac2a3fc` to emit a ```` ```{.include} ```` block where it used to emit
-  a `# Slides` heading; the tests still assert the heading and date from `f553f79`, before
-  that change. Test-only staleness, but which of the two encodes the intent is a question
-  for whoever wrote `ac2a3fc`, so I left them.
+- The two pytest failures were `test_assemble_slides.py`, now fixed, so **the pytest suite
+  is 436 passed with no failures**. `ac2a3fc` deliberately removed
+  `parts.append('\n# Slides\n')` - its message says so - because the heading rendered as an
+  extra section-title slide, which was the duplicate-slide bug it set out to fix. The tests
+  had asserted that heading. `# Slides` is only an *input* marker in `main.md`, one of four
+  splice points, and neither fixture contained one, so the heading could never have appeared
+  in their output. They now assert the include block, the slide filenames, and
+  header-slides-footer ordering, plus that `# Slides` is absent - which pins the fix instead
+  of leaving it to be undone silently. The marker path had no assembly-level coverage at
+  all, so removing the heading could not be told from breaking the splice; it has a test
+  now.
 - The three self-test failures are `self-test.sh` looking for template sections this
   specification does not have - `01-introduction`, `98-glossary`, `99-bibliography`, where
   it has `01-schema-format` and `99-appendices`. The check carries the
