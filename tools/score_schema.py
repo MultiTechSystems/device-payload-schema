@@ -253,6 +253,31 @@ def run_js_tests(schema: Dict[str, Any], schema_path: str) -> Tuple[str, List[st
 {js_code}
 
 const tests = {json.dumps(test_cases)};
+// Structural comparison. `actVal !== expVal` compared object identity, so two
+// structurally equal objects never matched and any nested expectation failed with
+// "[object Object], expected [object Object]" - the same defect the Java and C# corpus
+// runners had (PS-044, PS-045).
+function deepMatch(exp, act, tol) {{
+    if (typeof exp === 'number') {{
+        return typeof act === 'number' && Math.abs(act - exp) <= tol;
+    }}
+    if (Array.isArray(exp)) {{
+        if (!Array.isArray(act) || act.length !== exp.length) return false;
+        return exp.every(function (e, i) {{ return deepMatch(e, act[i], tol); }});
+    }}
+    if (exp && typeof exp === 'object') {{
+        if (!act || typeof act !== 'object') return false;
+        return Object.keys(exp).every(function (k) {{
+            return k in act && deepMatch(exp[k], act[k], tol);
+        }});
+    }}
+    return act === exp;
+}}
+
+function show(v) {{
+    return (v && typeof v === 'object') ? JSON.stringify(v) : String(v);
+}}
+
 let passed = 0, failed = 0;
 const errors = [];
 
@@ -276,14 +301,10 @@ for (const t of tests) {{
             if (actVal === undefined) {{
                 allMatch = false;
                 errors.push(t.name + ': missing ' + key);
-            }} else if (typeof expVal === 'number') {{
-                if (Math.abs(actVal - expVal) > {CONFORMANCE_TOLERANCE}) {{
-                    allMatch = false;
-                    errors.push(t.name + ': ' + key + '=' + actVal + ', expected ' + expVal);
-                }}
-            }} else if (actVal !== expVal) {{
+            }} else if (!deepMatch(expVal, actVal, {CONFORMANCE_TOLERANCE})) {{
                 allMatch = false;
-                errors.push(t.name + ': ' + key + '=' + actVal + ', expected ' + expVal);
+                errors.push(t.name + ': ' + key + '=' + show(actVal)
+                            + ', expected ' + show(expVal));
             }}
         }}
         

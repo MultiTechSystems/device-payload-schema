@@ -478,6 +478,35 @@ function writeS(buf, pos, size, value, endian) {
         if 'match' in field:
             return self._gen_decode_match(field['match'])
 
+        # object - a nested group reported under its own key.
+        #
+        # Unhandled until now, so a schema using one produced no key at all: the
+        # milesight ct30x current-alarm channels reported none of their four members,
+        # which failed the generated-codec gate and held three otherwise
+        # vendor-correct schemas below Silver.
+        #
+        # The members decode into the same flat `d` and are then lifted into a
+        # sub-object, so nested modifiers, lookups and bitfields all keep working
+        # without duplicating their generators.
+        if field.get('type') == 'object' and field.get('fields'):
+            obj_name = to_js_name(field.get('name', '_object'))
+            member_names = []
+            lines.append(f'{i}  // object {field.get("name")}')
+            for member in field['fields']:
+                if not isinstance(member, dict) or not member.get('name'):
+                    continue
+                lines.extend(self._gen_decode_field(member))
+                member_names.append(to_js_name(member['name']))
+            if member_names:
+                lines.append(f'{i}  d.{obj_name} = {{}};')
+                for member_name in member_names:
+                    lines.append(
+                        f'{i}  if (d.{member_name} !== undefined) '
+                        f'{{ d.{obj_name}.{member_name} = d.{member_name}; '
+                        f'delete d.{member_name}; }}'
+                    )
+            return lines
+
         # type: number (computed, decode-only)
         if field.get('type') == 'number':
             name = to_js_name(field['name'])
@@ -555,12 +584,18 @@ function writeS(buf, pos, size, value, endian) {
             eo = field_endian_override(base_type)
             endian_arg = f'"{eo}"' if eo else 'endian'
             mask = (1 << bit_width) - 1
-            consume = field.get('consume', 1)
+            # PS-060: a bitfield extraction does not advance the read position unless
+            # `consume` says so, and it advances by `consume` bytes. This defaulted to
+            # 1 and advanced by the base width, so several bitfields sharing one byte
+            # each moved on a byte and read different bytes entirely - the ct30x alarm
+            # object reported bits 0 and 1 of the right byte and then two bits of
+            # whatever followed. The interpreter has always defaulted to no advance.
+            consume = field.get('consume', 0)
 
             lines.append(f'{i}  var {js_name}_raw = readU(buf, pos, {base_size}, {endian_arg});')
             lines.append(f'{i}  var {js_name} = ({js_name}_raw >> {bit_start}) & 0x{mask:X};')
             if consume:
-                lines.append(f'{i}  pos += {base_size};')
+                lines.append(f'{i}  pos += {int(consume)};')
 
             if field.get('var'):
                 lines.append(f'{i}  vars.{to_js_name(field["var"])} = {js_name};')
