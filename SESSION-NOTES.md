@@ -1,62 +1,81 @@
 # Session Notes
 
-## RESUME HERE - state at the end of 2026-08-10
+## RESUME HERE - state at the end of 2026-08-11
 
-**Nothing is committed.** That is the single biggest risk in this state, because the
-work spans two repositories and several distinct topics.
+**Everything is committed**, on a topic branch in each repo rather than the default
+branch:
 
-| Repo | Unpushed commits | Uncommitted files |
+| Repo | Branch | Commits ahead of default |
 |---|---|---|
-| `payload-codec-proto` | 16 (pre-existing) | **92** (80 modified, 11 new, 1 deleted) |
-| `la-payload-schema` | 1 (CR-2026-005) | **17** (14 modified, 3 new) |
+| `payload-codec-proto` | `session/2026-08-10-language-alignment` | 8 (plus the 16 pre-existing on `master`) |
+| `la-payload-schema` | `session/2026-08-10-cr-006-007-008` | 4 (plus 1 pre-existing on `main`) |
 
-Everything is green as of the last run: Python 1781 passed / 4 skipped, Go, Java and
-C# corpus runners all at the full **1188** vectors, C selftests pass, and
-`compose_library_vectors.py --check` is clean. Corpus grew 1166 -> 1188 this session.
+Neither branch is pushed. Merge or rebase onto `master`/`main` as you prefer - the repo
+convention has been to keep everything on `master`, so a fast-forward is fine; the branch
+exists so nothing landed on the default branch unreviewed.
 
-**Commit first, in these groups.** They are independent and each is separately
-reviewable:
+Green as of the last run: Python 1789 passed / 4 skipped, Go, Java and C# corpus runners
+at the full **1189**, C selftests pass, `compose_library_vectors.py --check` clean, and
+zero regressions against a freshly regenerated `score-baseline.json`.
 
-1. CR-2026-006, bitfield retirement - `tools/schema_interpreter.py`, `binary_schema*.py`,
-   `schema_binary.py`, `generate_js_decoder.py`, `generate_ts013_codec.py`,
-   `generate_jsonschema.py`, `payload-schema.json`, `include/schema_interpreter.h`,
-   `src/test_comprehensive.c`, `lorawan_frames.yaml`, the two bitfield tests, floors.
-2. `header:` removal + Java `$ref` - `Schema.java`, `SchemaParser.cs`, `SchemaDecoder.cs`,
-   `Schema.cs`, `validate_schema.py`, `_language-conformance/ref-header.yaml`.
-3. Library vectors - `compose_library_vectors.py`, `lorawan_*.yaml`, `gps_tracker.yaml`,
-   `ts003_clock_sync.yaml`, `ts007_multi_package.yaml`, `udp_packet_forwarder.yaml`,
-   the regenerated `_library-composed/` tree, deleted `KNOWN-ISSUES.md`.
-4. Maths transforms + dl-blg - Go/Java/C# transform code, `transform-maths.yaml`,
-   `dl-blg.yaml`.
-5. PS-039 exactness - the four runner comparisons + the guard tests.
-6. CR-2026-007, floored idiv/mod - Python/Go/Java/C#/generator compute code,
-   `compute-negative-idiv-mod.yaml`, the four inverted tests, spec text.
-7. Generator half-to-even - `generate_ts013_codec.py`.
-8. milesight ct30x current channels + annotations.
-9. `tools/crossvalidate_js_json.py` (new), AGENTS.md, SESSION-NOTES.md,
-   SPEC-IMPLEMENTATION-STATUS.md, LANGUAGE-ANALYSIS.md.
+Corpus 1166 -> 1189 over the two days. Tiers: BRONZE 3, SILVER 76, GOLD 40, PLATINUM 30,
+REJECTED 69 of 218.
 
-In `la-payload-schema`: CR-2026-006 and CR-2026-007 are in `implemented/` with their
-spec text applied; CR-2026-008 is in `submitted/` and **not** implemented.
+**Done on 2026-08-11**, all five items from yesterday's list:
+
+1. Committed - in four groups per repo rather than the nine I had sketched. The nine were
+   not achievable: each hub file (`schema_interpreter.py`, `validate_schema.py`,
+   `generate_ts013_codec.py`, `go/schema/schema.go`) carries two to four of those topics,
+   so they cannot be split without hunk-level surgery, and the intermediate states would
+   not have built. The specification repo *did* split cleanly, one commit per CR.
+2. **CR-2026-008 implemented and moved to `implemented/`.** Normalization runs once
+   where `decode()` returns, so no decode path can bypass it. Java narrowed too, since a
+   binding returning native values reaches the rendering rule through its reported type.
+3. **`score-baseline.json` regenerated** - zero regressions against it now.
+4. **`round` made decimal-correct in Go and C#.**
+5. **Nested `object` support in the TS013 generator**, which restored ct303/ct305/ct310
+   to SILVER.
+
+**Four bugs found by doing that work, none of them anticipated:**
+
+- **The encoder silently zeroed a `bytes` field.** Once the decoder reported hex,
+  `encode(decode(payload))` turned `deadbeef0064` into `000000000064` with no error,
+  because `_encode_field` fell through to `bytes(length)` for anything that was not
+  already a bytes object. PS-281 needed the symmetric change; the encoder now takes a
+  bytes object, a hex string or an octet list and reports anything else.
+- **The output-schema generator was wrong for four constructs** - `bitfield_string` and
+  `version_string` declared "number" while reporting "v1.2.52" (280 of the mismatches),
+  `repeat` and `object` also fell through to "number", and a key produced by more than
+  one branch took whichever branch the walk saw last. Found by checking every decoded
+  corpus value against its declared type: 2718 values, now zero mismatches.
+- **The TS013 generator advanced past every bitfield.** `consume` defaulted to 1 against
+  PS-060, so several bitfields sharing a byte each moved on and read different bytes.
+- **A plain typed field in Go dropped its bare modifier when it also had a transform** -
+  `div: 1000` silently ignored, reporting 2355 instead of 2.35. The same either/or was
+  fixed on the ref and compute paths earlier and this branch was missed.
+
+Also corrected a sentence in CR-2026-008 that contradicted its own normative table: it
+claimed the output-schema generator should stop demoting a modified field to "number",
+where the table says a modified field *is* a number. The generator was already right.
 
 **Where to pick up, highest value first:**
 
-1. **CR-2026-008** (decoded value types) is submitted and unimplemented. The rule is
-   settled and measured: normalizing integral values to integers makes the interpreter
-   byte-identical to the generated codec on 1126 comparisons. Python is the
-   implementation that changes. `tools/crossvalidate_js_json.py` is the acceptance
-   test.
-2. **Regenerate `score-baseline.json`** - it is stale and reports 23 false regressions,
-   which will mask real ones.
-3. **Go's `round` transform** diverges from Python, Java and C# (2.355 -> 2.36 vs
-   2.35). Three of four are decimal-correct; Go is the outlier. No vector catches it.
-4. **Nested `object` members in the TS013 generator** - this is what holds ct303/305/310
-   at BRONZE despite their agreeing with the vendor decoder.
-5. Then items 3 onward in the Next list below.
-
-Read the rest of this section for detail, and AGENTS.md for the durable rules -
-especially the C two-target architecture, the rounding traps, and the note that a more
-correct schema can score lower.
+1. **Push the two branches** and decide whether they merge to `master`/`main`. Also the
+   three `td-tools` branches still have no PRs, and the catalog fix should go first.
+2. **The remaining TS013 generator gaps**, now the largest source of interpreter/codec
+   disagreement: no `lookup: default`, no `$ref` splicing (so `ref-header.yaml` reads
+   from the wrong offsets), no `repeat: byte_length`, `name_from` unimplemented, and it
+   drops the `log` transform chain `dl-blg` and `qingping` use. Measure with
+   `tools/crossvalidate_js_json.py` - currently 1129 identical, 5 value differences, 5
+   key-set differences.
+3. **A round-trip/encode corpus.** Still the least-tested part of the project and the MCU
+   tier's whole job: every vector is decode-only, `src/test_encoder.c` is in no build
+   target, and Java and C# have no encoder at all.
+4. **The C gateway front-end** - YAML reader and JSON writer. `result_to_json()`'s `%g`
+   destroys precision and `schema_create_yaml()` is a stub.
+5. Then items 3 onward in the Next list below: the two Decentlab hints, the preprocessor
+   in validate/score, provenance for the three Silver-capped schemas, `name_from` for
+   milesight, and the milesight vector counts.
 
 ## Session: Aug 10, 2026
 
