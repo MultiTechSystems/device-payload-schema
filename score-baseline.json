@@ -1,9 +1,3354 @@
 {
-  "timestamp": "2026-08-07T10:37:57.482428-05:00",
+  "timestamp": "2026-08-11T08:41:55.057074-05:00",
   "schemas": [
     {
+      "schema_path": "schemas/devices/_language-conformance/bitfield-string.yaml",
+      "timestamp": "2026-08-11T08:41:51.000880-05:00",
+      "score": 71.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 1,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "generated": 1
+          },
+          "independent_vectors": 0,
+          "verification": "self",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "No test vector declares an independent source; add `source: vendor-doc|vendor-codec|field-capture` so the score reflects verification rather than self-consistency",
+        "Add test vector for zero values",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_language-conformance/compute-negative-idiv-mod.yaml",
+      "timestamp": "2026-08-11T08:41:51.020692-05:00",
+      "score": 76.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 8,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 8,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 5,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "generated": 8
+          },
+          "independent_vectors": 0,
+          "verification": "self",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "No test vector declares an independent source; add `source: vendor-doc|vendor-codec|field-capture` so the score reflects verification rather than self-consistency",
+        "Add test vector for zero values",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_language-conformance/enum-spec-default.yaml",
+      "timestamp": "2026-08-11T08:41:51.041562-05:00",
+      "score": 71.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 2,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for zero values",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_language-conformance/lookup-default.yaml",
+      "timestamp": "2026-08-11T08:41:51.058563-05:00",
+      "score": 56.0,
+      "tier": "REJECTED",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "fail",
+        "js_tests_pass": false,
+        "js_errors": [
+          "lookup_default: mode=9, expected unknown"
+        ],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 1,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "generated": 1
+          },
+          "independent_vectors": 0,
+          "verification": "self",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Generated JS codec disagrees with the test vectors",
+        "No test vector declares an independent source; add `source: vendor-doc|vendor-codec|field-capture` so the score reflects verification rather than self-consistency",
+        "Add test vector for zero values",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_language-conformance/name-from.yaml",
+      "timestamp": "2026-08-11T08:41:51.077100-05:00",
+      "score": 56.0,
+      "tier": "REJECTED",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "fail",
+        "js_tests_pass": false,
+        "js_errors": [
+          "name_from: missing channel_3_reading"
+        ],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 2,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "generated": 1
+          },
+          "independent_vectors": 0,
+          "verification": "self",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Generated JS codec disagrees with the test vectors",
+        "No test vector declares an independent source; add `source: vendor-doc|vendor-codec|field-capture` so the score reflects verification rather than self-consistency",
+        "Add test vector for zero values",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_language-conformance/ref-header.yaml",
+      "timestamp": "2026-08-11T08:41:51.095543-05:00",
+      "score": 44.0,
+      "tier": "REJECTED",
+      "details": {
+        "schema_valid": false,
+        "schema_errors": [
+          "fields[0]: must have 'name', 'type', 'flagged', 'tlv', 'byte_group', 'object', or 'match'"
+        ],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "fail",
+        "js_tests_pass": false,
+        "js_errors": [
+          "ref_header: missing version",
+          "ref_header: missing msg_type",
+          "ref_header: reading=515, expected 772"
+        ],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 2,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "generated": 1
+          },
+          "independent_vectors": 0,
+          "verification": "self",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Fix schema validation errors",
+        "Add more test vectors (recommend at least 3)",
+        "Generated JS codec disagrees with the test vectors",
+        "No test vector declares an independent source; add `source: vendor-doc|vendor-codec|field-capture` so the score reflects verification rather than self-consistency",
+        "Add test vector for zero values",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_language-conformance/repeat-byte-length.yaml",
+      "timestamp": "2026-08-11T08:41:51.112651-05:00",
+      "score": 58.0,
+      "tier": "REJECTED",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "fail",
+        "js_tests_pass": false,
+        "js_errors": [
+          "repeat_byte_length: tail=10, expected 255"
+        ],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "max",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 3,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "generated": 1
+          },
+          "independent_vectors": 0,
+          "verification": "self",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Generated JS codec disagrees with the test vectors",
+        "No test vector declares an independent source; add `source: vendor-doc|vendor-codec|field-capture` so the score reflects verification rather than self-consistency",
+        "Add test vector for zero values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_language-conformance/repeat-count.yaml",
+      "timestamp": "2026-08-11T08:41:51.131721-05:00",
+      "score": 71.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 2,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "generated": 1
+          },
+          "independent_vectors": 0,
+          "verification": "self",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "No test vector declares an independent source; add `source: vendor-doc|vendor-codec|field-capture` so the score reflects verification rather than self-consistency",
+        "Add test vector for zero values",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_language-conformance/round-half-to-even.yaml",
+      "timestamp": "2026-08-11T08:41:51.153072-05:00",
+      "score": 59.0,
+      "tier": "REJECTED",
+      "details": {
+        "schema_valid": false,
+        "schema_errors": [
+          "fields[0] (below_half_by_representation): transform[0] has no valid operation (sqrt, abs, pow, floor, ceiling, clamp, log10, log, add, mult, div)",
+          "fields[1] (below_half_by_representation_2): transform[0] has no valid operation (sqrt, abs, pow, floor, ceiling, clamp, log10, log, add, mult, div)",
+          "fields[2] (exact_tie_down_to_even): transform[0] has no valid operation (sqrt, abs, pow, floor, ceiling, clamp, log10, log, add, mult, div)",
+          "fields[3] (exact_tie_up_to_even): transform[0] has no valid operation (sqrt, abs, pow, floor, ceiling, clamp, log10, log, add, mult, div)",
+          "fields[4] (exact_tie_two_decimals): transform[0] has no valid operation (sqrt, abs, pow, floor, ceiling, clamp, log10, log, add, mult, div)"
+        ],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 5,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "generated": 1
+          },
+          "independent_vectors": 0,
+          "verification": "self",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Fix schema validation errors",
+        "Add more test vectors (recommend at least 3)",
+        "No test vector declares an independent source; add `source: vendor-doc|vendor-codec|field-capture` so the score reflects verification rather than self-consistency",
+        "Add test vector for zero values",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_language-conformance/skip-type.yaml",
+      "timestamp": "2026-08-11T08:41:51.173294-05:00",
+      "score": 71.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "max",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "negative values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 3,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "generated": 1
+          },
+          "independent_vectors": 0,
+          "verification": "self",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "No test vector declares an independent source; add `source: vendor-doc|vendor-codec|field-capture` so the score reflects verification rather than self-consistency",
+        "Add test vector for zero values",
+        "Add test vector for negative values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_language-conformance/transform-maths.yaml",
+      "timestamp": "2026-08-11T08:41:51.191692-05:00",
+      "score": 59.0,
+      "tier": "REJECTED",
+      "details": {
+        "schema_valid": false,
+        "schema_errors": [
+          "fields[2] (log_of_400): transform[1] has no valid operation (sqrt, abs, pow, floor, ceiling, clamp, log10, log, add, mult, div)",
+          "fields[3] (log10_of_400): transform[1] has no valid operation (sqrt, abs, pow, floor, ceiling, clamp, log10, log, add, mult, div)"
+        ],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "maximum values",
+          "negative values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 6,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "generated": 1
+          },
+          "independent_vectors": 0,
+          "verification": "self",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Fix schema validation errors",
+        "Add more test vectors (recommend at least 3)",
+        "No test vector declares an independent source; add `source: vendor-doc|vendor-codec|field-capture` so the score reflects verification rather than self-consistency",
+        "Add test vector for maximum values",
+        "Add test vector for negative values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/alarm_config__set_delta_threshold.yaml",
+      "timestamp": "2026-08-11T08:41:51.216608-05:00",
+      "score": 71.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "maximum values",
+          "negative values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 4,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for maximum values",
+        "Add test vector for negative values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/alarm_config__set_temp_alarm.yaml",
+      "timestamp": "2026-08-11T08:41:51.236599-05:00",
+      "score": 71.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "maximum values",
+          "negative values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 5,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for maximum values",
+        "Add test vector for negative values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/data_logging__clear_log.yaml",
+      "timestamp": "2026-08-11T08:41:51.258091-05:00",
+      "score": 71.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 3,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for zero values",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/data_logging__enable_logging.yaml",
+      "timestamp": "2026-08-11T08:41:51.280895-05:00",
+      "score": 73.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 4,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/data_logging__fetch_all.yaml",
+      "timestamp": "2026-08-11T08:41:51.303444-05:00",
+      "score": 73.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 4,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/device_management__factory_reset.yaml",
+      "timestamp": "2026-08-11T08:41:51.324433-05:00",
+      "score": 73.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 3,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/device_management__identify_10sec.yaml",
+      "timestamp": "2026-08-11T08:41:51.346439-05:00",
+      "score": 71.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 3,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for zero values",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/device_management__reboot_immediate.yaml",
+      "timestamp": "2026-08-11T08:41:51.368909-05:00",
+      "score": 73.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 3,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/gps_tracker__clear_all_geofences.yaml",
+      "timestamp": "2026-08-11T08:41:51.391448-05:00",
+      "score": 73.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "max",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 3,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for zero values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/gps_tracker__request_position.yaml",
+      "timestamp": "2026-08-11T08:41:51.413756-05:00",
+      "score": 71.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 3,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for zero values",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/gps_tracker__set_geofence.yaml",
+      "timestamp": "2026-08-11T08:41:51.434463-05:00",
+      "score": 75.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [],
+        "semantic_annotations": {
+          "total_fields": 6,
+          "ipso_mapped": 0,
+          "ipso_missing": [
+            "latitude: add ipso: {object: 3336}",
+            "longitude: add ipso: {object: 3336}"
+          ],
+          "senml_mapped": 0,
+          "senml_missing": [
+            "latitude: add senml: {unit: \"lat\"}",
+            "longitude: add senml: {unit: \"lon\"}"
+          ],
+          "semantic_mapped": 0,
+          "detectable_sensors": 2,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "generated": 1
+          },
+          "independent_vectors": 0,
+          "verification": "self",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "No test vector declares an independent source; add `source: vendor-doc|vendor-codec|field-capture` so the score reflects verification rather than self-consistency",
+        "Add IPSO object mappings for standard sensors (2 fields)",
+        "  \u2192 latitude: add ipso: {object: 3336}",
+        "  \u2192 longitude: add ipso: {object: 3336}",
+        "Add SenML units for standard sensors (2 fields)",
+        "  \u2192 latitude: add senml: {unit: \"lat\"}",
+        "  \u2192 longitude: add senml: {unit: \"lon\"}"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/lorawan_frames__fctrl_uplink_adr_ack.yaml",
+      "timestamp": "2026-08-11T08:41:51.458278-05:00",
+      "score": 73.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 5,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/lorawan_frames__join_request.yaml",
+      "timestamp": "2026-08-11T08:41:51.484106-05:00",
+      "score": 56.0,
+      "tier": "REJECTED",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "fail",
+        "js_tests_pass": false,
+        "js_errors": [
+          "join_request: join_eui=[0,1,2,3,4,5,6,7], expected 0001020304050607",
+          "join_request: dev_eui=[8,9,10,11,12,13,14,15], expected 08090a0b0c0d0e0f"
+        ],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 3,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Generated JS codec disagrees with the test vectors",
+        "Add test vector for zero values",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/lorawan_frames__mhdr_confirmed_down.yaml",
+      "timestamp": "2026-08-11T08:41:51.508426-05:00",
+      "score": 73.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 3,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/lorawan_frames__mhdr_unconfirmed_up.yaml",
+      "timestamp": "2026-08-11T08:41:51.533464-05:00",
+      "score": 73.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 3,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/lorawan_mac_commands__dev_status_ans.yaml",
+      "timestamp": "2026-08-11T08:41:51.558221-05:00",
+      "score": 71.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 3,
+          "ipso_mapped": 0,
+          "ipso_missing": [
+            "battery: add ipso: {object: 3316}"
+          ],
+          "senml_mapped": 0,
+          "senml_missing": [
+            "battery: add senml: {unit: \"V\"}"
+          ],
+          "semantic_mapped": 0,
+          "detectable_sensors": 1,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for zero values",
+        "Add test vector for maximum values",
+        "Add IPSO object mappings for standard sensors (1 fields)",
+        "  \u2192 battery: add ipso: {object: 3316}",
+        "Add SenML units for standard sensors (1 fields)",
+        "  \u2192 battery: add senml: {unit: \"V\"}"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/lorawan_mac_commands__device_time_ans.yaml",
+      "timestamp": "2026-08-11T08:41:51.585168-05:00",
+      "score": 71.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 3,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "generated": 1
+          },
+          "independent_vectors": 0,
+          "verification": "self",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "No test vector declares an independent source; add `source: vendor-doc|vendor-codec|field-capture` so the score reflects verification rather than self-consistency",
+        "Add test vector for zero values",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/lorawan_mac_commands__link_adr_req_dr5_pwr2.yaml",
+      "timestamp": "2026-08-11T08:41:51.612025-05:00",
+      "score": 73.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "max",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 4,
+          "ipso_mapped": 0,
+          "ipso_missing": [
+            "data_rate_tx_power: add ipso: {object: 3328}"
+          ],
+          "senml_mapped": 0,
+          "senml_missing": [
+            "data_rate_tx_power: add senml: {unit: \"W\"}"
+          ],
+          "semantic_mapped": 0,
+          "detectable_sensors": 1,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for zero values",
+        "Add IPSO object mappings for standard sensors (1 fields)",
+        "  \u2192 data_rate_tx_power: add ipso: {object: 3328}",
+        "Add SenML units for standard sensors (1 fields)",
+        "  \u2192 data_rate_tx_power: add senml: {unit: \"W\"}"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/lorawan_mac_commands__link_check_ans.yaml",
+      "timestamp": "2026-08-11T08:41:51.638900-05:00",
+      "score": 71.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 3,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for zero values",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/lorawan_mac_commands__link_check_req.yaml",
+      "timestamp": "2026-08-11T08:41:51.665124-05:00",
+      "score": 71.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 1,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for zero values",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/sensor_config__read_all_sensors.yaml",
+      "timestamp": "2026-08-11T08:41:51.693641-05:00",
+      "score": 73.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "max",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 3,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for zero values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/sensor_config__set_interval_5min.yaml",
+      "timestamp": "2026-08-11T08:41:51.716587-05:00",
+      "score": 73.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 3,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/sensor_config__set_temp_calibration.yaml",
+      "timestamp": "2026-08-11T08:41:51.740677-05:00",
+      "score": 73.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "max",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 4,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for zero values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/ts003_clock_sync__app_time_ans_negative_correction.yaml",
+      "timestamp": "2026-08-11T08:41:51.763022-05:00",
+      "score": 73.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "max",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 3,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for zero values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/ts003_clock_sync__app_time_ans_positive_correction.yaml",
+      "timestamp": "2026-08-11T08:41:51.783497-05:00",
+      "score": 69.0,
+      "tier": "BRONZE",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "maximum values",
+          "negative values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 3,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for zero values",
+        "Add test vector for maximum values",
+        "Add test vector for negative values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/ts003_clock_sync__app_time_req_with_ans_required.yaml",
+      "timestamp": "2026-08-11T08:41:51.804514-05:00",
+      "score": 71.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 3,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "generated": 1
+          },
+          "independent_vectors": 0,
+          "verification": "self",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "No test vector declares an independent source; add `source: vendor-doc|vendor-codec|field-capture` so the score reflects verification rather than self-consistency",
+        "Add test vector for zero values",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/ts003_clock_sync__force_resync.yaml",
+      "timestamp": "2026-08-11T08:41:51.828740-05:00",
+      "score": 71.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 1,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for zero values",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/ts003_clock_sync__package_version_req.yaml",
+      "timestamp": "2026-08-11T08:41:51.849667-05:00",
+      "score": 73.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 1,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/ts003_clock_sync__set_periodicity_daily.yaml",
+      "timestamp": "2026-08-11T08:41:51.869534-05:00",
+      "score": 71.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 2,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for zero values",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/ts004_fragmentation__frag_session_delete.yaml",
+      "timestamp": "2026-08-11T08:41:51.889545-05:00",
+      "score": 73.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 2,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/ts004_fragmentation__frag_session_status_query.yaml",
+      "timestamp": "2026-08-11T08:41:51.911034-05:00",
+      "score": 73.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 2,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/ts004_fragmentation__package_version_req.yaml",
+      "timestamp": "2026-08-11T08:41:51.934738-05:00",
+      "score": 73.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 1,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/ts005_multicast__mc_group_delete_0.yaml",
+      "timestamp": "2026-08-11T08:41:51.955547-05:00",
+      "score": 73.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 2,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/ts005_multicast__mc_group_status_all.yaml",
+      "timestamp": "2026-08-11T08:41:51.977642-05:00",
+      "score": 71.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 2,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for zero values",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/ts005_multicast__package_version_req.yaml",
+      "timestamp": "2026-08-11T08:41:52.000635-05:00",
+      "score": 73.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 1,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/ts006_firmware_mgmt__delete_any_image.yaml",
+      "timestamp": "2026-08-11T08:41:52.025313-05:00",
+      "score": 73.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "max",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 2,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for zero values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/ts006_firmware_mgmt__dev_version_req.yaml",
+      "timestamp": "2026-08-11T08:41:52.047465-05:00",
+      "score": 71.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 1,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for zero values",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/ts006_firmware_mgmt__package_version_req.yaml",
+      "timestamp": "2026-08-11T08:41:52.069934-05:00",
+      "score": 73.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 1,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/ts006_firmware_mgmt__reboot_cancel.yaml",
+      "timestamp": "2026-08-11T08:41:52.091059-05:00",
+      "score": 73.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "max",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 2,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for zero values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/ts006_firmware_mgmt__reboot_countdown_5min.yaml",
+      "timestamp": "2026-08-11T08:41:52.113015-05:00",
+      "score": 71.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 2,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for zero values",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/ts006_firmware_mgmt__reboot_immediate.yaml",
+      "timestamp": "2026-08-11T08:41:52.135251-05:00",
+      "score": 73.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 2,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/ts006_firmware_mgmt__upgrade_image_query.yaml",
+      "timestamp": "2026-08-11T08:41:52.157093-05:00",
+      "score": 71.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 1,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for zero values",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/ts007_multi_package__package_version_ans_full_stack.yaml",
+      "timestamp": "2026-08-11T08:41:52.178268-05:00",
+      "score": 58.0,
+      "tier": "REJECTED",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "fail",
+        "js_tests_pass": false,
+        "js_errors": [
+          "package_version_ans_full_stack: missing packages"
+        ],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 2,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Generated JS codec disagrees with the test vectors",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/ts007_multi_package__package_version_req.yaml",
+      "timestamp": "2026-08-11T08:41:52.197170-05:00",
+      "score": 73.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 1,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/udp_packet_forwarder__push_ack.yaml",
+      "timestamp": "2026-08-11T08:41:52.215136-05:00",
+      "score": 71.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 3,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for zero values",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/udp_packet_forwarder__push_data_header.yaml",
+      "timestamp": "2026-08-11T08:41:52.238388-05:00",
+      "score": 58.0,
+      "tier": "REJECTED",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "fail",
+        "js_tests_pass": false,
+        "js_errors": [
+          "push_data_header: gateway_eui=[1,2,3,4,5,6,7,8], expected 0102030405060708"
+        ],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 4,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Generated JS codec disagrees with the test vectors",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/utility_meter__reset_all_counters.yaml",
+      "timestamp": "2026-08-11T08:41:52.265448-05:00",
+      "score": 73.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "max",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 3,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for zero values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/utility_meter__set_ct_100_1.yaml",
+      "timestamp": "2026-08-11T08:41:52.285410-05:00",
+      "score": 71.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "zero values",
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 3,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for zero values",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
+      "schema_path": "schemas/devices/_library-composed/utility_meter__set_tariff.yaml",
+      "timestamp": "2026-08-11T08:41:52.305022-05:00",
+      "score": 73.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 1,
+        "vector_issues": [
+          "Only 1 test vectors (recommend at least 3)"
+        ],
+        "python_tests_pass": true,
+        "python_passed": 1,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
+        "edge_cases_covered": [
+          "zero",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [
+          "maximum values"
+        ],
+        "semantic_annotations": {
+          "total_fields": 3,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "spec-example": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
+          "issues": []
+        }
+      },
+      "recommendations": [
+        "Add more test vectors (recommend at least 3)",
+        "Add test vector for maximum values"
+      ]
+    },
+    {
       "schema_path": "schemas/devices/decentlab/dl-5tm.yaml",
-      "timestamp": "2026-08-07T10:37:54.891346-05:00",
+      "timestamp": "2026-08-11T08:41:52.326881-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -51,7 +3396,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-alb.yaml",
-      "timestamp": "2026-08-07T10:37:54.917315-05:00",
+      "timestamp": "2026-08-11T08:41:52.352059-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -99,7 +3444,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-atm22.yaml",
-      "timestamp": "2026-08-07T10:37:54.941951-05:00",
+      "timestamp": "2026-08-11T08:41:52.376301-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -147,7 +3492,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-atm41.yaml",
-      "timestamp": "2026-08-07T10:37:54.968118-05:00",
+      "timestamp": "2026-08-11T08:41:52.401500-05:00",
       "score": 92.0,
       "tier": "GOLD",
       "details": {
@@ -210,7 +3555,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-atm41g2.yaml",
-      "timestamp": "2026-08-07T10:37:54.996944-05:00",
+      "timestamp": "2026-08-11T08:41:52.431331-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -296,39 +3641,37 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-blg.yaml",
-      "timestamp": "2026-08-07T10:37:55.001294-05:00",
-      "score": 16.5,
+      "timestamp": "2026-08-11T08:41:52.437404-05:00",
+      "score": 54.0,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
+        "has_test_vectors": true,
+        "test_count": 2,
         "vector_issues": [
-          "No test vectors defined"
+          "Only 2 test vectors (recommend at least 3)"
         ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "python_tests_pass": true,
+        "python_passed": 2,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
-        ],
-        "js_status": "skipped",
+        "python_errors": [],
+        "js_status": "fail",
         "js_tests_pass": false,
         "js_errors": [
-          "No test vectors for JS validation"
+          "blg_all_sensors: voltage_ratio=NaN, expected 0.006409406661987305",
+          "blg_all_sensors: thermistor_resistance=NaN, expected 115020.68221552655",
+          "blg_all_sensors: temperature=NaN, expected 22.028848392450755"
         ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
         "edge_cases_covered": [
-          "negative"
+          "min_payload"
         ],
         "edge_cases_missing": [
           "zero values",
           "maximum values",
-          "minimum payload length"
+          "negative values"
         ],
         "semantic_annotations": {
           "total_fields": 7,
@@ -349,19 +3692,20 @@
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 2
+          },
+          "independent_vectors": 2,
+          "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
+        "Add more test vectors (recommend at least 3)",
+        "Generated JS codec disagrees with the test vectors",
         "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
-        "Add test vectors covering all switch/flagged branches",
+        "Add test vector for negative values",
         "Add IPSO object mappings for standard sensors (3 fields)",
         "  \u2192 voltage_ratio: add ipso: {object: 3316}",
         "  \u2192 temperature: add ipso: {object: 3303}",
@@ -372,7 +3716,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-ctd10.yaml",
-      "timestamp": "2026-08-07T10:37:55.002924-05:00",
+      "timestamp": "2026-08-11T08:41:52.458279-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -431,7 +3775,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-cws.yaml",
-      "timestamp": "2026-08-07T10:37:55.025347-05:00",
+      "timestamp": "2026-08-11T08:41:52.482751-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -510,7 +3854,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-cws2.yaml",
-      "timestamp": "2026-08-07T10:37:55.027590-05:00",
+      "timestamp": "2026-08-11T08:41:52.486154-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -593,8 +3937,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-002.yaml",
-      "timestamp": "2026-08-07T10:37:55.030250-05:00",
-      "score": 16.5,
+      "timestamp": "2026-08-11T08:41:52.489980-05:00",
+      "score": 14.1,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -619,12 +3963,11 @@
         "coverage_issues": [
           "No test vectors for branch analysis"
         ],
-        "edge_cases_covered": [
-          "negative"
-        ],
+        "edge_cases_covered": [],
         "edge_cases_missing": [
           "zero values",
           "maximum values",
+          "negative values",
           "minimum payload length"
         ],
         "semantic_annotations": {
@@ -653,7 +3996,7 @@
         "Fix failing Python interpreter tests",
         "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
+        "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (1 fields)",
         "  \u2192 battery_voltage: add ipso: {object: 3316}",
@@ -663,7 +4006,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-003.yaml",
-      "timestamp": "2026-08-07T10:37:55.031769-05:00",
+      "timestamp": "2026-08-11T08:41:52.492605-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -711,8 +4054,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-004-10.yaml",
-      "timestamp": "2026-08-07T10:37:55.052065-05:00",
-      "score": 16.5,
+      "timestamp": "2026-08-11T08:41:52.513000-05:00",
+      "score": 14.1,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -737,12 +4080,11 @@
         "coverage_issues": [
           "No test vectors for branch analysis"
         ],
-        "edge_cases_covered": [
-          "negative"
-        ],
+        "edge_cases_covered": [],
         "edge_cases_missing": [
           "zero values",
           "maximum values",
+          "negative values",
           "minimum payload length"
         ],
         "semantic_annotations": {
@@ -773,7 +4115,7 @@
         "Fix failing Python interpreter tests",
         "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
+        "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (2 fields)",
         "  \u2192 current: add ipso: {object: 3317}",
@@ -785,8 +4127,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-005.yaml",
-      "timestamp": "2026-08-07T10:37:55.053429-05:00",
-      "score": 16.5,
+      "timestamp": "2026-08-11T08:41:52.514678-05:00",
+      "score": 14.1,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -811,12 +4153,11 @@
         "coverage_issues": [
           "No test vectors for branch analysis"
         ],
-        "edge_cases_covered": [
-          "negative"
-        ],
+        "edge_cases_covered": [],
         "edge_cases_missing": [
           "zero values",
           "maximum values",
+          "negative values",
           "minimum payload length"
         ],
         "semantic_annotations": {
@@ -847,7 +4188,7 @@
         "Fix failing Python interpreter tests",
         "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
+        "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (2 fields)",
         "  \u2192 voltage: add ipso: {object: 3316}",
@@ -859,8 +4200,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-006.yaml",
-      "timestamp": "2026-08-07T10:37:55.054680-05:00",
-      "score": 16.5,
+      "timestamp": "2026-08-11T08:41:52.516937-05:00",
+      "score": 14.1,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -885,12 +4226,11 @@
         "coverage_issues": [
           "No test vectors for branch analysis"
         ],
-        "edge_cases_covered": [
-          "negative"
-        ],
+        "edge_cases_covered": [],
         "edge_cases_missing": [
           "zero values",
           "maximum values",
+          "negative values",
           "minimum payload length"
         ],
         "semantic_annotations": {
@@ -919,7 +4259,7 @@
         "Fix failing Python interpreter tests",
         "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
+        "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (1 fields)",
         "  \u2192 battery_voltage: add ipso: {object: 3316}",
@@ -929,8 +4269,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-008-2000.yaml",
-      "timestamp": "2026-08-07T10:37:55.055909-05:00",
-      "score": 16.5,
+      "timestamp": "2026-08-11T08:41:52.519057-05:00",
+      "score": 14.1,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -955,12 +4295,11 @@
         "coverage_issues": [
           "No test vectors for branch analysis"
         ],
-        "edge_cases_covered": [
-          "negative"
-        ],
+        "edge_cases_covered": [],
         "edge_cases_missing": [
           "zero values",
           "maximum values",
+          "negative values",
           "minimum payload length"
         ],
         "semantic_annotations": {
@@ -991,7 +4330,7 @@
         "Fix failing Python interpreter tests",
         "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
+        "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (2 fields)",
         "  \u2192 temperature: add ipso: {object: 3303}",
@@ -1003,8 +4342,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-009-2000.yaml",
-      "timestamp": "2026-08-07T10:37:55.057225-05:00",
-      "score": 16.5,
+      "timestamp": "2026-08-11T08:41:52.522057-05:00",
+      "score": 14.1,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -1029,12 +4368,11 @@
         "coverage_issues": [
           "No test vectors for branch analysis"
         ],
-        "edge_cases_covered": [
-          "negative"
-        ],
+        "edge_cases_covered": [],
         "edge_cases_missing": [
           "zero values",
           "maximum values",
+          "negative values",
           "minimum payload length"
         ],
         "semantic_annotations": {
@@ -1065,7 +4403,7 @@
         "Fix failing Python interpreter tests",
         "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
+        "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (2 fields)",
         "  \u2192 temperature: add ipso: {object: 3303}",
@@ -1077,8 +4415,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-010.yaml",
-      "timestamp": "2026-08-07T10:37:55.058696-05:00",
-      "score": 16.5,
+      "timestamp": "2026-08-11T08:41:52.525535-05:00",
+      "score": 14.1,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -1103,12 +4441,11 @@
         "coverage_issues": [
           "No test vectors for branch analysis"
         ],
-        "edge_cases_covered": [
-          "negative"
-        ],
+        "edge_cases_covered": [],
         "edge_cases_missing": [
           "zero values",
           "maximum values",
+          "negative values",
           "minimum payload length"
         ],
         "semantic_annotations": {
@@ -1137,7 +4474,7 @@
         "Fix failing Python interpreter tests",
         "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
+        "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (1 fields)",
         "  \u2192 battery_voltage: add ipso: {object: 3316}",
@@ -1147,7 +4484,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-011.yaml",
-      "timestamp": "2026-08-07T10:37:55.060724-05:00",
+      "timestamp": "2026-08-11T08:41:52.528938-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -1195,8 +4532,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-012.yaml",
-      "timestamp": "2026-08-07T10:37:55.085800-05:00",
-      "score": 16.5,
+      "timestamp": "2026-08-11T08:41:52.550412-05:00",
+      "score": 14.1,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -1221,12 +4558,11 @@
         "coverage_issues": [
           "No test vectors for branch analysis"
         ],
-        "edge_cases_covered": [
-          "negative"
-        ],
+        "edge_cases_covered": [],
         "edge_cases_missing": [
           "zero values",
           "maximum values",
+          "negative values",
           "minimum payload length"
         ],
         "semantic_annotations": {
@@ -1255,7 +4591,7 @@
         "Fix failing Python interpreter tests",
         "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
+        "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (1 fields)",
         "  \u2192 battery_voltage: add ipso: {object: 3316}",
@@ -1265,7 +4601,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-ds18.yaml",
-      "timestamp": "2026-08-07T10:37:55.087301-05:00",
+      "timestamp": "2026-08-11T08:41:52.553085-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -1313,8 +4649,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dws-232263168-0000302459-1370.yaml",
-      "timestamp": "2026-08-07T10:37:55.108692-05:00",
-      "score": 16.5,
+      "timestamp": "2026-08-11T08:41:52.575330-05:00",
+      "score": 14.1,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -1339,12 +4675,11 @@
         "coverage_issues": [
           "No test vectors for branch analysis"
         ],
-        "edge_cases_covered": [
-          "negative"
-        ],
+        "edge_cases_covered": [],
         "edge_cases_missing": [
           "zero values",
           "maximum values",
+          "negative values",
           "minimum payload length"
         ],
         "semantic_annotations": {
@@ -1377,7 +4712,7 @@
         "Fix failing Python interpreter tests",
         "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
+        "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (3 fields)",
         "  \u2192 frequency: add ipso: {object: 3318}",
@@ -1389,7 +4724,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-gmm.yaml",
-      "timestamp": "2026-08-07T10:37:55.110222-05:00",
+      "timestamp": "2026-08-11T08:41:52.577893-05:00",
       "score": 92.0,
       "tier": "GOLD",
       "details": {
@@ -1450,7 +4785,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-iam.yaml",
-      "timestamp": "2026-08-07T10:37:55.137648-05:00",
+      "timestamp": "2026-08-11T08:41:52.604365-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -1537,7 +4872,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-ifd.yaml",
-      "timestamp": "2026-08-07T10:37:55.140835-05:00",
+      "timestamp": "2026-08-11T08:41:52.608028-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -1585,7 +4920,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-ilt.yaml",
-      "timestamp": "2026-08-07T10:37:55.162210-05:00",
+      "timestamp": "2026-08-11T08:41:52.629304-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -1633,7 +4968,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-isd.yaml",
-      "timestamp": "2026-08-07T10:37:55.184366-05:00",
+      "timestamp": "2026-08-11T08:41:52.651479-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -1681,7 +5016,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-isf.yaml",
-      "timestamp": "2026-08-07T10:37:55.205130-05:00",
+      "timestamp": "2026-08-11T08:41:52.672000-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -1758,8 +5093,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-itst.yaml",
-      "timestamp": "2026-08-07T10:37:55.208877-05:00",
-      "score": 16.5,
+      "timestamp": "2026-08-11T08:41:52.677564-05:00",
+      "score": 14.1,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -1784,12 +5119,11 @@
         "coverage_issues": [
           "No test vectors for branch analysis"
         ],
-        "edge_cases_covered": [
-          "negative"
-        ],
+        "edge_cases_covered": [],
         "edge_cases_missing": [
           "zero values",
           "maximum values",
+          "negative values",
           "minimum payload length"
         ],
         "semantic_annotations": {
@@ -1822,7 +5156,7 @@
         "Fix failing Python interpreter tests",
         "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
+        "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (3 fields)",
         "  \u2192 temperature_target: add ipso: {object: 3303}",
@@ -1834,8 +5168,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-kl66-1538372-464859.yaml",
-      "timestamp": "2026-08-07T10:37:55.210320-05:00",
-      "score": 16.5,
+      "timestamp": "2026-08-11T08:41:52.679242-05:00",
+      "score": 14.1,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -1860,12 +5194,11 @@
         "coverage_issues": [
           "No test vectors for branch analysis"
         ],
-        "edge_cases_covered": [
-          "negative"
-        ],
+        "edge_cases_covered": [],
         "edge_cases_missing": [
           "zero values",
           "maximum values",
+          "negative values",
           "minimum payload length"
         ],
         "semantic_annotations": {
@@ -1898,7 +5231,7 @@
         "Fix failing Python interpreter tests",
         "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
+        "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (3 fields)",
         "  \u2192 frequency: add ipso: {object: 3318}",
@@ -1910,7 +5243,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-lid.yaml",
-      "timestamp": "2026-08-07T10:37:55.212432-05:00",
+      "timestamp": "2026-08-11T08:41:52.682604-05:00",
       "score": 80.0,
       "tier": "SILVER",
       "details": {
@@ -1985,7 +5318,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-lp8p.yaml",
-      "timestamp": "2026-08-07T10:37:55.234786-05:00",
+      "timestamp": "2026-08-11T08:41:52.706047-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -2076,8 +5409,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-lpw.yaml",
-      "timestamp": "2026-08-07T10:37:55.238197-05:00",
-      "score": 16.5,
+      "timestamp": "2026-08-11T08:41:52.709876-05:00",
+      "score": 14.1,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -2102,12 +5435,11 @@
         "coverage_issues": [
           "No test vectors for branch analysis"
         ],
-        "edge_cases_covered": [
-          "negative"
-        ],
+        "edge_cases_covered": [],
         "edge_cases_missing": [
           "zero values",
           "maximum values",
+          "negative values",
           "minimum payload length"
         ],
         "semantic_annotations": {
@@ -2136,7 +5468,7 @@
         "Fix failing Python interpreter tests",
         "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
+        "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (1 fields)",
         "  \u2192 battery_voltage: add ipso: {object: 3316}",
@@ -2146,8 +5478,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-lws.yaml",
-      "timestamp": "2026-08-07T10:37:55.239437-05:00",
-      "score": 16.5,
+      "timestamp": "2026-08-11T08:41:52.711840-05:00",
+      "score": 14.1,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -2172,12 +5504,11 @@
         "coverage_issues": [
           "No test vectors for branch analysis"
         ],
-        "edge_cases_covered": [
-          "negative"
-        ],
+        "edge_cases_covered": [],
         "edge_cases_missing": [
           "zero values",
           "maximum values",
+          "negative values",
           "minimum payload length"
         ],
         "semantic_annotations": {
@@ -2206,7 +5537,7 @@
         "Fix failing Python interpreter tests",
         "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
+        "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (1 fields)",
         "  \u2192 battery_voltage: add ipso: {object: 3316}",
@@ -2216,7 +5547,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-mbx.yaml",
-      "timestamp": "2026-08-07T10:37:55.240635-05:00",
+      "timestamp": "2026-08-11T08:41:52.713736-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -2273,7 +5604,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-mes5.yaml",
-      "timestamp": "2026-08-07T10:37:55.260361-05:00",
+      "timestamp": "2026-08-11T08:41:52.739057-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -2321,7 +5652,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-ntu.yaml",
-      "timestamp": "2026-08-07T10:37:55.282446-05:00",
+      "timestamp": "2026-08-11T08:41:52.763157-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -2369,7 +5700,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-optod.yaml",
-      "timestamp": "2026-08-07T10:37:55.305785-05:00",
+      "timestamp": "2026-08-11T08:41:52.785920-05:00",
       "score": 94.0,
       "tier": "GOLD",
       "details": {
@@ -2426,8 +5757,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-par.yaml",
-      "timestamp": "2026-08-07T10:37:55.328367-05:00",
-      "score": 16.5,
+      "timestamp": "2026-08-11T08:41:52.809524-05:00",
+      "score": 14.1,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -2452,12 +5783,11 @@
         "coverage_issues": [
           "No test vectors for branch analysis"
         ],
-        "edge_cases_covered": [
-          "negative"
-        ],
+        "edge_cases_covered": [],
         "edge_cases_missing": [
           "zero values",
           "maximum values",
+          "negative values",
           "minimum payload length"
         ],
         "semantic_annotations": {
@@ -2486,7 +5816,7 @@
         "Fix failing Python interpreter tests",
         "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
+        "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (1 fields)",
         "  \u2192 battery_voltage: add ipso: {object: 3316}",
@@ -2496,7 +5826,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pheht.yaml",
-      "timestamp": "2026-08-07T10:37:55.329760-05:00",
+      "timestamp": "2026-08-11T08:41:52.811237-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -2551,8 +5881,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pm.yaml",
-      "timestamp": "2026-08-07T10:37:55.352966-05:00",
-      "score": 16.5,
+      "timestamp": "2026-08-11T08:41:52.834321-05:00",
+      "score": 14.1,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -2577,12 +5907,11 @@
         "coverage_issues": [
           "No test vectors for branch analysis"
         ],
-        "edge_cases_covered": [
-          "negative"
-        ],
+        "edge_cases_covered": [],
         "edge_cases_missing": [
           "zero values",
           "maximum values",
+          "negative values",
           "minimum payload length"
         ],
         "semantic_annotations": {
@@ -2635,7 +5964,7 @@
         "Fix failing Python interpreter tests",
         "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
+        "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (13 fields)",
         "  \u2192 battery_voltage: add ipso: {object: 3316}",
@@ -2647,8 +5976,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pr21-1-10.yaml",
-      "timestamp": "2026-08-07T10:37:55.357396-05:00",
-      "score": 16.5,
+      "timestamp": "2026-08-11T08:41:52.838960-05:00",
+      "score": 14.1,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -2673,12 +6002,11 @@
         "coverage_issues": [
           "No test vectors for branch analysis"
         ],
-        "edge_cases_covered": [
-          "negative"
-        ],
+        "edge_cases_covered": [],
         "edge_cases_missing": [
           "zero values",
           "maximum values",
+          "negative values",
           "minimum payload length"
         ],
         "semantic_annotations": {
@@ -2711,7 +6039,7 @@
         "Fix failing Python interpreter tests",
         "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
+        "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (3 fields)",
         "  \u2192 pressure: add ipso: {object: 3323}",
@@ -2723,8 +6051,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pr26-0-1.yaml",
-      "timestamp": "2026-08-07T10:37:55.359121-05:00",
-      "score": 16.5,
+      "timestamp": "2026-08-11T08:41:52.840809-05:00",
+      "score": 14.1,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -2749,12 +6077,11 @@
         "coverage_issues": [
           "No test vectors for branch analysis"
         ],
-        "edge_cases_covered": [
-          "negative"
-        ],
+        "edge_cases_covered": [],
         "edge_cases_missing": [
           "zero values",
           "maximum values",
+          "negative values",
           "minimum payload length"
         ],
         "semantic_annotations": {
@@ -2787,7 +6114,7 @@
         "Fix failing Python interpreter tests",
         "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
+        "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (3 fields)",
         "  \u2192 pressure: add ipso: {object: 3323}",
@@ -2799,7 +6126,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pr36-8192.yaml",
-      "timestamp": "2026-08-07T10:37:55.360632-05:00",
+      "timestamp": "2026-08-11T08:41:52.842638-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -2874,7 +6201,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pr36ctd-8192-1024.yaml",
-      "timestamp": "2026-08-07T10:37:55.362096-05:00",
+      "timestamp": "2026-08-11T08:41:52.844478-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -2952,8 +6279,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pyr.yaml",
-      "timestamp": "2026-08-07T10:37:55.363997-05:00",
-      "score": 16.5,
+      "timestamp": "2026-08-11T08:41:52.846999-05:00",
+      "score": 14.1,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -2978,12 +6305,11 @@
         "coverage_issues": [
           "No test vectors for branch analysis"
         ],
-        "edge_cases_covered": [
-          "negative"
-        ],
+        "edge_cases_covered": [],
         "edge_cases_missing": [
           "zero values",
           "maximum values",
+          "negative values",
           "minimum payload length"
         ],
         "semantic_annotations": {
@@ -3012,7 +6338,7 @@
         "Fix failing Python interpreter tests",
         "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
+        "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (1 fields)",
         "  \u2192 battery_voltage: add ipso: {object: 3316}",
@@ -3022,7 +6348,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-rad.yaml",
-      "timestamp": "2026-08-07T10:37:55.365269-05:00",
+      "timestamp": "2026-08-11T08:41:52.848528-05:00",
       "score": 92.0,
       "tier": "GOLD",
       "details": {
@@ -3079,7 +6405,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-rhc.yaml",
-      "timestamp": "2026-08-07T10:37:55.386610-05:00",
+      "timestamp": "2026-08-11T08:41:52.870605-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -3154,7 +6480,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-sdd.yaml",
-      "timestamp": "2026-08-07T10:37:55.388287-05:00",
+      "timestamp": "2026-08-11T08:41:52.873103-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -3297,8 +6623,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-sht35.yaml",
-      "timestamp": "2026-08-07T10:37:55.397652-05:00",
-      "score": 16.5,
+      "timestamp": "2026-08-11T08:41:52.883675-05:00",
+      "score": 14.1,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -3323,12 +6649,11 @@
         "coverage_issues": [
           "No test vectors for branch analysis"
         ],
-        "edge_cases_covered": [
-          "negative"
-        ],
+        "edge_cases_covered": [],
         "edge_cases_missing": [
           "zero values",
           "maximum values",
+          "negative values",
           "minimum payload length"
         ],
         "semantic_annotations": {
@@ -3361,7 +6686,7 @@
         "Fix failing Python interpreter tests",
         "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
+        "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (3 fields)",
         "  \u2192 air_temperature: add ipso: {object: 3303}",
@@ -3373,7 +6698,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-smtp.yaml",
-      "timestamp": "2026-08-07T10:37:55.399099-05:00",
+      "timestamp": "2026-08-11T08:41:52.885427-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -3476,8 +6801,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-tbrg-01.yaml",
-      "timestamp": "2026-08-07T10:37:55.402927-05:00",
-      "score": 16.5,
+      "timestamp": "2026-08-11T08:41:52.891006-05:00",
+      "score": 14.1,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -3502,12 +6827,11 @@
         "coverage_issues": [
           "No test vectors for branch analysis"
         ],
-        "edge_cases_covered": [
-          "negative"
-        ],
+        "edge_cases_covered": [],
         "edge_cases_missing": [
           "zero values",
           "maximum values",
+          "negative values",
           "minimum payload length"
         ],
         "semantic_annotations": {
@@ -3536,7 +6860,7 @@
         "Fix failing Python interpreter tests",
         "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
+        "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (1 fields)",
         "  \u2192 battery_voltage: add ipso: {object: 3316}",
@@ -3546,7 +6870,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-tp.yaml",
-      "timestamp": "2026-08-07T10:37:55.404517-05:00",
+      "timestamp": "2026-08-11T08:41:52.893392-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -3594,7 +6918,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-trs11.yaml",
-      "timestamp": "2026-08-07T10:37:55.436906-05:00",
+      "timestamp": "2026-08-11T08:41:52.927934-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -3667,7 +6991,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-trs12.yaml",
-      "timestamp": "2026-08-07T10:37:55.438737-05:00",
+      "timestamp": "2026-08-11T08:41:52.931052-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -3741,7 +7065,7 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-trs21.yaml",
-      "timestamp": "2026-08-07T10:37:55.440681-05:00",
+      "timestamp": "2026-08-11T08:41:52.934226-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -3814,8 +7138,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-wrm.yaml",
-      "timestamp": "2026-08-07T10:37:55.442209-05:00",
-      "score": 16.5,
+      "timestamp": "2026-08-11T08:41:52.935962-05:00",
+      "score": 14.1,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -3840,12 +7164,11 @@
         "coverage_issues": [
           "No test vectors for branch analysis"
         ],
-        "edge_cases_covered": [
-          "negative"
-        ],
+        "edge_cases_covered": [],
         "edge_cases_missing": [
           "zero values",
           "maximum values",
+          "negative values",
           "minimum payload length"
         ],
         "semantic_annotations": {
@@ -3882,7 +7205,7 @@
         "Fix failing Python interpreter tests",
         "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
+        "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (5 fields)",
         "  \u2192 air_temperature: add ipso: {object: 3303}",
@@ -3894,8 +7217,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-zn1.yaml",
-      "timestamp": "2026-08-07T10:37:55.444230-05:00",
-      "score": 16.5,
+      "timestamp": "2026-08-11T08:41:52.938454-05:00",
+      "score": 14.1,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -3920,12 +7243,11 @@
         "coverage_issues": [
           "No test vectors for branch analysis"
         ],
-        "edge_cases_covered": [
-          "negative"
-        ],
+        "edge_cases_covered": [],
         "edge_cases_missing": [
           "zero values",
           "maximum values",
+          "negative values",
           "minimum payload length"
         ],
         "semantic_annotations": {
@@ -3954,7 +7276,7 @@
         "Fix failing Python interpreter tests",
         "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
+        "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (1 fields)",
         "  \u2192 battery_voltage: add ipso: {object: 3316}",
@@ -3964,8 +7286,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-zn2.yaml",
-      "timestamp": "2026-08-07T10:37:55.445568-05:00",
-      "score": 16.5,
+      "timestamp": "2026-08-11T08:41:52.940615-05:00",
+      "score": 14.1,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -3990,12 +7312,11 @@
         "coverage_issues": [
           "No test vectors for branch analysis"
         ],
-        "edge_cases_covered": [
-          "negative"
-        ],
+        "edge_cases_covered": [],
         "edge_cases_missing": [
           "zero values",
           "maximum values",
+          "negative values",
           "minimum payload length"
         ],
         "semantic_annotations": {
@@ -4024,7 +7345,7 @@
         "Fix failing Python interpreter tests",
         "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
+        "Add test vector for negative values",
         "Add test vectors covering all switch/flagged branches",
         "Add IPSO object mappings for standard sensors (1 fields)",
         "  \u2192 battery_voltage: add ipso: {object: 3316}",
@@ -4034,7 +7355,7 @@
     },
     {
       "schema_path": "schemas/devices/digital-matter/oyster.yaml",
-      "timestamp": "2026-08-07T10:37:55.447145-05:00",
+      "timestamp": "2026-08-11T08:41:52.942998-05:00",
       "score": 100.0,
       "tier": "SILVER",
       "details": {
@@ -4088,7 +7409,7 @@
     },
     {
       "schema_path": "schemas/devices/dragino/laq4.yaml",
-      "timestamp": "2026-08-07T10:37:55.475353-05:00",
+      "timestamp": "2026-08-11T08:41:52.970412-05:00",
       "score": 100.0,
       "tier": "SILVER",
       "details": {
@@ -4142,7 +7463,7 @@
     },
     {
       "schema_path": "schemas/devices/elsys/ers.yaml",
-      "timestamp": "2026-08-07T10:37:55.498705-05:00",
+      "timestamp": "2026-08-11T08:41:52.997104-05:00",
       "score": 56.0,
       "tier": "REJECTED",
       "details": {
@@ -4239,7 +7560,7 @@
     },
     {
       "schema_path": "schemas/devices/hbi/mla20.yaml",
-      "timestamp": "2026-08-07T10:37:55.522848-05:00",
+      "timestamp": "2026-08-11T08:41:53.021581-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4313,7 +7634,7 @@
     },
     {
       "schema_path": "schemas/devices/makerfabs/4-channel-adc.yaml",
-      "timestamp": "2026-08-07T10:37:55.525639-05:00",
+      "timestamp": "2026-08-11T08:41:53.024387-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4383,7 +7704,7 @@
     },
     {
       "schema_path": "schemas/devices/makerfabs/ath20.yaml",
-      "timestamp": "2026-08-07T10:37:55.527251-05:00",
+      "timestamp": "2026-08-11T08:41:53.026030-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -4458,7 +7779,7 @@
     },
     {
       "schema_path": "schemas/devices/makerfabs/gps-tracker.yaml",
-      "timestamp": "2026-08-07T10:37:55.528105-05:00",
+      "timestamp": "2026-08-11T08:41:53.026890-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4535,7 +7856,7 @@
     },
     {
       "schema_path": "schemas/devices/makerfabs/leaf-moisture-sn-3001.yaml",
-      "timestamp": "2026-08-07T10:37:55.530641-05:00",
+      "timestamp": "2026-08-11T08:41:53.029470-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -4610,7 +7931,7 @@
     },
     {
       "schema_path": "schemas/devices/makerfabs/pipe-pressure.yaml",
-      "timestamp": "2026-08-07T10:37:55.531745-05:00",
+      "timestamp": "2026-08-11T08:41:53.030592-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4684,7 +8005,7 @@
     },
     {
       "schema_path": "schemas/devices/makerfabs/soil-monitor.yaml",
-      "timestamp": "2026-08-07T10:37:55.532479-05:00",
+      "timestamp": "2026-08-11T08:41:53.031325-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -4760,7 +8081,7 @@
     },
     {
       "schema_path": "schemas/devices/mclimate/flood-sensor.yaml",
-      "timestamp": "2026-08-07T10:37:55.533898-05:00",
+      "timestamp": "2026-08-11T08:41:53.032747-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4834,7 +8155,7 @@
     },
     {
       "schema_path": "schemas/devices/mclimate/t-valve.yaml",
-      "timestamp": "2026-08-07T10:37:55.534982-05:00",
+      "timestamp": "2026-08-11T08:41:53.033847-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -4904,8 +8225,8 @@
     },
     {
       "schema_path": "schemas/devices/mclimate/vicki.yaml",
-      "timestamp": "2026-08-07T10:37:55.537213-05:00",
-      "score": 85.0,
+      "timestamp": "2026-08-11T08:41:53.035629-05:00",
+      "score": 100.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -4917,11 +8238,9 @@
         "python_passed": 11,
         "python_failed": 0,
         "python_errors": [],
-        "js_status": "fail",
-        "js_tests_pass": false,
-        "js_errors": [
-          "keepalive_valve_fully_open: relativeHumidity=78.13, expected 78.12"
-        ],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
         "branch_coverage": 1.0,
         "coverage_issues": [],
         "edge_cases_covered": [
@@ -4954,14 +8273,13 @@
         ]
       },
       "recommendations": [
-        "Generated JS codec disagrees with the test vectors",
         "No test vector declares an independent source; add `source: vendor-doc|vendor-codec|field-capture` so the score reflects verification rather than self-consistency",
         "Tier capped: no independently sourced test vectors (PS-264)"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/am102.yaml",
-      "timestamp": "2026-08-07T10:37:55.570236-05:00",
+      "timestamp": "2026-08-11T08:41:53.069934-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -5010,7 +8328,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am102l.yaml",
-      "timestamp": "2026-08-07T10:37:55.598731-05:00",
+      "timestamp": "2026-08-11T08:41:53.097082-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -5059,7 +8377,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am103.yaml",
-      "timestamp": "2026-08-07T10:37:55.625530-05:00",
+      "timestamp": "2026-08-11T08:41:53.125123-05:00",
       "score": 94.0,
       "tier": "GOLD",
       "details": {
@@ -5117,7 +8435,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am103l.yaml",
-      "timestamp": "2026-08-07T10:37:55.648295-05:00",
+      "timestamp": "2026-08-11T08:41:53.150404-05:00",
       "score": 94.0,
       "tier": "GOLD",
       "details": {
@@ -5175,7 +8493,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am104.yaml",
-      "timestamp": "2026-08-07T10:37:55.675035-05:00",
+      "timestamp": "2026-08-11T08:41:53.174866-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -5224,7 +8542,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am107.yaml",
-      "timestamp": "2026-08-07T10:37:55.697661-05:00",
+      "timestamp": "2026-08-11T08:41:53.199549-05:00",
       "score": 94.0,
       "tier": "GOLD",
       "details": {
@@ -5282,7 +8600,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am307.yaml",
-      "timestamp": "2026-08-07T10:37:55.724489-05:00",
+      "timestamp": "2026-08-11T08:41:53.224211-05:00",
       "score": 91.0,
       "tier": "GOLD",
       "details": {
@@ -5345,7 +8663,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am307l.yaml",
-      "timestamp": "2026-08-07T10:37:55.750928-05:00",
+      "timestamp": "2026-08-11T08:41:53.249871-05:00",
       "score": 91.0,
       "tier": "GOLD",
       "details": {
@@ -5408,7 +8726,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am308.yaml",
-      "timestamp": "2026-08-07T10:37:55.776645-05:00",
+      "timestamp": "2026-08-11T08:41:53.275557-05:00",
       "score": 91.0,
       "tier": "GOLD",
       "details": {
@@ -5471,7 +8789,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am308l.yaml",
-      "timestamp": "2026-08-07T10:37:55.801781-05:00",
+      "timestamp": "2026-08-11T08:41:53.302429-05:00",
       "score": 91.0,
       "tier": "GOLD",
       "details": {
@@ -5534,7 +8852,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am319.yaml",
-      "timestamp": "2026-08-07T10:37:55.827386-05:00",
+      "timestamp": "2026-08-11T08:41:53.328471-05:00",
       "score": 91.0,
       "tier": "GOLD",
       "details": {
@@ -5597,7 +8915,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am319l.yaml",
-      "timestamp": "2026-08-07T10:37:55.860348-05:00",
+      "timestamp": "2026-08-11T08:41:53.356365-05:00",
       "score": 91.0,
       "tier": "GOLD",
       "details": {
@@ -5660,7 +8978,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/at101-fh.yaml",
-      "timestamp": "2026-08-07T10:37:55.889134-05:00",
+      "timestamp": "2026-08-11T08:41:53.387635-05:00",
       "score": 91.0,
       "tier": "GOLD",
       "details": {
@@ -5721,7 +9039,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/at101.yaml",
-      "timestamp": "2026-08-07T10:37:55.917794-05:00",
+      "timestamp": "2026-08-11T08:41:53.416058-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -5769,7 +9087,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ct101.yaml",
-      "timestamp": "2026-08-07T10:37:55.945784-05:00",
+      "timestamp": "2026-08-11T08:41:53.444361-05:00",
       "score": 81.0,
       "tier": "SILVER",
       "details": {
@@ -5838,7 +9156,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ct103.yaml",
-      "timestamp": "2026-08-07T10:37:55.971497-05:00",
+      "timestamp": "2026-08-11T08:41:53.470510-05:00",
       "score": 81.0,
       "tier": "SILVER",
       "details": {
@@ -5907,7 +9225,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ct105.yaml",
-      "timestamp": "2026-08-07T10:37:55.999164-05:00",
+      "timestamp": "2026-08-11T08:41:53.499726-05:00",
       "score": 81.0,
       "tier": "SILVER",
       "details": {
@@ -5976,17 +9294,17 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ct303.yaml",
-      "timestamp": "2026-08-07T10:37:56.027924-05:00",
-      "score": 98.0,
+      "timestamp": "2026-08-11T08:41:53.527259-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 16,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 16,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -6003,45 +9321,91 @@
           "negative values"
         ],
         "semantic_annotations": {
-          "total_fields": 11,
-          "ipso_mapped": 1,
-          "ipso_missing": [],
-          "senml_mapped": 1,
-          "senml_missing": [],
-          "semantic_mapped": 1,
-          "detectable_sensors": 1,
+          "total_fields": 38,
+          "ipso_mapped": 7,
+          "ipso_missing": [
+            "current_chn1_total: add ipso: {object: 3317}",
+            "current_chn1_max: add ipso: {object: 3317}",
+            "current_chn1_min: add ipso: {object: 3317}",
+            "current_chn1_alarm.current_threshold_alarm: add ipso: {object: 3317}",
+            "current_chn1_alarm.current_threshold_alarm_release: add ipso: {object: 3317}",
+            "current_chn1_alarm.current_over_range_alarm: add ipso: {object: 3317}",
+            "current_chn1_alarm.current_over_range_alarm_release: add ipso: {object: 3317}",
+            "current_chn2_total: add ipso: {object: 3317}",
+            "current_chn2_max: add ipso: {object: 3317}",
+            "current_chn2_min: add ipso: {object: 3317}",
+            "current_chn2_alarm.current_threshold_alarm: add ipso: {object: 3317}",
+            "current_chn2_alarm.current_threshold_alarm_release: add ipso: {object: 3317}",
+            "current_chn2_alarm.current_over_range_alarm: add ipso: {object: 3317}",
+            "current_chn2_alarm.current_over_range_alarm_release: add ipso: {object: 3317}",
+            "current_chn3_total: add ipso: {object: 3317}",
+            "current_chn3_max: add ipso: {object: 3317}",
+            "current_chn3_min: add ipso: {object: 3317}",
+            "current_chn3_alarm.current_threshold_alarm: add ipso: {object: 3317}",
+            "current_chn3_alarm.current_threshold_alarm_release: add ipso: {object: 3317}",
+            "current_chn3_alarm.current_over_range_alarm: add ipso: {object: 3317}",
+            "current_chn3_alarm.current_over_range_alarm_release: add ipso: {object: 3317}"
+          ],
+          "senml_mapped": 7,
+          "senml_missing": [
+            "current_chn1_total: add senml: {unit: \"A\"}",
+            "current_chn1_max: add senml: {unit: \"A\"}",
+            "current_chn1_min: add senml: {unit: \"A\"}",
+            "current_chn1_alarm.current_threshold_alarm: add senml: {unit: \"A\"}",
+            "current_chn1_alarm.current_threshold_alarm_release: add senml: {unit: \"A\"}",
+            "current_chn1_alarm.current_over_range_alarm: add senml: {unit: \"A\"}",
+            "current_chn1_alarm.current_over_range_alarm_release: add senml: {unit: \"A\"}",
+            "current_chn2_total: add senml: {unit: \"A\"}",
+            "current_chn2_max: add senml: {unit: \"A\"}",
+            "current_chn2_min: add senml: {unit: \"A\"}",
+            "current_chn2_alarm.current_threshold_alarm: add senml: {unit: \"A\"}",
+            "current_chn2_alarm.current_threshold_alarm_release: add senml: {unit: \"A\"}",
+            "current_chn2_alarm.current_over_range_alarm: add senml: {unit: \"A\"}",
+            "current_chn2_alarm.current_over_range_alarm_release: add senml: {unit: \"A\"}",
+            "current_chn3_total: add senml: {unit: \"A\"}",
+            "current_chn3_max: add senml: {unit: \"A\"}",
+            "current_chn3_min: add senml: {unit: \"A\"}",
+            "current_chn3_alarm.current_threshold_alarm: add senml: {unit: \"A\"}",
+            "current_chn3_alarm.current_threshold_alarm_release: add senml: {unit: \"A\"}",
+            "current_chn3_alarm.current_over_range_alarm: add senml: {unit: \"A\"}",
+            "current_chn3_alarm.current_over_range_alarm_release: add senml: {unit: \"A\"}"
+          ],
+          "semantic_mapped": 7,
+          "detectable_sensors": 28,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
-            "vendor-codec": 15
+            "vendor-codec": 16
           },
-          "independent_vectors": 15,
+          "independent_vectors": 16,
           "verification": "independent",
           "issues": []
-        },
-        "tier_capped_by": [
-          "missing edge case vectors (PS-239)"
-        ]
+        }
       },
       "recommendations": [
-        "Tier capped: missing edge case vectors (PS-239)",
-        "Add test vector for negative values"
+        "Add test vector for negative values",
+        "Add IPSO object mappings for standard sensors (21 fields)",
+        "  \u2192 current_chn1_total: add ipso: {object: 3317}",
+        "  \u2192 current_chn1_max: add ipso: {object: 3317}",
+        "Add SenML units for standard sensors (21 fields)",
+        "  \u2192 current_chn1_total: add senml: {unit: \"A\"}",
+        "  \u2192 current_chn1_max: add senml: {unit: \"A\"}"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/ct305.yaml",
-      "timestamp": "2026-08-07T10:37:56.052027-05:00",
-      "score": 98.0,
+      "timestamp": "2026-08-11T08:41:53.563350-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 16,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 16,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -6058,45 +9422,91 @@
           "negative values"
         ],
         "semantic_annotations": {
-          "total_fields": 11,
-          "ipso_mapped": 1,
-          "ipso_missing": [],
-          "senml_mapped": 1,
-          "senml_missing": [],
-          "semantic_mapped": 1,
-          "detectable_sensors": 1,
+          "total_fields": 38,
+          "ipso_mapped": 7,
+          "ipso_missing": [
+            "current_chn1_total: add ipso: {object: 3317}",
+            "current_chn1_max: add ipso: {object: 3317}",
+            "current_chn1_min: add ipso: {object: 3317}",
+            "current_chn1_alarm.current_threshold_alarm: add ipso: {object: 3317}",
+            "current_chn1_alarm.current_threshold_alarm_release: add ipso: {object: 3317}",
+            "current_chn1_alarm.current_over_range_alarm: add ipso: {object: 3317}",
+            "current_chn1_alarm.current_over_range_alarm_release: add ipso: {object: 3317}",
+            "current_chn2_total: add ipso: {object: 3317}",
+            "current_chn2_max: add ipso: {object: 3317}",
+            "current_chn2_min: add ipso: {object: 3317}",
+            "current_chn2_alarm.current_threshold_alarm: add ipso: {object: 3317}",
+            "current_chn2_alarm.current_threshold_alarm_release: add ipso: {object: 3317}",
+            "current_chn2_alarm.current_over_range_alarm: add ipso: {object: 3317}",
+            "current_chn2_alarm.current_over_range_alarm_release: add ipso: {object: 3317}",
+            "current_chn3_total: add ipso: {object: 3317}",
+            "current_chn3_max: add ipso: {object: 3317}",
+            "current_chn3_min: add ipso: {object: 3317}",
+            "current_chn3_alarm.current_threshold_alarm: add ipso: {object: 3317}",
+            "current_chn3_alarm.current_threshold_alarm_release: add ipso: {object: 3317}",
+            "current_chn3_alarm.current_over_range_alarm: add ipso: {object: 3317}",
+            "current_chn3_alarm.current_over_range_alarm_release: add ipso: {object: 3317}"
+          ],
+          "senml_mapped": 7,
+          "senml_missing": [
+            "current_chn1_total: add senml: {unit: \"A\"}",
+            "current_chn1_max: add senml: {unit: \"A\"}",
+            "current_chn1_min: add senml: {unit: \"A\"}",
+            "current_chn1_alarm.current_threshold_alarm: add senml: {unit: \"A\"}",
+            "current_chn1_alarm.current_threshold_alarm_release: add senml: {unit: \"A\"}",
+            "current_chn1_alarm.current_over_range_alarm: add senml: {unit: \"A\"}",
+            "current_chn1_alarm.current_over_range_alarm_release: add senml: {unit: \"A\"}",
+            "current_chn2_total: add senml: {unit: \"A\"}",
+            "current_chn2_max: add senml: {unit: \"A\"}",
+            "current_chn2_min: add senml: {unit: \"A\"}",
+            "current_chn2_alarm.current_threshold_alarm: add senml: {unit: \"A\"}",
+            "current_chn2_alarm.current_threshold_alarm_release: add senml: {unit: \"A\"}",
+            "current_chn2_alarm.current_over_range_alarm: add senml: {unit: \"A\"}",
+            "current_chn2_alarm.current_over_range_alarm_release: add senml: {unit: \"A\"}",
+            "current_chn3_total: add senml: {unit: \"A\"}",
+            "current_chn3_max: add senml: {unit: \"A\"}",
+            "current_chn3_min: add senml: {unit: \"A\"}",
+            "current_chn3_alarm.current_threshold_alarm: add senml: {unit: \"A\"}",
+            "current_chn3_alarm.current_threshold_alarm_release: add senml: {unit: \"A\"}",
+            "current_chn3_alarm.current_over_range_alarm: add senml: {unit: \"A\"}",
+            "current_chn3_alarm.current_over_range_alarm_release: add senml: {unit: \"A\"}"
+          ],
+          "semantic_mapped": 7,
+          "detectable_sensors": 28,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
-            "vendor-codec": 15
+            "vendor-codec": 16
           },
-          "independent_vectors": 15,
+          "independent_vectors": 16,
           "verification": "independent",
           "issues": []
-        },
-        "tier_capped_by": [
-          "missing edge case vectors (PS-239)"
-        ]
+        }
       },
       "recommendations": [
-        "Tier capped: missing edge case vectors (PS-239)",
-        "Add test vector for negative values"
+        "Add test vector for negative values",
+        "Add IPSO object mappings for standard sensors (21 fields)",
+        "  \u2192 current_chn1_total: add ipso: {object: 3317}",
+        "  \u2192 current_chn1_max: add ipso: {object: 3317}",
+        "Add SenML units for standard sensors (21 fields)",
+        "  \u2192 current_chn1_total: add senml: {unit: \"A\"}",
+        "  \u2192 current_chn1_max: add senml: {unit: \"A\"}"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/ct310.yaml",
-      "timestamp": "2026-08-07T10:37:56.078362-05:00",
-      "score": 98.0,
+      "timestamp": "2026-08-11T08:41:53.603051-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 16,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 16,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -6113,35 +9523,81 @@
           "negative values"
         ],
         "semantic_annotations": {
-          "total_fields": 11,
-          "ipso_mapped": 1,
-          "ipso_missing": [],
-          "senml_mapped": 1,
-          "senml_missing": [],
-          "semantic_mapped": 1,
-          "detectable_sensors": 1,
+          "total_fields": 38,
+          "ipso_mapped": 7,
+          "ipso_missing": [
+            "current_chn1_total: add ipso: {object: 3317}",
+            "current_chn1_max: add ipso: {object: 3317}",
+            "current_chn1_min: add ipso: {object: 3317}",
+            "current_chn1_alarm.current_threshold_alarm: add ipso: {object: 3317}",
+            "current_chn1_alarm.current_threshold_alarm_release: add ipso: {object: 3317}",
+            "current_chn1_alarm.current_over_range_alarm: add ipso: {object: 3317}",
+            "current_chn1_alarm.current_over_range_alarm_release: add ipso: {object: 3317}",
+            "current_chn2_total: add ipso: {object: 3317}",
+            "current_chn2_max: add ipso: {object: 3317}",
+            "current_chn2_min: add ipso: {object: 3317}",
+            "current_chn2_alarm.current_threshold_alarm: add ipso: {object: 3317}",
+            "current_chn2_alarm.current_threshold_alarm_release: add ipso: {object: 3317}",
+            "current_chn2_alarm.current_over_range_alarm: add ipso: {object: 3317}",
+            "current_chn2_alarm.current_over_range_alarm_release: add ipso: {object: 3317}",
+            "current_chn3_total: add ipso: {object: 3317}",
+            "current_chn3_max: add ipso: {object: 3317}",
+            "current_chn3_min: add ipso: {object: 3317}",
+            "current_chn3_alarm.current_threshold_alarm: add ipso: {object: 3317}",
+            "current_chn3_alarm.current_threshold_alarm_release: add ipso: {object: 3317}",
+            "current_chn3_alarm.current_over_range_alarm: add ipso: {object: 3317}",
+            "current_chn3_alarm.current_over_range_alarm_release: add ipso: {object: 3317}"
+          ],
+          "senml_mapped": 7,
+          "senml_missing": [
+            "current_chn1_total: add senml: {unit: \"A\"}",
+            "current_chn1_max: add senml: {unit: \"A\"}",
+            "current_chn1_min: add senml: {unit: \"A\"}",
+            "current_chn1_alarm.current_threshold_alarm: add senml: {unit: \"A\"}",
+            "current_chn1_alarm.current_threshold_alarm_release: add senml: {unit: \"A\"}",
+            "current_chn1_alarm.current_over_range_alarm: add senml: {unit: \"A\"}",
+            "current_chn1_alarm.current_over_range_alarm_release: add senml: {unit: \"A\"}",
+            "current_chn2_total: add senml: {unit: \"A\"}",
+            "current_chn2_max: add senml: {unit: \"A\"}",
+            "current_chn2_min: add senml: {unit: \"A\"}",
+            "current_chn2_alarm.current_threshold_alarm: add senml: {unit: \"A\"}",
+            "current_chn2_alarm.current_threshold_alarm_release: add senml: {unit: \"A\"}",
+            "current_chn2_alarm.current_over_range_alarm: add senml: {unit: \"A\"}",
+            "current_chn2_alarm.current_over_range_alarm_release: add senml: {unit: \"A\"}",
+            "current_chn3_total: add senml: {unit: \"A\"}",
+            "current_chn3_max: add senml: {unit: \"A\"}",
+            "current_chn3_min: add senml: {unit: \"A\"}",
+            "current_chn3_alarm.current_threshold_alarm: add senml: {unit: \"A\"}",
+            "current_chn3_alarm.current_threshold_alarm_release: add senml: {unit: \"A\"}",
+            "current_chn3_alarm.current_over_range_alarm: add senml: {unit: \"A\"}",
+            "current_chn3_alarm.current_over_range_alarm_release: add senml: {unit: \"A\"}"
+          ],
+          "semantic_mapped": 7,
+          "detectable_sensors": 28,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
-            "vendor-codec": 15
+            "vendor-codec": 16
           },
-          "independent_vectors": 15,
+          "independent_vectors": 16,
           "verification": "independent",
           "issues": []
-        },
-        "tier_capped_by": [
-          "missing edge case vectors (PS-239)"
-        ]
+        }
       },
       "recommendations": [
-        "Tier capped: missing edge case vectors (PS-239)",
-        "Add test vector for negative values"
+        "Add test vector for negative values",
+        "Add IPSO object mappings for standard sensors (21 fields)",
+        "  \u2192 current_chn1_total: add ipso: {object: 3317}",
+        "  \u2192 current_chn1_max: add ipso: {object: 3317}",
+        "Add SenML units for standard sensors (21 fields)",
+        "  \u2192 current_chn1_total: add senml: {unit: \"A\"}",
+        "  \u2192 current_chn1_max: add senml: {unit: \"A\"}"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/em300-di.yaml",
-      "timestamp": "2026-08-07T10:37:56.104374-05:00",
+      "timestamp": "2026-08-11T08:41:53.637753-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -6190,7 +9646,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em300-mcs.yaml",
-      "timestamp": "2026-08-07T10:37:56.127136-05:00",
+      "timestamp": "2026-08-11T08:41:53.662049-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -6239,7 +9695,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em300-mld.yaml",
-      "timestamp": "2026-08-07T10:37:56.153541-05:00",
+      "timestamp": "2026-08-11T08:41:53.688048-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -6288,7 +9744,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em300-sld.yaml",
-      "timestamp": "2026-08-07T10:37:56.174183-05:00",
+      "timestamp": "2026-08-11T08:41:53.709441-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -6337,7 +9793,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em300-th.yaml",
-      "timestamp": "2026-08-07T10:37:56.195727-05:00",
+      "timestamp": "2026-08-11T08:41:53.731820-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -6386,7 +9842,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em300-zld.yaml",
-      "timestamp": "2026-08-07T10:37:56.220717-05:00",
+      "timestamp": "2026-08-11T08:41:53.755323-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -6435,7 +9891,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em310-tilt.yaml",
-      "timestamp": "2026-08-07T10:37:56.242419-05:00",
+      "timestamp": "2026-08-11T08:41:53.781077-05:00",
       "score": 98.0,
       "tier": "SILVER",
       "details": {
@@ -6490,7 +9946,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em310-udl.yaml",
-      "timestamp": "2026-08-07T10:37:56.271490-05:00",
+      "timestamp": "2026-08-11T08:41:53.810941-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -6548,7 +10004,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em320-th.yaml",
-      "timestamp": "2026-08-07T10:37:56.296883-05:00",
+      "timestamp": "2026-08-11T08:41:53.836714-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -6597,7 +10053,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em320-tilt.yaml",
-      "timestamp": "2026-08-07T10:37:56.317461-05:00",
+      "timestamp": "2026-08-11T08:41:53.859275-05:00",
       "score": 37.6,
       "tier": "REJECTED",
       "details": {
@@ -6658,7 +10114,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em400-mud.yaml",
-      "timestamp": "2026-08-07T10:37:56.319944-05:00",
+      "timestamp": "2026-08-11T08:41:53.861785-05:00",
       "score": 73.0,
       "tier": "SILVER",
       "details": {
@@ -6728,7 +10184,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em400-tld.yaml",
-      "timestamp": "2026-08-07T10:37:56.343099-05:00",
+      "timestamp": "2026-08-11T08:41:53.885392-05:00",
       "score": 73.0,
       "tier": "SILVER",
       "details": {
@@ -6798,7 +10254,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em400-udl.yaml",
-      "timestamp": "2026-08-07T10:37:56.367712-05:00",
+      "timestamp": "2026-08-11T08:41:53.911231-05:00",
       "score": 73.0,
       "tier": "SILVER",
       "details": {
@@ -6868,7 +10324,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em410-rdl.yaml",
-      "timestamp": "2026-08-07T10:37:56.392253-05:00",
+      "timestamp": "2026-08-11T08:41:53.934803-05:00",
       "score": 92.0,
       "tier": "GOLD",
       "details": {
@@ -6926,7 +10382,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-co2.yaml",
-      "timestamp": "2026-08-07T10:37:56.419756-05:00",
+      "timestamp": "2026-08-11T08:41:53.961292-05:00",
       "score": 30.6,
       "tier": "REJECTED",
       "details": {
@@ -6995,7 +10451,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-lgt.yaml",
-      "timestamp": "2026-08-07T10:37:56.422622-05:00",
+      "timestamp": "2026-08-11T08:41:53.964221-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -7053,7 +10509,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-pp.yaml",
-      "timestamp": "2026-08-07T10:37:56.443852-05:00",
+      "timestamp": "2026-08-11T08:41:53.983299-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -7111,7 +10567,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-pt100.yaml",
-      "timestamp": "2026-08-07T10:37:56.468296-05:00",
+      "timestamp": "2026-08-11T08:41:54.004766-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -7160,7 +10616,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-smt.yaml",
-      "timestamp": "2026-08-07T10:37:56.488935-05:00",
+      "timestamp": "2026-08-11T08:41:54.026616-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -7208,7 +10664,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-smtc.yaml",
-      "timestamp": "2026-08-07T10:37:56.510188-05:00",
+      "timestamp": "2026-08-11T08:41:54.047094-05:00",
       "score": 94.0,
       "tier": "GOLD",
       "details": {
@@ -7262,7 +10718,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-swl.yaml",
-      "timestamp": "2026-08-07T10:37:56.533871-05:00",
+      "timestamp": "2026-08-11T08:41:54.072842-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -7320,7 +10776,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-udl.yaml",
-      "timestamp": "2026-08-07T10:37:56.554409-05:00",
+      "timestamp": "2026-08-11T08:41:54.093407-05:00",
       "score": 24.7,
       "tier": "REJECTED",
       "details": {
@@ -7389,7 +10845,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/gs101.yaml",
-      "timestamp": "2026-08-07T10:37:56.555952-05:00",
+      "timestamp": "2026-08-11T08:41:54.094807-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -7459,7 +10915,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/gs301.yaml",
-      "timestamp": "2026-08-07T10:37:56.557764-05:00",
+      "timestamp": "2026-08-11T08:41:54.096406-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -7507,7 +10963,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ts101.yaml",
-      "timestamp": "2026-08-07T10:37:56.585486-05:00",
+      "timestamp": "2026-08-11T08:41:54.125349-05:00",
       "score": 91.0,
       "tier": "GOLD",
       "details": {
@@ -7571,7 +11027,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ts201.yaml",
-      "timestamp": "2026-08-07T10:37:56.607266-05:00",
+      "timestamp": "2026-08-11T08:41:54.149562-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -7619,7 +11075,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ts201v2.yaml",
-      "timestamp": "2026-08-07T10:37:56.634446-05:00",
+      "timestamp": "2026-08-11T08:41:54.179425-05:00",
       "score": 94.0,
       "tier": "GOLD",
       "details": {
@@ -7676,7 +11132,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ts30x.yaml",
-      "timestamp": "2026-08-07T10:37:56.664434-05:00",
+      "timestamp": "2026-08-11T08:41:54.208330-05:00",
       "score": 80.0,
       "tier": "SILVER",
       "details": {
@@ -7750,7 +11206,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/uc100.yaml",
-      "timestamp": "2026-08-07T10:37:56.694428-05:00",
+      "timestamp": "2026-08-11T08:41:54.236706-05:00",
       "score": 78.0,
       "tier": "SILVER",
       "details": {
@@ -7809,7 +11265,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/uc1114.yaml",
-      "timestamp": "2026-08-07T10:37:56.715632-05:00",
+      "timestamp": "2026-08-11T08:41:54.260087-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -7877,7 +11333,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/uc1152.yaml",
-      "timestamp": "2026-08-07T10:37:56.717227-05:00",
+      "timestamp": "2026-08-11T08:41:54.261698-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -7943,7 +11399,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/uc300.yaml",
-      "timestamp": "2026-08-07T10:37:56.718203-05:00",
+      "timestamp": "2026-08-11T08:41:54.262689-05:00",
       "score": 80.0,
       "tier": "SILVER",
       "details": {
@@ -8006,7 +11462,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/uc50x.yaml",
-      "timestamp": "2026-08-07T10:37:56.746625-05:00",
+      "timestamp": "2026-08-11T08:41:54.288812-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -8054,7 +11510,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/uc51x.yaml",
-      "timestamp": "2026-08-07T10:37:56.771588-05:00",
+      "timestamp": "2026-08-11T08:41:54.314327-05:00",
       "score": 83.0,
       "tier": "SILVER",
       "details": {
@@ -8121,7 +11577,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs121.yaml",
-      "timestamp": "2026-08-07T10:37:56.799144-05:00",
+      "timestamp": "2026-08-11T08:41:54.342649-05:00",
       "score": 16.5,
       "tier": "REJECTED",
       "details": {
@@ -8183,7 +11639,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs135.yaml",
-      "timestamp": "2026-08-07T10:37:56.800171-05:00",
+      "timestamp": "2026-08-11T08:41:54.343794-05:00",
       "score": 80.0,
       "tier": "SILVER",
       "details": {
@@ -8231,7 +11687,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs321.yaml",
-      "timestamp": "2026-08-07T10:37:56.824828-05:00",
+      "timestamp": "2026-08-11T08:41:54.370018-05:00",
       "score": 98.0,
       "tier": "SILVER",
       "details": {
@@ -8286,7 +11742,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs330.yaml",
-      "timestamp": "2026-08-07T10:37:56.853943-05:00",
+      "timestamp": "2026-08-11T08:41:54.403033-05:00",
       "score": 86.0,
       "tier": "GOLD",
       "details": {
@@ -8346,7 +11802,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs340.yaml",
-      "timestamp": "2026-08-07T10:37:56.877236-05:00",
+      "timestamp": "2026-08-11T08:41:54.425456-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -8400,7 +11856,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs341.yaml",
-      "timestamp": "2026-08-07T10:37:56.895695-05:00",
+      "timestamp": "2026-08-11T08:41:54.444900-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -8454,7 +11910,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs350.yaml",
-      "timestamp": "2026-08-07T10:37:56.915716-05:00",
+      "timestamp": "2026-08-11T08:41:54.465976-05:00",
       "score": 94.0,
       "tier": "GOLD",
       "details": {
@@ -8511,7 +11967,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs351.yaml",
-      "timestamp": "2026-08-07T10:37:56.943766-05:00",
+      "timestamp": "2026-08-11T08:41:54.493683-05:00",
       "score": 94.0,
       "tier": "GOLD",
       "details": {
@@ -8569,7 +12025,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs360.yaml",
-      "timestamp": "2026-08-07T10:37:56.972329-05:00",
+      "timestamp": "2026-08-11T08:41:54.523404-05:00",
       "score": 80.0,
       "tier": "SILVER",
       "details": {
@@ -8631,7 +12087,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs370.yaml",
-      "timestamp": "2026-08-07T10:37:56.999003-05:00",
+      "timestamp": "2026-08-11T08:41:54.550535-05:00",
       "score": 92.0,
       "tier": "GOLD",
       "details": {
@@ -8684,7 +12140,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs373.yaml",
-      "timestamp": "2026-08-07T10:37:57.023291-05:00",
+      "timestamp": "2026-08-11T08:41:54.574977-05:00",
       "score": 80.0,
       "tier": "SILVER",
       "details": {
@@ -8741,7 +12197,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws101.yaml",
-      "timestamp": "2026-08-07T10:37:57.053376-05:00",
+      "timestamp": "2026-08-11T08:41:54.607676-05:00",
       "score": 27.1,
       "tier": "REJECTED",
       "details": {
@@ -8807,7 +12263,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws136.yaml",
-      "timestamp": "2026-08-07T10:37:57.054724-05:00",
+      "timestamp": "2026-08-11T08:41:54.609206-05:00",
       "score": 40.0,
       "tier": "REJECTED",
       "details": {
@@ -8869,7 +12325,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws156.yaml",
-      "timestamp": "2026-08-07T10:37:57.055699-05:00",
+      "timestamp": "2026-08-11T08:41:54.610218-05:00",
       "score": 40.0,
       "tier": "REJECTED",
       "details": {
@@ -8931,7 +12387,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws201.yaml",
-      "timestamp": "2026-08-07T10:37:57.056673-05:00",
+      "timestamp": "2026-08-11T08:41:54.611208-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -8989,7 +12445,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws202.yaml",
-      "timestamp": "2026-08-07T10:37:57.080092-05:00",
+      "timestamp": "2026-08-11T08:41:54.631975-05:00",
       "score": 86.0,
       "tier": "GOLD",
       "details": {
@@ -9049,7 +12505,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws203.yaml",
-      "timestamp": "2026-08-07T10:37:57.099412-05:00",
+      "timestamp": "2026-08-11T08:41:54.652409-05:00",
       "score": 94.0,
       "tier": "GOLD",
       "details": {
@@ -9103,7 +12559,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws301.yaml",
-      "timestamp": "2026-08-07T10:37:57.122281-05:00",
+      "timestamp": "2026-08-11T08:41:54.674629-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -9152,7 +12608,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws302.yaml",
-      "timestamp": "2026-08-07T10:37:57.145091-05:00",
+      "timestamp": "2026-08-11T08:41:54.695963-05:00",
       "score": 23.5,
       "tier": "REJECTED",
       "details": {
@@ -9226,7 +12682,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws303.yaml",
-      "timestamp": "2026-08-07T10:37:57.147054-05:00",
+      "timestamp": "2026-08-11T08:41:54.698074-05:00",
       "score": 100.0,
       "tier": "PLATINUM",
       "details": {
@@ -9275,7 +12731,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws50x.yaml",
-      "timestamp": "2026-08-07T10:37:57.168107-05:00",
+      "timestamp": "2026-08-11T08:41:54.717841-05:00",
       "score": 78.0,
       "tier": "SILVER",
       "details": {
@@ -9336,7 +12792,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws515.yaml",
-      "timestamp": "2026-08-07T10:37:57.198482-05:00",
+      "timestamp": "2026-08-11T08:41:54.745144-05:00",
       "score": 81.0,
       "tier": "SILVER",
       "details": {
@@ -9408,7 +12864,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws52x.yaml",
-      "timestamp": "2026-08-07T10:37:57.227333-05:00",
+      "timestamp": "2026-08-11T08:41:54.775458-05:00",
       "score": 80.0,
       "tier": "SILVER",
       "details": {
@@ -9476,7 +12932,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws558.yaml",
-      "timestamp": "2026-08-07T10:37:57.253078-05:00",
+      "timestamp": "2026-08-11T08:41:54.803398-05:00",
       "score": 80.0,
       "tier": "SILVER",
       "details": {
@@ -9544,7 +13000,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/wt101.yaml",
-      "timestamp": "2026-08-07T10:37:57.274574-05:00",
+      "timestamp": "2026-08-11T08:41:54.826639-05:00",
       "score": 89.0,
       "tier": "GOLD",
       "details": {
@@ -9606,7 +13062,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/wt201v1.yaml",
-      "timestamp": "2026-08-07T10:37:57.304340-05:00",
+      "timestamp": "2026-08-11T08:41:54.858424-05:00",
       "score": 86.0,
       "tier": "GOLD",
       "details": {
@@ -9675,7 +13131,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/wt201v2.yaml",
-      "timestamp": "2026-08-07T10:37:57.334276-05:00",
+      "timestamp": "2026-08-11T08:41:54.888820-05:00",
       "score": 85.0,
       "tier": "GOLD",
       "details": {
@@ -9746,7 +13202,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/wts305.yaml",
-      "timestamp": "2026-08-07T10:37:57.367666-05:00",
+      "timestamp": "2026-08-11T08:41:54.921226-05:00",
       "score": 91.0,
       "tier": "GOLD",
       "details": {
@@ -9808,7 +13264,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/wts505.yaml",
-      "timestamp": "2026-08-07T10:37:57.392887-05:00",
+      "timestamp": "2026-08-11T08:41:54.946578-05:00",
       "score": 91.0,
       "tier": "GOLD",
       "details": {
@@ -9870,7 +13326,7 @@
     },
     {
       "schema_path": "schemas/devices/milesight/wts506.yaml",
-      "timestamp": "2026-08-07T10:37:57.419209-05:00",
+      "timestamp": "2026-08-11T08:41:54.972139-05:00",
       "score": 91.0,
       "tier": "GOLD",
       "details": {
@@ -9932,7 +13388,7 @@
     },
     {
       "schema_path": "schemas/devices/radio-bridge/rbs30x.yaml",
-      "timestamp": "2026-08-07T10:37:57.442495-05:00",
+      "timestamp": "2026-08-11T08:41:54.997124-05:00",
       "score": 68.0,
       "tier": "BRONZE",
       "details": {
@@ -10004,7 +13460,7 @@
     },
     {
       "schema_path": "schemas/devices/radionode/rn320bth.yaml",
-      "timestamp": "2026-08-07T10:37:57.478996-05:00",
+      "timestamp": "2026-08-11T08:41:55.033846-05:00",
       "score": 14.1,
       "tier": "REJECTED",
       "details": {
@@ -10065,72 +13521,68 @@
     },
     {
       "schema_path": "schemas/devices/rakwireless/qingping.yaml",
-      "timestamp": "2026-08-07T10:37:57.480844-05:00",
-      "score": 16.5,
-      "tier": "REJECTED",
+      "timestamp": "2026-08-11T08:41:55.035788-05:00",
+      "score": 66.0,
+      "tier": "BRONZE",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
-        "has_test_vectors": false,
-        "test_count": 0,
+        "has_test_vectors": true,
+        "test_count": 1,
         "vector_issues": [
-          "No test vectors defined"
+          "Only 1 test vectors (recommend at least 3)"
         ],
-        "python_tests_pass": false,
-        "python_passed": 0,
+        "python_tests_pass": true,
+        "python_passed": 1,
         "python_failed": 0,
-        "python_errors": [
-          "No test vectors to run"
-        ],
-        "js_status": "skipped",
+        "python_errors": [],
+        "js_status": "fail",
         "js_tests_pass": false,
         "js_errors": [
-          "No test vectors for JS validation"
+          "realtime_data: temperature=NaN, expected 23.5",
+          "realtime_data: humidity=NaN, expected 45.2"
         ],
-        "branch_coverage": 0.0,
-        "coverage_issues": [
-          "No test vectors for branch analysis"
-        ],
+        "branch_coverage": 1.0,
+        "coverage_issues": [],
         "edge_cases_covered": [
-          "negative"
+          "min_payload"
         ],
         "edge_cases_missing": [
           "zero values",
           "maximum values",
-          "minimum payload length"
+          "negative values"
         ],
         "semantic_annotations": {
-          "total_fields": 8,
-          "ipso_mapped": 0,
+          "total_fields": 10,
+          "ipso_mapped": 3,
           "ipso_missing": [
-            "co2: add ipso: {object: 3325}",
             "battery: add ipso: {object: 3316}"
           ],
-          "senml_mapped": 0,
+          "senml_mapped": 2,
           "senml_missing": [
             "co2: add senml: {unit: \"ppm\"}",
             "battery: add senml: {unit: \"V\"}"
           ],
-          "semantic_mapped": 0,
-          "detectable_sensors": 2,
+          "semantic_mapped": 3,
+          "detectable_sensors": 4,
           "annotation_errors": []
         },
         "provenance": {
-          "counts": {},
-          "independent_vectors": 0,
-          "verification": "self",
+          "counts": {
+            "vendor-codec": 1
+          },
+          "independent_vectors": 1,
+          "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add at least 3 test vectors with payload and expected values",
-        "Fix failing Python interpreter tests",
+        "Add more test vectors (recommend at least 3)",
+        "Generated JS codec disagrees with the test vectors",
         "Add test vector for zero values",
         "Add test vector for maximum values",
-        "Add test vector for minimum payload length",
-        "Add test vectors covering all switch/flagged branches",
-        "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 co2: add ipso: {object: 3325}",
+        "Add test vector for negative values",
+        "Add IPSO object mappings for standard sensors (1 fields)",
         "  \u2192 battery: add ipso: {object: 3316}",
         "Add SenML units for standard sensors (2 fields)",
         "  \u2192 co2: add senml: {unit: \"ppm\"}",
