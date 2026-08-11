@@ -18,6 +18,7 @@ Usage:
 import struct
 import re
 import json
+import math
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional, Tuple, Union
 from enum import Enum
@@ -60,6 +61,51 @@ _COLON_STRING_TYPES = frozenset({'hex:upper'})
 
 #: Sentinel meaning "this field produced no value and is omitted from the output".
 OMITTED = object()
+
+
+def normalize_output(value):
+    """Bring one decoded value to its reported JSON representation (CR-2026-008).
+
+    Three rules, applied recursively so `object` and `repeat` members are covered:
+
+    - A byte sequence reports as a lowercase hex string (PS-281). Python decoded these
+      to a bytes object and Go to a hex string, so no single expected value satisfied
+      both and two library vectors had to be quarantined over it.
+    - An integral numeric value reports without a fraction (PS-280): 15, not 15.0.
+      `JSON.stringify` omits a zero fraction and `json.dumps` preserves it, so the
+      interpreter disagreed with the codec generated from the same schema on 304 of
+      2850 corpus fields. A gateway replacing a deployed JS codec must not appear to
+      change its schema, so JavaScript's rendering is the conformant one.
+    - NaN and the infinities are not JSON values, so a field holding one is omitted
+      (PS-282). Emitting them produced output no conforming parser would read.
+
+    Returns OMITTED for a value that must not be reported.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value).hex()
+    if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            return OMITTED
+        if value.is_integer():
+            return int(value)
+        return value
+    if isinstance(value, dict):
+        out = {}
+        for key, item in value.items():
+            normalized = normalize_output(item)
+            if normalized is not OMITTED:
+                out[key] = normalized
+        return out
+    if isinstance(value, (list, tuple)):
+        out = []
+        for item in value:
+            normalized = normalize_output(item)
+            if normalized is not OMITTED:
+                out.append(normalized)
+        return out
+    return value
 
 
 def apply_lookup(value, lookup):
@@ -1955,14 +2001,34 @@ class SchemaInterpreter:
                     result.errors.append(f"Error decoding {name}: {e}")
                 continue
             
-            # Computed field (type: number) - supports formula, ref, polynomial, compute, guard
-            if field_type == 'number':
+            # Computed field - supports formula, ref, polynomial, compute, guard.
+            # `integer` (PS-283) has identical semantics to `number` and declares that
+            # the result is an integer, so it reports as one. It performs no rounding
+            # of its own: `idiv` truncates and {op: round} rounds, both already
+            # available, and a type that also rounded would give two spellings for one
+            # operation - the defect CR-2026-006 removed from bitfields.
+            if field_type in ('number', 'integer'):
                 try:
                     value = self._decode_computed_field(field_def)
                     if value is OMITTED:
                         # Zero divisor (PS-278): the field is absent, and decoding of
                         # the rest of the payload continues.
                         continue
+                    if field_type == 'integer' and value is not None:
+                        # PS-283: an error, not a silent truncation. The schema is
+                        # expected to state which rounding it means, with `idiv` or a
+                        # {op: round} stage.
+                        try:
+                            numeric = float(value)
+                        except (TypeError, ValueError):
+                            numeric = None
+                        if numeric is not None and not numeric.is_integer():
+                            result.errors.append(
+                                "%s: type integer but the computed value is %r; add "
+                                "`idiv` to truncate or a {op: round} transform stage"
+                                % (name, value)
+                            )
+                            continue
                     if value is not None:
                         result.data[name] = value
                         self._variables[name] = value
@@ -2032,7 +2098,17 @@ class SchemaInterpreter:
         # Add quality dict to output if any quality flags were set
         if result.quality:
             result.data['_quality'] = dict(result.quality)
-        
+
+        # CR-2026-008: report each value in its JSON representation. Done once here
+        # rather than at each of the several places a value enters result.data, so no
+        # decode path can bypass it.
+        normalized = {}
+        for key, value in result.data.items():
+            reported = normalize_output(value)
+            if reported is not OMITTED:
+                normalized[key] = reported
+        result.data = normalized
+
         return result
     
     def _resolve_metadata_ref(self, ref: str, input_meta: Dict[str, Any]) -> Any:
@@ -2364,10 +2440,31 @@ class SchemaInterpreter:
             return bytes(length)
         
         if field_type == 'bytes':
-            length = field_def.get('length', len(value))
-            if isinstance(value, bytes):
-                return value[:length].ljust(length, b'\x00')
-            return bytes(length)
+            # Accepts every form a `bytes` field can arrive in, because CR-2026-008
+            # makes the decoder report one as a lowercase hex string (PS-281) and
+            # encode(decode(payload)) has to keep round-tripping. Falling through to
+            # `bytes(length)` used to emit zeros for anything that was not already a
+            # bytes object, so a hex string round-tripped to 00000000 silently.
+            if isinstance(value, (bytes, bytearray)):
+                raw = bytes(value)
+            elif isinstance(value, str):
+                text = value.replace(' ', '')
+                try:
+                    raw = bytes.fromhex(text)
+                except ValueError as exc:
+                    raise ValueError(
+                        "bytes field %r: expected hex, got %r (%s)"
+                        % (field_def.get('name'), value, exc)
+                    )
+            elif isinstance(value, (list, tuple)):
+                raw = bytes(int(b) & 0xFF for b in value)
+            else:
+                raise ValueError(
+                    "bytes field %r: cannot encode %s"
+                    % (field_def.get('name'), type(value).__name__)
+                )
+            length = field_def.get('length', len(raw))
+            return raw[:length].ljust(length, b'\x00')
         
         if field_type in ('string', 'ascii'):
             length = field_def.get('length', len(str(value)))

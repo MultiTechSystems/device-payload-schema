@@ -31,17 +31,13 @@ import yaml
 from schema_interpreter import SchemaInterpreter
 
 def normalize(v):
-    """CR-2026-008 rule 1: an integral numeric value renders without a fraction."""
-    if isinstance(v, bool):
-        return v
-    if isinstance(v, float) and v.is_integer():
-        return int(v)
-    if isinstance(v, dict):
-        return {k: normalize(x) for k, x in v.items()}
-    if isinstance(v, list):
-        return [normalize(x) for x in v]
-    if isinstance(v, (bytes, bytearray)):
-        return bytes(v).hex()
+    """Identity. The interpreter applies CR-2026-008 itself now.
+
+    This used to apply the rules here, which is how their sufficiency was measured
+    before they were implemented. Keeping it as a no-op rather than deleting the call
+    sites makes the point explicit: what this tool reports is the interpreter's own
+    output, unaltered, against the generated codec's.
+    """
     return v
 
 def tokens(js_text):
@@ -121,7 +117,7 @@ catch(e) {{ console.log('__ERR__'+e.message); }}
             results["identical"] += 1
     os.unlink(codec)
 
-print("=== Python (with CR-2026-008 normalization) vs generated TS013 codec ===")
+print("=== Python interpreter (raw output) vs generated TS013 codec ===")
 for k, v in results.most_common():
     print(f"  {k:22s} {v}")
 print()

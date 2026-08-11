@@ -60,20 +60,40 @@ def yaml_type_to_json_schema(field_type: str, field_def: Dict[str, Any]) -> Dict
     if base_type == 'bool':
         return {"type": "boolean"}
     
-    # String types
-    if base_type in ('ascii', 'string', 'hex', 'base64'):
+    # String types. `hex` is lowercase per PS-074 and PS-281; `hex:upper` is the
+    # opt-out and keeps a plain string.
+    if base_type == 'hex':
+        return {"type": "string", "pattern": "^[0-9a-f]*$"}
+    if base_type in ('ascii', 'string', 'base64', 'hex:upper'):
         return {"type": "string"}
     
-    # Bytes type
+    # Bytes type. PS-281 fixes this as a lowercase hex string, so the `format: array`
+    # branch this used to offer would describe output no interpreter produces. It is
+    # used by no schema in the repository; a schema that wants an octet array should
+    # say `type: repeat` over `u8` and mean it.
     if base_type == 'bytes':
-        fmt = field_def.get('format', 'hex')
-        if fmt == 'array':
-            return {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 255}}
-        return {"type": "string"}
+        return {"type": "string", "pattern": "^[0-9a-f]*$"}
     
-    # Number type (computed fields)
+    # bitfield_string and version_string report a formatted string, not a number.
+    # These fell through to the default below, so every version field in the corpus -
+    # 280 values - was declared "number" while reporting "v1.2.52".
+    if base_type in ('bitfield_string', 'version_string'):
+        return {"type": "string"}
+
+    # `repeat` reports an array, `object` an object. Both also fell through.
+    if base_type == 'repeat':
+        return {"type": "array"}
+    if base_type == 'object':
+        return {"type": "object"}
+
+    # Computed fields. `number` reports a JSON number; `integer` (PS-283) declares
+    # that the arithmetic result is an integer, which is the only way an arithmetic
+    # result can be typed as one - and therefore the only way a generated binding can
+    # give it an integer type.
     if base_type == 'number':
         return {"type": "number"}
+    if base_type == 'integer':
+        return {"type": "integer"}
     
     # Enum type
     if base_type == 'enum':
@@ -155,8 +175,41 @@ def process_byte_group(bg_def: Dict[str, Any], properties: Dict, required: List[
         if name and not name.startswith('_'):
             schema = field_to_json_schema(field)
             if schema:
-                properties[name] = schema
+                merge_property(properties, name, schema)
                 required.append(name)
+
+
+def merge_property(properties: Dict[str, Any], name: str, schema: Dict[str, Any]) -> None:
+    """Record a property, widening its type if another branch already declared one.
+
+    A `match` or `tlv` schema can report the same key from several branches with
+    different types. milesight/am308 reads `tvoc` as a raw u16 on channel [8, 230] and
+    as u16 with `div: 100` on [8, 125], so it is an integer on one branch and a number
+    on the other - and whichever branch the walk saw last used to win, leaving the
+    declared type wrong for every payload taking the other one.
+    """
+    existing = properties.get(name)
+    if not existing or existing == schema:
+        properties[name] = schema
+        return
+    old_types = existing.get('type')
+    new_types = schema.get('type')
+    if old_types is None or new_types is None or old_types == new_types:
+        return
+    merged = []
+    for candidate in (old_types if isinstance(old_types, list) else [old_types]) + \
+                     (new_types if isinstance(new_types, list) else [new_types]):
+        if candidate not in merged:
+            merged.append(candidate)
+    # An integer is a JSON number, so "number" alone describes both without a union.
+    if set(merged) == {'integer', 'number'}:
+        merged = ['number']
+    widened = dict(existing)
+    widened['type'] = merged[0] if len(merged) == 1 else merged
+    # Bounds and patterns from one branch do not hold for the other.
+    for key in ('minimum', 'maximum', 'pattern', 'enum'):
+        widened.pop(key, None)
+    properties[name] = widened
 
 
 def process_fields(fields: List[Dict], properties: Dict, required: List[str]):
@@ -216,7 +269,7 @@ def process_fields(fields: List[Dict], properties: Dict, required: List[str]):
         if name and not name.startswith('_'):
             schema = field_to_json_schema(field)
             if schema:
-                properties[name] = schema
+                merge_property(properties, name, schema)
                 # Fields are generally required unless conditional
                 required.append(name)
 

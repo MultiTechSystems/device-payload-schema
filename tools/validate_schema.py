@@ -278,6 +278,8 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
         'bool', 'bytes', 'string', 'ascii', 'hex', 'base64',
         'object', 'match', 'enum', 'repeat', 'skip',
         'bitfield_string', 'number', 'version_string',
+        # PS-283: a computed field declaring an integer result.
+        'integer',
         'udec', 'sdec', 'UDec', 'SDec',
     }
     

@@ -41,6 +41,7 @@ Optional Requirements (O001-O044):
 - O021, O022: Compact format strings
 """
 
+import json
 import pytest
 import struct
 import sys
@@ -403,7 +404,7 @@ class TestBytesAndStrings:
         interpreter = SchemaInterpreter(schema)
         
         result = interpreter.decode(bytes([0x01, 0x02, 0x03, 0x04]))
-        assert result.data['data'] == bytes([0x01, 0x02, 0x03, 0x04])
+        assert result.data['data'] == '01020304'  # PS-281: reported as lowercase hex
     
     def test_decode_string(self):
         """Test string type decode."""
@@ -3510,7 +3511,7 @@ class TestEncodeRoundtripAllTypes:
         interp = SchemaInterpreter(schema)
         enc = interp.encode({'v': bytes([0xDE, 0xAD, 0xBE, 0xEF])})
         dec = interp.decode(enc.payload)
-        assert dec.data['v'] == bytes([0xDE, 0xAD, 0xBE, 0xEF])
+        assert dec.data['v'] == 'deadbeef'  # PS-281: reported as lowercase hex
 
     def test_string_roundtrip(self):
         schema = {'fields': [{'name': 'v', 'type': 'string', 'length': 8}]}
@@ -3612,7 +3613,7 @@ class TestBytesType:
         interp = SchemaInterpreter(schema)
         result = interp.decode(bytes([0xDE, 0xAD, 0xBE, 0xEF]))
         assert result.success
-        assert result.data['data'] == bytes([0xDE, 0xAD, 0xBE, 0xEF])
+        assert result.data['data'] == 'deadbeef'  # PS-281: reported as lowercase hex
 
     def test_hex_type(self):
         """M063: Hex string output (lowercase)."""
@@ -3884,7 +3885,7 @@ class TestVariables:
         result = interp.decode(bytes([0x03, 0xAA, 0xBB, 0xCC]))
         assert result.success
         assert result.data['length'] == 3
-        assert result.data['data'] == bytes([0xAA, 0xBB, 0xCC])
+        assert result.data['data'] == 'aabbcc'  # PS-281: reported as lowercase hex
 
 
 class TestSkipType:
@@ -5842,3 +5843,99 @@ class TestConformanceComparisonIsExactForIntegers:
         # as a proportion of the value.
         match, _ = values_match(115020.6822, 115020.7822, 0.001)
         assert not match
+
+
+class TestDecodedValueTypes:
+    """CR-2026-008: what type a field reports, and how it serializes.
+
+    The rules exist because the interpreter disagreed with the codec generated from
+    the same schema. A gateway swapping a deployed JS codec for another decoder must
+    not appear to change its schema, so JavaScript's rendering is the conformant one.
+    """
+
+    def test_integral_value_reports_without_a_fraction(self):
+        """PS-280. json.dumps preserves a zero fraction where JSON.stringify drops it."""
+        schema = {'name': 't', 'endian': 'big', 'fields': [
+            {'name': 'scaled', 'type': 'u16', 'div': 10},
+        ]}
+        # 150 / 10 = 15.0 exactly.
+        result = SchemaInterpreter(schema).decode(bytes.fromhex('0096'))
+
+        assert result.data['scaled'] == 15
+        assert json.dumps(result.data) == '{"scaled": 15}', 'must not render 15.0'
+
+    def test_non_integral_value_keeps_its_fraction(self):
+        schema = {'name': 't', 'endian': 'big', 'fields': [
+            {'name': 'scaled', 'type': 'u16', 'div': 10},
+        ]}
+        result = SchemaInterpreter(schema).decode(bytes.fromhex('0097'))
+
+        assert result.data['scaled'] == 15.1
+        assert json.dumps(result.data) == '{"scaled": 15.1}'
+
+    def test_bytes_reports_lowercase_hex(self):
+        """PS-281. Python returned a bytes object and Go a hex string, so no single
+        expected value satisfied both."""
+        schema = {'name': 't', 'endian': 'big', 'fields': [
+            {'name': 'eui', 'type': 'bytes', 'length': 4},
+        ]}
+        result = SchemaInterpreter(schema).decode(bytes.fromhex('DEADBEEF'))
+
+        assert result.data['eui'] == 'deadbeef'
+        assert json.dumps(result.data) == '{"eui": "deadbeef"}'
+
+    def test_bytes_round_trips_through_encode(self):
+        """The encoder must accept what the decoder now reports.
+
+        It used to fall through to `bytes(length)` for anything that was not already
+        a bytes object, so a hex string encoded to zeros with no error raised.
+        """
+        schema = {'name': 't', 'endian': 'big', 'fields': [
+            {'name': 'eui', 'type': 'bytes', 'length': 4},
+            {'name': 'count', 'type': 'u16'},
+        ]}
+        interp = SchemaInterpreter(schema)
+        payload = bytes.fromhex('deadbeef0064')
+
+        decoded = interp.decode(payload)
+        encoded = interp.encode(decoded.data)
+
+        assert encoded.payload == payload
+        assert encoded.errors == []
+
+    def test_unencodable_bytes_value_is_reported(self):
+        schema = {'name': 't', 'endian': 'big', 'fields': [
+            {'name': 'eui', 'type': 'bytes', 'length': 4},
+        ]}
+        result = SchemaInterpreter(schema).encode({'eui': 'not-hex'})
+
+        assert result.errors, 'silently emitting zeros is worse than an error'
+
+    def test_nan_is_omitted_rather_than_emitted(self):
+        """PS-282. NaN is not a JSON value; emitting it made the whole decode
+        unparseable by a conforming consumer."""
+        schema = {'name': 't', 'endian': 'big', 'fields': [
+            {'name': 'a', 'type': 'u8'},
+            {'name': 'zero', 'type': 'u8'},
+            {'name': 'ratio', 'type': 'number',
+             'compute': {'op': 'div', 'a': '$a', 'b': '$zero'}},
+            {'name': 'after', 'type': 'u8'},
+        ]}
+        result = SchemaInterpreter(schema).decode(bytes([7, 0, 42]))
+
+        assert 'ratio' not in result.data
+        assert result.data['after'] == 42, 'decoding continues past the omitted field'
+        assert 'NaN' not in json.dumps(result.data)
+
+    def test_nested_object_members_are_normalized_too(self):
+        """The pass recurses, so `object` and `repeat` members follow the same rules."""
+        schema = {'name': 't', 'endian': 'big', 'fields': [
+            {'name': 'group', 'type': 'object', 'fields': [
+                {'name': 'scaled', 'type': 'u16', 'div': 10},
+                {'name': 'raw', 'type': 'bytes', 'length': 2},
+            ]},
+        ]}
+        result = SchemaInterpreter(schema).decode(bytes.fromhex('0096ABCD'))
+
+        assert result.data['group']['scaled'] == 15
+        assert result.data['group']['raw'] == 'abcd'
