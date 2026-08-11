@@ -32,6 +32,13 @@ Feature support matrix across reference implementations.
 | `enum` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `udec` / `sdec` | ✓ | - | ✓ | ✓ | ✓ |
 | `bitfield_string` | ✓ | ✓ | ✓ | - | ✓ |
+| `length: remaining` (PS-013/014/015) | ✓ | ✓ | ✓ | - | ✓ |
+
+`length: remaining` consumes to the end of the payload. C is short because the binary
+schema format encodes `length` as an unsigned varint, which cannot represent it; that
+needs a sentinel value in the format. The keyword is the only spelling - a negative
+integer is the internal sentinel the parsers map it to, and the validator rejects one
+written in a schema (PS-014).
 
 ### Bitfield Syntax
 

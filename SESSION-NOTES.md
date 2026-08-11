@@ -14,11 +14,14 @@ Neither branch is pushed. Merge or rebase onto `master`/`main` as you prefer - t
 convention has been to keep everything on `master`, so a fast-forward is fine; the branch
 exists so nothing landed on the default branch unreviewed.
 
-Green as of the last run: Python 1789 passed / 4 skipped, Go, Java and C# corpus runners
-at the full **1189**, C selftests pass, `compose_library_vectors.py --check` clean, and
-zero regressions against a freshly regenerated `score-baseline.json`.
+Green as of the last run: Python **1804** passed / 4 skipped, Go, Java and C# corpus
+runners at the full **1190**, C selftests pass, `compose_library_vectors.py --check`
+clean, and zero regressions against a freshly regenerated `score-baseline.json`.
 
-Corpus 1166 -> 1189 over the two days. Tiers: BRONZE 3, SILVER 76, GOLD 40, PLATINUM 30,
+The interpreter/codec cross-check is at **1141 identical with zero value differences and
+zero key-set differences** - the first time the two agree on every comparable field.
+
+Corpus 1166 -> 1190 over the three days. Tiers: BRONZE 3, SILVER 76, GOLD 40, PLATINUM 30,
 REJECTED 69 of 218.
 
 **Done on 2026-08-11**, all five items from yesterday's list:
@@ -62,12 +65,16 @@ where the table says a modified field *is* a number. The generator was already r
 
 1. **Push the two branches** and decide whether they merge to `master`/`main`. Also the
    three `td-tools` branches still have no PRs, and the catalog fix should go first.
-2. **The remaining TS013 generator gaps.** `lookup: default`, `$ref` splicing and
-   `$field` resolution are done. The cross-check stands at **1134 identical, 1 value
-   difference, 5 key-set differences** (`tools/crossvalidate_js_json.py`).
-   `name_from`, `repeat` and the plain-`tag_size` TLV form are done too. The cross-check
-   is at **1139 identical, zero value differences, and one key-set difference** -
-   rbs30x's empty `stored_downlink`, which is the last one.
+2. **The TS013 generator gaps are closed.** `lookup: default`, `$ref` splicing,
+   `$field` resolution, `name_from`, `repeat` and the plain-`tag_size` TLV form are all
+   done, and `tools/crossvalidate_js_json.py` now reports **1141 identical, zero value
+   differences, zero key-set differences**.
+
+   The one remaining reported difference was `_quality`, which the generator does not
+   emit at all because it implements no `valid_range` checking. The cross-check counts
+   that separately rather than as a value mismatch - it is additive, not a disagreement -
+   but **it is a real gap**: 12 vectors' worth, all `vicki.yaml`. That is the next
+   generator item.
    The `repeat` fixtures now pin the record shape in their `expected` blocks. They did
    not before, which is exactly why the generator could omit the construct entirely
    while all four runners passed.
@@ -89,6 +96,74 @@ where the table says a modified field *is* a number. The generator was already r
 5. Then items 3 onward in the Next list below: the two Decentlab hints, the preprocessor
    in validate/score, provenance for the three Silver-capped schemas, `name_from` for
    milesight, and the milesight vector counts.
+
+## Session: Aug 11, 2026 (later)
+
+### `length: remaining` - specified everywhere, implemented nowhere
+
+Chasing the last cross-check difference (rbs30x's `stored_downlink`) turned up a keyword
+that the specification defines and no implementation had:
+
+- **PS-013/PS-014/PS-015** define `length: remaining` - consume to the end of the
+  payload, empty rather than an error when already at the end, at most one per nesting
+  level. Every match for "remaining" in all five implementations, the generator and the
+  validator was incidental. **No schema used it**, because it did not work.
+- The one schema that needed it wrote **`length: -1`**. In Python that sliced
+  `buf[pos:pos + -1]` - an empty value *and* a read cursor rewound by one byte. Go's
+  `Read` already resolved a negative count to the remainder (added when the corpus
+  runners went in), so **Go and Python already disagreed on that field**, silently: no
+  vector asserted `stored_downlink`.
+- The generator's loop condition was `_si < -1`, so it never ran either.
+
+Fixed, with `remaining` as the only spelling and a negative integer as the internal
+sentinel the parsers map it to - so no field struct needs a string:
+
+- **Python** `resolve_length()`, used at all six variable-length decode sites. On encode
+  `remaining` has no count to pad, so a `skip` emits nothing.
+- **Go** parser maps the keyword to `-1`; `Read` already honoured it.
+- **Java** parser maps it (`toInt` would have silently returned its `0` default);
+  `getEffectiveLength` passes the sentinel through instead of falling back to the type
+  default; `DecodeContext.read` resolves it, guarded because `new byte[-1]` throws
+  `NegativeArraySizeException`.
+- **C#** the same three, guarded because `AsSpan` throws on a negative count.
+- **Validator** PS-014/PS-015 in the *structural* pass. It first went into
+  `check_best_practices`, which was wrong: errors added there are recorded in
+  `schema_errors` but **do not flip `schema_valid`**, so a MUST cannot be enforced from
+  it. The check walks every nesting level via a new `iter_field_lists()`, because
+  `check_fields` descends into `fields`, `byte_group` and `flagged.groups` but *not* TLV
+  `cases` - exactly where the offending field lived.
+
+### The `bytes` type was reporting an array
+
+Found while fixing the above, and worse than the original bug: the generator emitted
+`bytes` as a **JavaScript array of octet values** where PS-281 and all five interpreters
+report a **lowercase hex string**. It never showed up because
+`tools/crossvalidate_js_json.py` skipped dicts and lists entirely, so every `bytes` field
+in the corpus went uncompared. The harness now compares nested values, which is what
+turned up the `_quality` gap too.
+
+**Lesson for any cross-check harness: what it declines to compare, it silently blesses.**
+
+### Also
+
+- Corpus floors 1189 -> **1190** in Go, Java and C#. The floor is the ratchet: at 1189
+  Java or C# could have failed the new vector and still passed. Tightening it first is
+  what proved their `remaining` support actually works. Their stale comments still
+  described the negative-operand `idiv`/`mod` gap that CR-2026-007 closed; removed.
+- `rbs30x.yaml` asserts `stored_downlink` in both directions - `"010009"` and, at the end
+  of the payload, `""` (PS-014). It asserted neither before, which is why two
+  implementations could disagree about it indefinitely.
+- New `tests/test_remaining_length.py`, 14 tests: evaluation, the empty case per type,
+  the no-rewind property, the three validator rules, and the schema that needed it.
+
+### Known gap: `remaining` is not representable in the binary schema
+
+`tools/binary_schema_v2.py` encodes `length` as an unsigned varint, and the C interpreter
+has no notion of a remainder. So the MCU tier cannot express `remaining` at all. It fails
+loudly (`encode_varint` raises on the string) rather than writing something wrong, and
+rbs30x cannot be compiled to a binary schema today for unrelated pre-existing reasons -
+`binary_schema_v2.py` and `generate-c.py` both fail on it at HEAD as well. Worth a
+sentinel value in the format when the gateway front-end goes in.
 
 ## Session: Aug 10, 2026
 
