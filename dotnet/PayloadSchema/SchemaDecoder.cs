@@ -505,15 +505,39 @@ public static class SchemaDecoder
     /// </summary>
     static long FloorMod(long a, long b) => ((a % b) + b) % b;
 
+    /// <summary>
+    /// Rounds to <paramref name="decimals"/> places, half-to-even, on the stored value
+    /// rather than on value*10^decimals - see the note at the call site for why.
+    /// </summary>
+    static double RoundHalfEvenDecimal(double value, int decimals)
+    {
+        if (double.IsNaN(value) || double.IsInfinity(value)) return value;
+        if (decimals < 0) decimals = 0;
+        var text = value.ToString("F" + decimals, System.Globalization.CultureInfo.InvariantCulture);
+        return double.TryParse(text, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var rounded)
+            ? rounded
+            : value;
+    }
+
     static double ApplyTransformStages(double numVal, List<TransformStage> stages)
     {
         foreach (var stage in stages)
         {
             if (stage.Op == "round")
             {
-                // Half-to-even, matching the interpreter. Half-up would disagree
-                // with it on exact halves, which the corpus vectors contain.
-                numVal = Math.Round(numVal, stage.Decimals, MidpointRounding.ToEven);
+                // Half-to-even AND decimal-correct, matching Python, Java and Go.
+                //
+                // Math.Round(double, int, ToEven) is documented to lose precision this
+                // way, and it does: it gives 2.36 for 2.355 and 2.68 for 2.675, where
+                // the stored doubles are 2.35499999999999998 and 2.67499999999999982 and
+                // the other implementations give 2.35 and 2.67. Rounding through
+                // `decimal` is no better - it treats the literal as exact, so it agrees
+                // on those two and then gives 2.34 for 2.345.
+                //
+                // Formatting to a fixed number of decimals is correctly rounded on the
+                // stored value and breaks ties to even, which is both jobs at once.
+                numVal = RoundHalfEvenDecimal(numVal, stage.Decimals);
                 continue;
             }
             // Unary maths stages, each exclusive of the others and of the arithmetic

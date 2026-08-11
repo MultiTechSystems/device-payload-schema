@@ -1,0 +1,61 @@
+# The `round` transform is half-to-even, and rounding must be decimal-correct.
+#
+# Two separate things are pinned here, and Go failed the second before CR-2026-007's
+# follow-up:
+#
+# 1. Half-to-even on an exact tie. 2.5 rounds to 2 and 3.5 to 4, so `Math.round`
+#    (half-up) and a naive `int(x + 0.5)` are both wrong.
+# 2. Rounding v at d decimals is NOT rounding v * 10^d. 2.355 is stored as
+#    2.35499999999999998, so it must round DOWN to 2.35 - but 2.355 * 100 lands on
+#    exactly 235.5, and rounding that to even gives 236, i.e. 2.36. Python, Java and C#
+#    are decimal-correct; Go multiplied first and gave 2.36.
+#
+# The raw values are chosen so that `div` produces exactly the doubles above.
+name: probe_round_half_to_even
+endian: big
+fields:
+# 2355 / 1000 = 2.355 (stored just below the half) -> 2.35, not 2.36
+- name: below_half_by_representation
+  type: u16
+  div: 1000
+  transform:
+  - op: round
+    decimals: 2
+# 2675 / 1000 = 2.675 (also stored just below) -> 2.67, not 2.68
+- name: below_half_by_representation_2
+  type: u16
+  div: 1000
+  transform:
+  - op: round
+    decimals: 2
+# 25 / 10 = 2.5 exactly -> 2, the even neighbour
+- name: exact_tie_down_to_even
+  type: u8
+  div: 10
+  transform:
+  - op: round
+    decimals: 0
+# 35 / 10 = 3.5 exactly -> 4, the even neighbour
+- name: exact_tie_up_to_even
+  type: u8
+  div: 10
+  transform:
+  - op: round
+    decimals: 0
+# 78125 / 1000 = 78.125 exactly -> 78.12, the even neighbour at 2 decimals
+- name: exact_tie_two_decimals
+  type: u32
+  div: 1000
+  transform:
+  - op: round
+    decimals: 2
+test_vectors:
+- name: round_half_to_even
+  payload: '0933 0A73 19 23 0001312D'
+  source: generated
+  expected:
+    below_half_by_representation: 2.35
+    below_half_by_representation_2: 2.67
+    exact_tie_down_to_even: 2
+    exact_tie_up_to_even: 4
+    exact_tie_two_decimals: 78.12

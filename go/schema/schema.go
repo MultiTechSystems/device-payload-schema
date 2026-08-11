@@ -418,6 +418,22 @@ func applyCanonicalModifiers(value float64, field Field) float64 {
 	return value
 }
 
+// roundHalfEvenDecimal rounds to `decimals` places, half-to-even, on the stored value
+// rather than on value*10^decimals - see the note at the call site for why that matters.
+func roundHalfEvenDecimal(value float64, decimals int) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return value
+	}
+	if decimals < 0 {
+		decimals = 0
+	}
+	rounded, err := strconv.ParseFloat(strconv.FormatFloat(value, 'f', decimals, 64), 64)
+	if err != nil {
+		return value
+	}
+	return rounded
+}
+
 // applyTransformStages applies a transform array in list order. A stage normally
 // carries one arithmetic op; where it carries several they apply in the canonical
 // order mult, div, add, so a stage cannot mean different things in different
@@ -425,10 +441,19 @@ func applyCanonicalModifiers(value float64, field Field) float64 {
 func applyTransformStages(value float64, stages []Transform) float64 {
 	for _, stage := range stages {
 		if stage.Op == "round" {
-			// Half-to-even, matching the interpreter. Half-up would disagree with
-			// it on exact halves, which the corpus vectors do contain.
-			scale := math.Pow(10, float64(stage.Decimals))
-			value = math.RoundToEven(value*scale) / scale
+			// Half-to-even AND decimal-correct, matching Python, Java and C#.
+			//
+			// This was math.RoundToEven(value*scale)/scale, which is half-to-even but
+			// not decimal-correct: rounding v at d decimals is not rounding v*10^d.
+			// 2.355 is stored as 2.35499999999999998 and must round down to 2.35, but
+			// 2.355*100 lands on exactly 235.5, so the multiply manufactured a tie and
+			// rounded up to 2.36 - and 2.675 to 2.68 - where the other three
+			// implementations give 2.35 and 2.67.
+			//
+			// strconv.FormatFloat is correctly rounded on the stored value and breaks
+			// ties to even, so it does both jobs; verified against Python's round() on
+			// the exact-tie and representation-error cases.
+			value = roundHalfEvenDecimal(value, stage.Decimals)
 			continue
 		}
 		// Unary maths stages, each exclusive of the others and of the arithmetic
@@ -2010,6 +2035,12 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 			// mult, div, add, and it knew nothing of {op: round} or the unary maths
 			// stages - so on a plain typed field, unlike a ref or compute field, a
 			// rounding stage did nothing and sqrt/log/pow passed the value through.
+			// Bare modifiers first, then the stages - both when both are present.
+			// This was an either/or, so a field that scales with `div` and then rounds
+			// with a stage had the `div` silently dropped: round-half-to-even.yaml read
+			// 2355 rather than 2.35. The same defect was corrected on the ref and
+			// compute paths earlier; this branch was missed.
+			numVal = applyCanonicalModifiers(numVal, field)
 			numVal = applyTransformStages(numVal, field.Transform)
 		// Check for legacy 'modifiers' array
 		} else if len(field.Modifiers) > 0 {

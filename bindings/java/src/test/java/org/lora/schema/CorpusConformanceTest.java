@@ -30,7 +30,7 @@ class CorpusConformanceTest {
     // 1186 of 1188. The two short are `mod` with a negative operand: this binding
     // uses Math.floorDiv for `idiv` but a truncated `%` for `mod`, so its own two
     // operators disagree. Awaiting the CR that settles the convention.
-    private static final int CORPUS_FLOOR = 1188;
+    private static final int CORPUS_FLOOR = 1189;
 
     @Test
     void corpusVectorsDecodeAsExpected() throws IOException {

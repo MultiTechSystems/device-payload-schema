@@ -26,7 +26,7 @@ public class CorpusConformanceTests
     // 1184 of 1188. The four short are the negative-operand compute vectors: this
     // implementation truncates `idiv` and `mod` where the fixture asserts the
     // floored convention. Awaiting the CR that settles which is normative.
-    const int CorpusFloor = 1188;
+    const int CorpusFloor = 1189;
 
     readonly ITestOutputHelper _output;
 

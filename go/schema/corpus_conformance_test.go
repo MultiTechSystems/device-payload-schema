@@ -31,7 +31,7 @@ import (
 // interpreter truncates `idiv` and `mod` where the fixture asserts the floored
 // convention. Deliberately lowered rather than dropping them, so the gap stays
 // visible until the CR settles which convention is normative.
-const corpusFloor = 1188
+const corpusFloor = 1189
 
 type corpusVector struct {
 	Name    string `yaml:"name"`
