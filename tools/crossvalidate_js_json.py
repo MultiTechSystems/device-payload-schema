@@ -113,16 +113,6 @@ catch(e) {{ console.log('__ERR__'+e.message); }}
         py_norm = normalize(r.data)
         py_tok = tokens(json.dumps(py_norm))
         js_tok = tokens(js_out)
-        # `_quality` is the interpreter's valid_range reporting, which the TS013
-        # generator does not implement at all. Counted separately rather than as a
-        # mismatch of a field's value - it is an additive extension, not a disagreement -
-        # but it is a real gap and is listed in SESSION-NOTES.md.
-        quality_gap = '_quality' in py_tok and '_quality' not in js_tok
-        py_tok.pop('_quality', None)
-        js_tok.pop('_quality', None)
-        if quality_gap:
-            results["quality-only (generator lacks valid_range)"] += 1
-
         common = set(py_tok) & set(js_tok)
         mism = [k for k in common if str(py_tok[k]) != str(js_tok[k])]
         only_py = set(py_tok) - set(js_tok)

@@ -70,11 +70,8 @@ where the table says a modified field *is* a number. The generator was already r
    done, and `tools/crossvalidate_js_json.py` now reports **1141 identical, zero value
    differences, zero key-set differences**.
 
-   The one remaining reported difference was `_quality`, which the generator does not
-   emit at all because it implements no `valid_range` checking. The cross-check counts
-   that separately rather than as a value mismatch - it is additive, not a disagreement -
-   but **it is a real gap**: 12 vectors' worth, all `vicki.yaml`. That is the next
-   generator item.
+   `valid_range` -> `_quality` is done too, so `_quality` is compared as a first-class
+   value again rather than counted separately.
    The `repeat` fixtures now pin the record shape in their `expected` blocks. They did
    not before, which is exactly why the generator could omit the construct entirely
    while all four runners passed.
@@ -155,6 +152,43 @@ turned up the `_quality` gap too.
   implementations could disagree about it indefinitely.
 - New `tests/test_remaining_length.py`, 14 tests: evaluation, the empty case per type,
   the no-rewind property, the three validator rules, and the schema that needed it.
+
+### `valid_range` -> `_quality` in the generated codec
+
+The generator implemented no range checking, so every schema with `valid_range` produced
+a codec that dropped the `_quality` object the interpreters report - 12 vectors, in
+`vicki.yaml` and `qingping.yaml`.
+
+Implemented as a single pass at the end of the decode function rather than a check inside
+each of the six emitters. Two reasons: the emitters already carry a "remember to also
+write `vars`" trap and this would have added a second one, and a post-pass keyed on the
+reported name is guarded by `hasOwnProperty`, so a field in an untaken TLV or conditional
+branch does not acquire a flag.
+
+What it deliberately does not do: `_valid_range_fields()` mirrors the interpreters' three
+call sites - the main field loop (plain and computed fields) and `flagged` group members -
+and does **not** descend into `repeat`, `object`, TLV `cases` or `match` cases, because
+the interpreters do not check there either. A field inside a TLV case gets no flag even
+when it declares a range. Emitting one would have invented a divergence in the opposite
+direction. All 196 `valid_range` declarations in the corpus sit in top-level `fields` or
+in `definitions` (spliced by `$ref`), so nothing is missed today; the point is which
+behaviour is being copied.
+
+The decode functions now carry a warnings array and return it, and the decode entry
+points surface it instead of a hardcoded `[]`. An out-of-range value produces the same
+warning text as the interpreter.
+
+Two of the tests I wrote for this were wrong first time and passed for the wrong reason:
+`compute` takes `a:`/`b:`, not `operands:`, so the "computed field" case computed 0 and
+compared 0 against its range; and a range of `[0, 10]` on 200/10 is out of range, not in
+it. Both now assert the direction they claim. `tests/test_valid_range_quality.py`, 15
+tests, each comparing the codec against the interpreter rather than against my
+expectation of it.
+
+**Adjacent, not done:** `generate_output_schema.py` does not declare `_quality` as a
+property. Output still validates because the generator sets `additionalProperties: true`
+with a comment saying it is for `_quality`, but a consumer reading the output schema
+cannot learn the field exists. PS-182 fixes its shape, so it could be declared.
 
 ### Known gap: `length: $variable`
 

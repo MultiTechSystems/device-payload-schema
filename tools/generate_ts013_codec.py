@@ -366,6 +366,9 @@ class TS013Generator:
         self.has_commands = 'downlink_commands' in schema
         self.downlink_commands = schema.get('downlink_commands', {})
         self.indent = 0
+        # Constructs this generator declined to emit, surfaced as `// TODO:` comments in
+        # the generated codec rather than dropped silently.
+        self.gaps: List[str] = []
 
     def _i(self) -> str:
         return '  ' * self.indent
@@ -393,7 +396,22 @@ class TS013Generator:
         return '\n'.join(lines)
 
     def _gen_helpers(self) -> str:
-        return '''// --- Rounding ---
+        return '''// --- Range quality (valid_range -> _quality) ---
+// PS-131/PS-182. Checked after all arithmetic, on the reported value, and the value
+// is passed through unchanged whatever the verdict (PS-132). Boundaries are `good`.
+// A non-numeric value is reported `good` rather than skipped, matching the
+// interpreters - the flag says "not out of range", not "was checked".
+function checkRange(q, w, name, value, lo, hi) {
+  if (typeof value !== "number" || !isFinite(value)) { q[name] = "good"; return; }
+  if (value < lo || value > hi) {
+    w.push(name + ": value " + value + " outside valid range [" + lo + ", " + hi + "]");
+    q[name] = "out_of_range";
+  } else {
+    q[name] = "good";
+  }
+}
+
+// --- Rounding ---
 // Half-to-even (banker's rounding), matching the Python, Java and C# interpreters.
 //
 // Two traps this avoids. First, JavaScript's Math.round is half-UP and asymmetric
@@ -527,9 +545,53 @@ function writeS(buf, pos, size, value, endian) {
             out.extend(self._expand_refs(target, depth + 1))
         return out
 
+    def _valid_range_fields(self, fields: List[Dict]) -> List[Tuple[str, str, Any, Any]]:
+        """Fields whose value carries a `valid_range`, as (outputName, schemaName, lo, hi).
+
+        Mirrors where the interpreters actually check: the main field loop (which
+        covers plain and computed fields) and `flagged` group members. It deliberately
+        does NOT descend into `repeat`, `object`, TLV `cases` or `match` cases, because
+        the interpreters do not check there either - a field inside a TLV case gets no
+        quality flag even when it declares a range. Emitting one here would invent a
+        divergence in the opposite direction. No schema in the corpus declares a range
+        in those positions, so this costs nothing today; it is about which behaviour
+        this generator is copying.
+        """
+        found: List[Tuple[str, str, Any, Any]] = []
+        for field in self._expand_refs(fields):
+            if not isinstance(field, dict):
+                continue
+            flagged = field.get('flagged')
+            groups = flagged.get('groups') if isinstance(flagged, dict) else None
+            if isinstance(groups, list):
+                for group in groups:
+                    if isinstance(group, dict) and isinstance(group.get('fields'), list):
+                        found.extend(self._valid_range_fields(group['fields']))
+            valid_range = field.get('valid_range')
+            name = field.get('name')
+            if not name or not isinstance(valid_range, (list, tuple)) or len(valid_range) < 2:
+                continue
+            lo, hi = valid_range[0], valid_range[1]
+            if not isinstance(lo, (int, float)) or not isinstance(hi, (int, float)):
+                continue
+            if isinstance(lo, bool) or isinstance(hi, bool):
+                continue
+            if field.get('name_from'):
+                # The output key is decided at run time, so a static table cannot name
+                # it. Nothing in the corpus combines the two; skipped loudly rather
+                # than emitting a check against the wrong key.
+                self.gaps.append(
+                    f"valid_range on '{name}' with name_from is not generated")
+                continue
+            if name.startswith('_'):
+                # Internal fields are stripped before reporting and get no flag.
+                continue
+            found.append((to_js_name(name), name, lo, hi))
+        return found
+
     def _gen_decode_fn(self, fname: str, fields: List[Dict]) -> str:
         lines = [f'function {fname}(buf, endian) {{']
-        lines.append(f'  var pos = 0, d = {{}}, vars = {{}};')
+        lines.append(f'  var pos = 0, d = {{}}, vars = {{}}, w = [];')
         lines.append(f'  endian = endian || "{self.endian}";')
         self.indent = 1
         for field in self._expand_refs(fields):
@@ -540,7 +602,24 @@ function writeS(buf, pos, size, value, endian) {
         # never written, which would break every reference to one. mclimate/vicki
         # reported four intermediates before this.
         lines.append("  for (var _k in d) { if (_k.charAt(0) === '_' && _k !== '_quality') delete d[_k]; }")
-        lines.append('  return { data: d, pos: pos };')
+        # valid_range runs last, on the reported values, after the internal fields are
+        # stripped - a `_`-prefixed field is not reported and gets no flag, matching the
+        # interpreters. Each check is guarded on the key being present so a field in an
+        # untaken conditional branch does not acquire a flag.
+        ranges = self._valid_range_fields(fields)
+        for gap in self.gaps:
+            lines.append(f'  // TODO: {gap}')
+        if ranges:
+            lines.append('  var q = {}, qn = 0;')
+            for js_name, schema_name, lo, hi in ranges:
+                lines.append(
+                    f'  if (Object.prototype.hasOwnProperty.call(d, {json.dumps(js_name)})) '
+                    f'{{ checkRange(q, w, {json.dumps(schema_name)}, d.{js_name}, '
+                    f'{json.dumps(lo)}, {json.dumps(hi)}); qn++; }}'
+                )
+            # PS-182: `_quality` appears only when a field actually carried a range.
+            lines.append('  if (qn) d._quality = q;')
+        lines.append('  return { data: d, pos: pos, warnings: w };')
         lines.append('}')
         return '\n'.join(lines)
 
@@ -1460,7 +1539,7 @@ function writeS(buf, pos, size, value, endian) {
                 if direction == 'uplink':
                     lines.append(f'    if (input.fPort === {port_key}) {{')
                     lines.append(f'      var r = decodePort{port_key}(input.bytes, endian);')
-                    lines.append(f'      return {{ data: r.data, warnings: [], errors: [] }};')
+                    lines.append(f'      return {{ data: r.data, warnings: r.warnings || [], errors: [] }};')
                     lines.append(f'    }}')
             lines.append(f'    return {{ data: {{}}, warnings: ["Unknown fPort: " + input.fPort], errors: [] }};')
             lines.append('  } catch (e) {')
@@ -1478,7 +1557,7 @@ function writeS(buf, pos, size, value, endian) {
                 if direction == 'downlink':
                     lines.append(f'    if (input.fPort === {port_key}) {{')
                     lines.append(f'      var r = decodePort{port_key}(input.bytes, endian);')
-                    lines.append(f'      return {{ data: r.data, warnings: [], errors: [] }};')
+                    lines.append(f'      return {{ data: r.data, warnings: r.warnings || [], errors: [] }};')
                     lines.append(f'    }}')
             lines.append(f'    return {{ data: {{}}, warnings: ["Unknown fPort: " + input.fPort], errors: [] }};')
             lines.append('  } catch (e) {')
@@ -1508,7 +1587,7 @@ function writeS(buf, pos, size, value, endian) {
             lines.append('function decodeUplink(input) {')
             lines.append('  try {')
             lines.append(f'    var r = decodePayload(input.bytes, "{self.endian}");')
-            lines.append('    return { data: r.data, warnings: [], errors: [] };')
+            lines.append('    return { data: r.data, warnings: r.warnings || [], errors: [] };')
             lines.append('  } catch (e) {')
             lines.append('    return { data: {}, warnings: [], errors: [e.message] };')
             lines.append('  }')
@@ -1520,7 +1599,7 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append('function decodeDownlink(input) {')
                 lines.append('  try {')
                 lines.append(f'    var r = decodeCommand(input.bytes, "{self.endian}");')
-                lines.append('    return { data: r.data, warnings: [], errors: [] };')
+                lines.append('    return { data: r.data, warnings: r.warnings || [], errors: [] };')
                 lines.append('  } catch (e) {')
                 lines.append('    return { data: {}, warnings: [], errors: [e.message] };')
                 lines.append('  }')

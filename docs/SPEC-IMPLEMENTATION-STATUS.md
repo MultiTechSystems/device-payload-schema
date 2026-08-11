@@ -148,6 +148,13 @@ each resolved it to the wrong bits or set a sentinel nothing consumed.
 | INFO level | ✓ | - | - | - | - |
 | Best practice checks | ✓ | - | - | - | - |
 | Quality scoring | ✓ | - | - | - | - |
+| `valid_range` -> `_quality` (PS-131/PS-182) | ✓ | - | - | - | ✓ |
+
+`valid_range` is checked after all arithmetic, on the reported value, and the value is
+passed through unchanged whatever the verdict (PS-132). `_quality` appears only when a
+field actually carried a range (PS-182). Go, Java and C# decode these schemas correctly
+but report no quality object; the interpreters and the generated JS agree on it, which
+`tools/crossvalidate_js_json.py` now checks as a first-class value.
 
 ### Semantic Hints
 
@@ -233,6 +240,7 @@ each resolved it to the wrong bits or set a sentinel nothing consumed.
 - No binary schema (uses generated code)
 - Eval-free generated code
 - TS013 format compliant
+- `valid_range` quality flags and their warnings
 - **v0.3.2 additions**: downlink_commands (encodeCommand/decodeCommand)
 
 ### Output JSON Schema (`tools/generate_output_schema.py`)
