@@ -59,7 +59,7 @@ fields:
     }
 
     [Fact]
-    public void SequenceFormKeepsTheRawValueOutOfRange()
+    public void SequenceFormOutOfRangeIsAnError()
     {
         const string yaml = @"
 name: seq
@@ -69,7 +69,11 @@ fields:
     lookup: [""off"", ""on""]
 ";
         Assert.Equal("on", Decode(yaml, new byte[] { 0x01 })["relay"]);
-        Assert.True(Decode(yaml, new byte[] { 0x07 }).ContainsKey("relay"));
+        // PS-105: an out-of-bounds index is an error, not the raw value. This asserted
+        // only that the key was present, which the raw index satisfied.
+        var thrown = Assert.Throws<InvalidOperationException>(
+            () => Decode(yaml, new byte[] { 0x07 }));
+        Assert.Equal("lookup index 7 out of bounds for 2 entries", thrown.Message);
     }
 
     [Fact]

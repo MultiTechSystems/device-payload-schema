@@ -18,11 +18,17 @@ func TestSequenceLookupIsApplied(t *testing.T) {
 	}
 }
 
-func TestSequenceLookupOutOfRangeKeepsRawValue(t *testing.T) {
+// PS-105. This asserted the raw value 7 while the requirement was unimplemented -
+// the index reported under a name that promises a label. CR-2026-004 is unaffected:
+// it narrowed PS-104 and states that no existing requirement changes behaviour.
+func TestSequenceLookupOutOfRangeIsAnError(t *testing.T) {
 	s, _ := ParseSchema("name: seq\nfields:\n  - name: relay\n    type: u8\n    lookup: [\"off\", \"on\"]\n")
-	out, _ := s.Decode([]byte{0x07})
-	if v, ok := toInt(out["relay"]); !ok || v != 7 {
-		t.Errorf("relay = %#v, want raw 7", out["relay"])
+	out, err := s.Decode([]byte{0x07})
+	if err == nil {
+		t.Fatalf("want an error for an out-of-bounds index, got out = %#v", out)
+	}
+	if want := "lookup index 7 out of bounds for 2 entries"; err.Error() != want {
+		t.Errorf("err = %q, want %q", err.Error(), want)
 	}
 }
 

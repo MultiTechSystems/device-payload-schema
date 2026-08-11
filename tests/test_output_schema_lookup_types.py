@@ -147,19 +147,20 @@ class TestSequenceLookup:
         body = "  - name: v\n    type: u8\n    lookup: [zero, one]\n"
         assert reported(body, "01")["v"] == "one"
 
-    def test_out_of_bounds_reports_the_raw_index_which_ps_105_forbids(self):
-        """Documents a real conformance gap rather than asserting desired behaviour.
+    def test_out_of_bounds_is_an_error_so_the_enum_stays_closed(self):
+        """PS-105, now implemented, is what makes the closed `enum` correct.
 
-        PS-105 requires an error for an out-of-bounds index; the interpreter silently
-        reports the raw value instead, and the other four implementations' own comments
-        say they do the same. The declaration stays closed because such output is
-        malformed - validating it *should* fail. Change this test when PS-105 is either
-        implemented or withdrawn.
+        While every implementation silently reported the raw index instead, this
+        declaration was arguably too strict. It is exactly right now: no conformant
+        decode can report a value outside the sequence.
         """
-        body = "  - name: v\n    type: u8\n    lookup: [zero, one]\n"
-        result = reported(body, "09")
-        assert result["v"] == 9
-        assert "v" in result
+        schema = yaml.safe_load(
+            "name: t\nendian: big\nfields:\n"
+            "  - name: v\n    type: u8\n    lookup: [zero, one]\n"
+        )
+        result = SchemaInterpreter(schema).decode(bytes.fromhex("09"))
+        assert not result.success
+        assert "v" not in result.data
 
 
 class TestEnumType:

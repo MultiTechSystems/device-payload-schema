@@ -22,6 +22,7 @@ typedef void (*selftest_fn)(void);
 static const selftest_fn all_tests[] = {
     selftest_codec,
     selftest_protocol,
+    selftest_schema,
     /* Add new test functions here */
 };
 

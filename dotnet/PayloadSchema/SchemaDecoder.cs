@@ -459,7 +459,13 @@ public static class SchemaDecoder
                     value = lookupStr;
                 else if (field.LookupDefault != null)
                     value = field.LookupDefault;
-                else if (!field.LookupIsSequence)
+                else if (field.LookupIsSequence)
+                    // An out-of-bounds index into a sequence is an error (PS-105), not
+                    // the raw value: the payload does not match the schema's shape.
+                    // A mapping gap is the different case and omits the field (PS-269).
+                    throw new InvalidOperationException(
+                        $"lookup index {intVal} out of bounds for {field.Lookup.Count} entries");
+                else
                     return Omitted;
             }
         }

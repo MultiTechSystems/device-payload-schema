@@ -63,8 +63,17 @@ each resolved it to the wrong bits or set a sentinel nothing consumed.
 | `mult` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `div` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | YAML key ordering | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `lookup` (array) | ✓ | - | ✓ | ✓ | ✓ |
+| `lookup` (array) | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `lookup` (map) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| out-of-bounds index errors (PS-105) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| mapping gap omits the field (PS-269) | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+Java was marked as lacking the array form; its own CR-2026-004 test decodes one, so the
+mark was stale. All five now treat the two lookup failures as the distinct requirements
+they are: an out-of-bounds sequence index is a decode error (PS-105), while a mapping with
+no matching key and no `default` omits the field (PS-269). Every implementation previously
+reported the raw index for the first, and C reported it for the second as well on its
+ordinary-field path, disagreeing with its own enum path.
 
 ### Transform Pipeline
 

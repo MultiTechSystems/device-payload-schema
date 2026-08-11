@@ -139,6 +139,14 @@ def normalize_output(value):
     return value
 
 
+class LookupIndexError(ValueError):
+    """An out-of-bounds index into a sequence ``lookup`` (PS-105).
+
+    Every implementation used to report the raw index instead, silently, so a payload
+    that did not match its schema decoded as though it did.
+    """
+
+
 def apply_lookup(value, lookup):
     """Map a decoded integer through a ``lookup`` table (PS-103..PS-107, PS-268).
 
@@ -148,6 +156,13 @@ def apply_lookup(value, lookup):
     without inventing a label. Where a mapping has no entry and declares no
     ``default``, the field is omitted rather than reported as its raw value, since
     the device did not report a value the schema can name.
+
+    The two failure cases are deliberately different, following the specification:
+    a mapping gap is a known unknown and omits the field (PS-269), while an
+    out-of-bounds sequence index is an error (PS-105) -- the payload does not match
+    the schema's shape at all. PS-278 shows the specification saying "report the
+    field as absent and MUST NOT abort" where that is what it wants, so PS-105's
+    bare "MUST emit an error" is read as a decode error.
 
     The mapping form was previously accepted and mis-decoded: the guard
     ``0 <= value < len(lookup)`` was written for a list, so the last entry of any
@@ -167,7 +182,8 @@ def apply_lookup(value, lookup):
         return OMITTED
     if 0 <= value < len(lookup):
         return lookup[value]
-    return value
+    raise LookupIndexError(
+        f"lookup index {value} out of bounds for {len(lookup)} entries")
 
 
 def _match_composite_key(case_key: str, tag_tuple):

@@ -74,7 +74,11 @@ class CR2026004Test {
                     lookup: ["off", "on"]
                 """;
         assertEquals("on", decode(yaml, new byte[] {1}).get("relay"));
-        assertTrue(decode(yaml, new byte[] {7}).containsKey("relay"));
+        // PS-105: an out-of-bounds index is an error, not the raw value. This asserted
+        // only that the key was present, which the raw index satisfied.
+        SchemaException.DecodeException thrown = assertThrows(
+                SchemaException.DecodeException.class, () -> decode(yaml, new byte[] {7}));
+        assertEquals("lookup index 7 out of bounds for 2 entries", thrown.getMessage());
     }
 
     @Test

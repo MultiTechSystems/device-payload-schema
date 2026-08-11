@@ -86,10 +86,21 @@ fields:
         assert decoded(schema, "01") == {"relay": "on"}
         assert decoded(schema, "00") == {"relay": "off"}
 
-    def test_sequence_out_of_range_keeps_the_raw_value(self):
-        """Unchanged behaviour for the sequence form: PS-104 is only narrowed."""
+    def test_sequence_out_of_range_is_an_error(self):
+        """PS-105, which this CR left untouched while narrowing PS-104.
+
+        This asserted `{"relay": 7}` while PS-105 was unimplemented - the raw index
+        reported under a name that promises a label. The CR is unaffected: it says in
+        as many words that no existing requirement changes behaviour, and the sequence
+        form is unchanged. Only the previously-missing error is new.
+        """
         schema = 'name: seq\nfields:\n  - {name: relay, type: u8, lookup: ["off", "on"]}\n'
-        assert decoded(schema, "07") == {"relay": 7}
+        result = SchemaInterpreter(yaml.safe_load(schema)).decode(bytes.fromhex("07"))
+        assert not result.success
+        assert result.errors == [
+            "Error decoding relay: lookup index 7 out of bounds for 2 entries"
+        ]
+        assert "relay" not in result.data
 
 
 class TestLookupHelpers:

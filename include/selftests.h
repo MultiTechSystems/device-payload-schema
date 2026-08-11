@@ -38,6 +38,7 @@
  */
 extern void selftest_codec(void);
 extern void selftest_protocol(void);
+extern void selftest_schema(void);
 /* Add more as needed:
 extern void selftest_yourmodule(void);
 */

@@ -396,7 +396,20 @@ class TS013Generator:
         return '\n'.join(lines)
 
     def _gen_helpers(self) -> str:
-        return '''// --- Range quality (valid_range -> _quality) ---
+        return '''// --- Sequence lookup ---
+// PS-104 indexes a sequence from zero; PS-105 makes an out-of-bounds index an error,
+// not the raw index. Reporting the raw value let a payload that does not match its
+// schema decode as though it did - every implementation did that, silently, until
+// PS-105 was implemented. A mapping gap is the different case: it omits the field
+// (PS-269), because a gap is a known unknown rather than a shape mismatch.
+function seqLookup(table, index) {
+  if (index >= 0 && index < table.length && table[index] !== undefined) {
+    return table[index];
+  }
+  throw new Error("lookup index " + index + " out of bounds for " + table.length + " entries");
+}
+
+// --- Range quality (valid_range -> _quality) ---
 // PS-131/PS-182. Checked after all arithmetic, on the reported value, and the value
 // is passed through unchanged whatever the verdict (PS-132). Boundaries are `good`.
 // A non-numeric value is reported `good` rather than skipped, matching the
@@ -1031,9 +1044,11 @@ function writeS(buf, pos, size, value, endian) {
                     fallback = 'undefined'
                 expr = f'(({lk})[{expr}] !== undefined ? ({lk})[{expr}] : {fallback})'
             else:
-                # PS-104: a sequence keeps the raw value when the index is out of range.
+                # PS-104/PS-105: a sequence is indexed from zero, and an out-of-bounds
+                # index is an error rather than the raw value. Routed through a helper so
+                # the index expression is evaluated once instead of up to three times.
                 lk = json.dumps(lookup)
-                expr = f'(({lk})[{expr}] !== undefined ? ({lk})[{expr}] : {expr})'
+                expr = f'seqLookup({lk}, {expr})'
         return expr
 
     def _reverse_modifiers_expr(self, val_var: str, field: Dict) -> str:

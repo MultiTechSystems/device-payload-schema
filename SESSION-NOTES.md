@@ -312,26 +312,78 @@ Effect: 7 schemas change, all in the intended direction - `["string", "integer"]
 value is in its declared `enum`, which is what actually tests the closed-set claim against
 real data rather than against my reading of the code.
 
-### PS-105 is violated by every implementation
+### PS-105 implemented in all five
 
-Measured while typing sequence lookups: **an out-of-bounds sequence index silently reports
-the raw index value** instead of erroring. PS-105 says implementations MUST emit an error.
-Python does it (verified by running it), and the Go, Java and C# sources say the same in
-their own comments - Java: "A sequence keeps the raw value when out of range (PS-104)".
+Every implementation now treats an out-of-bounds sequence index as a decode error rather
+than silently reporting the raw index. The message is identical everywhere -
+`lookup index 7 out of bounds for 2 entries` - and each language asserts it in its own
+suite, which is what makes the parity real: `tests/test_ps105_sequence_lookup.py`,
+`cr004_test.go`, `CR2026004Test.java`, `CR2026_004Tests.cs`, `src/selftest_schema.c`.
 
-No corpus vector exercises it, which is why nothing has caught it.
+**The ambiguity I had to resolve.** PS-105 says only "MUST emit an error" - it does not say
+whether the payload is abandoned. Read as a decode error, because PS-278 shows the
+specification saying "report the field as absent and MUST NOT abort" where that is what it
+means, and PS-269 already provides the omit-quietly behaviour for the failure that deserves
+it. The two lookup failures are therefore deliberately different: a mapping gap is a known
+unknown and omits; a sequence index out of bounds is a shape mismatch and errors. **This is
+worth a one-sentence clarification in the specification** - I did not amend it, since spec
+changes go through a CR here.
 
-The output schema deliberately does **not** accommodate that output: it declares the
-sequence's entries as a closed `enum`, so validating a raw-index value fails. That is the
-useful behaviour - such a payload is malformed per PS-105 - but it is a decision worth
-revisiting, and the two ways out differ:
+Three existing tests asserted the old behaviour and were rewritten, which is worth noting
+because of *how* they were written: one accepted either outcome ("out of range should
+either return raw value or 'unknown'"), and two asserted only that the key was present,
+which the raw index satisfied. A test written to pass whatever the code does is how a
+requirement stays unimplemented. CR-2026-004 is unaffected - it narrowed PS-104 and says in
+as many words that no existing requirement changes behaviour.
 
-- implement PS-105 in all five interpreters (an error, and the field omitted), or
-- withdraw PS-105 and make the raw fallback normative, in which case the declaration must
-  loosen to `["string", "integer"]` and lose the label set for 260 corpus fields.
+**C needed more than the others, and turned up two further defects.**
 
-`tests/test_output_schema_lookup_types.py` pins the current behaviour with a test named
-after the gap, so whichever way it is settled the test has to be edited deliberately.
+- Its lookups are stored keyed whichever form they came from, so PS-105 could not be told
+  from PS-269. `field_def_t` gained `lookup_is_sequence`, and the v1 binary format carries
+  it in the high bit of the lookup count byte (the count is bounded by SCHEMA_MAX_LOOKUP,
+  far under 0x7F). A format change, so an old reader would misread a new binary that sets
+  the flag; a new reader reading an old binary sees no flag and keeps mapping semantics.
+- **C had two lookup sites that disagreed with each other.** The enum path omitted on a
+  miss (PS-269, correct); the ordinary-field path stored the raw integer, so C violated
+  PS-269 as well for every plain field with a lookup. Both now agree.
+- `binary_schema_v2.py` still cannot express a sequence lookup at all -
+  `LookupTable.add()` calls `.items()` on it and raises. Untouched: v2 is not what C reads.
+
+### Two build defects found while testing the C change
+
+Both were found by mutation-testing the new selftest - deliberately reverting the C
+behaviour to check the test caught it. It did not, twice, for different reasons.
+
+- **`make` tracked no header dependencies.** A header-only change rebuilt nothing, and the
+  entire schema interpreter is a header, so `make selftest` was passing against stale
+  objects after exactly the changes most worth testing. Fixed with `-MMD -MP` and
+  `-include $(SELFTEST_OBJS:.o=.d)`. Verified by mutating the header without `make clean`
+  and watching the selftest fail, then restoring and watching it pass.
+- **`make clean` ran `rm -rf build-*`, which deleted the tracked `build-system/`
+  directory.** It really did delete `build-system/syntax/protobuf.xml` on my run; I
+  restored it from git. Now matched on the variant suffix
+  (`build-*-debug build-*-release build-*-coverage`), which cannot match `build-system`.
+
+Also: `include/schema_interpreter.h` called `snprintf` without including `<stdio.h>`, so it
+only compiled where the including file happened to have pulled it in already. Every
+existing caller did, which is why nothing noticed until a new file included the header
+first.
+
+### The output schema's closed enum is now exactly right
+
+It declared a sequence lookup's entries as a closed `enum` while every implementation could
+still report a raw index, which was arguably too strict. With PS-105 implemented, no
+conformant decode can report a value outside the sequence, so the declaration and the
+behaviour agree.
+
+### How the PS-105 gap was found
+
+Found while typing sequence lookups for the output schema, not by any test: no corpus
+vector indexes a sequence out of bounds, and the tests that touched the case were written
+to accept whatever the code did. The choice at the time was between implementing PS-105 and
+withdrawing it in favour of the raw fallback; implementing it kept the output schema's
+closed `enum` and the label set for 260 corpus fields. See the section above for what that
+took.
 
 ### Known gap: `length: $variable`
 

@@ -32,6 +32,10 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <string.h>
+/* schema_load_binary formats a placeholder field name with snprintf. The header used
+ * it without declaring it, so it only compiled where the including file happened to
+ * have pulled in <stdio.h> already - every existing caller did. */
+#include <stdio.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -141,6 +145,12 @@ struct field_def {
     /* Lookup table */
     lookup_entry_t lookup[SCHEMA_MAX_LOOKUP];
     int lookup_count;
+    /* True where the table came from a YAML sequence rather than a mapping. Both
+     * forms are stored keyed, so without this the two failure cases cannot be told
+     * apart: a mapping gap omits the field (PS-269) while an out-of-bounds sequence
+     * index is an error (PS-105). Defaults to false, so a table built by hand with
+     * field_add_lookup keeps the mapping behaviour. */
+    bool lookup_is_sequence;
     
     /* For match type */
     char match_var[SCHEMA_MAX_NAME_LEN];
@@ -198,6 +208,7 @@ typedef struct {
 #define SCHEMA_ERR_MATCH      -5
 #define SCHEMA_ERR_UNSUPPORTED -6
 #define SCHEMA_ERR_MISSING    -7
+#define SCHEMA_ERR_LOOKUP     -8   /* Out-of-bounds sequence lookup index (PS-105) */
 
 /* ============================================
  * Byte Reading Utilities
@@ -700,11 +711,18 @@ static inline int decode_field(
                         return SCHEMA_OK;
                     }
                 }
-                /* No entry for this value: omit the field rather than reporting a
-                 * placeholder under a name that promises a label (PS-269). This
-                 * emitted "unknown(N)", a fourth behaviour on top of the three the
-                 * other interpreters each had for the same case. The variable is
-                 * still recorded so $references keep working. */
+                /* No entry for this value. A sequence index out of bounds is an
+                 * error (PS-105): the payload does not match the schema's shape, and
+                 * reporting the raw index under a name that promises a label let such
+                 * a payload decode as though it did. */
+                if (field->lookup_is_sequence) {
+                    out->valid = false;
+                    return SCHEMA_ERR_LOOKUP;
+                }
+                /* A mapping gap is the other case: omit the field rather than
+                 * reporting a placeholder (PS-269). This emitted "unknown(N)", a
+                 * fourth behaviour on top of the three the other interpreters each
+                 * had. The variable is still recorded so $references keep working. */
                 out->valid = false;
                 if (field->var_name[0]) var_set(vars, field->var_name, raw_value);
                 return SCHEMA_OK;
@@ -769,8 +787,16 @@ static inline int decode_field(
                 return SCHEMA_OK;
             }
         }
-        /* No match - store raw value */
-        out->value.i64 = raw_value;
+        /* No match. An out-of-bounds index into a sequence is an error (PS-105); a
+         * mapping gap omits the field (PS-269). This path did neither - it stored the
+         * raw integer under a name that promises a label, which is the behaviour the
+         * enum path above had already been corrected away from. The two sites had
+         * disagreed with each other since. */
+        out->valid = false;
+        if (field->lookup_is_sequence) {
+            return SCHEMA_ERR_LOOKUP;
+        }
+        return SCHEMA_OK;
     } else {
         out->value.f64 = final_value;
     }
@@ -1521,7 +1547,12 @@ static inline int schema_load_binary(
         
         /* Lookup table */
         if (has_lookup && offset < len) {
-            uint8_t lookup_count = data[offset++];
+            /* The count byte's high bit marks a table that came from a sequence, so
+             * PS-105 can be told from PS-269 after both forms are stored keyed. The
+             * count itself is bounded by SCHEMA_MAX_LOOKUP, well under 0x7F. */
+            uint8_t lookup_header = data[offset++];
+            uint8_t lookup_count = lookup_header & 0x7F;
+            f.lookup_is_sequence = (lookup_header & 0x80) != 0;
             for (int j = 0; j < lookup_count && j < SCHEMA_MAX_LOOKUP && offset < len; j++) {
                 uint8_t key = data[offset++];
                 if (offset >= len) break;

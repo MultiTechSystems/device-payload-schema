@@ -2073,8 +2073,9 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 	// Apply lookup. A mapping is matched on its keys, which need not start at
 	// zero or be contiguous (PS-268); an unmatched value omits the field rather
 	// than reporting the raw integer under a name that promises a label, unless a
-	// default is declared (PS-269). A sequence stays indexed from zero (PS-104)
-	// and keeps the raw value when out of range.
+	// default is declared (PS-269). A sequence stays indexed from zero (PS-104);
+	// an out-of-bounds index is an error (PS-105), not the raw value, because the
+	// payload does not match the schema's shape at all.
 	if field.Lookup != nil {
 		if intVal, ok := toInt(value); ok {
 			if lookup, found := field.Lookup[intVal]; found {
@@ -2090,6 +2091,9 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 		if intVal, ok := toInt(value); ok {
 			if intVal >= 0 && intVal < len(field.LookupArray) {
 				value = field.LookupArray[intVal]
+			} else {
+				return nil, fmt.Errorf("lookup index %d out of bounds for %d entries",
+					intVal, len(field.LookupArray))
 			}
 		}
 	}

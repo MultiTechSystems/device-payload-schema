@@ -3105,14 +3105,19 @@ class TestModifierEdgeCases:
         assert r.data['v'] == 160  # 200 + (-40) = 160
 
     def test_lookup_out_of_range(self):
-        """Lookup with index beyond list length."""
+        """An index beyond the sequence is an error (PS-105).
+
+        This used to accept either the raw value or an "unknown" label, which is how
+        an unimplemented requirement stays unimplemented: the test was written to pass
+        whatever the code did.
+        """
         schema = {'fields': [
             {'name': 'v', 'type': 'u8', 'lookup': ['a', 'b', 'c', 'd']}
         ]}
         r = SchemaInterpreter(schema).decode(bytes([10]))
-        assert r.success
-        # Out of range should either return raw value or "unknown"
-        assert r.data['v'] == 10 or 'unknown' in str(r.data['v']).lower()
+        assert not r.success
+        assert 'lookup index 10 out of bounds for 4 entries' in r.errors[0]
+        assert 'v' not in r.data
 
 
 class TestNestedObjectEdgeCases:

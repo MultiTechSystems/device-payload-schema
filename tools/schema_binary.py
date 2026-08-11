@@ -237,11 +237,17 @@ def encode_field(field: Dict) -> bytes:
     # Lookup table
     if has_lookup:
         lookup = field.get('lookup') or field.get('values', {})
-        if isinstance(lookup, list):
+        is_sequence = isinstance(lookup, list)
+        if is_sequence:
             # Convert list to dict
             lookup = {i: v for i, v in enumerate(lookup)}
         
-        result.append(len(lookup))
+        # The high bit of the count marks a sequence. Both forms are stored keyed, and
+        # without the mark the C interpreter cannot tell an out-of-bounds sequence index
+        # (an error, PS-105) from a mapping gap (an omission, PS-269) - it treated every
+        # flattened sequence as a mapping.
+        assert len(lookup) <= 0x7F, "lookup table too large to carry the sequence flag"
+        result.append(len(lookup) | (0x80 if is_sequence else 0x00))
         for key, value in lookup.items():
             result.append(int(key) & 0xFF)
             value_bytes = str(value).encode('utf-8')[:15]  # Max 15 chars

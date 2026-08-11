@@ -792,14 +792,20 @@ public class Schema {
         // Apply lookup. A mapping's keys need not start at zero or be contiguous
         // (PS-268); an unmatched value omits the field rather than reporting the raw
         // integer under a name that promises a label, unless a default is declared
-        // (PS-269). A sequence keeps the raw value when out of range (PS-104).
+        // (PS-269). A sequence is indexed from zero (PS-104) and an out-of-bounds
+        // index is an error (PS-105), not the raw value: the payload does not match
+        // the schema's shape at all.
         if (field.getLookup() != null && value instanceof Number) {
             int intVal = ((Number) value).intValue();
             if (field.getLookup().containsKey(intVal)) {
                 value = field.getLookup().get(intVal);
             } else if (field.getLookupDefault() != null) {
                 value = field.getLookupDefault();
-            } else if (!field.isLookupSequence()) {
+            } else if (field.isLookupSequence()) {
+                throw new SchemaException.DecodeException(String.format(
+                    "lookup index %d out of bounds for %d entries",
+                    intVal, field.getLookup().size()));
+            } else {
                 return OMITTED;
             }
         }
