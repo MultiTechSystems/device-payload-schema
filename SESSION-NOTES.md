@@ -418,6 +418,39 @@ Two things worth carrying forward:
   generator: it is what turned "the table looks right" into 274 of 274 bullets matched to a
   row at its exact line.
 
+### The spec repo's test suite corrupted a tracked file
+
+Found by running it. `python3 -m pytest tools/tests` in `la-payload-schema` wrote two
+invented release sections into the tracked `CHANGELOG.md` - `[2.5.0]` and `[1.0.1]`, dated
+today, with empty Added/Changed/Fixed headings. Anyone running the suite and committing
+without reading `git status` would have published phantom releases.
+
+The cause was a relative default: `bump-version.py`'s `--changelog` defaults to
+`CHANGELOG.md`, resolved against the working directory, and two tests of `main()`
+redirected `--spec-info` into a temp directory but not `--changelog`. The two version
+numbers in the pollution are exactly the ones those tests bump to. Both now point at a
+temp file and assert the version reaches it. Verified by md5sum across a full run.
+
+**Suite status after that fix** (all pre-existing failures, confirmed against a worktree
+at the pre-session commit):
+
+| Suite | Result |
+|---|---|
+| `pytest tools/tests` | 433 passed, **2 failed** |
+| `make test` (`self-test.sh`) | 68 passed, **3 failed**, 13 skipped |
+
+- The two pytest failures are `test_assemble_slides.py`. `tools/assemble-slides.py` was
+  changed by commit `ac2a3fc` to emit a ```` ```{.include} ```` block where it used to emit
+  a `# Slides` heading; the tests still assert the heading and date from `f553f79`, before
+  that change. Test-only staleness, but which of the two encodes the intent is a question
+  for whoever wrote `ac2a3fc`, so I left them.
+- The three self-test failures are `self-test.sh` looking for template sections this
+  specification does not have - `01-introduction`, `98-glossary`, `99-bibliography`, where
+  it has `01-schema-format` and `99-appendices`. The check carries the
+  `la-spec-template` layout unchanged.
+- Baseline was 67 passed there; it is 68 now because `generate-conformance-tables.py`
+  clears the tool-syntax check.
+
 ### Known gap: `length: $variable`
 
 The specification allows `length` to be an integer, a `$variable` reference, or
