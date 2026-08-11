@@ -273,6 +273,17 @@ def transform_to_js(transform_ops: List[Dict[str, Any]], input_expr: str) -> str
     return result
 
 
+def is_remaining_length(declared):
+    """True when a `length` means "to the end of the payload" (PS-014).
+
+    The spelling is `remaining`; a negative integer is the internal sentinel the
+    parsers map it to.
+    """
+    if isinstance(declared, str):
+        return declared.strip().lower() == 'remaining'
+    return isinstance(declared, int) and declared < 0
+
+
 def name_from_to_js(field: Dict[str, Any], js_name: str) -> Tuple[List[str], str]:
     """Build the JS for a field's output key, honouring `name_from` (PS-265..PS-267).
 
@@ -830,18 +841,30 @@ function writeS(buf, pos, size, value, endian) {
 
         # string types
         if ftype in ('ascii', 'hex', 'bytes'):
-            length = field.get('length', 1)
-            if ftype == 'ascii':
-                lines.append(f'{i}  var {js_name} = "";')
-                lines.append(f'{i}  for (var _si = 0; _si < {length} && pos < buf.length; _si++) {{ {js_name} += String.fromCharCode(buf[pos++]); }}')
-            elif ftype == 'hex':
-                lines.append(f'{i}  var {js_name} = "";')
-                lines.append(f'{i}  for (var _si = 0; _si < {length} && pos < buf.length; _si++) {{ {js_name} += ("0" + buf[pos++].toString(16)).slice(-2); }}')
+            declared = field.get('length', 1)
+            # `length: remaining` consumes to the end of the payload (PS-014).
+            if is_remaining_length(declared):
+                bound = 'buf.length - pos'
             else:
-                lines.append(f'{i}  var {js_name} = [];')
-                lines.append(f'{i}  for (var _si = 0; _si < {length} && pos < buf.length; _si++) {{ {js_name}.push(buf[pos++]); }}')
+                bound = str(declared)
+            lines.append(f'{i}  var {js_name} = "";')
+            lines.append(f'{i}  var {js_name}_n = {bound};')
+            if ftype == 'ascii':
+                lines.append(f'{i}  for (var _si = 0; _si < {js_name}_n && pos < buf.length; _si++)'
+                             f' {{ {js_name} += String.fromCharCode(buf[pos++]); }}')
+            else:
+                # PS-281: `bytes` and `hex` both report a lowercase hexadecimal string.
+                # `bytes` used to build an array of octet values, so it disagreed with
+                # every interpreter for any non-empty field - invisibly, because the
+                # JSON cross-check skipped arrays.
+                lines.append(f'{i}  for (var _si = 0; _si < {js_name}_n && pos < buf.length; _si++)'
+                             f' {{ {js_name} += ("0" + buf[pos++].toString(16)).slice(-2); }}')
             if not name.startswith('_'):
-                lines.append(f'{i}  d.{js_name} = {js_name};')
+                guards, target = name_from_to_js(field, js_name)
+                for guard in guards:
+                    lines.append(f'{i}  {guard}')
+                lines.append(f'{i}  {target} = {js_name};')
+            lines.append(f'{i}  vars.{js_name} = {js_name};')
             return lines
 
         # float

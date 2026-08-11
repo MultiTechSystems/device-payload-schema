@@ -40,6 +40,17 @@ def normalize(v):
     """
     return v
 
+def _strip_tokens(value):
+    """Render a nested value with its number tokens restored, for comparison."""
+    if isinstance(value, str) and value.startswith("\x00tok:"):
+        return value[5:]
+    if isinstance(value, dict):
+        return {k: _strip_tokens(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_strip_tokens(v) for v in value]
+    return value
+
+
 def tokens(js_text):
     """Map key -> literal token as written, so 15 and 15.0 are distinguishable."""
     out = {}
@@ -49,8 +60,11 @@ def tokens(js_text):
             d[k] = v
             if isinstance(v, str) and v.startswith("\x00tok:"):
                 out[k] = v[5:]
-            elif not isinstance(v, (dict, list)):
-                out[k] = v
+            else:
+                # Arrays and objects are compared too. Skipping them hid every `bytes`
+                # field: the generator emitted an array of octets where the interpreters
+                # emit a hex string, and the comparison never looked.
+                out[k] = _strip_tokens(v)
         return d
     json.loads(js_text,
                parse_int=lambda s: "\x00tok:" + s,
@@ -99,6 +113,16 @@ catch(e) {{ console.log('__ERR__'+e.message); }}
         py_norm = normalize(r.data)
         py_tok = tokens(json.dumps(py_norm))
         js_tok = tokens(js_out)
+        # `_quality` is the interpreter's valid_range reporting, which the TS013
+        # generator does not implement at all. Counted separately rather than as a
+        # mismatch of a field's value - it is an additive extension, not a disagreement -
+        # but it is a real gap and is listed in SESSION-NOTES.md.
+        quality_gap = '_quality' in py_tok and '_quality' not in js_tok
+        py_tok.pop('_quality', None)
+        js_tok.pop('_quality', None)
+        if quality_gap:
+            results["quality-only (generator lacks valid_range)"] += 1
+
         common = set(py_tok) & set(js_tok)
         mism = [k for k in common if str(py_tok[k]) != str(js_tok[k])]
         only_py = set(py_tok) - set(js_tok)
