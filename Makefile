@@ -39,9 +39,13 @@ endif
 
 # Include paths
 CFLAGS += -Iinclude
+# Header dependency tracking. Without it a header-only change rebuilt nothing, and the
+# whole schema interpreter is a header - so `make selftest` could pass against stale
+# objects after any change to it, which is exactly the change most worth testing.
+CFLAGS += -MMD -MP
 
 # Source files - selftest framework only
-SELFTEST_SRCS = src/selftests.c src/selftest_codec.c src/selftest_protocol.c src/sys_linux.c
+SELFTEST_SRCS = src/selftests.c src/selftest_codec.c src/selftest_protocol.c src/selftest_schema.c src/sys_linux.c
 SELFTEST_OBJS = $(patsubst src/%.c,$(BUILD_DIR)/%.o,$(SELFTEST_SRCS))
 
 # Test binary
@@ -70,6 +74,9 @@ $(BUILD_DIR):
 # Compile C sources
 $(BUILD_DIR)/%.o: src/%.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
+
+# Pull in the generated .d files so a header edit rebuilds what included it.
+-include $(SELFTEST_OBJS:.o=.d)
 
 # Build selftests.o with SELFTEST_MAIN for standalone executable
 $(BUILD_DIR)/selftests.o: src/selftests.c | $(BUILD_DIR)
@@ -257,7 +264,9 @@ simulation:
 
 # Clean build artifacts
 clean:
-	rm -rf build-*
+	# Matched on the variant suffix, not `build-*`: the tracked `build-system/`
+	# directory is a build-* too, and `rm -rf build-*` deleted its source files.
+	rm -rf build-*-debug build-*-release build-*-coverage
 	rm -f src/*.pb.c src/*.pb.h
 	rm -f *.gcov *.gcda *.gcno
 	rm -rf coverage-html .coverage .pytest_cache
