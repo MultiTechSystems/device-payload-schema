@@ -431,13 +431,13 @@ redirected `--spec-info` into a temp directory but not `--changelog`. The two ve
 numbers in the pollution are exactly the ones those tests bump to. Both now point at a
 temp file and assert the version reaches it. Verified by md5sum across a full run.
 
-**Suite status after that fix** (all pre-existing failures, confirmed against a worktree
-at the pre-session commit):
+**Both suites are green now.** Every failure was pre-existing, confirmed against a worktree
+at the pre-session commit, and each turned out to be a stale test rather than a real fault:
 
-| Suite | Result |
-|---|---|
-| `pytest tools/tests` | 433 passed, **2 failed** |
-| `make test` (`self-test.sh`) | 68 passed, **3 failed**, 13 skipped |
+| Suite | Was | Now |
+|---|---|---|
+| `pytest tools/tests` | 433 passed, 2 failed | **436 passed, 0 failed** |
+| `make test` (`self-test.sh`) | 68 passed, 3 failed | **70 passed, 0 failed**, 13 skipped |
 
 - The two pytest failures were `test_assemble_slides.py`, now fixed, so **the pytest suite
   is 436 passed with no failures**. `ac2a3fc` deliberately removed
@@ -450,10 +450,15 @@ at the pre-session commit):
   of leaving it to be undone silently. The marker path had no assembly-level coverage at
   all, so removing the heading could not be told from breaking the splice; it has a test
   now.
-- The three self-test failures are `self-test.sh` looking for template sections this
-  specification does not have - `01-introduction`, `98-glossary`, `99-bibliography`, where
-  it has `01-schema-format` and `99-appendices`. The check carries the
-  `la-spec-template` layout unchanged.
+- The three self-test failures were `self-test.sh` requiring template section names this
+  specification has never used - `01-introduction`, `98-glossary`, `99-bibliography`. It
+  reported three missing sections on every run while nothing was missing, and **being
+  permanently red it could not report anything real either**, which is the worse half of
+  the defect. Replaced with a check derived from the repository, in both directions: every
+  section `main.md` includes must exist, and every section file must be included by
+  `main.md` or it is silently absent from the spec while looking present in the tree.
+  Neither direction can be expressed as a fixed list, and neither needs touching when a
+  section is added or renamed.
 - Baseline was 67 passed there; it is 68 now because `generate-conformance-tables.py`
   clears the tool-syntax check.
 
