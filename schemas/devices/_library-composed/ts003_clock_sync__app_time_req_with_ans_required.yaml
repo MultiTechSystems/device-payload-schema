@@ -1,17 +1,17 @@
-'name': 'ts003_clock_sync__set_periodicity_daily'
-'description': 'Composed from schemas/library/commands/ts003_clock_sync.yaml#/definitions/device_app_time_periodicity_req
+'name': 'ts003_clock_sync__app_time_req_with_ans_required'
+'description': 'Composed from schemas/library/commands/ts003_clock_sync.yaml#/definitions/app_time_req
   so the library''s test vectors run in every implementation.'
 'endian': 'big'
 'fields': &id001
 - 'name': 'cid'
   'type': 'u8'
-  'value': 2
-- 'name': 'periodicity'
+  'value': 1
+- 'name': 'device_time'
+  'type': 'u32'
+  'description': 'Current device clock (GPS epoch, modulo 2^32)'
+- 'name': 'param'
   'type': 'u8'
-  'description': 'Sync period = 128 * 2^periodicity seconds (0-15)'
-  'valid_range':
-  - 0
-  - 15
+  'description': 'TokenReq[3:0] | AnsRequired[4]'
 'definitions':
   'package_version_req':
     'name': 'PackageVersionReq'
@@ -43,16 +43,7 @@
     'cid': 1
     'direction': 'uplink'
     'description': 'Device requests time correction'
-    'fields':
-    - 'name': 'cid'
-      'type': 'u8'
-      'value': 1
-    - 'name': 'device_time'
-      'type': 'u32'
-      'description': 'Current device clock (GPS epoch, modulo 2^32)'
-    - 'name': 'param'
-      'type': 'u8'
-      'description': 'TokenReq[3:0] | AnsRequired[4]'
+    'fields': *id001
   'app_time_ans':
     'name': 'AppTimeAns'
     'cid': 1
@@ -74,7 +65,16 @@
     'cid': 2
     'direction': 'downlink'
     'description': 'Set automatic time sync periodicity'
-    'fields': *id001
+    'fields':
+    - 'name': 'cid'
+      'type': 'u8'
+      'value': 2
+    - 'name': 'periodicity'
+      'type': 'u8'
+      'description': 'Sync period = 128 * 2^periodicity seconds (0-15)'
+      'valid_range':
+      - 0
+      - 15
   'device_app_time_periodicity_ans':
     'name': 'DeviceAppTimePeriodicityAns'
     'cid': 2
@@ -100,9 +100,10 @@
       'type': 'u8'
       'value': 3
 'test_vectors':
-- 'name': 'set_periodicity_daily'
-  'payload': '02 09'
-  'source': 'spec-example'
+- 'name': 'app_time_req_with_ans_required'
+  'payload': '01 65A8F000 15'
+  'source': 'generated'
   'expected':
-    'cid': 2
-    'periodicity': 9
+    'cid': 1
+    'device_time': 1705570304
+    'param': 21

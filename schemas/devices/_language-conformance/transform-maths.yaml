@@ -1,0 +1,63 @@
+# Unary maths transform stages: sqrt, abs, pow, log10, log.
+#
+# Python had all five; Go, Java and C# had none, which is why decentlab/dl-blg -
+# a thermistor needing a natural log and a cube - could not be expressed and sat
+# on a `# formula:` hint. Squares also had to go through `compute`.
+#
+# The domain clamps are part of the contract, not an implementation detail: sqrt of
+# a negative and log of a non-positive return NaN in most languages, which then
+# poisons every later stage and every field computed from it. Python clamps sqrt at
+# 0 and log at 1e-10, so the other three must too.
+#
+# Every field reads its own u16 of 0x0190 (400), so the vector does not depend on
+# `consume` semantics as well.
+name: probe_transform_maths
+endian: big
+fields:
+# sqrt(400) = 20
+- name: sqrt_of_400
+  type: u16
+  transform:
+  - sqrt: true
+# 400^2 = 160000, via pow rather than compute
+- name: pow_of_400
+  type: u16
+  transform:
+  - pow: 2
+# log(400) = 5.991464547..., rounded so the vector does not depend on printing
+- name: log_of_400
+  type: u16
+  transform:
+  - log: true
+  - op: round
+    decimals: 6
+# log10(400) = 2.602059991...
+- name: log10_of_400
+  type: u16
+  transform:
+  - log10: true
+  - op: round
+    decimals: 6
+# The clamp: negate to -400, then sqrt. Python gives sqrt(max(0, -400)) = 0, not NaN.
+- name: sqrt_clamped
+  type: u16
+  transform:
+  - mult: -1
+  - sqrt: true
+# abs of the same negative
+- name: abs_of_negated
+  type: u16
+  transform:
+  - mult: -1
+  - abs: true
+test_vectors:
+- name: transform_maths
+  payload: '019001900190019001900190'
+  source: generated
+  expected:
+    sqrt_of_400: 20
+    pow_of_400: 160000
+    log_of_400: 5.991465
+    log10_of_400: 2.60206
+    sqrt_clamped: 0
+    abs_of_negated: 400

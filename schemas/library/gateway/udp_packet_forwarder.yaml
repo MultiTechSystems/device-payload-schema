@@ -375,7 +375,9 @@ test_vectors:
       protocol_version: 2
       random_token: 0x1234
       packet_type: 0
-      gateway_eui: [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]
+      # Compared as hex: Python decodes a bytes field to a bytes object and Go to a
+      # lowercase hex string, so a list of octet values cannot satisfy both.
+      gateway_eui: "0102030405060708"
 
   - name: push_ack
     description: "PUSH_ACK response"

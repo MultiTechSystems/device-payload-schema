@@ -1,0 +1,98 @@
+# `idiv` and `mod` with a negative operand.
+#
+# The specification does not say which rounding convention these use, and the four
+# implementations do not agree - which no vector had ever exercised, because every
+# other compute in the corpus has non-negative operands, where all conventions
+# coincide.
+#
+# Read from the four sources:
+#   Python  int(a) % int(b)      and int(a) // int(b)     -> floored, both
+#   Go      int64(a) % int64(b)  and int64(a) / int64(b)  -> truncated, both
+#   Java    (long)a % (long)b    and Math.floorDiv(a, b)  -> truncated, then floored
+#   C#      (long)a % (long)b    and (long)a / (long)b    -> truncated, both
+#   C       no compute at all
+#
+# The expected values are the **floored** convention: what Python already does, and
+# the one that keeps the division identity
+#   a == idiv(a, b) * b + mod(a, b)
+# true for every sign combination. That is a proposal, not a ratified decision. This
+# fixture is the acceptance test for the CR that settles it, so it is expected to
+# fail until then - in Go for both operators, in Java for `mod`, in C# for both.
+#
+# One assertion per vector, deliberately: a runner stops at a vector's first
+# mismatch, so bundling all four fields into one vector hid three of the four
+# disagreements behind whichever happened to be checked first.
+name: probe_negative_idiv_mod
+endian: big
+fields:
+- name: a
+  type: s16
+- name: idiv_pos_divisor
+  type: number
+  compute: {op: idiv, a: $a, b: 3}
+- name: mod_pos_divisor
+  type: number
+  compute: {op: mod, a: $a, b: 3}
+- name: idiv_neg_divisor
+  type: number
+  compute: {op: idiv, a: $a, b: -3}
+- name: mod_neg_divisor
+  type: number
+  compute: {op: mod, a: $a, b: -3}
+test_vectors:
+# floor(-7/3) = -3, truncation gives -2
+- name: idiv_pos_divisor_neg_dividend
+  payload: 'FFF9'
+  source: generated
+  expected:
+    a: -7
+    idiv_pos_divisor: -3
+# -7 = (-3)*3 + 2, truncation gives -1
+- name: mod_pos_divisor_neg_dividend
+  payload: 'FFF9'
+  source: generated
+  expected:
+    a: -7
+    mod_pos_divisor: 2
+# floor(-7/-3) = 2, agrees with truncation
+- name: idiv_neg_divisor_neg_dividend
+  payload: 'FFF9'
+  source: generated
+  expected:
+    a: -7
+    idiv_neg_divisor: 2
+# -7 = 2*(-3) + (-1), agrees with truncation
+- name: mod_neg_divisor_neg_dividend
+  payload: 'FFF9'
+  source: generated
+  expected:
+    a: -7
+    mod_neg_divisor: -1
+# all conventions agree for positives
+- name: idiv_pos_divisor_pos_dividend
+  payload: '0007'
+  source: generated
+  expected:
+    a: 7
+    idiv_pos_divisor: 2
+# all conventions agree for positives
+- name: mod_pos_divisor_pos_dividend
+  payload: '0007'
+  source: generated
+  expected:
+    a: 7
+    mod_pos_divisor: 1
+# floor(7/-3) = -3, truncation gives -2
+- name: idiv_neg_divisor_pos_dividend
+  payload: '0007'
+  source: generated
+  expected:
+    a: 7
+    idiv_neg_divisor: -3
+# 7 = (-3)*(-3) + (-2), truncation gives 1
+- name: mod_neg_divisor_pos_dividend
+  payload: '0007'
+  source: generated
+  expected:
+    a: 7
+    mod_neg_divisor: -2

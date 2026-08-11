@@ -1,5 +1,5 @@
-'name': 'gps_tracker__clear_all_geofences'
-'description': 'Composed from schemas/library/commands/gps_tracker.yaml#/definitions/clear_geofence_req
+'name': 'gps_tracker__set_geofence'
+'description': 'Composed from schemas/library/commands/gps_tracker.yaml#/definitions/set_geofence_req
   so the library''s test vectors run in every implementation.'
 'endian': 'big'
 'fields': &id001
@@ -8,40 +8,31 @@
   'value': 2
 - 'name': 'cid'
   'type': 'u8'
-  'value': 1
+  'value': 0
 - 'name': 'fence_id'
   'type': 'u8'
-  'description': 'Geofence to clear (0xFF=all)'
+  'description': 'Geofence identifier (0-15)'
+- 'name': 'latitude'
+  'type': 's32'
+  'div': 10000000
+  'unit': 'degrees'
+  'description': 'Latitude in degrees (7 decimal places)'
+- 'name': 'longitude'
+  'type': 's32'
+  'div': 10000000
+  'unit': 'degrees'
+  'description': 'Longitude in degrees (7 decimal places)'
+- 'name': 'radius'
+  'type': 'u16'
+  'unit': 'meters'
+  'description': 'Geofence radius in meters'
 'definitions':
   'set_geofence_req':
     'name': 'SetGeofenceReq'
     'cid': 0
     'direction': 'downlink'
     'description': 'Set geofence center and radius'
-    'fields':
-    - 'name': 'category'
-      'type': 'u8'
-      'value': 2
-    - 'name': 'cid'
-      'type': 'u8'
-      'value': 0
-    - 'name': 'fence_id'
-      'type': 'u8'
-      'description': 'Geofence identifier (0-15)'
-    - 'name': 'latitude'
-      'type': 's32'
-      'div': 10000000
-      'unit': 'degrees'
-      'description': 'Latitude in degrees (7 decimal places)'
-    - 'name': 'longitude'
-      'type': 's32'
-      'div': 10000000
-      'unit': 'degrees'
-      'description': 'Longitude in degrees (7 decimal places)'
-    - 'name': 'radius'
-      'type': 'u16'
-      'unit': 'meters'
-      'description': 'Geofence radius in meters'
+    'fields': *id001
   'set_geofence_ans':
     'name': 'SetGeofenceAns'
     'cid': 0
@@ -61,7 +52,16 @@
     'cid': 1
     'direction': 'downlink'
     'description': 'Clear geofence'
-    'fields': *id001
+    'fields':
+    - 'name': 'category'
+      'type': 'u8'
+      'value': 2
+    - 'name': 'cid'
+      'type': 'u8'
+      'value': 1
+    - 'name': 'fence_id'
+      'type': 'u8'
+      'description': 'Geofence to clear (0xFF=all)'
   'clear_geofence_ans':
     'name': 'ClearGeofenceAns'
     'cid': 1
@@ -148,10 +148,13 @@
       'unit': 'degrees'
       'description': 'Longitude (only if status=0)'
 'test_vectors':
-- 'name': 'clear_all_geofences'
-  'payload': '02 01 FF'
-  'source': 'spec-example'
+- 'name': 'set_geofence'
+  'payload': '02 00 00 1E65FB80 FFEDB080 03E8'
+  'source': 'generated'
   'expected':
     'category': 2
-    'cid': 1
-    'fence_id': 255
+    'cid': 0
+    'fence_id': 0
+    'latitude': 51.0
+    'longitude': -0.12
+    'radius': 1000

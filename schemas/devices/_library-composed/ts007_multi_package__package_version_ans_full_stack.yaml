@@ -1,0 +1,52 @@
+'name': 'ts007_multi_package__package_version_ans_full_stack'
+'description': 'Composed from schemas/library/commands/ts007_multi_package.yaml#/definitions/package_version_ans
+  so the library''s test vectors run in every implementation.'
+'endian': 'big'
+'fields': &id001
+- 'name': 'cid'
+  'type': 'u8'
+  'value': 0
+- 'name': 'packages'
+  'type': 'repeat'
+  'until': 'end'
+  'description': 'Array of (PackageID, PackageVersion) pairs'
+  'fields':
+  - 'name': 'package_id'
+    'type': 'u8'
+    'description': 'Package identifier'
+  - 'name': 'package_version'
+    'type': 'u8'
+    'description': 'Package version'
+'definitions':
+  'package_version_req':
+    'name': 'PackageVersionReq'
+    'cid': 0
+    'direction': 'downlink'
+    'description': 'Request all supported package versions from device'
+    'fields':
+    - 'name': 'cid'
+      'type': 'u8'
+      'value': 0
+  'package_version_ans':
+    'name': 'PackageVersionAns'
+    'cid': 0
+    'direction': 'uplink'
+    'description': 'List of supported packages and versions'
+    'fields': *id001
+'test_vectors':
+- 'name': 'package_version_ans_full_stack'
+  'payload': '00 00 01 01 02 02 02 03 02 04 01'
+  'source': 'spec-example'
+  'expected':
+    'cid': 0
+    'packages':
+    - 'package_id': 0
+      'package_version': 1
+    - 'package_id': 1
+      'package_version': 2
+    - 'package_id': 2
+      'package_version': 2
+    - 'package_id': 3
+      'package_version': 2
+    - 'package_id': 4
+      'package_version': 1

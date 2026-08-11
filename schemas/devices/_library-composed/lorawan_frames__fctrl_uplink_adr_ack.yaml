@@ -1,312 +1,300 @@
-name: lorawan_frames__fctrl_uplink_adr_ack
-description: Composed from schemas/library/lorawan/lorawan_frames.yaml#/definitions/fctrl_uplink
-  so the library's test vectors run in every implementation.
-endian: big
-fields: &id001
-- name: adr
-  type: u8:1
-  bit_offset: 7
-  description: Adaptive Data Rate enabled
-- name: adr_ack_req
-  type: u8:1
-  bit_offset: 6
-  description: ADR acknowledgment request
-- name: ack
-  type: u8:1
-  bit_offset: 5
-  description: Acknowledgment of confirmed downlink
-- name: class_b
-  type: u8:1
-  bit_offset: 4
-  description: 'Class B enabled (1.1: FPending in 1.0)'
-- name: fopts_len
-  type: u8:4
-  bit_offset: 0
-  description: Length of FOpts field (0-15)
-definitions:
-  mhdr:
-    name: MHDR
-    description: MAC Header - first byte of every LoRaWAN frame
-    fields:
-    - name: mtype
-      type: u8:3
-      bit_offset: 5
-      description: Message Type
-      enum:
-        0: Join-Request
-        1: Join-Accept
-        2: Unconfirmed Data Up
-        3: Unconfirmed Data Down
-        4: Confirmed Data Up
-        5: Confirmed Data Down
-        6: RFU
-        7: Proprietary
-    - name: rfu
-      type: u8:3
-      bit_offset: 2
-      description: Reserved for Future Use
-    - name: major
-      type: u8:2
-      bit_offset: 0
-      description: Major version (0 = LoRaWAN R1)
-  mtype_values:
-    JOIN_REQUEST: 0
-    JOIN_ACCEPT: 1
-    UNCONFIRMED_DATA_UP: 2
-    UNCONFIRMED_DATA_DOWN: 3
-    CONFIRMED_DATA_UP: 4
-    CONFIRMED_DATA_DOWN: 5
-    RFU: 6
-    PROPRIETARY: 7
-  fhdr:
-    name: FHDR
-    description: Frame Header for data messages
-    fields:
-    - name: dev_addr
-      type: u32
-      description: Device address (little-endian)
-    - name: fctrl
-      type: u8
-      description: Frame control byte
-    - name: fcnt
-      type: u16
-      description: Frame counter (little-endian)
-    - name: fopts
-      type: bytes
-      length: fctrl.fopts_len
-      description: Frame options (0-15 bytes of MAC commands)
-      max_length: 15
-  fctrl_uplink:
-    name: FCtrl_Uplink
-    description: Frame control for uplink messages
-    fields: *id001
-  fctrl_downlink:
-    name: FCtrl_Downlink
-    description: Frame control for downlink messages
-    fields:
-    - name: adr
-      type: u8:1
-      bit_offset: 7
-      description: Adaptive Data Rate control
-    - name: rfu
-      type: u8:1
-      bit_offset: 6
-      description: Reserved for Future Use
-    - name: ack
-      type: u8:1
-      bit_offset: 5
-      description: Acknowledgment of confirmed uplink
-    - name: fpending
-      type: u8:1
-      bit_offset: 4
-      description: More data pending from server
-    - name: fopts_len
-      type: u8:4
-      bit_offset: 0
-      description: Length of FOpts field (0-15)
-  join_request:
-    name: JoinRequest
-    version: 1.0.0+
-    description: OTAA Join Request message
-    fields:
-    - name: join_eui
-      type: bytes
-      length: 8
-      description: Join EUI / AppEUI (little-endian)
-    - name: dev_eui
-      type: bytes
-      length: 8
-      description: Device EUI (little-endian)
-    - name: dev_nonce
-      type: u16
-      description: Device nonce (random, or counter in 1.1)
-  join_accept:
-    name: JoinAccept
-    version: 1.0.0+
-    description: OTAA Join Accept message (decrypted)
-    fields:
-    - name: join_nonce
-      type: u24
-      description: Join nonce / AppNonce (little-endian)
-    - name: net_id
-      type: u24
-      description: Network identifier
-    - name: dev_addr
-      type: u32
-      description: Assigned device address
-    - name: dl_settings
-      type: u8
-      description: OptNeg[7] | RX1DRoffset[6:4] | RX2DataRate[3:0]
-    - name: rx_delay
-      type: u8
-      description: RX1 delay (seconds, 0=1s)
-    - name: cf_list
-      type: bytes
-      length: 16
-      description: Optional channel frequency list
-      optional: true
-  dl_settings:
-    name: DLSettings
-    description: Join Accept DL settings byte
-    fields:
-    - name: opt_neg
-      type: u8:1
-      bit_offset: 7
-      description: '1.1: OptNeg flag for backend negotiation'
-      version: 1.1.0+
-    - name: rx1_dr_offset
-      type: u8:3
-      bit_offset: 4
-      description: RX1 data rate offset
-    - name: rx2_data_rate
-      type: u8:4
-      bit_offset: 0
-      description: RX2 data rate
-  rejoin_request_type_0_2:
-    name: RejoinRequest_Type0_2
-    version: 1.1.0+
-    description: Rejoin-Request Type 0 or 2
-    fields:
-    - name: rejoin_type
-      type: u8
-      description: 0 or 2
-    - name: net_id
-      type: u24
-      description: Network identifier
-    - name: dev_eui
-      type: bytes
-      length: 8
-      description: Device EUI
-    - name: rj_count_0
-      type: u16
-      description: Rejoin counter (Type 0/2)
-  rejoin_request_type_1:
-    name: RejoinRequest_Type1
-    version: 1.1.0+
-    description: Rejoin-Request Type 1
-    fields:
-    - name: rejoin_type
-      type: u8
-      value: 1
-    - name: join_eui
-      type: bytes
-      length: 8
-      description: Join EUI
-    - name: dev_eui
-      type: bytes
-      length: 8
-      description: Device EUI
-    - name: rj_count_1
-      type: u16
-      description: Rejoin counter (Type 1)
-  cf_list_type_0:
-    name: CFList_Type0
-    description: Channel frequency list (default type)
-    fields:
-    - name: freq_ch3
-      type: u24
-      description: Channel 3 frequency (Hz = value * 100)
-    - name: freq_ch4
-      type: u24
-      description: Channel 4 frequency
-    - name: freq_ch5
-      type: u24
-      description: Channel 5 frequency
-    - name: freq_ch6
-      type: u24
-      description: Channel 6 frequency
-    - name: freq_ch7
-      type: u24
-      description: Channel 7 frequency
-    - name: cf_list_type
-      type: u8
-      value: 0
-      description: CFList type (0 = frequencies)
-  cf_list_type_1:
-    name: CFList_Type1
-    description: Channel mask list (US915, AU915)
-    fields:
-    - name: ch_mask
-      type: bytes
-      length: 10
-      description: Channel mask (80 bits for 72 channels)
-    - name: rfu
-      type: bytes
-      length: 4
-    - name: cf_list_type
-      type: u8
-      value: 1
-      description: CFList type (1 = mask)
-  data_frame_uplink:
-    name: DataFrameUplink
-    description: Complete uplink data frame
-    fields:
-    - name: mhdr
-      type: u8
-      description: MAC header (MType | RFU | Major)
-    - name: dev_addr
-      type: u32
-      description: Device address
-    - name: fctrl
-      type: u8
-      description: Frame control (uplink format)
-    - name: fcnt
-      type: u16
-      description: Frame counter
-    - name: fopts
-      type: bytes
-      description: MAC commands in header
-      max_length: 15
-    - name: fport
-      type: u8
-      description: Port (0=MAC, 1-223=app, 224+=reserved)
-      optional: true
-    - name: frm_payload
-      type: bytes
-      description: Encrypted frame payload
-      optional: true
-    - name: mic
-      type: u32
-      description: Message Integrity Code
-  data_frame_downlink:
-    name: DataFrameDownlink
-    description: Complete downlink data frame
-    fields:
-    - name: mhdr
-      type: u8
-      description: MAC header (MType | RFU | Major)
-    - name: dev_addr
-      type: u32
-      description: Device address
-    - name: fctrl
-      type: u8
-      description: Frame control (downlink format)
-    - name: fcnt
-      type: u16
-      description: Frame counter
-    - name: fopts
-      type: bytes
-      description: MAC commands in header
-      max_length: 15
-    - name: fport
-      type: u8
-      description: Port
-      optional: true
-    - name: frm_payload
-      type: bytes
-      description: Encrypted frame payload
-      optional: true
-    - name: mic
-      type: u32
-      description: Message Integrity Code
-test_vectors:
-- name: fctrl_uplink_adr_ack
-  payload: A0
-  description: Uplink FCtrl with ADR and ACK
-  source: spec-example
-  expected:
-    adr: 1
-    adr_ack_req: 0
-    ack: 1
-    class_b: 0
-    fopts_len: 0
+'name': 'lorawan_frames__fctrl_uplink_adr_ack'
+'description': 'Composed from schemas/library/lorawan/lorawan_frames.yaml#/definitions/fctrl_uplink
+  so the library''s test vectors run in every implementation.'
+'endian': 'little'
+'fields': &id001
+- 'name': 'adr'
+  'type': 'u8[7:7]'
+  'description': 'Adaptive Data Rate enabled'
+- 'name': 'adr_ack_req'
+  'type': 'u8[6:6]'
+  'description': 'ADR acknowledgment request'
+- 'name': 'ack'
+  'type': 'u8[5:5]'
+  'description': 'Acknowledgment of confirmed downlink'
+- 'name': 'class_b'
+  'type': 'u8[4:4]'
+  'description': 'Class B enabled (1.1: FPending in 1.0)'
+- 'name': 'fopts_len'
+  'type': 'u8[0:3]'
+  'consume': 1
+  'description': 'Length of FOpts field (0-15)'
+'definitions':
+  'mhdr':
+    'name': 'MHDR'
+    'description': 'MAC Header - first byte of every LoRaWAN frame'
+    'fields':
+    - 'name': 'mtype'
+      'type': 'u8[5:7]'
+      'description': 'Message Type'
+      'enum':
+        0: 'Join-Request'
+        1: 'Join-Accept'
+        2: 'Unconfirmed Data Up'
+        3: 'Unconfirmed Data Down'
+        4: 'Confirmed Data Up'
+        5: 'Confirmed Data Down'
+        6: 'RFU'
+        7: 'Proprietary'
+    - 'name': 'rfu'
+      'type': 'u8[2:4]'
+      'description': 'Reserved for Future Use'
+    - 'name': 'major'
+      'type': 'u8[0:1]'
+      'consume': 1
+      'description': 'Major version (0 = LoRaWAN R1)'
+  'mtype_values':
+    'JOIN_REQUEST': 0
+    'JOIN_ACCEPT': 1
+    'UNCONFIRMED_DATA_UP': 2
+    'UNCONFIRMED_DATA_DOWN': 3
+    'CONFIRMED_DATA_UP': 4
+    'CONFIRMED_DATA_DOWN': 5
+    'RFU': 6
+    'PROPRIETARY': 7
+  'fhdr':
+    'name': 'FHDR'
+    'description': 'Frame Header for data messages'
+    'fields':
+    - 'name': 'dev_addr'
+      'type': 'u32'
+      'description': 'Device address (little-endian)'
+    - 'name': 'fctrl'
+      'type': 'u8'
+      'description': 'Frame control byte'
+    - 'name': 'fcnt'
+      'type': 'u16'
+      'description': 'Frame counter (little-endian)'
+    - 'name': 'fopts'
+      'type': 'bytes'
+      'length': 'fctrl.fopts_len'
+      'description': 'Frame options (0-15 bytes of MAC commands)'
+      'max_length': 15
+  'fctrl_uplink':
+    'name': 'FCtrl_Uplink'
+    'description': 'Frame control for uplink messages'
+    'fields': *id001
+  'fctrl_downlink':
+    'name': 'FCtrl_Downlink'
+    'description': 'Frame control for downlink messages'
+    'fields':
+    - 'name': 'adr'
+      'type': 'u8[7:7]'
+      'description': 'Adaptive Data Rate control'
+    - 'name': 'rfu'
+      'type': 'u8[6:6]'
+      'description': 'Reserved for Future Use'
+    - 'name': 'ack'
+      'type': 'u8[5:5]'
+      'description': 'Acknowledgment of confirmed uplink'
+    - 'name': 'fpending'
+      'type': 'u8[4:4]'
+      'description': 'More data pending from server'
+    - 'name': 'fopts_len'
+      'type': 'u8[0:3]'
+      'consume': 1
+      'description': 'Length of FOpts field (0-15)'
+  'join_request':
+    'name': 'JoinRequest'
+    'version': '1.0.0+'
+    'description': 'OTAA Join Request message'
+    'fields':
+    - 'name': 'join_eui'
+      'type': 'bytes'
+      'length': 8
+      'description': 'Join EUI / AppEUI (little-endian)'
+    - 'name': 'dev_eui'
+      'type': 'bytes'
+      'length': 8
+      'description': 'Device EUI (little-endian)'
+    - 'name': 'dev_nonce'
+      'type': 'u16'
+      'description': 'Device nonce (random, or counter in 1.1)'
+  'join_accept':
+    'name': 'JoinAccept'
+    'version': '1.0.0+'
+    'description': 'OTAA Join Accept message (decrypted)'
+    'fields':
+    - 'name': 'join_nonce'
+      'type': 'u24'
+      'description': 'Join nonce / AppNonce (little-endian)'
+    - 'name': 'net_id'
+      'type': 'u24'
+      'description': 'Network identifier'
+    - 'name': 'dev_addr'
+      'type': 'u32'
+      'description': 'Assigned device address'
+    - 'name': 'dl_settings'
+      'type': 'u8'
+      'description': 'OptNeg[7] | RX1DRoffset[6:4] | RX2DataRate[3:0]'
+    - 'name': 'rx_delay'
+      'type': 'u8'
+      'description': 'RX1 delay (seconds, 0=1s)'
+    - 'name': 'cf_list'
+      'type': 'bytes'
+      'length': 16
+      'description': 'Optional channel frequency list'
+      'optional': true
+  'dl_settings':
+    'name': 'DLSettings'
+    'description': 'Join Accept DL settings byte'
+    'fields':
+    - 'name': 'opt_neg'
+      'type': 'u8[7:7]'
+      'description': '1.1: OptNeg flag for backend negotiation'
+      'version': '1.1.0+'
+    - 'name': 'rx1_dr_offset'
+      'type': 'u8[4:6]'
+      'description': 'RX1 data rate offset'
+    - 'name': 'rx2_data_rate'
+      'type': 'u8[0:3]'
+      'consume': 1
+      'description': 'RX2 data rate'
+  'rejoin_request_type_0_2':
+    'name': 'RejoinRequest_Type0_2'
+    'version': '1.1.0+'
+    'description': 'Rejoin-Request Type 0 or 2'
+    'fields':
+    - 'name': 'rejoin_type'
+      'type': 'u8'
+      'description': '0 or 2'
+    - 'name': 'net_id'
+      'type': 'u24'
+      'description': 'Network identifier'
+    - 'name': 'dev_eui'
+      'type': 'bytes'
+      'length': 8
+      'description': 'Device EUI'
+    - 'name': 'rj_count_0'
+      'type': 'u16'
+      'description': 'Rejoin counter (Type 0/2)'
+  'rejoin_request_type_1':
+    'name': 'RejoinRequest_Type1'
+    'version': '1.1.0+'
+    'description': 'Rejoin-Request Type 1'
+    'fields':
+    - 'name': 'rejoin_type'
+      'type': 'u8'
+      'value': 1
+    - 'name': 'join_eui'
+      'type': 'bytes'
+      'length': 8
+      'description': 'Join EUI'
+    - 'name': 'dev_eui'
+      'type': 'bytes'
+      'length': 8
+      'description': 'Device EUI'
+    - 'name': 'rj_count_1'
+      'type': 'u16'
+      'description': 'Rejoin counter (Type 1)'
+  'cf_list_type_0':
+    'name': 'CFList_Type0'
+    'description': 'Channel frequency list (default type)'
+    'fields':
+    - 'name': 'freq_ch3'
+      'type': 'u24'
+      'description': 'Channel 3 frequency (Hz = value * 100)'
+    - 'name': 'freq_ch4'
+      'type': 'u24'
+      'description': 'Channel 4 frequency'
+    - 'name': 'freq_ch5'
+      'type': 'u24'
+      'description': 'Channel 5 frequency'
+    - 'name': 'freq_ch6'
+      'type': 'u24'
+      'description': 'Channel 6 frequency'
+    - 'name': 'freq_ch7'
+      'type': 'u24'
+      'description': 'Channel 7 frequency'
+    - 'name': 'cf_list_type'
+      'type': 'u8'
+      'value': 0
+      'description': 'CFList type (0 = frequencies)'
+  'cf_list_type_1':
+    'name': 'CFList_Type1'
+    'description': 'Channel mask list (US915, AU915)'
+    'fields':
+    - 'name': 'ch_mask'
+      'type': 'bytes'
+      'length': 10
+      'description': 'Channel mask (80 bits for 72 channels)'
+    - 'name': 'rfu'
+      'type': 'bytes'
+      'length': 4
+    - 'name': 'cf_list_type'
+      'type': 'u8'
+      'value': 1
+      'description': 'CFList type (1 = mask)'
+  'data_frame_uplink':
+    'name': 'DataFrameUplink'
+    'description': 'Complete uplink data frame'
+    'fields':
+    - 'name': 'mhdr'
+      'type': 'u8'
+      'description': 'MAC header (MType | RFU | Major)'
+    - 'name': 'dev_addr'
+      'type': 'u32'
+      'description': 'Device address'
+    - 'name': 'fctrl'
+      'type': 'u8'
+      'description': 'Frame control (uplink format)'
+    - 'name': 'fcnt'
+      'type': 'u16'
+      'description': 'Frame counter'
+    - 'name': 'fopts'
+      'type': 'bytes'
+      'description': 'MAC commands in header'
+      'max_length': 15
+    - 'name': 'fport'
+      'type': 'u8'
+      'description': 'Port (0=MAC, 1-223=app, 224+=reserved)'
+      'optional': true
+    - 'name': 'frm_payload'
+      'type': 'bytes'
+      'description': 'Encrypted frame payload'
+      'optional': true
+    - 'name': 'mic'
+      'type': 'u32'
+      'description': 'Message Integrity Code'
+  'data_frame_downlink':
+    'name': 'DataFrameDownlink'
+    'description': 'Complete downlink data frame'
+    'fields':
+    - 'name': 'mhdr'
+      'type': 'u8'
+      'description': 'MAC header (MType | RFU | Major)'
+    - 'name': 'dev_addr'
+      'type': 'u32'
+      'description': 'Device address'
+    - 'name': 'fctrl'
+      'type': 'u8'
+      'description': 'Frame control (downlink format)'
+    - 'name': 'fcnt'
+      'type': 'u16'
+      'description': 'Frame counter'
+    - 'name': 'fopts'
+      'type': 'bytes'
+      'description': 'MAC commands in header'
+      'max_length': 15
+    - 'name': 'fport'
+      'type': 'u8'
+      'description': 'Port'
+      'optional': true
+    - 'name': 'frm_payload'
+      'type': 'bytes'
+      'description': 'Encrypted frame payload'
+      'optional': true
+    - 'name': 'mic'
+      'type': 'u32'
+      'description': 'Message Integrity Code'
+'test_vectors':
+- 'name': 'fctrl_uplink_adr_ack'
+  'payload': 'A0'
+  'description': 'Uplink FCtrl with ADR and ACK'
+  'source': 'spec-example'
+  'expected':
+    'adr': 1
+    'adr_ack_req': 0
+    'ack': 1
+    'class_b': 0
+    'fopts_len': 0

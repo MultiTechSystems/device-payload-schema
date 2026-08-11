@@ -1,0 +1,31 @@
+# A message header pulled in by $ref, which is the specified way to share one.
+#
+# There used to be a top-level `header:` block as well. It was never in the
+# specification, and while it existed Java and C# decoded it while Python and Go
+# ignored it - reading the header's bytes as the first fields, so the same schema
+# decoded differently per language and nothing reported a problem. It was removed.
+#
+# This fixture holds the replacement to the same standard: the $ref'd definition
+# must be spliced ahead of the local fields, consuming its bytes, in all four
+# implementations. Payload 01 02 0304 means version=1, msg_type=2, reading=772.
+name: probe_ref_header
+endian: big
+definitions:
+  common_header:
+    fields:
+    - name: version
+      type: u8
+    - name: msg_type
+      type: u8
+fields:
+- $ref: '#/definitions/common_header'
+- name: reading
+  type: u16
+test_vectors:
+- name: ref_header
+  payload: '01020304'
+  source: generated
+  expected:
+    version: 1
+    msg_type: 2
+    reading: 772

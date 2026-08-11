@@ -163,7 +163,14 @@ definitions:
 test_vectors:
   - name: set_geofence
     command: set_geofence_req
-    payload: "02 00 00 030A7A80 FF38E700 03E8"
+    # Payload recomputed from the expected values below, which are the part of this
+    # vector carrying intent - 51.0, -0.12 is central London. The original payload
+    # matched them under no scaling at all: 030A7A80 is 51018368, so latitude read
+    # 5.1018368 against a declared div of 1e7, and FF38E700 gave a longitude of
+    # -1.3596416 rather than -0.12. Nothing had ever executed it.
+    # `generated` rather than `spec-example`: these bytes come from this schema.
+    payload: "02 00 00 1E65FB80 FFEDB080 03E8"
+    source: generated
     expected:
       category: 2
       cid: 0

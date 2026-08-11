@@ -29,10 +29,15 @@ definitions:
       - name: cid
         type: u8
         value: 0x00
+      # `type: array` with `items:` was never a type in this language, so this
+      # definition could not decode at all. `repeat` with `until: end` is the
+      # construct for a sequence running to the end of the payload, and it produces
+      # the same list of objects the vector expects - no new feature was needed.
       - name: packages
-        type: array
+        type: repeat
+        until: end
         description: "Array of (PackageID, PackageVersion) pairs"
-        items:
+        fields:
           - name: package_id
             type: u8
             description: "Package identifier"

@@ -1,32 +1,43 @@
-'name': 'lorawan_frames__mhdr_confirmed_down'
-'description': 'Composed from schemas/library/lorawan/lorawan_frames.yaml#/definitions/mhdr
+'name': 'lorawan_frames__join_request'
+'description': 'Composed from schemas/library/lorawan/lorawan_frames.yaml#/definitions/join_request
   so the library''s test vectors run in every implementation.'
 'endian': 'little'
 'fields': &id001
-- 'name': 'mtype'
-  'type': 'u8[5:7]'
-  'description': 'Message Type'
-  'enum':
-    0: 'Join-Request'
-    1: 'Join-Accept'
-    2: 'Unconfirmed Data Up'
-    3: 'Unconfirmed Data Down'
-    4: 'Confirmed Data Up'
-    5: 'Confirmed Data Down'
-    6: 'RFU'
-    7: 'Proprietary'
-- 'name': 'rfu'
-  'type': 'u8[2:4]'
-  'description': 'Reserved for Future Use'
-- 'name': 'major'
-  'type': 'u8[0:1]'
-  'consume': 1
-  'description': 'Major version (0 = LoRaWAN R1)'
+- 'name': 'join_eui'
+  'type': 'bytes'
+  'length': 8
+  'description': 'Join EUI / AppEUI (little-endian)'
+- 'name': 'dev_eui'
+  'type': 'bytes'
+  'length': 8
+  'description': 'Device EUI (little-endian)'
+- 'name': 'dev_nonce'
+  'type': 'u16'
+  'description': 'Device nonce (random, or counter in 1.1)'
 'definitions':
   'mhdr':
     'name': 'MHDR'
     'description': 'MAC Header - first byte of every LoRaWAN frame'
-    'fields': *id001
+    'fields':
+    - 'name': 'mtype'
+      'type': 'u8[5:7]'
+      'description': 'Message Type'
+      'enum':
+        0: 'Join-Request'
+        1: 'Join-Accept'
+        2: 'Unconfirmed Data Up'
+        3: 'Unconfirmed Data Down'
+        4: 'Confirmed Data Up'
+        5: 'Confirmed Data Down'
+        6: 'RFU'
+        7: 'Proprietary'
+    - 'name': 'rfu'
+      'type': 'u8[2:4]'
+      'description': 'Reserved for Future Use'
+    - 'name': 'major'
+      'type': 'u8[0:1]'
+      'consume': 1
+      'description': 'Major version (0 = LoRaWAN R1)'
   'mtype_values':
     'JOIN_REQUEST': 0
     'JOIN_ACCEPT': 1
@@ -98,18 +109,7 @@
     'name': 'JoinRequest'
     'version': '1.0.0+'
     'description': 'OTAA Join Request message'
-    'fields':
-    - 'name': 'join_eui'
-      'type': 'bytes'
-      'length': 8
-      'description': 'Join EUI / AppEUI (little-endian)'
-    - 'name': 'dev_eui'
-      'type': 'bytes'
-      'length': 8
-      'description': 'Device EUI (little-endian)'
-    - 'name': 'dev_nonce'
-      'type': 'u16'
-      'description': 'Device nonce (random, or counter in 1.1)'
+    'fields': *id001
   'join_accept':
     'name': 'JoinAccept'
     'version': '1.0.0+'
@@ -288,11 +288,11 @@
       'type': 'u32'
       'description': 'Message Integrity Code'
 'test_vectors':
-- 'name': 'mhdr_confirmed_down'
-  'payload': 'A0'
-  'description': 'Confirmed data downlink header'
+- 'name': 'join_request'
+  'payload': '0001020304050607 08090A0B0C0D0E0F 1011'
+  'description': 'Join request message'
   'source': 'spec-example'
   'expected':
-    'mtype': 5
-    'rfu': 0
-    'major': 0
+    'join_eui': '0001020304050607'
+    'dev_eui': '08090a0b0c0d0e0f'
+    'dev_nonce': 4368

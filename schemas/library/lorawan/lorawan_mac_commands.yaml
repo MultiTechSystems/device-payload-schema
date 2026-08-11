@@ -13,6 +13,12 @@
 fport: 0
 spec: TS001
 
+# TS001: "all multi-octet fields are transmitted with the least significant octet
+# first". The header comment above has always said so, but the key was missing, so
+# the file composed as big-endian and LinkADRReq's ch_mask decoded to 0xFF00 where
+# the vector - and the specification - say 0x00FF.
+endian: little
+
 definitions:
 
   # ===========================================================================
@@ -565,7 +571,15 @@ test_vectors:
 
   - name: device_time_ans
     command: device_time_ans
-    payload: "0D 00A8F865 80"
+    # Payload recomputed as the little-endian encoding of the seconds value below.
+    # The original 00A8F865 read 11073637 big-endian and 1710794752 little-endian,
+    # matching the expected 1705570304 neither way - it looks like the intended
+    # bytes 00 F0 A8 65 with two of them transposed. The timestamp is kept because
+    # ts003_clock_sync's app_time_req states the same one independently, making it
+    # the one part of the vector with corroboration.
+    # `generated` rather than `spec-example`: these bytes come from this schema.
+    payload: "0D 00F0A865 80"
+    source: generated
     expected:
       cid: 13
       seconds: 1705570304

@@ -1,39 +1,39 @@
-'name': 'udp_packet_forwarder__push_ack'
-'description': 'Composed from schemas/library/gateway/udp_packet_forwarder.yaml#/definitions/packet_header
+'name': 'udp_packet_forwarder__push_data_header'
+'description': 'Composed from schemas/library/gateway/udp_packet_forwarder.yaml#/definitions/push_data_header
   so the library''s test vectors run in every implementation.'
 'endian': 'big'
 'fields': &id001
 - 'name': 'protocol_version'
   'type': 'u8'
   'value': 2
-  'description': 'Protocol version (always 2)'
 - 'name': 'random_token'
   'type': 'u16'
-  'description': 'Random token for request/response matching'
 - 'name': 'packet_type'
   'type': 'u8'
-  'description': 'Packet type identifier'
+  'value': 0
+- 'name': 'gateway_eui'
+  'type': 'bytes'
+  'length': 8
+  'description': 'Gateway EUI (big-endian)'
 'definitions':
   'packet_header':
     'name': 'PacketHeader'
     'description': '4-byte header for all UDP packets (12 bytes for PUSH_DATA/PULL_DATA)'
-    'fields': *id001
-  'push_data_header':
-    'name': 'PushDataHeader'
-    'description': '12-byte header for PUSH_DATA'
     'fields':
     - 'name': 'protocol_version'
       'type': 'u8'
       'value': 2
+      'description': 'Protocol version (always 2)'
     - 'name': 'random_token'
       'type': 'u16'
+      'description': 'Random token for request/response matching'
     - 'name': 'packet_type'
       'type': 'u8'
-      'value': 0
-    - 'name': 'gateway_eui'
-      'type': 'bytes'
-      'length': 8
-      'description': 'Gateway EUI (big-endian)'
+      'description': 'Packet type identifier'
+  'push_data_header':
+    'name': 'PushDataHeader'
+    'description': '12-byte header for PUSH_DATA'
+    'fields': *id001
   'pull_data_header':
     'name': 'PullDataHeader'
     'description': '12-byte header for PULL_DATA'
@@ -264,11 +264,12 @@
         - 'TX_POWER'
         - 'GPS_UNLOCKED'
 'test_vectors':
-- 'name': 'push_ack'
-  'payload': '02 1234 01'
-  'description': 'PUSH_ACK response'
+- 'name': 'push_data_header'
+  'payload': '02 1234 00 0102030405060708'
+  'description': 'PUSH_DATA header with token 0x1234'
   'source': 'spec-example'
   'expected':
     'protocol_version': 2
     'random_token': 4660
-    'packet_type': 1
+    'packet_type': 0
+    'gateway_eui': '0102030405060708'

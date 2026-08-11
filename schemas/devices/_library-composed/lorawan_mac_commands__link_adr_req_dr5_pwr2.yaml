@@ -1,17 +1,20 @@
-'name': 'lorawan_mac_commands__dev_status_ans'
-'description': 'Composed from schemas/library/lorawan/lorawan_mac_commands.yaml#/definitions/dev_status_ans
+'name': 'lorawan_mac_commands__link_adr_req_dr5_pwr2'
+'description': 'Composed from schemas/library/lorawan/lorawan_mac_commands.yaml#/definitions/link_adr_req
   so the library''s test vectors run in every implementation.'
 'endian': 'little'
 'fields': &id001
 - 'name': 'cid'
   'type': 'u8'
-  'value': 6
-- 'name': 'battery'
+  'value': 3
+- 'name': 'data_rate_tx_power'
   'type': 'u8'
-  'description': '0=external, 1-254=level, 255=unable to measure'
-- 'name': 'margin'
+  'description': 'DataRate[7:4] | TXPower[3:0]'
+- 'name': 'ch_mask'
+  'type': 'u16'
+  'description': 'Channel mask (1=enabled)'
+- 'name': 'redundancy'
   'type': 'u8'
-  'description': 'SNR margin [5:0] signed (-32 to +31 dB)'
+  'description': 'ChMaskCntl[6:4] | NbTrans[3:0]'
 'definitions':
   'link_check_req':
     'name': 'LinkCheckReq'
@@ -46,19 +49,7 @@
     'direction': 'downlink'
     'version': '1.0.0+'
     'description': 'Network requests data rate and TX power change'
-    'fields':
-    - 'name': 'cid'
-      'type': 'u8'
-      'value': 3
-    - 'name': 'data_rate_tx_power'
-      'type': 'u8'
-      'description': 'DataRate[7:4] | TXPower[3:0]'
-    - 'name': 'ch_mask'
-      'type': 'u16'
-      'description': 'Channel mask (1=enabled)'
-    - 'name': 'redundancy'
-      'type': 'u8'
-      'description': 'ChMaskCntl[6:4] | NbTrans[3:0]'
+    'fields': *id001
   'link_adr_ans':
     'name': 'LinkADRAns'
     'cid': 3
@@ -140,7 +131,16 @@
     'direction': 'uplink'
     'version': '1.0.0+'
     'description': 'End-device reports battery and margin'
-    'fields': *id001
+    'fields':
+    - 'name': 'cid'
+      'type': 'u8'
+      'value': 6
+    - 'name': 'battery'
+      'type': 'u8'
+      'description': '0=external, 1-254=level, 255=unable to measure'
+    - 'name': 'margin'
+      'type': 'u8'
+      'description': 'SNR margin [5:0] signed (-32 to +31 dB)'
   'new_channel_req':
     'name': 'NewChannelReq'
     'cid': 7
@@ -363,10 +363,11 @@
       'type': 'u8'
       'description': 'TimeOK[0]'
 'test_vectors':
-- 'name': 'dev_status_ans'
-  'payload': '06 C8 0C'
+- 'name': 'link_adr_req_dr5_pwr2'
+  'payload': '03 52 FF00 01'
   'source': 'spec-example'
   'expected':
-    'cid': 6
-    'battery': 200
-    'margin': 12
+    'cid': 3
+    'data_rate_tx_power': 82
+    'ch_mask': 255
+    'redundancy': 1

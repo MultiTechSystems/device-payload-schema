@@ -8,6 +8,13 @@
 
 spec: TS001
 
+# TS001: "all multi-octet fields are transmitted with the least significant octet
+# first". The header comment above has always said so and every test vector below
+# assumes it, but the key was missing, so the file composed as big-endian and
+# dev_nonce decoded to 0x1011 where the vector says 0x1110. Bitfield ranges are
+# unaffected - a u8[a:b] reads one byte.
+endian: little
+
 definitions:
 
   # ===========================================================================
@@ -31,8 +38,7 @@ definitions:
     description: "MAC Header - first byte of every LoRaWAN frame"
     fields:
       - name: mtype
-        type: u8:3
-        bit_offset: 5
+        type: u8[5:7]
         description: "Message Type"
         enum:
           0: Join-Request
@@ -44,12 +50,11 @@ definitions:
           6: RFU
           7: Proprietary
       - name: rfu
-        type: u8:3
-        bit_offset: 2
+        type: u8[2:4]
         description: "Reserved for Future Use"
       - name: major
-        type: u8:2
-        bit_offset: 0
+        type: u8[0:1]
+        consume: 1
         description: "Major version (0 = LoRaWAN R1)"
 
   mtype_values:
@@ -94,24 +99,20 @@ definitions:
     description: "Frame control for uplink messages"
     fields:
       - name: adr
-        type: u8:1
-        bit_offset: 7
+        type: u8[7:7]
         description: "Adaptive Data Rate enabled"
       - name: adr_ack_req
-        type: u8:1
-        bit_offset: 6
+        type: u8[6:6]
         description: "ADR acknowledgment request"
       - name: ack
-        type: u8:1
-        bit_offset: 5
+        type: u8[5:5]
         description: "Acknowledgment of confirmed downlink"
       - name: class_b
-        type: u8:1
-        bit_offset: 4
+        type: u8[4:4]
         description: "Class B enabled (1.1: FPending in 1.0)"
       - name: fopts_len
-        type: u8:4
-        bit_offset: 0
+        type: u8[0:3]
+        consume: 1
         description: "Length of FOpts field (0-15)"
 
   fctrl_downlink:
@@ -119,24 +120,20 @@ definitions:
     description: "Frame control for downlink messages"
     fields:
       - name: adr
-        type: u8:1
-        bit_offset: 7
+        type: u8[7:7]
         description: "Adaptive Data Rate control"
       - name: rfu
-        type: u8:1
-        bit_offset: 6
+        type: u8[6:6]
         description: "Reserved for Future Use"
       - name: ack
-        type: u8:1
-        bit_offset: 5
+        type: u8[5:5]
         description: "Acknowledgment of confirmed uplink"
       - name: fpending
-        type: u8:1
-        bit_offset: 4
+        type: u8[4:4]
         description: "More data pending from server"
       - name: fopts_len
-        type: u8:4
-        bit_offset: 0
+        type: u8[0:3]
+        consume: 1
         description: "Length of FOpts field (0-15)"
 
   # ===========================================================================
@@ -195,17 +192,15 @@ definitions:
     description: "Join Accept DL settings byte"
     fields:
       - name: opt_neg
-        type: u8:1
-        bit_offset: 7
+        type: u8[7:7]
         description: "1.1: OptNeg flag for backend negotiation"
         version: "1.1.0+"
       - name: rx1_dr_offset
-        type: u8:3
-        bit_offset: 4
+        type: u8[4:6]
         description: "RX1 data rate offset"
       - name: rx2_data_rate
-        type: u8:4
-        bit_offset: 0
+        type: u8[0:3]
+        consume: 1
         description: "RX2 data rate"
 
   # ===========================================================================
@@ -413,8 +408,10 @@ test_vectors:
     description: "Join request message"
     payload: "0001020304050607 08090A0B0C0D0E0F 1011"
     expected:
-      join_eui: [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07]
-      dev_eui: [0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F]
+      # A bytes field is compared as hex: Python decodes one to a bytes object and
+      # Go to a lowercase hex string, so a list of octet values cannot satisfy both.
+      join_eui: "0001020304050607"
+      dev_eui: "08090a0b0c0d0e0f"
       dev_nonce: 0x1110
 
   - name: fctrl_uplink_adr_ack

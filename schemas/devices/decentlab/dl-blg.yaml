@@ -40,16 +40,77 @@ fields:
                 - div: 16777216
                 - add: -0.5
             - name: thermistor_resistance
-              type: u16
+              type: number
               unit: "Ω"
-              # formula: 1000 / (((x[0] + x[1]*65536) / 8388608 - 1) / 2) - 41000
+              # 1000 / voltage_ratio - 41000. `voltage_ratio` above already computes
+              # the vendor's ((x[0] + x[1]*65536) / 8388608 - 1) / 2, because dividing
+              # by 16777216 and subtracting 0.5 is the same thing.
+              #
+              # This and temperature were both declared `type: u16` while they sat on
+              # a formula hint, so each also consumed two bytes it does not own - four
+              # bytes belonging to the next group, read as this group's output.
+              compute:
+                op: div
+                a: 1000
+                b: $voltage_ratio
+              transform:
+                - add: -41000
+
+            # Steinhart-Hart over ln(R):  T = 1 / (a + b*ln(R) + d*ln(R)^3) - 273.15
+            #
+            # The natural log is a transform stage, which Go, Java and C# only gained
+            # with the unary maths ops. The cubic is a `polynomial` over ln(R) rather
+            # than a second pow stage, so the whole denominator is one step;
+            # coefficients are in descending power order, hence the explicit zero for
+            # the absent square term.
+            - name: _ln_thermistor_resistance
+              type: number
+              ref: $thermistor_resistance
+              transform:
+                - log: true
+            - name: _steinhart_denominator
+              type: number
+              ref: $_ln_thermistor_resistance
+              polynomial: [0.000000080592, 0.0, 0.000208802, 0.0008271111]
             - name: temperature
-              type: u16
+              type: number
               unit: "°C"
-              # formula: (1 / (0.0008271111 + 0.000208802 * Math.log(1000 / (((x[0] + x[1]*65536) / 8388608 - 1) / 2) - 41000) + 0.000000080592 * Math.pow(Math.log(1000 / (((x[0] + x[1]*65536) / 8388608 - 1) / 2) - 41000), 3) )) - 273.15
+              compute:
+                op: div
+                a: 1
+                b: $_steinhart_denominator
+              transform:
+                - add: -273.15
         - bit: 1
           fields:
             - name: battery_voltage
               type: u16
               div: 1000
               unit: "V"
+
+test_vectors:
+  # Both payloads are the vendor decoder's own examples (the `main()` in
+  # DL-BLG.js), and the expected values are what that decoder returns for them.
+  # This is the schema's first vector: the two computed fields sat on an unconverted
+  # vendor-formula comment until Go, Java and C# gained the `log` transform, so
+  # nothing here had ever been checked against the device.
+  - name: blg_all_sensors
+    payload: "0230c50003a40c00810c60"
+    source: vendor-codec
+    expected:
+      protocol_version: 2
+      device_id: 12485
+      flags: 3
+      voltage_ratio: 0.006409406661987305
+      thermistor_resistance: 115020.68221552655
+      temperature: 22.028848392450755
+      battery_voltage: 3.168
+
+  - name: blg_battery_only
+    payload: "0230c500020c60"
+    source: vendor-codec
+    expected:
+      protocol_version: 2
+      device_id: 12485
+      flags: 2
+      battery_voltage: 3.168

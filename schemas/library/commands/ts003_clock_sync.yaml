@@ -125,7 +125,14 @@ test_vectors:
 
   - name: app_time_req_with_ans_required
     command: app_time_req
-    payload: "01 65A8F800 15"
+    # Payload corrected from 65A8F800 to 65A8F000, a one-nibble typo: it decoded to
+    # 1705572352 where the expected value is 1705570304 (0x65A8F000). The 2048-second
+    # gap passed the corpus runners, whose comparison applies a relative tolerance to
+    # integers - 0.1% of a GPS timestamp is about 20 days - but PS-039 requires
+    # integers to match exactly, and the compose tool applies that.
+    # `generated` rather than `spec-example`: these bytes come from this schema.
+    payload: "01 65A8F000 15"
+    source: generated
     expected:
       cid: 1
       device_time: 1705570304

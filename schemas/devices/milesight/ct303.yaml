@@ -93,6 +93,148 @@ fields:
             lookup: ["temperature threshold alarm release", "temperature threshold alarm"]
             # raw: readTemperatureAlarm(bytes[i + 2])
 
+        # CURRENT, PER CHANNEL
+        #
+        # The vendor builds these keys from the channel id's position in a list:
+        # current_chns = [0x04, 0x06, 0x08] and the key is "current_chn" + (index+1).
+        # The index is fixed per channel, so each case names its fields outright -
+        # `name_from` is for a key derived from a decoded *value*, which this is not.
+        "[3, 151]":
+          - name: current_chn1_total
+            type: u32
+            div: 100
+            unit: "Ah"
+        "[4, 153]":
+          - name: current_chn1
+            type: u16
+            div: 10
+            unit: "A"
+            ipso: {object: 3317, instance: 0, resource: 5700}
+            senml: {name: "current_chn1", unit: "A"}
+            semantic: "current"
+        "[132, 153]":
+          - name: current_chn1_max
+            type: u16
+            div: 10
+            unit: "A"
+          - name: current_chn1_min
+            type: u16
+            div: 10
+            unit: "A"
+          - name: current_chn1
+            type: u16
+            div: 10
+            unit: "A"
+            ipso: {object: 3317, instance: 0, resource: 5700}
+            senml: {name: "current_chn1", unit: "A"}
+            semantic: "current"
+          - name: current_chn1_alarm
+            type: object
+            fields:
+              - name: current_threshold_alarm
+                type: u8[0:0]
+                lookup: ["no", "yes"]
+              - name: current_threshold_alarm_release
+                type: u8[1:1]
+                lookup: ["no", "yes"]
+              - name: current_over_range_alarm
+                type: u8[2:2]
+                lookup: ["no", "yes"]
+              - name: current_over_range_alarm_release
+                type: u8[3:3]
+                lookup: ["no", "yes"]
+                consume: 1
+        "[5, 151]":
+          - name: current_chn2_total
+            type: u32
+            div: 100
+            unit: "Ah"
+        "[6, 153]":
+          - name: current_chn2
+            type: u16
+            div: 10
+            unit: "A"
+            ipso: {object: 3317, instance: 1, resource: 5700}
+            senml: {name: "current_chn2", unit: "A"}
+            semantic: "current"
+        "[134, 153]":
+          - name: current_chn2_max
+            type: u16
+            div: 10
+            unit: "A"
+          - name: current_chn2_min
+            type: u16
+            div: 10
+            unit: "A"
+          - name: current_chn2
+            type: u16
+            div: 10
+            unit: "A"
+            ipso: {object: 3317, instance: 1, resource: 5700}
+            senml: {name: "current_chn2", unit: "A"}
+            semantic: "current"
+          - name: current_chn2_alarm
+            type: object
+            fields:
+              - name: current_threshold_alarm
+                type: u8[0:0]
+                lookup: ["no", "yes"]
+              - name: current_threshold_alarm_release
+                type: u8[1:1]
+                lookup: ["no", "yes"]
+              - name: current_over_range_alarm
+                type: u8[2:2]
+                lookup: ["no", "yes"]
+              - name: current_over_range_alarm_release
+                type: u8[3:3]
+                lookup: ["no", "yes"]
+                consume: 1
+        "[7, 151]":
+          - name: current_chn3_total
+            type: u32
+            div: 100
+            unit: "Ah"
+        "[8, 153]":
+          - name: current_chn3
+            type: u16
+            div: 10
+            unit: "A"
+            ipso: {object: 3317, instance: 2, resource: 5700}
+            senml: {name: "current_chn3", unit: "A"}
+            semantic: "current"
+        "[136, 153]":
+          - name: current_chn3_max
+            type: u16
+            div: 10
+            unit: "A"
+          - name: current_chn3_min
+            type: u16
+            div: 10
+            unit: "A"
+          - name: current_chn3
+            type: u16
+            div: 10
+            unit: "A"
+            ipso: {object: 3317, instance: 2, resource: 5700}
+            senml: {name: "current_chn3", unit: "A"}
+            semantic: "current"
+          - name: current_chn3_alarm
+            type: object
+            fields:
+              - name: current_threshold_alarm
+                type: u8[0:0]
+                lookup: ["no", "yes"]
+              - name: current_threshold_alarm_release
+                type: u8[1:1]
+                lookup: ["no", "yes"]
+              - name: current_over_range_alarm
+                type: u8[2:2]
+                lookup: ["no", "yes"]
+              - name: current_over_range_alarm_release
+                type: u8[3:3]
+                lookup: ["no", "yes"]
+                consume: 1
+
 test_vectors:
   - name: ch255_type1_midscale
     description: "Channel 255 type 1, midscale bytes, decoded by the vendor's own decoder"
@@ -200,3 +342,17 @@ test_vectors:
     source: vendor-codec
     expected:
       sn: "ffffffffffffffff"
+  - name: current_chn1_alarm_channel
+    description: "Channel 0x84 type 0x99: per-channel current max/min/value plus the alarm bits"
+    payload: "8499b80bd007c40905"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      current_chn1_max: 300
+      current_chn1_min: 200
+      current_chn1: 250
+      current_chn1_alarm:
+        current_threshold_alarm: "yes"
+        current_threshold_alarm_release: "no"
+        current_over_range_alarm: "yes"
+        current_over_range_alarm_release: "no"
