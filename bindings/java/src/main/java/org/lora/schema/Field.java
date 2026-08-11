@@ -283,6 +283,31 @@ public class Field {
         /** Named operation form, e.g. {@code {op: round, decimals: 2}}. */
         private String op;
         private Integer decimals;
+        /**
+         * Unary maths stages. {@code sqrt}, {@code abs}, {@code log10} and
+         * {@code log} are flags; {@code pow} carries its exponent. Boxed so an
+         * absent key stays distinguishable from {@code pow: 0}.
+         */
+        private Boolean sqrt;
+        private Boolean abs;
+        private Boolean log10;
+        private Boolean log;
+        private Double pow;
+
+        public Boolean getSqrt() { return sqrt; }
+        public void setSqrt(Boolean sqrt) { this.sqrt = sqrt; }
+
+        public Boolean getAbs() { return abs; }
+        public void setAbs(Boolean abs) { this.abs = abs; }
+
+        public Boolean getLog10() { return log10; }
+        public void setLog10(Boolean log10) { this.log10 = log10; }
+
+        public Boolean getLog() { return log; }
+        public void setLog(Boolean log) { this.log = log; }
+
+        public Double getPow() { return pow; }
+        public void setPow(Double pow) { this.pow = pow; }
 
         public Double getAdd() { return add; }
         public void setAdd(Double add) { this.add = add; }

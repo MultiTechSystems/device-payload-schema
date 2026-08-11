@@ -34,6 +34,15 @@ public class TransformStage
     /// <summary>Named operation form, e.g. {op: round, decimals: 2}.</summary>
     public string? Op { get; set; }
     public int Decimals { get; set; }
+    /// <summary>
+    /// Unary maths stages. Sqrt, Abs, Log10 and Log are flags; Pow carries its
+    /// exponent. Nullable so an absent key stays distinguishable from pow: 0.
+    /// </summary>
+    public bool Sqrt { get; set; }
+    public bool Abs { get; set; }
+    public bool Log10 { get; set; }
+    public bool Log { get; set; }
+    public double? Pow { get; set; }
 }
 
 public class MatchCase
@@ -219,7 +228,6 @@ public class PayloadSchemaDefinition
     public int Version { get; set; }
     public string? Description { get; set; }
     public string Endian { get; set; } = "big";
-    public List<SchemaField> Header { get; set; } = new();
     public List<SchemaField> Fields { get; set; } = new();
     public Dictionary<string, PortDef>? Ports { get; set; }
     public Dictionary<string, DefinitionDef>? Definitions { get; set; }

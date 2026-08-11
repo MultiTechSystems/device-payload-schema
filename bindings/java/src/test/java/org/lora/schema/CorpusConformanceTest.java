@@ -23,12 +23,14 @@ import org.yaml.snakeyaml.Yaml;
 class CorpusConformanceTest {
 
     /** Vectors this interpreter is known to decode correctly. Raise as gaps close. */
-    // 1166 of 1166 except three: this binding does not support the sequential
-    // bitfield form `u8:3`, only the bracket form `u8[5:7]`. The type falls through
-    // to a plain u8, so each field reads a whole byte and a one-byte LoRaWAN MHDR
-    // underflows. Deliberately lowered rather than dropping the vectors, so the gap
-    // stays visible - see AGENTS.md.
-    private static final int CORPUS_FLOOR = 1163;
+    // The full corpus, so any failure is a regression rather than a known gap. The
+    // three LoRaWAN frame vectors that used to fail here needed the sequential
+    // bitfield form `u8:3`, which CR-2026-006 withdrew in favour of the bracket form
+    // `u8[5:7]` this binding already supported.
+    // 1186 of 1188. The two short are `mod` with a negative operand: this binding
+    // uses Math.floorDiv for `idiv` but a truncated `%` for `mod`, so its own two
+    // operators disagree. Awaiting the CR that settles the convention.
+    private static final int CORPUS_FLOOR = 1188;
 
     @Test
     void corpusVectorsDecodeAsExpected() throws IOException {
@@ -126,12 +128,64 @@ class CorpusConformanceTest {
      * reported its own formatting differences as decode failures.
      */
     private static boolean valuesMatch(Object want, Object got) {
+        // Recurse into lists and maps (PS-044, PS-045) rather than comparing their
+        // printed forms. Stringifying made a nested list of integers fail against an
+        // identical one: this binding decodes a u8 to a Double, so ts007's package
+        // list printed as {package_id=0.0} where the vector says 0, even though every
+        // value in it compared equal numerically.
+        if (want instanceof List<?> wantList && got instanceof List<?> gotList) {
+            if (wantList.size() != gotList.size()) return false;
+            for (int i = 0; i < wantList.size(); i++) {
+                if (!valuesMatch(wantList.get(i), gotList.get(i))) return false;
+            }
+            return true;
+        }
+        if (want instanceof Map<?, ?> wantMap && got instanceof Map<?, ?> gotMap) {
+            for (Map.Entry<?, ?> entry : wantMap.entrySet()) {
+                if (!gotMap.containsKey(entry.getKey())) return false;
+                if (!valuesMatch(entry.getValue(), gotMap.get(entry.getKey()))) return false;
+            }
+            return true;
+        }
+
         Double a = asNumber(want);
         Double b = asNumber(got);
         if (a != null && b != null) {
-            return Math.abs(a - b) <= Math.max(0.001, Math.abs(a) * 0.001);
+            // PS-039: an integer expectation must match exactly. PS-040's 0.001 is for
+            // floats, and it is absolute. This used to be a relative
+            // max(0.001, |want| * 0.001) applied to everything, which on a GPS
+            // timestamp is about 20 days of slack.
+            if (wantsInteger(want)) {
+                return a.doubleValue() == b.doubleValue();
+            }
+            return Math.abs(a - b) <= 0.001;
         }
         return String.valueOf(want).equals(String.valueOf(got));
+    }
+
+    /**
+     * Whether the vector wrote its expected value as an integer, which is what
+     * selects exact comparison. A decoded value arriving as a Double does not make
+     * the expectation a float - this binding widens every integer on the way out.
+     */
+    private static boolean wantsInteger(Object want) {
+        if (want instanceof Integer || want instanceof Long
+                || want instanceof Short || want instanceof Byte
+                || want instanceof java.math.BigInteger) {
+            return true;
+        }
+        if (want instanceof String text) {
+            String trimmed = text.trim().toLowerCase();
+            if (trimmed.startsWith("0x")) return true;
+            if (trimmed.isEmpty() || trimmed.contains(".") || trimmed.contains("e")) return false;
+            try {
+                Long.parseLong(trimmed);
+                return true;
+            } catch (NumberFormatException e) {
+                return false;
+            }
+        }
+        return false;
     }
 
     private static Double asNumber(Object value) {

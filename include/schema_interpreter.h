@@ -357,7 +357,15 @@ static inline field_type_t parse_type_string(const char* type_str,
     *bit_start = 0;
     *bit_width = 0;
     
-    /* Bitfield syntax 1: Python slice u8[3:5] - bits 3..5 inclusive */
+    /* Bitfield range u8[3:5] - bits 3..5 inclusive.
+     *
+     * The only bitfield spelling. CR-2026-006 withdrew the Verilog part-select
+     * u8[3+:2], the C++ template bits<3,2>, the @ notation bits:2@3 and the
+     * sequential u8:2, which were carried while the working group chose between
+     * them. Two of the four were not really implemented here anyway: the
+     * sequential form set a bit_start sentinel of 255 that no decode path ever
+     * read.
+     */
     {
         int start, end;
         if (sscanf(type_str, "u8[%d:%d]", &start, &end) == 2) {
@@ -368,47 +376,6 @@ static inline field_type_t parse_type_string(const char* type_str,
         if (sscanf(type_str, "u16[%d:%d]", &start, &end) == 2) {
             *bit_start = (uint8_t)start;
             *bit_width = (uint8_t)(end - start + 1);
-            return FIELD_TYPE_BITS;
-        }
-    }
-    
-    /* Bitfield syntax 2: Verilog part-select u8[3+:2] - 2 bits at offset 3 */
-    {
-        int offset, width;
-        if (sscanf(type_str, "u8[%d+:%d]", &offset, &width) == 2) {
-            *bit_start = (uint8_t)offset;
-            *bit_width = (uint8_t)width;
-            return FIELD_TYPE_BITS;
-        }
-    }
-    
-    /* Bitfield syntax 3: C++ template bits<3,2> */
-    {
-        int offset, width;
-        if (sscanf(type_str, "bits<%d,%d>", &offset, &width) == 2) {
-            *bit_start = (uint8_t)offset;
-            *bit_width = (uint8_t)width;
-            return FIELD_TYPE_BITS;
-        }
-    }
-    
-    /* Bitfield syntax 4: @ notation bits:2@3 */
-    {
-        int width, offset;
-        if (sscanf(type_str, "bits:%d@%d", &width, &offset) == 2) {
-            *bit_start = (uint8_t)offset;
-            *bit_width = (uint8_t)width;
-            return FIELD_TYPE_BITS;
-        }
-    }
-    
-    /* Bitfield syntax 5: Sequential u8:2 - next N bits (bit_start=255 sentinel) */
-    {
-        int base, width;
-        if (sscanf(type_str, "u%d:%d", &base, &width) == 2 && 
-            strchr(type_str, '[') == NULL) {
-            *bit_start = 255;  /* Sentinel: sequential mode */
-            *bit_width = (uint8_t)width;
             return FIELD_TYPE_BITS;
         }
     }

@@ -9,9 +9,21 @@ import java.util.regex.*;
 
 public class Schema {
     /**
-     * Bit-range type, e.g. {@code u8[4:7]} - bits 4 to 7 inclusive. This is the only
-     * bitfield spelling the device corpus uses; the interpreter also accepts
-     * {@code u8[3+:2]}, {@code bits<3,2>} and {@code u8:2}, which this binding does not.
+     * Signals that a computed field is absent because its divisor was zero (PS-278).
+     * A distinct NaN payload rather than a boolean flag, so it flows through the same
+     * double-valued compute path without changing its signature.
+     */
+    private static final double COMPUTE_OMITTED = Double.longBitsToDouble(0x7ff8000000000abcL);
+
+    private static boolean isComputeOmitted(double v) {
+        return Double.doubleToRawLongBits(v) == 0x7ff8000000000abcL;
+    }
+
+    /**
+     * Bit-range type, e.g. {@code u8[4:7]} - bits 4 to 7 inclusive. Since CR-2026-006
+     * this is the only bitfield spelling in the language: {@code u8[3+:2]},
+     * {@code bits<3,2>}, {@code bits:2@3} and {@code u8:2} were withdrawn, so there is
+     * nothing left for this binding to be missing.
      */
     private static final Pattern BIT_RANGE = Pattern.compile("u(\\d+)\\[(\\d+):(\\d+)\\]");
 
@@ -19,12 +31,10 @@ public class Schema {
     private int version;
     private String description;
     private String endian = "big";
-    private List<Field> header;
     private List<Field> fields;
     private Map<String, PortDef> ports;
 
     public Schema() {
-        this.header = new ArrayList<>();
         this.fields = new ArrayList<>();
     }
 
@@ -40,9 +50,6 @@ public class Schema {
     
     public String getEndian() { return endian; }
     public void setEndian(String endian) { this.endian = endian; }
-    
-    public List<Field> getHeader() { return header; }
-    public void setHeader(List<Field> header) { this.header = header; }
     
     public List<Field> getFields() { return fields; }
     public void setFields(List<Field> fields) { this.fields = fields; }
@@ -74,18 +81,20 @@ public class Schema {
         schema.description = (String) raw.get("description");
         schema.endian = (String) raw.getOrDefault("endian", "big");
         
-        // Parse fields
+        // Parse fields, splicing any `$ref` into the list first.
         Object fieldsRaw = raw.get("fields");
         if (fieldsRaw instanceof List) {
-            schema.fields = parseFields((List<Map<String, Object>>) fieldsRaw);
+            schema.fields = parseFields(
+                    expandRefs((List<Map<String, Object>>) fieldsRaw, raw, 0));
         }
         
-        // Parse header
-        Object headerRaw = raw.get("header");
-        if (headerRaw instanceof List) {
-            schema.header = parseFields((List<Map<String, Object>>) headerRaw);
-        }
-        
+        // No `header:` block. It was never in the specification, and honouring it
+        // here while Python and Go ignored it meant the same schema decoded
+        // differently per language - silently, since the ignoring implementations
+        // read the header's bytes as the first fields rather than erroring. Use a
+        // `definitions:` entry and `$ref` instead, which is specified and works
+        // everywhere; schemas/library/common/headers.yaml does exactly that.
+
         // Parse ports
         Object portsRaw = raw.get("ports");
         if (portsRaw instanceof Map) {
@@ -94,7 +103,7 @@ public class Schema {
             for (Map.Entry<?, ?> entry : portsMap.entrySet()) {
                 String portKey = String.valueOf(entry.getKey());
                 if (entry.getValue() instanceof Map) {
-                    PortDef pd = parsePortDef((Map<String, Object>) entry.getValue());
+                    PortDef pd = parsePortDef((Map<String, Object>) entry.getValue(), raw);
                     schema.ports.put(portKey, pd);
                 }
             }
@@ -104,16 +113,19 @@ public class Schema {
     }
 
     @SuppressWarnings("unchecked")
-    private static PortDef parsePortDef(Map<String, Object> raw) {
+    private static PortDef parsePortDef(Map<String, Object> raw, Map<String, Object> root) {
         PortDef pd = new PortDef();
         pd.setDirection((String) raw.get("direction"));
         pd.setDescription((String) raw.get("description"));
-        
+
         Object fieldsRaw = raw.get("fields");
         if (fieldsRaw instanceof List) {
-            pd.setFields(parseFields((List<Map<String, Object>>) fieldsRaw));
+            // A port's field list may carry a `$ref` too - `definitions` are
+            // schema-level, so they resolve against the document root.
+            pd.setFields(parseFields(
+                    expandRefs((List<Map<String, Object>>) fieldsRaw, root, 0)));
         }
-        
+
         return pd;
     }
 
@@ -121,11 +133,63 @@ public class Schema {
     private static List<Field> parseFields(List<Map<String, Object>> fieldsRaw) {
         List<Field> fields = new ArrayList<>();
         if (fieldsRaw == null) return fields;
-        
+
         for (Map<String, Object> fm : fieldsRaw) {
             fields.add(parseField(fm));
         }
         return fields;
+    }
+
+    /**
+     * Splice `$ref: '#/definitions/name'` entries into the field list they appear in.
+     *
+     * <p>Resolved at parse time, and the referenced definition's {@code fields:} are
+     * spliced rather than nested: a nested container with no {@code type: object} is
+     * never descended into, so every field inside it would report as missing.
+     *
+     * <p>Only local {@code #/definitions/...} references resolve here, matching the
+     * other implementations. Cross-file references are a pre-step
+     * (tools/schema_preprocessor.py) so the interpreters need no loader.
+     *
+     * <p>This binding had no {@code $ref} support at all until the `header:` block was
+     * removed and a conformance fixture pointed the replacement at it.
+     */
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> expandRefs(
+            List<Map<String, Object>> fieldsRaw, Map<String, Object> root, int depth) {
+        if (fieldsRaw == null) return null;
+        List<Map<String, Object>> out = new ArrayList<>();
+        // Guard against a definition that refers to itself, directly or in a cycle.
+        if (depth > 16) return fieldsRaw;
+
+        for (Map<String, Object> fm : fieldsRaw) {
+            Object refRaw = fm.get("$ref");
+            if (!(refRaw instanceof String ref)) {
+                out.add(fm);
+                continue;
+            }
+            List<Map<String, Object>> target = definitionFields(ref, root);
+            if (target == null) {
+                // Unresolvable: keep the entry so the field simply produces nothing,
+                // rather than dropping it and shifting every later offset.
+                out.add(fm);
+                continue;
+            }
+            out.addAll(expandRefs(target, root, depth + 1));
+        }
+        return out;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> definitionFields(String ref, Map<String, Object> root) {
+        String prefix = "#/definitions/";
+        if (!ref.startsWith(prefix)) return null;
+        Object defsRaw = root.get("definitions");
+        if (!(defsRaw instanceof Map)) return null;
+        Object def = ((Map<String, Object>) defsRaw).get(ref.substring(prefix.length()));
+        if (!(def instanceof Map)) return null;
+        Object fields = ((Map<String, Object>) def).get("fields");
+        return fields instanceof List ? (List<Map<String, Object>>) fields : null;
     }
 
     @SuppressWarnings("unchecked")
@@ -236,6 +300,13 @@ public class Schema {
                     // rounding its output reported the unrounded value instead.
                     if (tm.containsKey("op")) t.setOp(String.valueOf(tm.get("op")));
                     if (tm.containsKey("decimals")) t.setDecimals(toInt(tm.get("decimals"), 0));
+                    // Unary maths stages. dl-blg's thermistor needs a natural log
+                    // and a cube, and had no way to say so in this binding.
+                    if (tm.containsKey("sqrt")) t.setSqrt(toBoolean(tm.get("sqrt")));
+                    if (tm.containsKey("abs")) t.setAbs(toBoolean(tm.get("abs")));
+                    if (tm.containsKey("log10")) t.setLog10(toBoolean(tm.get("log10")));
+                    if (tm.containsKey("log")) t.setLog(toBoolean(tm.get("log")));
+                    if (tm.containsKey("pow")) t.setPow(toDouble(tm.get("pow")));
                     transforms.add(t);
                 }
             }
@@ -431,13 +502,7 @@ public class Schema {
     public Map<String, Object> decode(byte[] data) {
         DecodeContext ctx = new DecodeContext(data, endian);
         Map<String, Object> result = new LinkedHashMap<>();
-        
-        // Decode header
-        if (header != null && !header.isEmpty()) {
-            Map<String, Object> headerResult = decodeFields(header, ctx);
-            result.putAll(headerResult);
-        }
-        
+
         // Decode main fields
         Map<String, Object> fieldsResult = decodeFields(fields, ctx);
         result.putAll(fieldsResult);
@@ -450,13 +515,7 @@ public class Schema {
         
         DecodeContext ctx = new DecodeContext(data, endian);
         Map<String, Object> result = new LinkedHashMap<>();
-        
-        // Decode header
-        if (header != null && !header.isEmpty()) {
-            Map<String, Object> headerResult = decodeFields(header, ctx);
-            result.putAll(headerResult);
-        }
-        
+
         // Decode resolved fields
         Map<String, Object> fieldsResult = decodeFields(resolvedFields, ctx);
         result.putAll(fieldsResult);
@@ -1265,6 +1324,11 @@ public class Schema {
 
         if (field.getCompute() != null) {
             double value = evaluateCompute(field.getCompute(), ctx);
+            // A zero divisor omits the field (PS-278). Short-circuit before the
+            // transform stages, which would otherwise operate on the sentinel.
+            if (isComputeOmitted(value)) {
+                return null;
+            }
             return applyTransform(value, field.getTransform());
         }
 
@@ -1297,6 +1361,31 @@ public class Schema {
                         .doubleValue();
                 continue;
             }
+            // Unary maths stages, each exclusive of the others and of the arithmetic
+            // ops, in the order the Python interpreter checks them. The domain clamps
+            // match it exactly: sqrt of a negative and log of a non-positive would
+            // otherwise yield NaN and poison every later stage, where the interpreter
+            // yields 0 and log(1e-10).
+            if (Boolean.TRUE.equals(stage.getSqrt())) {
+                value = Math.sqrt(Math.max(0.0, value));
+                continue;
+            }
+            if (Boolean.TRUE.equals(stage.getAbs())) {
+                value = Math.abs(value);
+                continue;
+            }
+            if (stage.getPow() != null) {
+                value = Math.pow(value, stage.getPow());
+                continue;
+            }
+            if (Boolean.TRUE.equals(stage.getLog10())) {
+                value = Math.log10(Math.max(1e-10, value));
+                continue;
+            }
+            if (Boolean.TRUE.equals(stage.getLog())) {
+                value = Math.log(Math.max(1e-10, value));
+                continue;
+            }
             if (stage.getMult() != null) value *= stage.getMult();
             if (stage.getDiv() != null && stage.getDiv() != 0) value /= stage.getDiv();
             if (stage.getAdd() != null) value += stage.getAdd();
@@ -1321,9 +1410,16 @@ public class Schema {
             case "add" -> a + b;
             case "sub" -> a - b;
             case "mul" -> a * b;
-            case "div" -> b == 0 ? Double.NaN : a / b;
-            case "mod" -> b == 0 ? Double.NaN : (double) ((long) a % (long) b);
-            case "idiv" -> b == 0 ? Double.NaN : (double) Math.floorDiv((long) a, (long) b);
+            // PS-278: a zero divisor omits the field. NaN is not a JSON value, so
+            // returning it made the whole decode unparseable by a conforming consumer.
+            case "div" -> b == 0 ? COMPUTE_OMITTED : a / b;
+            // PS-277 floored. This was `%`, which truncates, so it gave -1 where the
+            // floored answer is 2 - and it sat beside a floorDiv `idiv`, meaning this
+            // binding's own two operators used different conventions and
+            // a == idiv(a,b)*b + mod(a,b) did not hold. Math.floorMod is the match.
+            case "mod" -> b == 0 ? COMPUTE_OMITTED : (double) Math.floorMod((long) a, (long) b);
+            // PS-276 floored, already correct.
+            case "idiv" -> b == 0 ? COMPUTE_OMITTED : (double) Math.floorDiv((long) a, (long) b);
             default -> throw new SchemaException.DecodeException(
                     "Unknown compute op: " + compute.getOp());
         };
@@ -1370,6 +1466,15 @@ public class Schema {
             }
         }
         return defaultValue;
+    }
+
+    /** Reads a flag written as a YAML boolean, or as "true"/1 by a JSON producer. */
+    private static Boolean toBoolean(Object obj) {
+        if (obj == null) return null;
+        if (obj instanceof Boolean) return (Boolean) obj;
+        if (obj instanceof Number) return ((Number) obj).doubleValue() != 0.0;
+        if (obj instanceof String) return Boolean.parseBoolean((String) obj);
+        return null;
     }
 
     private static Double toDouble(Object obj) {

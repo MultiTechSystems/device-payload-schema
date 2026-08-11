@@ -48,7 +48,10 @@ def parse_bit_slice_type(t: str) -> Optional[Tuple[str, int, int]]:
 
     Supports:
       - u8[3:4]   -> start=3, width=2
-      - u8[3+:2]  -> start=3, width=2
+
+    The bracket range is the only bitfield spelling; the Verilog part-select
+    `u8[3+:2]` was withdrawn by CR-2026-006.
+
     Returns (base_type, bit_start, bit_width) or None.
     """
     m = re.match(r'^((?:be_|le_)?[usif]\d+)\[(\d+):(\d+)\]$', t)
@@ -59,15 +62,6 @@ def parse_bit_slice_type(t: str) -> Optional[Tuple[str, int, int]]:
         if hi < lo:
             return None
         return base_t, lo, (hi - lo + 1)
-
-    m = re.match(r'^((?:be_|le_)?[usif]\d+)\[(\d+)\+:(\d+)\]$', t)
-    if m:
-        base_t = m.group(1)
-        start = int(m.group(2))
-        width = int(m.group(3))
-        if width <= 0:
-            return None
-        return base_t, start, width
 
     return None
 
@@ -98,7 +92,7 @@ def formula_to_js(formula: str) -> str:
     js = re.sub(r'\bsqrt\b', 'Math.sqrt', js)
     js = re.sub(r'\bmin\b', 'Math.min', js)
     js = re.sub(r'\bmax\b', 'Math.max', js)
-    js = re.sub(r'\bround\b', 'Math.round', js)
+    js = re.sub(r'\bround\b', 'roundHalfEven', js)  # half-to-even, as the interpreters use
     js = re.sub(r'\bfloor\b', 'Math.floor', js)
     js = re.sub(r'\bceil\b', 'Math.ceil', js)
     js = re.sub(r'\blog\b', 'Math.log', js)
@@ -150,11 +144,22 @@ def compute_to_js(compute: Dict[str, Any]) -> str:
     elif op == 'mul':
         return f'({a_js} * {b_js})'
     elif op == 'div':
-        return f'({b_js} !== 0 ? {a_js} / {b_js} : NaN)'
+        # PS-278: a zero divisor omits the field. `undefined` rather than NaN, because
+        # JSON.stringify drops an undefined property but writes NaN as `null`, and
+        # neither NaN nor null is what an absent field means.
+        return f'({b_js} !== 0 ? {a_js} / {b_js} : undefined)'
     elif op == 'mod':
-        return f'({b_js} !== 0 ? Math.trunc({a_js}) % Math.trunc({b_js}) : NaN)'
+        # PS-277 floored: the remainder takes the divisor's sign. JavaScript's `%`
+        # truncates, so `((a % b) + b) % b` is needed - the generator emitted the bare
+        # `%` and therefore disagreed with the floored interpreters.
+        # PS-284: operands truncate toward zero first.
+        return (f'({b_js} !== 0 ? ((Math.trunc({a_js}) % Math.trunc({b_js})) '
+                f'+ Math.trunc({b_js})) % Math.trunc({b_js}) : undefined)')
     elif op == 'idiv':
-        return f'({b_js} !== 0 ? Math.trunc({a_js} / {b_js}) : NaN)'
+        # PS-276 floored: Math.floor, not Math.trunc, so it rounds toward negative
+        # infinity. Operands truncate first (PS-284), matching the interpreters.
+        return (f'({b_js} !== 0 ? Math.floor(Math.trunc({a_js}) / Math.trunc({b_js})) '
+                f': undefined)')
     return '0'
 
 
@@ -246,20 +251,20 @@ def transform_to_js(transform_ops: List[Dict[str, Any]], input_expr: str) -> str
         elif 'round' in op:
             decimals = op['round']
             if decimals is True or decimals == 0:
-                result = f'Math.round({result})'
+                result = f'roundHalfEven({result}, 0)'
             else:
                 factor = 10 ** int(decimals)
-                result = f'(Math.round({result} * {factor}) / {factor})'
+                result = f'roundHalfEven({result}, {int(decimals)})'
         elif 'op' in op:
             # Handle {op: 'name', ...} syntax
             op_name = op['op']
             if op_name == 'round':
                 decimals = op.get('decimals', 0)
                 if decimals == 0:
-                    result = f'Math.round({result})'
+                    result = f'roundHalfEven({result}, 0)'
                 else:
                     factor = 10 ** int(decimals)
-                    result = f'(Math.round({result} * {factor}) / {factor})'
+                    result = f'roundHalfEven({result}, {int(decimals)})'
             elif op_name == 'floor':
                 result = f'Math.floor({result})'
             elif op_name in ('ceiling', 'ceil'):
@@ -312,7 +317,42 @@ class TS013Generator:
         return '\n'.join(lines)
 
     def _gen_helpers(self) -> str:
-        return '''// --- Binary helpers ---
+        return '''// --- Rounding ---
+// Half-to-even (banker's rounding), matching the Python, Java and C# interpreters.
+//
+// Two traps this avoids. First, JavaScript's Math.round is half-UP and asymmetric
+// for negatives (Math.round(-2.5) is -2 but Math.round(2.5) is 3), so a codec using
+// it disagreed with the interpreters on any exact half - mclimate/vicki reported a
+// humidity of 78.13 where the interpreters say 78.12.
+//
+// Second, rounding v*10^d is not the same as rounding v at d decimals: 2.355 is
+// stored as 2.35499999999999998, but 2.355*100 lands on exactly 235.5, so the
+// multiply turns a value below the half into a tie and rounds it up. toFixed is
+// correctly rounded on the exact stored value, so it is used for the ordinary case
+// and a genuine tie is detected from the long expansion.
+function roundHalfEven(v, decimals) {
+  if (typeof v !== 'number' || !isFinite(v)) return v;
+  var d = Math.min(Math.max(decimals || 0, 0), 90);
+  var neg = v < 0;
+  var a = Math.abs(v);
+  // A genuine tie is a 5 at the cut with nothing but zeros beyond it in the exact
+  // expansion. Testing Number(s) === a instead would be wrong: the shortest
+  // representation of 2.345 round-trips exactly while the stored value is above it.
+  var long = a.toFixed(Math.min(d + 19, 100));
+  var frac = long.slice(long.indexOf('.') + 1);
+  var out;
+  if (frac.charAt(d) === '5' && /^0*$/.test(frac.slice(d + 1))) {
+    var f = Math.pow(10, d);
+    var lower = Math.floor(a * f);
+    out = ((lower % 2 === 0) ? lower : lower + 1) / f;
+  } else {
+    out = Number(a.toFixed(d));
+  }
+  if (out === 0) return 0;   // never report -0
+  return neg ? -out : out;
+}
+
+// --- Binary helpers ---
 function readU(buf, pos, size, endian) {
   var v = 0;
   if (endian === 'big') {
@@ -503,7 +543,7 @@ function writeS(buf, pos, size, value, endian) {
         if ftype == 'bitfield_string':
             return self._gen_decode_bitfield_string(field)
 
-        # bit-slice integer (e.g., u8[0:6], u8[7:7], u8[3+:2])
+        # bit-slice integer (e.g., u8[0:6], u8[7:7])
         bit_slice = parse_bit_slice_type(ftype)
         if bit_slice is not None:
             base_type, bit_start, bit_width = bit_slice

@@ -11,6 +11,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -189,6 +190,13 @@ type Transform struct {
 	// Named operation form, e.g. {op: round, decimals: 2}.
 	Op       string `json:"op,omitempty" yaml:"op,omitempty"`
 	Decimals int    `json:"decimals,omitempty" yaml:"decimals,omitempty"`
+	// Unary maths stages. Sqrt, Abs, Log10 and Log are flags; Pow carries the
+	// exponent. Pointers so an absent key is distinguishable from `pow: 0`.
+	Sqrt  bool     `json:"sqrt,omitempty" yaml:"sqrt,omitempty"`
+	Abs   bool     `json:"abs,omitempty" yaml:"abs,omitempty"`
+	Log10 bool     `json:"log10,omitempty" yaml:"log10,omitempty"`
+	Log   bool     `json:"log,omitempty" yaml:"log,omitempty"`
+	Pow   *float64 `json:"pow,omitempty" yaml:"pow,omitempty"`
 }
 
 // Case represents a match case in conditional parsing.
@@ -421,6 +429,31 @@ func applyTransformStages(value float64, stages []Transform) float64 {
 			// it on exact halves, which the corpus vectors do contain.
 			scale := math.Pow(10, float64(stage.Decimals))
 			value = math.RoundToEven(value*scale) / scale
+			continue
+		}
+		// Unary maths stages, each exclusive of the others and of the arithmetic
+		// ops, in the same order the Python interpreter checks them. The domain
+		// clamps match it exactly: sqrt of a negative and log of a non-positive
+		// would otherwise return NaN and poison every later stage, where the
+		// interpreter yields 0 and log(1e-10).
+		if stage.Sqrt {
+			value = math.Sqrt(math.Max(0, value))
+			continue
+		}
+		if stage.Abs {
+			value = math.Abs(value)
+			continue
+		}
+		if stage.Pow != nil {
+			value = math.Pow(value, *stage.Pow)
+			continue
+		}
+		if stage.Log10 {
+			value = math.Log10(math.Max(1e-10, value))
+			continue
+		}
+		if stage.Log {
+			value = math.Log(math.Max(1e-10, value))
 			continue
 		}
 		if stage.Mult != nil {
@@ -708,6 +741,29 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 					t.Decimals = decimals
 				} else if decimals, ok := tm["decimals"].(float64); ok {
 					t.Decimals = int(decimals)
+				}
+				// Unary maths stages. Struct tags are not enough here: transform
+				// stages are built by hand from this map, so a field added to
+				// Transform without a line below is silently never populated -
+				// the stage becomes a no-op and the value passes through
+				// untouched rather than erroring.
+				if flag, ok := tm["sqrt"].(bool); ok {
+					t.Sqrt = flag
+				}
+				if flag, ok := tm["abs"].(bool); ok {
+					t.Abs = flag
+				}
+				if flag, ok := tm["log10"].(bool); ok {
+					t.Log10 = flag
+				}
+				if flag, ok := tm["log"].(bool); ok {
+					t.Log = flag
+				}
+				if pow, ok := tm["pow"].(float64); ok {
+					t.Pow = &pow
+				} else if pow, ok := tm["pow"].(int); ok {
+					p := float64(pow)
+					t.Pow = &p
 				}
 				f.Transform = append(f.Transform, t)
 			}
@@ -1866,13 +1922,20 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 				value = field.Guard.Else
 			} else {
 				result, err := evaluateCompute(field.Compute, ctx)
-				if err != nil {
+				if errors.Is(err, errComputeOmitted) {
+					// Zero divisor (PS-278): report the field absent and carry on
+					// with the payload, reusing the same `omitted` sentinel the
+					// unmatched-lookup path uses. Returning the error here used to
+					// abandon the whole decode.
+					value = omitted
+				} else if err != nil {
 					return nil, err
+				} else {
+					// A compute takes its transform stages and no bare modifiers,
+					// as the interpreter does. These were not applied at all, so a
+					// computed field asking to be rounded was reported unrounded.
+					value = applyTransformStages(result, field.Transform)
 				}
-				// A compute takes its transform stages and no bare modifiers,
-				// as the interpreter does. These were not applied at all, so a
-				// computed field asking to be rounded was reported unrounded.
-				value = applyTransformStages(result, field.Transform)
 			}
 		} else if field.Formula != "" {
 			// Legacy formula support
@@ -1892,7 +1955,7 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 			}
 		}
 
-	case TypeObject:
+	case TypeObject, TypeObjectLower:
 		value, err = decodeFields(field.Fields, ctx)
 		if err != nil {
 			return nil, err
@@ -1928,25 +1991,26 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 			}
 			value = result
 		}
-	} else if (field.Type == TypeNumber || field.Type == "number") && field.Ref != "" {
-		// Transform already applied in the ref block, skip
+	} else if (field.Type == TypeNumber || field.Type == "number") &&
+		(field.Ref != "" || field.Compute != nil) {
+		// A computed field's transform stages were already applied where the value
+		// was produced, so applying them again here doubles them. The ref case was
+		// already skipped; compute was not, so a compute field carrying a transform
+		// had it run twice - decentlab/dl-blg's voltage_ratio came out as
+		// -0.4999999996 where the vendor decoder says 0.0064094, because its
+		// `div: 16777216` and `add: -0.5` were each applied a second time. Nothing
+		// caught it: that schema had no test vectors at all.
 	} else if numVal, ok := toFloat64(value); ok {
 		// Apply transformations in order
 		// Support both top-level shortcuts and transform array
 		if len(field.Transform) > 0 {
-			// Transform array: each stage applied sequentially, ops within
-			// each stage in YAML key order
-			for _, stage := range field.Transform {
-				if stage.Add != nil {
-					numVal = numVal + *stage.Add
-				}
-				if stage.Mult != nil {
-					numVal = numVal * *stage.Mult
-				}
-				if stage.Div != nil && *stage.Div != 0 {
-					numVal = numVal / *stage.Div
-				}
-			}
+			// Routed through applyTransformStages rather than repeating the loop
+			// here. This branch used to be its own copy, and being a copy it drifted:
+			// it applied add before mult where PS-101 fixes the canonical order at
+			// mult, div, add, and it knew nothing of {op: round} or the unary maths
+			// stages - so on a plain typed field, unlike a ref or compute field, a
+			// rounding stage did nothing and sqrt/log/pow passed the value through.
+			numVal = applyTransformStages(numVal, field.Transform)
 		// Check for legacy 'modifiers' array
 		} else if len(field.Modifiers) > 0 {
 			for _, stage := range field.Modifiers {
@@ -2759,7 +2823,7 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 			return err
 		}
 
-	case TypeObject:
+	case TypeObject, TypeObjectLower:
 		if mapVal, ok := value.(map[string]any); ok {
 			if err := encodeFields(field.Fields, mapVal, ctx); err != nil {
 				return err
@@ -3127,7 +3191,7 @@ func evaluateCompute(cd *ComputeDef, ctx *DecodeContext) (float64, error) {
 	switch cd.Op {
 	case "div":
 		if b == 0 {
-			return 0, fmt.Errorf("division by zero")
+			return 0, errComputeOmitted
 		}
 		return a / b, nil
 	case "mul":
@@ -3138,17 +3202,47 @@ func evaluateCompute(cd *ComputeDef, ctx *DecodeContext) (float64, error) {
 		return a - b, nil
 	case "mod":
 		if b == 0 {
-			return 0, fmt.Errorf("modulo by zero")
+			return 0, errComputeOmitted
 		}
-		return float64(int64(a) % int64(b)), nil
+		// PS-277 floored: the remainder takes the divisor's sign, so mod(a, 8) stays
+		// in 0..7. Go's native % truncates, which gave -1 where the floored answer
+		// is 2. PS-284: operands truncate toward zero first.
+		return float64(floorMod(int64(a), int64(b))), nil
 	case "idiv":
 		if b == 0 {
-			return 0, fmt.Errorf("integer division by zero")
+			return 0, errComputeOmitted
 		}
-		return float64(int64(a) / int64(b)), nil
+		// PS-276 floored: rounds toward negative infinity, not toward zero.
+		return float64(floorDiv(int64(a), int64(b))), nil
 	default:
 		return 0, fmt.Errorf("unknown compute op: %s", cd.Op)
 	}
+}
+
+// errComputeOmitted signals a zero divisor. PS-278: the field is reported absent and
+// decoding of the rest of the payload continues. Previously this was a plain error,
+// which abandoned the field and, through the caller, could take the payload with it.
+var errComputeOmitted = errors.New("compute omitted: division by zero")
+
+// floorDiv is integer division rounded toward negative infinity (PS-276).
+//
+// Corrected on the integers deliberately. The obvious
+// int64(math.Floor(float64(a)/float64(b))) is wrong above 2^53, where an int64 is not
+// exactly representable as a float64: for a = 2^53+1, b = 1 it yields 9007199254740992
+// instead of 9007199254740993.
+func floorDiv(a, b int64) int64 {
+	q := a / b
+	if (a%b != 0) && ((a < 0) != (b < 0)) {
+		q--
+	}
+	return q
+}
+
+// floorMod is the remainder matching floorDiv, so that
+// a == floorDiv(a, b)*b + floorMod(a, b) holds for every combination of signs
+// (PS-277). Exact for the full int64 range, and gives the divisor's sign.
+func floorMod(a, b int64) int64 {
+	return ((a % b) + b) % b
 }
 
 // resolveOperand resolves a compute operand (field reference or literal).

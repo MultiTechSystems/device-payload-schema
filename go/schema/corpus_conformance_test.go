@@ -23,12 +23,15 @@ import (
 
 // corpusFloor is the number of corpus vectors this interpreter is known to decode
 // correctly. Raise it as gaps close.
-// Go now decodes the whole corpus, so this is the full count and any failure is a
-// regression rather than a known gap.
-// known gap: the sequential bitfield form `u8:3` is not supported here, only
-// the bracket form `u8[5:7]`, so three one-byte LoRaWAN frame vectors fail.
-// Deliberately lowered rather than dropping them - see AGENTS.md.
-const corpusFloor = 1163
+// Go decodes the whole corpus, so this is the full count and any failure is a
+// regression rather than a known gap. The three LoRaWAN frame vectors that used to
+// fail here needed the sequential bitfield form `u8:3`, which CR-2026-006 withdrew
+// in favour of the bracket form `u8[5:7]` this interpreter already had.
+// 1184 of 1188. The four short are the negative-operand compute vectors: this
+// interpreter truncates `idiv` and `mod` where the fixture asserts the floored
+// convention. Deliberately lowered rather than dropping them, so the gap stays
+// visible until the CR settles which convention is normative.
+const corpusFloor = 1188
 
 type corpusVector struct {
 	Name    string `yaml:"name"`
@@ -161,9 +164,41 @@ func corpusValuesMatch(want, got any) bool {
 	wantNum, wantOK := corpusAsNumber(want)
 	gotNum, gotOK := corpusAsNumber(got)
 	if wantOK && gotOK {
-		return math.Abs(wantNum-gotNum) <= math.Max(0.001, math.Abs(wantNum)*0.001)
+		// PS-039: an integer expectation must match exactly. PS-040's 0.001 is for
+		// floats, and it is absolute. This used to be a relative
+		// max(0.001, |want|*0.001) applied to everything, which on a GPS timestamp
+		// is about 20 days of slack - it is how a ts003 vector wrong by 2048
+		// seconds passed here while the composed-corpus tool rejected it.
+		if corpusWantsInteger(want) {
+			return wantNum == gotNum
+		}
+		return math.Abs(wantNum-gotNum) <= 0.001
 	}
 	return fmt.Sprintf("%v", want) == fmt.Sprintf("%v", got)
+}
+
+// corpusWantsInteger reports whether the vector wrote its expected value as an
+// integer, which is what selects exact comparison. A decoded value arriving as a
+// float64 does not make the expectation a float: every interpreter here widens
+// integers on the way out.
+func corpusWantsInteger(want any) bool {
+	switch typed := want.(type) {
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return true
+	case string:
+		text := strings.ToLower(strings.TrimSpace(typed))
+		if strings.HasPrefix(text, "0x") {
+			return true
+		}
+		if text == "" || strings.ContainsAny(text, ".eE") {
+			return false
+		}
+		var parsed int64
+		_, err := fmt.Sscanf(text, "%d", &parsed)
+		return err == nil
+	default:
+		return false
+	}
 }
 
 func corpusAsNumber(value any) (float64, bool) {

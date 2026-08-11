@@ -177,36 +177,14 @@ function decodeFieldRaw(buf, field, variables, schema) {{
 }}
 
 function parseBitfield(type) {{
-  // u8[3:4] - Python slice
+  // u8[3:4] - the bracket range, the only bitfield spelling since CR-2026-006.
+  // The withdrawn sequential form `u8:2` used to be matched here with a start bit
+  // of 0, which is not what it meant, so generated decoders read the wrong bits.
   var m = type.match(/^u(\\d+)\\[(\\d+):(\\d+)\\]$/);
   if (m) {{
     return {{ start: parseInt(m[2]), width: parseInt(m[3]) - parseInt(m[2]) + 1, consumeDefault: false }};
   }}
-  
-  // u8[3+:2] - Verilog part-select
-  m = type.match(/^u(\\d+)\\[(\\d+)\\+:(\\d+)\\]$/);
-  if (m) {{
-    return {{ start: parseInt(m[2]), width: parseInt(m[3]), consumeDefault: false }};
-  }}
-  
-  // bits<3,2> - C++ template
-  m = type.match(/^bits<(\\d+),(\\d+)>$/);
-  if (m) {{
-    return {{ start: parseInt(m[1]), width: parseInt(m[2]), consumeDefault: false }};
-  }}
-  
-  // bits:2@3 - @ notation
-  m = type.match(/^bits:(\\d+)@(\\d+)$/);
-  if (m) {{
-    return {{ start: parseInt(m[2]), width: parseInt(m[1]), consumeDefault: false }};
-  }}
-  
-  // u8:2 - Sequential
-  m = type.match(/^u(\\d+):(\\d+)$/);
-  if (m) {{
-    return {{ start: 0, width: parseInt(m[2]), consumeDefault: false }};
-  }}
-  
+
   return null;
 }}
 

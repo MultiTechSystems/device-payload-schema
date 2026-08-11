@@ -31,8 +31,12 @@ public static class SchemaParser
         if (string.IsNullOrEmpty(schema.Endian))
             schema.Endian = "big";
 
-        if (root.TryGetValue("header", out var header) && header is YamlSequenceNode headerSeq)
-            schema.Header = ParseFields(headerSeq);
+        // No `header:` block. It was never in the specification, and honouring it
+        // here while Python and Go ignored it meant the same schema decoded
+        // differently per language - silently, since the ignoring implementations
+        // read the header's bytes as the first fields rather than erroring. Use a
+        // `definitions:` entry and `$ref` instead, which is specified and works
+        // everywhere; schemas/library/common/headers.yaml does exactly that.
 
         if (root.TryGetValue("fields", out var fields) && fields is YamlSequenceNode fieldsSeq)
             schema.Fields = ParseFields(fieldsSeq);
@@ -154,6 +158,13 @@ public static class SchemaParser
                     // rounding its output reported the unrounded value instead.
                     if (tMap.TryGetValue("op", out var top)) stage.Op = Scalar(top);
                     if (tMap.TryGetValue("decimals", out var tdec)) stage.Decimals = (int)Double(tdec);
+                    // Unary maths stages. dl-blg's thermistor needs a natural log
+                    // and a cube, and had no way to say so in this implementation.
+                    if (tMap.TryGetValue("sqrt", out var tsq)) stage.Sqrt = Flag(tsq);
+                    if (tMap.TryGetValue("abs", out var tab)) stage.Abs = Flag(tab);
+                    if (tMap.TryGetValue("log10", out var tl10)) stage.Log10 = Flag(tl10);
+                    if (tMap.TryGetValue("log", out var tlog)) stage.Log = Flag(tlog);
+                    if (tMap.TryGetValue("pow", out var tpow)) stage.Pow = Double(tpow);
                     f.Transform.Add(stage);
                 }
             }
@@ -492,6 +503,14 @@ public static class SchemaParser
     {
         var s = Scalar(node);
         return double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out double v) ? v : 0;
+    }
+
+    /// <summary>Reads a flag written as a YAML boolean, or as 1/0 by a JSON producer.</summary>
+    static bool Flag(YamlNode node)
+    {
+        var s = Scalar(node);
+        if (bool.TryParse(s, out bool b)) return b;
+        return double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out double v) && v != 0;
     }
 
     static object? ParseScalarValue(YamlNode node)

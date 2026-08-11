@@ -4009,10 +4009,18 @@ fields:
 		t.Fatalf("ParseSchema() error = %v", err)
 	}
 
-	// Division by zero
-	_, err = schema.Decode([]byte{10, 0})
-	if err == nil {
-		t.Error("expected division by zero error")
+	// PS-278 (CR-2026-007): a zero divisor omits the field and decoding continues.
+	// This expected an error until then, which abandoned the whole payload where the
+	// other implementations returned the rest of it.
+	out, err := schema.Decode([]byte{10, 0})
+	if err != nil {
+		t.Fatalf("zero divisor should not fail the decode: %v", err)
+	}
+	if _, present := out["result"]; present {
+		t.Error("expected the computed field to be absent for a zero divisor")
+	}
+	if out["a"] != float64(10) && out["a"] != 10 {
+		t.Errorf("decoding should continue past the omitted field, got a = %v", out["a"])
 	}
 }
 
@@ -7172,9 +7180,13 @@ fields:
 		t.Fatalf("ParseSchema() error = %v", err)
 	}
 
-	_, err = schema.Decode([]byte{42})
-	if err == nil {
-		t.Error("expected error for division by zero")
+	// PS-278 (CR-2026-007): omitted, not an error - see TestComputeDivByZero.
+	out, err := schema.Decode([]byte{42})
+	if err != nil {
+		t.Fatalf("zero divisor should not fail the decode: %v", err)
+	}
+	if _, present := out["result"]; present {
+		t.Error("expected the computed field to be absent for a zero divisor")
 	}
 }
 

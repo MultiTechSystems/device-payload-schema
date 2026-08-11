@@ -18,12 +18,15 @@ namespace PayloadSchema.Tests;
 /// </summary>
 public class CorpusConformanceTests
 {
-    // This implementation now decodes the whole corpus, so the floor is the full
-    // count and any failure is a regression rather than a known gap.
-        // known gap: the sequential bitfield form `u8:3` is not supported here, only
-    // the bracket form `u8[5:7]`, so three one-byte LoRaWAN frame vectors fail.
-    // Deliberately lowered rather than dropping them - see AGENTS.md.
-    const int CorpusFloor = 1163;
+    // This implementation decodes the whole corpus, so the floor is the full count
+    // and any failure is a regression rather than a known gap. The three LoRaWAN
+    // frame vectors that used to fail here needed the sequential bitfield form
+    // `u8:3`, which CR-2026-006 withdrew in favour of the bracket form `u8[5:7]`
+    // this implementation already had.
+    // 1184 of 1188. The four short are the negative-operand compute vectors: this
+    // implementation truncates `idiv` and `mod` where the fixture asserts the
+    // floored convention. Awaiting the CR that settles which is normative.
+    const int CorpusFloor = 1188;
 
     readonly ITestOutputHelper _output;
 
@@ -97,15 +100,14 @@ public class CorpusConformanceTests
                     foreach (var kv in expected.Children)
                     {
                         var key = ((YamlScalarNode)kv.Key).Value ?? "";
-                        var want = kv.Value is YamlScalarNode scalar ? scalar.Value : null;
                         if (!result.TryGetValue(key, out var got))
                         {
                             mismatch = $"{key} missing";
                             break;
                         }
-                        if (!ValuesMatch(want, got))
+                        if (!NodeMatches(kv.Value, got))
                         {
-                            mismatch = $"{key}: want {want}, got {got}";
+                            mismatch = $"{key}: want {Describe(kv.Value)}, got {got}";
                             break;
                         }
                     }
@@ -138,6 +140,54 @@ public class CorpusConformanceTests
         counts[key] = counts.TryGetValue(key, out var n) ? n + 1 : 1;
 
     /// <summary>
+    /// Compares an expected YAML node against a decoded value, descending into
+    /// sequences and mappings (PS-044, PS-045).
+    ///
+    /// This runner used to read every expectation as <c>kv.Value as YamlScalarNode</c>,
+    /// so a structured expected value silently became null and compared against
+    /// whatever was decoded - ts007's list of package pairs reported "want , got
+    /// System.Collections.Generic.List`1[System.Object]". A vector could not express a
+    /// nested expectation at all.
+    /// </summary>
+    static bool NodeMatches(YamlNode want, object? got)
+    {
+        switch (want)
+        {
+            case YamlScalarNode scalar:
+                return ValuesMatch(scalar.Value, got);
+
+            case YamlSequenceNode seq:
+                if (got is not System.Collections.IEnumerable gotSeq || got is string) return false;
+                var gotItems = gotSeq.Cast<object?>().ToList();
+                if (gotItems.Count != seq.Children.Count) return false;
+                return !seq.Children.Where((child, i) => !NodeMatches(child, gotItems[i])).Any();
+
+            case YamlMappingNode map:
+                if (got is not System.Collections.IDictionary gotMap) return false;
+                foreach (var entry in map.Children)
+                {
+                    var mapKey = ((YamlScalarNode)entry.Key).Value ?? "";
+                    if (!gotMap.Contains(mapKey)) return false;
+                    if (!NodeMatches(entry.Value, gotMap[mapKey])) return false;
+                }
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>Renders an expected node for a failure message.</summary>
+    static string Describe(YamlNode node) => node switch
+    {
+        YamlScalarNode scalar => scalar.Value ?? "",
+        YamlSequenceNode seq => "[" + string.Join(", ", seq.Children.Select(Describe)) + "]",
+        YamlMappingNode map => "{" + string.Join(", ", map.Children.Select(
+            kv => Describe(kv.Key) + "=" + Describe(kv.Value))) + "}",
+        _ => node.ToString() ?? "",
+    };
+
+    /// <summary>
     /// Same comparison the conformance tolerance defines: numeric within tolerance,
     /// hex literals read as numbers, booleans as 0 and 1. Without this the runner
     /// reported its own formatting differences as decode failures.
@@ -146,8 +196,31 @@ public class CorpusConformanceTests
     {
         if (want is null || got is null) return Equals(want, got);
         if (AsNumber(want) is double a && AsNumber(got) is double b)
-            return Math.Abs(a - b) <= Math.Max(0.001, Math.Abs(a) * 0.001);
+        {
+            // PS-039: an integer expectation must match exactly. PS-040's 0.001 is for
+            // floats, and it is absolute. This used to be a relative
+            // max(0.001, |want| * 0.001) applied to everything, which on a GPS
+            // timestamp is about 20 days of slack.
+            if (WantsInteger(want)) return a == b;
+            return Math.Abs(a - b) <= 0.001;
+        }
         return string.Equals(want.ToString(), got.ToString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Whether the vector wrote its expected value as an integer, which is what
+    /// selects exact comparison. Expectations reach this runner as YAML scalar text,
+    /// so the decision is made on the text: a decoded value arriving as a double does
+    /// not make the expectation a float.
+    /// </summary>
+    static bool WantsInteger(object want)
+    {
+        var text = (want.ToString() ?? "").Trim();
+        if (text.Length == 0) return false;
+        if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) return true;
+        if (text.Contains('.') || text.Contains('e') || text.Contains('E')) return false;
+        return long.TryParse(text, System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture, out _);
     }
 
     static double? AsNumber(object value)

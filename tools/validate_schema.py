@@ -145,6 +145,29 @@ class ValidationResult:
         }
 
 
+#: Types that carry a colon but are strings rather than bit ranges. `hex:upper` is
+#: the only one; without this it would be read as a bitfield just for its colon.
+_COLON_STRING_TYPES = frozenset({'hex:upper'})
+
+
+def _looks_like_bitfield(ftype: str) -> bool:
+    """Whether a type is claiming to be a bitfield, valid spelling or not.
+
+    Deliberately broad: it must catch the four spellings CR-2026-006 withdrew so
+    they can be reported, not just the one still valid. A bare `u8` or `hex:upper`
+    is not a bitfield.
+    """
+    if not isinstance(ftype, str) or ftype in _COLON_STRING_TYPES:
+        return False
+    if '[' in ftype or '<' in ftype:
+        return True
+    # `bits...` is the withdrawn template and @ notation; a colon after a uN/sN/iN
+    # prefix is the withdrawn sequential form.
+    if ftype == 'bitfield_string':
+        return False
+    return ftype.startswith('bits') or bool(re.match(r'^[usi]\d+:', ftype))
+
+
 def parse_payload(payload: Any) -> bytes:
     """Parse payload from various formats to bytes."""
     if isinstance(payload, bytes):
@@ -175,6 +198,14 @@ def values_match(expected: Any, actual: Any, tolerance: float = 0.001) -> Tuple[
         return True, ""
     
     if isinstance(expected, (int, float)) and isinstance(actual, (int, float)):
+        # PS-039: an integer expectation MUST match exactly. The tolerance is for
+        # floats (PS-040) and applying it to integers made a value that is wrong by
+        # a fraction pass as right - which matters most where an integer is not a
+        # measurement, such as a counter or a GPS timestamp.
+        if isinstance(expected, int) and not isinstance(expected, bool):
+            if expected != actual:
+                return False, f"expected {expected}, got {actual} (integers must match exactly)"
+            return True, ""
         if abs(expected - actual) > tolerance:
             return False, f"expected {expected}, got {actual} (diff: {abs(expected - actual)})"
         return True, ""
@@ -193,6 +224,27 @@ def values_match(expected: Any, actual: Any, tolerance: float = 0.001) -> Tuple[
                 return False, f"{key}: {msg}"
         return True, ""
     
+    # A `bytes` field decodes to a Python bytes object here and to a lowercase hex
+    # string in Go, so a vector cannot be written to satisfy both by value. Hex is
+    # the representation the vectors use, being the one that survives YAML, JSON and
+    # every language, so accept it against a byte sequence.
+    if isinstance(actual, (bytes, bytearray)) and isinstance(expected, str):
+        got_hex = bytes(actual).hex()
+        want_hex = expected.replace(' ', '').lower()
+        if got_hex != want_hex:
+            return False, f"expected {want_hex}, got {got_hex}"
+        return True, ""
+
+    # Same field written as a list of octet values (PS-045), compared element-wise
+    # rather than rejected on type.
+    if isinstance(actual, (bytes, bytearray)) and isinstance(expected, list):
+        if len(expected) != len(actual):
+            return False, f"byte length mismatch: expected {len(expected)}, got {len(actual)}"
+        for i, (e, a) in enumerate(zip(expected, actual)):
+            if e != a:
+                return False, f"[{i}]: expected {e}, got {a}"
+        return True, ""
+
     if isinstance(expected, list) and isinstance(actual, list):
         if len(expected) != len(actual):
             return False, f"list length mismatch: expected {len(expected)}, got {len(actual)}"
@@ -396,9 +448,38 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                     if ref not in known_field_names:
                         errors.append(f"{path}[{i}] ({name}): formula references unknown field '${ref}'")
             
+            # Bitfield form and bounds (PS-274, PS-275). This runs before the
+            # base-type check because a withdrawn spelling like `u8:2` has a base
+            # type of `u8`, which is known, so it would otherwise validate cleanly
+            # and then fail to decode in every implementation.
+            if _looks_like_bitfield(ftype):
+                bitfield = re.match(r'^u(\d+)\[(\d+):(\d+)\]$', ftype)
+                if not bitfield:
+                    errors.append(
+                        f"{path}[{i}] ({name}): '{ftype}' is not a valid bitfield type; "
+                        f"the only spelling is uN[start:end], e.g. u8[3:4] "
+                        f"(uN[base+:width], bits<offset,width>, bits:width@offset and "
+                        f"uN:width were withdrawn by CR-2026-006)"
+                    )
+                else:
+                    base_bits = int(bitfield.group(1))
+                    start = int(bitfield.group(2))
+                    end = int(bitfield.group(3))
+                    if end < start:
+                        errors.append(
+                            f"{path}[{i}] ({name}): bitfield range '{ftype}' ends at bit "
+                            f"{end}, before its start bit {start}"
+                        )
+                    elif end >= base_bits:
+                        errors.append(
+                            f"{path}[{i}] ({name}): bitfield range '{ftype}' ends at bit "
+                            f"{end}, outside the {base_bits} bits of u{base_bits}"
+                        )
+                continue
+
             base_type = ftype.split('[')[0].split(':')[0].split('<')[0]
             if base_type not in KNOWN_TYPES and not base_type.startswith('be_') and not base_type.startswith('le_'):
-                if not re.match(r'(u|i|s)\d+[\[:]', ftype) and not ftype.startswith('bits'):
+                if not re.match(r'(u|i|s)\d+\[', ftype):
                     errors.append(f"{path}[{i}] ({name}): unknown type '{ftype}'")
         
         # Validate modifier values
@@ -469,7 +550,22 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
     # Required fields
     if 'name' not in schema:
         errors.append("Missing required field: 'name'")
-    
+
+    # A top-level `header:` block is not part of the language. It was never in the
+    # specification, and while it existed Java and C# decoded it and Python and Go
+    # ignored it, reading the header's bytes as the first fields - so the same
+    # schema decoded differently per language with nothing reporting a problem.
+    # Support was removed from all implementations; this error exists so a schema
+    # still carrying one is told, rather than quietly losing its first fields.
+    if 'header' in schema:
+        errors.append(
+            "'header' is not a schema key. Declare the header fields in "
+            "'definitions' and pull them in with '$ref', which is specified and "
+            "behaves the same in every implementation - see "
+            "schemas/library/common/headers.yaml"
+        )
+
+
     # Must have either 'fields' or 'ports' (or both)
     if 'fields' in schema:
         has_fields = True

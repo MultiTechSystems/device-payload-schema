@@ -199,7 +199,7 @@ class SchemaInterpreter:
     Supports:
     - All integer types (u8, u16, u24, u32, i8, i16, etc.)
     - Floating point (f32, f64)
-    - Bitfields (u8[3:4], u8:2, bits<3,2>, etc.)
+    - Bitfields (u8[3:4] - the bracket range is the only spelling)
     - Boolean
     - Bytes/strings
     - Arithmetic modifiers (mult, add, div)
@@ -217,10 +217,7 @@ class SchemaInterpreter:
         self.definitions = schema.get('definitions', {})
         self.direction = schema.get('direction', 'uplink')  # uplink|downlink|bidirectional
         self.downlink_commands = schema.get('downlink_commands', {})
-        
-        # Bitfield state for sequential extraction
-        self._bit_pos = 0
-    
+
     def _parse_compact_format(self, format_str: str) -> tuple:
         """
         Parse compact format string to field definitions.
@@ -504,45 +501,24 @@ class SchemaInterpreter:
         
         Returns: (base_size_bytes, bit_offset, bit_width)
         """
-        # Python slice: u8[3:4] - bits 3 to 4 inclusive
-        match = re.match(r'u(\d+)\[(\d+):(\d+)\]', type_str)
+        # Bracket range: u8[3:4] - bits 3 to 4 inclusive. This is the only bitfield
+        # spelling. The Verilog part-select `u8[3+:2]`, the C++ template `bits<3,2>`,
+        # the @ notation `bits:2@3` and the sequential `u8:2` were withdrawn by
+        # CR-2026-006, so a schema still using one must fail loudly rather than be
+        # accepted by an interpreter no other language agrees with.
+        match = re.match(r'u(\d+)\[(\d+):(\d+)\]$', type_str)
         if match:
             base_size = int(match.group(1)) // 8
             start = int(match.group(2))
             end = int(match.group(3))
             width = end - start + 1
             return base_size, start, width
-        
-        # Verilog part-select: u8[3+:2] - 2 bits starting at bit 3
-        match = re.match(r'u(\d+)\[(\d+)\+:(\d+)\]', type_str)
-        if match:
-            base_size = int(match.group(1)) // 8
-            offset = int(match.group(2))
-            width = int(match.group(3))
-            return base_size, offset, width
-        
-        # C++ template: bits<3,2> - 2 bits at offset 3
-        match = re.match(r'bits<(\d+),(\d+)>', type_str)
-        if match:
-            offset = int(match.group(1))
-            width = int(match.group(2))
-            return 1, offset, width
-        
-        # @ notation: bits:2@3 - 2 bits at offset 3
-        match = re.match(r'bits:(\d+)@(\d+)', type_str)
-        if match:
-            width = int(match.group(1))
-            offset = int(match.group(2))
-            return 1, offset, width
-        
-        # Sequential: u8:2 - next 2 bits
-        match = re.match(r'u(\d+):(\d+)', type_str)
-        if match:
-            base_size = int(match.group(1)) // 8
-            width = int(match.group(2))
-            return base_size, -1, width  # -1 = sequential
-        
-        raise ValueError(f"Unknown bitfield format: {type_str}")
+
+        raise ValueError(
+            f"Unknown bitfield format: {type_str} - the only bitfield spelling is "
+            f"uN[start:end], e.g. u8[3:4]. uN[base+:width], bits<offset,width>, "
+            f"bits:width@offset and uN:width were withdrawn by CR-2026-006"
+        )
     
     def _extract_bits(self, buf: bytes, pos: int, bit_offset: int, 
                       bit_width: int, base_size: int) -> Tuple[int, int, bool]:
@@ -553,39 +529,24 @@ class SchemaInterpreter:
         """
         if pos >= len(buf):
             raise ValueError(f"Buffer too short at pos {pos}")
-        
-        byte_val = buf[pos]
-        
-        if bit_offset < 0:
-            # Sequential mode - use internal bit position
-            if self._current_byte_pos != pos:
-                self._current_byte_pos = pos
-                self._current_byte = byte_val
-                self._bit_pos = 8  # Start from MSB
-            
-            self._bit_pos -= bit_width
-            if self._bit_pos < 0:
-                raise ValueError("Bit overflow in sequential extraction")
-            
-            mask = (1 << bit_width) - 1
-            value = (self._current_byte >> self._bit_pos) & mask
-            
-            consumed = self._bit_pos == 0
-            return value, pos, consumed
-        else:
-            # Explicit offset mode. The base width is part of the type - `u24[4:23]`
-            # means bits 4-23 of a 24-bit big-endian value - so read that many bytes
-            # before masking. Reading only buf[pos] made every range wider than one
-            # byte decode from the first byte alone: rakwireless/qingping declares a
-            # 12-bit humidity as u24[0:11] and got 11 where the device means 1320.
-            if pos + base_size > len(buf):
-                raise ValueError(
-                    "Buffer too short for %d-bit bitfield at pos %d" % (base_size * 8, pos)
-                )
-            raw = int.from_bytes(buf[pos:pos + base_size], 'big')
-            mask = (1 << bit_width) - 1
-            value = (raw >> bit_offset) & mask
-            return value, pos, False
+
+        # The base width is part of the type - `u24[4:23]` means bits 4-23 of a
+        # 24-bit big-endian value - so read that many bytes before masking. Reading
+        # only buf[pos] made every range wider than one byte decode from the first
+        # byte alone: rakwireless/qingping declares a 12-bit humidity as u24[0:11]
+        # and got 11 where the device means 1320.
+        if pos + base_size > len(buf):
+            raise ValueError(
+                "Buffer too short for %d-bit bitfield at pos %d" % (base_size * 8, pos)
+            )
+        raw = int.from_bytes(buf[pos:pos + base_size], 'big')
+        mask = (1 << bit_width) - 1
+        value = (raw >> bit_offset) & mask
+
+        # A bracket range never advances the read position on its own; `consume: N`
+        # is the only way to move it (PS-060). The sequential form's implicit
+        # advance on reaching bit 0 went with CR-2026-006.
+        return value, pos, False
     
     def _decode_field(self, field_def: Dict[str, Any], buf: bytes, 
                       pos: int) -> Tuple[Any, int]:
@@ -1210,7 +1171,10 @@ class SchemaInterpreter:
             else:
                 value = self._evaluate_compute(field_def['compute'])
             
-            # Apply transform after compute
+            # Apply transform after compute. An omitted compute short-circuits:
+            # there is no value to transform, and float(OMITTED) would raise.
+            if value is OMITTED:
+                return OMITTED
             if value is not None and 'transform' in field_def:
                 value = self._apply_transform(float(value), field_def['transform'])
         
@@ -1383,16 +1347,24 @@ class SchemaInterpreter:
         elif op == 'mul':
             return a * b
         elif op == 'div':
+            # PS-278: omit rather than emit NaN, which is not a JSON value.
             if b == 0:
-                return float('nan')
+                return OMITTED
             return a / b
         elif op == 'mod':
+            # PS-278: a zero divisor omits the field. Returning NaN, as this used to,
+            # produces `{"x": NaN}` - which is not JSON, so one zero divisor made the
+            # whole decode unparseable by a conforming consumer.
             if b == 0:
-                return float('nan')
+                return OMITTED
+            # PS-277 floored, and PS-284: operands truncate toward zero first.
+            # Python's `%` is already floored, so the remainder takes the divisor's
+            # sign and `mod(a, 8)` stays in 0..7.
             return float(int(a) % int(b))
         elif op == 'idiv':
             if b == 0:
-                return float('nan')
+                return OMITTED
+            # PS-276 floored: Python's `//` rounds toward negative infinity.
             return float(int(a) // int(b))
         else:
             raise ValueError(f"Unknown compute op: {op}")
@@ -1866,12 +1838,7 @@ class SchemaInterpreter:
             DecodeResult with decoded data
         """
         result = DecodeResult(data={}, bytes_consumed=0)
-        
-        # Reset bitfield state
-        self._bit_pos = 0
-        self._current_byte = 0
-        self._current_byte_pos = -1
-        
+
         # Track current data for match references
         self._current_data = result.data
         # Variable storage for Option B match references
@@ -1992,6 +1959,10 @@ class SchemaInterpreter:
             if field_type == 'number':
                 try:
                     value = self._decode_computed_field(field_def)
+                    if value is OMITTED:
+                        # Zero divisor (PS-278): the field is absent, and decoding of
+                        # the rest of the payload continues.
+                        continue
                     if value is not None:
                         result.data[name] = value
                         self._variables[name] = value

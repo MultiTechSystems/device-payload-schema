@@ -288,50 +288,40 @@ void test_float_types(void) {
 void test_bitfield_syntaxes(void) {
     printf("--- Bitfield Syntaxes ---\n");
     
-    /* Test parse_type_string for all 5 syntaxes */
+    /* The bracket range is the only bitfield spelling (CR-2026-006). */
     uint8_t bs, bw;
-    
-    /* Syntax 1: u8[3:4] - bits 3..4 inclusive = 2 bits */
+
+    /* u8[3:4] - bits 3..4 inclusive = 2 bits */
     {
         field_type_t t = parse_type_string("u8[3:4]", &bs, &bw);
         TCHECK(t == FIELD_TYPE_BITS, "u8[3:4] type");
         TCHECK_INT(bs, 3, "u8[3:4] start");
         TCHECK_INT(bw, 2, "u8[3:4] width");
     }
-    
-    /* Syntax 2: u8[3+:2] */
+
+    /* u16[4:11] - a range wider than one byte */
     {
-        field_type_t t = parse_type_string("u8[3+:2]", &bs, &bw);
-        TCHECK(t == FIELD_TYPE_BITS, "u8[3+:2] type");
-        TCHECK_INT(bs, 3, "u8[3+:2] start");
-        TCHECK_INT(bw, 2, "u8[3+:2] width");
+        field_type_t t = parse_type_string("u16[4:11]", &bs, &bw);
+        TCHECK(t == FIELD_TYPE_BITS, "u16[4:11] type");
+        TCHECK_INT(bs, 4, "u16[4:11] start");
+        TCHECK_INT(bw, 8, "u16[4:11] width");
     }
-    
-    /* Syntax 3: bits<3,2> */
+
+    /* The four withdrawn spellings must not parse. The sequential form in
+     * particular used to return a bit_start sentinel of 255 that no decode path
+     * read, so it parsed without ever decoding correctly. */
     {
-        field_type_t t = parse_type_string("bits<3,2>", &bs, &bw);
-        TCHECK(t == FIELD_TYPE_BITS, "bits<3,2> type");
-        TCHECK_INT(bs, 3, "bits<3,2> start");
-        TCHECK_INT(bw, 2, "bits<3,2> width");
+        TCHECK(parse_type_string("u8[3+:2]", &bs, &bw) == FIELD_TYPE_UNKNOWN,
+               "u8[3+:2] withdrawn");
+        TCHECK(parse_type_string("bits<3,2>", &bs, &bw) == FIELD_TYPE_UNKNOWN,
+               "bits<3,2> withdrawn");
+        TCHECK(parse_type_string("bits:2@3", &bs, &bw) == FIELD_TYPE_UNKNOWN,
+               "bits:2@3 withdrawn");
+        TCHECK(parse_type_string("u8:2", &bs, &bw) == FIELD_TYPE_UNKNOWN,
+               "u8:2 withdrawn");
     }
-    
-    /* Syntax 4: bits:2@3 */
-    {
-        field_type_t t = parse_type_string("bits:2@3", &bs, &bw);
-        TCHECK(t == FIELD_TYPE_BITS, "bits:2@3 type");
-        TCHECK_INT(bs, 3, "bits:2@3 start");
-        TCHECK_INT(bw, 2, "bits:2@3 width");
-    }
-    
-    /* Syntax 5: u8:2 (sequential) */
-    {
-        field_type_t t = parse_type_string("u8:2", &bs, &bw);
-        TCHECK(t == FIELD_TYPE_BITS, "u8:2 type");
-        TCHECK_INT(bs, 255, "u8:2 start=255 (sequential)");
-        TCHECK_INT(bw, 2, "u8:2 width");
-    }
-    
-    /* Decode: all 5 syntaxes on byte 0x18 (bits 3-4 set = 0b11) */
+
+    /* Decode on byte 0x18 (bits 3-4 set = 0b11) */
     uint8_t buf[] = {0x18};  /* 0b00011000 */
     
     {

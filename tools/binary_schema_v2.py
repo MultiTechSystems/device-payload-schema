@@ -258,39 +258,19 @@ class BinarySchemaEncoder:
     
     def _parse_bitfield(self, type_str: str) -> Optional[Tuple[int, int, int]]:
         """Parse bitfield syntax, return (byte_width, start_bit, bit_width)."""
-        # u8[3:4] - Python slice
-        m = re.match(r'u(\d+)\[(\d+):(\d+)\]', type_str)
+        # u8[3:4] - the bracket range, and since CR-2026-006 the only spelling.
+        #
+        # The four withdrawn forms were deleted rather than translated, because two
+        # of them were never right here: the sequential `u8:3` returned a start bit
+        # of 0, so a field the interpreter reads as bits 5-7 encoded as bits 0-2.
+        # Nothing caught it because no schema reaching this encoder used the form.
+        m = re.match(r'u(\d+)\[(\d+):(\d+)\]$', type_str)
         if m:
             byte_width = int(m.group(1)) // 8
             start = int(m.group(2))
             end = int(m.group(3))
             return (byte_width, start, end - start + 1)
-        
-        # u8[3+:2] - Verilog part-select
-        m = re.match(r'u(\d+)\[(\d+)\+:(\d+)\]', type_str)
-        if m:
-            byte_width = int(m.group(1)) // 8
-            start = int(m.group(2))
-            width = int(m.group(3))
-            return (byte_width, start, width)
-        
-        # bits<3,2> - C++ template
-        m = re.match(r'bits<(\d+),(\d+)>', type_str)
-        if m:
-            return (1, int(m.group(1)), int(m.group(2)))
-        
-        # bits:2@3 - @ notation
-        m = re.match(r'bits:(\d+)@(\d+)', type_str)
-        if m:
-            return (1, int(m.group(2)), int(m.group(1)))
-        
-        # u8:2 - Sequential (simplified)
-        m = re.match(r'u(\d+):(\d+)$', type_str)
-        if m:
-            byte_width = int(m.group(1)) // 8
-            width = int(m.group(2))
-            return (byte_width, 0, width)
-        
+
         return None
     
     def _get_base_type(self, type_str: str) -> Tuple[FieldType, int]:

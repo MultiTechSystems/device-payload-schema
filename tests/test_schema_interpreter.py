@@ -201,66 +201,43 @@ class TestBitfieldTypes:
     
     Spec Requirements:
     - M048: Bits numbered 0 (LSB) to 7 (MSB)
-    - M049: All shorthand syntaxes (slice, part-select, template, @, sequential)
+    - M049: the bracket range uN[start:end] is the only bitfield spelling
     - M050: Bitfield extractions MUST NOT advance read position unless consume:1
     """
-    
+
     def test_decode_bitfield_python_slice(self):
-        """Test Python slice notation: u8[3:4]."""
+        """Test the bracket range: u8[3:4]."""
         schema = {'fields': [
             {'name': 'val', 'type': 'u8[3:4]', 'consume': 1}
         ]}
         interpreter = SchemaInterpreter(schema)
-        
+
         # Byte: 0b00011000 = 0x18, bits 3-4 = 0b11 = 3
         result = interpreter.decode(bytes([0x18]))
         assert result.data['val'] == 3
-    
-    def test_decode_bitfield_verilog(self):
-        """Test Verilog part-select: u8[3+:2]."""
+
+    @pytest.mark.parametrize('withdrawn_type', [
+        'u8[3+:2]',   # Verilog part-select
+        'bits<3,2>',  # C++ template
+        'bits:2@3',   # @ notation
+        'u8:2',       # sequential
+    ])
+    def test_withdrawn_bitfield_forms_are_rejected(self, withdrawn_type):
+        """CR-2026-006 left uN[start:end] as the only bitfield spelling.
+
+        These four were implemented in Python alone, which is what let
+        `lorawan_frames.yaml` use the sequential form and hold Go, Java and C#
+        three vectors below the corpus. Accepting them quietly here would let that
+        divergence return, so each must be reported as an error.
+        """
         schema = {'fields': [
-            {'name': 'val', 'type': 'u8[3+:2]', 'consume': 1}
+            {'name': 'val', 'type': withdrawn_type, 'consume': 1}
         ]}
-        interpreter = SchemaInterpreter(schema)
-        
-        result = interpreter.decode(bytes([0x18]))
-        assert result.data['val'] == 3
-    
-    def test_decode_bitfield_cpp_template(self):
-        """Test C++ template: bits<3,2>."""
-        schema = {'fields': [
-            {'name': 'val', 'type': 'bits<3,2>', 'consume': 1}
-        ]}
-        interpreter = SchemaInterpreter(schema)
-        
-        result = interpreter.decode(bytes([0x18]))
-        assert result.data['val'] == 3
-    
-    def test_decode_bitfield_at_notation(self):
-        """Test @ notation: bits:2@3."""
-        schema = {'fields': [
-            {'name': 'val', 'type': 'bits:2@3', 'consume': 1}
-        ]}
-        interpreter = SchemaInterpreter(schema)
-        
-        result = interpreter.decode(bytes([0x18]))
-        assert result.data['val'] == 3
-    
-    def test_decode_bitfield_sequential(self):
-        """Test sequential: u8:2."""
-        schema = {'fields': [
-            {'name': 'high', 'type': 'u8:2'},
-            {'name': 'mid', 'type': 'u8:3'},
-            {'name': 'low', 'type': 'u8:3', 'consume': 1},
-        ]}
-        interpreter = SchemaInterpreter(schema)
-        
-        # Byte: 0b11_010_001 = 0xD1
-        result = interpreter.decode(bytes([0xD1]))
-        assert result.data['high'] == 3   # bits 6-7 = 0b11
-        assert result.data['mid'] == 2    # bits 3-5 = 0b010
-        assert result.data['low'] == 1    # bits 0-2 = 0b001
-    
+        result = SchemaInterpreter(schema).decode(bytes([0x18]))
+
+        assert 'val' not in result.data
+        assert any('Unknown bitfield format' in e for e in result.errors), result.errors
+
     def test_decode_multiple_bitfields_no_advance(self):
         """Test multiple bitfields from same byte."""
         schema = {'fields': [
@@ -1904,7 +1881,12 @@ class TestDeclarativeComputedFields:
             assert result.data['lower'] == test_byte % 16
     
     def test_compute_mod_division_by_zero(self):
-        """Test mod operation with division by zero returns NaN."""
+        """A zero divisor omits the field (PS-278, CR-2026-007).
+
+        This asserted NaN until CR-2026-007. NaN is not a JSON value, so the field
+        serialized as a bare `NaN` token and made the whole decode unparseable by a
+        conforming consumer - one zero divisor cost every other field in the payload.
+        """
         schema = {
             'fields': [
                 {'name': 'a', 'type': 'u8'},
@@ -1916,11 +1898,16 @@ class TestDeclarativeComputedFields:
         
         result = interpreter.decode(bytes([100]))
         assert result.success
-        import math
-        assert math.isnan(result.data['result'])
+        assert 'result' not in result.data
+        assert result.data['a'] == 100, 'decoding continues past the omitted field'
     
     def test_compute_idiv_division_by_zero(self):
-        """Test idiv operation with division by zero returns NaN."""
+        """A zero divisor omits the field (PS-278, CR-2026-007).
+
+        This asserted NaN until CR-2026-007. NaN is not a JSON value, so the field
+        serialized as a bare `NaN` token and made the whole decode unparseable by a
+        conforming consumer - one zero divisor cost every other field in the payload.
+        """
         schema = {
             'fields': [
                 {'name': 'a', 'type': 'u8'},
@@ -1932,8 +1919,8 @@ class TestDeclarativeComputedFields:
         
         result = interpreter.decode(bytes([100]))
         assert result.success
-        import math
-        assert math.isnan(result.data['result'])
+        assert 'result' not in result.data
+        assert result.data['a'] == 100, 'decoding continues past the omitted field'
     
     def test_guard_with_gt(self):
         """Test guard with greater-than condition."""
@@ -5756,3 +5743,102 @@ class TestValidationLevels:
         assert 'error_count' in result_dict
         assert 'warning_count' in result_dict
         assert 'info_count' in result_dict
+
+
+class TestHeaderBlockRemoved:
+    """A top-level `header:` block is not part of the language.
+
+    It was never in the specification. While it existed, Java and C# decoded it and
+    Python and Go ignored it - reading the header's bytes as the first fields - so
+    the same schema decoded differently per language and nothing reported a
+    problem. Support was removed from every implementation; the validator reports
+    it so a schema still carrying one is told, rather than quietly losing its
+    first fields.
+    """
+
+    def test_header_key_is_rejected(self):
+        from validate_schema import validate_schema_structure
+
+        errors = validate_schema_structure({
+            'name': 'legacy',
+            'header': [{'name': 'version', 'type': 'u8'}],
+            'fields': [{'name': 'reading', 'type': 'u8'}],
+        })
+
+        assert any("'header' is not a schema key" in e for e in errors), errors
+        assert any('$ref' in e for e in errors), errors
+
+    def test_ref_header_is_the_replacement(self):
+        """The $ref form must splice ahead of local fields and consume its bytes."""
+        schema = {
+            'name': 'ref_header',
+            'definitions': {
+                'common_header': {
+                    'fields': [
+                        {'name': 'version', 'type': 'u8'},
+                        {'name': 'msg_type', 'type': 'u8'},
+                    ]
+                }
+            },
+            'fields': [
+                {'$ref': '#/definitions/common_header'},
+                {'name': 'reading', 'type': 'u16'},
+            ],
+        }
+
+        result = SchemaInterpreter(schema).decode(bytes.fromhex('01020304'))
+
+        assert result.errors == []
+        assert result.data == {'version': 1, 'msg_type': 2, 'reading': 772}
+
+
+class TestConformanceComparisonIsExactForIntegers:
+    """PS-039 requires an integer expectation to match exactly.
+
+    PS-040's 0.001 tolerance is for floats and is absolute. Every corpus runner used
+    to apply a *relative* `max(0.001, |want| * 0.001)` to everything instead, which
+    on a GPS timestamp is roughly 20 days of slack - and that is how a ts003 clock
+    sync vector wrong by 2048 seconds passed in Go, Java and C# while the
+    composed-corpus tool rejected it.
+    """
+
+    def test_integer_off_by_2048_is_rejected(self):
+        from validate_schema import values_match
+
+        want, got = 1705570304, 1705572352  # the real ts003 discrepancy
+        assert abs(want - got) <= max(0.001, abs(want) * 0.001), (
+            "the relative rule really did accept this, which is the point"
+        )
+
+        match, message = values_match(want, got, 0.001)
+        assert not match
+        assert "exactly" in message
+
+    def test_integer_must_match_exactly_not_within_tolerance(self):
+        from validate_schema import values_match
+
+        # Inside an absolute 0.001, yet still not an exact integer match.
+        match, _ = values_match(5, 5.0005, 0.001)
+        assert not match
+
+        match, _ = values_match(5, 5, 0.001)
+        assert match
+        match, _ = values_match(5, 5.0, 0.001)
+        assert match, "an interpreter that widens integers to floats still matches"
+
+    def test_float_expectation_keeps_the_absolute_tolerance(self):
+        from validate_schema import values_match
+
+        match, _ = values_match(22.0288, 22.0289, 0.001)
+        assert match, "PS-040: floats compare within 0.001"
+
+        match, _ = values_match(22.0288, 22.0400, 0.001)
+        assert not match
+
+    def test_tolerance_is_absolute_not_relative(self):
+        from validate_schema import values_match
+
+        # A large float wrong by more than 0.001 must fail, however small that is
+        # as a proportion of the value.
+        match, _ = values_match(115020.6822, 115020.7822, 0.001)
+        assert not match

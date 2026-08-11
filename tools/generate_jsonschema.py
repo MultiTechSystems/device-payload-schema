@@ -42,7 +42,7 @@ def generate_payload_schema() -> dict:
             },
             "type": {
                 "type": "string",
-                "description": "Data type. Standard types or bitfield syntax (u8[3:4], bits<3,2>, etc.)"
+                "description": "Data type. Standard types or the bitfield range uN[start:end], e.g. u8[3:4]"
             },
             "length": {
                 "type": "integer",

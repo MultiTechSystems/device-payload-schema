@@ -13,9 +13,6 @@ public static class SchemaDecoder
         var ctx = new DecodeContext(data, schema.Endian);
         var result = new Dictionary<string, object?>();
 
-        if (schema.Header.Count > 0)
-            MergeTo(result, DecodeFields(schema.Header, ctx, schema));
-
         MergeTo(result, DecodeFields(schema.Fields, ctx, schema));
 
         if (ctx.Quality.Count > 0)
@@ -29,9 +26,6 @@ public static class SchemaDecoder
         var fields = ResolveFields(schema, fPort);
         var ctx = new DecodeContext(data, schema.Endian);
         var result = new Dictionary<string, object?>();
-
-        if (schema.Header.Count > 0)
-            MergeTo(result, DecodeFields(schema.Header, ctx, schema));
 
         MergeTo(result, DecodeFields(fields, ctx, schema));
 
@@ -428,8 +422,15 @@ public static class SchemaDecoder
                 throw new InvalidOperationException($"Unknown field type: {field.Type} ({field.RawType})");
         }
 
-        // Apply modifiers (skip for Number type with ref -- already applied)
-        if (field.Type == FieldType.Number && field.Ref != null)
+        // Apply modifiers, skipping a Number whose value came from a ref or a
+        // compute - DecodeNumber already applied its stages, so doing it again here
+        // doubles them. The ref case was already skipped; compute was not, so a
+        // compute field carrying a transform had it run twice, and
+        // decentlab/dl-blg's voltage_ratio came out as -0.4999999996 where the
+        // vendor decoder says 0.0064094: its `div: 16777216` and `add: -0.5` were
+        // each applied a second time. Nothing caught it - that schema had no test
+        // vectors at all.
+        if (field.Type == FieldType.Number && (field.Ref != null || field.Compute != null))
         {
             // already handled in DecodeNumber
         }
@@ -474,6 +475,36 @@ public static class SchemaDecoder
     /// mult, div, add, so a stage cannot mean different things in different
     /// languages. A stage may instead name an operation, as {op: round, decimals: N}.
     /// </summary>
+
+    /// <summary>
+    /// Signals that a computed field is absent because its divisor was zero (PS-278).
+    /// A distinct NaN payload, so it travels the existing double-valued compute path.
+    /// </summary>
+    internal static readonly double ComputeOmitted = BitConverter.Int64BitsToDouble(0x7ff8000000000abcL);
+
+    internal static bool IsComputeOmitted(double v) =>
+        BitConverter.DoubleToInt64Bits(v) == 0x7ff8000000000abcL;
+
+    /// <summary>
+    /// Integer division rounded toward negative infinity (PS-276).
+    ///
+    /// Corrected on the integers deliberately: (long)Math.Floor((double)a / b) is wrong
+    /// above 2^53, where a long is not exactly representable as a double - for
+    /// a = 2^53+1, b = 1 it yields 9007199254740992 rather than 9007199254740993.
+    /// </summary>
+    static long FloorDiv(long a, long b)
+    {
+        long q = a / b;
+        if ((a % b != 0) && ((a < 0) != (b < 0))) q--;
+        return q;
+    }
+
+    /// <summary>
+    /// The remainder matching FloorDiv, so a == FloorDiv(a,b)*b + FloorMod(a,b) holds
+    /// for every combination of signs (PS-277). Exact for the full long range.
+    /// </summary>
+    static long FloorMod(long a, long b) => ((a % b) + b) % b;
+
     static double ApplyTransformStages(double numVal, List<TransformStage> stages)
     {
         foreach (var stage in stages)
@@ -485,6 +516,16 @@ public static class SchemaDecoder
                 numVal = Math.Round(numVal, stage.Decimals, MidpointRounding.ToEven);
                 continue;
             }
+            // Unary maths stages, each exclusive of the others and of the arithmetic
+            // ops, in the order the Python interpreter checks them. The domain clamps
+            // match it exactly: sqrt of a negative and log of a non-positive would
+            // otherwise yield NaN and poison every later stage, where the interpreter
+            // yields 0 and log(1e-10).
+            if (stage.Sqrt) { numVal = Math.Sqrt(Math.Max(0.0, numVal)); continue; }
+            if (stage.Abs) { numVal = Math.Abs(numVal); continue; }
+            if (stage.Pow.HasValue) { numVal = Math.Pow(numVal, stage.Pow.Value); continue; }
+            if (stage.Log10) { numVal = Math.Log10(Math.Max(1e-10, numVal)); continue; }
+            if (stage.Log) { numVal = Math.Log(Math.Max(1e-10, numVal)); continue; }
             if (stage.Mult.HasValue) numVal *= stage.Mult.Value;
             if (stage.Div.HasValue && stage.Div.Value != 0) numVal /= stage.Div.Value;
             if (stage.Sub.HasValue) numVal -= stage.Sub.Value;
@@ -537,7 +578,11 @@ public static class SchemaDecoder
             // A compute takes its transform stages and no bare modifiers, as the
             // interpreter does. These were not applied at all, so a computed field
             // asking to be rounded was reported unrounded.
-            numVal = ApplyTransformStages(EvaluateCompute(field.Compute, ctx), field.Transform);
+            var computed = EvaluateCompute(field.Compute, ctx);
+            // A zero divisor omits the field (PS-278), short-circuiting before the
+            // transform stages so they never see the sentinel.
+            if (IsComputeOmitted(computed)) return null;
+            numVal = ApplyTransformStages(computed, field.Transform);
         }
         else
         {
@@ -559,12 +604,18 @@ public static class SchemaDecoder
 
         return cd.Op switch
         {
-            "div" => b == 0 ? throw new DivideByZeroException() : a / b,
+            // PS-278: a zero divisor omits the field. Throwing, as this used to,
+            // abandoned the decode entirely where other implementations carried on.
+            "div" => b == 0 ? ComputeOmitted : a / b,
             "mul" => a * b,
             "add" => a + b,
             "sub" => a - b,
-            "mod" => b == 0 ? throw new DivideByZeroException() : (double)((long)a % (long)b),
-            "idiv" => b == 0 ? throw new DivideByZeroException() : (double)((long)a / (long)b),
+            // PS-277 floored: the remainder takes the divisor's sign, so mod(a, 8)
+            // stays in 0..7. C#'s native % truncates, giving -1 where the floored
+            // answer is 2. PS-284: operands truncate toward zero first.
+            "mod" => b == 0 ? ComputeOmitted : (double)FloorMod((long)a, (long)b),
+            // PS-276 floored: rounds toward negative infinity, not toward zero.
+            "idiv" => b == 0 ? ComputeOmitted : (double)FloorDiv((long)a, (long)b),
             _ => throw new InvalidOperationException($"Unknown compute op: {cd.Op}")
         };
     }
@@ -1082,7 +1133,6 @@ public static class SemanticFormatter
     static List<SchemaField> GetAllFields(PayloadSchemaDefinition schema)
     {
         var all = new List<SchemaField>();
-        all.AddRange(schema.Header);
         all.AddRange(schema.Fields);
         
         // Include fields from definitions

@@ -59,6 +59,7 @@ Usage:
 import struct
 import math
 import base64
+import re
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any, Tuple
 from enum import IntEnum
@@ -252,10 +253,14 @@ class BinarySchemaEncoder:
     
     def _parse_type(self, type_str: str) -> Tuple[FieldType, int]:
         """Parse schema type string to (FieldType, size)."""
-        # Handle bitfield shorthand: u8[3:4], u8:2, bits<3,2>, etc.
-        if '[' in type_str or ':' in type_str or '<' in type_str:
+        # Handle the bitfield range u8[3:4]. Matched precisely rather than by
+        # "contains a bracket, colon or angle bracket": that test also accepted the
+        # four spellings CR-2026-006 withdrew, so a schema using one encoded here as
+        # a bitfield while the interpreter rejects it outright.
+        if re.match(r'^u\d+\[\d+:\d+\]$', type_str):
             return FieldType.BITFIELD, 1
-        
+
+
         if type_str in TYPE_MAP:
             return TYPE_MAP[type_str]
         

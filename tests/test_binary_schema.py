@@ -379,14 +379,27 @@ class TestEdgeCases:
         assert 's32' in types
     
     def test_bitfield_type(self):
-        """Test bitfield type encoding."""
+        """The bracket range is the only bitfield spelling (CR-2026-006)."""
         encoder = BinarySchemaEncoder()
-        
-        # Various bitfield syntaxes
-        for type_str in ['u8[3:4]', 'u8:2', 'bits<3,2>', 'bits:2@3']:
+
+        for type_str in ['u8[3:4]', 'u8[0:0]', 'u24[4:23]']:
             type_code, size = encoder._parse_type(type_str)
             assert type_code == FieldType.BITFIELD
-    
+
+    def test_withdrawn_bitfield_types_raise(self):
+        """The four withdrawn spellings must not encode as bitfields.
+
+        The check here used to be "contains a bracket, colon or angle bracket",
+        which accepted all four while the interpreter rejects them - so a schema
+        using one encoded without complaint and decoded to nothing.
+        """
+        encoder = BinarySchemaEncoder()
+
+        for type_str in ['u8:2', 'bits<3,2>', 'bits:2@3', 'u8[3+:2]']:
+            with pytest.raises(ValueError):
+                encoder._parse_type(type_str)
+
+
     def test_unknown_type_raises(self):
         """Test that unknown type raises error."""
         encoder = BinarySchemaEncoder()

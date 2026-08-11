@@ -81,18 +81,15 @@ def parse_type(type_str: str) -> Tuple[int, int, Optional[Tuple[int, int]]]:
     """Parse type string, return (type_code, size, bitfield_info)."""
     type_str = type_str.lower().strip()
     
-    # Bitfield: u8[3:5] or u8[3+:2]
-    bitfield_match = re.match(r'u8\[(\d+):(\d+)\]', type_str)
+    # Bitfield: u8[3:5]. The bracket range is the only spelling; the Verilog
+    # part-select `u8[3+:2]` was withdrawn by CR-2026-006.
+    bitfield_match = re.match(r'u8\[(\d+):(\d+)\]$', type_str)
     if bitfield_match:
         start, end = int(bitfield_match.group(1)), int(bitfield_match.group(2))
         width = end - start + 1
         return TYPE_BITFIELD, width, (start, width)
-    
-    bitfield_match = re.match(r'u8\[(\d+)\+:(\d+)\]', type_str)
-    if bitfield_match:
-        start, width = int(bitfield_match.group(1)), int(bitfield_match.group(2))
-        return TYPE_BITFIELD, width, (start, width)
-    
+
+
     # Standard types
     type_map = {
         'u8': (TYPE_UINT, 1), 'uint8': (TYPE_UINT, 1),
