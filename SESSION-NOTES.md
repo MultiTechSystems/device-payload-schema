@@ -185,10 +185,25 @@ it. Both now assert the direction they claim. `tests/test_valid_range_quality.py
 tests, each comparing the codec against the interpreter rather than against my
 expectation of it.
 
-**Adjacent, not done:** `generate_output_schema.py` does not declare `_quality` as a
-property. Output still validates because the generator sets `additionalProperties: true`
-with a comment saying it is for `_quality`, but a consumer reading the output schema
-cannot learn the field exists. PS-182 fixes its shape, so it could be declared.
+`generate_output_schema.py` now declares `_quality` too, so the output schema describes
+the field rather than merely tolerating it under `additionalProperties: true`. PS-182
+closes the key set - only fields with `valid_range` appear - so the declaration lists
+them and sets `additionalProperties: false`, except when a `valid_range` field also has
+`name_from`, where the output key is decided at run time and the values are constrained
+instead.
+
+The collector walks the **whole schema**, not the field lists the properties come from,
+and deliberately over-collects. A declared-but-absent property costs nothing in JSON
+Schema; a *missing* one combined with `additionalProperties: false` would reject valid
+decoder output. That matters concretely: 159 of the corpus's 196 `valid_range`
+declarations live in `definitions`, and `process_fields` does not resolve `$ref` at all,
+so a walk of the field lists alone would have under-declared most of them.
+
+40 schemas now declare `_quality`; the only two files containing `valid_range` without it
+are `SEMANTIC-MAPPING.md` and the meta-schema `payload-schema.json`, neither a device
+schema. `tests/test_output_schema_quality.py` replays every corpus vector that emits
+`_quality` against its own declaration, so the closed key set cannot silently start
+rejecting real output.
 
 ### Known gap: `length: $variable`
 

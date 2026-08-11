@@ -274,6 +274,71 @@ def process_fields(fields: List[Dict], properties: Dict, required: List[str]):
                 required.append(name)
 
 
+QUALITY_FLAG = {
+    "type": "string",
+    "enum": ["good", "out_of_range"],
+    "description": "good = within valid_range; out_of_range = outside it",
+}
+
+
+def collect_quality_fields(node: Any, found: Dict[str, bool] = None) -> Dict[str, bool]:
+    """Names of every field declaring a `valid_range`, mapped to "has name_from".
+
+    Walked over the whole schema rather than just the field lists the properties come
+    from, deliberately over-collecting: a declared-but-absent property costs nothing in
+    JSON Schema, whereas a missing one combined with `additionalProperties: false`
+    would reject valid decoder output. `definitions` matters most here - 159 of the
+    corpus's 196 `valid_range` declarations live there, spliced in by `$ref`, which
+    process_fields does not resolve.
+    """
+    if found is None:
+        found = {}
+    if isinstance(node, dict):
+        name = node.get('name')
+        valid_range = node.get('valid_range')
+        if (
+            isinstance(name, str)
+            and not name.startswith('_')
+            and isinstance(valid_range, (list, tuple))
+            and len(valid_range) >= 2
+            and all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                    for v in valid_range[:2])
+        ):
+            found[name] = bool(node.get('name_from'))
+        for value in node.values():
+            collect_quality_fields(value, found)
+    elif isinstance(node, list):
+        for item in node:
+            collect_quality_fields(item, found)
+    return found
+
+
+def quality_property(yaml_schema: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The `_quality` property, or None when no field declares a `valid_range`.
+
+    PS-182: the object appears only when at least one field has `valid_range`, and only
+    such fields appear in it - so the key set is closed and can be declared.
+    """
+    fields = collect_quality_fields(yaml_schema)
+    if not fields:
+        return None
+    prop = {
+        "type": "object",
+        "description": (
+            "Per-field quality flags for fields declaring valid_range (PS-131/PS-182). "
+            "Present only when at least one such field is decoded; absent otherwise."
+        ),
+        "properties": {name: dict(QUALITY_FLAG) for name in sorted(fields)},
+    }
+    if any(fields.values()):
+        # A `name_from` field's output key is decided at run time, so the key set is not
+        # closed after all. Constrain the values and accept the key.
+        prop["additionalProperties"] = dict(QUALITY_FLAG)
+    else:
+        prop["additionalProperties"] = False
+    return prop
+
+
 def generate_output_schema(yaml_schema: Dict[str, Any]) -> Dict[str, Any]:
     """Generate JSON Schema for codec output from YAML payload schema."""
     
@@ -294,6 +359,13 @@ def generate_output_schema(yaml_schema: Dict[str, Any]) -> Dict[str, Any]:
         if isinstance(port_def, dict) and 'fields' in port_def:
             process_fields(port_def['fields'], properties, required)
     
+    # PS-182: `_quality` is part of the decoder's contract, so it is described rather
+    # than merely tolerated by additionalProperties - a consumer reading this schema
+    # could not otherwise learn the field exists.
+    quality = quality_property(yaml_schema)
+    if quality:
+        properties['_quality'] = quality
+
     # Build output schema
     output_schema = {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -302,7 +374,9 @@ def generate_output_schema(yaml_schema: Dict[str, Any]) -> Dict[str, Any]:
         "description": description,
         "type": "object",
         "properties": properties,
-        "additionalProperties": True  # Allow _quality and other metadata
+        # Metadata enrichment and implementation extensions may add keys; `_quality`
+        # itself is declared above.
+        "additionalProperties": True
     }
     
     # Don't require all fields since some may be conditional

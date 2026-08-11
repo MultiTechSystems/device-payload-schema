@@ -247,6 +247,11 @@ but report no quality object; the interpreters and the generated JS agree on it,
 
 **Validation schemas** for decoder output.
 
+- `_quality` is declared when any field carries a `valid_range` (PS-182), with a closed
+  key set unless a `name_from` makes the output key dynamic
+- `$ref` into `definitions` is **not** resolved for the properties themselves, so fields
+  behind a reference are missing from the output schema
+
 - Describes structure of decoded payload data
 - JSON Schema draft-07 compliant
 - Includes type constraints, ranges, and descriptions
