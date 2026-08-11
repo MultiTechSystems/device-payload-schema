@@ -76,9 +76,19 @@ def resolve_length(field_def, buf, pos, default=1):
     """
     raw = field_def.get('length', default)
     if isinstance(raw, str):
-        if raw.strip().lower() == 'remaining':
+        text = raw.strip()
+        if text.lower() == 'remaining':
             return max(0, len(buf) - pos)
-        raw = int(raw)
+        if text.startswith('$'):
+            # The specification also allows a `$variable` reference here. No
+            # implementation has it, and `int()` would fail with "invalid literal for
+            # int() with base 10: '$len'", which does not say that. `repeat` supports
+            # the reference on its own `byte_length` key if that is what was meant.
+            raise ValueError(
+                f"length: {raw} - a $variable reference is not implemented for "
+                "'length'; use an integer or the keyword 'remaining'"
+            )
+        raw = int(text)
     if raw < 0:
         return max(0, len(buf) - pos)
     return int(raw)

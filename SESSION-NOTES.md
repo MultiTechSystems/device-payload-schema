@@ -156,6 +156,13 @@ turned up the `_quality` gap too.
 - New `tests/test_remaining_length.py`, 14 tests: evaluation, the empty case per type,
   the no-rewind property, the three validator rules, and the schema that needed it.
 
+### Known gap: `length: $variable`
+
+The specification allows `length` to be an integer, a `$variable` reference, or
+`remaining`. The reference form is implemented nowhere - only `repeat`'s separate
+`byte_length` key resolves `$len`. `resolve_length()` now raises a message that says so,
+rather than `int()`'s "invalid literal for int() with base 10: '$len'". No schema uses it.
+
 ### Known gap: `remaining` is not representable in the binary schema
 
 `tools/binary_schema_v2.py` encodes `length` as an unsigned varint, and the C interpreter
