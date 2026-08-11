@@ -65,9 +65,9 @@ where the table says a modified field *is* a number. The generator was already r
 2. **The remaining TS013 generator gaps.** `lookup: default`, `$ref` splicing and
    `$field` resolution are done. The cross-check stands at **1134 identical, 1 value
    difference, 5 key-set differences** (`tools/crossvalidate_js_json.py`).
-   `name_from` and `repeat` are done too. The cross-check is at **1137 identical, zero
-   value differences, 3 key-set differences**. Still open: some `ers` TLV channels and
-   rbs30x's empty `stored_downlink` - both key-set only.
+   `name_from`, `repeat` and the plain-`tag_size` TLV form are done too. The cross-check
+   is at **1139 identical, zero value differences, and one key-set difference** -
+   rbs30x's empty `stored_downlink`, which is the last one.
    The `repeat` fixtures now pin the record shape in their `expected` blocks. They did
    not before, which is exactly why the generator could omit the construct entirely
    while all four runners passed.

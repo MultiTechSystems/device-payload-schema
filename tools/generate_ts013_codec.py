@@ -983,9 +983,21 @@ function writeS(buf, pos, size, value, endian) {
         tag_fields = tlv.get('tag_fields', [])
         cases = tlv.get('cases', {})
 
-        tag_size = sum(type_size(tf.get('type', 'u8')) or 1 for tf in tag_fields)
+        # Two block shapes exist. A composite block names its tag components in
+        # `tag_fields`; a plain block declares only `tag_size` and reads one tag value.
+        #
+        # This handled the first alone: with no `tag_fields`, `tag_size` summed to 0, no
+        # tag was ever read, and the key expression collapsed to a constant that matched
+        # nothing - so elsys/ers decoded to {} entirely. Go had the identical defect for
+        # the identical reason.
+        if tag_fields:
+            tag_size = sum(type_size(tf.get('type', 'u8')) or 1 for tf in tag_fields)
+        else:
+            tag_size = int(tlv.get('tag_size', 1))
+        length_size = int(tlv.get('length_size', 0))
+
         lines.append(f'{i}  // TLV loop')
-        lines.append(f'{i}  while (pos + {tag_size} <= buf.length) {{')
+        lines.append(f'{i}  while (pos + {tag_size + length_size} <= buf.length) {{')
         lines.append(f'{i}    var _tlvStart = pos;')
 
         # Read tag fields
@@ -994,9 +1006,18 @@ function writeS(buf, pos, size, value, endian) {
             tfsz = type_size(tf.get('type', 'u8')) or 1
             lines.append(f'{i}    var {tfname} = readU(buf, pos, {tfsz}, endian);')
             lines.append(f'{i}    pos += {tfsz};')
+        if not tag_fields:
+            lines.append(f'{i}    var _tlvTag = readU(buf, pos, {tag_size}, endian);')
+            lines.append(f'{i}    pos += {tag_size};')
+        if length_size:
+            lines.append(f'{i}    var _tlvLen = readU(buf, pos, {length_size}, endian);')
+            lines.append(f'{i}    pos += {length_size};')
 
         # Build tag key for matching
-        if len(tag_fields) == 1:
+        if not tag_fields:
+            tag_key_expr = '_tlvTag'
+            tag_is_composite = False
+        elif len(tag_fields) == 1:
             tag_key_expr = to_js_name(tag_fields[0]['name'])
             tag_is_composite = False
         else:
