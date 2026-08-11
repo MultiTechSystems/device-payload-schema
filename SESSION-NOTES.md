@@ -325,9 +325,15 @@ whether the payload is abandoned. Read as a decode error, because PS-278 shows t
 specification saying "report the field as absent and MUST NOT abort" where that is what it
 means, and PS-269 already provides the omit-quietly behaviour for the failure that deserves
 it. The two lookup failures are therefore deliberately different: a mapping gap is a known
-unknown and omits; a sequence index out of bounds is a shape mismatch and errors. **This is
-worth a one-sentence clarification in the specification** - I did not amend it, since spec
-changes go through a CR here.
+unknown and omits; a sequence index out of bounds is a shape mismatch and errors.
+
+**Written up as CR-2026-009** (`la-payload-schema`, `change-requests/submitted/`), which
+adds PS-285 (the field is not reported) and PS-286 (surfaced as a decode error, explicitly
+not PS-278's non-aborting case). Category D: the reading is fixed, not changed. Both
+alternatives are recorded with reasons - aligning with PS-269's quiet omission discards the
+distinction the two lookup forms exist to express, and blessing the raw index makes a field
+declared as a label report an integer, which no generated JSON Schema can describe without
+admitting values the field should never hold.
 
 Three existing tests asserted the old behaviour and were rewritten, which is worth noting
 because of *how* they were written: one accepted either outcome ("out of range should
