@@ -65,8 +65,9 @@ where the table says a modified field *is* a number. The generator was already r
 2. **The remaining TS013 generator gaps.** `lookup: default`, `$ref` splicing and
    `$field` resolution are done. The cross-check stands at **1134 identical, 1 value
    difference, 5 key-set differences** (`tools/crossvalidate_js_json.py`).
-   Still open, all feature gaps rather than representation: `name_from`, `repeat` item
-   output, `repeat: byte_length`, some `ers` TLV channels, and rbs30x's empty
+   `name_from` is done too, so the cross-check is at **1135 identical, 1 value
+   difference, 4 key-set differences**. Still open: `repeat` item output,
+   `repeat: byte_length`, some `ers` TLV channels, and rbs30x's empty
    `stored_downlink`.
    **`vars` is now the variable table and `d` is only the reported output.** Six
    emitters record into `vars`, all of them post-modifier, matching the interpreters -

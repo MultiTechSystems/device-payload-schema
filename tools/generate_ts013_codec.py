@@ -273,6 +273,58 @@ def transform_to_js(transform_ops: List[Dict[str, Any]], input_expr: str) -> str
     return result
 
 
+def name_from_to_js(field: Dict[str, Any], js_name: str) -> Tuple[List[str], str]:
+    """Build the JS for a field's output key, honouring `name_from` (PS-265..PS-267).
+
+    Returns (guard statements, key expression). The key expression indexes `d`, so a
+    field whose key varies with the payload can be reported at all - a device with a
+    variable number of active instances puts the instance in the key
+    ("region_3_avg_dwell"), and enumerating every possible instance as its own field is
+    not an alternative because the count is a device configuration rather than a
+    property of the schema.
+
+    References resolve from `vars`, which is keyed by the schema-level `name` - a field
+    with `name_from` still declares one, and that is what `$references`, test vectors and
+    encoding use (PS-267).
+
+    A reference that has not been decoded throws, which the generated entry point turns
+    into an `errors` entry, matching PS-266 and the interpreter. JavaScript needs no
+    integer coercion here: it has one number type, so `"" + 3` is "3" where Python had to
+    narrow 3.0 first.
+    """
+    template = field.get('name_from')
+    if not template:
+        return [], f'd.{js_name}'
+
+    parts: List[str] = []
+    refs: List[str] = []
+    last = 0
+    for match in re.finditer(r'\$\{(\w+)\}', str(template)):
+        literal = str(template)[last:match.start()]
+        if literal:
+            parts.append(json.dumps(literal))
+        reference = to_js_name(match.group(1))
+        parts.append(f'vars.{reference}')
+        refs.append(reference)
+        last = match.end()
+    tail = str(template)[last:]
+    if tail:
+        parts.append(json.dumps(tail))
+    if not parts:
+        parts.append(json.dumps(str(template)))
+    # Force string concatenation even when the template starts with a reference.
+    if not parts[0].startswith('"'):
+        parts.insert(0, '""')
+
+    guards = []
+    for reference in refs:
+        message = (f"name_from for '{field.get('name')}' references "
+                   f"'{reference}', which has not been decoded")
+        guards.append(f'if (vars.{reference} === undefined) '
+                      f'throw new Error({json.dumps(message)});')
+    return guards, 'd[' + ' + '.join(parts) + ']'
+
+
 def ref_to_js(ref: str) -> str:
     """Convert a `$field` reference to a JS expression.
 
@@ -510,7 +562,10 @@ function writeS(buf, pos, size, value, endian) {
                     lines.append(f'{i}  var {bjs}_out = {bval};')
                     lines.append(f'{i}  vars.{bjs} = {bjs}_out;')
                     if not bname.startswith('_'):
-                        lines.append(f'{i}  d.{bjs} = {bjs}_out;')
+                        guards, target = name_from_to_js(bf, bjs)
+                        for guard in guards:
+                            lines.append(f'{i}  {guard}')
+                        lines.append(f'{i}  {target} = {bjs}_out;')
             lines.append(f'{i}  pos = bgStart + {bg_size};')
             return lines
 
@@ -671,7 +726,10 @@ function writeS(buf, pos, size, value, endian) {
             lines.append(f'{i}  vars.{js_name} = {js_name}_out;')
 
             if not name.startswith('_'):
-                lines.append(f'{i}  d.{js_name} = {js_name}_out;')
+                guards, target = name_from_to_js(field, js_name)
+                for guard in guards:
+                    lines.append(f'{i}  {guard}')
+                lines.append(f'{i}  {target} = {js_name}_out;')
 
             return lines
 
@@ -692,7 +750,10 @@ function writeS(buf, pos, size, value, endian) {
             # The interpreters store the mapped label in their variable table, having
             # applied the mapping before recording the variable, so record it here too.
             lines.append(f'{i}  vars.{js_name} = {js_name}_out;')
-            lines.append(f'{i}  d.{js_name} = {js_name}_out;')
+            guards, target = name_from_to_js(field, js_name)
+            for guard in guards:
+                lines.append(f'{i}  {guard}')
+            lines.append(f'{i}  {target} = {js_name}_out;')
             return lines
 
         # skip
@@ -731,7 +792,10 @@ function writeS(buf, pos, size, value, endian) {
             lines.append(f'{i}  var {js_name}_out = {val_expr};')
             lines.append(f'{i}  vars.{js_name} = {js_name}_out;')
             if not name.startswith('_'):
-                lines.append(f'{i}  d.{js_name} = {js_name}_out;')
+                guards, target = name_from_to_js(field, js_name)
+                for guard in guards:
+                    lines.append(f'{i}  {guard}')
+                lines.append(f'{i}  {target} = {js_name}_out;')
             return lines
 
         # integer
@@ -755,7 +819,10 @@ function writeS(buf, pos, size, value, endian) {
         lines.append(f'{i}  vars.{js_name} = {js_name}_out;')
 
         if not name.startswith('_'):
-            lines.append(f'{i}  d.{js_name} = {js_name}_out;')
+            guards, target = name_from_to_js(field, js_name)
+            for guard in guards:
+                lines.append(f'{i}  {guard}')
+            lines.append(f'{i}  {target} = {js_name}_out;')
 
         return lines
 
