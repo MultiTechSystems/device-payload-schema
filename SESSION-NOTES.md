@@ -62,12 +62,26 @@ where the table says a modified field *is* a number. The generator was already r
 
 1. **Push the two branches** and decide whether they merge to `master`/`main`. Also the
    three `td-tools` branches still have no PRs, and the catalog fix should go first.
-2. **The remaining TS013 generator gaps**, now the largest source of interpreter/codec
-   disagreement: no `lookup: default`, no `$ref` splicing (so `ref-header.yaml` reads
-   from the wrong offsets), no `repeat: byte_length`, `name_from` unimplemented, and it
-   drops the `log` transform chain `dl-blg` and `qingping` use. Measure with
-   `tools/crossvalidate_js_json.py` - currently 1129 identical, 5 value differences, 5
-   key-set differences.
+2. **The remaining TS013 generator gaps.** `lookup: default` and `$ref` splicing are
+   done; the cross-check stands at **1132 identical, 3 value differences, 5 key-set
+   differences** (measure with `tools/crossvalidate_js_json.py`).
+   Still open: `name_from`, `repeat` item output, `repeat: byte_length`, some `ers` TLV
+   channels, and `dl-blg`'s `log` transform chain.
+   **Read the note in `ref_to_js` before touching references.** A `$field` reference
+   resolves against `d`, which is wrong for an internal field - one is recorded only in
+   `vars`, so the reference resolves to undefined and `rakwireless/qingping` reports no
+   humidity or temperature. Switching references to `vars` was tried and **measured a
+   net loss**, 1132 identical down to 1117: `vars` holds the value *before* modifiers
+   while the interpreters' variable table holds it *after*, so every reference to a
+   scaled field then resolved to the unscaled one - dl-5tm's volumetric_water_content
+   ran its polynomial over a raw u16 and reported 414.547 instead of 0.1883. Doing it
+   properly means making all five `vars` emitters record the post-modifier value: the
+   two plain-type paths, the bit-range path, the enum path and the byte_group path. It
+   was reverted rather than left half-done.
+   That detour did turn up a real defect, now fixed on both sides: **the computed-field
+   path was the one construct that ignored the underscore convention**, so
+   `mclimate/vicki` reported four intermediates in its output. It was the only schema
+   in the corpus affected.
 3. **A round-trip/encode corpus.** Still the least-tested part of the project and the MCU
    tier's whole job: every vector is decode-only, `src/test_encoder.c` is in no build
    target, and Java and C# have no encoder at all.
