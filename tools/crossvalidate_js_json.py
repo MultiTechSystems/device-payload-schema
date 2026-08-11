@@ -122,5 +122,5 @@ for k, v in results.most_common():
     print(f"  {k:22s} {v}")
 print()
 print("first divergences:")
-for kind, sch, key, js, py in detail[:16]:
+for kind, sch, key, js, py in detail[:8]:
     print(f"  {kind:9s} {sch:28s} {key:24s} js={js!s:22s} py={py!s}")

@@ -102,7 +102,7 @@ def formula_to_js(formula: str) -> str:
     js = re.sub(r'\bor\b', '||', js)
     js = re.sub(r'\bnot\b', '!', js)
     # $field_name → d.field_name
-    js = re.sub(r'\$([a-zA-Z_][a-zA-Z0-9_]*)', r'd.\1', js)
+    js = re.sub(r'\$([a-zA-Z_][a-zA-Z0-9_]*)', r'vars.\1', js)  # see ref_to_js
     # C-style ternary: cond ? a : b (already JS)
     return js
 
@@ -130,8 +130,9 @@ def compute_to_js(compute: Dict[str, Any]) -> str:
     b = compute.get('b', 0)
     
     def operand_to_js(spec):
+        # `vars`, not `d` - see ref_to_js.
         if isinstance(spec, str) and spec.startswith('$'):
-            return f'd.{spec[1:]}'
+            return f'vars.{to_js_name(spec[1:])}'
         return str(spec)
     
     a_js = operand_to_js(a)
@@ -172,7 +173,7 @@ def guard_to_js(guard: Dict[str, Any], value_expr: str) -> str:
     for cond in when_conditions:
         field_ref = cond.get('field', '')
         if isinstance(field_ref, str) and field_ref.startswith('$'):
-            field_js = f'd.{field_ref[1:]}'
+            field_js = f'vars.{to_js_name(field_ref[1:])}'  # see ref_to_js
         else:
             continue
         
@@ -275,21 +276,19 @@ def transform_to_js(transform_ops: List[Dict[str, Any]], input_expr: str) -> str
 def ref_to_js(ref: str) -> str:
     """Convert a `$field` reference to a JS expression.
 
-    A `$field` reference resolves against `d`, the reported output.
+    Resolves against `vars`, which records every field - internal or not - after its
+    modifiers, matching the interpreters' variable table. `d` holds only the reported
+    fields, so a reference to an internal name (one beginning with an underscore)
+    resolved to undefined: rakwireless/qingping computes both humidity and temperature
+    from internal bitfields and reported neither.
 
-    This is known to be wrong for an internal field - a name beginning with an
-    underscore is recorded only in `vars`, never in `d`, so a ref to one resolves to
-    undefined and rakwireless/qingping reports no humidity or temperature. Switching to
-    `vars` was tried and is a net loss: `vars` holds the value *before* modifiers, while
-    the interpreters' variable table holds it after, so every ref to a scaled field then
-    resolved to the unscaled one. Doing it properly means making all five `vars`
-    emitters record the post-modifier value - the two plain-type paths, the bit-range
-    path, the enum path and the byte_group path - and it also surfaces the interpreter
-    reporting `_`-prefixed fields out of `flagged` groups, which looks like a separate
-    defect. Left as it is until that is untangled; see SESSION-NOTES.md.
+    This only works because all five `vars` emitters record the post-modifier value. An
+    earlier attempt switched the references alone and lost 15 comparisons, because
+    `vars` then held the raw read and every reference to a scaled field resolved to the
+    unscaled one.
     """
     if isinstance(ref, str) and ref.startswith('$'):
-        return f'd.{ref[1:]}'
+        return f'vars.{to_js_name(ref[1:])}'
     return str(ref)
 
 
@@ -504,11 +503,14 @@ function writeS(buf, pos, size, value, endian) {
                     lo, hi = int(bit_m.group(1)), int(bit_m.group(2))
                     width = hi - lo + 1
                     mask = (1 << width) - 1
-                    lines.append(f'{i}  var {to_js_name(bname)} = (bgVal >> {lo}) & 0x{mask:X};')
+                    bjs = to_js_name(bname)
+                    lines.append(f'{i}  var {bjs} = (bgVal >> {lo}) & 0x{mask:X};')
+                    # `vars` records the post-modifier value - see _apply_modifiers_expr.
+                    bval = self._apply_modifiers_expr(bjs, bf)
+                    lines.append(f'{i}  var {bjs}_out = {bval};')
+                    lines.append(f'{i}  vars.{bjs} = {bjs}_out;')
                     if not bname.startswith('_'):
-                        val_expr = self._apply_modifiers_expr(to_js_name(bname), bf)
-                        lines.append(f'{i}  d.{to_js_name(bname)} = {val_expr};')
-                    lines.append(f'{i}  vars.{to_js_name(bname)} = {to_js_name(bname)};')
+                        lines.append(f'{i}  d.{bjs} = {bjs}_out;')
             lines.append(f'{i}  pos = bgStart + {bg_size};')
             return lines
 
@@ -572,6 +574,7 @@ function writeS(buf, pos, size, value, endian) {
             if 'formula' in field:
                 js_formula = formula_to_js(field['formula'])
                 lines.append(f'{i}  d.{name} = {js_formula};')
+                lines.append(f'{i}  vars.{name} = {js_formula};')
                 return lines
             
             # New: ref + polynomial/transform/modifiers
@@ -594,6 +597,7 @@ function writeS(buf, pos, size, value, endian) {
                     value_expr = guard_to_js(field['guard'], value_expr)
                 
                 lines.append(f'{i}  d.{name} = {value_expr};')
+                lines.append(f'{i}  vars.{name} = {value_expr};')
                 return lines
             
             # New: compute with optional guard and transform
@@ -609,15 +613,21 @@ function writeS(buf, pos, size, value, endian) {
                     value_expr = guard_to_js(field['guard'], value_expr)
                 
                 lines.append(f'{i}  d.{name} = {value_expr};')
+                lines.append(f'{i}  vars.{name} = {value_expr};')
                 return lines
             
             # Literal value
             if 'value' in field:
                 lines.append(f'{i}  d.{name} = {field["value"]};')
+                lines.append(f'{i}  vars.{name} = {field["value"]};')
                 return lines
             
-            # Default to 0 if no source specified
+            # Default to 0 if no source specified. `vars` is mirrored below for every
+            # computed field: this path writes only `d`, so once a `$ref` resolves
+            # against `vars` an internal computed field would be invisible to it -
+            # mclimate/vicki's motorPosition is computed from two such helpers.
             lines.append(f'{i}  d.{name} = 0;')
+            lines.append(f'{i}  vars.{name} = 0;')
             return lines
 
         # regular field
@@ -654,13 +664,14 @@ function writeS(buf, pos, size, value, endian) {
             if consume:
                 lines.append(f'{i}  pos += {int(consume)};')
 
+            val_expr = self._apply_modifiers_expr(js_name, field)
+            lines.append(f'{i}  var {js_name}_out = {val_expr};')
             if field.get('var'):
-                lines.append(f'{i}  vars.{to_js_name(field["var"])} = {js_name};')
-            lines.append(f'{i}  vars.{js_name} = {js_name};')
+                lines.append(f'{i}  vars.{to_js_name(field["var"])} = {js_name}_out;')
+            lines.append(f'{i}  vars.{js_name} = {js_name}_out;')
 
             if not name.startswith('_'):
-                val_expr = self._apply_modifiers_expr(js_name, field)
-                lines.append(f'{i}  d.{js_name} = {val_expr};')
+                lines.append(f'{i}  d.{js_name} = {js_name}_out;')
 
             return lines
 
@@ -677,8 +688,11 @@ function writeS(buf, pos, size, value, endian) {
             default = field.get('default', None)
             default_js = json.dumps(default) if default else f'{js_name}_raw'
             lines.append(f'{i}  var {js_name}_map = {val_json};')
-            lines.append(f'{i}  d.{js_name} = {js_name}_map[{js_name}_raw] !== undefined ? {js_name}_map[{js_name}_raw] : {default_js};')
-            lines.append(f'{i}  vars.{js_name} = {js_name}_raw;')
+            lines.append(f'{i}  var {js_name}_out = {js_name}_map[{js_name}_raw] !== undefined ? {js_name}_map[{js_name}_raw] : {default_js};')
+            # The interpreters store the mapped label in their variable table, having
+            # applied the mapping before recording the variable, so record it here too.
+            lines.append(f'{i}  vars.{js_name} = {js_name}_out;')
+            lines.append(f'{i}  d.{js_name} = {js_name}_out;')
             return lines
 
         # skip
@@ -713,10 +727,11 @@ function writeS(buf, pos, size, value, endian) {
             else:
                 lines.append(f'{i}  var {js_name} = readF64(buf, pos, {endian_arg});')
             lines.append(f'{i}  pos += {sz};')
+            val_expr = self._apply_modifiers_expr(js_name, field)
+            lines.append(f'{i}  var {js_name}_out = {val_expr};')
+            lines.append(f'{i}  vars.{js_name} = {js_name}_out;')
             if not name.startswith('_'):
-                val_expr = self._apply_modifiers_expr(js_name, field)
-                lines.append(f'{i}  d.{js_name} = {val_expr};')
-            lines.append(f'{i}  vars.{js_name} = {js_name};')
+                lines.append(f'{i}  d.{js_name} = {js_name}_out;')
             return lines
 
         # integer
@@ -733,13 +748,14 @@ function writeS(buf, pos, size, value, endian) {
         lines.append(f'{i}  var {js_name} = {read_fn}(buf, pos, {sz}, {endian_arg});')
         lines.append(f'{i}  pos += {sz};')
 
+        val_expr = self._apply_modifiers_expr(js_name, field)
+        lines.append(f'{i}  var {js_name}_out = {val_expr};')
         if field.get('var'):
-            lines.append(f'{i}  vars.{to_js_name(field["var"])} = {js_name};')
-        lines.append(f'{i}  vars.{js_name} = {js_name};')
+            lines.append(f'{i}  vars.{to_js_name(field["var"])} = {js_name}_out;')
+        lines.append(f'{i}  vars.{js_name} = {js_name}_out;')
 
         if not name.startswith('_'):
-            val_expr = self._apply_modifiers_expr(js_name, field)
-            lines.append(f'{i}  d.{js_name} = {val_expr};')
+            lines.append(f'{i}  d.{js_name} = {js_name}_out;')
 
         return lines
 
@@ -825,6 +841,7 @@ function writeS(buf, pos, size, value, endian) {
         if prefix:
             joined = f'"{prefix}" + {joined}'
         lines.append(f'{i}  d.{name} = {joined};')
+        lines.append(f'{i}  vars.{name} = {joined};')
         return lines
 
     def _gen_decode_tlv(self, tlv: Dict) -> List[str]:
