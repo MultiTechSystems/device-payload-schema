@@ -225,14 +225,30 @@ for them and unrelated to `$ref`.
 A corpus check now asserts every key a decoder reports is a declared property: 173
 schemas pass, and the three that do not are named in the test with their reasons.
 
-**Two remaining gaps in this tool, neither of them `$ref`:**
+### `match` in the output schema
 
-- The **`match` construct is not traversed at all** - `process_fields` handles `switch`
-  and `tlv` but not `match` - so every field inside a `match` case is undeclared.
-  `rbs30x.yaml` and `laq4.yaml` are the corpus cases. This is the bigger of the two and
-  is a straightforward addition.
-- A `name_from` field's output key is built at run time, so it cannot be declared from
-  the schema alone (`name-from.yaml`). Inherent, not a bug.
+`process_fields` handled `switch` and `tlv` but not `match`, so every field inside a match
+case was undeclared. Both syntaxes are covered now - the nested `match:` form with `cases`
+keyed by value, and the legacy `type: match`/`on:` form with cases as a list of
+`{case, fields}` - along with `default` when it carries fields, a literal `default` key
+inside `cases`, and the `name:` key, which reports the discriminator itself (`var:` only
+stores it, so it declares nothing). `default: error` and `default: skip` report nothing.
+
+Effect: rbs30x 3 -> 50 declared properties, rn320bth 2 -> 12, laq4 3 -> 13, and no other
+schema in the corpus changes. 16 of rbs30x's properties come out with union types like
+`["string", "integer"]`, which is `merge_property`'s widening doing its job - the same
+name is reported as a `lookup` label in one case and a raw integer in another, and a flat
+output has one property for it.
+
+The corpus guarantees now live in `tests/test_output_schema_corpus.py`: every reported key
+is a declared property, and every reported value satisfies its declared type (2832
+value/type pairs, zero mismatches). Only `name-from.yaml` falls short, and inherently -
+its output key is built at run time from a decoded value.
+
+One correction to my own measurement: I reported "175 fully declared" earlier. The honest
+figure is **173 of 174**, because two schemas have no vector that decodes at all and my
+first count credited them as complete. The test now excludes them - a schema that decodes
+nothing proves nothing about whether its properties are declared.
 
 ### Known gap: `length: $variable`
 

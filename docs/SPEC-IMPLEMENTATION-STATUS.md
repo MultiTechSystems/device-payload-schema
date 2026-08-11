@@ -250,8 +250,8 @@ but report no quality object; the interpreters and the generated JS agree on it,
 - `_quality` is declared when any field carries a `valid_range` (PS-182), with a closed
   key set unless a `name_from` makes the output key dynamic
 - `$ref` into local `definitions` is resolved, so fields behind a reference are declared
-- The `match` construct is **not** traversed (`switch` and `tlv` are), so fields inside
-  its cases are missing - `rbs30x.yaml` and `laq4.yaml`
+- `match` is traversed in both syntaxes (nested `match:` and legacy `type: match`/`on:`),
+  including `default` branches; types widen where cases report a name differently
 - A `name_from` field's output key is decided at run time and cannot be declared
 
 - Describes structure of decoded payload data

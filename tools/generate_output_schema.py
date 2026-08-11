@@ -254,6 +254,71 @@ def merge_property(properties: Dict[str, Any], name: str, schema: Dict[str, Any]
     properties[name] = widened
 
 
+def match_branches(field: Dict[str, Any]) -> List[List[Dict]]:
+    """Every field list a `match` can take, across both syntaxes.
+
+    Option B nests the construct under `match:` with `cases` keyed by value; the legacy
+    form puts `on:`/`cases:` on a `type: match` field with cases as a list of
+    `{case, fields}`. A `default` may itself carry fields, and `cases` may hold a
+    literal `default` key - both are branches whose fields can be reported.
+
+    Every branch merges into the same flat property set, which is what merge_property's
+    type widening is for: two cases reporting the same name with different types produce
+    one property accepting both.
+    """
+    branches: List[List[Dict]] = []
+
+    def add(candidate):
+        if isinstance(candidate, list):
+            branches.append([f for f in candidate if isinstance(f, dict)])
+        elif isinstance(candidate, dict) and isinstance(candidate.get('fields'), list):
+            branches.append([f for f in candidate['fields'] if isinstance(f, dict)])
+
+    match_def = field.get('match')
+    if isinstance(match_def, dict) and match_def:
+        cases = match_def.get('cases') or {}
+        default = match_def.get('default')
+    else:
+        cases = field.get('cases') or []
+        default = field.get('default')
+
+    if isinstance(cases, dict):
+        for case in cases.values():
+            add(case)
+    elif isinstance(cases, list):
+        for case in cases:
+            # Legacy: [{case: 1, fields: [...]}, ...]. A bare list of fields would have
+            # no `fields` key and is not a branch.
+            add(case)
+
+    # `default: error` and `default: skip` report nothing.
+    add(default)
+    return branches
+
+
+def process_match(field: Dict[str, Any], properties: Dict, required: List[str],
+                  definitions: Optional[Dict[str, Any]] = None):
+    """Declare the properties a `match` construct can report.
+
+    Not traversed at all before this - process_fields handled `switch` and `tlv` but not
+    `match` - so every field inside a match case was missing from the output schema.
+    rbs30x.yaml reported 40 keys the schema described none of.
+    """
+    match_def = field.get('match')
+    if isinstance(match_def, dict):
+        # `name:` reports the discriminator itself; `var:` only stores it.
+        name = match_def.get('name')
+        if isinstance(name, str) and name and not name.startswith('_'):
+            merge_property(properties, name, {
+                "type": "integer",
+                "description": "Matched discriminator value",
+            })
+            required.append(name)
+
+    for branch in match_branches(field):
+        process_fields(branch, properties, required, definitions)
+
+
 def process_fields(fields: List[Dict], properties: Dict, required: List[str],
                    definitions: Optional[Dict[str, Any]] = None):
     """Process field list and populate properties dict."""
@@ -281,6 +346,11 @@ def process_fields(fields: List[Dict], properties: Dict, required: List[str],
             for case_fields in switch.get('cases', {}).values():
                 if isinstance(case_fields, list):
                     process_fields(case_fields, properties, required, definitions)
+            continue
+        
+        # Handle match, in either syntax
+        if 'match' in field or field.get('type') in ('match', 'Match'):
+            process_match(field, properties, required, definitions)
             continue
         
         # Handle tlv
