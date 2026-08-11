@@ -252,7 +252,9 @@ but report no quality object; the interpreters and the generated JS agree on it,
 - `$ref` into local `definitions` is resolved, so fields behind a reference are declared
 - `match` is traversed in both syntaxes (nested `match:` and legacy `type: match`/`on:`),
   including `default` branches; types widen where cases report a name differently
-- A `name_from` field's output key is decided at run time and cannot be declared
+- `name_from` keys are declared: as exact properties where every `${...}` reference
+  has a closed set of values, otherwise as an anchored `patternProperties` entry
+  carrying the field's value schema
 
 - Describes structure of decoded payload data
 - JSON Schema draft-07 compliant

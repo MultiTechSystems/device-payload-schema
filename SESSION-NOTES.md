@@ -242,13 +242,49 @@ output has one property for it.
 
 The corpus guarantees now live in `tests/test_output_schema_corpus.py`: every reported key
 is a declared property, and every reported value satisfies its declared type (2832
-value/type pairs, zero mismatches). Only `name-from.yaml` falls short, and inherently -
-its output key is built at run time from a decoded value.
+value/type pairs, zero mismatches).
 
 One correction to my own measurement: I reported "175 fully declared" earlier. The honest
 figure is **173 of 174**, because two schemas have no vector that decodes at all and my
 first count credited them as complete. The test now excludes them - a schema that decodes
 nothing proves nothing about whether its properties are declared.
+
+### `name_from` in the output schema
+
+The last construct whose output the schema could not account for. `name_from` builds the
+reported key from a template filled in from values decoded earlier (PS-265/PS-266), so
+the field's own name is never a key - and the old output schema declared exactly that:
+`name-from.yaml` described `reading`, a key the decoder never emits, and did not describe
+`channel_3_reading`, the key it does.
+
+Two forms now, chosen by what the template references:
+
+- **Every reference closed -> exact properties.** A `lookup` counts as closed, which I
+  checked rather than assumed: PS-269 *drops* a field whose value is not in the mapping
+  rather than reporting the raw number, so an unmapped value never reaches a key - it
+  makes the `name_from` field fail to decode instead. `lookup: default:` just adds one
+  more member. The cross-product is capped at 64; past that the pattern form is clearer
+  than hundreds of properties for one field.
+- **Otherwise -> an anchored `patternProperties` entry** carrying the field's value
+  schema, so a consumer validates the value even where the key is dynamic.
+
+Every reference pattern comes from measured substitution behaviour: a lookup reference
+substitutes the **label** (`beta_reading`), a signed field can contribute a minus sign
+(`at_-2_reading`), a scaled field renders as a decimal while an integral one loses its
+trailing zero (`v_2.5_reading`, `v_2_reading`), and an `ascii` field contributes arbitrary
+text. Where the type is unclear the fragment is deliberately loose - too narrow a pattern
+would reject a key the decoder really produces, while too wide only describes the shape
+loosely.
+
+Patterns are scoped: one inside a nested `object` attaches to that object, not the root.
+
+**The corpus is now fully described: all 174 schemas that decode a vector report zero
+undeclared keys**, so `KNOWN_UNDECLARED` in the corpus test is empty.
+
+Two things left deliberately imprecise, both correct as they stand: a `valid_range` field
+with `name_from` still gets the permissive `_quality` form (values constrained, keys open)
+rather than the enumerated keys, and `field_to_json_schema` still types a dict `lookup` as
+`["string", "integer"]` where PS-269 means only the label can be reported.
 
 ### Known gap: `length: $variable`
 

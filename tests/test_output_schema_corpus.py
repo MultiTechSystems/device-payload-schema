@@ -12,6 +12,7 @@ fields. Both are ratcheted with a floor so the checks cannot pass by finding not
 look at.
 """
 
+import re
 import sys
 from pathlib import Path
 
@@ -23,9 +24,11 @@ sys.path.insert(0, str(REPO_ROOT / "tools"))
 from generate_output_schema import generate_output_schema  # noqa: E402
 from schema_interpreter import SchemaInterpreter  # noqa: E402
 
-# `name_from` builds its output key at run time from a decoded value, so it cannot be
-# declared from the schema alone. This is inherent, not a gap to close.
-KNOWN_UNDECLARED = {"name-from.yaml"}
+# Nothing is expected to report an undeclared key. `name_from` used to be the exception:
+# its output key is built at run time, and it is now described either as exact properties
+# (where every reference in the template has a closed set of values) or as a
+# `patternProperties` entry.
+KNOWN_UNDECLARED = set()
 
 
 def json_types(value):
@@ -47,8 +50,29 @@ def json_types(value):
     return set()
 
 
+def declares(schema_doc, key):
+    """Whether an output schema describes `key`, by name or by pattern."""
+    if key in (schema_doc.get("properties") or {}):
+        return True
+    for pattern in schema_doc.get("patternProperties") or {}:
+        if re.search(pattern, key):
+            return True
+    return False
+
+
+def property_for(schema_doc, key):
+    """The subschema describing `key`, preferring an exact property."""
+    exact = (schema_doc.get("properties") or {}).get(key)
+    if exact is not None:
+        return exact
+    for pattern, subschema in (schema_doc.get("patternProperties") or {}).items():
+        if re.search(pattern, key):
+            return subschema
+    return None
+
+
 def decoded_corpus():
-    """Yield (path, declared properties, [decoded data, ...]) per schema.
+    """Yield (path, output schema, [decoded data, ...]) per schema.
 
     Aggregated per schema rather than per vector: a schema whose first vector reports
     every declared key and whose second reports an extra one is a schema with a gap, and
@@ -62,7 +86,7 @@ def decoded_corpus():
         if not isinstance(schema, dict) or not schema.get("test_vectors"):
             continue
         try:
-            declared = generate_output_schema(schema).get("properties", {})
+            output_schema = generate_output_schema(schema)
         except Exception:
             continue
         decoded = []
@@ -76,15 +100,18 @@ def decoded_corpus():
                 continue
             decoded.append(result.data)
         if decoded:
-            yield path, declared, decoded
+            yield path, output_schema, decoded
 
 
 def undeclared_by_schema():
     out = {}
-    for path, declared, decoded in decoded_corpus():
+    for path, output_schema, decoded in decoded_corpus():
         missing = set()
         for data in decoded:
-            missing |= {k for k in data if k != "_quality" and k not in declared}
+            missing |= {
+                k for k in data
+                if k != "_quality" and not declares(output_schema, k)
+            }
         if missing:
             out[path.name] = missing
     return out
@@ -99,25 +126,29 @@ def test_every_reported_key_is_declared():
 def test_enough_schemas_are_fully_declared():
     """A floor, so the check above cannot pass by looking at nothing.
 
-    173 of 174 as of the `match` fix - every schema with a vector that actually decodes,
-    bar name-from.yaml. Schemas whose vectors all fail to decode are excluded rather than
-    counted as complete: they prove nothing about whether their properties are declared,
-    and counting them inflated this figure by two the first time I measured it.
+    All 174 of them, as of the `name_from` fix - every schema with a vector that actually
+    decodes. Schemas whose vectors all fail to decode are excluded rather than counted as
+    complete: they prove nothing about whether their properties are declared, and counting
+    them inflated this figure by two the first time I measured it.
     """
     total = sum(1 for _ in decoded_corpus())
     complete = total - len(undeclared_by_schema())
-    assert complete >= 173, f"{complete} of {total}"
+    assert complete == total, f"{complete} of {total}"
+    assert total >= 174, total
 
 
 def test_reported_values_satisfy_their_declared_type():
     problems = {}
     checked = 0
-    for path, declared, decoded in decoded_corpus():
+    for path, output_schema, decoded in decoded_corpus():
         for data in decoded:
             for key, value in data.items():
-                if key == "_quality" or key not in declared:
+                if key == "_quality":
                     continue
-                declared_type = declared[key].get("type")
+                subschema = property_for(output_schema, key)
+                if subschema is None:
+                    continue
+                declared_type = subschema.get("type")
                 if declared_type is None:
                     continue
                 allowed = (

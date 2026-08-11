@@ -13,9 +13,10 @@ Usage:
 
 import argparse
 import json
+import re
 import sys
 import yaml
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 def yaml_type_to_json_schema(field_type: str, field_def: Dict[str, Any]) -> Dict[str, Any]:
@@ -161,6 +162,129 @@ def field_to_json_schema(field_def: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return schema
 
 
+NAME_FROM_REF = re.compile(r'\$\{(\w+)\}')
+
+# Guard on the cross-product of enumerated keys. Two references over twenty labels each
+# is 400 properties describing one field, which documents nothing; past this the pattern
+# form is clearer.
+MAX_ENUMERATED_KEYS = 64
+
+
+def variable_sources(schema: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Map every name a `name_from` reference can resolve to onto its definition.
+
+    The interpreters store each field's value under its own name and, where `var:` is
+    given, under that alias too, so both are addressable from a template.
+    """
+    sources: Dict[str, Dict[str, Any]] = {}
+
+    def visit(node):
+        if isinstance(node, dict):
+            for key in ('name', 'var'):
+                label = node.get(key)
+                if isinstance(label, str) and label:
+                    sources.setdefault(label, node)
+            for value in node.values():
+                visit(value)
+        elif isinstance(node, list):
+            for item in node:
+                visit(item)
+
+    visit(schema)
+    return sources
+
+
+def reference_labels(field_def: Optional[Dict[str, Any]]) -> Optional[List[str]]:
+    """The closed set of strings a reference can substitute, or None if it is open.
+
+    A `lookup` is closed for this purpose: PS-269 drops a field whose value is not in
+    the mapping rather than reporting the raw number, so an unmapped value never reaches
+    a key - it makes the whole `name_from` field fail to decode instead.
+    """
+    if not isinstance(field_def, dict):
+        return None
+    lookup = field_def.get('lookup')
+    labels: List[str] = []
+    if isinstance(lookup, dict):
+        for key, value in lookup.items():
+            if key == 'default':
+                # `lookup: default:` supplies a label for everything unmapped, so the
+                # set stays closed - it just gains one more member.
+                labels.append(str(value))
+            else:
+                labels.append(str(value))
+    elif isinstance(lookup, list):
+        labels = [str(v) for v in lookup]
+    elif field_def.get('type') in ('enum', 'Enum'):
+        values = field_def.get('values')
+        if isinstance(values, dict):
+            labels = [str(v) for v in values.values()]
+        elif isinstance(values, list):
+            labels = [str(v) for v in values]
+    return labels or None
+
+
+def reference_pattern(field_def: Optional[Dict[str, Any]]) -> str:
+    """A regular-expression fragment for whatever a reference substitutes.
+
+    Deliberately permissive where the type is unclear: a fragment that is too narrow
+    would make `patternProperties` reject a key the decoder really produces, while one
+    that is too wide only describes the shape loosely.
+    """
+    labels = reference_labels(field_def)
+    if labels:
+        return '(?:' + '|'.join(re.escape(label) for label in sorted(set(labels))) + ')'
+    if not isinstance(field_def, dict):
+        return '.+'
+    if 'cases' in field_def:      # a match discriminator substitutes its value
+        return r'-?\d+'
+    field_type = str(field_def.get('type', ''))
+    if has_modifiers(field_def) or field_type.startswith(('f', 'number', 'udec', 'sdec')):
+        # A scaled or floating value renders as a decimal, and an integral one loses its
+        # trailing zero: `v_2.5_reading`, but `v_2_reading`.
+        return r'-?\d+(?:\.\d+)?'
+    if field_type.startswith(('u', 'byte', 'bool')):
+        return r'\d+'
+    if field_type.startswith(('s', 'i')) and field_type not in ('string',):
+        return r'-?\d+'
+    return '.+'
+
+
+def name_from_targets(
+    field_def: Dict[str, Any], sources: Dict[str, Dict[str, Any]]
+) -> Tuple[List[str], Optional[str]]:
+    """Resolve a `name_from` template into (exact keys, key pattern).
+
+    Exactly one of the two is populated. Every reference resolving to a closed label set
+    makes the whole key set finite, so the keys are declared outright; otherwise the
+    template becomes an anchored pattern for `patternProperties`.
+    """
+    template = str(field_def.get('name_from') or '')
+    references = NAME_FROM_REF.findall(template)
+    if not references:
+        return [template], None
+
+    label_sets = [reference_labels(sources.get(ref)) for ref in references]
+    if all(label_sets):
+        total = 1
+        for labels in label_sets:
+            total *= len(labels)
+        if total <= MAX_ENUMERATED_KEYS:
+            keys = [template]
+            for ref, labels in zip(references, label_sets):
+                keys = [k.replace('${%s}' % ref, label) for k in keys for label in labels]
+            return sorted(set(keys)), None
+
+    pattern = '^'
+    position = 0
+    for match in NAME_FROM_REF.finditer(template):
+        pattern += re.escape(template[position:match.start()])
+        pattern += reference_pattern(sources.get(match.group(1)))
+        position = match.end()
+    pattern += re.escape(template[position:]) + '$'
+    return [], pattern
+
+
 def expand_refs(
     fields: List[Dict], definitions: Optional[Dict[str, Any]], depth: int = 0
 ) -> List[Dict]:
@@ -203,7 +327,8 @@ def expand_refs(
 
 
 def process_byte_group(bg_def: Dict[str, Any], properties: Dict, required: List[str],
-                       definitions: Optional[Dict[str, Any]] = None):
+                       definitions: Optional[Dict[str, Any]] = None,
+                       context: Optional[Dict[str, Any]] = None):
     """Process byte_group fields and add to properties."""
     if isinstance(bg_def, dict):
         fields = bg_def.get('fields', [])
@@ -297,7 +422,8 @@ def match_branches(field: Dict[str, Any]) -> List[List[Dict]]:
 
 
 def process_match(field: Dict[str, Any], properties: Dict, required: List[str],
-                  definitions: Optional[Dict[str, Any]] = None):
+                  definitions: Optional[Dict[str, Any]] = None,
+                  context: Optional[Dict[str, Any]] = None):
     """Declare the properties a `match` construct can report.
 
     Not traversed at all before this - process_fields handled `switch` and `tlv` but not
@@ -316,11 +442,12 @@ def process_match(field: Dict[str, Any], properties: Dict, required: List[str],
             required.append(name)
 
     for branch in match_branches(field):
-        process_fields(branch, properties, required, definitions)
+        process_fields(branch, properties, required, definitions, context)
 
 
 def process_fields(fields: List[Dict], properties: Dict, required: List[str],
-                   definitions: Optional[Dict[str, Any]] = None):
+                   definitions: Optional[Dict[str, Any]] = None,
+                   context: Optional[Dict[str, Any]] = None):
     """Process field list and populate properties dict."""
     
     for field in expand_refs(fields, definitions):
@@ -329,7 +456,8 @@ def process_fields(fields: List[Dict], properties: Dict, required: List[str],
         
         # Handle byte_group
         if 'byte_group' in field:
-            process_byte_group(field['byte_group'], properties, required, definitions)
+            process_byte_group(field['byte_group'], properties, required, definitions,
+                               context)
             continue
         
         # Handle flagged groups
@@ -337,7 +465,7 @@ def process_fields(fields: List[Dict], properties: Dict, required: List[str],
             flagged = field['flagged']
             for group in flagged.get('groups', []):
                 if 'fields' in group:
-                    process_fields(group['fields'], properties, required, definitions)
+                    process_fields(group['fields'], properties, required, definitions, context)
             continue
         
         # Handle switch
@@ -345,12 +473,12 @@ def process_fields(fields: List[Dict], properties: Dict, required: List[str],
             switch = field['switch']
             for case_fields in switch.get('cases', {}).values():
                 if isinstance(case_fields, list):
-                    process_fields(case_fields, properties, required, definitions)
+                    process_fields(case_fields, properties, required, definitions, context)
             continue
         
         # Handle match, in either syntax
         if 'match' in field or field.get('type') in ('match', 'Match'):
-            process_match(field, properties, required, definitions)
+            process_match(field, properties, required, definitions, context)
             continue
         
         # Handle tlv
@@ -358,7 +486,7 @@ def process_fields(fields: List[Dict], properties: Dict, required: List[str],
             tlv = field['tlv']
             for case_fields in tlv.get('cases', {}).values():
                 if isinstance(case_fields, list):
-                    process_fields(case_fields, properties, required, definitions)
+                    process_fields(case_fields, properties, required, definitions, context)
             continue
         
         # Handle nested object
@@ -366,12 +494,18 @@ def process_fields(fields: List[Dict], properties: Dict, required: List[str],
             obj_name = field['object']
             nested_props = {}
             nested_req = []
+            nested_patterns: Dict[str, Any] = {}
             if 'fields' in field:
-                process_fields(field['fields'], nested_props, nested_req, definitions)
+                nested_context = dict(context or {})
+                nested_context['patterns'] = nested_patterns
+                process_fields(field['fields'], nested_props, nested_req, definitions,
+                               nested_context)
             properties[obj_name] = {
                 "type": "object",
                 "properties": nested_props
             }
+            if nested_patterns:
+                properties[obj_name]["patternProperties"] = nested_patterns
             if nested_req:
                 properties[obj_name]["required"] = nested_req
             required.append(obj_name)
@@ -382,6 +516,21 @@ def process_fields(fields: List[Dict], properties: Dict, required: List[str],
         if name and not name.startswith('_'):
             schema = field_to_json_schema(field)
             if schema:
+                if field.get('name_from'):
+                    # The reported key comes from a template filled in from values
+                    # decoded earlier (PS-265/PS-266), so the field's own name is never
+                    # a key. Declared as exact properties where the template's
+                    # references are closed, and as a patternProperties entry otherwise.
+                    sources = (context or {}).get('sources') or {}
+                    keys, pattern = name_from_targets(field, sources)
+                    for key in keys:
+                        merge_property(properties, key, schema)
+                        required.append(key)
+                    if pattern is not None:
+                        patterns = (context or {}).get('patterns')
+                        if patterns is not None:
+                            patterns[pattern] = schema
+                    continue
                 merge_property(properties, name, schema)
                 # Fields are generally required unless conditional
                 required.append(name)
@@ -462,16 +611,18 @@ def generate_output_schema(yaml_schema: Dict[str, Any]) -> Dict[str, Any]:
     properties = {}
     required = []
     definitions = yaml_schema.get('definitions') or {}
+    patterns: Dict[str, Any] = {}
+    context = {'patterns': patterns, 'sources': variable_sources(yaml_schema)}
     
     # Process top-level fields
     fields = yaml_schema.get('fields', [])
-    process_fields(fields, properties, required, definitions)
+    process_fields(fields, properties, required, definitions, context)
     
     # Process port-based fields
     ports = yaml_schema.get('ports', {})
     for port_num, port_def in ports.items():
         if isinstance(port_def, dict) and 'fields' in port_def:
-            process_fields(port_def['fields'], properties, required, definitions)
+            process_fields(port_def['fields'], properties, required, definitions, context)
     
     # PS-182: `_quality` is part of the decoder's contract, so it is described rather
     # than merely tolerated by additionalProperties - a consumer reading this schema
@@ -492,6 +643,10 @@ def generate_output_schema(yaml_schema: Dict[str, Any]) -> Dict[str, Any]:
         # itself is declared above.
         "additionalProperties": True
     }
+
+    # A `name_from` key that could not be enumerated is described by its shape.
+    if patterns:
+        output_schema['patternProperties'] = patterns
     
     # Don't require all fields since some may be conditional
     # Only mark truly required fields
