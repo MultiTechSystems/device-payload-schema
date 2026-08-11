@@ -472,6 +472,12 @@ function writeS(buf, pos, size, value, endian) {
         self.indent = 1
         for field in self._expand_refs(fields):
             lines.extend(self._gen_decode_field(field))
+        # A leading underscore marks an internal field: a variable later fields can
+        # reference, but not reported. `d` doubles as the working scope here - a `$ref`
+        # resolves against it - so the internal keys are stripped at the end rather than
+        # never written, which would break every reference to one. mclimate/vicki
+        # reported four intermediates before this.
+        lines.append("  for (var _k in d) { if (_k.charAt(0) === '_' && _k !== '_quality') delete d[_k]; }")
         lines.append('  return { data: d, pos: pos };')
         lines.append('}')
         return '\n'.join(lines)

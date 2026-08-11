@@ -2030,7 +2030,14 @@ class SchemaInterpreter:
                             )
                             continue
                     if value is not None:
-                        result.data[name] = value
+                        # A leading underscore marks an internal field: it becomes a
+                        # variable later fields can reference, but is not reported.
+                        # Every other construct checked this; the computed-field path
+                        # did not, so mclimate/vicki reported four intermediates
+                        # (_motorPosPercent, _motorPosRatio and two high-byte helpers)
+                        # in its output.
+                        if not name.startswith('_'):
+                            result.data[name] = value
                         self._variables[name] = value
                         # Check valid_range for computed fields
                         if field_def.get('valid_range'):
