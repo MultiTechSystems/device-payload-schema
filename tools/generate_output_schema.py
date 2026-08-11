@@ -161,14 +161,56 @@ def field_to_json_schema(field_def: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return schema
 
 
-def process_byte_group(bg_def: Dict[str, Any], properties: Dict, required: List[str]):
+def expand_refs(
+    fields: List[Dict], definitions: Optional[Dict[str, Any]], depth: int = 0
+) -> List[Dict]:
+    """Splice `$ref: '#/definitions/name'` entries into the list they appear in.
+
+    Matches the interpreters and the TS013 generator: only local
+    `#/definitions/...` references resolve, and the target's `fields:` are spliced
+    into the list rather than nested, because a container with no `type: object` is
+    never descended into.
+
+    Unresolved before this, so every field behind a reference was missing from the
+    output schema - `basic_station.yaml` and `udp_packet_forwarder.yaml` described no
+    properties at all, and `ref-header.yaml` described one of its three. Cross-file
+    references are a pre-step (tools/schema_preprocessor.py), not this tool's job.
+    """
+    out: List[Dict] = []
+    if depth > 16:   # a definition that refers to itself, directly or in a cycle
+        return [f for f in fields if isinstance(f, dict)]
+    definitions = definitions or {}
+    prefix = '#/definitions/'
+    for field in fields:
+        if not isinstance(field, dict):
+            continue
+        ref = field.get('$ref')
+        if not isinstance(ref, str):
+            out.append(field)
+            continue
+        target = None
+        if ref.startswith(prefix):
+            definition = definitions.get(ref[len(prefix):])
+            if isinstance(definition, dict):
+                target = definition.get('fields')
+        if not isinstance(target, list):
+            # Unresolvable. Dropped rather than kept: unlike a decoder, this tool has
+            # no read offsets to keep in step, and an entry with no name and no type
+            # would only produce an empty property.
+            continue
+        out.extend(expand_refs(target, definitions, depth + 1))
+    return out
+
+
+def process_byte_group(bg_def: Dict[str, Any], properties: Dict, required: List[str],
+                       definitions: Optional[Dict[str, Any]] = None):
     """Process byte_group fields and add to properties."""
     if isinstance(bg_def, dict):
         fields = bg_def.get('fields', [])
     else:
         fields = bg_def if isinstance(bg_def, list) else []
     
-    for field in fields:
+    for field in expand_refs(fields, definitions):
         if not isinstance(field, dict):
             continue
         name = field.get('name', '')
@@ -212,16 +254,17 @@ def merge_property(properties: Dict[str, Any], name: str, schema: Dict[str, Any]
     properties[name] = widened
 
 
-def process_fields(fields: List[Dict], properties: Dict, required: List[str]):
+def process_fields(fields: List[Dict], properties: Dict, required: List[str],
+                   definitions: Optional[Dict[str, Any]] = None):
     """Process field list and populate properties dict."""
     
-    for field in fields:
+    for field in expand_refs(fields, definitions):
         if not isinstance(field, dict):
             continue
         
         # Handle byte_group
         if 'byte_group' in field:
-            process_byte_group(field['byte_group'], properties, required)
+            process_byte_group(field['byte_group'], properties, required, definitions)
             continue
         
         # Handle flagged groups
@@ -229,7 +272,7 @@ def process_fields(fields: List[Dict], properties: Dict, required: List[str]):
             flagged = field['flagged']
             for group in flagged.get('groups', []):
                 if 'fields' in group:
-                    process_fields(group['fields'], properties, required)
+                    process_fields(group['fields'], properties, required, definitions)
             continue
         
         # Handle switch
@@ -237,7 +280,7 @@ def process_fields(fields: List[Dict], properties: Dict, required: List[str]):
             switch = field['switch']
             for case_fields in switch.get('cases', {}).values():
                 if isinstance(case_fields, list):
-                    process_fields(case_fields, properties, required)
+                    process_fields(case_fields, properties, required, definitions)
             continue
         
         # Handle tlv
@@ -245,7 +288,7 @@ def process_fields(fields: List[Dict], properties: Dict, required: List[str]):
             tlv = field['tlv']
             for case_fields in tlv.get('cases', {}).values():
                 if isinstance(case_fields, list):
-                    process_fields(case_fields, properties, required)
+                    process_fields(case_fields, properties, required, definitions)
             continue
         
         # Handle nested object
@@ -254,7 +297,7 @@ def process_fields(fields: List[Dict], properties: Dict, required: List[str]):
             nested_props = {}
             nested_req = []
             if 'fields' in field:
-                process_fields(field['fields'], nested_props, nested_req)
+                process_fields(field['fields'], nested_props, nested_req, definitions)
             properties[obj_name] = {
                 "type": "object",
                 "properties": nested_props
@@ -348,16 +391,17 @@ def generate_output_schema(yaml_schema: Dict[str, Any]) -> Dict[str, Any]:
     
     properties = {}
     required = []
+    definitions = yaml_schema.get('definitions') or {}
     
     # Process top-level fields
     fields = yaml_schema.get('fields', [])
-    process_fields(fields, properties, required)
+    process_fields(fields, properties, required, definitions)
     
     # Process port-based fields
     ports = yaml_schema.get('ports', {})
     for port_num, port_def in ports.items():
         if isinstance(port_def, dict) and 'fields' in port_def:
-            process_fields(port_def['fields'], properties, required)
+            process_fields(port_def['fields'], properties, required, definitions)
     
     # PS-182: `_quality` is part of the decoder's contract, so it is described rather
     # than merely tolerated by additionalProperties - a consumer reading this schema

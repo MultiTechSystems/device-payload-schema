@@ -205,6 +205,35 @@ schema. `tests/test_output_schema_quality.py` replays every corpus vector that e
 `_quality` against its own declaration, so the closed key set cannot silently start
 rejecting real output.
 
+### `$ref` in the output schema
+
+`process_fields` never resolved `$ref`, so every field behind a reference was absent from
+the generated output schema. Now spliced the same way the interpreters and the TS013
+generator do it: local `#/definitions/...` only, the target's `fields:` spliced into the
+list rather than nested, recursive with a depth cap for a definition that refers to
+itself. The `definitions` had to be threaded through every recursive `process_fields`
+call, not just the top-level one, or a reference inside a flagged group or a TLV case
+would still have been missed.
+
+Measured effect: exactly one schema changes, `ref-header.yaml`, from 1 declared property
+to 3 - and it now declares exactly what its decoder reports. I had claimed
+`basic_station.yaml` and `udp_packet_forwarder.yaml` produced empty output schemas
+because of this; **that was wrong**. They have no `fields` at all - they are protocol
+descriptions built from `message_types`/`packet_types` - so zero properties is correct
+for them and unrelated to `$ref`.
+
+A corpus check now asserts every key a decoder reports is a declared property: 173
+schemas pass, and the three that do not are named in the test with their reasons.
+
+**Two remaining gaps in this tool, neither of them `$ref`:**
+
+- The **`match` construct is not traversed at all** - `process_fields` handles `switch`
+  and `tlv` but not `match` - so every field inside a `match` case is undeclared.
+  `rbs30x.yaml` and `laq4.yaml` are the corpus cases. This is the bigger of the two and
+  is a straightforward addition.
+- A `name_from` field's output key is built at run time, so it cannot be declared from
+  the schema alone (`name-from.yaml`). Inherent, not a bug.
+
 ### Known gap: `length: $variable`
 
 The specification allows `length` to be an integer, a `$variable` reference, or

@@ -249,8 +249,10 @@ but report no quality object; the interpreters and the generated JS agree on it,
 
 - `_quality` is declared when any field carries a `valid_range` (PS-182), with a closed
   key set unless a `name_from` makes the output key dynamic
-- `$ref` into `definitions` is **not** resolved for the properties themselves, so fields
-  behind a reference are missing from the output schema
+- `$ref` into local `definitions` is resolved, so fields behind a reference are declared
+- The `match` construct is **not** traversed (`switch` and `tlv` are), so fields inside
+  its cases are missing - `rbs30x.yaml` and `laq4.yaml`
+- A `name_from` field's output key is decided at run time and cannot be declared
 
 - Describes structure of decoded payload data
 - JSON Schema draft-07 compliant
