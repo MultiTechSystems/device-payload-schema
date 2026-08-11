@@ -35,12 +35,17 @@ Feature support matrix across reference implementations.
 
 ### Bitfield Syntax
 
+The bracket range is the only bitfield spelling; CR-2026-006 withdrew the other
+four (`u8[3+:2]`, `bits<3,2>`, `bits:2@3`, `u8:4`). The `Width u8:4` row this table
+used to carry claimed all five implementations supported it, which was never true:
+only Python decoded it correctly, and the binary encoder, the JS generator and C
+each resolved it to the wrong bits or set a sentinel nothing consumed.
+
 | Feature | Python | Java | Go | C | JS |
 |---------|--------|------|-----|---|-----|
 | Range `u8[0:3]` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Width `u8:4` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Cross-byte `u16[4:11]` | ✓ | - | ✓ | ✓ | ✓ |
-| `byte_group` | ✓ | - | ✓ | ✓ | ✓ |
+| Cross-byte `u16[4:11]` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `byte_group` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Endian prefix `le_u16` | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 ### Arithmetic Modifiers
@@ -273,6 +278,25 @@ Tested with DL-5TM schema (8 fields, flagged construct, polynomial transform).
 | AMD Ryzen 9 7950X3D | 2023 | 81K ops/s (12 µs) | 1.87M ops/s (0.5 µs) |
 | Intel i5-2400 | 2011 | 17K ops/s (58 µs) | 555K ops/s (1.8 µs) |
 | **Ratio** | | **4.7x** | **3.4x** |
+
+### C Interpreter (AMD Ryzen 9 7950X3D)
+
+**Not comparable to the DL-5TM rows above** — the C interpreter has no `flagged` or
+`polynomial` support, so this uses a simpler 5-field frame (u8 protocol, u16 device
+id, s16 temperature with `div`, u8 humidity with `div`, u16 battery). The Python
+figure was measured on the same machine with the same schema and payload, so the two
+rows here are comparable to each other and to nothing else in this document.
+
+| Implementation | Throughput | Latency |
+|----------------|------------|---------|
+| C interpreter (`include/schema_interpreter.h`) | 20.5M ops/s | 0.05 µs |
+| Python interpreter | 141K ops/s | 7.1 µs |
+| **Ratio** | **145x** | |
+
+Stripped executable including the whole interpreter and the schema: **18.6 KB**
+(`gcc -O2 -Os`, header-only so everything inlines). That size and throughput are why
+the C interpreter is a candidate for a full-featured embedded-Linux gateway decoder
+and not only for the MCU binary-schema path — see AGENTS.md for what it still lacks.
 
 ### Java Implementation (AMD Ryzen 9 7950X3D)
 

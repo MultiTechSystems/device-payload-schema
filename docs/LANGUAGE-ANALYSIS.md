@@ -94,20 +94,27 @@ type: UInt        # Long form - explicit
 - Long forms allow explicit length for unusual sizes (`u24`)
 - Both parse to same internal representation
 
-### Why Bitfield Syntax Variants?
+### Why One Bitfield Syntax?
 
 ```yaml
-type: u8[0:3]     # Range syntax - bits 0-3
-type: u8:4        # Width syntax - 4 bits from current position
-type: bits
-  offset: 0
-  width: 4
+type: u8[0:3]     # Range syntax - bits 0-3, the only spelling
 ```
 
 **Rationale**:
-- Range syntax natural for hardware engineers (matches datasheets)
-- Width syntax natural for sequential bit extraction
-- Verbose form for complex cases or code generation
+- Range syntax is natural for hardware engineers (it matches datasheets)
+- One spelling means a schema reads the same way in every implementation
+
+The language carried five spellings for a while - `u8[0:3]`, `u8[3+:2]`,
+`bits<3,2>`, `bits:2@3` and the sequential `u8:4` - deliberately, to keep the
+options open while the working group chose. CR-2026-006 settled on the range and
+withdrew the rest.
+
+The sequential form is why it mattered. "Four bits from the current position" needs
+a bit cursor every implementation maintains identically, and only Python ever did:
+Go and Java let the type fall through to a plain `u8` and read a whole byte, C#
+reported an unknown field type, C set a sentinel no decode path read, and the
+binary encoder and JS generator both resolved it to bit 0. A range says where the
+bits are, so there is nothing to keep in step.
 
 ### Why Separate `udec`/`sdec` Types?
 

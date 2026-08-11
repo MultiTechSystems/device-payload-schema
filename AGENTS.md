@@ -209,31 +209,92 @@ definition catalogues, not schemas - no top-level `name:`/`fields:` - so nothing
 could decode them and their vectors were verified by no implementation. The tool
 composes each vector into a standalone schema, splicing the named definition's
 `fields:` rather than nesting them, and **quarantines any vector that does not
-decode** into `KNOWN-ISSUES.md` rather than adding it. Seven are quarantined: the
-vectors had never been executed, so each is either a wrong expected value or a
-wrong schema and needs a source to tell apart. Regenerate with the tool; `--check`
-verifies it is current.
+decode** into `KNOWN-ISSUES.md` rather than adding it. Regenerate with the tool;
+`--check` verifies it is current.
 
-**The sequential bitfield form `u8:3` is Python-only — and probably should not be
-implemented.** Go, Java and C# support only the bracket form `u8[5:7]`. Go and
-Java let the type fall through to a plain u8, so each field reads a whole byte and
-a one-byte LoRaWAN MHDR underflows; C# reports `Unknown field type`. Three floors
-sit at 1163 rather than 1166 for this reason.
+**Nothing is quarantined now** — `KNOWN-ISSUES.md` is gone. The seven that were
+resolved as follows, and the causes are worth knowing because none was a wrong
+expected value:
 
-Do not close that gap by adding `u8:N` to three languages. The specification lists
-five bitfield spellings — `u8[3:4]`, `u8[3+:2]`, `bits<3,2>`, `bits:2@3`, `u8:2` —
-and carrying all five was deliberate, to keep the options open while the group
-decided. **The direction under discussion is to keep only the bracket form**, so
-schemas read the same way everywhere. If that is settled, the work is the reverse:
-drop the other four from the specification and from the Python interpreter, and
-rewrite the schemas that use them.
+- **Two LoRaWAN files never declared `endian: little`.** Both
+  `lorawan/lorawan_frames.yaml` and `lorawan/lorawan_mac_commands.yaml` say
+  "little-endian byte order for multi-byte fields" in their header comments, and
+  TS001 requires it, but neither set the key — so they composed as big-endian.
+  `dev_nonce` read 0x1011 for a vector saying 0x1110, and LinkADRReq's `ch_mask`
+  read 0xFF00 where TS001 says 0x00FF. Adding the key fixed both.
+- **A `bytes` field has no agreed output representation.** Python decodes one to a
+  bytes object, Go to a lowercase hex string. Vectors now write these as a hex
+  string, the one form that survives YAML, JSON and every language, and
+  `values_match` accepts hex or a list of octets against a byte sequence. **That the
+  four implementations disagree on the decoded type is unresolved and unspecified** —
+  worth a CR.
+- **`type: array` never existed.** `repeat` with `until: end` expresses exactly the
+  same thing and already worked in all four. Another "missing feature" that was not
+  missing — try the current language first.
+- **Three payloads had never been executed and did not match their own expected
+  values under any scaling.** `gps_tracker`'s geofence read latitude 5.1018368
+  against a vector saying 51.0 and a longitude of -1.3596416 against -0.12; two
+  timestamps were a nibble or a byte-transposition out. In each the expected values
+  carry the intent, so the payload was recomputed from them and the vector marked
+  `source: generated` — the bytes now come from this schema, not a specification.
 
-Only `schemas/library/lorawan/lorawan_frames.yaml` uses the sequential form, in
-three definitions. The rewrite is mechanical and verified equivalent — a field
-with `type: u8:3` and `bit_offset: 5` becomes `type: u8[5:7]`, and `u8:2` at
-offset 0 becomes `u8[0:1]`; both spellings decode payloads 40 and A0 identically.
-Doing that returns every floor to the full 1166 without touching an interpreter.
-The device corpus uses only `u8[...]` and `u24[...]`, so nothing else is affected.
+**`compose_library_vectors.py` force-quotes every string it emits, and must keep
+doing so.** PyYAML left a numeric-looking string such as a hex EUI unquoted when its
+own resolver would not read it back as a number, but Go, Java and C# use different
+YAML implementations and theirs resolve `0102030405060708` to an integer. One EUI
+arrived in Go as 1.02030405060708e+14 while the identically-shaped
+`0001020304050607` stayed a string, so one vector passed and its neighbour failed
+for a reason nothing in the schema explained.
+
+**The four corpus runners are more permissive than the specification.** PS-039
+requires integers to match *exactly* and PS-040 allows 0.001 for floats; every
+runner instead applies a relative `max(0.001, |want| * 0.001)` to everything, which
+on a GPS timestamp is about 20 days of slack — it is why one of the timestamp
+vectors above looked fine to them. **Zero corpus vectors currently depend on that
+laxity** (measured), so tightening the runners to PS-039 is free. Not yet done.
+
+The Java and C# runners also did not descend into lists or maps, comparing their
+printed forms instead — so a nested expectation could not be expressed. Java's
+compared `{package_id=0.0}` against `{package_id=0}` and failed on the rendering
+while every value in it was equal; C# read non-scalar expectations as null and
+compared that against whatever was decoded. Both now recurse, per PS-044/PS-045.
+
+**The bracket range `u8[5:7]` is the only bitfield spelling.** CR-2026-006 withdrew
+the other four — `u8[3+:2]`, `bits<3,2>`, `bits:2@3` and the sequential `u8:2`. All
+five were carried deliberately while the working group chose; the range won because
+it says where the bits are instead of depending on a bit cursor each implementation
+has to maintain identically.
+
+Every floor is now the full 1166. Do not re-add a withdrawn form to "support" an
+old schema: the Python interpreter, the binary encoders, the JS and TS013
+generators and the C header all reject them, and the four tests that used to assert
+they decode now assert they are refused.
+
+Two of the four were never actually implemented outside Python, which is worth
+knowing if anyone proposes reviving one:
+
+- `binary_schema_v2.py` and `generate_js_decoder.py` resolved the sequential form
+  to a start bit of 0, so a field the interpreter reads as bits 5-7 encoded as bits
+  0-2.
+- The C header set `bit_start = 255` as a sequential sentinel that no decode path
+  ever read.
+
+`schemas/library/lorawan/lorawan_frames.yaml` was the only file using the
+sequential form, in **four** definitions — `mhdr`, `fctrl_uplink`,
+`fctrl_downlink`, `dl_settings` — not three as an earlier note here said.
+
+**When converting a sequential field, carry the byte consumption over too.** The
+recipe `type: u8:3` + `bit_offset: 5` → `type: u8[5:7]` gets the value right and
+the position wrong: the sequential form advanced the read position automatically on
+reaching bit 0, and a bracket range never advances without `consume:`. So the last
+field of each byte needs `consume: 1`. Without it the values still match and
+`bytes_consumed` silently drops to 0, which misaligns every field after a spliced
+`mhdr` or `fctrl`. Verified by decoding all 256 one-byte payloads through each of
+the four definitions before and after: identical, `bytes_consumed` included.
+
+`bit_offset:` keys were dropped in that rewrite. The interpreter never read them —
+it derives the offset from the type string alone — so they were documentation that
+could drift out of step with the field beside them.
 
 `schemas/devices/_language-conformance/` holds fixtures rather than devices: one
 schema per construct that no device schema uses, so the four interpreters are held
@@ -242,15 +303,289 @@ tree the runners walk — a fixture in `examples/` is read by nothing. Adding it
 found `enum` unimplemented in Java (PS-067) and `default:` on an enum ignored by
 Python, Go and C# (PS-068).
 
-**The `header:` block is undocumented and implementations disagree.** Java and C#
-honour it — the header field is emitted and consumes its bytes; Python and Go
-ignore it entirely, so the field is absent and everything after it reads from the
-wrong offset. The specification does not define `header:` anywhere, so there is no
-authority to say which is right. Decide and write it down before any schema uses it.
+**The `header:` block is gone. Use `definitions` + `$ref`.** It was never in the
+specification, so there was no authority for either behaviour, and the two
+behaviours were measured rather than assumed: with a two-byte probe declaring one
+header field and one ordinary field, Java reported both, while Python and Go
+reported no header field at all *and* read the header's byte as the first field.
+Nothing errored. Support is removed from Java and C#, and `validate_schema.py` now
+reports a top-level `header:` — deleting it silently would have turned a
+two-language divergence into four languages quietly losing a schema's first fields.
+
+The replacement is what `schemas/library/common/headers.yaml` already used: a
+`definitions:` entry pulled in with `$ref`. `schemas/devices/_language-conformance/
+ref-header.yaml` holds it to the same standard as any other construct.
+
+**That fixture immediately found `$ref` unimplemented in Java** — no `definitions`
+parsing and no `$ref` resolution, in a binding whose users were being pointed at it
+as the replacement. Now implemented, by splicing the referenced `fields:` into the
+list at parse time, for both schema-level and per-port field lists. Note the
+unrelated `ref:` key on a computed field, which Java did already support; they are
+different constructs.
 
 Run them all with `make test-languages`. This suite is why the Go and Java TLV
 defects were found: those implementations returned an empty result for every
 channel/type schema in the repository, and no test had ever read one.
+
+**The unary maths transform stages — `sqrt`, `abs`, `pow`, `log10`, `log` — now
+exist in all four.** Python always had them; Go, Java and C# had none, which is what
+kept `decentlab/dl-blg` on an unconverted vendor formula. The domain clamps are part
+of the contract, not an implementation detail: `sqrt` clamps its input at 0 and the
+logs at 1e-10, because returning NaN instead poisons every later stage and every
+field computed from it. `_language-conformance/transform-maths.yaml` holds all four
+to it.
+
+Two things to know before adding another transform key:
+
+- **Go builds transform stages by hand from a map, not from its struct tags.** A
+  field added to `Transform` without a matching line in that parse block is silently
+  never populated: the stage parses to a no-op and the value passes through
+  untouched, with nothing reported.
+- **A plain typed field and a `ref`/`compute` field used to take different code
+  paths in Go.** The plain-field branch was a second copy of the transform loop, and
+  being a copy it had drifted — it applied `add` before `mult` where PS-101 fixes the
+  order at mult, div, add, and it knew nothing of `{op: round}`. It now calls
+  `applyTransformStages` like everything else.
+
+**A compute field's transform stages were applied twice in Go and C#.** Both skipped
+the re-application for a `type: number` with `ref` and forgot the `compute` case, so
+`dl-blg`'s `voltage_ratio` came out as -0.4999999996 where the vendor decoder says
+0.0064094 — its `div: 16777216` and `add: -0.5` each ran a second time. Fixed in
+both. It survived because `dl-blg` had no test vectors at all; it now has two, taken
+from the vendor decoder's own examples.
+
+**Two Decentlab hints remain**, both in `schemas/devices/decentlab/`, and neither
+needs a new language feature:
+
+- `dl-iam` — `max(max(1.0*x0 - 1.64*x1, 0.59*x0 - 0.86*x1), 0) * 1.5504`. There is no
+  `max` of two computed fields; `floor: 0` clamps a lower bound, so the outer
+  `max(..., 0)` is expressible but the inner one is not.
+- `dl-zn2` — a difference of two two-word values. Expressible today with two compute
+  chains and a subtraction, exactly as `dl-blg`'s `voltage_ratio` assembles one.
+  Mechanical; just not done.
+
+Cross-validate either against the vendor decoder before trusting it:
+`git clone --depth 1 https://github.com/decentlab/decentlab-decoders`, then run its
+`DL-*.js` under node — `main()` in each carries the vendor's own example payloads,
+which is where `dl-blg`'s two vectors came from.
+
+**The C interpreter is a much smaller language than the other four.** It consumes a
+binary schema for embedded use, and its `field_def_t` carries only `mult`, `div` and
+`add` — there is no transform array and no compute struct. Audited against the header
+rather than the comments, which claim more than the code does (`definitions`, `$ref`,
+`ports`, `formula` and `byte_group` all appear only in prose):
+
+- **Has**: `u8`-`u64`/`s8`-`s64` and their aliases, `f16`/`f32`/`f64`, `bool`,
+  `bytes`, `string`/`ascii`, `hex`, `base64`, `udec`/`sdec`, `enum`, `match`,
+  `object`, `skip`, the bracket bitfield range, `lookup`, `var`/`$var`, `consume`,
+  per-field `endian`, and the three bare modifiers.
+- **Lacks**: `compute`, `polynomial`, `guard`, `ref`, `formula`, the whole
+  `transform` array (so no `round`, `sqrt`, `log`, `pow`, and no multi-stage),
+  `name_from`, `tlv`, `flagged`, `repeat`/`until`/`count`/`byte_length`,
+  `bitfield_string`, `number`, `version_string`, `definitions`/`$ref`, `ports`,
+  `merge`, `valid_range`/`resolution`/`unece`, and the semantic mappings.
+
+**Do not read the `Supports:` comment block at the top of
+`include/schema_interpreter.h` as a feature list** — it is out of date.
+
+**That list is a roadmap, not an accepted subset.** C serves two targets, and they
+differ in their **I/O surface**, not in decode semantics — so the right structure is
+one core with two front-ends, not two implementations. `schema_interpreter.hpp` is
+already this pattern: a C++ RAII wrapper over the same core.
+
+| | MCU (Zephyr) | Gateway (embedded Linux) |
+|---|---|---|
+| schema in | binary blob, compiled on the host | **YAML** |
+| data out | native C values, no serialization | **JSON**, TS013 `{data, warnings, errors}` |
+| direction | uplink packing, downlink commands | uplink decode |
+| feature set | reduced on purpose | parity with the other four |
+| missing today | v2 structural opcodes | **YAML reader and JSON writer** |
+
+**The MCU tier never sees YAML or JSON** — `schema_load_binary` takes a blob,
+`encode_inputs_add_int`/`add_double` take native values, and the header contains zero
+occurrences of `json`. That is why its reduced feature set is correct rather than a
+gap: packing an uplink and reading a downlink command need types, bitfields,
+modifiers, `match` and `lookup`, not `compute` chains or semantic mappings. Every
+output-representation question below is irrelevant to this tier.
+
+**The gateway tier is the opposite: it exists to replace deployed JS codecs**, so its
+JSON *is* the compatibility contract. Three pieces are missing, and the second decides
+success:
+
+1. **A YAML reader.** libyaml is fine here — an embedded-Linux gateway has megabytes
+   and often already has it. Do not trade this away to protect the 18.6 KB figure;
+   that number is an MCU concern and applying it here was a mistake once already.
+2. **A JSON writer**, matching **JavaScript's** rendering, not Python's. See
+   CR-2026-008: an integral value must serialize as `15`, not `15.0`, because that is
+   what every deployed JS codec emits and a gateway swapping codecs must not appear to
+   change its schema. This is the one rule that decides whether the C interpreter can
+   actually replace a JS codec.
+3. **The TS013 envelope** `{data, warnings, errors}`.
+
+**There is no YAML->JSON C interpreter yet, and the JSON writer that exists is
+unsafe.** `bindings/c/schema_ffi.c` has `schema_create_yaml()`, but its body is
+`(void)yaml_str; return NULL;` — a declared stub. `result_to_json()` is real, and it
+formats floats with `%g`, which silently destroys precision: 115020.68221552655 prints
+as `115021`, 22.028848392450755 as `22.0288`, and the identifier 20228605 as
+`2.02286e+07`. Do not build on it. Matching JavaScript needs the shortest
+round-tripping decimal (a 1..17 `%.{p}g` search that stops when `strtod` returns the
+input, or Ryu/Grisu) *plus* JavaScript's exponent thresholds — it uses fixed notation
+between 1e-7 and 1e21 where `%g` switches far earlier, so `1000000.0` must print
+`1000000`, not `1e+06`.
+
+**Matching the JS codecs is a solved problem on the Python side.** Normalizing integral
+values to integers is sufficient — measured with `tools/crossvalidate_js_json.py`,
+which diffs serialized JSON token by token: **1117 byte-identical**, 14 numeric
+differences all of which are CR-2026-007's `idiv`/`mod` convention, and 8 differing
+only in key set. No precision or exponent divergence at all, because Python's float
+repr and JavaScript's number-to-string both emit the shortest round-tripping decimal.
+That tool is the acceptance test for the gateway work; run it before and after any
+change to output representation.
+
+The key-set differences are **TS013 generator** gaps, not interpreter gaps: it does
+not implement `name_from`, drops `repeat` items, misses some TLV channels, and does not
+emit every member of a nested `object`. So "the generated codec and the interpreter are
+interchangeable" is true for 1126 comparisons and not yet true in general.
+
+**Rounding is half-to-even everywhere, and the generator now emits a helper for it.**
+`Math.round` is half-up and asymmetric for negatives, which put the generated codec at
+78.13 against the interpreters' 78.12 for `vicki.relativeHumidity`. Two traps are baked
+into `roundHalfEven`, and any reimplementation needs both:
+
+- Rounding `v * 10^d` is not rounding `v` at `d` decimals. 2.355 is stored as
+  2.35499999999999998, but `2.355 * 100` is exactly 235.5, so the multiply invents a
+  tie. Use a decimal-correct path (`toFixed`) for the ordinary case.
+- A genuine tie needs the long expansion to detect. `Number("2.345") === 2.345` is
+  true - that is the shortest *representation* - while the stored value sits above the
+  half. Read `toFixed(d+19)` and require a 5 at the cut with only zeros after it.
+
+**Go's `round` transform is the remaining outlier**: `math.RoundToEven(v*scale)/scale`
+inherits exactly the multiply error above, so Go gives 2.36 and 2.68 where Python, Java
+and C# give 2.35 and 2.67. Three of four are decimal-correct. No corpus vector catches
+it yet, so add one when fixing it.
+
+**`score-baseline.json` is stale.** It reports 26 regressions, of which 23 are
+decentlab schemas that score identically at HEAD in a clean worktree - the baseline
+predates an edge-case scoring fix in the unpushed commits. Regenerate it before using
+it as a gate, or it will keep hiding the real regressions among false ones.
+
+**A more correct schema can score lower**, which is the mirror of the warning above
+that a high score is not proof of correctness. `ct303`/`ct305`/`ct310` dropped SILVER
+98% to BRONZE 66% when they gained their vendor-verified current channels: the JS gate
+fails because the generator cannot emit nested `object` members (15 points), and 27 new
+fields diluted the semantic component. Only the six genuine current readings were
+annotated (IPSO 3317); `_max`, `_min`, `_total` and the alarm bits were deliberately
+left alone, because inventing mappings to lift a score is what PS-264 exists to
+prevent. Python passes 16/16, branch coverage is 100%, and crossvalidate reports
+`agrees`.
+
+With YAML in C, the corpus runner walks `schemas/devices/` exactly like the other four
+— no host-side fixture generation needed. **Build it before building features**: C is
+invisible to the corpus today, which is precisely why its dead sequential-bitfield
+sentinel and its unbuilt test files survived so long. For this target the acceptance
+test is stronger than the expected-value blocks: **diff the serialized JSON against
+the generated TS013 codec's output.** That comparison catches `15` vs `15.0` on the
+first run, which no value-level check does.
+
+Fidelity has two different targets, worth not confusing:
+
+- Replacing **our own generated** codecs is achievable now — both come from the same
+  YAML, so the key sets already agree.
+- Replacing a **vendor** codec is a schema-fidelity question, tracked by
+  `crossvalidate_ttn.py` (milesight 50/84, decentlab 55/58), not an interpreter one.
+  Our `dl-5tm` emits `flags` and `soil_temperature_raw` where the vendor's emits
+  neither — and `soil_temperature_raw` is a pure intermediate that should have been
+  `_`-prefixed, so it is a schema bug that would surface as an extra JSON key.
+
+Priority order for the gateway target, by what the device corpus actually uses:
+`tlv` and `flagged` first (most device schemas open with one), then `transform`
+stages, then `compute`/`ref`/`polynomial`, then `repeat`/`until`. `name_from`,
+`merge`, `bitfield_string` and the semantic mappings are rarer and can wait.
+
+**Encoding is the least-tested part of the project, and it is the MCU tier's whole
+job.** All 1188 corpus vectors are decode-only, and no vector asserts an encoded
+payload. C has a full encoder (`schema_encode`, `encode_field`, reverse modifiers) and
+`src/test_encoder.c` is in no build target, so it is verified by nothing that runs.
+Python and Go have encoders; **Java and C# have none** — Java's only `encode` hit is
+`Base64.getEncoder()`, and C# has just byte-level helpers in `Helpers.cs`. Meanwhile
+PS-061..PS-064 and the reverse of canonical modifier order are normative. A round-trip
+corpus is the cheap fix: every vector already carries a payload and its expected
+values, so feeding the values back through `encode` and asserting the original bytes
+gives ~1188 encode assertions for almost no authoring cost. It will not be lossless
+everywhere — `lookup`, `hex` case, guard fallbacks and unmatched enums discard
+information by design — so it needs a per-vector opt-out.
+
+**Four of the eight C test files are in no build target**: `test_comprehensive.c`,
+`test_interpreter.c`, `test_binary_schema.c`, `test_encoder.c`. Only `test_codec.c`
+and the `selftest_*` files are wired in. Six compiled executables are also tracked in
+git (`src/test_binary_schema`, `test_comprehensive`, `test_interpreter`,
+`test_encoder`, and the two `_cpp` ones).
+
+**`idiv` and `mod` disagree across implementations on negative operands**, and
+CR-2026-007 exists to settle it. Measured for `a = -7, b = 3`: Python gives
+`idiv -3, mod 2` (floored both), Go and C# give `-2, -1` (truncated both), and Java
+gives `-3, -1` — `Math.floorDiv` for `idiv` beside a truncated `%`, so its own two
+operators use different conventions and `a == idiv(a,b)*b + mod(a,b)` fails in Java
+alone. A zero divisor diverges a fourth way: Python and Java emit `NaN`, **which is
+not valid JSON**, so one zero divisor makes the whole decode unparseable; Go errors
+and C# throws.
+
+`_language-conformance/compute-negative-idiv-mod.yaml` is the acceptance test and is
+**expected to fail** until the CR lands — 4 in Go, 4 in C#, 2 in Java, 0 in Python.
+The floors are lowered to match (Go 1184, Java 1186, C# 1184 of 1188) so the gap
+stays visible rather than silently passing. Raise them when the CR is implemented.
+
+Note that no schema in the repository uses `idiv` or `mod` at all; those eight
+vectors are the only exercise of either operator in the corpus.
+
+**One assertion per vector when probing a divergence.** A runner stops at a vector's
+first mismatch, so an earlier draft of that fixture — four computed fields in one
+vector — hid three of the four disagreements behind whichever field was compared
+first. Go looked like it had an `idiv` bug and a correct `mod`.
+
+**The conformance comparison is exact for integers.** PS-039 requires an integer
+expectation to match exactly; PS-040's 0.001 is for floats and is absolute. All four
+runners used a relative `max(0.001, |want| * 0.001)` on everything, roughly 20 days
+of slack on a GPS timestamp, which is how a ts003 vector wrong by 2048 seconds passed
+in three languages while the composed-corpus tool rejected it. Integerness is decided
+from **how the vector wrote the value**, not from the decoded type — every
+interpreter widens integers on the way out, so `5` against `5.0` still matches.
+
+**`name_from` is not the answer to a per-channel key.** It exists for a key that
+varies with a decoded *value*. A milesight channel whose key is `current_chn1` or
+`region_3` looks like a candidate and is not: the index is fixed per channel id — the
+vendor builds it from `current_chns.indexOf(channel_id)` — so a per-(channel, type)
+TLV case names its fields outright. Check the vendor decoder before reaching for the
+construct; an earlier note here claimed 27 channels were blocked on it and none of
+the ones examined were.
+
+Cross-validate a vendor family with:
+
+```
+.venv/bin/python tools/crossvalidate_ttn.py \
+  --devices-repo ~/Workspace/lora/tools/lorawan-devices \
+  --vendor milesight-iot --schema-dir schemas/devices/milesight [--verbose]
+```
+
+Milesight stands at 50 of 84 agreeing. `vs321` and `vs373` are the next region-mask
+pair; both decode nothing for their declared example, so more than the regions is
+missing. Note that a bitfield range reads its base value **big-endian regardless of
+the schema's `endian`**, so a little-endian 16-bit mask must be taken as two `u8`
+fields rather than one `u16`.
+
+**`src/test_comprehensive.c` is in no build target.** No Makefile rule references
+it, so `make test` and `make selftest` never compile it and its 160 checks run
+nowhere. Build it by hand:
+
+```
+gcc -I include -o /tmp/tc src/test_comprehensive.c -lm && /tmp/tc
+```
+
+Two checks fail there and did before this session: both expect an unmatched enum to
+report `unknown(N)`, which PS-269 replaced with omitting the field. Fix the
+assertions or wire the file into the build — but know the failures are stale
+expectations, not regressions. Being unbuilt is also how C's dead sequential
+sentinel went unnoticed.
 
 ## Converting a vendor codec
 
