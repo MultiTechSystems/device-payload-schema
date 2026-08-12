@@ -351,9 +351,18 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                     known_field_names.append(bgf['name'])
             continue
         
-        if ('name' not in fld and 'type' not in fld and 'tlv' not in fld
-                and 'byte_group' not in fld and 'object' not in fld and 'match' not in fld):
-            errors.append(f"{path}[{i}]: must have 'name', 'type', 'flagged', 'tlv', 'byte_group', 'object', or 'match'")
+        # Every construct the interpreters dispatch on at field level. `$ref` was
+        # missing, so a schema pulling its header in from `definitions` was reported
+        # invalid (ref-header.yaml). `flagged` was missing from the condition while
+        # the message already listed it - harmless only because a flagged field also
+        # carries a name and type.
+        field_constructs = ('name', 'type', '$ref', 'flagged', 'tlv',
+                            'byte_group', 'object', 'match')
+        if not any(key in fld for key in field_constructs):
+            errors.append(
+                f"{path}[{i}]: must have "
+                f"{', '.join(repr(k) for k in field_constructs[:-1])} or "
+                f"{field_constructs[-1]!r}")
         
         if 'type' in fld:
             ftype = fld['type']
@@ -523,12 +532,24 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
             if not isinstance(transform, list):
                 errors.append(f"{path}[{i}] ({name}): 'transform' must be an array")
             else:
-                valid_ops = ('sqrt', 'abs', 'pow', 'floor', 'ceiling', 'clamp', 'log10', 'log', 'add', 'mult', 'div')
+                # Every stage key `_apply_transform` dispatches on. `round` and the
+                # named `op` form were absent, so a schema the interpreters decode
+                # correctly was reported invalid - round-half-to-even.yaml and
+                # transform-maths.yaml are the fixtures that exercise them.
+                valid_ops = ('sqrt', 'abs', 'pow', 'floor', 'ceiling', 'clamp', 'log10',
+                             'log', 'round', 'op', 'add', 'mult', 'div')
+                # `op:` names the operation instead of keying it (`{op: round,
+                # decimals: 2}`), so the name needs checking too.
+                valid_op_names = ('round', 'floor', 'ceiling', 'ceil')
                 for ti, op_def in enumerate(transform):
                     if not isinstance(op_def, dict):
                         errors.append(f"{path}[{i}] ({name}): transform[{ti}] must be an object")
                     elif not any(op in op_def for op in valid_ops):
                         errors.append(f"{path}[{i}] ({name}): transform[{ti}] has no valid operation ({', '.join(valid_ops)})")
+                    elif 'op' in op_def and op_def['op'] not in valid_op_names:
+                        errors.append(
+                            f"{path}[{i}] ({name}): transform[{ti}].op must be one of "
+                            f"{', '.join(valid_op_names)}, not {op_def['op']!r}")
                     else:
                         # Validate specific ops
                         if 'pow' in op_def and not isinstance(op_def['pow'], (int, float)):

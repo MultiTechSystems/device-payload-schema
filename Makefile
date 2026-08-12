@@ -63,7 +63,7 @@ PROTO_C = $(patsubst proto/%.proto,src/%.pb.c,$(PROTO_SRCS))
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra -O3 -Iinclude
 
-.PHONY: all clean test selftest coverage proto help codec benchmark generate-codec pytest pytest-cov coverage-html coverage-all validate fuzz fuzz-quick fuzz-hypothesis fuzz-go fuzz-c test-go test-java test-dotnet test-languages
+.PHONY: all clean test selftest validate-devices coverage proto help codec benchmark generate-codec pytest pytest-cov coverage-html coverage-all validate fuzz fuzz-quick fuzz-hypothesis fuzz-go fuzz-c test-go test-java test-dotnet test-languages
 
 all: $(TEST_BIN)
 
@@ -91,8 +91,9 @@ $(TEST_BIN): $(SELFTEST_OBJS) | $(BUILD_DIR)
 selftest: $(TEST_BIN)
 	$(TEST_BIN)
 
-test: selftest pytest
+test: selftest pytest validate-devices
 	@echo "All tests complete."
+
 
 # Tests for the Go, Java and C# interpreters, run in containers so no local
 # toolchain is needed. Caches live under .cache/ so repeat runs are quick.
@@ -138,6 +139,24 @@ $(VENV)/bin/activate:
 pytest: $(VENV)/bin/activate
 	@echo "Running Python tests..."
 	PYTHONPATH=tools $(PYTEST) tests/ -v
+
+# Mirrors the `Validate every device schema` job in .github/workflows/quality.yml.
+# `make test` ran the five interpreters and the Python suite but never the validator,
+# so three conformance fixtures using `round`, the named `op` form and `$$ref` were
+# pushed while that job was red - the local checks could not have caught it.
+validate-devices: $(VENV)/bin/activate
+	@status=0; \
+	for schema in schemas/devices/*/*.yaml; do \
+		if ! $(PYTHON) tools/validate_schema.py "$$schema" > /tmp/vd.txt 2>&1; then \
+			status=1; \
+		fi; \
+		if grep -q "Schema: INVALID" /tmp/vd.txt; then \
+			echo "INVALID: $$schema"; cat /tmp/vd.txt; status=1; \
+		fi; \
+	done; \
+	if [ $$status -eq 0 ]; then echo "All device schemas valid."; fi; \
+	exit $$status
+
 
 # Python tests with coverage
 pytest-cov: $(VENV)/bin/activate
