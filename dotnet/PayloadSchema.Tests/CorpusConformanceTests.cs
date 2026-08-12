@@ -26,7 +26,7 @@ public class CorpusConformanceTests
     // CR-2026-007 settled the floored `idiv`/`mod` convention and this
     // implementation follows it, so the negative-operand vectors pass and the floor
     // is the full corpus.
-    const int CorpusFloor = 1190;
+    const int CorpusFloor = 1191;
 
     readonly ITestOutputHelper _output;
 

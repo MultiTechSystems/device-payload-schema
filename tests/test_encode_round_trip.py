@@ -229,7 +229,9 @@ def test_tlv_payload_round_trips():
     # `ch255_type9_midscale` carries a `version_string`, which is lossy in the decoder
     # rather than the encoder: bytes 11 11 decode to "v11.1", a digit short, so nothing
     # can reconstruct the second byte. That is a separate defect from TLV framing.
-    lossy = {"ch255_type9_midscale"}
+    # Both hardware-version vectors: the vendor's format keeps only the high nibble of
+    # byte 1, so bits 8-11 are discarded and no encoder can put them back.
+    lossy = {"ch255_type9_midscale", "ch255_type9_hex_letters"}
     checked = 0
     for vector in schema["test_vectors"]:
         if vector["name"] in lossy:

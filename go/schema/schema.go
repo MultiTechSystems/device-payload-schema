@@ -1912,7 +1912,8 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 			mask := (uint64(1) << bitLen) - 1
 			raw := (intVal >> bitOff) & mask
 			if format == "hex" {
-				partStrs = append(partStrs, strings.ToUpper(strconv.FormatUint(raw, 16)))
+				// Lowercase (PS-074), matching the vendor codecs and the generated JS.
+				partStrs = append(partStrs, strconv.FormatUint(raw, 16))
 			} else {
 				partStrs = append(partStrs, strconv.FormatUint(raw, 10))
 			}

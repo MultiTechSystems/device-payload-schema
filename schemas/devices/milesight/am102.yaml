@@ -148,6 +148,19 @@ test_vectors:
     source: vendor-codec
     expected:
       hardware_version: "v11.1"
+  # A hardware version whose hex part contains letters. Every other vector here uses
+  # digits 0-9, where the two cases are identical, which is why four interpreters
+  # rendered "vFF.9" without a single test disagreeing. The expected value is the
+  # vendor's: readHardwareVersion in lorawan-devices/vendor/milesight-iot/am102.js
+  # formats byte 0 with toString(16), which is lowercase, and takes only the high
+  # nibble of byte 1 - so bits 8-11 are discarded by the vendor's own format.
+  - name: ch255_type9_hex_letters
+    description: "Channel 255 type 9, letters in the hex part, per the vendor's decoder"
+    payload: "FF09FF9F"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      hardware_version: "vff.9"
   - name: ch255_type10_midscale
     description: "Channel 255 type 10, midscale bytes, decoded by the vendor's own decoder"
     payload: "FF0A1111"

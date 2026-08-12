@@ -1584,7 +1584,10 @@ class TestBitfieldString:
         
         result = interpreter.decode(bytes([0x02, 0x0A]))
         assert result.success
-        assert result.data['firmware_version'] == 'v2.A'
+        # Lowercase (PS-074), matching the vendor codecs and the generated JS. This
+        # asserted 'v2.A': the four interpreters agreed with each other and none of
+        # them agreed with any vendor.
+        assert result.data['firmware_version'] == 'v2.a'
     
     def test_decimal_version(self):
         schema = {

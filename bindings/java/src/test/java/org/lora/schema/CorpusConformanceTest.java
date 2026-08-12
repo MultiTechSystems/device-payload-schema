@@ -30,7 +30,7 @@ class CorpusConformanceTest {
     // CR-2026-007 settled the floored convention and this binding now uses
     // Math.floorMod for `mod` as well as Math.floorDiv for `idiv`, so its two
     // operators agree and the floor is the full corpus.
-    private static final int CORPUS_FLOOR = 1190;
+    private static final int CORPUS_FLOOR = 1191;
 
     @Test
     void corpusVectorsDecodeAsExpected() throws IOException {

@@ -1165,7 +1165,9 @@ public class Schema {
                 long raw = (intVal >> bitOff) & mask;
                 
                 if ("hex".equals(format)) {
-                    partStrs.add(Long.toHexString(raw).toUpperCase());
+                    // Lowercase (PS-074), matching the vendor codecs and the
+                    // generated JS.
+                    partStrs.add(Long.toHexString(raw));
                 } else {
                     partStrs.add(String.valueOf(raw));
                 }

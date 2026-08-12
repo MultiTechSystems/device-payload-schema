@@ -117,7 +117,7 @@ Mean quality score 65.9% (PLATINUM 30, GOLD 40, SILVER 87, BRONZE 3, REJECTED 58
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
-| milesight | 84 | 946 | PLATINUM 18, GOLD 33, SILVER 22, REJECTED 11 |
+| milesight | 84 | 947 | PLATINUM 18, GOLD 33, SILVER 22, REJECTED 11 |
 | decentlab | 58 | 122 | PLATINUM 12, GOLD 7, SILVER 1, BRONZE 1, REJECTED 37 |
 | _library-composed | 49 | 49 | SILVER 48, BRONZE 1 |
 | _language-conformance | 11 | 18 | SILVER 11 |
@@ -268,7 +268,7 @@ Mean quality score 65.9% (PLATINUM 30, GOLD 40, SILVER 87, BRONZE 3, REJECTED 58
 | `mclimate/flood-sensor` | 5 | 0 | fields | 16% | REJECTED |
 | `mclimate/t-valve` | 11 | 0 | fields | 16% | REJECTED |
 | `mclimate/vicki` | 31 | 11 | fields | 100% | SILVER |
-| `milesight/am102` | 22 | 15 | fields | 100% | PLATINUM |
+| `milesight/am102` | 22 | 16 | fields | 100% | PLATINUM |
 | `milesight/am102l` | 22 | 15 | fields | 100% | PLATINUM |
 | `milesight/am103` | 16 | 15 | fields | 94% | GOLD |
 | `milesight/am103l` | 16 | 15 | fields | 94% | GOLD |

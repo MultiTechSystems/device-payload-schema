@@ -1149,13 +1149,15 @@ fields:
 		t.Errorf("firmware_version = %v, want v1.3", result["firmware_version"])
 	}
 
-	// Test hex uppercase for A
+	// A hex part renders lowercase (PS-074), as every vendor codec does and as the
+	// generated JS codec always did. This asserted "v2.A"; four interpreters agreed
+	// with each other and none of them agreed with the vendor.
 	result, err = schema.Decode([]byte{0x02, 0x0A})
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if result["firmware_version"] != "v2.A" {
-		t.Errorf("firmware_version = %v, want v2.A", result["firmware_version"])
+	if result["firmware_version"] != "v2.a" {
+		t.Errorf("firmware_version = %v, want v2.a", result["firmware_version"])
 	}
 }
 

@@ -1363,7 +1363,10 @@ class SchemaInterpreter:
             mask = (1 << bit_len) - 1
             raw = (int_val >> bit_off) & mask
             if fmt == 'hex':
-                part_strs.append(format(raw, 'X'))
+                # Lowercase, as PS-074 requires of the `hex` type and as every vendor
+                # codec renders it - JavaScript's toString(16) is lowercase, and the
+                # generated TS013 codec was the only implementation getting this right.
+                part_strs.append(format(raw, 'x'))
             else:
                 part_strs.append(str(raw))
         

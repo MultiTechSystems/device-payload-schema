@@ -30,7 +30,7 @@ import (
 // CR-2026-007 settled the floored `idiv`/`mod` convention and this interpreter
 // implements it, so the negative-operand vectors that used to be excluded now pass
 // and the floor is the full corpus again.
-const corpusFloor = 1190
+const corpusFloor = 1191
 
 type corpusVector struct {
 	Name    string `yaml:"name"`

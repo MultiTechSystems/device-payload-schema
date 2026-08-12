@@ -389,8 +389,9 @@ public static class SchemaDecoder
                     string format = part.Count >= 3 && part[2] is string f ? f : "decimal";
                     ulong mask = (1UL << bitLen) - 1;
                     ulong raw = (intVal >> bitOff) & mask;
+                    // Lowercase (PS-074), matching the vendor codecs and the generated JS.
                     partStrs.Add(format == "hex"
-                        ? raw.ToString("X")
+                        ? raw.ToString("x")
                         : raw.ToString());
                 }
                 value = prefix + string.Join(delimiter, partStrs);
