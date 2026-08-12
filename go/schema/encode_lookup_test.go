@@ -88,6 +88,87 @@ func TestEncodeReportsAValueItCannotWrite(t *testing.T) {
 	}
 }
 
+func TestEncodeWritesThe24BitWidths(t *testing.T) {
+	// u24 and s24 are in decodeField's two integer cases and were in neither of
+	// encodeField's, so they wrote nothing: oyster's port 4 re-encoded its latitude and
+	// longitude as no bytes at all and kept the three fields after them.
+	source := "name: t\nendian: little\nfields:\n" +
+		"  - name: lat\n    type: s24\n  - name: count\n    type: u24\n"
+
+	got, err := encodeHex(t, source, map[string]any{"lat": -390625.0, "count": 66051.0})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	// -390625 is 0xFA0A1F as a 24-bit two's complement value, little-endian.
+	if got != "1f0afa030201" {
+		t.Errorf("encoded as %q, want %q", got, "1f0afa030201")
+	}
+}
+
+func TestEncodeSplicesARef(t *testing.T) {
+	// Decoding splices a `$ref`'s fields in place; encoding did not, so a referenced
+	// header contributed no bytes.
+	source := "name: t\nendian: big\n" +
+		"definitions:\n" +
+		"  header:\n" +
+		"    fields:\n" +
+		"      - name: version\n        type: u8\n" +
+		"      - name: kind\n        type: u8\n" +
+		"fields:\n" +
+		"  - $ref: '#/definitions/header'\n" +
+		"  - name: value\n    type: u8\n"
+
+	got, err := encodeHex(t, source, map[string]any{
+		"version": 1.0, "kind": 2.0, "value": 3.0})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if got != "010203" {
+		t.Errorf("encoded as %q, want %q", got, "010203")
+	}
+}
+
+func TestEncodeRejectsATypeItHasNoCaseFor(t *testing.T) {
+	// The general form of every defect in this file: a type spelling the switch did not
+	// list wrote no bytes and returned nil, so the caller got a payload with a hole in
+	// it and was told it had succeeded.
+	source := "name: t\nendian: big\nfields:\n  - name: thing\n    type: base64\n"
+
+	got, err := encodeHex(t, source, map[string]any{"thing": "AQID"})
+	if err == nil {
+		t.Fatalf("expected an error, got payload %q", got)
+	}
+	if !strings.Contains(err.Error(), "cannot encode type") {
+		t.Errorf("error does not name the type: %v", err)
+	}
+}
+
+func TestEncodeSkipsADerivedFieldInsideAFlaggedGroup(t *testing.T) {
+	// A `type: number` field is computed from others and occupies no bytes. encodeFlagged
+	// skipped one only if it also carried the deprecated `formula` spelling, so a field
+	// using `ref` reached encodeField - where it wrote nothing, because the switch had no
+	// case for `number`, and the group's bytes came out right by accident.
+	source := "name: t\nendian: big\nfields:\n" +
+		"  - name: flags\n    type: u8\n" +
+		"  - flagged:\n" +
+		"      field: flags\n" +
+		"      groups:\n" +
+		"        - bit: 0\n" +
+		"          fields:\n" +
+		"            - name: raw\n              type: u8\n" +
+		"            - name: scaled\n              type: number\n" +
+		"              ref: $raw\n              mult: 2\n"
+
+	got, err := encodeHex(t, source, map[string]any{"raw": 5.0, "scaled": 10.0})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	// The flags byte, then `raw` alone: `scaled` is derived and writes nothing.
+	if got != "0105" {
+		t.Errorf("encoded as %q, want %q", got, "0105")
+	}
+}
+
 func TestEncodeWritesABitRangeField(t *testing.T) {
 	// A bit range carries its range in the type string, so it never matches a plain type
 	// name; encoding had no equivalent of decodeField's pre-switch check and wrote

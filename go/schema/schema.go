@@ -291,6 +291,10 @@ type EncodeContext struct {
 	// TLVOrder is the channel sequence to emit, as DecodeOrdered reported it. Empty
 	// means no order is known, and encodeTLV falls back to ascending tag order.
 	TLVOrder []string
+	// Definitions resolves a field's `$ref`. Decoding splices the referenced fields in
+	// place, so encoding has to as well; nothing carried them here before, and a
+	// referenced header contributed no bytes at all.
+	Definitions map[string]*DefinitionDef
 }
 
 // NewEncodeContext creates a new encode context.
@@ -2625,6 +2629,7 @@ func (s *Schema) Encode(data map[string]any) ([]byte, error) {
 // EncodeWithPort encodes data to binary using port-based schema selection.
 func (s *Schema) EncodeWithPort(data map[string]any, fPort int) ([]byte, error) {
 	ctx := NewEncodeContext(s.Endian)
+	ctx.Definitions = s.Definitions
 
 	// Encode header fields first
 	if len(s.Header) > 0 {
@@ -2690,6 +2695,7 @@ func (s *Schema) EncodeOrdered(data map[string]any, order []string) ([]byte, err
 func (s *Schema) EncodeOrderedWithPort(data map[string]any, fPort int, order []string) ([]byte, error) {
 	ctx := NewEncodeContext(s.Endian)
 	ctx.TLVOrder = order
+	ctx.Definitions = s.Definitions
 	if len(s.Header) > 0 {
 		if err := encodeFields(s.Header, data, ctx); err != nil {
 			return nil, err
@@ -2999,6 +3005,7 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 			}
 			inner := NewEncodeContext(ctx.Endian)
 			inner.Variables = ctx.Variables
+			inner.Definitions = ctx.Definitions
 			if err := encodeFieldList(c.fields, data, inner); err != nil {
 				return err
 			}
@@ -3037,6 +3044,7 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 	for _, c := range chosen {
 		inner := NewEncodeContext(ctx.Endian)
 		inner.Variables = ctx.Variables
+		inner.Definitions = ctx.Definitions
 		if err := encodeFieldList(c.fields, data, inner); err != nil {
 			return err
 		}
@@ -3151,8 +3159,30 @@ func encodeByteGroup(field Field, data map[string]any, ctx *EncodeContext) error
 
 // encodeFieldList encodes a list of plain fields - a TLV case's or match case's value
 // bytes - resolving nested constructs the same way the top-level loop does.
+// encodeRef writes the fields of a referenced definition in place, as decoding reads them.
+func encodeRef(ref string, data map[string]any, ctx *EncodeContext) error {
+	if !strings.HasPrefix(ref, "#/definitions/") {
+		return fmt.Errorf("unsupported $ref format: %s", ref)
+	}
+	name := strings.TrimPrefix(ref, "#/definitions/")
+	if ctx.Definitions == nil {
+		return fmt.Errorf("no definitions in schema, cannot resolve %s", ref)
+	}
+	def, ok := ctx.Definitions[name]
+	if !ok {
+		return fmt.Errorf("definition not found: %s", name)
+	}
+	return encodeFieldList(def.Fields, data, ctx)
+}
+
 func encodeFieldList(fields []Field, data map[string]any, ctx *EncodeContext) error {
 	for _, f := range fields {
+		if f.Ref2 != "" {
+			if err := encodeRef(f.Ref2, data, ctx); err != nil {
+				return err
+			}
+			continue
+		}
 		if f.MatchInline != nil {
 			if err := encodeMatch(*f.MatchInline, data, ctx); err != nil {
 				return err
@@ -3252,6 +3282,16 @@ func encodeFields(fields []Field, data map[string]any, ctx *EncodeContext) error
 	}
 
 	for _, field := range fields {
+		// $ref: decoding splices the referenced definition's fields in place, and
+		// encoding did not, so a referenced header contributed nothing - ref-header
+		// re-encoded 01020304 as 0304.
+		if field.Ref2 != "" {
+			if err := encodeRef(field.Ref2, data, ctx); err != nil {
+				return err
+			}
+			continue
+		}
+
 		// Flagged construct
 		if field.Flagged != nil {
 			if err := encodeFlagged(field.Flagged, data, ctx); err != nil {
@@ -3350,7 +3390,14 @@ func encodeFlagged(fd *FlaggedDef, data map[string]any, ctx *EncodeContext) erro
 			if gf.Name == "" || strings.HasPrefix(gf.Name, "_") {
 				continue
 			}
-			if gf.Formula != "" && (gf.Type == TypeNumber || gf.Type == "number") {
+			// A derived value is computed from other fields and occupies no bytes of
+			// its own. Requiring the deprecated `formula` spelling here - the same
+			// defect encodeFields already had fixed - meant a field using `ref`,
+			// `compute`, `polynomial` or `guard` was encoded as though it were on the
+			// wire. It wrote nothing, because the type switch had no case for
+			// `number`, so the group's bytes came out right by accident; the switch's
+			// default now reports it, which is how this was found.
+			if gf.Type == TypeNumber || gf.Type == "number" {
 				continue
 			}
 			value, ok := data[gf.Name]
@@ -3511,14 +3558,18 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 	// field wrote no bytes, the payload came back the right shape minus one value, and
 	// the encoder called it a success.
 	switch field.Type {
-	case TypeByte, TypeUInt, TypeU8, TypeU16, TypeU32, TypeU64:
+	// The 24-bit spellings are in decodeField's two integer cases and were in neither of
+	// these, so a u24 or an s24 wrote nothing at all: oyster's port 4 re-encoded its
+	// latitude and longitude as no bytes and kept the three fields after them.
+	case TypeByte, TypeUInt, TypeU8, TypeU16, TypeU24, TypeU32, TypeU64:
 		numVal, ok := toFloat64(value)
 		if !ok {
 			return notANumber(field, value)
 		}
 		ctx.Write(encodeUint(uint64(numVal), length, endian))
 
-	case TypeSInt, TypeS8, TypeS16, TypeS32, TypeS64, TypeI8, TypeI16, TypeI32, TypeI64:
+	case TypeSInt, TypeS8, TypeS16, TypeS24, TypeS32, TypeS64, TypeI8, TypeI16, TypeI32,
+		TypeI64:
 		numVal, ok := toFloat64(value)
 		if !ok {
 			return notANumber(field, value)
@@ -3631,6 +3682,15 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 
 	case TypeSkip, TypeSkipLower:
 		ctx.Write(make([]byte, length))
+
+	default:
+		// The general form of the three defects above. Each was a type spelling this
+		// switch did not list - a sequence lookup's label, a `u8[0:0]` range, a `u24` -
+		// and each wrote no bytes and returned nil, so the caller was handed a payload
+		// with a hole in it and told it had succeeded. A type with no case is now a
+		// reported failure, which is what makes the next omission of this kind visible
+		// the first time it happens rather than at the next corpus diff.
+		return fmt.Errorf("cannot encode type %q for field %q", field.Type, field.Name)
 	}
 
 	return nil

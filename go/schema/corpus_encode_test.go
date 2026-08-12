@@ -33,22 +33,25 @@ import (
 // map cannot hold. Encode alone still has to assume ascending tag order, which is how most
 // devices here lay their channels out but not all - so the plain pair scores lower, and
 // that is the reason the ordered pair exists.
-const encodeFloorTotal = 1132
+const encodeFloorTotal = 1135
 
 // encodeFloorByShape guards each layout separately, so a regression in one that works
-// cannot hide behind the mass of one that does not.
+// cannot hide behind the mass of one that does not. It has earned that: raising the total
+// after adding the type switch's default case caught `flagged` dropping 9 vectors in the
+// same run, which the total alone would have absorbed.
 //
-// tlv is the highest of the five implementations, not because the encoder is better but
-// because TLVOrder records the case key of every channel as it was read, so a tag that
-// appears twice goes back twice; the other four recover the order from their output keys,
-// which collapses a repeated channel to one. The 61-vector gap this used to have was a
-// sequence `lookup` that no encode-side reversal undid - see reverseLookupLabel.
+// Every shape now matches the Python, Java and C# figures except tlv, which is higher.
+// That is not a better encoder: TLVOrder records the case key of each channel as it was
+// read, so where two cases define the same field name under different tags - em500-smt
+// carries `humidity` under both [4, 104] and [4, 202], with identical arithmetic - the tag
+// that actually wrote those bytes goes back. The other four recover order from their output
+// keys, which cannot tell those two cases apart, and pick the first.
 var encodeFloorByShape = map[string]int{
 	"tlv":         905,
 	"flagged":     121,
-	"plain fixed": 53,
+	"plain fixed": 54,
 	"match":       34,
-	"byte_group":  15,
+	"byte_group":  17,
 	"repeat":      4,
 }
 
