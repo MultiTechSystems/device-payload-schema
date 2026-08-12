@@ -266,6 +266,51 @@ def apply_canonical_modifiers(value, field_def: Dict[str, Any]):
     return value
 
 
+class TransformNotInvertible(ValueError):
+    """A ``transform`` stage that encoding cannot undo (``sqrt``, ``log``, ``pow``...)."""
+
+
+def reverse_transform_stages(value, stages):
+    """Undo a ``transform`` chain for encoding, innermost stage last.
+
+    Decoding runs the stages in order, so encoding runs their inverses in reverse
+    order. Nothing did this before: a `u16` carrying
+    ``transform: [{add: -32768}, {div: 10}]`` decoded to -3276.8 and encoding wrote
+    that straight back into an unsigned field, which raised
+    "can't convert negative int to unsigned" where it happened to be out of range and
+    silently produced the wrong bytes where it did not.
+
+    Rounding and clamping stages are identity in reverse: the value they discarded
+    cannot be recovered, and for a value that was in range they changed nothing.
+    Genuinely irreversible arithmetic raises, so a caller reports the field rather
+    than writing a wrong byte.
+    """
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return value
+    for stage in reversed(list(stages or [])):
+        if not isinstance(stage, dict):
+            continue
+        if 'add' in stage:
+            value = value - float(stage['add'])
+        elif 'mult' in stage:
+            factor = float(stage['mult'])
+            if factor == 0:
+                raise TransformNotInvertible("cannot undo 'mult: 0'")
+            value = value / factor
+        elif 'div' in stage:
+            value = value * float(stage['div'])
+        elif 'round' in stage or 'op' in stage:
+            # The discarded precision is gone; the value itself is unchanged.
+            continue
+        elif 'floor' in stage or 'ceiling' in stage or 'clamp' in stage:
+            # Bound stages: identity for anything that was inside the bound.
+            continue
+        else:
+            unknown = ", ".join(sorted(stage)) or "empty stage"
+            raise TransformNotInvertible(f"cannot undo transform stage: {unknown}")
+    return value
+
+
 def reverse_canonical_modifiers(value, field_def: Dict[str, Any]):
     """Invert :func:`apply_canonical_modifiers` for encoding.
 
@@ -2293,15 +2338,22 @@ class SchemaInterpreter:
         for field_def in fields:
             # Flagged construct
             if 'flagged' in field_def:
-                encoded = self._encode_flagged(field_def['flagged'], data)
-                output.extend(encoded)
+                try:
+                    output.extend(self._encode_flagged(field_def['flagged'], data))
+                except Exception as e:
+                    # The per-field path below reports its errors; this one used to
+                    # propagate, so one unencodable group killed the whole call.
+                    result.errors.append(f"Error encoding flagged group: {e}")
                 continue
             
             name = field_def.get('name', 'unknown')
             field_type = field_def.get('type', 'u8')
             
-            # Skip computed fields
-            if field_type == 'number' and field_def.get('formula'):
+            # A derived value is computed from other fields and occupies no bytes of its
+            # own. This required the deprecated `formula` spelling, so a field using
+            # `ref`, `compute`, `polynomial` or `guard` fell through to "Cannot encode
+            # type: number" - every schema with a computed field failed to encode.
+            if field_type == 'number':
                 continue
             
             # Bitfield string encoding
@@ -2366,7 +2418,11 @@ class SchemaInterpreter:
                 gf_type = gf.get('type', 'u8')
                 if not gf_name or gf_name.startswith('_'):
                     continue
-                if gf_type == 'number' and gf.get('formula'):
+                if gf_type == 'number':
+                    # A derived value: computed from other fields, so it has no bytes of
+                    # its own. This skipped only the deprecated `formula` spelling, so a
+                    # field using `ref`, `compute`, `polynomial` or `guard` was encoded
+                    # as though it were on the wire.
                     continue
                 value = data.get(gf_name, 0)
                 value = self._reverse_modifiers(value, gf)
@@ -2431,6 +2487,10 @@ class SchemaInterpreter:
         
         # Reverse lookup
         value = reverse_lookup(value, field_def.get('lookup'))
+
+        # Decoding applies the canonical modifiers, then the transform chain, then the
+        # lookup, so encoding undoes them in the opposite order.
+        value = reverse_transform_stages(value, field_def.get('transform'))
 
         value = reverse_canonical_modifiers(value, field_def)
         
