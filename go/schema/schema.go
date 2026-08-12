@@ -7,6 +7,7 @@
 package schema
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -15,6 +16,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -2595,6 +2597,513 @@ func (s *Schema) EncodeWithPort(data map[string]any, fPort int) ([]byte, error) 
 	return ctx.Buffer, nil
 }
 
+
+// --- encoding the constructs -------------------------------------------------
+//
+// Ported from tools/schema_interpreter.py, whose round-trip corpus found these gaps.
+// Encoding had none of the constructs: a TLV schema emitted its channel values with no
+// tag or length framing, a match emitted nothing, and a byte_group emitted one zero byte.
+
+// integerRange gives the inclusive bounds a field of this type can hold, so a candidate
+// TLV case can be asked whether the value it claims would even fit.
+func integerRange(t FieldType) (int64, int64, bool) {
+	var size int
+	var signed bool
+	switch t {
+	case TypeU8, "uint8", TypeByte:
+		size, signed = 1, false
+	case TypeU16, "uint16":
+		size, signed = 2, false
+	case TypeU24, "uint24":
+		size, signed = 3, false
+	case TypeU32, "uint32":
+		size, signed = 4, false
+	case "s8", "i8", "int8":
+		size, signed = 1, true
+	case "s16", "i16", "int16":
+		size, signed = 2, true
+	case "s24", "i24", "int24":
+		size, signed = 3, true
+	case "s32", "i32", "int32":
+		size, signed = 4, true
+	default:
+		return 0, 0, false
+	}
+	if signed {
+		half := int64(1) << (8*size - 1)
+		return -half, half - 1, true
+	}
+	return 0, (int64(1) << (8 * size)) - 1, true
+}
+
+// rawForField undoes a field's lookup, transform chain and canonical modifiers, without
+// the rounding that encodeField applies - so a caller can see whether the value could
+// have come from this field at all.
+func rawForField(field Field, value any) (float64, bool) {
+	if strVal, ok := value.(string); ok && field.Lookup != nil {
+		found := false
+		for k, v := range field.Lookup {
+			if v == strVal {
+				value = k
+				found = true
+				break
+			}
+		}
+		if !found {
+			return 0, false
+		}
+	}
+	num, ok := toFloat64(value)
+	if !ok {
+		return 0, false
+	}
+	for i := len(field.Transform) - 1; i >= 0; i-- {
+		stage := field.Transform[i]
+		switch {
+		case stage.Add != nil:
+			num -= *stage.Add
+		case stage.Mult != nil && *stage.Mult != 0:
+			num /= *stage.Mult
+		case stage.Div != nil:
+			num *= *stage.Div
+		case stage.Op != "", stage.Sqrt, stage.Abs, stage.Log, stage.Log10, stage.Pow != nil:
+			// Rounding and clamping are identity in reverse; the rest are not
+			// invertible, which the caller treats as "this case did not write it".
+			if stage.Sqrt || stage.Abs || stage.Log || stage.Log10 || stage.Pow != nil {
+				return 0, false
+			}
+		}
+	}
+	return reverseCanonicalModifiers(num, field), true
+}
+
+// caseFidelity reports how well a candidate TLV case explains the data: how many of its
+// fields are present, and whether each could have produced the value it claims. am308
+// defines `tvoc` under [8, 125] with div: 100 and under [8, 230] raw; 43.69 came from
+// 4369 through the divide exactly, and 4369 raw cannot have come from the divide case
+// because 436900 does not fit a u16.
+
+// caseMatchesValue reports whether a discriminator selects this case: a single value, a
+// list of values, or an "a..b" range, the same spellings decodeMatch accepts.
+func caseMatchesValue(value int, c Case) bool {
+	raw := c.Case
+	if raw == nil {
+		raw = c.Match
+	}
+	if raw == nil {
+		return false
+	}
+	switch v := raw.(type) {
+	case []any:
+		for _, item := range v {
+			if n, ok := toInt(item); ok && n == value {
+				return true
+			}
+		}
+		return false
+	case string:
+		if strings.Contains(v, "..") {
+			parts := strings.SplitN(v, "..", 2)
+			lo, errLo := parseIntAny(parts[0])
+			hi, errHi := parseIntAny(parts[1])
+			return errLo == nil && errHi == nil && int64(value) >= lo && int64(value) <= hi
+		}
+		n, err := parseIntAny(v)
+		return err == nil && int64(value) == n
+	}
+	if n, ok := toInt(raw); ok {
+		return n == value
+	}
+	return false
+}
+
+func caseFidelity(caseFields []Field, data map[string]any) (int, bool) {
+	matches, lossless := 0, true
+	for _, f := range caseFields {
+		if f.Name == "" || strings.HasPrefix(f.Name, "_") || f.Type == TypeNumber || f.Type == "number" {
+			continue
+		}
+		value, ok := data[f.Name]
+		if !ok {
+			continue
+		}
+		matches++
+		raw, invertible := rawForField(f, value)
+		if !invertible {
+			lossless = false
+			continue
+		}
+		if math.Abs(raw-math.Round(raw)) > 1e-9 {
+			lossless = false
+		}
+		if lo, hi, known := integerRange(f.Type); known {
+			r := int64(math.Round(raw))
+			if r < lo || r > hi {
+				lossless = false
+			}
+		}
+	}
+	return matches, lossless
+}
+
+// encodeTLVTag rebuilds a tag from the case key that matched it while decoding. The
+// composite form carries the values in the key ("[3, 103]" against tag_key), so each goes
+// back through its own tag_fields entry. A key using ! or * names a range of tags rather
+// than one (PS-270), so it cannot be encoded.
+func encodeTLVTag(caseKey string, field Field, ctx *EncodeContext) ([]byte, error) {
+	text := strings.TrimSpace(caseKey)
+	if strings.HasPrefix(text, "[") {
+		text = strings.TrimSuffix(strings.TrimPrefix(text, "["), "]")
+		parts := strings.Split(text, ",")
+		if len(field.TagFields) == 0 {
+			return nil, fmt.Errorf("composite tlv case %q with no tag_fields", caseKey)
+		}
+		names := tagKeyNames(field.TagKey)
+		if len(names) != len(parts) {
+			return nil, fmt.Errorf("tlv case %q does not match tag_key %v", caseKey, names)
+		}
+		values := map[string]int64{}
+		for i, part := range parts {
+			p := strings.Trim(strings.TrimSpace(part), "\"'")
+			if p == "*" || strings.HasPrefix(p, "!") {
+				return nil, fmt.Errorf("tlv case %q matches a range of tags, so encoding cannot choose one", caseKey)
+			}
+			v, err := parseIntAny(p)
+			if err != nil {
+				return nil, fmt.Errorf("tlv case %q: %v", caseKey, err)
+			}
+			values[names[i]] = v
+		}
+		out := []byte{}
+		for _, tf := range field.TagFields {
+			v, ok := values[tf.Name]
+			if !ok {
+				return nil, fmt.Errorf("tlv case %q gives no value for %q", caseKey, tf.Name)
+			}
+			width := 1
+			if lo, hi, known := integerRange(tf.Type); known {
+				_ = lo
+				switch {
+				case hi > 0xFFFFFF:
+					width = 4
+				case hi > 0xFFFF:
+					width = 3
+				case hi > 0xFF:
+					width = 2
+				}
+			}
+			out = append(out, encodeUint(uint64(v), width, ctx.Endian)...)
+		}
+		return out, nil
+	}
+	v, err := parseIntAny(text)
+	if err != nil {
+		return nil, fmt.Errorf("tlv case %q: %v", caseKey, err)
+	}
+	size := field.TagSize
+	if size <= 0 {
+		size = 1
+	}
+	return encodeUint(uint64(v), size, ctx.Endian), nil
+}
+
+func tagKeyNames(tagKey any) []string {
+	switch v := tagKey.(type) {
+	case string:
+		return []string{v}
+	case []any:
+		names := make([]string, 0, len(v))
+		for _, item := range v {
+			names = append(names, fmt.Sprintf("%v", item))
+		}
+		return names
+	case []string:
+		return v
+	}
+	return nil
+}
+
+func parseIntAny(text string) (int64, error) {
+	text = strings.TrimSpace(text)
+	base := 10
+	if strings.HasPrefix(strings.ToLower(text), "0x") {
+		text, base = text[2:], 16
+	}
+	return strconv.ParseInt(text, base, 64)
+}
+
+// encodeTLV rebuilds a TLV payload from decoded output. Decoding flattens every channel
+// into one map, so the channels are recovered from which field names are present and
+// ordered by where those names appear in the decoded output.
+func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
+	// Python recovers channel order from its decoded output, whose keys are in payload
+	// order. A Go map has no order at all, so the channels are emitted in ascending tag
+	// order instead - which is how devices in this corpus lay them out, but is an
+	// assumption rather than recovered information. The floor in corpus_encode_test.go
+	// records how far it gets.
+	type candidate struct {
+		tag     []byte
+		lossy   int
+		matches int
+		key     string
+		fields  []Field
+		claimed []string
+	}
+	candidates := []candidate{}
+	for key, caseFields := range field.TLVCases {
+		claimed := []string{}
+		for _, f := range caseFields {
+			if f.Name == "" || strings.HasPrefix(f.Name, "_") || f.Type == TypeNumber || f.Type == "number" {
+				continue
+			}
+			if _, ok := data[f.Name]; ok {
+				claimed = append(claimed, f.Name)
+			}
+		}
+		if len(claimed) == 0 {
+			continue
+		}
+		tag, err := encodeTLVTag(key, field, ctx)
+		if err != nil {
+			// A wildcard or negated key names a range of tags (PS-270); it cannot be
+			// written, so it is not a candidate.
+			continue
+		}
+		matches, lossless := caseFidelity(caseFields, data)
+		lossy := 0
+		if !lossless {
+			lossy = 1
+		}
+		candidates = append(candidates, candidate{tag, lossy, matches, key, caseFields, claimed})
+	}
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if c := bytes.Compare(candidates[i].tag, candidates[j].tag); c != 0 {
+			return c < 0
+		}
+		if candidates[i].lossy != candidates[j].lossy {
+			return candidates[i].lossy < candidates[j].lossy
+		}
+		return candidates[i].matches > candidates[j].matches
+	})
+
+	spent := map[string]bool{}
+	chosen := []candidate{}
+	for _, c := range candidates {
+		allSpent := true
+		for _, name := range c.claimed {
+			if !spent[name] {
+				allSpent = false
+				break
+			}
+		}
+		if allSpent {
+			continue
+		}
+		for _, name := range c.claimed {
+			spent[name] = true
+		}
+		chosen = append(chosen, c)
+	}
+	sort.SliceStable(chosen, func(i, j int) bool { return bytes.Compare(chosen[i].tag, chosen[j].tag) < 0 })
+
+	for _, c := range chosen {
+		inner := NewEncodeContext(ctx.Endian)
+		inner.Variables = ctx.Variables
+		if err := encodeFieldList(c.fields, data, inner); err != nil {
+			return err
+		}
+		ctx.Write(c.tag)
+		if field.LengthSize > 0 {
+			ctx.Write(encodeUint(uint64(len(inner.Buffer)), field.LengthSize, ctx.Endian))
+		}
+		ctx.Write(inner.Buffer)
+	}
+	return nil
+}
+
+// encodeMatch writes a match construct's bytes. An inline match (length: N) read those
+// bytes itself, so encoding writes them back; a match on field: $var read nothing,
+// because the variable came from a field earlier in the list that is encoded on its own.
+func encodeMatch(field Field, data map[string]any, ctx *EncodeContext) error {
+	var discriminator any
+	if field.Name != "" {
+		if v, ok := data[field.Name]; ok {
+			discriminator = v
+		}
+	}
+	if discriminator == nil && field.On != "" {
+		varName := strings.TrimPrefix(field.On, "$")
+		if v, ok := data[varName]; ok {
+			discriminator = v
+		} else if v, ok := ctx.Variables[varName]; ok {
+			discriminator = v
+		}
+	}
+
+	var chosen []Field
+	chosenKey := ""
+	if discriminator != nil {
+		if intVal, ok := toInt(discriminator); ok {
+			for _, c := range field.Cases {
+				if caseMatchesValue(intVal, c) {
+					chosen, chosenKey = c.Fields, fmt.Sprintf("%v", c.Case)
+					break
+				}
+			}
+		}
+	}
+	if chosen == nil {
+		best := -1
+		for _, c := range field.Cases {
+			hits := 0
+			for _, f := range c.Fields {
+				if f.Name != "" {
+					if _, ok := data[f.Name]; ok {
+						hits++
+					}
+				}
+			}
+			if hits > best {
+				best, chosen, chosenKey = hits, c.Fields, fmt.Sprintf("%v", c.Case)
+			}
+		}
+		if best <= 0 {
+			return nil
+		}
+	}
+
+	if field.Length > 0 {
+		value := int64(0)
+		if intVal, ok := toInt(discriminator); ok {
+			value = int64(intVal)
+		} else if v, err := parseIntAny(chosenKey); err == nil {
+			value = v
+		}
+		ctx.Write(encodeUint(uint64(value), field.Length, ctx.Endian))
+	}
+	return encodeFieldList(chosen, data, ctx)
+}
+
+// encodeByteGroup packs a group's bit ranges back into their shared byte(s). Encoding had
+// no case for the construct, so it emitted a single zero byte: right length, wrong bits.
+func encodeByteGroup(field Field, data map[string]any, ctx *EncodeContext) error {
+	size := field.Size
+	if size <= 0 {
+		size = 1
+	}
+	packed := uint64(0)
+	for _, gf := range field.ByteGroup {
+		var value any = 0
+		if gf.Name != "" && !strings.HasPrefix(gf.Name, "_") {
+			if v, ok := data[gf.Name]; ok {
+				value = v
+			}
+		}
+		raw, ok := rawForField(gf, value)
+		if !ok {
+			continue
+		}
+		num := uint64(int64(math.Round(raw)))
+		if m := bitRangePattern.FindStringSubmatch(string(gf.Type)); m != nil {
+			bits, _ := strconv.Atoi(strings.TrimLeft(m[1], "usf"))
+			start, _ := strconv.Atoi(m[2])
+			end, _ := strconv.Atoi(m[3])
+			if base := bits / 8; base > size {
+				size = base
+			}
+			width := uint(end - start + 1)
+			packed |= (num & ((1 << width) - 1)) << uint(start)
+		} else {
+			packed |= num
+		}
+	}
+	ctx.Write(encodeUint(packed, size, ctx.Endian))
+	return nil
+}
+
+// encodeFieldList encodes a list of plain fields - a TLV case's or match case's value
+// bytes - resolving nested constructs the same way the top-level loop does.
+func encodeFieldList(fields []Field, data map[string]any, ctx *EncodeContext) error {
+	for _, f := range fields {
+		if f.MatchInline != nil {
+			if err := encodeMatch(*f.MatchInline, data, ctx); err != nil {
+				return err
+			}
+			continue
+		}
+		if f.TLVInline != nil {
+			if err := encodeTLV(*f.TLVInline, data, ctx); err != nil {
+				return err
+			}
+			continue
+		}
+		if len(f.ByteGroup) > 0 {
+			if err := encodeByteGroup(f, data, ctx); err != nil {
+				return err
+			}
+			continue
+		}
+		if f.Type == TypeNumber || f.Type == "number" {
+			continue
+		}
+		if f.Type == "skip" {
+			length := f.Length
+			if length < 0 {
+				length = 0
+			}
+			ctx.Write(make([]byte, length))
+			continue
+		}
+		if f.Name == "" || strings.HasPrefix(f.Name, "_") {
+			if err := encodeField(f, 0, ctx); err != nil {
+				return err
+			}
+			continue
+		}
+		value, ok := data[f.Name]
+		if !ok {
+			value = 0
+		}
+		if f.Type == TypeBitfieldString {
+			if strVal, isStr := value.(string); isStr {
+				if err := encodeBitfieldString(f, strVal, ctx); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		if err := encodeField(f, value, ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+
+// encodeRepeat writes a repeat's records back to back. The framing costs no bytes here:
+// count: $n and byte_length: $len name a field earlier in the list, encoded on its own.
+func encodeRepeat(field Field, data map[string]any, ctx *EncodeContext) error {
+	raw, ok := data[field.Name]
+	if !ok {
+		return nil
+	}
+	records, ok := raw.([]any)
+	if !ok {
+		return fmt.Errorf("repeat field %q: expected a list of records", field.Name)
+	}
+	for _, item := range records {
+		record, ok := item.(map[string]any)
+		if !ok {
+			return fmt.Errorf("repeat field %q: expected each record to be a mapping", field.Name)
+		}
+		if err := encodeFieldList(field.Fields, record, ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func encodeFields(fields []Field, data map[string]any, ctx *EncodeContext) error {
 	// Pre-scan flagged constructs to compute flag values
 	flagsPatches := map[string]int{}
@@ -2624,12 +3133,43 @@ func encodeFields(fields []Field, data map[string]any, ctx *EncodeContext) error
 			continue
 		}
 
+		if field.TLVInline != nil {
+			if err := encodeTLV(*field.TLVInline, data, ctx); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if field.MatchInline != nil {
+			if err := encodeMatch(*field.MatchInline, data, ctx); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if len(field.ByteGroup) > 0 {
+			if err := encodeByteGroup(field, data, ctx); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if field.Type == "repeat" {
+			if err := encodeRepeat(field, data, ctx); err != nil {
+				return err
+			}
+			continue
+		}
+
 		if field.Name == "" || strings.HasPrefix(field.Name, "_") {
 			continue
 		}
 
 		// Skip computed fields
-		if field.Formula != "" && (field.Type == TypeNumber || field.Type == "number") {
+		// A derived value is computed from other fields and occupies no bytes of its own.
+		// This required the deprecated `formula` spelling, so `ref`, `compute`,
+		// `polynomial` and `guard` fields were encoded as though they were on the wire.
+		if field.Type == TypeNumber || field.Type == "number" {
 			continue
 		}
 
@@ -2921,6 +3461,14 @@ func encodeBytes(field Field, value any, length int, ctx *EncodeContext) error {
 
 	case []byte:
 		data = v
+	}
+
+	// `length: remaining` (PS-014) parses to the negative sentinel, and it gives no
+	// fixed count when encoding - the value supplies its own. make([]byte, -1) panicked,
+	// which is how radio-bridge's stored downlink brought the encoder down rather than
+	// reporting anything.
+	if length < 0 {
+		length = len(data)
 	}
 
 	// Pad or truncate to exact length
