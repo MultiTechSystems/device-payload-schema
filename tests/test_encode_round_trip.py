@@ -23,20 +23,21 @@ Measured state when this was written, and the reason for the shape breakdown:
 | plain fixed |          54 |              3 |            3 |      3 |
 | match       |          34 |              0 |            0 |      0 |
 | byte_group  |          17 |              0 |            2 |      0 |
-| repeat      |           1 |              0 |            0 |      3 |
+| repeat      |           4 |              0 |            0 |      0 |
 
-1126 of 1191, from 120 when this began. What remains, and what kind of thing it is:
+1129 of 1191, from 120 when this began. **Every construct now has an encoder**, so what
+is left is information the decoded output does not carry, not a missing implementation:
 
-1. **37 TLV, all lossy by the vendor's design.** A `bitfield_string` hardware version
-   keeps only the high nibble of byte 1, so bits 8-11 are discarded by the format itself
-   and no encoder can put them back. Not fixable here.
-2. **13 TLV**, 7 short or long and 6 differing in place: a channel repeated in one payload
-   collapses to a single dict key while decoding, so which occurrence a value came from is
-   gone. Partly unfixable for the same reason.
-3. **9 in plain fixed and repeat**: `skip` padding whose bytes the output does not carry,
-   `name_from` whose key is built at run time, and `repeat` framing, which encoding does
-   not rebuild - the remaining construct-shaped gap.
-4. **2 byte_group** in vicki, differing in place.
+1. **37 TLV, lossy by the vendor's design.** A `bitfield_string` hardware version keeps
+   only the high nibble of byte 1, so bits 8-11 are discarded by the format itself.
+2. **13 TLV**: a channel repeated within one payload collapses to a single dict key while
+   decoding, so which occurrence a value came from is gone.
+3. **3 errors, each a deliberate refusal** rather than a failure. Two are a `default`
+   label, which stands for every value a table does not list (PS-269), so no original can
+   be recovered; the third is `sqrt`, which cannot be inverted. Reported against the field
+   rather than guessed at.
+4. **9 in plain fixed, flagged and byte_group**: `skip` padding whose bytes the output
+   does not carry, `name_from` whose key is built at run time, and two vicki vectors.
 
 Raising any of those floors is the measure of progress on encoding.
 """
@@ -59,7 +60,7 @@ from schema_interpreter import SchemaInterpreter  # noqa: E402
 DEVICES = REPO_ROOT / "schemas" / "devices"
 
 #: Exact round-trips required overall. Raise as encoding improves.
-FLOOR_TOTAL = 1126
+FLOOR_TOTAL = 1129
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -69,6 +70,7 @@ FLOOR_BY_SHAPE = {
     "plain fixed": 54,
     "match": 34,
     "byte_group": 17,
+    "repeat": 4,
 }
 
 #: Encoding must never raise. It used to, 26 times: "Cannot encode type: number" for any
@@ -404,3 +406,46 @@ def test_ref_is_spliced_when_encoding():
         encoded = SchemaInterpreter(schema).encode(dict(decoded.data))
         assert not encoded.errors, encoded.errors
         assert bytes(encoded.payload) == payload
+
+def test_repeat_records_round_trip():
+    """A `repeat` writes its records back to back, and nothing else.
+
+    The framing costs no bytes here: `count: $n` and `byte_length: $len` name a field
+    earlier in the list that the main loop encodes on its own. Encoding reached
+    "Cannot encode type: repeat" before this, so every record was dropped -
+    repeat-count.yaml re-encoded 020a14 as 02, keeping only the count.
+    """
+    for name in ("repeat-count", "repeat-byte-length"):
+        schema = yaml.safe_load(
+            (REPO_ROOT / f"schemas/devices/_language-conformance/{name}.yaml")
+            .read_text(encoding="utf-8")
+        )
+        for vector in schema["test_vectors"]:
+            payload = bytes.fromhex(str(vector["payload"]).replace(" ", ""))
+            decoded = SchemaInterpreter(schema).decode(payload)
+            assert isinstance(decoded.data["items"], list), decoded.data
+            encoded = SchemaInterpreter(schema).encode(dict(decoded.data))
+            assert not encoded.errors, f"{name}: {encoded.errors}"
+            assert bytes(encoded.payload) == payload, (
+                f"{name}: {bytes(encoded.payload).hex()} != {payload.hex()}"
+            )
+
+
+def test_unrecoverable_default_label_is_refused_clearly():
+    """A `default` label matches any unmapped value, so there is no original to write.
+
+    Reported as that, rather than as int()'s "invalid literal for int() with base 10:
+    'unknown'", which said nothing about why the value could not be encoded.
+    """
+    schema = yaml.safe_load(
+        "name: t\nendian: big\nfields:\n"
+        "  - name: mode\n    type: u8\n"
+        # `on` must be quoted: YAML parses it as the boolean True, which is why the
+        # corpus writes ["off", "on"] rather than [off, on].
+        "    lookup: {1: \"on\", default: unknown}\n"
+    )
+    encoded = SchemaInterpreter(schema).encode({"mode": "unknown"})
+    assert encoded.errors
+    assert "default" in encoded.errors[0] and "cannot be recovered" in encoded.errors[0]
+    # A label the table does list still encodes.
+    assert bytes(SchemaInterpreter(schema).encode({"mode": "on"}).payload) == b"\x01"

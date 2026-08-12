@@ -2416,6 +2416,14 @@ class SchemaInterpreter:
                     result.errors.append(f"Error encoding match: {e}")
                 continue
             
+            if field_def.get('type') == 'repeat':
+                try:
+                    output.extend(self._encode_repeat(field_def, data))
+                except Exception as e:
+                    result.errors.append(
+                        f"Error encoding repeat {field_def.get('name')!r}: {e}")
+                continue
+            
             if 'flagged' in field_def:
                 try:
                     output.extend(self._encode_flagged(field_def['flagged'], data))
@@ -2761,6 +2769,9 @@ class SchemaInterpreter:
                 continue
             name = f.get('name', '')
             ftype = f.get('type', 'u8')
+            if ftype == 'repeat':
+                out.extend(self._encode_repeat(f, data))
+                continue
             if ftype == 'object':
                 # A nested object's fields are written in place; the interpreter reports
                 # them flattened, so they are looked up by their own names.
@@ -2786,6 +2797,38 @@ class SchemaInterpreter:
                 value = data.get(name, f.get('default', 0))
             value = self._reverse_modifiers(value, f)
             out.extend(self._encode_field(f, value))
+        return bytes(out)
+
+    def _encode_repeat(self, field_def: Dict[str, Any], data: Dict[str, Any]) -> bytes:
+        """Encode a ``repeat``: its records back to back, and nothing else.
+
+        The framing costs no bytes of its own here. ``count: $n`` and
+        ``byte_length: $len`` name a field earlier in the list, which the main loop
+        encodes from its own value, and ``until: end`` needs no header at all - so the
+        construct contributes exactly its records. Each record is a dict, and its fields
+        are looked up inside it rather than in the payload-level output.
+
+        Encoding reached "Cannot encode type: repeat" before this, so a schema with a
+        repeat lost every record: repeat-count.yaml re-encoded 020a14 as 02.
+        """
+        name = field_def.get('name', '')
+        records = data.get(name)
+        if records is None:
+            return b''
+        if isinstance(records, dict):
+            records = [records]
+        if not isinstance(records, (list, tuple)):
+            raise ValueError(
+                f"repeat field {name!r}: expected a list of records, got "
+                f"{type(records).__name__}")
+        record_fields = field_def.get('fields') or []
+        out = bytearray()
+        for record in records:
+            if not isinstance(record, dict):
+                raise ValueError(
+                    f"repeat field {name!r}: expected each record to be a mapping, got "
+                    f"{type(record).__name__}")
+            out.extend(self._encode_field_list(record_fields, record))
         return bytes(out)
 
     def _case_fidelity(self, case_fields: List[Dict[str, Any]], data: Dict[str, Any]):
@@ -2893,6 +2936,16 @@ class SchemaInterpreter:
         # and the label then reached int() as "invalid literal for int() with base 10:
         # 'Class A'". 69 corpus vectors failed to encode on exactly that.
         value = reverse_lookup(value, field_def.get('lookup'))
+
+        if isinstance(value, str) and field_def.get('lookup'):
+            # The label is not in the table, so it came from the mapping's `default`,
+            # which stands for every value the table does not list (PS-269) - there is no
+            # original to recover. Said plainly here, because otherwise int() reported
+            # "invalid literal for int() with base 10: 'unknown'".
+            raise ValueError(
+                f"{value!r} is not a label in the lookup for {field_def.get('name')!r}; "
+                "a `default` label matches any unmapped value, so the value that "
+                "produced it cannot be recovered")
 
         if not isinstance(value, (int, float)) or isinstance(value, bool):
             return value
