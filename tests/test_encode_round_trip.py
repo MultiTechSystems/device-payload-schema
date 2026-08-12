@@ -18,22 +18,25 @@ Measured state when this was written, and the reason for the shape breakdown:
 
 | shape       | round-trips | length differs | bytes differ | errors |
 |-------------|-------------|----------------|--------------|--------|
-| tlv         |         816 |             91 |           36 |      5 |
+| tlv         |         899 |              7 |           43 |      0 |
 | flagged     |         121 |              1 |            0 |      0 |
-| plain fixed |          53 |              4 |            3 |      3 |
+| plain fixed |          54 |              3 |            3 |      3 |
 | match       |          34 |              0 |            0 |      0 |
 | byte_group  |          17 |              0 |            2 |      0 |
 | repeat      |           1 |              0 |            0 |      3 |
 
-1042 of 1190, from 120 when this began. What remains, in order of size:
+1126 of 1191, from 120 when this began. What remains, and what kind of thing it is:
 
-1. **The rest of TLV**, 132 vectors. A repeated channel is unrecoverable in principle -
-   decoding flattens both occurrences into one dict key - but a tag value wider than its
-   `tag_size` is an ordinary gap.
-2. **10 in plain fixed and 3 in repeat**, mostly `skip` padding whose bytes the output
-   does not carry, which is lossy by definition.
-3. **`version_string` is lossy in the *decoder*.** Bytes 11 11 decode to "v11.1", a digit
-   short, so no encoder can reconstruct them. Found here, but it is a decode defect.
+1. **37 TLV, all lossy by the vendor's design.** A `bitfield_string` hardware version
+   keeps only the high nibble of byte 1, so bits 8-11 are discarded by the format itself
+   and no encoder can put them back. Not fixable here.
+2. **13 TLV**, 7 short or long and 6 differing in place: a channel repeated in one payload
+   collapses to a single dict key while decoding, so which occurrence a value came from is
+   gone. Partly unfixable for the same reason.
+3. **9 in plain fixed and repeat**: `skip` padding whose bytes the output does not carry,
+   `name_from` whose key is built at run time, and `repeat` framing, which encoding does
+   not rebuild - the remaining construct-shaped gap.
+4. **2 byte_group** in vicki, differing in place.
 
 Raising any of those floors is the measure of progress on encoding.
 """
@@ -56,14 +59,14 @@ from schema_interpreter import SchemaInterpreter  # noqa: E402
 DEVICES = REPO_ROOT / "schemas" / "devices"
 
 #: Exact round-trips required overall. Raise as encoding improves.
-FLOOR_TOTAL = 1042
+FLOOR_TOTAL = 1126
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
 FLOOR_BY_SHAPE = {
-    "tlv": 816,
+    "tlv": 899,
     "flagged": 121,
-    "plain fixed": 53,
+    "plain fixed": 54,
     "match": 34,
     "byte_group": 17,
 }
@@ -357,6 +360,46 @@ def test_remaining_length_encodes_the_value_it_has():
     )
     for raw in ("10010009", "10", "1042"):
         payload = bytes.fromhex(raw)
+        decoded = SchemaInterpreter(schema).decode(payload)
+        encoded = SchemaInterpreter(schema).encode(dict(decoded.data))
+        assert not encoded.errors, encoded.errors
+        assert bytes(encoded.payload) == payload
+
+def test_ambiguous_tlv_case_is_resolved_by_the_arithmetic():
+    """Two cases can define one field name; only one of them wrote the bytes.
+
+    am308 has `tvoc` under [8, 125] with `div: 100` and under [8, 230] raw. Emitting
+    every case whose fields are present produced both channels, so the payload grew.
+    The value says which: 43.69 came from 4369 through the divide exactly, while the raw
+    case would need it rounded - and 4369 raw cannot have come from the divide case,
+    because 436900 does not fit the u16 it would have to be written to.
+    """
+    schema = yaml.safe_load(
+        (REPO_ROOT / "schemas/devices/milesight/am308.yaml").read_text(encoding="utf-8")
+    )
+    for name in ("ch8_type125_midscale", "ch8_type230_midscale"):
+        vector = next(v for v in schema["test_vectors"] if v["name"] == name)
+        payload = bytes.fromhex(str(vector["payload"]).replace(" ", ""))
+        decoded = SchemaInterpreter(schema).decode(payload, fPort=85)
+        encoded = SchemaInterpreter(schema).encode(dict(decoded.data), fPort=85)
+        assert not encoded.errors, f"{name}: {encoded.errors}"
+        assert bytes(encoded.payload) == payload, (
+            f"{name}: {bytes(encoded.payload).hex()} != {payload.hex()}"
+        )
+
+
+def test_ref_is_spliced_when_encoding():
+    """Decoding splices a `$ref` definition's fields in place; encoding must too.
+
+    It did not, so the whole referenced header collapsed to one zero byte and
+    ref-header.yaml re-encoded 01020304 as 000304.
+    """
+    schema = yaml.safe_load(
+        (REPO_ROOT / "schemas/devices/_language-conformance/ref-header.yaml")
+        .read_text(encoding="utf-8")
+    )
+    for vector in schema["test_vectors"]:
+        payload = bytes.fromhex(str(vector["payload"]).replace(" ", ""))
         decoded = SchemaInterpreter(schema).decode(payload)
         encoded = SchemaInterpreter(schema).encode(dict(decoded.data))
         assert not encoded.errors, encoded.errors

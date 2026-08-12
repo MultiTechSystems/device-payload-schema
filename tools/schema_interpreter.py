@@ -63,6 +63,34 @@ _COLON_STRING_TYPES = frozenset({'hex:upper'})
 OMITTED = object()
 
 
+#: Byte width and signedness of every integer type spelling, including aliases. Lifted
+#: out of _encode_field so the TLV case ranking can ask whether a value fits a field
+#: before believing that field wrote it.
+INTEGER_TYPE_INFO: Dict[str, Tuple[int, bool]] = {
+    'u8': (1, False), 'uint8': (1, False),
+    'u16': (2, False), 'uint16': (2, False),
+    'u24': (3, False), 'uint24': (3, False),
+    'u32': (4, False), 'uint32': (4, False),
+    'u64': (8, False), 'uint64': (8, False),
+    's8': (1, True), 'i8': (1, True), 'int8': (1, True),
+    's16': (2, True), 'i16': (2, True), 'int16': (2, True),
+    's24': (3, True), 'i24': (3, True), 'int24': (3, True),
+    's32': (4, True), 'i32': (4, True), 'int32': (4, True),
+    's64': (8, True), 'i64': (8, True), 'int64': (8, True),
+}
+
+
+def integer_range(field_type: str):
+    """Inclusive (low, high) a field of this type can hold, or None if not an integer."""
+    info = INTEGER_TYPE_INFO.get(str(field_type))
+    if info is None:
+        return None
+    size, signed = info
+    if signed:
+        return -(1 << (8 * size - 1)), (1 << (8 * size - 1)) - 1
+    return 0, (1 << (8 * size)) - 1
+
+
 def encode_length(field_def, natural: int) -> int:
     """The byte count to write for a variable-length field.
 
@@ -2355,6 +2383,18 @@ class SchemaInterpreter:
                 flags_patches[field_name] = flags
         
         for field_def in fields:
+            if '$ref' in field_def:
+                # Decoding splices the referenced definition's fields in place; encoding
+                # never did, so the whole header collapsed to one zero byte -
+                # ref-header.yaml re-encoded 01020304 as 000304.
+                try:
+                    ref_def = self._resolve_ref(field_def['$ref'])
+                    output.extend(
+                        self._encode_field_list(ref_def.get('fields') or [], data))
+                except Exception as e:
+                    result.errors.append(f"Error encoding $ref: {e}")
+                continue
+            
             if 'byte_group' in field_def:
                 try:
                     output.extend(self._encode_byte_group(field_def, data))
@@ -2748,6 +2788,41 @@ class SchemaInterpreter:
             out.extend(self._encode_field(f, value))
         return bytes(out)
 
+    def _case_fidelity(self, case_fields: List[Dict[str, Any]], data: Dict[str, Any]):
+        """How well a candidate case explains the data: (matches, lossless).
+
+        Two cases can define the same field name under different tags - am308 has `tvoc`
+        under both [8, 125] (``div: 100``) and [8, 230] (raw). Only one of them can have
+        produced the value, and the arithmetic says which: 43.69 came from 4369 through
+        `div: 100` exactly, while the raw case would need it rounded to 44. A candidate
+        that cannot reproduce the value it claims did not write those bytes.
+        """
+        matches, lossless = 0, True
+        for f in case_fields:
+            if not isinstance(f, dict):
+                continue
+            name = f.get('name')
+            if not name or name not in data or f.get('type') == 'number':
+                continue
+            matches += 1
+            raw = reverse_lookup(data[name], f.get('lookup'))
+            if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+                try:
+                    raw = reverse_transform_stages(raw, f.get('transform'))
+                    raw = reverse_canonical_modifiers(raw, f)
+                except Exception:
+                    lossless = False
+                    continue
+                if isinstance(raw, float) and abs(raw - round(raw)) > 1e-9:
+                    lossless = False
+                bounds = integer_range(f.get('type', 'u8'))
+                if bounds is not None and not (bounds[0] <= round(raw) <= bounds[1]):
+                    # It does not fit the field, so this case cannot have written it:
+                    # am308's `tvoc` of 4369 needs 436900 through the `div: 100` case,
+                    # which a u16 cannot hold. That raised "int too big to convert".
+                    lossless = False
+        return matches, lossless
+
     def _encode_tlv(self, field_def: Dict[str, Any], data: Dict[str, Any]) -> bytes:
         """Rebuild a TLV payload from decoded output.
 
@@ -2767,7 +2842,7 @@ class SchemaInterpreter:
         byteorder = 'little' if self.endian == Endian.LITTLE else 'big'
         order = list(data)
 
-        present = []
+        candidates = []
         for case_key, case_fields in cases.items():
             if case_key == 'default' or not isinstance(case_fields, list):
                 continue
@@ -2776,15 +2851,32 @@ class SchemaInterpreter:
                 if isinstance(f, dict) and f.get('name') and not str(f['name']).startswith('_')
                 and f.get('type') != 'number'
             ]
-            positions = [order.index(n) for n in names if n in data]
-            if not positions:
+            claimed = [n for n in names if n in data]
+            if not claimed:
                 continue
-            present.append((min(positions), case_key, case_fields))
+            matches, lossless = self._case_fidelity(case_fields, data)
+            candidates.append((
+                min(order.index(n) for n in claimed),   # payload order
+                0 if lossless else 1,                   # one that can reproduce the value
+                -matches,                               # then the fuller explanation
+                case_key, case_fields, claimed,
+            ))
 
-        present.sort(key=lambda item: item[0])
+        candidates.sort(key=lambda item: item[:3])
 
         out = bytearray()
-        for _, case_key, case_fields in present:
+        spent: set = set()
+        emitted = []
+        for position, _, _, case_key, case_fields, claimed in candidates:
+            # Every decoded field belongs to one channel. Without this a name defined
+            # under two tags emitted both of them, so am308 grew an extra channel.
+            if all(name in spent for name in claimed):
+                continue
+            spent.update(claimed)
+            emitted.append((position, case_key, case_fields))
+
+        emitted.sort(key=lambda item: item[0])
+        for _, case_key, case_fields in emitted:
             tag = self._encode_tlv_tag(case_key, tlv_def)
             value = self._encode_field_list(case_fields, data)
             out.extend(tag)
@@ -2831,21 +2923,7 @@ class SchemaInterpreter:
         if any(c in str(field_type) for c in ['[', ':', '<']):
             return bytes([int(value) & 0xFF])
         
-        # Type info with all aliases (must match decoder)
-        type_info = {
-            # Unsigned (canonical: u prefix)
-            'u8': (1, False), 'uint8': (1, False),
-            'u16': (2, False), 'uint16': (2, False),
-            'u24': (3, False), 'uint24': (3, False),
-            'u32': (4, False), 'uint32': (4, False),
-            'u64': (8, False), 'uint64': (8, False),
-            # Signed (canonical: s prefix, aliases: i prefix, int prefix)
-            's8': (1, True), 'i8': (1, True), 'int8': (1, True),
-            's16': (2, True), 'i16': (2, True), 'int16': (2, True),
-            's24': (3, True), 'i24': (3, True), 'int24': (3, True),
-            's32': (4, True), 'i32': (4, True), 'int32': (4, True),
-            's64': (8, True), 'i64': (8, True), 'int64': (8, True),
-        }
+        type_info = INTEGER_TYPE_INFO
         
         if field_type in type_info:
             size, signed = type_info[field_type]
