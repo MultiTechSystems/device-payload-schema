@@ -2337,6 +2337,13 @@ class SchemaInterpreter:
         
         for field_def in fields:
             # Flagged construct
+            if 'tlv' in field_def and not field_def.get('type'):
+                try:
+                    output.extend(self._encode_tlv(field_def, data))
+                except Exception as e:
+                    result.errors.append(f"Error encoding tlv: {e}")
+                continue
+            
             if 'flagged' in field_def:
                 try:
                     output.extend(self._encode_flagged(field_def['flagged'], data))
@@ -2475,18 +2482,137 @@ class SchemaInterpreter:
         
         return bytes(output)
     
+    def _encode_tlv_tag(self, case_key: Any, tlv_def: Dict[str, Any]) -> bytes:
+        """Rebuild a TLV tag from the case key that matched it while decoding.
+
+        The composite form carries the tag values in the key - ``"[3, 103]"`` against
+        ``tag_key: [channel_id, channel_type]`` - so encoding reads them back out and
+        writes each through its own ``tag_fields`` entry. A key using ``!`` or ``*``
+        (PS-270) names no single tag, so it cannot be encoded; 3 of the corpus's 762
+        composite keys are of that kind.
+        """
+        byteorder = 'little' if self.endian == Endian.LITTLE else 'big'
+        tag_fields = tlv_def.get('tag_fields')
+        tag_key = tlv_def.get('tag_key')
+
+        if tag_fields and tag_key:
+            text = str(case_key).strip()
+            if text.startswith('['):
+                text = text[1:-1] if text.endswith(']') else text[1:]
+            parts = [part.strip().strip('"\'') for part in text.split(',')]
+            if any(part == '*' or part.startswith('!') for part in parts):
+                raise ValueError(
+                    f"TLV case {case_key!r} matches a range of tags, so encoding cannot "
+                    "choose one")
+            values = {}
+            names = tag_key if isinstance(tag_key, list) else [tag_key]
+            if len(parts) != len(names):
+                raise ValueError(f"TLV case {case_key!r} does not match tag_key {names}")
+            for name, part in zip(names, parts):
+                values[name] = int(part, 0)
+            out = bytearray()
+            for tf in tag_fields:
+                tf_name = tf.get('name', '')
+                if tf_name not in values:
+                    raise ValueError(f"TLV case {case_key!r} gives no value for {tf_name!r}")
+                out.extend(self._encode_field(tf, values[tf_name]))
+            return bytes(out)
+
+        tag_size = tlv_def.get('tag_size', 1)
+        value = int(str(case_key), 0) if not isinstance(case_key, int) else case_key
+        return int(value).to_bytes(tag_size, byteorder)
+
+    def _encode_field_list(self, fields: List[Dict[str, Any]], data: Dict[str, Any]) -> bytes:
+        """Encode a list of plain fields - a TLV case's value bytes."""
+        out = bytearray()
+        for f in fields:
+            if not isinstance(f, dict):
+                continue
+            name = f.get('name', '')
+            ftype = f.get('type', 'u8')
+            if ftype == 'number':
+                # Derived: computed from other fields, no bytes of its own.
+                continue
+            if ftype == 'skip':
+                length = f.get('length', 1)
+                length = 0 if isinstance(length, str) else max(0, int(length))
+                out.extend(bytes(length))
+                continue
+            if ftype == 'bitfield_string':
+                out.extend(self._encode_bitfield_string(f, str(data.get(name, ''))))
+                continue
+            if ftype == 'version_string':
+                out.extend(self._encode_version_string(f, str(data.get(name, ''))))
+                continue
+            if not name or name.startswith('_'):
+                value = f.get('default', 0)
+            else:
+                value = data.get(name, f.get('default', 0))
+            value = self._reverse_modifiers(value, f)
+            out.extend(self._encode_field(f, value))
+        return bytes(out)
+
+    def _encode_tlv(self, field_def: Dict[str, Any], data: Dict[str, Any]) -> bytes:
+        """Rebuild a TLV payload from decoded output.
+
+        Decoding flattens every channel into one dict, so the channels have to be
+        recovered from which field names are present. Their order comes from the order
+        those names appear in the dict, which for output straight from `decode` is the
+        order they were read - that is what lets a payload round-trip rather than come
+        back with its channels rearranged.
+
+        A case whose fields are all absent is not emitted. A case that cannot be
+        encoded - a wildcard tag, or a field the data does not carry - raises, and the
+        caller records it against the payload rather than writing a wrong tag.
+        """
+        tlv_def = field_def.get('tlv', {})
+        cases = tlv_def.get('cases', {}) or {}
+        length_size = tlv_def.get('length_size', 0) or 0
+        byteorder = 'little' if self.endian == Endian.LITTLE else 'big'
+        order = list(data)
+
+        present = []
+        for case_key, case_fields in cases.items():
+            if case_key == 'default' or not isinstance(case_fields, list):
+                continue
+            names = [
+                f.get('name') for f in case_fields
+                if isinstance(f, dict) and f.get('name') and not str(f['name']).startswith('_')
+                and f.get('type') != 'number'
+            ]
+            positions = [order.index(n) for n in names if n in data]
+            if not positions:
+                continue
+            present.append((min(positions), case_key, case_fields))
+
+        present.sort(key=lambda item: item[0])
+
+        out = bytearray()
+        for _, case_key, case_fields in present:
+            tag = self._encode_tlv_tag(case_key, tlv_def)
+            value = self._encode_field_list(case_fields, data)
+            out.extend(tag)
+            if length_size > 0:
+                out.extend(len(value).to_bytes(length_size, byteorder))
+            out.extend(value)
+        return bytes(out)
+
     def _reverse_modifiers(self, value: Any, field_def: Dict[str, Any]) -> Any:
         """Reverse arithmetic modifiers for encoding."""
-        if not isinstance(value, (int, float)):
+        # The lookup comes first, before the numeric guard below: a lookup's whole
+        # purpose is to report a label, so the value arriving here is a string and the
+        # guard returned it untouched - reverse_lookup was dead code for every label,
+        # and the label then reached int() as "invalid literal for int() with base 10:
+        # 'Class A'". 69 corpus vectors failed to encode on exactly that.
+        value = reverse_lookup(value, field_def.get('lookup'))
+
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
             return value
         
         # Phase 3: encode_formula takes precedence
         encode_formula = field_def.get('encode_formula')
         if encode_formula:
             return int(round(self._evaluate_encode_formula(encode_formula, value)))
-        
-        # Reverse lookup
-        value = reverse_lookup(value, field_def.get('lookup'))
 
         # Decoding applies the canonical modifiers, then the transform chain, then the
         # lookup, so encoding undoes them in the opposite order.

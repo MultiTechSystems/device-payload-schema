@@ -16,22 +16,25 @@ shape cannot hide behind the mass of a broken one.
 
 Measured state when this was written, and the reason for the shape breakdown:
 
-| shape       | round-trips | length differs | bytes differ |
-|-------------|-------------|----------------|--------------|
-| tlv         |           0 |            948 |            0 |
-| flagged     |         121 |              1 |            0 |
-| plain fixed |          53 |              7 |            3 |
-| match       |           0 |             23 |           11 |
-| byte_group  |           2 |              1 |           16 |
-| repeat      |           1 |              3 |            0 |
+| shape       | round-trips | length differs | bytes differ | errors |
+|-------------|-------------|----------------|--------------|--------|
+| tlv         |         816 |             88 |           36 |      8 |
+| flagged     |         121 |              1 |            0 |      0 |
+| plain fixed |          53 |              4 |            3 |      3 |
+| match       |           0 |             23 |           11 |      0 |
+| byte_group  |           2 |              1 |           16 |      0 |
+| repeat      |           1 |              0 |            0 |      3 |
 
-Three gaps, in order of size:
+993 of 1190, from 120 when this began. What remains, in order of size:
 
-1. **TLV encoding is unimplemented.** 948 vectors, none round-tripping: the encoder
-   emits the channel values without rebuilding the tag/length framing around them.
-2. **`match` encoding.** 34 vectors; the discriminator and the selected case's bytes are
-   not reassembled.
-3. **`byte_group` bit packing.** 16 vectors produce the right length and the wrong bits.
+1. **The rest of TLV**, 132 vectors. A repeated channel is unrecoverable in principle -
+   decoding flattens both occurrences into one dict key - but the `object` type inside a
+   case, and a tag value wider than its `tag_size`, are ordinary gaps.
+2. **`match` encoding**, 34 vectors: the discriminator and the selected case's bytes are
+   not reassembled. The same shape of work TLV needed.
+3. **`byte_group` bit packing**, 16 vectors with the right length and the wrong bits.
+4. **`version_string` is lossy in the *decoder*.** Bytes 11 11 decode to "v11.1", a digit
+   short, so no encoder can reconstruct them. Found here, but it is a decode defect.
 
 Raising any of those floors is the measure of progress on encoding.
 """
@@ -54,11 +57,12 @@ from schema_interpreter import SchemaInterpreter  # noqa: E402
 DEVICES = REPO_ROOT / "schemas" / "devices"
 
 #: Exact round-trips required overall. Raise as encoding improves.
-FLOOR_TOTAL = 177
+FLOOR_TOTAL = 993
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
 FLOOR_BY_SHAPE = {
+    "tlv": 816,
     "flagged": 121,
     "plain fixed": 53,
 }
@@ -208,3 +212,80 @@ def test_non_invertible_transform_is_reported_not_guessed():
     encoded = SchemaInterpreter(schema).encode({"v": 4})
     assert encoded.errors, "expected an error for an irreversible transform"
     assert "sqrt" in encoded.errors[0]
+
+def test_tlv_payload_round_trips():
+    """A TLV payload must come back byte-identical, channels in their original order.
+
+    Decoding flattens every channel into one dict, so encoding recovers the channels
+    from which field names are present and orders them by where those names appear in
+    the dict - which for output straight from `decode` is the order they were read.
+    Without that the channels come back rearranged and the payload differs while every
+    value in it is right.
+    """
+    schema = yaml.safe_load(
+        (REPO_ROOT / "schemas/devices/milesight/am102.yaml").read_text(encoding="utf-8")
+    )
+    # `ch255_type9_midscale` carries a `version_string`, which is lossy in the decoder
+    # rather than the encoder: bytes 11 11 decode to "v11.1", a digit short, so nothing
+    # can reconstruct the second byte. That is a separate defect from TLV framing.
+    lossy = {"ch255_type9_midscale"}
+    checked = 0
+    for vector in schema["test_vectors"]:
+        if vector["name"] in lossy:
+            continue
+        payload = bytes.fromhex(str(vector["payload"]).replace(" ", ""))
+        decoded = SchemaInterpreter(schema).decode(payload)
+        assert not decoded.errors, decoded.errors
+        encoded = SchemaInterpreter(schema).encode(dict(decoded.data))
+        assert not encoded.errors, encoded.errors
+        assert bytes(encoded.payload) == payload, (
+            f"{vector['name']}: {bytes(encoded.payload).hex()} != {payload.hex()}"
+        )
+        checked += 1
+    assert checked >= 14, checked
+
+    # The multi-channel vector is the one that tests framing and ordering together:
+    # three channels, each with its own composite tag, in payload order.
+    multi = next(v for v in schema["test_vectors"] if v["name"] == "vendor_reference")
+    payload = bytes.fromhex(str(multi["payload"]).replace(" ", ""))
+    decoded = SchemaInterpreter(schema).decode(payload)
+    assert bytes(SchemaInterpreter(schema).encode(dict(decoded.data)).payload) == payload
+
+
+def test_lookup_label_encodes_back_to_its_integer():
+    """A label must map back through the lookup, not reach int() as a string.
+
+    `_reverse_modifiers` guarded on the value being numeric *before* reversing the
+    lookup, so reverse_lookup was dead code for every label a lookup had produced. The
+    label then hit int() and 69 corpus vectors failed to encode with
+    "invalid literal for int() with base 10: 'Class A'".
+    """
+    schema = yaml.safe_load(
+        "name: t\nendian: big\nfields:\n"
+        "  - name: lorawan_class\n    type: u8\n"
+        "    lookup: [\"Class A\", \"Class B\", \"Class C\"]\n"
+    )
+    for raw, label in (("00", "Class A"), ("01", "Class B"), ("02", "Class C")):
+        decoded = SchemaInterpreter(schema).decode(bytes.fromhex(raw))
+        assert decoded.data["lorawan_class"] == label
+        encoded = SchemaInterpreter(schema).encode(dict(decoded.data))
+        assert not encoded.errors, encoded.errors
+        assert bytes(encoded.payload) == bytes.fromhex(raw)
+
+
+def test_unencodable_tlv_tag_is_reported():
+    """A wildcard case matches a range of tags, so encoding cannot choose one (PS-270)."""
+    schema = yaml.safe_load(
+        "name: t\nendian: big\nfields:\n"
+        "  - tlv:\n"
+        "      tag_fields:\n"
+        "        - {name: ch, type: u8}\n"
+        "        - {name: kind, type: u8}\n"
+        "      tag_key: [ch, kind]\n"
+        "      cases:\n"
+        "        \"[1, *]\":\n"
+        "          - {name: reading, type: u8}\n"
+    )
+    encoded = SchemaInterpreter(schema).encode({"reading": 7})
+    assert encoded.errors, "expected an error rather than an invented tag"
+    assert "cannot choose one" in encoded.errors[0]
