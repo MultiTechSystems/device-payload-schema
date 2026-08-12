@@ -33,12 +33,18 @@ import (
 // map cannot hold. Encode alone still has to assume ascending tag order, which is how most
 // devices here lay their channels out but not all - so the plain pair scores lower, and
 // that is the reason the ordered pair exists.
-const encodeFloorTotal = 1065
+const encodeFloorTotal = 1132
 
 // encodeFloorByShape guards each layout separately, so a regression in one that works
 // cannot hide behind the mass of one that does not.
+//
+// tlv is the highest of the five implementations, not because the encoder is better but
+// because TLVOrder records the case key of every channel as it was read, so a tag that
+// appears twice goes back twice; the other four recover the order from their output keys,
+// which collapses a repeated channel to one. The 61-vector gap this used to have was a
+// sequence `lookup` that no encode-side reversal undid - see reverseLookupLabel.
 var encodeFloorByShape = map[string]int{
-	"tlv":         838,
+	"tlv":         905,
 	"flagged":     121,
 	"plain fixed": 53,
 	"match":       34,

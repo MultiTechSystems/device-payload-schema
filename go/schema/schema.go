@@ -522,6 +522,45 @@ func reverseCanonicalModifiers(value float64, field Field) float64 {
 	return value
 }
 
+// reverseLookupLabel maps a decoded label back to the value that produced it.
+//
+// Both spellings of `lookup` have to be undone here, and only the mapping form was.
+// A sequence (PS-104) is parsed into LookupArray, which neither encode-side reversal
+// consulted, so every label a sequence produced - "open", "occupied", "Class A" -
+// stayed a string. It then failed the numeric conversion in encodeField, whose
+// integer cases wrote nothing at all when that conversion failed, so 67 corpus
+// vectors emitted a TLV tag followed by no value and reported no error.
+//
+// A label in neither table came from a `default`, which stands for every value the
+// table does not list (PS-269): there is no original to recover, and saying so is
+// better than writing a byte that is merely plausible.
+func reverseLookupLabel(field Field, value any) (any, error) {
+	strVal, isStr := value.(string)
+	if !isStr || (field.Lookup == nil && field.LookupArray == nil) {
+		return value, nil
+	}
+	// Smallest matching key, so a table that gives two values the same label resolves
+	// the same way on every run rather than however the map happens to be walked.
+	matched, found := 0, false
+	for k, v := range field.Lookup {
+		if v == strVal && (!found || k < matched) {
+			matched, found = k, true
+		}
+	}
+	if found {
+		return float64(matched), nil
+	}
+	for i, entry := range field.LookupArray {
+		if label, ok := entry.(string); ok && label == strVal {
+			return float64(i), nil
+		}
+	}
+	return nil, fmt.Errorf(
+		"%q is not a label in the lookup for %q; a `default` label matches any "+
+			"unmapped value, so the value that produced it cannot be recovered",
+		strVal, field.Name)
+}
+
 // findFieldNodes returns a mapping from field index to its yaml.Node for a fields sequence.
 func findFieldNodes(root *yaml.Node, path ...string) []*yaml.Node {
 	node := root
@@ -2705,19 +2744,12 @@ func integerRange(t FieldType) (int64, int64, bool) {
 // the rounding that encodeField applies - so a caller can see whether the value could
 // have come from this field at all.
 func rawForField(field Field, value any) (float64, bool) {
-	if strVal, ok := value.(string); ok && field.Lookup != nil {
-		found := false
-		for k, v := range field.Lookup {
-			if v == strVal {
-				value = k
-				found = true
-				break
-			}
-		}
-		if !found {
-			return 0, false
-		}
+	reversed, err := reverseLookupLabel(field, value)
+	if err != nil {
+		// A label with no value behind it: this case cannot have written those bytes.
+		return 0, false
 	}
+	value = reversed
 	num, ok := toFloat64(value)
 	if !ok {
 		return 0, false
@@ -3398,6 +3430,12 @@ func encodeBitfieldString(field Field, strVal string, ctx *EncodeContext) error 
 	return nil
 }
 
+// notANumber names the field and what arrived instead, so a caller is told which value
+// it could not write rather than being handed a payload with a hole in it.
+func notANumber(field Field, value any) error {
+	return fmt.Errorf("field %q: expected a number, got %T %v", field.Name, value, value)
+}
+
 func encodeField(field Field, value any, ctx *EncodeContext) error {
 	length := field.Length
 	if length == 0 {
@@ -3408,15 +3446,13 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 		endian = ctx.Endian
 	}
 
-	// Reverse lookup if value is a string and lookup exists
-	if strVal, ok := value.(string); ok && field.Lookup != nil {
-		for k, v := range field.Lookup {
-			if v == strVal {
-				value = float64(k)
-				break
-			}
-		}
+	// Reverse the lookup first, before the numeric reversal below: a lookup's whole
+	// purpose is to report a label, so that is the form the value arrives in.
+	reversed, err := reverseLookupLabel(field, value)
+	if err != nil {
+		return err
 	}
+	value = reversed
 
 	// Reverse modifiers for numeric values
 	if numVal, ok := toFloat64(value); ok {
@@ -3456,26 +3492,52 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 		value = numVal
 	}
 
+	// A bit range carries its range in the type string, so it never matches a plain type
+	// name - decodeField checks for one before its own switch, and encoding did not,
+	// which left `u8[0:0]` falling through to write nothing. One byte of the value, as
+	// the reference interpreter writes it: a bare range does not own the byte it shares,
+	// so there is nothing better to reconstruct from a single field.
+	if bitRangePattern.MatchString(string(field.Type)) {
+		numVal, ok := toFloat64(value)
+		if !ok {
+			return notANumber(field, value)
+		}
+		ctx.Write([]byte{byte(uint64(numVal) & 0xFF)})
+		return nil
+	}
+
+	// Every numeric case below reports a value it cannot convert rather than writing
+	// nothing. The silent form is what kept the sequence-lookup defect invisible: a
+	// field wrote no bytes, the payload came back the right shape minus one value, and
+	// the encoder called it a success.
 	switch field.Type {
 	case TypeByte, TypeUInt, TypeU8, TypeU16, TypeU32, TypeU64:
-		if numVal, ok := toFloat64(value); ok {
-			ctx.Write(encodeUint(uint64(numVal), length, endian))
+		numVal, ok := toFloat64(value)
+		if !ok {
+			return notANumber(field, value)
 		}
+		ctx.Write(encodeUint(uint64(numVal), length, endian))
 
 	case TypeSInt, TypeS8, TypeS16, TypeS32, TypeS64, TypeI8, TypeI16, TypeI32, TypeI64:
-		if numVal, ok := toFloat64(value); ok {
-			ctx.Write(encodeSint(int64(numVal), length, endian))
+		numVal, ok := toFloat64(value)
+		if !ok {
+			return notANumber(field, value)
 		}
+		ctx.Write(encodeSint(int64(numVal), length, endian))
 
 	case TypeFloat32, TypeF32:
-		if numVal, ok := toFloat64(value); ok {
-			ctx.Write(encodeFloat32(float32(numVal), endian))
+		numVal, ok := toFloat64(value)
+		if !ok {
+			return notANumber(field, value)
 		}
+		ctx.Write(encodeFloat32(float32(numVal), endian))
 
 	case TypeFloat64, TypeF64:
-		if numVal, ok := toFloat64(value); ok {
-			ctx.Write(encodeFloat64(numVal, endian))
+		numVal, ok := toFloat64(value)
+		if !ok {
+			return notANumber(field, value)
 		}
+		ctx.Write(encodeFloat64(numVal, endian))
 
 	// Encoding covered far fewer type spellings than decoding: `hex`, `ascii`,
 	// `string`, `bool` and `enum` are all written lowercase in every schema, and the
