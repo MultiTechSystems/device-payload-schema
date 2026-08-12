@@ -63,7 +63,7 @@ PROTO_C = $(patsubst proto/%.proto,src/%.pb.c,$(PROTO_SRCS))
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra -O3 -Iinclude
 
-.PHONY: all clean test selftest validate-devices coverage proto help codec benchmark generate-codec pytest pytest-cov coverage-html coverage-all validate fuzz fuzz-quick fuzz-hypothesis fuzz-go fuzz-c test-go test-java test-dotnet test-languages
+.PHONY: all clean test selftest validate-devices ci docs-index docs-index-check score-check validate-examples hypothesis coverage proto help codec benchmark generate-codec pytest pytest-cov coverage-html coverage-all validate fuzz fuzz-quick fuzz-hypothesis fuzz-go fuzz-c test-go test-java test-dotnet test-languages
 
 all: $(TEST_BIN)
 
@@ -144,6 +144,44 @@ pytest: $(VENV)/bin/activate
 # `make test` ran the five interpreters and the Python suite but never the validator,
 # so three conformance fixtures using `round`, the named `op` form and `$$ref` were
 # pushed while that job was red - the local checks could not have caught it.
+# --- CI parity -------------------------------------------------------------
+#
+# Every check the GitHub workflows run, so a local pass and a red build cannot
+# disagree. Added after two jobs went red on pushes that `make test` had approved:
+# the device-schema validation (quality.yml) and the repository index check, neither
+# of which existed as a local target. Whenever a workflow gains a step, add it here.
+ci: test validate-examples docs-index-check score-check hypothesis test-go test-java test-dotnet
+	@echo "All CI checks passed."
+
+# quality.yml: the index is generated, so a stale one fails the build.
+docs-index-check: $(VENV)/bin/activate
+	$(PYTHON) tools/generate_docs_index.py --check
+
+docs-index: $(VENV)/bin/activate
+	$(PYTHON) tools/generate_docs_index.py
+
+# quality.yml: the gate is "nothing got worse", plus one example held at SILVER.
+score-check: $(VENV)/bin/activate
+	$(PYTHON) tools/score_schema.py schemas/devices --all --baseline score-baseline.json --quiet
+	$(PYTHON) tools/score_schema.py examples/canonical-modifier-order.yaml --min-tier SILVER --quiet
+
+# fuzz.yml: the examples, skipping the three that need preprocessing first.
+validate-examples: $(VENV)/bin/activate
+	@status=0; \
+	for schema in examples/*.yaml; do \
+		case "$$schema" in \
+			*_with_lib.yaml|*_rename.yaml|examples/lib_sensors_test.yaml) continue;; \
+		esac; \
+		PYTHONPATH=tools $(PYTHON) tools/validate_schema.py "$$schema" > /tmp/ve.txt 2>&1 || { \
+			echo "FAILED: $$schema"; cat /tmp/ve.txt; status=1; }; \
+	done; \
+	if [ $$status -eq 0 ]; then echo "All examples valid."; fi; \
+	exit $$status
+
+# fuzz.yml: the property tests under the profile CI uses.
+hypothesis: $(VENV)/bin/activate
+	PYTHONPATH=tools $(PYTEST) tests/test_hypothesis.py -q --hypothesis-profile=ci
+
 validate-devices: $(VENV)/bin/activate
 	@status=0; \
 	for schema in schemas/devices/*/*.yaml; do \
