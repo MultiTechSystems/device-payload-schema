@@ -63,6 +63,22 @@ _COLON_STRING_TYPES = frozenset({'hex:upper'})
 OMITTED = object()
 
 
+def encode_length(field_def, natural: int) -> int:
+    """The byte count to write for a variable-length field.
+
+    `length: remaining` has no fixed count when encoding (PS-014) - the value supplies
+    it. Slicing with the word itself raised "slice indices must be integers", which is
+    how radio-bridge's stored downlink failed to re-encode.
+    """
+    raw = field_def.get('length', natural)
+    if isinstance(raw, str):
+        return max(0, int(natural))
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        return max(0, int(natural))
+
+
 def resolve_length(field_def, buf, pos, default=1):
     """Resolve a field's byte count, honouring `length: remaining` (PS-014).
 
@@ -2336,12 +2352,25 @@ class SchemaInterpreter:
                 flags_patches[field_name] = flags
         
         for field_def in fields:
-            # Flagged construct
+            if 'byte_group' in field_def:
+                try:
+                    output.extend(self._encode_byte_group(field_def, data))
+                except Exception as e:
+                    result.errors.append(f"Error encoding byte_group: {e}")
+                continue
+            
             if 'tlv' in field_def and not field_def.get('type'):
                 try:
                     output.extend(self._encode_tlv(field_def, data))
                 except Exception as e:
                     result.errors.append(f"Error encoding tlv: {e}")
+                continue
+            
+            if 'match' in field_def and not field_def.get('type'):
+                try:
+                    output.extend(self._encode_match(field_def, data))
+                except Exception as e:
+                    result.errors.append(f"Error encoding match: {e}")
                 continue
             
             if 'flagged' in field_def:
@@ -2482,6 +2511,155 @@ class SchemaInterpreter:
         
         return bytes(output)
     
+    def _encode_byte_group(self, field_def: Dict[str, Any], data: Dict[str, Any]) -> bytes:
+        """Pack a ``byte_group``'s bit ranges back into their shared byte(s).
+
+        Encoding had no byte_group case at all: the construct fell through to the plain
+        field path, which found no ``name``, encoded a default of 0 and emitted one zero
+        byte. rbs30x's first byte is a group of ``u8[4:7]`` and ``u8[0:3]``, so every one
+        of its payloads came back with 0x00 where the version and counter belong - the
+        right length, the wrong bits, and no error to say so.
+        """
+        byte_group = field_def.get('byte_group', [])
+        if isinstance(byte_group, dict):
+            group_fields = byte_group.get('fields', []) or []
+            size = int(byte_group.get('size', 1))
+        else:
+            group_fields = byte_group or []
+            size = int(field_def.get('size', 1))
+
+        packed = 0
+        for gf in group_fields:
+            if not isinstance(gf, dict):
+                continue
+            name = gf.get('name', '')
+            gtype = str(gf.get('type', ''))
+            if not name or str(name).startswith('_'):
+                value = gf.get('default', 0)
+            else:
+                value = data.get(name, gf.get('default', 0))
+            value = self._reverse_modifiers(value, gf)
+            if not isinstance(value, (int, float)):
+                continue
+            value = int(round(value))
+            if '[' in gtype:
+                base_size, start, width = self._parse_bitfield_type(gtype)
+                size = max(size, base_size)
+                packed |= (value & ((1 << width) - 1)) << start
+            else:
+                # A full-width member: it owns the group's bytes outright.
+                packed |= value
+        byteorder = 'little' if self.endian == Endian.LITTLE else 'big'
+        return int(packed).to_bytes(max(1, size), byteorder)
+
+    def _field_declaring_var(self, var_name: str) -> Optional[Dict[str, Any]]:
+        """The field that declared ``var: <var_name>``, searched anywhere in the schema.
+
+        A match's discriminator is named by its variable, and the variable's name is
+        often not the field's: rbs30x has ``name: event_type`` with ``var: evt`` and
+        matches on ``$evt``. Decoded output is keyed by the *field* name, so encoding
+        has to get from one to the other.
+        """
+        def visit(node):
+            if isinstance(node, dict):
+                if node.get('var') == var_name and node.get('name'):
+                    return node
+                for value in node.values():
+                    found = visit(value)
+                    if found is not None:
+                        return found
+            elif isinstance(node, list):
+                for item in node:
+                    found = visit(item)
+                    if found is not None:
+                        return found
+            return None
+        return visit(self.schema)
+
+    def _case_fields_present(self, cases: Dict[Any, Any], data: Dict[str, Any]):
+        """The case whose fields the data carries most of, or ``(None, None)``.
+
+        Used where the discriminator is not in the output - an inline match with no
+        ``name`` reports nothing of itself, so the case has to be recovered from which
+        of its fields are there.
+        """
+        best_key, best_fields, best_hits = None, None, 0
+        for case_key, case_fields in cases.items():
+            if case_key == 'default' or not isinstance(case_fields, list):
+                continue
+            names = [
+                f.get('name') for f in case_fields
+                if isinstance(f, dict) and f.get('name')
+                and not str(f['name']).startswith('_') and f.get('type') != 'number'
+            ]
+            hits = sum(1 for n in names if n in data)
+            if hits > best_hits:
+                best_key, best_fields, best_hits = case_key, case_fields, hits
+        return best_key, best_fields
+
+    def _encode_match(self, field_def: Dict[str, Any], data: Dict[str, Any]) -> bytes:
+        """Rebuild a ``match`` construct's bytes from decoded output.
+
+        Two sources of the discriminator, and they encode differently. An inline match
+        (``length: N``) read those bytes itself, so encoding writes them back. A match on
+        ``field: $var`` read nothing - the variable came from a field earlier in the
+        list, which the main loop encodes on its own - so writing the discriminator here
+        would duplicate it.
+        """
+        match_def = field_def.get('match', {}) or {}
+        cases = match_def.get('cases', {}) or {}
+        length = match_def.get('length')
+        match_name = match_def.get('name')
+        field_ref = match_def.get('field')
+        default = match_def.get('default', 'error')
+        byteorder = 'little' if self.endian == Endian.LITTLE else 'big'
+
+        discriminator = None
+        if match_name and match_name in data:
+            discriminator = data[match_name]
+        elif field_ref:
+            var_name = str(field_ref).lstrip('$')
+            if var_name in data:
+                discriminator = data[var_name]
+            else:
+                source = self._field_declaring_var(var_name)
+                if source and source.get('name') in data:
+                    discriminator = reverse_lookup(
+                        data[source['name']], source.get('lookup'))
+
+        matched_key, matched_fields = None, None
+        if discriminator is not None:
+            for case_key, case_fields in cases.items():
+                if case_key == 'default':
+                    continue
+                if self._match_case_pattern(discriminator, case_key):
+                    matched_key, matched_fields = case_key, case_fields
+                    break
+
+        if matched_fields is None:
+            matched_key, matched_fields = self._case_fields_present(cases, data)
+
+        if matched_fields is None:
+            if isinstance(default, list):
+                matched_fields = default
+            elif isinstance(cases.get('default'), list):
+                matched_fields = cases['default']
+            else:
+                # 'skip', or nothing in the data belongs to any case.
+                return b''
+
+        out = bytearray()
+        if length is not None:
+            value = discriminator
+            if value is None:
+                if not isinstance(matched_key, (int, str)):
+                    raise ValueError(
+                        f"match case {matched_key!r} names no single discriminator value")
+                value = int(str(matched_key), 0)
+            out.extend(int(value).to_bytes(int(length), byteorder))
+        out.extend(self._encode_field_list(matched_fields, data))
+        return bytes(out)
+
     def _encode_tlv_tag(self, case_key: Any, tlv_def: Dict[str, Any]) -> bytes:
         """Rebuild a TLV tag from the case key that matched it while decoding.
 
@@ -2528,8 +2706,23 @@ class SchemaInterpreter:
         for f in fields:
             if not isinstance(f, dict):
                 continue
+            # A case body may hold another construct rather than a plain field.
+            if 'match' in f and not f.get('type'):
+                out.extend(self._encode_match(f, data))
+                continue
+            if 'tlv' in f and not f.get('type'):
+                out.extend(self._encode_tlv(f, data))
+                continue
+            if 'byte_group' in f:
+                out.extend(self._encode_byte_group(f, data))
+                continue
             name = f.get('name', '')
             ftype = f.get('type', 'u8')
+            if ftype == 'object':
+                # A nested object's fields are written in place; the interpreter reports
+                # them flattened, so they are looked up by their own names.
+                out.extend(self._encode_field_list(f.get('fields') or [], data))
+                continue
             if ftype == 'number':
                 # Derived: computed from other fields, no bytes of its own.
                 continue
@@ -2706,16 +2899,16 @@ class SchemaInterpreter:
                     "bytes field %r: cannot encode %s"
                     % (field_def.get('name'), type(value).__name__)
                 )
-            length = field_def.get('length', len(raw))
+            length = encode_length(field_def, len(raw))
             return raw[:length].ljust(length, b'\x00')
         
         if field_type in ('string', 'ascii'):
-            length = field_def.get('length', len(str(value)))
+            length = encode_length(field_def, len(str(value).encode('utf-8')))
             encoded = str(value).encode('utf-8')[:length]
             return encoded.ljust(length, b'\x00')
         
         if field_type == 'hex':
-            length = field_def.get('length', len(str(value)) // 2)
+            length = encode_length(field_def, len(str(value)) // 2)
             return bytes.fromhex(str(value).replace(' ', ''))[:length].ljust(length, b'\x00')
         
         if field_type == 'base64':

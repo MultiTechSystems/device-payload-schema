@@ -18,22 +18,21 @@ Measured state when this was written, and the reason for the shape breakdown:
 
 | shape       | round-trips | length differs | bytes differ | errors |
 |-------------|-------------|----------------|--------------|--------|
-| tlv         |         816 |             88 |           36 |      8 |
+| tlv         |         816 |             91 |           36 |      5 |
 | flagged     |         121 |              1 |            0 |      0 |
 | plain fixed |          53 |              4 |            3 |      3 |
-| match       |           0 |             23 |           11 |      0 |
-| byte_group  |           2 |              1 |           16 |      0 |
+| match       |          34 |              0 |            0 |      0 |
+| byte_group  |          17 |              0 |            2 |      0 |
 | repeat      |           1 |              0 |            0 |      3 |
 
-993 of 1190, from 120 when this began. What remains, in order of size:
+1042 of 1190, from 120 when this began. What remains, in order of size:
 
 1. **The rest of TLV**, 132 vectors. A repeated channel is unrecoverable in principle -
-   decoding flattens both occurrences into one dict key - but the `object` type inside a
-   case, and a tag value wider than its `tag_size`, are ordinary gaps.
-2. **`match` encoding**, 34 vectors: the discriminator and the selected case's bytes are
-   not reassembled. The same shape of work TLV needed.
-3. **`byte_group` bit packing**, 16 vectors with the right length and the wrong bits.
-4. **`version_string` is lossy in the *decoder*.** Bytes 11 11 decode to "v11.1", a digit
+   decoding flattens both occurrences into one dict key - but a tag value wider than its
+   `tag_size` is an ordinary gap.
+2. **10 in plain fixed and 3 in repeat**, mostly `skip` padding whose bytes the output
+   does not carry, which is lossy by definition.
+3. **`version_string` is lossy in the *decoder*.** Bytes 11 11 decode to "v11.1", a digit
    short, so no encoder can reconstruct them. Found here, but it is a decode defect.
 
 Raising any of those floors is the measure of progress on encoding.
@@ -57,7 +56,7 @@ from schema_interpreter import SchemaInterpreter  # noqa: E402
 DEVICES = REPO_ROOT / "schemas" / "devices"
 
 #: Exact round-trips required overall. Raise as encoding improves.
-FLOOR_TOTAL = 993
+FLOOR_TOTAL = 1042
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -65,6 +64,8 @@ FLOOR_BY_SHAPE = {
     "tlv": 816,
     "flagged": 121,
     "plain fixed": 53,
+    "match": 34,
+    "byte_group": 17,
 }
 
 #: Encoding must never raise. It used to, 26 times: "Cannot encode type: number" for any
@@ -289,3 +290,72 @@ def test_unencodable_tlv_tag_is_reported():
     encoded = SchemaInterpreter(schema).encode({"reading": 7})
     assert encoded.errors, "expected an error rather than an invented tag"
     assert "cannot choose one" in encoded.errors[0]
+
+def test_match_construct_round_trips():
+    """rbs30x: a `byte_group` header, an event type, and a `match` on it.
+
+    Two things had to be right together. The discriminator comes from `field: $evt`,
+    whose variable name is not the field's name (`name: event_type, var: evt`), so
+    encoding has to find the field that declared the variable to read its value. And
+    because that field is encoded by the main loop, the match must *not* write the
+    discriminator again - only an inline `length:` match owns those bytes.
+    """
+    schema = yaml.safe_load(
+        (REPO_ROOT / "schemas/devices/radio-bridge/rbs30x.yaml").read_text(encoding="utf-8")
+    )
+    exact = 0
+    for vector in schema["test_vectors"]:
+        payload = bytes.fromhex(str(vector["payload"]).replace(" ", ""))
+        decoded = SchemaInterpreter(schema).decode(payload)
+        if decoded.errors:
+            continue
+        encoded = SchemaInterpreter(schema).encode(dict(decoded.data))
+        assert not encoded.errors, f"{vector['name']}: {encoded.errors}"
+        assert bytes(encoded.payload) == payload, (
+            f"{vector['name']}: {bytes(encoded.payload).hex()} != {payload.hex()}"
+        )
+        exact += 1
+    assert exact >= 29, exact
+
+
+def test_byte_group_bits_are_packed():
+    """A shared byte's ranges pack back into it.
+
+    Encoding had no byte_group case at all: the construct fell through to the plain
+    field path, which found no name, encoded a default of 0, and emitted one zero byte -
+    right length, wrong bits, no error. rbs30x's first byte is `u8[4:7]` over `u8[0:3]`.
+    """
+    schema = yaml.safe_load(
+        "name: t\nendian: big\nfields:\n"
+        "  - byte_group:\n      size: 1\n      fields:\n"
+        "        - {name: high, type: 'u8[4:7]'}\n"
+        "        - {name: low, type: 'u8[0:3]'}\n"
+    )
+    for raw in ("10", "a5", "0f", "f0"):
+        payload = bytes.fromhex(raw)
+        decoded = SchemaInterpreter(schema).decode(payload)
+        assert not decoded.errors, decoded.errors
+        encoded = SchemaInterpreter(schema).encode(dict(decoded.data))
+        assert not encoded.errors, encoded.errors
+        assert bytes(encoded.payload) == payload, (
+            f"{raw}: {decoded.data} re-encoded to {bytes(encoded.payload).hex()}"
+        )
+
+
+def test_remaining_length_encodes_the_value_it_has():
+    """`length: remaining` has no fixed count when encoding (PS-014).
+
+    Slicing with the word itself raised "slice indices must be integers", which is how
+    radio-bridge's stored downlink failed to re-encode.
+    """
+    schema = yaml.safe_load(
+        "name: t\nendian: big\nfields:\n"
+        "  - name: head\n    type: u8\n"
+        "  - name: tail\n    type: bytes\n    length: remaining\n"
+    )
+    for raw in ("10010009", "10", "1042"):
+        payload = bytes.fromhex(raw)
+        decoded = SchemaInterpreter(schema).decode(payload)
+        encoded = SchemaInterpreter(schema).encode(dict(decoded.data))
+        assert not encoded.errors, encoded.errors
+        assert bytes(encoded.payload) == payload
