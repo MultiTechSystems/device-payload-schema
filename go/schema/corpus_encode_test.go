@@ -29,18 +29,16 @@ import (
 // encodeFloorTotal is the number of corpus vectors that re-encode to their exact
 // payload. Raise it as encoding improves; never lower it without saying why.
 //
-// 988 here against 1129 in Python, and the difference is one thing: channel order.
-// Python recovers it from decoded output whose keys are in payload order; a Go map has
-// none, so encodeTLV emits channels in ascending tag order. That is how most devices in
-// this corpus lay them out, but 142 TLV vectors do not, and no amount of encoder work
-// will fix them while Decode returns an unordered map. Closing that gap is an API
-// question - decode would have to report the order it read fields in.
-const encodeFloorTotal = 988
+// This test uses DecodeOrdered/EncodeOrdered, which carry the TLV channel sequence a Go
+// map cannot hold. Encode alone still has to assume ascending tag order, which is how most
+// devices here lay their channels out but not all - so the plain pair scores lower, and
+// that is the reason the ordered pair exists.
+const encodeFloorTotal = 1065
 
 // encodeFloorByShape guards each layout separately, so a regression in one that works
 // cannot hide behind the mass of one that does not.
 var encodeFloorByShape = map[string]int{
-	"tlv":         761,
+	"tlv":         838,
 	"flagged":     121,
 	"plain fixed": 53,
 	"match":       34,
@@ -106,11 +104,12 @@ func TestCorpusEncodeRoundTrip(t *testing.T) {
 				fport = v.FPortLower
 			}
 			var decoded map[string]any
+			var order []string
 			var decErr error
 			if fport != nil {
-				decoded, decErr = s.DecodeWithPort(payload, *fport)
+				decoded, order, decErr = s.DecodeOrderedWithPort(payload, *fport)
 			} else {
-				decoded, decErr = s.Decode(payload)
+				decoded, order, decErr = s.DecodeOrdered(payload)
 			}
 			if decErr != nil {
 				continue
@@ -119,9 +118,9 @@ func TestCorpusEncodeRoundTrip(t *testing.T) {
 			var out []byte
 			var encErr error
 			if fport != nil {
-				out, encErr = s.EncodeWithPort(decoded, *fport)
+				out, encErr = s.EncodeOrderedWithPort(decoded, *fport, order)
 			} else {
-				out, encErr = s.Encode(decoded)
+				out, encErr = s.EncodeOrdered(decoded, order)
 			}
 			switch {
 			case encErr != nil:

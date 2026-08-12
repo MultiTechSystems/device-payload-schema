@@ -277,6 +277,10 @@ type DecodeContext struct {
 	Variables map[string]any
 	Quality   map[string]string   // Quality status for fields with valid_range
 	Warnings  []string            // Quality warnings
+	// TLVOrder is the sequence of TLV case keys as they were read, in payload order.
+	// A Go map cannot carry that, and encoding needs it: without it channels come back
+	// in ascending tag order, which is how most devices lay them out but not all.
+	TLVOrder []string
 }
 
 // EncodeContext maintains state during encoding.
@@ -284,6 +288,9 @@ type EncodeContext struct {
 	Buffer    []byte
 	Endian    string
 	Variables map[string]any
+	// TLVOrder is the channel sequence to emit, as DecodeOrdered reported it. Empty
+	// means no order is known, and encodeTLV falls back to ascending tag order.
+	TLVOrder []string
 }
 
 // NewEncodeContext creates a new encode context.
@@ -2263,6 +2270,7 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 		caseKey := findTLVCaseKey(field.TLVCases, tag)
 		
 		if caseKey != "" {
+			ctx.TLVOrder = append(ctx.TLVOrder, caseKey)
 			caseFields := field.TLVCases[caseKey]
 			caseResult, err := decodeFields(caseFields, ctx)
 			if err != nil {
@@ -2598,6 +2606,63 @@ func (s *Schema) EncodeWithPort(data map[string]any, fPort int) ([]byte, error) 
 }
 
 
+// DecodeOrdered decodes and also reports the TLV channel sequence in payload order.
+//
+// A map cannot carry that order, and encoding needs it to put the channels back where
+// they were - Encode alone has to assume ascending tags. Pair this with EncodeOrdered
+// for a faithful round trip.
+func (s *Schema) DecodeOrdered(data []byte) (map[string]any, []string, error) {
+	return s.DecodeOrderedWithPort(data, 0)
+}
+
+// DecodeOrderedWithPort is DecodeOrdered with port-based schema selection.
+func (s *Schema) DecodeOrderedWithPort(data []byte, fPort int) (map[string]any, []string, error) {
+	fields, err := s.ResolveFields(fPort)
+	if err != nil {
+		return nil, nil, err
+	}
+	ctx := NewDecodeContext(data, s.Endian)
+	result := make(map[string]any)
+	if len(s.Header) > 0 {
+		headerResult, err := decodeFieldsWithSchema(s.Header, ctx, s)
+		if err != nil {
+			return nil, nil, err
+		}
+		for k, v := range headerResult {
+			result[k] = v
+		}
+	}
+	fieldsResult, err := decodeFieldsWithSchema(fields, ctx, s)
+	if err != nil {
+		return nil, nil, err
+	}
+	for k, v := range fieldsResult {
+		result[k] = v
+	}
+	return result, ctx.TLVOrder, nil
+}
+
+// EncodeOrdered encodes with an explicit TLV channel order, as DecodeOrdered reported it.
+func (s *Schema) EncodeOrdered(data map[string]any, order []string) ([]byte, error) {
+	return s.EncodeOrderedWithPort(data, 0, order)
+}
+
+// EncodeOrderedWithPort is EncodeOrdered with port-based schema selection.
+func (s *Schema) EncodeOrderedWithPort(data map[string]any, fPort int, order []string) ([]byte, error) {
+	ctx := NewEncodeContext(s.Endian)
+	ctx.TLVOrder = order
+	if len(s.Header) > 0 {
+		if err := encodeFields(s.Header, data, ctx); err != nil {
+			return nil, err
+		}
+	}
+	fields, _ := s.ResolveFields(fPort)
+	if err := encodeFields(fields, data, ctx); err != nil {
+		return nil, err
+	}
+	return ctx.Buffer, nil
+}
+
 // --- encoding the constructs -------------------------------------------------
 //
 // Ported from tools/schema_interpreter.py, whose round-trip corpus found these gaps.
@@ -2886,6 +2951,36 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 		}
 		return candidates[i].matches > candidates[j].matches
 	})
+
+	// With the order DecodeOrdered reported, the channels go back exactly where they
+	// were - including a tag that appears twice. Without it the sort above stands in.
+	if len(ctx.TLVOrder) > 0 {
+		byKey := map[string]candidate{}
+		for _, c := range candidates {
+			byKey[c.key] = c
+		}
+		emittedAny := false
+		for _, key := range ctx.TLVOrder {
+			c, ok := byKey[key]
+			if !ok {
+				continue
+			}
+			inner := NewEncodeContext(ctx.Endian)
+			inner.Variables = ctx.Variables
+			if err := encodeFieldList(c.fields, data, inner); err != nil {
+				return err
+			}
+			ctx.Write(c.tag)
+			if field.LengthSize > 0 {
+				ctx.Write(encodeUint(uint64(len(inner.Buffer)), field.LengthSize, ctx.Endian))
+			}
+			ctx.Write(inner.Buffer)
+			emittedAny = true
+		}
+		if emittedAny {
+			return nil
+		}
+	}
 
 	spent := map[string]bool{}
 	chosen := []candidate{}
@@ -3382,21 +3477,71 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 			ctx.Write(encodeFloat64(numVal, endian))
 		}
 
-	case TypeAscii:
+	// Encoding covered far fewer type spellings than decoding: `hex`, `ascii`,
+	// `string`, `bool` and `enum` are all written lowercase in every schema, and the
+	// switch matched only the capitalised constants, so those fields silently wrote no
+	// bytes. am102's 8-byte serial number emitted its tag and then nothing.
+	case TypeAscii, TypeAsciiLower, TypeString, TypeStringLower:
 		if strVal, ok := value.(string); ok {
+			if length <= 0 {
+				length = len(strVal)
+			}
 			data := make([]byte, length)
 			copy(data, []byte(strVal))
 			ctx.Write(data)
 		}
 
-	case TypeHex:
+	case TypeHex, TypeHexLower, TypeHexUpperLower:
 		if strVal, ok := value.(string); ok {
 			strVal = strings.ReplaceAll(strVal, ":", "")
 			strVal = strings.ReplaceAll(strVal, "-", "")
-			data, _ := hex.DecodeString(strVal)
+			data, err := hex.DecodeString(strVal)
+			if err != nil {
+				return fmt.Errorf("hex field %q: %v", field.Name, err)
+			}
+			if length <= 0 {
+				length = len(data)
+			}
 			padded := make([]byte, length)
 			copy(padded, data)
 			ctx.Write(padded)
+		}
+
+	case TypeBool, TypeBoolLower:
+		b := byte(0)
+		switch v := value.(type) {
+		case bool:
+			if v {
+				b = 1
+			}
+		default:
+			if num, ok := toFloat64(value); ok && num != 0 {
+				b = 1
+			}
+		}
+		ctx.Write([]byte{b})
+
+	case TypeEnum, TypeEnumLower:
+		// The label maps back through `values`; an unmapped one cannot be recovered.
+		if strVal, ok := value.(string); ok {
+			// A `type: enum` field keeps its mapping in Values; Lookup is the separate
+			// `lookup:` modifier. Reading the wrong one made every label unknown.
+			tables := []map[int]string{field.Values, field.Lookup}
+			for _, table := range tables {
+				for k, v := range table {
+					if v == strVal {
+						ctx.Write(encodeUint(uint64(k), maxInt(length, 1), endian))
+						return nil
+					}
+				}
+			}
+			return fmt.Errorf(
+				"enum field %q: %q is not one of its values; an unmapped value is "+
+					"reported through `default` (PS-068), and that label cannot be "+
+					"traced back to the value that produced it", field.Name, strVal)
+		}
+		if num, ok := toFloat64(value); ok {
+			ctx.Write(encodeUint(uint64(int64(num)), maxInt(length, 1), endian))
 		}
 
 	case TypeBytes, TypeBytesLower:
@@ -3477,6 +3622,14 @@ func encodeBytes(field Field, value any, length int, ctx *EncodeContext) error {
 	ctx.Write(padded)
 
 	return nil
+}
+
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func encodeUint(val uint64, length int, endian string) []byte {
