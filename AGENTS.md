@@ -181,22 +181,27 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 1,166 test vectors in `schemas/devices/` are the shared cross-language test set.
-Every implementation has a runner that reads the same YAML and the same vectors:
+The 1,191 test vectors across the 160 schemas in `schemas/devices/` that carry any (of
+218 YAML files) are the shared cross-language test set. Every implementation has a
+runner that reads the same YAML and the same vectors:
 
-| Implementation | Runner | Vectors passing |
-|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | 1166 / 1166 |
-| Go | `go/schema/corpus_conformance_test.go` | 1163 |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 1163 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 1163 |
-| C | none - consumes a binary schema, not YAML | n/a |
+| Implementation | Runner | Decode | Re-encode |
+|---|---|---|---|
+| Python | `tests/test_corpus_conformance.py` | 1191 / 1191 | 1129 |
+| Go | `go/schema/corpus_conformance_test.go` | 1191 | 1135 |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 1191 | 1129 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 1191 | 1129 |
+| C | none - consumes a binary schema, not YAML | n/a | n/a |
 
 Every runner compares its pass count against a committed floor rather than requiring
 the whole corpus, so any gap stays visible and a regression fails the build. All four
-YAML implementations now decode the entire corpus, so **every floor is the full 1166
-and any failure is a regression, not a known gap.** If you add a construct that one
+YAML implementations now decode the entire corpus, so **every decode floor is the full
+1191 and any failure is a regression, not a known gap.** If you add a construct that one
 implementation cannot express yet, lower its floor deliberately and say why here.
+
+The re-encode column is the round-trip suite described under "Encoding" below, and its
+floors are ratchets rather than a target: `encode(decode(payload)) == payload` cannot
+hold for every vector. Update the number in this table when you move a floor.
 
 A vector's port is written `fPort` or `fport`, and a runner that reads only one
 spelling decodes a port-based schema with no port at all - every field of it then
@@ -265,7 +270,7 @@ five were carried deliberately while the working group chose; the range won beca
 it says where the bits are instead of depending on a bit cursor each implementation
 has to maintain identically.
 
-Every floor is now the full 1166. Do not re-add a withdrawn form to "support" an
+Every decode floor is now the full 1191. Do not re-add a withdrawn form to "support" an
 old schema: the Python interpreter, the binary encoders, the JS and TS013
 generators and the C header all reject them, and the four tests that used to assert
 they decode now assert they are refused.
@@ -326,6 +331,20 @@ different constructs.
 Run them all with `make test-languages`. This suite is why the Go and Java TLV
 defects were found: those implementations returned an empty result for every
 channel/type schema in the repository, and no test had ever read one.
+
+**A `lookup` has two failure modes and they behave differently — CR-2026-009 settled
+which is which.** A sequence is indexed from zero (PS-104) and an out-of-bounds index is
+an **error** (PS-105/PS-285): the payload does not match the schema's shape at all. A
+mapping's keys need not be contiguous (PS-268), so a value with no entry **omits the
+field** (PS-269/PS-286) unless a `default` is declared. Storing the raw integer under a
+name that promises a label is wrong in both cases. All five implementations honour the
+distinction; C had both wrong on the ordinary-field path while its enum path a few lines
+above was already correct, and the two sites disagreed with each other because C's
+interpreter tests are in no build target. `src/selftest_schema.c` covers it now, and it
+*is* in `SELFTEST_SRCS`.
+
+The distinction also constrains encoding: a `default` label matches any unmapped value, so
+there is no original to recover, and every encoder reports that rather than guessing.
 
 **The unary maths transform stages — `sqrt`, `abs`, `pow`, `log10`, `log` — now
 exist in all four.** Python always had them; Go, Java and C# had none, which is what
@@ -435,17 +454,21 @@ between 1e-7 and 1e21 where `%g` switches far earlier, so `1000000.0` must print
 
 **Matching the JS codecs is a solved problem on the Python side.** Normalizing integral
 values to integers is sufficient — measured with `tools/crossvalidate_js_json.py`,
-which diffs serialized JSON token by token: **1117 byte-identical**, 14 numeric
-differences all of which are CR-2026-007's `idiv`/`mod` convention, and 8 differing
-only in key set. No precision or exponent divergence at all, because Python's float
-repr and JavaScript's number-to-string both emit the shortest round-tripping decimal.
-That tool is the acceptance test for the gateway work; run it before and after any
-change to output representation.
+which diffs serialized JSON token by token: **1142 byte-identical, zero divergences.**
+No precision or exponent divergence at all, because Python's float repr and JavaScript's
+number-to-string both emit the shortest round-tripping decimal. That tool is the
+acceptance test for the gateway work; run it before and after any change to output
+representation.
 
-The key-set differences are **TS013 generator** gaps, not interpreter gaps: it does
-not implement `name_from`, drops `repeat` items, misses some TLV channels, and does not
-emit every member of a nested `object`. So "the generated codec and the interpreter are
-interchangeable" is true for 1126 comparisons and not yet true in general.
+It reached zero in two steps, and the second is the transferable lesson. The 14 numeric
+differences were CR-2026-007's `idiv`/`mod` convention and closed when that CR landed.
+The remaining key-set differences were **TS013 generator** gaps — `name_from`, dropped
+`repeat` items, missed TLV channels, unemitted members of a nested `object` — but the
+tool had also been skipping lists and dicts entirely rather than comparing them, so a
+`bytes` field the generator emitted as a JS array read as identical. **What a cross-check
+declines to compare, it silently blesses.** Both the generator and the comparison were
+fixed; if you extend the tool, make sure a new value shape is compared rather than
+skipped.
 
 **Rounding is half-to-even everywhere, and the generator now emits a helper for it.**
 `Math.round` is half-up and asymmetric for negatives, which put the generated codec at
@@ -502,38 +525,80 @@ Priority order for the gateway target, by what the device corpus actually uses:
 stages, then `compute`/`ref`/`polynomial`, then `repeat`/`until`. `name_from`,
 `merge`, `bitfield_string` and the semantic mappings are rarer and can wait.
 
-**Encoding is the least-tested part of the project, and it is the MCU tier's whole
-job.** All 1188 corpus vectors are decode-only, and no vector asserts an encoded
-payload. C has a full encoder (`schema_encode`, `encode_field`, reverse modifiers) and
-`src/test_encoder.c` is in no build target, so it is verified by nothing that runs.
-Python and Go have encoders; **Java and C# have none** — Java's only `encode` hit is
-`Base64.getEncoder()`, and C# has just byte-level helpers in `Helpers.cs`. Meanwhile
-PS-061..PS-064 and the reverse of canonical modifier order are normative. A round-trip
-corpus is the cheap fix: every vector already carries a payload and its expected
-values, so feeding the values back through `encode` and asserting the original bytes
-gives ~1188 encode assertions for almost no authoring cost. It will not be lossless
-everywhere — `lookup`, `hex` case, guard fallbacks and unmatched enums discard
-information by design — so it needs a per-vector opt-out.
+### Encoding
 
-**Four of the eight C test files are in no build target**: `test_comprehensive.c`,
+**Every corpus vector is an encode assertion, for free.** A vector carries a payload and
+the values it decodes to, so `encode(decode(payload)) == payload` needs no new fixtures.
+That is now a suite in four languages, and it is the reason encoding went from barely
+exercised to the best-covered part of the project:
+
+| | Runner | Round-trips |
+|---|---|---|
+| Python | `tests/test_encode_round_trip.py` | 1129 / 1191 |
+| Go | `go/schema/corpus_encode_test.go` | 1135 |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1129 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1129 |
+| C | none — `src/test_encoder.c` is in no build target | unverified |
+
+All five implementations have an encoder; Java's and C#'s were built from nothing, ported
+from `tools/schema_interpreter.py`. Read that one first when changing any of them.
+
+**The floors are per shape, not just per total, and that is what makes them work.** Each
+runner scores `tlv`, `flagged`, `match`, `byte_group`, `repeat` and plain-fixed layouts
+separately, so a regression in one cannot hide behind the mass of another. This has paid
+off literally: adding a `default` case to Go's encode type switch raised the total and
+dropped `flagged` by 9 in the same run, which the total alone would have absorbed.
+
+**It cannot be lossless everywhere, so the floors are ratchets, not a target of 1191.** A
+`skip` field's bytes are not recoverable from output that omits them, a rounding stage
+discards precision, a `lookup` or enum `default` label stands for every value the table
+does not list (PS-269, PS-068), `sqrt`/`log`/`pow` do not invert, an unknown TLV channel
+was never decoded, and a `name_from` key is not the field's name. Those are reported
+through the result type rather than papered over with plausible bytes. Raise a floor when
+you close a gap; never lower one without saying why here.
+
+**The defect shape to watch for is a silent write of nothing.** Every encode gap found so
+far was a type spelling some dispatch did not list, which wrote no bytes and returned
+success — a sequence `lookup` label (67 Go vectors emitted a TLV tag followed by nothing),
+a `u8[0:0]` bit range, `u24`/`s24`, a `type: number` inside a `flagged` group. Each read
+as a pass until a cross-implementation diff. Go's switch now has a `default` that reports
+an unhandled type; keep it, and prefer reporting a value you cannot write over skipping it.
+
+Go's re-encode figure is the highest, and not because its encoder is better:
+`DecodeOrdered`/`EncodeOrdered` carry the TLV channel sequence a Go map cannot hold, so
+where two cases define the same field name under different tags — em500-smt has `humidity`
+under both `[4, 104]` and `[4, 202]` with identical arithmetic — the tag that actually
+wrote those bytes goes back. Python, Java and C# recover order from their output keys,
+which cannot tell those two cases apart, and pick the first. Java and C# need no such API
+because a `LinkedHashMap` and a .NET `Dictionary` already preserve insertion order.
+
+Cross-language method of record: **diff the failing sets, not the totals.** Two
+implementations at the same count can be failing different vectors. Every Go fix above came
+from listing what Go failed that Python passed; the set is now empty in that direction.
+
+**Four of the nine C test files are in no build target**: `test_comprehensive.c`,
 `test_interpreter.c`, `test_binary_schema.c`, `test_encoder.c`. Only `test_codec.c`
-and the `selftest_*` files are wired in. Six compiled executables are also tracked in
+and the `selftest_*` files are wired in — so C's encoder (`schema_encode`, `encode_field`,
+reverse modifiers) is verified by nothing that runs, and PS-061..PS-064 and the reverse of
+canonical modifier order are normative. Six compiled executables are also tracked in
 git (`src/test_binary_schema`, `test_comprehensive`, `test_interpreter`,
 `test_encoder`, and the two `_cpp` ones).
 
-**`idiv` and `mod` disagree across implementations on negative operands**, and
-CR-2026-007 exists to settle it. Measured for `a = -7, b = 3`: Python gives
-`idiv -3, mod 2` (floored both), Go and C# give `-2, -1` (truncated both), and Java
-gives `-3, -1` — `Math.floorDiv` for `idiv` beside a truncated `%`, so its own two
-operators use different conventions and `a == idiv(a,b)*b + mod(a,b)` fails in Java
-alone. A zero divisor diverges a fourth way: Python and Java emit `NaN`, **which is
-not valid JSON**, so one zero divisor makes the whole decode unparseable; Go errors
-and C# throws.
+**`idiv` and `mod` are floored everywhere — CR-2026-007 settled it, and it is
+implemented.** The convention is floored division and a remainder taking the divisor's
+sign, so `a == idiv(a,b)*b + mod(a,b)` holds in every implementation, and a zero divisor
+omits the field rather than emitting `NaN` (PS-278).
 
-`_language-conformance/compute-negative-idiv-mod.yaml` is the acceptance test and is
-**expected to fail** until the CR lands — 4 in Go, 4 in C#, 2 in Java, 0 in Python.
-The floors are lowered to match (Go 1184, Java 1186, C# 1184 of 1188) so the gap
-stays visible rather than silently passing. Raise them when the CR is implemented.
+Worth keeping because it is the clearest example of four implementations disagreeing four
+ways on one operator. Measured for `a = -7, b = 3` before the CR: Python gave `idiv -3,
+mod 2` (floored both), Go and C# gave `-2, -1` (truncated both), and Java gave `-3, -1` —
+`Math.floorDiv` for `idiv` beside a truncated `%`, so its own two operators used different
+conventions and the identity failed in Java alone. A zero divisor diverged a fourth way:
+Python and Java emitted `NaN`, **which is not valid JSON**, so one zero divisor made the
+whole decode unparseable; Go errored and C# threw.
+
+`_language-conformance/compute-negative-idiv-mod.yaml` is the acceptance test and now
+passes everywhere, which is why every decode floor is the full 1191.
 
 Note that no schema in the repository uses `idiv` or `mod` at all; those eight
 vectors are the only exercise of either operator in the corpus.

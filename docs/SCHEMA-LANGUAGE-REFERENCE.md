@@ -1,6 +1,10 @@
 # Payload Schema Language Reference
 
-Complete reference for the LoRa Alliance Payload Schema specification (v0.3.2).
+Complete reference for the LoRa Alliance Payload Schema specification (v0.5.0).
+
+Normative requirement ids (`PS-nnn`) are cited where a rule is easy to get wrong or where
+implementations have disagreed. The specification is the authority; this is a working
+reference for authoring schemas in this repository.
 
 ## Document Structure
 
@@ -56,6 +60,9 @@ downlink_commands: [...]  # Command definitions (for downlink)
 | `bytes` | Raw bytes (requires `length:`) |
 | `base64` | Base64 encoded output (requires `length:`) |
 
+A `bytes` or `hex` field reports a **lowercase** hex string (PS-074, PS-281), not an array
+of numbers.
+
 Bytes format options:
 ```yaml
 - name: device_eui
@@ -67,6 +74,26 @@ Bytes format options:
   format: array         # [0, 17, 34, 51, ...]
   separator: ":"        # "00:11:22:33:44:55"
 ```
+
+#### `length: remaining`
+
+Consumes every byte from the read position to the end of the payload (PS-013):
+
+```yaml
+- name: message_type
+  type: u8
+- name: stored_downlink
+  type: bytes
+  length: remaining     # whatever is left after message_type
+```
+
+- `remaining` is the **only** spelling. A negative integer is an internal sentinel the
+  parsers map it to, and `validate_schema.py` rejects it in a schema.
+- At the end of a payload it yields an empty value, not an error and not a one-byte read
+  (PS-014).
+- At most one field per nesting level may use it (PS-015), and only on a variable-length
+  type — `bytes`, `hex`, `ascii`, `string`. On a fixed-width type it is a validation error.
+- When encoding it contributes no fixed count; the value supplies its own length.
 
 ### Special Types
 
@@ -149,11 +176,49 @@ Applied in YAML key order:
 
 ## Lookup Tables
 
+Two forms, and they differ in more than syntax — a value the table does not cover behaves
+differently in each.
+
+**Sequence** — indexed from zero (PS-104):
+
 ```yaml
 - name: status
   type: u8
   lookup: ["off", "on", "error", "unknown"]
 ```
+
+An index past the last entry is an **error** (PS-105). The payload does not match the
+schema's shape, so reporting the raw integer under a name that promises a label would be
+worse than failing.
+
+**Mapping** — keys need not start at zero or be contiguous (PS-268):
+
+```yaml
+- name: button
+  type: u8
+  lookup:
+    1: short_press
+    2: long_press
+    10: held
+```
+
+A value with no entry **omits the field** (PS-269) rather than reporting the raw number.
+Declare a `default` to report something instead:
+
+```yaml
+- name: mode
+  type: u8
+  lookup:
+    0: idle
+    1: active
+    default: unknown
+```
+
+Values may be numbers as well as strings (PS-106).
+
+**A `default` label cannot be encoded back.** It stands for every value the table does not
+list, so there is no original to recover; encoders report the field rather than writing a
+plausible byte. The same applies to an `enum` `default` (PS-068).
 
 ## Computed Fields
 
@@ -429,6 +494,34 @@ Store values for later reference:
       1: [...]
       2: [...]
 ```
+
+A name beginning with `_` is internal: it becomes a variable that later fields can
+reference, but it is not reported in the output. Use it for intermediates.
+
+## Computed Output Keys (`name_from`)
+
+The reported key comes from a template filled in from values decoded earlier in the same
+payload (PS-265). The field's own `name` is then **not** a key in the output (PS-266) — it
+stays available as a variable.
+
+```yaml
+- name: channel
+  type: u8
+  var: ch
+- name: reading
+  type: u16
+  div: 10
+  name_from: channel_${ch}_reading   # -> "channel_3_reading"
+```
+
+- `${...}` references a field's `name` or its `var` alias; both resolve.
+- A reference the payload has not decoded yet is an error, not an empty substitution.
+- An integral value renders without a fraction — `channel_3_`, not `channel_3.0_`.
+- A `lookup` reference substitutes the label, so the key set is closed when every
+  reference is.
+
+This is the one construct whose output cannot be round-tripped: encoding looks a field up
+by its schema name, and the decoded output holds the resolved key instead.
 
 ## TLV (Type-Length-Value)
 
