@@ -390,7 +390,10 @@ public class Schema {
         if ((f.getType() == FieldType.TLV || fm.containsKey("tag_fields")
                 || fm.containsKey("tag_key") || fm.containsKey("tag_size"))
                 && casesRaw instanceof Map) {
-            Map<String, List<Field>> tlvCases = new HashMap<>();
+            // Insertion-ordered: encoding ranks the candidate cases for a channel and
+            // needs that ranking to be reproducible, which a HashMap's iteration order is
+            // not.
+            Map<String, List<Field>> tlvCases = new LinkedHashMap<>();
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) casesRaw).entrySet()) {
                 String key = String.valueOf(entry.getKey());
                 if (entry.getValue() instanceof List) {
@@ -490,6 +493,16 @@ public class Schema {
             if (on instanceof String) {
                 matchField.setOn((String) on);
             }
+            // The block's own `name` and `length`: a match with no `field:` reads its
+            // discriminator from the payload, and both the decoder's read width and the
+            // encoder's write width come from `length`. Dropping them left a two-byte
+            // discriminator read as one byte.
+            if (matchMap.get("name") instanceof String matchName) {
+                matchField.setName(matchName);
+            }
+            if (matchMap.get("length") != null) {
+                matchField.setLength(toInt(matchMap.get("length"), 0));
+            }
             matchField.setCases(parseCaseMap(matchMap.get("cases")));
             f.setMatchInline(matchField);
         }
@@ -528,6 +541,24 @@ public class Schema {
         result.putAll(fieldsResult);
         
         return result;
+    }
+
+    // Encode methods
+
+    /**
+     * Encode a data map back to payload bytes - the inverse of {@link #decode}.
+     *
+     * <p>Unlike the decoders, this reports per-field failures through the result rather
+     * than throwing: encoding has inherently lossy cases, and a caller needs to know which
+     * fields they were. See {@link Encoder} for what round-tripping can and cannot recover.
+     */
+    public EncodeResult encode(Map<String, Object> data) {
+        return new Encoder(this, fields).run(data);
+    }
+
+    /** {@link #encode} with port-based schema selection. */
+    public EncodeResult encodeWithPort(Map<String, Object> data, int fPort) {
+        return new Encoder(this, resolveFields(fPort)).run(data);
     }
 
     private List<Field> resolveFields(int fPort) {

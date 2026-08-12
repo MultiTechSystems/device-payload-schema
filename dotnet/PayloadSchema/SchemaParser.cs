@@ -475,6 +475,12 @@ public static class SchemaParser
         {
             var matchField = new SchemaField { Type = FieldType.Match };
             if (matchMap.TryGetValue("field", out var mf)) matchField.On = Scalar(mf);
+            // The block's own `name` and `length`: a match with no `field:` reads its
+            // discriminator from the payload, and both the decoder's read width and the
+            // encoder's write width come from `length`. Dropping them left a two-byte
+            // discriminator read as one byte.
+            if (matchMap.TryGetValue("name", out var mn)) matchField.Name = Scalar(mn);
+            if (matchMap.TryGetValue("length", out var ml)) matchField.Length = Int(ml);
             if (matchMap.TryGetValue("cases", out var mc) && mc is YamlMappingNode mcMap)
             {
                 // As above: hex keys need ParseScalarValue, not int.TryParse.

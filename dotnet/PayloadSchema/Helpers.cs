@@ -126,6 +126,19 @@ public static class Helpers
         return buf;
     }
 
+    /// <summary>
+    /// IEEE 754 half-precision, the inverse of <see cref="Float16ToFloat64"/>. Encoding an
+    /// f16 field had no primitive to reach for: EncodeFloat32 and EncodeFloat64 existed and
+    /// the two-byte form did not.
+    /// </summary>
+    public static byte[] EncodeFloat16(double val, string endian)
+    {
+        // .NET's Half does the rounding, including subnormals and the overflow to infinity,
+        // so this is a conversion rather than a hand-rolled bit shuffle.
+        ushort bits = BitConverter.HalfToUInt16Bits((Half)val);
+        return EncodeUint(bits, 2, endian);
+    }
+
     public static int InferLengthFromType(FieldType type) => type switch
     {
         FieldType.U8 or FieldType.S8 => 1,
