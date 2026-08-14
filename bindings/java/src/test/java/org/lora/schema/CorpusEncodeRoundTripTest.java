@@ -40,16 +40,16 @@ class CorpusEncodeRoundTripTest {
      * map the encoder reads back, which is what lets a multi-channel payload round-trip
      * rather than come back rearranged.
      */
-    private static final int ENCODE_FLOOR_TOTAL = 1129;
+    private static final int ENCODE_FLOOR_TOTAL = 1131;
 
     /**
      * Per-shape floors, so a regression in a layout that works cannot hide behind the mass
      * of one that does not.
      */
     private static final Map<String, Integer> ENCODE_FLOOR_BY_SHAPE = Map.of(
-            "tlv", 899,
+            "tlv", 900,
             "flagged", 121,
-            "plain fixed", 54,
+            "plain fixed", 55,
             "match", 34,
             "byte_group", 17,
             "repeat", 4);

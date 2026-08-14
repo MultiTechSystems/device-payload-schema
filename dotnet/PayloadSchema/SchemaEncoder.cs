@@ -477,12 +477,58 @@ public static class SchemaEncoder
         /// exactly, while the raw case would need it rounded. A candidate that cannot
         /// reproduce the value it claims is ranked behind one that can.
         /// </remarks>
+        /// <summary>
+        /// Flatten a tlv case to the fields whose values are looked up in the case's own
+        /// data map, descending into the constructs that carry no name of their own.
+        /// </summary>
+        /// <remarks>
+        /// A byte_group or flagged field is nameless: its names sit in its group's fields,
+        /// and EncodeByteGroup and EncodeFlagged both read them straight out of the same
+        /// flat map. Collecting only the top level therefore found nothing to claim for
+        /// such a case, so it never became a candidate and the channel encoded to no bytes
+        /// <em>and no error</em>. hbi/mla20's case 0x20 is two of these, and
+        /// _language-conformance/tlv-nameless-case.yaml pins it.
+        /// <para>Deliberately not descended into: an object's or repeat's `fields`, whose
+        /// values live in a nested map under the field's own name rather than in this map,
+        /// so claiming their members would claim names this map does not have - the field's
+        /// own name is claimed instead, which is what the nested objects in the milesight
+        /// schemas rely on; and a nested match or tlv, where which branch supplies a name
+        /// depends on the data, so claiming every branch's names would over-claim.</para>
+        /// </remarks>
+        static List<SchemaField> ClaimableFields(List<SchemaField> caseFields)
+        {
+            var claimable = new List<SchemaField>();
+            CollectClaimable(caseFields, claimable);
+            return claimable;
+        }
+
+        static void CollectClaimable(List<SchemaField>? fields, List<SchemaField> sink)
+        {
+            if (fields == null) return;
+            foreach (var f in fields)
+            {
+                if (f.ByteGroup.Count > 0)
+                {
+                    CollectClaimable(f.ByteGroup, sink);
+                    continue;
+                }
+                if (f.Flagged?.Groups != null)
+                {
+                    foreach (var group in f.Flagged.Groups)
+                        CollectClaimable(group.Fields, sink);
+                    continue;
+                }
+                if (PayloadName(f) == null) continue;
+                sink.Add(f);
+            }
+        }
+
         (int matches, bool lossless) CaseFidelity(List<SchemaField> caseFields,
             Dictionary<string, object?> data)
         {
             int matches = 0;
             bool lossless = true;
-            foreach (var f in caseFields)
+            foreach (var f in ClaimableFields(caseFields))
             {
                 var name = PayloadName(f);
                 if (name == null || !data.TryGetValue(name, out var reported)) continue;
@@ -534,7 +580,7 @@ public static class SchemaEncoder
             foreach (var (caseKey, caseFields) in tlv.TLVCases)
             {
                 if (caseKey == "default") continue;
-                var claimed = caseFields
+                var claimed = ClaimableFields(caseFields)
                     .Select(PayloadName)
                     .Where(n => n != null && data.ContainsKey(n))
                     .Select(n => n!)

@@ -33,7 +33,7 @@ import (
 // map cannot hold. Encode alone still has to assume ascending tag order, which is how most
 // devices here lay their channels out but not all - so the plain pair scores lower, and
 // that is the reason the ordered pair exists.
-const encodeFloorTotal = 1135
+const encodeFloorTotal = 1137
 
 // encodeFloorByShape guards each layout separately, so a regression in one that works
 // cannot hide behind the mass of one that does not. It has earned that: raising the total
@@ -47,9 +47,9 @@ const encodeFloorTotal = 1135
 // that actually wrote those bytes goes back. The other four recover order from their output
 // keys, which cannot tell those two cases apart, and pick the first.
 var encodeFloorByShape = map[string]int{
-	"tlv":         905,
+	"tlv":         906,
 	"flagged":     121,
-	"plain fixed": 54,
+	"plain fixed": 55,
 	"match":       34,
 	"byte_group":  17,
 	"repeat":      4,

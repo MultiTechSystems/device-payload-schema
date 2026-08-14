@@ -1,0 +1,29 @@
+# A field that carries no value for the caller to supply still occupies its bytes.
+#
+# `_reserved` is an internal field and the unnamed entry is pure padding: neither
+# is in the decoded output, so encoding has to reproduce them from the schema
+# alone. Go's encoder returned early on both, writing none of their bytes, so the
+# payload came out three bytes short and `b` landed where the first padding byte
+# belongs. skip-type.yaml covers a *named* skip, which took a different branch.
+#
+# The padding is zero here on purpose, unlike skip-type.yaml's FF FF: it makes the
+# vector round-trip, so `encode(decode(payload)) == payload` fails the moment a
+# field like this stops contributing its bytes.
+name: probe_encode_padding
+endian: big
+fields:
+- name: a
+  type: u8
+- type: skip
+  length: 2
+- name: _reserved
+  type: u8
+- name: b
+  type: u8
+test_vectors:
+- name: padding_occupies_its_bytes
+  payload: 01 00 00 00 02
+  source: generated
+  expected:
+    a: 1
+    b: 2

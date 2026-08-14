@@ -1794,7 +1794,9 @@ class SchemaInterpreter:
         return nested_result, pos
     
     def _decode_tlv(self, field_def: Dict[str, Any], buf: bytes,
-                    pos: int) -> Tuple[Dict[str, Any], int]:
+                    pos: int,
+                    outer: Optional[DecodeResult] = None,
+                    ) -> Tuple[Dict[str, Any], int]:
         """
         Decode TLV (Type-Length-Value) loop using Option B syntax.
         
@@ -1918,7 +1920,29 @@ class SchemaInterpreter:
             for cf in matched_fields:
                 cf_name = cf.get('name', 'unknown')
                 cf_type = cf.get('type', 'u8')
-                
+
+                # A byte_group carries no name and no type of its own - its names
+                # live in its own `fields`, sharing one byte. The generic path
+                # below therefore read that shared byte as a `u8` called
+                # "unknown" and never descended into the bit ranges, so
+                # hbi/mla20's case 0x20 decoded to {"unknown": 81} and its
+                # charger_status and device_status were never reported at all.
+                # Go descends into it; this brings Python onto the same result.
+                #
+                # The group is decoded into a scratch result so its fields land
+                # in tag_result rather than jumping straight to the payload-level
+                # output, which would bypass the merge/channels handling below.
+                if 'byte_group' in cf and not cf.get('type'):
+                    group = DecodeResult(data={}, bytes_consumed=0)
+                    pos = self._decode_byte_group(cf, buf, pos, group)
+                    tag_result.update(group.data)
+                    # `outer`, not `result`: this method already binds a local
+                    # `result` dict for the channel output further down.
+                    if outer is not None:
+                        outer.errors.extend(group.errors)
+                        outer.warnings.extend(group.warnings)
+                    continue
+
                 # Handle bitfield_string inside TLV cases
                 if cf_type == 'bitfield_string':
                     value, pos = self._decode_bitfield_string(cf, buf, pos)
@@ -2101,7 +2125,7 @@ class SchemaInterpreter:
             # Option B: tlv: as top-level key
             if 'tlv' in field_def and not field_def.get('type'):
                 try:
-                    tlv_result, pos = self._decode_tlv(field_def, payload, pos)
+                    tlv_result, pos = self._decode_tlv(field_def, payload, pos, result)
                     result.data.update(tlv_result)
                 except Exception as e:
                     result.errors.append(f"Error in tlv: {e}")
@@ -2831,6 +2855,47 @@ class SchemaInterpreter:
             out.extend(self._encode_field_list(record_fields, record))
         return bytes(out)
 
+    def _claimable_fields(
+        self, case_fields: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Flatten a tlv case to the fields looked up in the case's own data map.
+
+        A byte_group or flagged field is nameless: its names live in its own group's
+        `fields`, and _encode_byte_group and _encode_flagged both read them straight out
+        of the same flat map. Collecting only the top level therefore found nothing to
+        claim for such a case, never selected it as a candidate, and dropped the channel
+        with no bytes and no error. hbi/mla20's case 0x20 is two of these.
+
+        Deliberately not descended into:
+
+        - an object's or repeat's `fields`, whose values live in a nested map under the
+          field's own name rather than in this map, so claiming their members would
+          claim names this map does not have. The field's own name is claimed instead,
+          which is what the nested objects in the milesight schemas rely on.
+        - a nested match or tlv, where which branch supplies a name depends on the data,
+          so claiming every branch's names would over-claim.
+        """
+        out = []  # type: List[Dict[str, Any]]
+        for f in case_fields:
+            if not isinstance(f, dict):
+                continue
+            if 'byte_group' in f and not f.get('type'):
+                group = f['byte_group']
+                group_fields = (
+                    group.get('fields') or [] if isinstance(group, dict) else group
+                )
+                out.extend(self._claimable_fields(group_fields or []))
+                continue
+            if 'flagged' in f and not f.get('type'):
+                for group in (f['flagged'].get('groups') or []):
+                    out.extend(self._claimable_fields(group.get('fields') or []))
+                continue
+            name = f.get('name')
+            if not name or str(name).startswith('_') or f.get('type') == 'number':
+                continue
+            out.append(f)
+        return out
+
     def _case_fidelity(self, case_fields: List[Dict[str, Any]], data: Dict[str, Any]):
         """How well a candidate case explains the data: (matches, lossless).
 
@@ -2841,11 +2906,9 @@ class SchemaInterpreter:
         that cannot reproduce the value it claims did not write those bytes.
         """
         matches, lossless = 0, True
-        for f in case_fields:
-            if not isinstance(f, dict):
-                continue
+        for f in self._claimable_fields(case_fields):
             name = f.get('name')
-            if not name or name not in data or f.get('type') == 'number':
+            if name not in data:
                 continue
             matches += 1
             raw = reverse_lookup(data[name], f.get('lookup'))
@@ -2889,11 +2952,7 @@ class SchemaInterpreter:
         for case_key, case_fields in cases.items():
             if case_key == 'default' or not isinstance(case_fields, list):
                 continue
-            names = [
-                f.get('name') for f in case_fields
-                if isinstance(f, dict) and f.get('name') and not str(f['name']).startswith('_')
-                and f.get('type') != 'number'
-            ]
+            names = [f['name'] for f in self._claimable_fields(case_fields)]
             claimed = [n for n in names if n in data]
             if not claimed:
                 continue

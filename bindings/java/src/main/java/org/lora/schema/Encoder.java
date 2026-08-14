@@ -404,10 +404,52 @@ final class Encoder {
      * from 4369 through {@code div: 100} exactly, while the raw case would need it rounded.
      * A candidate that cannot reproduce the value it claims is ranked behind one that can.
      */
+    /**
+     * Flatten a tlv case to the fields whose values are looked up in the case's own data
+     * map, descending into the constructs that carry no name of their own.
+     *
+     * <p>A byte_group or flagged field is nameless: its names sit in its group's fields,
+     * and encodeByteGroup and encodeFlagged both read them straight out of the same flat
+     * map. Collecting only the top level therefore found nothing to claim for such a case,
+     * so it never became a candidate and the channel encoded to no bytes <em>and no
+     * error</em>. {@code hbi/mla20}'s case {@code 0x20} is two of these, and
+     * {@code _language-conformance/tlv-nameless-case.yaml} pins it.
+     *
+     * <p>Deliberately not descended into: an object's or repeat's {@code fields}, whose
+     * values live in a nested map under the field's own name rather than in this map, so
+     * claiming their members would claim names this map does not have — the field's own
+     * name is claimed instead, which is what the nested objects in the milesight schemas
+     * rely on; and a nested match or tlv, where which branch supplies a name depends on
+     * the data, so claiming every branch's names would over-claim.
+     */
+    private static void collectClaimable(List<Field> fields, List<Field> out) {
+        if (fields == null) return;
+        for (Field f : fields) {
+            if (f.getByteGroup() != null && !f.getByteGroup().isEmpty()) {
+                collectClaimable(f.getByteGroup(), out);
+                continue;
+            }
+            if (f.getFlagged() != null && f.getFlagged().getGroups() != null) {
+                for (Field.FlaggedGroup group : f.getFlagged().getGroups()) {
+                    collectClaimable(group.getFields(), out);
+                }
+                continue;
+            }
+            if (payloadName(f) == null) continue;
+            out.add(f);
+        }
+    }
+
+    private static List<Field> claimableFields(List<Field> fields) {
+        List<Field> out = new ArrayList<>();
+        collectClaimable(fields, out);
+        return out;
+    }
+
     private Fidelity caseFidelity(List<Field> caseFields, Map<String, Object> data) {
         int matches = 0;
         boolean lossless = true;
-        for (Field f : caseFields) {
+        for (Field f : claimableFields(caseFields)) {
             String name = payloadName(f);
             if (name == null || !data.containsKey(name)) continue;
             matches++;
@@ -457,7 +499,7 @@ final class Encoder {
         for (Map.Entry<String, List<Field>> entry : cases.entrySet()) {
             if ("default".equals(entry.getKey()) || entry.getValue() == null) continue;
             List<String> claimed = new ArrayList<>();
-            for (Field f : entry.getValue()) {
+            for (Field f : claimableFields(entry.getValue())) {
                 String name = payloadName(f);
                 if (name != null && data.containsKey(name)) claimed.add(name);
             }

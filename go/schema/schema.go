@@ -295,6 +295,13 @@ type EncodeContext struct {
 	// place, so encoding has to as well; nothing carried them here before, and a
 	// referenced header contributed no bytes at all.
 	Definitions map[string]*DefinitionDef
+	// Warnings records what was encoded on the caller's behalf rather than from
+	// the data given — currently a field the input omitted, written as zero. The
+	// other four implementations carry these on an encode result type (Python's
+	// EncodeResult.warnings, Java's `warnings`, C#'s `_result.Warnings`); Go
+	// returned bare bytes and so had nowhere to put them, which is why its
+	// encoder was the silent one. Read them with Schema.EncodeToResult.
+	Warnings []string
 }
 
 // NewEncodeContext creates a new encode context.
@@ -306,12 +313,35 @@ func NewEncodeContext(endian string) *EncodeContext {
 		Buffer:    make([]byte, 0),
 		Endian:    endian,
 		Variables: make(map[string]any),
+		Warnings:  []string{},
 	}
 }
 
 // Write appends bytes to the buffer.
 func (ctx *EncodeContext) Write(data []byte) {
 	ctx.Buffer = append(ctx.Buffer, data...)
+}
+
+// branch returns a context that writes to its own buffer while sharing the
+// surrounding encode's state.
+//
+// A tlv case has to be encoded before its length prefix can be written, so its
+// bytes are measured in isolation. Its warnings still belong to the same encode,
+// which is what mergeWarnings puts back.
+//
+// TLVOrder is deliberately not carried: a nested tlv inside a case has no
+// recovered channel order of its own, and passing the outer one down would
+// reorder its channels to match a sequence that was never about them.
+func (ctx *EncodeContext) branch() *EncodeContext {
+	child := NewEncodeContext(ctx.Endian)
+	child.Variables = ctx.Variables
+	child.Definitions = ctx.Definitions
+	return child
+}
+
+// mergeWarnings carries a branch's warnings back into the parent.
+func (ctx *EncodeContext) mergeWarnings(child *EncodeContext) {
+	ctx.Warnings = append(ctx.Warnings, child.Warnings...)
 }
 
 // inferLengthFromType returns the byte length for shorthand types like u8, s16, etc.
@@ -2626,9 +2656,49 @@ func (s *Schema) Encode(data map[string]any) ([]byte, error) {
 	return s.EncodeWithPort(data, 0)
 }
 
+// EncodeResult is an encoded payload together with what the encoder supplied on
+// the caller's behalf rather than reading from the data given.
+//
+// The other four implementations all return this shape — Python's EncodeResult,
+// Java's `warnings`, C#'s `_result.Warnings`. Go returned bare bytes, so a
+// warning had nowhere to go and its encoder was the silent one of the five.
+type EncodeResult struct {
+	Payload  []byte
+	Warnings []string
+}
+
 // EncodeWithPort encodes data to binary using port-based schema selection.
+//
+// A field missing from data is written as zero and noted as a warning, which
+// EncodeToResult reports and this signature necessarily drops.
 func (s *Schema) EncodeWithPort(data map[string]any, fPort int) ([]byte, error) {
+	ctx, err := s.encodeToContext(data, fPort, nil)
+	if err != nil {
+		return nil, err
+	}
+	return ctx.Buffer, nil
+}
+
+// EncodeToResult is EncodeWithPort with the warnings retained, matching what the
+// other four implementations return.
+func (s *Schema) EncodeToResult(data map[string]any, fPort int) (*EncodeResult, error) {
+	ctx, err := s.encodeToContext(data, fPort, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &EncodeResult{Payload: ctx.Buffer, Warnings: ctx.Warnings}, nil
+}
+
+// encodeToContext is the one encode path. EncodeWithPort and
+// EncodeOrderedWithPort were separate copies of it, and being copies they had
+// drifted into sharing a defect: both discarded the error from ResolveFields.
+//
+// An empty order means no TLV channel sequence is known.
+func (s *Schema) encodeToContext(
+	data map[string]any, fPort int, order []string,
+) (*EncodeContext, error) {
 	ctx := NewEncodeContext(s.Endian)
+	ctx.TLVOrder = order
 	ctx.Definitions = s.Definitions
 
 	// Encode header fields first
@@ -2638,15 +2708,29 @@ func (s *Schema) EncodeWithPort(data map[string]any, fPort int) ([]byte, error) 
 		}
 	}
 
-	// Resolve fields (port-based or top-level)
-	fields, _ := s.ResolveFields(fPort)
+	// Resolve fields (port-based or top-level).
+	//
+	// The error is propagated rather than discarded. ResolveFields already falls
+	// back to the `default` port, so it fails only when the schema declares
+	// neither this port nor a default — and swallowing that left `fields` nil,
+	// which encoded to an empty payload and reported success. Python's
+	// _resolve_fields raises here and its encode does not catch it.
+	//
+	// Note what this does *not* catch: a schema that declares a `default` port
+	// resolves any undeclared port to it, so encoding against the wrong port
+	// still succeeds with plausible bytes for the wrong message. A caller that
+	// needs a specific port to exist has to check Ports itself.
+	fields, err := s.ResolveFields(fPort)
+	if err != nil {
+		return nil, err
+	}
 
 	// Encode main fields
 	if err := encodeFields(fields, data, ctx); err != nil {
 		return nil, err
 	}
 
-	return ctx.Buffer, nil
+	return ctx, nil
 }
 
 
@@ -2693,16 +2777,8 @@ func (s *Schema) EncodeOrdered(data map[string]any, order []string) ([]byte, err
 
 // EncodeOrderedWithPort is EncodeOrdered with port-based schema selection.
 func (s *Schema) EncodeOrderedWithPort(data map[string]any, fPort int, order []string) ([]byte, error) {
-	ctx := NewEncodeContext(s.Endian)
-	ctx.TLVOrder = order
-	ctx.Definitions = s.Definitions
-	if len(s.Header) > 0 {
-		if err := encodeFields(s.Header, data, ctx); err != nil {
-			return nil, err
-		}
-	}
-	fields, _ := s.ResolveFields(fPort)
-	if err := encodeFields(fields, data, ctx); err != nil {
+	ctx, err := s.encodeToContext(data, fPort, order)
+	if err != nil {
 		return nil, err
 	}
 	return ctx.Buffer, nil
@@ -2820,12 +2896,50 @@ func caseMatchesValue(value int, c Case) bool {
 	return false
 }
 
-func caseFidelity(caseFields []Field, data map[string]any) (int, bool) {
-	matches, lossless := 0, true
-	for _, f := range caseFields {
-		if f.Name == "" || strings.HasPrefix(f.Name, "_") || f.Type == TypeNumber || f.Type == "number" {
+// claimableFields flattens a tlv case to the fields whose values are looked up in
+// the case's own data map, descending into the constructs that carry no name of
+// their own.
+//
+// A byte_group or flagged field is nameless: its names sit in its group's fields,
+// and encodeByteGroup and encodeFlagged both read them straight out of the same
+// flat map. Collecting only the top level therefore found nothing to claim for
+// such a case, so it never became a candidate and the channel encoded to no bytes
+// and no error. hbi/mla20's case 32 is two of these, and a flagged construct in a
+// case was the same.
+//
+// Deliberately not descended into:
+//
+//   - an object's or repeat's `fields`, whose values live in a nested map under
+//     the field's own name rather than in this map — claiming those names here
+//     would claim names this map does not have. The field's own name is claimed
+//     instead, which is what the 17 nested objects in the corpus rely on.
+//   - a nested match or tlv, where which branch supplies a name depends on the
+//     data, so claiming every branch's names would over-claim. No corpus schema
+//     nests either inside a case.
+func claimableFields(fields []Field, out []Field) []Field {
+	for _, f := range fields {
+		if len(f.ByteGroup) > 0 {
+			out = claimableFields(f.ByteGroup, out)
 			continue
 		}
+		if f.Flagged != nil {
+			for _, g := range f.Flagged.Groups {
+				out = claimableFields(g.Fields, out)
+			}
+			continue
+		}
+		if f.Name == "" || strings.HasPrefix(f.Name, "_") ||
+			f.Type == TypeNumber || f.Type == "number" {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+func caseFidelity(caseFields []Field, data map[string]any) (int, bool) {
+	matches, lossless := 0, true
+	for _, f := range claimableFields(caseFields, nil) {
 		value, ok := data[f.Name]
 		if !ok {
 			continue
@@ -2955,10 +3069,7 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 	candidates := []candidate{}
 	for key, caseFields := range field.TLVCases {
 		claimed := []string{}
-		for _, f := range caseFields {
-			if f.Name == "" || strings.HasPrefix(f.Name, "_") || f.Type == TypeNumber || f.Type == "number" {
-				continue
-			}
+		for _, f := range claimableFields(caseFields, nil) {
 			if _, ok := data[f.Name]; ok {
 				claimed = append(claimed, f.Name)
 			}
@@ -3003,10 +3114,8 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 			if !ok {
 				continue
 			}
-			inner := NewEncodeContext(ctx.Endian)
-			inner.Variables = ctx.Variables
-			inner.Definitions = ctx.Definitions
-			if err := encodeFieldList(c.fields, data, inner); err != nil {
+			inner := ctx.branch()
+			if err := encodeFields(c.fields, data, inner); err != nil {
 				return err
 			}
 			ctx.Write(c.tag)
@@ -3014,6 +3123,7 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 				ctx.Write(encodeUint(uint64(len(inner.Buffer)), field.LengthSize, ctx.Endian))
 			}
 			ctx.Write(inner.Buffer)
+			ctx.mergeWarnings(inner)
 			emittedAny = true
 		}
 		if emittedAny {
@@ -3042,10 +3152,8 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 	sort.SliceStable(chosen, func(i, j int) bool { return bytes.Compare(chosen[i].tag, chosen[j].tag) < 0 })
 
 	for _, c := range chosen {
-		inner := NewEncodeContext(ctx.Endian)
-		inner.Variables = ctx.Variables
-		inner.Definitions = ctx.Definitions
-		if err := encodeFieldList(c.fields, data, inner); err != nil {
+		inner := ctx.branch()
+		if err := encodeFields(c.fields, data, inner); err != nil {
 			return err
 		}
 		ctx.Write(c.tag)
@@ -3053,6 +3161,7 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 			ctx.Write(encodeUint(uint64(len(inner.Buffer)), field.LengthSize, ctx.Endian))
 		}
 		ctx.Write(inner.Buffer)
+		ctx.mergeWarnings(inner)
 	}
 	return nil
 }
@@ -3117,7 +3226,7 @@ func encodeMatch(field Field, data map[string]any, ctx *EncodeContext) error {
 		}
 		ctx.Write(encodeUint(uint64(value), field.Length, ctx.Endian))
 	}
-	return encodeFieldList(chosen, data, ctx)
+	return encodeFields(chosen, data, ctx)
 }
 
 // encodeByteGroup packs a group's bit ranges back into their shared byte(s). Encoding had
@@ -3157,8 +3266,6 @@ func encodeByteGroup(field Field, data map[string]any, ctx *EncodeContext) error
 	return nil
 }
 
-// encodeFieldList encodes a list of plain fields - a TLV case's or match case's value
-// bytes - resolving nested constructs the same way the top-level loop does.
 // encodeRef writes the fields of a referenced definition in place, as decoding reads them.
 func encodeRef(ref string, data map[string]any, ctx *EncodeContext) error {
 	if !strings.HasPrefix(ref, "#/definitions/") {
@@ -3172,71 +3279,8 @@ func encodeRef(ref string, data map[string]any, ctx *EncodeContext) error {
 	if !ok {
 		return fmt.Errorf("definition not found: %s", name)
 	}
-	return encodeFieldList(def.Fields, data, ctx)
+	return encodeFields(def.Fields, data, ctx)
 }
-
-func encodeFieldList(fields []Field, data map[string]any, ctx *EncodeContext) error {
-	for _, f := range fields {
-		if f.Ref2 != "" {
-			if err := encodeRef(f.Ref2, data, ctx); err != nil {
-				return err
-			}
-			continue
-		}
-		if f.MatchInline != nil {
-			if err := encodeMatch(*f.MatchInline, data, ctx); err != nil {
-				return err
-			}
-			continue
-		}
-		if f.TLVInline != nil {
-			if err := encodeTLV(*f.TLVInline, data, ctx); err != nil {
-				return err
-			}
-			continue
-		}
-		if len(f.ByteGroup) > 0 {
-			if err := encodeByteGroup(f, data, ctx); err != nil {
-				return err
-			}
-			continue
-		}
-		if f.Type == TypeNumber || f.Type == "number" {
-			continue
-		}
-		if f.Type == "skip" {
-			length := f.Length
-			if length < 0 {
-				length = 0
-			}
-			ctx.Write(make([]byte, length))
-			continue
-		}
-		if f.Name == "" || strings.HasPrefix(f.Name, "_") {
-			if err := encodeField(f, 0, ctx); err != nil {
-				return err
-			}
-			continue
-		}
-		value, ok := data[f.Name]
-		if !ok {
-			value = 0
-		}
-		if f.Type == TypeBitfieldString {
-			if strVal, isStr := value.(string); isStr {
-				if err := encodeBitfieldString(f, strVal, ctx); err != nil {
-					return err
-				}
-			}
-			continue
-		}
-		if err := encodeField(f, value, ctx); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 
 // encodeRepeat writes a repeat's records back to back. The framing costs no bytes here:
 // count: $n and byte_length: $len name a field earlier in the list, encoded on its own.
@@ -3254,13 +3298,38 @@ func encodeRepeat(field Field, data map[string]any, ctx *EncodeContext) error {
 		if !ok {
 			return fmt.Errorf("repeat field %q: expected each record to be a mapping", field.Name)
 		}
-		if err := encodeFieldList(field.Fields, record, ctx); err != nil {
+		if err := encodeFields(field.Fields, record, ctx); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+// encodeFields writes a list of fields to the buffer.
+//
+// This is the single field-list dispatch. The top level and a schema's header use
+// it, and so do a tlv case, a match's chosen branch, a repeat's record, a `$ref`d
+// definition and a nested object.
+//
+// It was two functions until now — this one for the first pair, encodeFieldList
+// for the rest — and being hand-maintained copies they drifted apart, each in the
+// direction of whatever its own callers needed. Every difference was a defect in
+// one of them rather than a deliberate distinction:
+//
+//   - encodeFieldList handled neither `flagged` nor `repeat`, so either construct
+//     inside a tlv case fell through to encodeField and came back as an
+//     unencodable type. Python's field-list path handles `repeat`.
+//   - encodeFields carried all three of the silent "writes nothing" defects — a
+//     missing field, an unnamed field, an `_`-prefixed field — while
+//     encodeFieldList had none of them. Which is the wrong way round from where
+//     the testing is: the corpus is overwhelmingly tlv, so the path it exercises
+//     least is the one that rotted.
+//   - A `skip` with no explicit length wrote one byte here and none there. One
+//     byte is what Python writes and is what is kept; both corpus skip fields
+//     declare a length, so nothing observes the difference.
+//
+// The flagged pre-scan is a no-op for a list with no flagged construct, so the
+// callers that never had one pay a single pass over their own fields.
 func encodeFields(fields []Field, data map[string]any, ctx *EncodeContext) error {
 	// Pre-scan flagged constructs to compute flag values
 	flagsPatches := map[string]int{}
@@ -3328,15 +3397,51 @@ func encodeFields(fields []Field, data map[string]any, ctx *EncodeContext) error
 			continue
 		}
 
-		if field.Name == "" || strings.HasPrefix(field.Name, "_") {
-			continue
-		}
-
 		// Skip computed fields
 		// A derived value is computed from other fields and occupies no bytes of its own.
 		// This required the deprecated `formula` spelling, so `ref`, `compute`,
 		// `polynomial` and `guard` fields were encoded as though they were on the wire.
+		//
+		// This has to come before the name check below, not after it as it once
+		// did: a computed field is very often the `_`-prefixed kind — vicki has
+		// six — so with the order reversed they would reach encodeField, whose
+		// switch has no case for `number`, and a schema that encoded fine would
+		// start reporting "cannot encode type".
 		if field.Type == TypeNumber || field.Type == "number" {
+			continue
+		}
+
+		// `skip` is padding: it contributes its own bytes and takes no input, so
+		// it is neither looked up in data nor reported as missing. Handled before
+		// the name check because a skip field may be named — skip-type.yaml calls
+		// one `pad` — and would otherwise be warned about as an omitted value.
+		//
+		// Both spellings, as the decode path matches: encodeFieldList checked only
+		// the lowercase one, so a `type: Skip` in a tlv case wrote nothing.
+		if field.Type == TypeSkip || field.Type == TypeSkipLower {
+			length := field.Length
+			if length <= 0 {
+				// An absent length is one byte, as in Python's f.get('length', 1).
+				// Go cannot tell an absent length from `length: remaining`, which
+				// Python pads to nothing (PS-014); both arrive here as zero.
+				length = 1
+			}
+			ctx.Write(make([]byte, length))
+			continue
+		}
+
+		// A field with no name, or an `_`-prefixed intermediate, carries no value
+		// for the caller to supply — but it still occupies its bytes on the wire.
+		// Returning early wrote none of them, so a top-level `skip` or a
+		// `_reserved` byte shifted every field after it and the payload came out
+		// short: the same defect as a missing field being skipped, one branch up.
+		//
+		// encodeField writes `length` zeros for a `skip` and the zero value for
+		// anything else, which is what encodeFieldList and Python both do.
+		if field.Name == "" || strings.HasPrefix(field.Name, "_") {
+			if err := encodeField(field, 0, ctx); err != nil {
+				return err
+			}
 			continue
 		}
 
@@ -3358,7 +3463,16 @@ func encodeFields(fields []Field, data map[string]any, ctx *EncodeContext) error
 			var exists bool
 			value, exists = data[field.Name]
 			if !exists {
-				continue
+				// A field the input omits is written as zero and reported, which
+				// is what Python, Java and C# all do. Skipping it wrote no bytes
+				// at all, so the payload came out short and every field after it
+				// landed at the wrong offset — a corrupt frame returned as a
+				// success. Zero is not a guess at the value; it is a placeholder
+				// that keeps the layout intact while the warning says the value
+				// was never supplied. encodeFieldList, used for tlv/match/repeat
+				// cases, already did exactly this.
+				ctx.Warnings = append(ctx.Warnings, "Missing field: "+field.Name)
+				value = 0
 			}
 		}
 

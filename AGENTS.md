@@ -181,22 +181,27 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 1,166 test vectors in `schemas/devices/` are the shared cross-language test set.
-Every implementation has a runner that reads the same YAML and the same vectors:
+The 1,193 test vectors across the 162 schemas in `schemas/devices/` that carry any (of
+220 YAML files) are the shared cross-language test set. Every implementation has a
+runner that reads the same YAML and the same vectors:
 
-| Implementation | Runner | Vectors passing |
-|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | 1166 / 1166 |
-| Go | `go/schema/corpus_conformance_test.go` | 1163 |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 1163 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 1163 |
-| C | none - consumes a binary schema, not YAML | n/a |
+| Implementation | Runner | Decode | Re-encode |
+|---|---|---|---|
+| Python | `tests/test_corpus_conformance.py` | 1193 / 1193 | 1131 |
+| Go | `go/schema/corpus_conformance_test.go` | 1193 | 1137 |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 1193 | 1131 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 1193 | 1131 |
+| C | none - consumes a binary schema, not YAML | n/a | n/a |
 
 Every runner compares its pass count against a committed floor rather than requiring
 the whole corpus, so any gap stays visible and a regression fails the build. All four
-YAML implementations now decode the entire corpus, so **every floor is the full 1166
-and any failure is a regression, not a known gap.** If you add a construct that one
+YAML implementations now decode the entire corpus, so **every decode floor is the full
+1193 and any failure is a regression, not a known gap.** If you add a construct that one
 implementation cannot express yet, lower its floor deliberately and say why here.
+
+The re-encode column is the round-trip suite described under "Encoding" below, and its
+floors are ratchets rather than a target: `encode(decode(payload)) == payload` cannot
+hold for every vector. Update the number in this table when you move a floor.
 
 A vector's port is written `fPort` or `fport`, and a runner that reads only one
 spelling decodes a port-based schema with no port at all - every field of it then
@@ -265,7 +270,7 @@ five were carried deliberately while the working group chose; the range won beca
 it says where the bits are instead of depending on a bit cursor each implementation
 has to maintain identically.
 
-Every floor is now the full 1166. Do not re-add a withdrawn form to "support" an
+Every decode floor is now the full 1193. Do not re-add a withdrawn form to "support" an
 old schema: the Python interpreter, the binary encoders, the JS and TS013
 generators and the C header all reject them, and the four tests that used to assert
 they decode now assert they are refused.
@@ -326,6 +331,20 @@ different constructs.
 Run them all with `make test-languages`. This suite is why the Go and Java TLV
 defects were found: those implementations returned an empty result for every
 channel/type schema in the repository, and no test had ever read one.
+
+**A `lookup` has two failure modes and they behave differently — CR-2026-009 settled
+which is which.** A sequence is indexed from zero (PS-104) and an out-of-bounds index is
+an **error** (PS-105/PS-285): the payload does not match the schema's shape at all. A
+mapping's keys need not be contiguous (PS-268), so a value with no entry **omits the
+field** (PS-269/PS-286) unless a `default` is declared. Storing the raw integer under a
+name that promises a label is wrong in both cases. All five implementations honour the
+distinction; C had both wrong on the ordinary-field path while its enum path a few lines
+above was already correct, and the two sites disagreed with each other because C's
+interpreter tests are in no build target. `src/selftest_schema.c` covers it now, and it
+*is* in `SELFTEST_SRCS`.
+
+The distinction also constrains encoding: a `default` label matches any unmapped value, so
+there is no original to recover, and every encoder reports that rather than guessing.
 
 **The unary maths transform stages — `sqrt`, `abs`, `pow`, `log10`, `log` — now
 exist in all four.** Python always had them; Go, Java and C# had none, which is what
@@ -435,17 +454,21 @@ between 1e-7 and 1e21 where `%g` switches far earlier, so `1000000.0` must print
 
 **Matching the JS codecs is a solved problem on the Python side.** Normalizing integral
 values to integers is sufficient — measured with `tools/crossvalidate_js_json.py`,
-which diffs serialized JSON token by token: **1117 byte-identical**, 14 numeric
-differences all of which are CR-2026-007's `idiv`/`mod` convention, and 8 differing
-only in key set. No precision or exponent divergence at all, because Python's float
-repr and JavaScript's number-to-string both emit the shortest round-tripping decimal.
-That tool is the acceptance test for the gateway work; run it before and after any
-change to output representation.
+which diffs serialized JSON token by token: **1142 byte-identical, zero divergences.**
+No precision or exponent divergence at all, because Python's float repr and JavaScript's
+number-to-string both emit the shortest round-tripping decimal. That tool is the
+acceptance test for the gateway work; run it before and after any change to output
+representation.
 
-The key-set differences are **TS013 generator** gaps, not interpreter gaps: it does
-not implement `name_from`, drops `repeat` items, misses some TLV channels, and does not
-emit every member of a nested `object`. So "the generated codec and the interpreter are
-interchangeable" is true for 1126 comparisons and not yet true in general.
+It reached zero in two steps, and the second is the transferable lesson. The 14 numeric
+differences were CR-2026-007's `idiv`/`mod` convention and closed when that CR landed.
+The remaining key-set differences were **TS013 generator** gaps — `name_from`, dropped
+`repeat` items, missed TLV channels, unemitted members of a nested `object` — but the
+tool had also been skipping lists and dicts entirely rather than comparing them, so a
+`bytes` field the generator emitted as a JS array read as identical. **What a cross-check
+declines to compare, it silently blesses.** Both the generator and the comparison were
+fixed; if you extend the tool, make sure a new value shape is compared rather than
+skipped.
 
 **Rounding is half-to-even everywhere, and the generator now emits a helper for it.**
 `Math.round` is half-up and asymmetric for negatives, which put the generated codec at
@@ -502,38 +525,254 @@ Priority order for the gateway target, by what the device corpus actually uses:
 stages, then `compute`/`ref`/`polynomial`, then `repeat`/`until`. `name_from`,
 `merge`, `bitfield_string` and the semantic mappings are rarer and can wait.
 
-**Encoding is the least-tested part of the project, and it is the MCU tier's whole
-job.** All 1188 corpus vectors are decode-only, and no vector asserts an encoded
-payload. C has a full encoder (`schema_encode`, `encode_field`, reverse modifiers) and
-`src/test_encoder.c` is in no build target, so it is verified by nothing that runs.
-Python and Go have encoders; **Java and C# have none** — Java's only `encode` hit is
-`Base64.getEncoder()`, and C# has just byte-level helpers in `Helpers.cs`. Meanwhile
-PS-061..PS-064 and the reverse of canonical modifier order are normative. A round-trip
-corpus is the cheap fix: every vector already carries a payload and its expected
-values, so feeding the values back through `encode` and asserting the original bytes
-gives ~1188 encode assertions for almost no authoring cost. It will not be lossless
-everywhere — `lookup`, `hex` case, guard fallbacks and unmatched enums discard
-information by design — so it needs a per-vector opt-out.
+### Encoding
 
-**Four of the eight C test files are in no build target**: `test_comprehensive.c`,
+**Every corpus vector is an encode assertion, for free.** A vector carries a payload and
+the values it decodes to, so `encode(decode(payload)) == payload` needs no new fixtures.
+That is now a suite in four languages, and it is the reason encoding went from barely
+exercised to the best-covered part of the project:
+
+| | Runner | Round-trips |
+|---|---|---|
+| Python | `tests/test_encode_round_trip.py` | 1131 / 1193 |
+| Go | `go/schema/corpus_encode_test.go` | 1137 |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1131 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1131 |
+| C | none — `src/test_encoder.c` is in no build target | unverified |
+
+All five implementations have an encoder; Java's and C#'s were built from nothing, ported
+from `tools/schema_interpreter.py`. Read that one first when changing any of them.
+
+**The floors are per shape, not just per total, and that is what makes them work.** Each
+runner scores `tlv`, `flagged`, `match`, `byte_group`, `repeat` and plain-fixed layouts
+separately, so a regression in one cannot hide behind the mass of another. This has paid
+off literally: adding a `default` case to Go's encode type switch raised the total and
+dropped `flagged` by 9 in the same run, which the total alone would have absorbed.
+
+**It cannot be lossless everywhere, so the floors are ratchets, not a target of 1193.** A
+`skip` field's bytes are not recoverable from output that omits them, a rounding stage
+discards precision, a `lookup` or enum `default` label stands for every value the table
+does not list (PS-269, PS-068), `sqrt`/`log`/`pow` do not invert, an unknown TLV channel
+was never decoded, and a `name_from` key is not the field's name. Those are reported
+through the result type rather than papered over with plausible bytes. Raise a floor when
+you close a gap; never lower one without saying why here.
+
+**The defect shape to watch for is a silent write of nothing.** Every encode gap found so
+far was a type spelling some dispatch did not list, which wrote no bytes and returned
+success — a sequence `lookup` label (67 Go vectors emitted a TLV tag followed by nothing),
+a `u8[0:0]` bit range, `u24`/`s24`, a `type: number` inside a `flagged` group. Each read
+as a pass until a cross-implementation diff. Go's switch now has a `default` that reports
+an unhandled type; keep it, and prefer reporting a value you cannot write over skipping it.
+
+**Three more of that shape were in Go's `encodeFields`, and all three are fixed.** They
+were found from outside, by a consumer building LoRaWAN downlink on the Go encoder, which
+is worth noting: the corpus could not see any of them, because a round-trip that fails on
+length looks the same as any other near miss.
+
+- **A missing field was skipped, not zero-filled.** Python, Java and C# all warn
+  `Missing field: {name}` and write zero; Go alone wrote nothing, so the payload came out
+  *short* and every field after the gap landed at the wrong offset. A partial map
+  therefore produced a corrupt frame rather than one with a zero placeholder. Go now
+  matches the other three. `encodeFieldList` — the tlv/match/repeat path — was already
+  correct, which is why only fixed layouts were affected.
+- **`EncodeWithPort` discarded the error from `ResolveFields`.** An undeclared fPort
+  resolved to nil fields, encoding to an empty payload and returning success. Python's
+  `_resolve_fields` raises and its `encode` does not catch it. Both Go entry points had
+  this, because `EncodeWithPort` and `EncodeOrderedWithPort` were copies; they now share
+  one `encodeToContext`. Note the limit: a schema declaring a `default` port resolves
+  *any* undeclared port to it, so encoding against the wrong port still succeeds with
+  plausible bytes for the wrong message. A caller needing a specific port must check
+  `Ports` itself.
+
+- **An unnamed or `_`-prefixed field contributed no bytes.** `encodeFields` returned early
+  on `field.Name == ""` or a `_` prefix, so a top-level `skip` or a `_reserved` byte
+  shifted every field after it — the same defect as the missing field above, one branch
+  up. Both now go through `encodeField`, which writes `length` zeros for a `skip` and the
+  zero value otherwise, as `encodeFieldList` and Python do. Neither is warned about:
+  padding and internals are not the caller's to supply, and Python does not warn either.
+
+  **The `number` check had to move above the name check to do this.** A computed field is
+  very often the `_`-prefixed kind — `mclimate/vicki` has six — and with the old order
+  they would now reach `encodeField`, whose switch has no `number` case, so a schema that
+  encoded fine would start reporting "cannot encode type".
+
+None of the three changed a single round-trip count — total stays 1135 and every shape
+floor holds. The only visible movement is `plain fixed` going `length=5 → 3` and
+`bytes=2 → 4`: two vectors went from a silently truncated payload to a correctly shaped
+one. **That is why the per-shape table records length and bytes separately from
+round-trips** — a pure correctness win that moves no total would otherwise be invisible.
+
+**The third fix moved nothing at all, and that was the finding.** Of the five schemas with
+an unnamed or `_`-prefixed field at top level, four ship no test vectors
+(`makerfabs/soil-monitor`, `makerfabs/ath20`, `makerfabs/leaf-moisture-sn-3001`,
+`hbi/mla20`) and the fifth, `_language-conformance/skip-type.yaml`, *names* its skip field
+so the missing-field path already covered it. The corpus could observe neither the bug nor
+its repair.
+
+**`_language-conformance/encode-padding.yaml` closes that hole**, and it is the first
+fixture there aimed at the encode direction. `[u8 a, skip 2, _reserved u8, u8 b]` over
+`01 00 00 00 02`. The padding is **zero on purpose**, unlike `skip-type.yaml`'s `FF FF`:
+zero padding is reconstructible, so the vector round-trips and
+`encode(decode(payload)) == payload` fails the moment such a field stops contributing its
+bytes. A fixture whose padding cannot be reconstructed can only ever test decoding, which
+is why the existing skip fixture never caught this.
+
+All four implementations decode *and* round-trip it — confirmed with `make test-java` and
+`make test-dotnet`, not assumed — so every floor was raised together: decode 1191 → 1192 in
+all four, re-encode totals 1129 → 1130 for Python, Java and C# and 1135 → 1136 for Go, and
+the `plain fixed` shape floor 54 → 55 in all four. Exact counts were read out of each
+runner rather than inferred; Python's and C#'s runners print no table, so their totals came
+from over-raising the floor and reading the assertion message.
+
+Parity was checked against the reference implementation rather than assumed. For
+`[u8 a, skip 2, _reserved u8, u8 b]` Python and Go now both emit `01 00 00 00 02` with no
+warnings; for a three-field layout missing its middle field both emit `11 11 00 33 33`
+with `Missing field: second`; and for a `_`-prefixed `number` both emit two bytes. Three of
+the four implementations already agreed before these fixes and Go was the outlier, which
+is what settled "should this error?" — it should not; it should zero-fill and say so.
+
+**Go had nowhere to put a warning, which is why it was the silent one.** The other four
+return a result type carrying `warnings`; Go returned bare bytes. `EncodeContext` now has
+`Warnings`, and `Schema.EncodeToResult` returns an `EncodeResult{Payload, Warnings}` —
+additive, so `Encode`/`EncodeWithPort` keep their signatures and simply drop the warnings
+as before. Wording matches the other three exactly (`Missing field: {name}`) so a
+cross-language diff compares equal strings.
+
+**`encodeFields` and `encodeFieldList` were two hand-maintained copies of the same
+dispatch, and are now one.** That duplication is why all three defects above were in
+`encodeFields` and none in `encodeFieldList`: the corpus is overwhelmingly tlv, so the
+copy it exercises least is the one that rotted. `encodeFields` is the survivor and now
+serves every context — top level, header, tlv case, match branch, repeat record, `$ref`d
+definition, nested object.
+
+The merge is byte-for-byte inert on the corpus: 1135 round-trips, every shape identical
+including `tlv` at 905/7/37/0, decode 1191/1191. What it changed:
+
+- **The tlv/match/repeat path gained the constructs only the top-level copy dispatched
+  on.** `flagged` and `repeat` were the two missing. Bytes for a well-formed `repeat` were
+  already right — it fell through to `encodeField`, whose `TypeRepeat` case walks records
+  the same way — but a value that is *not* a list of records wrote nothing and returned
+  success there, where `encodeRepeat` reports it. The strict path is now used everywhere.
+- **A `skip` is dispatched before the name check, and on both spellings.**
+  `encodeFieldList` matched only lowercase `skip`, so `type: Skip` in a tlv case wrote
+  nothing. Handling it before the name check also stops a *named* skip — `skip-type.yaml`
+  calls one `pad` — being reported as an omitted value.
+- **Warnings now escape a tlv case.** A case is encoded into its own buffer so its length
+  prefix can be measured first, and warnings raised in there were dropped on the floor.
+  `EncodeContext.branch()` / `mergeWarnings` carry them out; without that the tlv path
+  would have looked clean by construction. `branch()` deliberately does *not* carry
+  `TLVOrder` — a nested tlv has no recovered order of its own, and passing the outer one
+  down would reorder its channels to match a sequence that was never about them.
+
+**Warning volume was measured, not assumed: 1 warning across all 1190 encodable corpus
+vectors**, and it is a true positive — `_language-conformance/name-from.yaml` reports
+`Missing field: reading`, because a `name_from` key is not the field's name, which is
+already listed above as an unrecoverable round-trip case. The tlv path, whose newly
+enabled warnings were the thing to worry about, produces none.
+
+**A tlv case built from a nameless construct claimed nothing, and is fixed.** `encodeTLV`
+collected a case's claimable names from the top level of the case only, and a `byte_group`
+or `flagged` field has no name there — its names live in its group's fields, which
+`encodeByteGroup` and `encodeFlagged` read out of the same flat map. So such a case found
+nothing to claim, never became a candidate, and its channel encoded to **no bytes and no
+error**: the silent shape again, this time in candidate selection rather than in a
+dispatch.
+
+`claimableFields` now flattens a case for both the claiming loop and `caseFidelity`, which
+had the identical top-level-only scan and would otherwise have ranked such a case at zero
+matches. What it deliberately does *not* descend into matters as much as what it does:
+
+- **An object's or repeat's `fields` are not descended into.** Their values live in a
+  nested map under the field's own name, not in the case's map, so claiming their members
+  would claim names that are not there. The field's own name is claimed instead, which is
+  what the 17 nested objects in the corpus rely on — `TestNestedObjectInATLVCaseIsClaimedByItsOwnName`
+  pins that boundary from the other side.
+- **A nested `match` or `tlv` is not descended into**, because which branch supplies a name
+  depends on the data, so every branch's names would over-claim. No corpus schema nests
+  either inside a case.
+
+`hbi/mla20`'s case 32 is two byte_groups of exactly this shape and now encodes: tag `20`
+then the packed byte `51` for `device_status: 5` / `charger_status: 1`. It ships no test
+vectors, which is why the corpus never saw this and does not see the repair either. The
+same silence covered the `flagged` variant, which had been failing loudly before the
+dispatch merge (`cannot encode type ""`) and briefly degraded to silent-empty in between.
+
+**Trying to write a conformance fixture for it found a matching *decode* defect, and that
+one was Python's.** Under a one-byte tag and length, `20 01 51` decoded in Go to
+`{charger_status: 1, device_status: 5}` and in Python to `{unknown: 81}` — the reference
+implementation read the group's shared byte as a `u8` called `unknown` and never descended
+into the bit ranges, because `_decode_tlv`'s case loop dispatched only `bitfield_string`
+before falling through to the generic field path. So `hbi/mla20`'s case `0x20` had never
+worked in Python either, in *either* direction, and no vector had ever asked it to.
+
+Both halves are now fixed in Python and the fixture is committed as
+`_language-conformance/tlv-nameless-case.yaml`:
+
+- `_decode_tlv` dispatches `byte_group`, decoding it into a scratch `DecodeResult` whose
+  data folds into `tag_result` — not straight into the payload-level output, which would
+  bypass the merge/channels handling. It takes an optional `outer` result so the group's
+  errors have somewhere to go; the parameter is **not** called `result`, because the method
+  already binds a local `result` dict for its channel output and the collision made the
+  first attempt fail with `'dict' object has no attribute 'errors'`.
+- `_claimable_fields` mirrors Go's `claimableFields` and feeds both `_encode_tlv`'s
+  claiming and `_case_fidelity`, which had the same top-level-only scan.
+
+**All four implementations now have it, encode and decode.** `claimableFields` /
+`ClaimableFields` are the same helper in `Encoder.java` and `SchemaEncoder.cs`, feeding
+both the claiming loop and `caseFidelity`/`CaseFidelity`, which had the same
+top-level-only scan in every language. Neither port needed anything else: unlike Go, both
+already funnel every field-list context through one dispatch (`encodeOne`, `EncodeOne`), so
+a byte_group inside a case encoded correctly the moment the case was selected.
+
+Every floor moved together: decode 1192 → 1193 in all four; re-encode 1130 → 1131 for
+Python, Java and C# and 1136 → 1137 for Go; tlv shape 899 → 900 for Python, Java and C# and
+905 → 906 for Go. Java prints its per-shape table, Go does too; Python's and C#'s counts
+came from over-raising the floor and reading the assertion message.
+
+`mla20` still ships no vectors of its own. It can have them now that the construct works in
+all five implementations, and that is the better long-term guard than a fixture standing in
+for it — but its payloads have to come from the vendor rather than from our own decoder
+(PS-264), so it is not a mechanical job.
+
+Note that `tools/schema_interpreter.py` is a public API surface with external consumers, so
+its decode output changing is not a local matter — but `{unknown: 81}` cannot have been
+depended on, since the field names the schema declares were absent entirely.
+
+Go's re-encode figure is the highest, and not because its encoder is better:
+`DecodeOrdered`/`EncodeOrdered` carry the TLV channel sequence a Go map cannot hold, so
+where two cases define the same field name under different tags — em500-smt has `humidity`
+under both `[4, 104]` and `[4, 202]` with identical arithmetic — the tag that actually
+wrote those bytes goes back. Python, Java and C# recover order from their output keys,
+which cannot tell those two cases apart, and pick the first. Java and C# need no such API
+because a `LinkedHashMap` and a .NET `Dictionary` already preserve insertion order.
+
+Cross-language method of record: **diff the failing sets, not the totals.** Two
+implementations at the same count can be failing different vectors. Every Go fix above came
+from listing what Go failed that Python passed; the set is now empty in that direction.
+
+**Four of the nine C test files are in no build target**: `test_comprehensive.c`,
 `test_interpreter.c`, `test_binary_schema.c`, `test_encoder.c`. Only `test_codec.c`
-and the `selftest_*` files are wired in. Six compiled executables are also tracked in
+and the `selftest_*` files are wired in — so C's encoder (`schema_encode`, `encode_field`,
+reverse modifiers) is verified by nothing that runs, and PS-061..PS-064 and the reverse of
+canonical modifier order are normative. Six compiled executables are also tracked in
 git (`src/test_binary_schema`, `test_comprehensive`, `test_interpreter`,
 `test_encoder`, and the two `_cpp` ones).
 
-**`idiv` and `mod` disagree across implementations on negative operands**, and
-CR-2026-007 exists to settle it. Measured for `a = -7, b = 3`: Python gives
-`idiv -3, mod 2` (floored both), Go and C# give `-2, -1` (truncated both), and Java
-gives `-3, -1` — `Math.floorDiv` for `idiv` beside a truncated `%`, so its own two
-operators use different conventions and `a == idiv(a,b)*b + mod(a,b)` fails in Java
-alone. A zero divisor diverges a fourth way: Python and Java emit `NaN`, **which is
-not valid JSON**, so one zero divisor makes the whole decode unparseable; Go errors
-and C# throws.
+**`idiv` and `mod` are floored everywhere — CR-2026-007 settled it, and it is
+implemented.** The convention is floored division and a remainder taking the divisor's
+sign, so `a == idiv(a,b)*b + mod(a,b)` holds in every implementation, and a zero divisor
+omits the field rather than emitting `NaN` (PS-278).
 
-`_language-conformance/compute-negative-idiv-mod.yaml` is the acceptance test and is
-**expected to fail** until the CR lands — 4 in Go, 4 in C#, 2 in Java, 0 in Python.
-The floors are lowered to match (Go 1184, Java 1186, C# 1184 of 1188) so the gap
-stays visible rather than silently passing. Raise them when the CR is implemented.
+Worth keeping because it is the clearest example of four implementations disagreeing four
+ways on one operator. Measured for `a = -7, b = 3` before the CR: Python gave `idiv -3,
+mod 2` (floored both), Go and C# gave `-2, -1` (truncated both), and Java gave `-3, -1` —
+`Math.floorDiv` for `idiv` beside a truncated `%`, so its own two operators used different
+conventions and the identity failed in Java alone. A zero divisor diverged a fourth way:
+Python and Java emitted `NaN`, **which is not valid JSON**, so one zero divisor made the
+whole decode unparseable; Go errored and C# threw.
+
+`_language-conformance/compute-negative-idiv-mod.yaml` is the acceptance test and now
+passes everywhere, which is why every decode floor is the full 1193.
 
 Note that no schema in the repository uses `idiv` or `mod` at all; those eight
 vectors are the only exercise of either operator in the corpus.

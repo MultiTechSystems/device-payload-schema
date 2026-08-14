@@ -60,14 +60,14 @@ from schema_interpreter import SchemaInterpreter  # noqa: E402
 DEVICES = REPO_ROOT / "schemas" / "devices"
 
 #: Exact round-trips required overall. Raise as encoding improves.
-FLOOR_TOTAL = 1129
+FLOOR_TOTAL = 1131
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
 FLOOR_BY_SHAPE = {
-    "tlv": 899,
+    "tlv": 900,
     "flagged": 121,
-    "plain fixed": 54,
+    "plain fixed": 55,
     "match": 34,
     "byte_group": 17,
     "repeat": 4,
