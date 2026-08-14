@@ -110,8 +110,8 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Device schemas
 
-218 schemas under `schemas/devices/`.
-Mean quality score 65.9% (PLATINUM 30, GOLD 40, SILVER 87, BRONZE 3, REJECTED 58). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+220 schemas under `schemas/devices/`.
+Mean quality score 66.0% (PLATINUM 30, GOLD 40, SILVER 89, BRONZE 3, REJECTED 58). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
@@ -120,7 +120,7 @@ Mean quality score 65.9% (PLATINUM 30, GOLD 40, SILVER 87, BRONZE 3, REJECTED 58
 | milesight | 84 | 947 | PLATINUM 18, GOLD 33, SILVER 22, REJECTED 11 |
 | decentlab | 58 | 122 | PLATINUM 12, GOLD 7, SILVER 1, BRONZE 1, REJECTED 37 |
 | _library-composed | 49 | 49 | SILVER 48, BRONZE 1 |
-| _language-conformance | 11 | 18 | SILVER 11 |
+| _language-conformance | 13 | 20 | SILVER 13 |
 | makerfabs | 6 | 0 | REJECTED 6 |
 | mclimate | 3 | 11 | SILVER 1, REJECTED 2 |
 | digital-matter | 1 | 7 | SILVER 1 |
@@ -139,6 +139,7 @@ Mean quality score 65.9% (PLATINUM 30, GOLD 40, SILVER 87, BRONZE 3, REJECTED 58
 |---|---|---|---|---|---|
 | `_language-conformance/bitfield-string` | 1 | 1 | fields | 71% | SILVER |
 | `_language-conformance/compute-negative-idiv-mod` | 5 | 8 | fields | 76% | SILVER |
+| `_language-conformance/encode-padding` | 3 | 1 | fields | 71% | SILVER |
 | `_language-conformance/enum-spec-default` | 2 | 1 | fields | 71% | SILVER |
 | `_language-conformance/lookup-default` | 1 | 1 | fields | 71% | SILVER |
 | `_language-conformance/name-from` | 2 | 1 | fields | 71% | SILVER |
@@ -147,6 +148,7 @@ Mean quality score 65.9% (PLATINUM 30, GOLD 40, SILVER 87, BRONZE 3, REJECTED 58
 | `_language-conformance/repeat-count` | 3 | 1 | fields | 71% | SILVER |
 | `_language-conformance/round-half-to-even` | 5 | 1 | fields | 71% | SILVER |
 | `_language-conformance/skip-type` | 3 | 1 | fields | 71% | SILVER |
+| `_language-conformance/tlv-nameless-case` | 2 | 1 | fields | 71% | SILVER |
 | `_language-conformance/transform-maths` | 6 | 1 | fields | 71% | SILVER |
 | `_library-composed/alarm_config__set_delta_threshold` | 4 | 1 | fields | 71% | SILVER |
 | `_library-composed/alarm_config__set_temp_alarm` | 5 | 1 | fields | 71% | SILVER |

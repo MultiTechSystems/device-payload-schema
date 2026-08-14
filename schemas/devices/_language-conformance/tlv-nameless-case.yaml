@@ -1,0 +1,36 @@
+# A tlv case whose fields sit inside a construct with no name of its own.
+#
+# A byte_group carries no name at the case's top level - its names are in its own
+# `fields`, sharing one byte - and that broke both directions independently:
+#
+#   - decoding read the shared byte as a `u8` called "unknown" and never descended
+#     into the bit ranges, so this payload came back as {"unknown": 81};
+#   - encoding collects a case's claimable names from the top level of the case, so
+#     it found nothing to claim, never selected the case, and emitted no bytes and
+#     no error for the channel.
+#
+# hbi/mla20's case 0x20 is exactly this shape and ships no vectors, so nothing in
+# the corpus observed either half. The tag/length framing and the bit ranges match
+# mla20's, so this fixture stands in for that schema until it has vectors of its own.
+name: probe_tlv_nameless_case
+endian: big
+fields:
+- tlv:
+    tag_size: 1
+    length_size: 1
+    cases:
+      0x20:
+      - byte_group:
+          size: 1
+          fields:
+          - name: charger_status
+            type: u8[0:1]
+          - name: device_status
+            type: u8[4:7]
+test_vectors:
+- name: nameless_construct_is_claimed
+  payload: 20 01 51
+  source: generated
+  expected:
+    charger_status: 1
+    device_status: 5

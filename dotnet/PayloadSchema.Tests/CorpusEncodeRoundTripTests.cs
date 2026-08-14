@@ -29,7 +29,7 @@ public class CorpusEncodeRoundTripTests
     /// Corpus vectors that re-encode to their exact payload. Raise it as encoding improves;
     /// never lower it without saying why.
     /// </summary>
-    const int EncodeFloorTotal = 1129;
+    const int EncodeFloorTotal = 1131;
 
     /// <summary>
     /// Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -37,9 +37,9 @@ public class CorpusEncodeRoundTripTests
     /// </summary>
     static readonly Dictionary<string, int> EncodeFloorByShape = new()
     {
-        ["tlv"] = 899,
+        ["tlv"] = 900,
         ["flagged"] = 121,
-        ["plain fixed"] = 54,
+        ["plain fixed"] = 55,
         ["match"] = 34,
         ["byte_group"] = 17,
         ["repeat"] = 4,
