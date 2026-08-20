@@ -1627,6 +1627,11 @@ func (s *Schema) DecodeWithPortDirection(data []byte, fPort int, direction strin
 	if len(ctx.Quality) > 0 {
 		result["_quality"] = ctx.Quality
 	}
+	// Warnings were collected and never reported, so an unknown TLV tag had nowhere to
+	// surface (PS-301). Reported the way _quality is.
+	if len(ctx.Warnings) > 0 {
+		result["_warnings"] = ctx.Warnings
+	}
 
 	return result, nil
 }
@@ -1659,6 +1664,11 @@ func (s *Schema) Decode(data []byte) (map[string]any, error) {
 	// Add quality dict to output if any quality flags were set
 	if len(ctx.Quality) > 0 {
 		result["_quality"] = ctx.Quality
+	}
+	// Warnings were collected and never reported, so an unknown TLV tag had nowhere to
+	// surface (PS-301). Reported the way _quality is.
+	if len(ctx.Warnings) > 0 {
+		result["_warnings"] = ctx.Warnings
 	}
 
 	return result, nil
@@ -2430,6 +2440,10 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 
 	// Parse until end of data
 	for ctx.Remaining() > 0 {
+		// Where this entry begins, so an abandoned remainder is counted from the
+		// unknown tag itself rather than from after it (PS-302).
+		entryStart := ctx.Offset
+
 		var tag []int
 		var tagValues map[string]int
 
@@ -2522,14 +2536,57 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 				channels = append(channels, entry)
 			}
 		} else {
-			// Unknown tag
-			if unknownMode == "error" {
-				return nil, fmt.Errorf("unknown TLV tag: %v", tag)
-			} else if dataLength >= 0 {
-				ctx.Read(dataLength) // Skip
-			} else {
-				break // Can't skip without length
+			// A tag the schema does not describe. Whatever the mode, the fact is
+			// reported: silence here cannot be told from a device that sent fewer
+			// fields (PS-301, PS-302).
+			tagText := make([]string, 0, len(tag))
+			for _, part := range tag {
+				tagText = append(tagText, fmt.Sprintf("0x%02X", part))
 			}
+			label := strings.Join(tagText, ", ")
+
+			if unknownMode == "error" {
+				return nil, fmt.Errorf("unknown TLV tag: %s", label)
+			}
+
+			if unknownMode == "raw" {
+				span := dataLength
+				if span < 0 {
+					span = len(ctx.Data) - ctx.Offset
+				}
+				raw, _ := ctx.Read(span)
+				entry := map[string]any{"tag": tag, "raw": hex.EncodeToString(raw)}
+				// PS-303: reported either way. Merged output has no channel list, so it
+				// goes under `unknown_tags`, which cannot collide with a field name.
+				if merge {
+					existing, _ := result["unknown_tags"].([]map[string]any)
+					result["unknown_tags"] = append(existing, entry)
+				} else {
+					channels = append(channels, entry)
+				}
+				if dataLength < 0 {
+					ctx.Warnings = append(ctx.Warnings, fmt.Sprintf(
+						"unknown TLV tag (%s) captured raw; %d byte(s) after it could not be delimited",
+						label, span))
+					break
+				}
+				continue
+			}
+
+			// skip, the default
+			if dataLength >= 0 {
+				ctx.Warnings = append(ctx.Warnings, fmt.Sprintf(
+					"unknown TLV tag (%s) skipped, %d byte(s) discarded", label, dataLength))
+				ctx.Read(dataLength)
+				continue
+			}
+
+			// Without a length there is nothing to skip over, so decoding stops and
+			// everything from the tag onwards is lost (PS-302).
+			ctx.Warnings = append(ctx.Warnings, fmt.Sprintf(
+				"unknown TLV tag (%s) at offset %d: %d of %d byte(s) left undecoded",
+				label, entryStart, len(ctx.Data)-entryStart, len(ctx.Data)))
+			break
 		}
 	}
 

@@ -17,6 +17,10 @@ public static class SchemaDecoder
 
         if (ctx.Quality.Count > 0)
             result["_quality"] = new Dictionary<string, string>(ctx.Quality);
+        // Warnings were collected and never reported, so an unknown TLV tag had nowhere
+        // to surface (PS-301). Reported the way _quality is.
+        if (ctx.Warnings.Count > 0)
+            result["_warnings"] = new List<string>(ctx.Warnings);
 
         return result;
     }
@@ -44,6 +48,10 @@ public static class SchemaDecoder
 
         if (ctx.Quality.Count > 0)
             result["_quality"] = new Dictionary<string, string>(ctx.Quality);
+        // Warnings were collected and never reported, so an unknown TLV tag had nowhere
+        // to surface (PS-301). Reported the way _quality is.
+        if (ctx.Warnings.Count > 0)
+            result["_warnings"] = new List<string>(ctx.Warnings);
 
         return result;
     }
@@ -820,6 +828,10 @@ public static class SchemaDecoder
 
         while (ctx.Remaining > 0)
         {
+            // Where this entry begins, so an abandoned remainder is counted from the
+            // unknown tag itself rather than from after it (PS-302).
+            var entryStart = ctx.Offset;
+
             var tag = new List<int>();
 
             if (field.TagFields.Count > 0)
@@ -898,12 +910,61 @@ public static class SchemaDecoder
             }
             else
             {
+                // A tag the schema does not describe. Whatever the mode, the fact is
+                // reported: silence cannot be told from a device that sent fewer fields
+                // (PS-301, PS-302).
+                var label = string.Join(", ", tag.Select(part => $"0x{part:X2}"));
+
                 if (unknownMode == "error")
-                    throw new InvalidOperationException($"Unknown TLV tag: [{string.Join(", ", tag)}]");
+                    throw new InvalidOperationException($"Unknown TLV tag: {label}");
+
+                if (unknownMode == "raw")
+                {
+                    var span = dataLength >= 0 ? dataLength : ctx.Remaining;
+                    var bytes = ctx.Read(span);
+                    var entry = new Dictionary<string, object?>
+                    {
+                        ["tag"] = tag.ToList(),
+                        ["raw"] = Convert.ToHexString(bytes).ToLowerInvariant(),
+                    };
+                    // PS-303: reported either way. Merged output has no channel list, so
+                    // it goes under `unknown_tags`.
+                    if (merge)
+                    {
+                        if (result.TryGetValue("unknown_tags", out var existing)
+                            && existing is List<Dictionary<string, object?>> list)
+                            list.Add(entry);
+                        else
+                            result["unknown_tags"] = new List<Dictionary<string, object?>> { entry };
+                    }
+                    else
+                    {
+                        channels.Add(entry);
+                    }
+
+                    if (dataLength < 0)
+                    {
+                        ctx.Warnings.Add($"unknown TLV tag ({label}) captured raw; "
+                                         + $"{span} byte(s) after it could not be delimited");
+                        break;
+                    }
+                    continue;
+                }
+
+                // skip, the default
                 if (dataLength >= 0)
+                {
+                    ctx.Warnings.Add($"unknown TLV tag ({label}) skipped, "
+                                     + $"{dataLength} byte(s) discarded");
                     ctx.Read(dataLength);
-                else
-                    break;
+                    continue;
+                }
+
+                // Nothing to skip over, so decoding stops and everything from the tag
+                // onwards is lost (PS-302).
+                ctx.Warnings.Add($"unknown TLV tag ({label}) at offset {entryStart}: "
+                                 + $"{ctx.Data.Length - entryStart} of {ctx.Data.Length} byte(s) left undecoded");
+                break;
             }
         }
 
