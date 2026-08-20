@@ -384,3 +384,72 @@ class TestTiers:
         results = self._perfect_results(provenance={"verification": "self"})
         calculate_score(results)
         assert any("PS-264" in gate for gate in results["tier_capped_by"])
+
+
+# --- encode vectors -------------------------------------------------------------
+#
+# CR-2026-012 settled the encode vector's spelling as `input` + `expected_payload`
+# (+ `direction`), and schemas started carrying them. The scorer read `payload` from
+# every vector regardless, so an encode vector decoded empty bytes and scored as a
+# failure — costing the whole 20-point Python component. Ten schemas dropped a tier
+# or two, one of them from PLATINUM to SILVER, while validate_schema and
+# vector-verdicts passed the same vectors.
+
+ENCODE_SCHEMA = {
+    "name": "encode_only",
+    "version": 1,
+    "endian": "big",
+    "fields": [
+        {"name": "command", "type": "u8"},
+        {"name": "interval", "type": "u16"},
+    ],
+}
+
+
+def _encode_vector(**over):
+    v = {
+        "name": "set_interval",
+        "direction": "downlink",
+        "input": {"command": 1, "interval": 600},
+        "expected_payload": "010258",
+        "source": "generated",
+    }
+    v.update(over)
+    return v
+
+
+def test_encode_vector_is_run_as_an_encode_not_a_decode():
+    schema = dict(ENCODE_SCHEMA, test_vectors=[_encode_vector()])
+    ok, passed, failed, errors, _ = run_python_tests(schema)
+    assert ok, errors
+    assert (passed, failed) == (1, 0)
+
+
+def test_encode_vector_that_produces_the_wrong_bytes_fails():
+    """The credit has to be earned: a wrong expectation must still fail."""
+    schema = dict(ENCODE_SCHEMA,
+                  test_vectors=[_encode_vector(expected_payload="01FFFF")])
+    ok, passed, failed, errors, _ = run_python_tests(schema)
+    assert not ok
+    assert (passed, failed) == (0, 1)
+    assert any("expected" in e for e in errors)
+
+
+def test_expected_payload_may_be_a_byte_array():
+    """Clause 5 wrote the bytes as an array; CR-2026-012 keeps both readable."""
+    schema = dict(ENCODE_SCHEMA,
+                  test_vectors=[_encode_vector(expected_payload=[0x01, 0x02, 0x58])])
+    ok, passed, failed, _, _ = run_python_tests(schema)
+    assert ok and (passed, failed) == (1, 0)
+
+
+def test_decode_and_encode_vectors_score_together():
+    """A schema carrying both kinds gets credit for both."""
+    schema = dict(ENCODE_SCHEMA, test_vectors=[
+        {"name": "decode_it", "payload": "010258",
+         "expected": {"command": 1, "interval": 600}},
+        _encode_vector(),
+    ])
+    ok, passed, failed, errors, _ = run_python_tests(schema)
+    assert ok, errors
+    assert (passed, failed) == (2, 0)

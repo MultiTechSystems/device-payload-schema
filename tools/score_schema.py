@@ -145,6 +145,35 @@ def check_test_vectors_exist(schema: Dict[str, Any]) -> Tuple[bool, int, List[st
     return usable >= 1, usable, issues
 
 
+def is_encode_vector(vector: Dict[str, Any]) -> bool:
+    """An encode vector carries the values to encode, not the bytes to decode (PS-047)."""
+    return 'input' in vector or 'expected_payload' in vector
+
+
+def expected_encode_bytes(vector: Dict[str, Any]) -> bytes:
+    """The bytes an encode vector expects, in either spelling CR-2026-012 allows."""
+    want = vector.get('expected_payload')
+    if isinstance(want, list):
+        return bytes(want)
+    return bytes.fromhex(str(want).replace(' ', '').replace('0x', ''))
+
+
+def run_encode_vector(
+    interpreter: SchemaInterpreter, vector: Dict[str, Any], fport
+) -> Tuple[bool, str]:
+    """Encode a vector's input and compare the bytes it produced."""
+    try:
+        result = interpreter.encode(vector.get('input') or {}, fPort=fport)
+    except Exception as exc:
+        return False, f"encode raised {type(exc).__name__}: {exc}"
+    if not result.success:
+        return False, f"encode failed - {result.errors}"
+    want = expected_encode_bytes(vector)
+    if result.payload != want:
+        return False, f"encoded {result.payload.hex()}, expected {want.hex()}"
+    return True, ""
+
+
 def run_python_tests(
     schema: Dict[str, Any]
 ) -> Tuple[bool, int, int, List[str], List[Tuple[Dict, Dict]]]:
@@ -170,9 +199,26 @@ def run_python_tests(
 
     for i, tv in enumerate(vectors):
         tv_name = tv.get('name', f'test_{i}')
+        fport = tv.get('fPort') or tv.get('fport')
+
+        # An encode vector carries the values to encode and the bytes expected out
+        # (PS-047), not bytes to decode. Running one through the decoder reads its
+        # absent `payload` as empty and scores the vector as a failure — which is
+        # how ten schemas carrying encode vectors lost the whole 20-point Python
+        # component while validate_schema and vector-verdicts both passed them.
+        # Same helper and the same encoder call as those two, so the three tools
+        # cannot disagree about whether a vector passes.
+        if is_encode_vector(tv):
+            ok, detail = run_encode_vector(interpreter, tv, fport)
+            if ok:
+                passed += 1
+            else:
+                failed += 1
+                errors.append(f"{tv_name}: {detail}")
+            continue
+
         payload_hex = tv.get('payload', '').replace(' ', '')
         expected = tv.get('expected', {})
-        fport = tv.get('fPort') or tv.get('fport')
         
         try:
             payload_bytes = bytes.fromhex(payload_hex)
