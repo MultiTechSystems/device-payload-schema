@@ -1,44 +1,16 @@
 """
 Tests for schema interpreter.
 
-Requirements Coverage (see test-requirements-map.yaml for full mapping):
-Requirement IDs from: la-payload-schema/spec/sections/A4-requirements.md
+Requirements coverage: see test-requirements-map.yaml, which keys on the stable `PS-nnn`
+tags carried in the specification text and in the Tag column of
+la-payload-schema/spec/sections/10-conformance.md.
 
-Mandatory Requirements (M001-M234):
-- M003-M040: Schema format, structure, ports
-- M041-M045: Integer types and endianness
-- M046-M047: Float types
-- M048-M053: Bitfield syntaxes
-- M054-M055: Boolean type
-- M056-M058: Enum type
-- M059-M060: Byte groups
-- M061-M064: String types
-- M065-M067: Computed fields
-- M072-M076: Repeat/arrays
-- M085-M092: Modifiers (add, mult, div, lookup)
-- M093-M097: Polynomial
-- M098-M101: Transforms
-- M102-M106: Compute operations
-- M107-M111: Guard conditions
-- M112-M115: Valid range
-- M119-M121: Nested objects
-- M122-M127: Variables
-- M128-M132: Match conditionals
-- M133-M137: TLV parsing
-- M138-M148: Flagged construct
-- M149-M156, M166-M169: Compact format
-- M179-M188: Validation
-- M189-M201: Safety
-- M210-M213: Downlink encoding
-- M226-M231: Schema composition
-
-Recommended Requirements (R001-R057):
-- R024: SenML unit codes
-- R027-R029: IPSO/SenML warnings
-
-Optional Requirements (O001-O044):
-- O005, O028: Direction property
-- O021, O022: Compact format strings
+The ranges this docstring used to list (M003-M040 schema format, M041-M045 integer types,
+and so on) came from a requirements appendix that no longer exists, and the M/R/O ids are
+positional: they are assigned by source order, so an inserted requirement renumbers every
+one after it. Listing them here made the ranges look authoritative while they silently
+came to mean something else. The map is the single place that records which requirement a
+test covers.
 """
 
 import json
