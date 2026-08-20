@@ -1,5 +1,12 @@
-# HBI MLA20 Emergency Light
-# Protocol: version (3 bytes) + reserved (1 byte) + TLV packets (tag: 1B, length: 1B)
+# HBI MLA20 Emergency Light (HBI-MLA20-3L0606C, "SERIES 300 EAGLE")
+#
+# Protocol: version (3 bytes) + length (1 byte) + TLV packets (tag 1B, length 1B).
+# The fourth header byte equals the TLV bytes that follow in every vendor example,
+# so it reads as a length; the vendor decoder skips it, and so does this schema.
+#
+# Field layout and semantics are taken from HBI's own decoder, `hbi-mla20.js`, as
+# published in The Things Network Device Repository under vendor/hbi. No datasheet
+# for this device is published.
 name: hbi_mla20
 version: 1
 endian: big
@@ -17,41 +24,598 @@ fields:
       tag_size: 1
       length_size: 1
       cases:
-        # STATUS (0x20)
-        0x20:
-          - byte_group:
-              size: 1
-              fields:
-                - name: charger_status
-                  type: u8[0:1]
-                - name: device_status
-                  type: u8[4:7]
-          - byte_group:
-              size: 1
-              fields:
-                - name: radar_switch
-                  type: u8[0:0]
-                - name: daylight_switch
-                  type: u8[1:1]
-                - name: emergency_switch
-                  type: u8[2:2]
-                - name: intensity_switch
-                  type: u8[3:3]
-                - name: l2
-                  type: u8[6:6]
-                - name: l1
-                  type: u8[7:7]
-          - name: led_intensity
-            type: u8
-          - name: battery_voltage
-            type: u16
-            unit: "mV"
-          - name: board_temperature
-            type: u8
-            unit: "°C"
-          - name: days_since_function_test
-            type: u8
-          - name: days_since_duration_test
-            type: u16
-          - name: latest_duration_test
-            type: u8
+          # STATUS (0x20) — Periodic report. Every type below repeats this same status
+          # block, which is what the vendor decoder does: each case
+          # calls DecodeStatusPart before reading its own tail.
+          0x20:
+            - byte_group:
+                size: 1
+                fields:
+                  - name: charger_status
+                    type: u8[0:1]
+                  - name: device_status
+                    type: u8[4:7]
+            - byte_group:
+                size: 1
+                fields:
+                  - name: radar_switch
+                    type: u8[0:0]
+                  - name: daylight_switch
+                    type: u8[1:1]
+                  - name: emergency_switch
+                    type: u8[2:2]
+                  - name: intensity_switch
+                    type: u8[3:3]
+                  - name: l2
+                    type: u8[6:6]
+                  - name: l1
+                    type: u8[7:7]
+            - name: led_intensity
+              type: u8
+            - name: battery_voltage
+              type: u16
+              unit: "mV"
+            - name: board_temperature
+              type: u8
+              unit: "Cel"
+            - name: days_since_function_test
+              type: u8
+              unit: "d"
+            - name: days_since_duration_test
+              type: u16
+              unit: "d"
+            - name: latest_duration_test
+              type: u8
+              unit: "min"
+
+          # TEST_START (0x21) — A self-test began.
+          0x21:
+            - byte_group:
+                size: 1
+                fields:
+                  - name: charger_status
+                    type: u8[0:1]
+                  - name: device_status
+                    type: u8[4:7]
+            - byte_group:
+                size: 1
+                fields:
+                  - name: radar_switch
+                    type: u8[0:0]
+                  - name: daylight_switch
+                    type: u8[1:1]
+                  - name: emergency_switch
+                    type: u8[2:2]
+                  - name: intensity_switch
+                    type: u8[3:3]
+                  - name: l2
+                    type: u8[6:6]
+                  - name: l1
+                    type: u8[7:7]
+            - name: led_intensity
+              type: u8
+            - name: battery_voltage
+              type: u16
+              unit: "mV"
+            - name: board_temperature
+              type: u8
+              unit: "Cel"
+            - name: days_since_function_test
+              type: u8
+              unit: "d"
+            - name: days_since_duration_test
+              type: u16
+              unit: "d"
+            - name: latest_duration_test
+              type: u8
+              unit: "min"
+            - name: test_type
+              type: u8
+              description: "0 none, 1 short, 2 commissioning, 3 function, 4 duration"
+
+          # TEST_FINISHED (0x22) — A self-test completed, with how long it ran.
+          0x22:
+            - byte_group:
+                size: 1
+                fields:
+                  - name: charger_status
+                    type: u8[0:1]
+                  - name: device_status
+                    type: u8[4:7]
+            - byte_group:
+                size: 1
+                fields:
+                  - name: radar_switch
+                    type: u8[0:0]
+                  - name: daylight_switch
+                    type: u8[1:1]
+                  - name: emergency_switch
+                    type: u8[2:2]
+                  - name: intensity_switch
+                    type: u8[3:3]
+                  - name: l2
+                    type: u8[6:6]
+                  - name: l1
+                    type: u8[7:7]
+            - name: led_intensity
+              type: u8
+            - name: battery_voltage
+              type: u16
+              unit: "mV"
+            - name: board_temperature
+              type: u8
+              unit: "Cel"
+            - name: days_since_function_test
+              type: u8
+              unit: "d"
+            - name: days_since_duration_test
+              type: u16
+              unit: "d"
+            - name: latest_duration_test
+              type: u8
+              unit: "min"
+            - name: test_type
+              type: u8
+              description: "0 none, 1 short, 2 commissioning, 3 function, 4 duration"
+            - name: test_duration
+              type: u16
+              unit: "min"
+
+          # MAIN_FAILURE (0x23) — Mains power lost.
+          0x23:
+            - byte_group:
+                size: 1
+                fields:
+                  - name: charger_status
+                    type: u8[0:1]
+                  - name: device_status
+                    type: u8[4:7]
+            - byte_group:
+                size: 1
+                fields:
+                  - name: radar_switch
+                    type: u8[0:0]
+                  - name: daylight_switch
+                    type: u8[1:1]
+                  - name: emergency_switch
+                    type: u8[2:2]
+                  - name: intensity_switch
+                    type: u8[3:3]
+                  - name: l2
+                    type: u8[6:6]
+                  - name: l1
+                    type: u8[7:7]
+            - name: led_intensity
+              type: u8
+            - name: battery_voltage
+              type: u16
+              unit: "mV"
+            - name: board_temperature
+              type: u8
+              unit: "Cel"
+            - name: days_since_function_test
+              type: u8
+              unit: "d"
+            - name: days_since_duration_test
+              type: u16
+              unit: "d"
+            - name: latest_duration_test
+              type: u8
+              unit: "min"
+
+          # MAIN_RESTORED (0x24) — Mains power returned, with how long it was out.
+          0x24:
+            - byte_group:
+                size: 1
+                fields:
+                  - name: charger_status
+                    type: u8[0:1]
+                  - name: device_status
+                    type: u8[4:7]
+            - byte_group:
+                size: 1
+                fields:
+                  - name: radar_switch
+                    type: u8[0:0]
+                  - name: daylight_switch
+                    type: u8[1:1]
+                  - name: emergency_switch
+                    type: u8[2:2]
+                  - name: intensity_switch
+                    type: u8[3:3]
+                  - name: l2
+                    type: u8[6:6]
+                  - name: l1
+                    type: u8[7:7]
+            - name: led_intensity
+              type: u8
+            - name: battery_voltage
+              type: u16
+              unit: "mV"
+            - name: board_temperature
+              type: u8
+              unit: "Cel"
+            - name: days_since_function_test
+              type: u8
+              unit: "d"
+            - name: days_since_duration_test
+              type: u16
+              unit: "d"
+            - name: latest_duration_test
+              type: u8
+              unit: "min"
+            - name: mains_outage_duration
+              type: u16
+              unit: "min"
+
+          # BATTERY_FAILURE (0x25) — A battery fault. The flags are the vendor's named bits,
+          # e.g. 0x40 UBAT_TOO_LOW, 0x800 BAT_EXHAUSTED.
+          0x25:
+            - byte_group:
+                size: 1
+                fields:
+                  - name: charger_status
+                    type: u8[0:1]
+                  - name: device_status
+                    type: u8[4:7]
+            - byte_group:
+                size: 1
+                fields:
+                  - name: radar_switch
+                    type: u8[0:0]
+                  - name: daylight_switch
+                    type: u8[1:1]
+                  - name: emergency_switch
+                    type: u8[2:2]
+                  - name: intensity_switch
+                    type: u8[3:3]
+                  - name: l2
+                    type: u8[6:6]
+                  - name: l1
+                    type: u8[7:7]
+            - name: led_intensity
+              type: u8
+            - name: battery_voltage
+              type: u16
+              unit: "mV"
+            - name: board_temperature
+              type: u8
+              unit: "Cel"
+            - name: days_since_function_test
+              type: u8
+              unit: "d"
+            - name: days_since_duration_test
+              type: u16
+              unit: "d"
+            - name: latest_duration_test
+              type: u8
+              unit: "min"
+            - name: failure_flags
+              type: u32
+
+          # HARDWARE_FAILURE (0x26) — A hardware fault, same flag word,
+          # e.g. 0x2000 LED_FAILURE.
+          0x26:
+            - byte_group:
+                size: 1
+                fields:
+                  - name: charger_status
+                    type: u8[0:1]
+                  - name: device_status
+                    type: u8[4:7]
+            - byte_group:
+                size: 1
+                fields:
+                  - name: radar_switch
+                    type: u8[0:0]
+                  - name: daylight_switch
+                    type: u8[1:1]
+                  - name: emergency_switch
+                    type: u8[2:2]
+                  - name: intensity_switch
+                    type: u8[3:3]
+                  - name: l2
+                    type: u8[6:6]
+                  - name: l1
+                    type: u8[7:7]
+            - name: led_intensity
+              type: u8
+            - name: battery_voltage
+              type: u16
+              unit: "mV"
+            - name: board_temperature
+              type: u8
+              unit: "Cel"
+            - name: days_since_function_test
+              type: u8
+              unit: "d"
+            - name: days_since_duration_test
+              type: u16
+              unit: "d"
+            - name: latest_duration_test
+              type: u8
+              unit: "min"
+            - name: failure_flags
+              type: u32
+
+          # SHUTDOWN (0x27) — Powering down. Carries no status block at all — its
+          # declared length is zero, so only the header decodes.
+          0x27:
+            []
+
+# Test vectors. Provenance is `vendor-codec` throughout (CR-2026-003): every expected
+# value is what HBI's own published decoder produces for those bytes. The first eight
+# payloads are HBI's too, taken verbatim from the example block at the bottom of that
+# decoder — one per packet type. The last four exercise the range of the status fields.
+#
+# The codec definition HBI submitted alongside the decoder has its `examples:` block
+# commented out, so the decoder is the only vendor-authored description of this format
+# available.
+test_vectors:
+  - name: vendor_status
+    description: "STATUS (0x20) — HBI's own example, from the test block in its decoder"
+    source: vendor-codec
+    payload: "0001020C200A22870E10C60D00000000"
+    expected:
+      version_major: 0
+      version_minor: 1
+      version_patch: 2
+      charger_status: 2
+      device_status: 2
+      radar_switch: 1
+      daylight_switch: 1
+      emergency_switch: 1
+      intensity_switch: 0
+      l2: 0
+      l1: 1
+      led_intensity: 14
+      battery_voltage: 4294
+      board_temperature: 13
+      days_since_function_test: 0
+      days_since_duration_test: 0
+      latest_duration_test: 0
+
+  - name: vendor_test_start
+    description: "TEST_START (0x21) — HBI's own example; adds the test type"
+    source: vendor-codec
+    payload: "0001020D210B32870E10A00F0000000001"
+    expected:
+      version_major: 0
+      version_minor: 1
+      version_patch: 2
+      charger_status: 2
+      device_status: 3
+      radar_switch: 1
+      daylight_switch: 1
+      emergency_switch: 1
+      intensity_switch: 0
+      l2: 0
+      l1: 1
+      led_intensity: 14
+      battery_voltage: 4256
+      board_temperature: 15
+      days_since_function_test: 0
+      days_since_duration_test: 0
+      latest_duration_test: 0
+      test_type: 1
+
+  - name: vendor_test_finished
+    description: "TEST_FINISHED (0x22) — HBI's own example; adds test type and duration"
+    source: vendor-codec
+    payload: "0001020F220D3087100F0A1000000000010003"
+    expected:
+      version_major: 0
+      version_minor: 1
+      version_patch: 2
+      charger_status: 0
+      device_status: 3
+      radar_switch: 1
+      daylight_switch: 1
+      emergency_switch: 1
+      intensity_switch: 0
+      l2: 0
+      l1: 1
+      led_intensity: 16
+      battery_voltage: 3850
+      board_temperature: 16
+      days_since_function_test: 0
+      days_since_duration_test: 0
+      latest_duration_test: 0
+      test_type: 1
+      test_duration: 3
+
+  - name: vendor_mains_failure
+    description: "MAIN_FAILURE (0x23) — HBI's own example; status block only"
+    source: vendor-codec
+    payload: "0001020C230A03070E10C71100000000"
+    expected:
+      version_major: 0
+      version_minor: 1
+      version_patch: 2
+      charger_status: 3
+      device_status: 0
+      radar_switch: 1
+      daylight_switch: 1
+      emergency_switch: 1
+      intensity_switch: 0
+      l2: 0
+      l1: 0
+      led_intensity: 14
+      battery_voltage: 4295
+      board_temperature: 17
+      days_since_function_test: 0
+      days_since_duration_test: 0
+      latest_duration_test: 0
+
+  - name: vendor_mains_restored
+    description: "MAIN_RESTORED (0x24) — HBI's own example; adds the outage duration"
+    source: vendor-codec
+    payload: "0001020E240C00C42E0E8413000000000100"
+    expected:
+      version_major: 0
+      version_minor: 1
+      version_patch: 2
+      charger_status: 0
+      device_status: 0
+      radar_switch: 0
+      daylight_switch: 0
+      emergency_switch: 1
+      intensity_switch: 0
+      l2: 1
+      l1: 1
+      led_intensity: 46
+      battery_voltage: 3716
+      board_temperature: 19
+      days_since_function_test: 0
+      days_since_duration_test: 0
+      latest_duration_test: 0
+      mains_outage_duration: 256
+
+  - name: vendor_battery_failure
+    description: "BATTERY_FAILURE (0x25) — HBI's own example; UBAT_TOO_HIGH (0x80) set"
+    source: vendor-codec
+    payload: "00010210250E51870E178A120000000000000080"
+    expected:
+      version_major: 0
+      version_minor: 1
+      version_patch: 2
+      charger_status: 1
+      device_status: 5
+      radar_switch: 1
+      daylight_switch: 1
+      emergency_switch: 1
+      intensity_switch: 0
+      l2: 0
+      l1: 1
+      led_intensity: 14
+      battery_voltage: 6026
+      board_temperature: 18
+      days_since_function_test: 0
+      days_since_duration_test: 0
+      latest_duration_test: 0
+      failure_flags: 128
+
+  - name: vendor_hardware_failure
+    description: "HARDWARE_FAILURE (0x26) — HBI's own example; LED_FAILURE (0x2000) set"
+    source: vendor-codec
+    payload: "00010210260E6187000F9E120000000000002000"
+    expected:
+      version_major: 0
+      version_minor: 1
+      version_patch: 2
+      charger_status: 1
+      device_status: 6
+      radar_switch: 1
+      daylight_switch: 1
+      emergency_switch: 1
+      intensity_switch: 0
+      l2: 0
+      l1: 1
+      led_intensity: 0
+      battery_voltage: 3998
+      board_temperature: 18
+      days_since_function_test: 0
+      days_since_duration_test: 0
+      latest_duration_test: 0
+      failure_flags: 8192
+
+  - name: vendor_shutdown
+    description: "SHUTDOWN (0x27) — HBI's own example; zero-length, so only the version decodes"
+    source: vendor-codec
+    payload: "000102022700"
+    expected:
+      version_major: 0
+      version_minor: 1
+      version_patch: 2
+
+  - name: status_all_zero
+    description: "Every status field at its minimum"
+    source: vendor-codec
+    payload: "0001020C200A00000000000000000000"
+    expected:
+      version_major: 0
+      version_minor: 1
+      version_patch: 2
+      charger_status: 0
+      device_status: 0
+      radar_switch: 0
+      daylight_switch: 0
+      emergency_switch: 0
+      intensity_switch: 0
+      l2: 0
+      l1: 0
+      led_intensity: 0
+      battery_voltage: 0
+      board_temperature: 0
+      days_since_function_test: 0
+      days_since_duration_test: 0
+      latest_duration_test: 0
+
+  - name: status_all_ones
+    description: "Every status field at its maximum, and the widest value each type carries"
+    source: vendor-codec
+    payload: "0001020C200AF3FFFFFFFFFFFFFFFFFF"
+    expected:
+      version_major: 0
+      version_minor: 1
+      version_patch: 2
+      charger_status: 3
+      device_status: 15
+      radar_switch: 1
+      daylight_switch: 1
+      emergency_switch: 1
+      intensity_switch: 1
+      l2: 1
+      l1: 1
+      led_intensity: 255
+      battery_voltage: 65535
+      board_temperature: 255
+      days_since_function_test: 255
+      days_since_duration_test: 65535
+      latest_duration_test: 255
+
+  - name: status_l1_only
+    description: "Bit 7 alone. l1 and l2 are adjacent, so one vector each pins the pair against a transposition"
+    source: vendor-codec
+    payload: "0001020C200A00800000000000000000"
+    expected:
+      version_major: 0
+      version_minor: 1
+      version_patch: 2
+      charger_status: 0
+      device_status: 0
+      radar_switch: 0
+      daylight_switch: 0
+      emergency_switch: 0
+      intensity_switch: 0
+      l2: 0
+      l1: 1
+      led_intensity: 0
+      battery_voltage: 0
+      board_temperature: 0
+      days_since_function_test: 0
+      days_since_duration_test: 0
+      latest_duration_test: 0
+
+  - name: status_l2_only
+    description: "Bit 6 alone, the other half of that pair"
+    source: vendor-codec
+    payload: "0001020C200A00400000000000000000"
+    expected:
+      version_major: 0
+      version_minor: 1
+      version_patch: 2
+      charger_status: 0
+      device_status: 0
+      radar_switch: 0
+      daylight_switch: 0
+      emergency_switch: 0
+      intensity_switch: 0
+      l2: 1
+      l1: 0
+      led_intensity: 0
+      battery_voltage: 0
+      board_temperature: 0
+      days_since_function_test: 0
+      days_since_duration_test: 0
+      latest_duration_test: 0
