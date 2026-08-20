@@ -1882,6 +1882,9 @@ class SchemaInterpreter:
         channels = []
         
         while pos < len(buf):
+            # Where this entry begins, so PS-302 can count the bytes abandoned from the
+            # unknown tag itself rather than from after it.
+            entry_start = pos
             # Read tag
             if pos + tag_size > len(buf):
                 break
@@ -1958,21 +1961,55 @@ class SchemaInterpreter:
                     break
             
             if matched_fields is None:
+                # A tag the schema does not describe. Whatever the mode, the fact is
+                # reported: silence here is indistinguishable from a device that sent
+                # fewer fields, which is what PS-301 and PS-302 exist to prevent.
+                tag_text = ", ".join(
+                    f"0x{part:02X}" if isinstance(part, int) else str(part)
+                    for part in tag_tuple
+                )
+
                 if unknown_mode == 'error':
-                    raise ValueError(f"Unknown TLV tag: {tag_tuple}")
-                elif unknown_mode == 'skip':
-                    if data_length is not None:
-                        pos += data_length
+                    raise ValueError(f"Unknown TLV tag: {tag_text}")
+
+                if unknown_mode == 'raw':
+                    span = data_length if data_length is not None else len(buf) - pos
+                    entry = {'tag': list(tag_tuple), 'raw': buf[pos:pos + span].hex()}
+                    # PS-303: reported either way. Merged output has no channel list to
+                    # put it in, so it goes under `unknown_tags`, where it cannot collide
+                    # with a field name.
+                    if merge:
+                        result.setdefault('unknown_tags', []).append(entry)
                     else:
-                        break  # Can't skip without length
-                elif unknown_mode == 'raw':
-                    if data_length is not None:
-                        raw = buf[pos:pos + data_length].hex()
-                        channels.append({'tag': list(tag_tuple), 'raw': raw})
-                        pos += data_length
-                    else:
+                        channels.append(entry)
+                    pos += span
+                    if data_length is None:
+                        if outer is not None:
+                            outer.warnings.append(
+                                f"unknown TLV tag ({tag_text}) captured raw; "
+                                f"{span} byte(s) after it could not be delimited"
+                            )
                         break
-                continue
+                    continue
+
+                # skip, the default
+                if data_length is not None:
+                    if outer is not None:
+                        outer.warnings.append(
+                            f"unknown TLV tag ({tag_text}) skipped, "
+                            f"{data_length} byte(s) discarded"
+                        )
+                    pos += data_length
+                    continue
+
+                # Without a length there is nothing to skip over, so decoding stops here
+                # and everything from the tag onwards is lost (PS-302).
+                if outer is not None:
+                    outer.warnings.append(
+                        f"unknown TLV tag ({tag_text}) at offset {entry_start}: "
+                        f"{len(buf) - entry_start} of {len(buf)} byte(s) left undecoded"
+                    )
+                break
             
             # Decode fields for this tag
             tag_result = {}

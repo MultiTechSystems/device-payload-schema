@@ -436,6 +436,32 @@ function checkRange(q, w, name, value, lo, hi) {
   }
 }
 
+// --- Unknown TLV tags ---
+// PS-301 to PS-304. A generated codec has to report an undescribed tag the way an
+// interpreter reading the same schema does, or the two conformance paths disagree:
+// before this the generator ignored `unknown` entirely, so `unknown: error` errored on
+// one path and skipped in silence on the other.
+function tlvTagLabel(parts) {
+  var out = [];
+  for (var n = 0; n < parts.length; n++) {
+    var hex = (parts[n] & 0xFF).toString(16).toUpperCase();
+    out.push("0x" + (hex.length < 2 ? "0" + hex : hex));
+  }
+  return out.join(", ");
+}
+
+// The captured bytes of an unknown tag, under the key PS-303 names. Generated codecs
+// merge a TLV case into the parent, so this is always the merged form.
+function tlvUnknownRaw(d, tag, buf, from, span) {
+  var hex = "";
+  for (var n = from; n < from + span && n < buf.length; n++) {
+    var part = (buf[n] & 0xFF).toString(16);
+    hex += part.length < 2 ? "0" + part : part;
+  }
+  if (!d.unknown_tags) { d.unknown_tags = []; }
+  d.unknown_tags.push({ tag: tag, raw: hex });
+}
+
 // --- Rounding ---
 // Half-to-even (banker's rounding), matching the Python, Java and C# interpreters.
 //
@@ -1241,13 +1267,19 @@ function writeS(buf, pos, size, value, endian) {
         if not tag_fields:
             tag_key_expr = '_tlvTag'
             tag_is_composite = False
+            tag_parts = ['_tlvTag']
         elif len(tag_fields) == 1:
             tag_key_expr = to_js_name(tag_fields[0]['name'])
             tag_is_composite = False
+            tag_parts = [tag_key_expr]
         else:
             parts = [to_js_name(tf['name']) for tf in tag_fields]
             tag_key_expr = '"[" + ' + ' + ", " + '.join(parts) + ' + "]"'
             tag_is_composite = True
+            tag_parts = parts
+        #: The tag as the interpreters carry it - a list of its components, in key order -
+        #: so a warning naming it reads the same on both paths.
+        tag_parts_expr = '[' + ', '.join(tag_parts) + ']'
 
         first = True
         for case_key, case_fields in cases.items():
@@ -1269,10 +1301,64 @@ function writeS(buf, pos, size, value, endian) {
 
         if not first:
             lines.append(f'{i}    }} else {{')
-            lines.append(f'{i}      break;')
+            lines.extend(self._gen_decode_tlv_unknown(
+                tlv, i, tag_parts_expr, length_size))
             lines.append(f'{i}    }}')
 
         lines.append(f'{i}  }}')
+        return lines
+
+    def _gen_decode_tlv_unknown(self, tlv: Dict, i: str, tag_parts_expr: str,
+                                length_size: int) -> List[str]:
+        """What a generated codec does with a tag its schema does not describe.
+
+        PS-304: it has to be what an interpreter reading the same schema does, because a
+        schema is conformant through either path and the two must not differ. Before this
+        the generator ignored `unknown`, so every mode came out as a silent `break` -
+        including `error`, which the interpreters raise on.
+
+        `merge` is not consulted: a generated codec puts a TLV case's fields straight into
+        the output and has no channel list, so PS-303's merged form is the only one
+        available here.
+        """
+        mode = tlv.get('unknown', 'skip')
+        lines = [f'{i}      var _tlvLabel = tlvTagLabel({tag_parts_expr});']
+
+        if mode == 'error':
+            lines.append(f'{i}      throw new Error("Unknown TLV tag: " + _tlvLabel);')
+            return lines
+
+        if mode == 'raw':
+            span = '_tlvLen' if length_size else 'buf.length - pos'
+            lines.append(f'{i}      var _tlvSpan = {span};')
+            lines.append(
+                f'{i}      tlvUnknownRaw(d, {tag_parts_expr}, buf, pos, _tlvSpan);')
+            lines.append(f'{i}      pos += _tlvSpan;')
+            if not length_size:
+                # Nothing delimits the entry, so the capture ran to the end of the buffer
+                # and there is no next tag to read.
+                lines.append(
+                    f'{i}      w.push("unknown TLV tag (" + _tlvLabel + ") captured raw; "'
+                    f' + _tlvSpan + " byte(s) after it could not be delimited");')
+                lines.append(f'{i}      break;')
+            return lines
+
+        # skip, the default
+        if length_size:
+            lines.append(
+                f'{i}      w.push("unknown TLV tag (" + _tlvLabel + ") skipped, "'
+                f' + _tlvLen + " byte(s) discarded");')
+            lines.append(f'{i}      pos += _tlvLen;')
+            return lines
+
+        # PS-302: with no length there is nothing to skip over, so decoding stops here
+        # and everything from the tag onwards is lost. The count is what makes that
+        # distinguishable from a device that sent fewer fields.
+        lines.append(
+            f'{i}      w.push("unknown TLV tag (" + _tlvLabel + ") at offset " + _tlvStart'
+            f' + ": " + (buf.length - _tlvStart) + " of " + buf.length'
+            f' + " byte(s) left undecoded");')
+        lines.append(f'{i}      break;')
         return lines
 
     def _gen_decode_match(self, match: Dict) -> List[str]:
