@@ -54,6 +54,10 @@ const (
 	TypeU8  FieldType = "u8"
 	TypeU16 FieldType = "u16"
 	TypeU32 FieldType = "u32"
+	// Two 16-bit big-endian units, least significant unit first (PS-271). Not
+	// expressible as u32 under either endianness.
+	TypeU32LE16 FieldType = "u32le16"
+	TypeS32LE16 FieldType = "s32le16"
 	TypeU64 FieldType = "u64"
 	TypeS8  FieldType = "s8"
 	TypeS16 FieldType = "s16"
@@ -355,7 +359,7 @@ func inferLengthFromType(t FieldType) int {
 		return 2
 	case TypeU24, TypeS24:
 		return 3
-	case TypeU32, TypeS32, TypeI32, TypeF32:
+	case TypeU32, TypeS32, TypeI32, TypeF32, TypeU32LE16, TypeS32LE16:
 		return 4
 	case TypeU64, TypeS64, TypeI64, TypeF64:
 		return 8
@@ -456,7 +460,8 @@ func isIntegerTyped(field Field) bool {
 	switch field.Type {
 	case TypeByte, TypeUInt, TypeU8, TypeU16, TypeU24, TypeU32, TypeU64,
 		TypeSInt, TypeS8, TypeS16, TypeS24, TypeS32, TypeS64,
-		TypeI8, TypeI16, TypeI32, TypeI64, TypeBInt:
+		TypeI8, TypeI16, TypeI32, TypeI64, TypeBInt,
+		TypeU32LE16, TypeS32LE16:
 		return true
 	}
 	return false
@@ -1953,6 +1958,22 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 	var err error
 
 	switch field.Type {
+	// The type fixes both the unit order and the byte order within a unit, so the
+	// endian setting is deliberately not consulted (PS-272): honouring it would make
+	// u32le16 with endian little a second spelling of little-endian u32.
+	case TypeU32LE16, TypeS32LE16:
+		data, err := ctx.Read(4)
+		if err != nil {
+			return nil, err
+		}
+		combined := uint64(decodeUint(data[0:2], "big")) |
+			uint64(decodeUint(data[2:4], "big"))<<16
+		if field.Type == TypeS32LE16 && combined >= 0x80000000 {
+			value = int64(combined) - 0x100000000
+		} else {
+			value = combined
+		}
+
 	case TypeByte, TypeUInt, TypeU8, TypeU16, TypeU32, TypeU64, TypeU24:
 		data, err := ctx.Read(length)
 		if err != nil {

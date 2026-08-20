@@ -82,6 +82,9 @@ INTEGER_TYPE_INFO: Dict[str, Tuple[int, bool]] = {
     'u24': (3, False), 'uint24': (3, False),
     'u32': (4, False), 'uint32': (4, False),
     'u64': (8, False), 'uint64': (8, False),
+    # Word-ordered 32-bit (PS-271): four bytes wide, and the bytes are laid out by the
+    # encoder rather than by the width alone.
+    'u32le16': (4, False), 's32le16': (4, True),
     's8': (1, True), 'i8': (1, True), 'int8': (1, True),
     's16': (2, True), 'i16': (2, True), 'int16': (2, True),
     's24': (3, True), 'i24': (3, True), 'int24': (3, True),
@@ -815,6 +818,20 @@ class SchemaInterpreter:
             's64': (8, True), 'i64': (8, True), 'int64': (8, True),
         }
         
+        # Two 16-bit big-endian units, least significant unit first (PS-271). Neither
+        # `endian` setting reaches this: the type fixes both orders, and honouring
+        # `endian` would make `u32le16` with `endian: little` a second spelling of plain
+        # little-endian u32 (PS-272).
+        if field_type in ('u32le16', 's32le16'):
+            if pos + 4 > len(buf):
+                raise ValueError(f"Buffer too short: need 4 bytes at pos {pos}")
+            low = int.from_bytes(buf[pos:pos + 2], 'big')
+            high = int.from_bytes(buf[pos + 2:pos + 4], 'big')
+            value = low + (high << 16)
+            if field_type == 's32le16' and value >= 0x80000000:
+                value -= 0x100000000
+            return value, pos + 4
+
         if field_type in type_info:
             size, signed = type_info[field_type]
             value, new_pos = self._read_int(buf, pos, size, signed)
@@ -3106,7 +3123,16 @@ class SchemaInterpreter:
             return bytes([int(value) & 0xFF])
         
         type_info = INTEGER_TYPE_INFO
-        
+
+        # The inverse of the word-ordered read (PS-271): least significant 16-bit unit
+        # first, each unit big-endian, and `endian` plays no part (PS-272).
+        if field_type in ('u32le16', 's32le16'):
+            int_val = int(value)
+            if int_val < 0:
+                int_val += 0x100000000
+            int_val &= 0xFFFFFFFF
+            return (int_val & 0xFFFF).to_bytes(2, 'big') + (int_val >> 16).to_bytes(2, 'big')
+
         if field_type in type_info:
             size, signed = type_info[field_type]
             int_val = int(value)

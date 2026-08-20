@@ -284,6 +284,8 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
     """Validate a list of field definitions recursively."""
     KNOWN_TYPES = {
         'u8', 'u16', 'u24', 'u32', 'u64',
+        # Two 16-bit big-endian units, low unit first (PS-271).
+        'u32le16', 's32le16',
         'uint8', 'uint16', 'uint24', 'uint32', 'uint64',
         's8', 's16', 's24', 's32', 's64',
         'i8', 'i16', 'i24', 'i32', 'i64',

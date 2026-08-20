@@ -25,22 +25,8 @@ fields:
             # low word first, so those four bytes are not a big-endian u32 and
             # cannot be read as one field. Reading only the low word also left the
             # high word unconsumed, misaligning every group after it.
-            - name: _cumulative_pulse_count_low
-              type: u16
-            - name: _cumulative_pulse_count_high
-              type: u16
-            - name: _cumulative_pulse_count_high_scaled
-              type: number
-              compute:
-                op: mul
-                a: $_cumulative_pulse_count_high
-                b: 65536
             - name: cumulative_pulse_count
-              type: number
-              compute:
-                op: add
-                a: $_cumulative_pulse_count_low
-                b: $_cumulative_pulse_count_high_scaled
+              type: u32le16
         - bit: 1
           fields:
             - name: battery_voltage

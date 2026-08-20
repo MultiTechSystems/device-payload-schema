@@ -20,22 +20,8 @@ fields:
             # low word first, so those four bytes are not a big-endian u32 and
             # cannot be read as one field. Reading only the low word also left the
             # high word unconsumed, misaligning every group after it.
-            - name: _dendrometer_a_position_low
-              type: u16
-            - name: _dendrometer_a_position_high
-              type: u16
-            - name: _dendrometer_a_position_high_scaled
-              type: number
-              compute:
-                op: mul
-                a: $_dendrometer_a_position_high
-                b: 65536
             - name: dendrometer_a_position
-              type: number
-              compute:
-                op: add
-                a: $_dendrometer_a_position_low
-                b: $_dendrometer_a_position_high_scaled
+              type: u32le16
               transform:
                 - mult: 0.002384185791015625
                 - add: -20000

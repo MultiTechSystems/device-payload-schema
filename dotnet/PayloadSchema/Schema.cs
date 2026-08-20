@@ -7,6 +7,9 @@ public enum FieldType
 {
     Unknown,
     U8, U16, U24, U32, U64,
+    // Two 16-bit big-endian units, least significant unit first (PS-271); not
+    // expressible as U32 under either endianness.
+    U32LE16, S32LE16,
     S8, S16, S24, S32, S64,
     F16, F32, F64,
     Bool,

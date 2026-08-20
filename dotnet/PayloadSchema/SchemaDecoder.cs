@@ -256,6 +256,21 @@ public static class SchemaDecoder
             // before anything could report it: a u64 of 2^64-1 came back as
             // 1.8446744073709552E+19. The integer is kept, and ApplyModifiers below
             // converts only where a modifier makes the field a `number` (PS-293, PS-294).
+            // The type fixes the unit order and the byte order within a unit, so the
+            // endian setting is deliberately not consulted (PS-272).
+            case FieldType.U32LE16:
+            case FieldType.S32LE16:
+            {
+                var data = ctx.Read(4);
+                ulong low = Helpers.DecodeUint(data[..2], "big");
+                ulong high = Helpers.DecodeUint(data[2..], "big");
+                ulong combined = low | (high << 16);
+                value = field.Type == FieldType.S32LE16 && combined >= 0x80000000UL
+                    ? (long)combined - 0x100000000L
+                    : combined;
+                break;
+            }
+
             case FieldType.U8:
             case FieldType.U16:
             case FieldType.U24:
@@ -604,7 +619,8 @@ public static class SchemaDecoder
     {
         var integerType = field.Type is FieldType.U8 or FieldType.U16 or FieldType.U24
             or FieldType.U32 or FieldType.U64 or FieldType.S8 or FieldType.S16
-            or FieldType.S24 or FieldType.S32 or FieldType.S64;
+            or FieldType.S24 or FieldType.S32 or FieldType.S64
+            or FieldType.U32LE16 or FieldType.S32LE16;
         if (!integerType) return false;
 
         return field.Mult == null && field.Div == null && field.Add == null

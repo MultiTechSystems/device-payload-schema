@@ -20,22 +20,8 @@ fields:
             # low word first, so those four bytes are not a big-endian u32 and
             # cannot be read as one field. Reading only the low word also left the
             # high word unconsumed, misaligning every group after it.
-            - name: _voltage_ratio_low
-              type: u16
-            - name: _voltage_ratio_high
-              type: u16
-            - name: _voltage_ratio_high_scaled
-              type: number
-              compute:
-                op: mul
-                a: $_voltage_ratio_high
-                b: 65536
             - name: voltage_ratio
-              type: number
-              compute:
-                op: add
-                a: $_voltage_ratio_low
-                b: $_voltage_ratio_high_scaled
+              type: u32le16
               transform:
                 - div: 16777216
                 - add: -0.5

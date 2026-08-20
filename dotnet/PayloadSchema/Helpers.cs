@@ -151,7 +151,8 @@ public static class Helpers
         FieldType.U8 or FieldType.S8 => 1,
         FieldType.U16 or FieldType.S16 or FieldType.F16 => 2,
         FieldType.U24 or FieldType.S24 => 3,
-        FieldType.U32 or FieldType.S32 or FieldType.F32 => 4,
+        FieldType.U32 or FieldType.S32 or FieldType.F32
+            or FieldType.U32LE16 or FieldType.S32LE16 => 4,
         FieldType.U64 or FieldType.S64 or FieldType.F64 => 8,
         _ => 1
     };
@@ -210,6 +211,8 @@ public static class Helpers
             "u16" => FieldType.U16,
             "u24" => FieldType.U24,
             "u32" => FieldType.U32,
+            "u32le16" => FieldType.U32LE16,
+            "s32le16" => FieldType.S32LE16,
             "u64" => FieldType.U64,
             "s8" or "i8" => FieldType.S8,
             "s16" or "i16" => FieldType.S16,

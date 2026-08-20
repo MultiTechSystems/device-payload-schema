@@ -20,22 +20,8 @@ fields:
             # low word first, so those four bytes are not a big-endian u32 and
             # cannot be read as one field. Reading only the low word also left the
             # high word unconsumed, misaligning every group after it.
-            - name: _leaf_wetness_index_low
-              type: u16
-            - name: _leaf_wetness_index_high
-              type: u16
-            - name: _leaf_wetness_index_high_scaled
-              type: number
-              compute:
-                op: mul
-                a: $_leaf_wetness_index_high
-                b: 65536
             - name: leaf_wetness_index
-              type: number
-              compute:
-                op: add
-                a: $_leaf_wetness_index_low
-                b: $_leaf_wetness_index_high_scaled
+              type: u32le16
               transform:
                 - div: 8388608
                 - add: -1

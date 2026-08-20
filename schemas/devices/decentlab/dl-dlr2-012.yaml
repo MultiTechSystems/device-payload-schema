@@ -20,22 +20,8 @@ fields:
             # low word first, so those four bytes are not a big-endian u32 and
             # cannot be read as one field. Reading only the low word also left the
             # high word unconsumed, misaligning every group after it.
-            - name: _strain_gauge_low
-              type: u16
-            - name: _strain_gauge_high
-              type: u16
-            - name: _strain_gauge_high_scaled
-              type: number
-              compute:
-                op: mul
-                a: $_strain_gauge_high
-                b: 65536
             - name: strain_gauge
-              type: number
-              compute:
-                op: add
-                a: $_strain_gauge_low
-                b: $_strain_gauge_high_scaled
+              type: u32le16
               transform:
                 - mult: 0.003688406236100905
                 - add: -30940.59405940594
