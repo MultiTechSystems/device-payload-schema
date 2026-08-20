@@ -1,10 +1,22 @@
 # Test Requirements Mapping
 # Maps test functions to specification requirements from la-payload-schema
 #
-# Requirement IDs from: la-payload-schema/spec/sections/A4-requirements.md
-# - M001-M234: Mandatory (MUST/SHALL)
-# - R001-R057: Recommended (SHOULD)
-# - O001-O044: Optional (MAY)
+# Requirement ids are the stable `PS-nnn` tags carried in the specification text and in
+# the Tag column of spec/sections/10-conformance.md.
+#
+# This file used to key on the M/R/O ids of an earlier requirements appendix
+# (spec/sections/A4-requirements.md, removed in d129427). Those ids are positional -
+# `generate-conformance-tables.py` assigns them by source order - so every inserted
+# requirement renumbered the ones after it and this map came to name requirements it did
+# not mean: its entry for M003 described what is now M001, and CR-2026-010 and -011
+# shifted clause 1 again. A PS tag is allocated once and never reused.
+#
+# The re-pointing recovered each stale id's original wording from A4-requirements.md at
+# e9a67b1 and matched that against the current requirement set: 115 of 139 references
+# resolved. The remaining 24 are left as UNRESOLVED comments with the reason - the
+# requirement was withdrawn (compact mode, the shorthand bitfield spellings, QR
+# provisioning), or it was never a requirement at all but a line the old extractor lifted
+# out of an example YAML block.
 #
 # Patterns support wildcards:
 #   TestClassName.* - all tests in class
@@ -12,422 +24,427 @@
 
 mappings:
   # ============================================================
-  # Section 01: Schema Format (M003-M040)
+  # Section 01: Schema Format
   # ============================================================
   - test: test_schema_interpreter.TestSchemaInterpreterBasic.*
     requirements:
-      - M003  # Schema SHALL be valid JSON/YAML
-      - M004  # name field REQUIRED
-      - M008  # Schema MUST contain fields or ports
+      - PS-001  # Schema SHALL be valid JSON/YAML
+      # UNRESOLVED M004  # name field REQUIRED
+      #   never a requirement, an example YAML line: 'name: string REQUIRED: Schema identifier'
+      - PS-004  # Schema MUST contain fields or ports
 
   - test: test_schema_interpreter.TestSchemaInterpreterBasic.test_decode_simple
     requirements:
-      - M003
-      - M004
+      - PS-001
+      # UNRESOLVED M004
+      #   never a requirement, an example YAML line: 'name: string REQUIRED: Schema identifier'
 
   - test: test_schema_interpreter.TestSchemaInterpreterBasic.test_decode_empty_payload
     requirements:
-      - M045  # Decoders MUST reject payloads too short
+      - PS-054  # Decoders MUST reject payloads too short
 
   # ============================================================
-  # Section 02: Field Types - Integers (M041-M045)
+  # Section 02: Field Types - Integers
   # ============================================================
   - test: test_schema_interpreter.TestIntegerTypes.*
     requirements:
-      - M041  # Type aliases
-      - M042  # All integer widths
-      - M043  # Documented type aliases
-      - M044  # Big/little endian
+      - PS-049  # Type aliases
+      - PS-052  # All integer widths
+      - PS-049  # Documented type aliases
+      - PS-053  # Big/little endian
 
   - test: test_schema_interpreter.TestIntegerTypes.test_decode_u16_big_endian
     requirements:
-      - M042
-      - R008  # Big-endian default
+      - PS-052
+      - PS-050  # Big-endian default
 
   - test: test_schema_interpreter.TestIntegerTypes.test_decode_u16_little_endian
     requirements:
-      - M044
+      - PS-053
 
   # ============================================================
-  # Section 02: Field Types - Floats (M046-M047)
+  # Section 02: Field Types - Floats
   # ============================================================
   - test: test_schema_interpreter.TestFloatTypes.*
     requirements:
-      - M046  # IEEE 754 formats
-      - M047  # Special values (NaN, Infinity)
+      - PS-055  # IEEE 754 formats
+      - PS-056  # Special values (NaN, Infinity)
 
   # ============================================================
-  # Section 02: Field Types - Bitfields (M048-M053)
+  # Section 02: Field Types - Bitfields
   # ============================================================
   - test: test_schema_interpreter.TestBitfieldTypes.*
     requirements:
-      - M048  # Bits numbered 0 (LSB) to 7 (MSB)
-      - M049  # All shorthand syntaxes
-      - M050  # Bitfield extractions position
+      - PS-058  # Bits numbered 0 (LSB) to 7 (MSB)
+      # UNRESOLVED M049  # All shorthand syntaxes
+      #   withdrawn from the specification: '- Decoders MUST support all shorthand syntaxes listed above'
+      - PS-060  # Bitfield extractions position
 
   - test: test_schema_interpreter.TestBitfieldTypes.test_decode_multiple_bitfields_no_advance
     requirements:
-      - M050
+      - PS-060
 
   # ============================================================
-  # Section 02: Field Types - Boolean (M054-M055)
+  # Section 02: Field Types - Boolean
   # ============================================================
   - test: test_schema_interpreter.TestBooleanType.*
     requirements:
-      - M054  # JSON boolean output
-      - M055  # Bool doesn't advance position
+      - PS-065  # JSON boolean output
+      - PS-066  # Bool doesn't advance position
 
   # ============================================================
-  # Section 02: Field Types - Enum (M056-M058)
+  # Section 02: Field Types - Enum
   # ============================================================
   - test: test_schema_interpreter.TestEnumType.*
     requirements:
-      - M056  # String name for known values
-      - M057  # Unknown value handling
-      - M058  # Encoder accepts string/integer
+      - PS-067  # String name for known values
+      - PS-068  # Unknown value handling
+      - PS-069  # Encoder accepts string/integer
 
   # ============================================================
-  # Section 02: Field Types - Byte Group (M059-M060)
+  # Section 02: Field Types - Byte Group
   # ============================================================
   - test: test_schema_interpreter.TestByteGroup.*
     requirements:
-      - M059  # Byte groups consume full bytes
-      - M060  # Fields in byte group MUST NOT specify consume
+      - PS-070  # Byte groups consume full bytes
+      - PS-017  # Fields in byte group MUST NOT specify consume
 
   # ============================================================
-  # Section 02: Field Types - Strings (M061-M064)
+  # Section 02: Field Types - Strings
   # ============================================================
   - test: test_schema_interpreter.TestBytesAndStrings.*
     requirements:
-      - M061  # ascii, hex, base64 support
-      - M062  # length field requirement
-      - M063  # hex lowercase output
-      - M064  # RFC 4648 Base64
+      - PS-071  # ascii, hex, base64 support
+      - PS-072  # length field requirement
+      - PS-074  # hex lowercase output
+      - PS-075  # RFC 4648 Base64
 
   # ============================================================
-  # Section 02: Field Types - Computed (M065-M067)
+  # Section 02: Field Types - Computed
   # ============================================================
   - test: test_schema_interpreter.TestPolynomialAndCompute.*
     requirements:
-      - M065  # type: number for computed
-      - M066  # No value property
-      - M067  # Referenced fields decoded first
+      - PS-076  # type: number for computed
+      - PS-077  # No value property
+      - PS-122  # Referenced fields decoded first
 
   # ============================================================
-  # Section 02: Field Types - Repeat (M072-M076)
+  # Section 02: Field Types - Repeat
   # ============================================================
   - test: test_schema_interpreter.TestRepeatType.*
     requirements:
-      - M072  # Exactly ONE of count/byte_length/until
-      - M073  # byte_length references field
-      - M074  # until MUST be "end"
-      - M075  # Empty arrays produce []
-      - M076  # byte_length evenly divisible
+      - PS-083  # Exactly ONE of count/byte_length/until
+      - PS-085  # byte_length references field
+      - PS-086  # until MUST be "end"
+      - PS-087  # Empty arrays produce []
+      - PS-088  # byte_length evenly divisible
 
   # ============================================================
-  # Section 02: Field Types - Bitfield String (M077-M084)
+  # Section 02: Field Types - Bitfield String
   # ============================================================
   - test: test_schema_interpreter.TestVersionString.*
     requirements:
-      - M077  # Read length bytes as unsigned
-      - M078  # Parts processed in order
-      - M079  # Default part format decimal
-      - M081  # Prefix prepended
+      - PS-090  # Read length bytes as unsigned
+      - PS-091  # Parts processed in order
+      - PS-092  # Default part format decimal
+      - PS-094  # Prefix prepended
 
   # ============================================================
-  # Section 03: Modifiers (M085-M092)
+  # Section 03: Modifiers
   # ============================================================
   - test: test_schema_interpreter.TestModifiers.*
     requirements:
-      - M085  # add, mult, div support
-      - M086  # Floating-point arithmetic
-      - M087  # Division by zero
+      - PS-098  # add, mult, div support
+      - PS-099  # Floating-point arithmetic
+      - PS-100  # Division by zero
 
   - test: test_schema_interpreter.TestModifiers.test_lookup_modifier
     requirements:
-      - M089  # lookup field support
-      - M090  # Zero-based array index
-      - M091  # Out of range error
-      - M092  # Lookup after arithmetic
+      - PS-103  # lookup field support
+      - PS-104  # Zero-based array index
+      # UNRESOLVED M091  # Out of range error
+      #   withdrawn from the specification: '- Implementations MUST emit an error if the index is out'
+      - PS-107  # Lookup after arithmetic
 
   # ============================================================
-  # Section 03: Polynomial (M093-M097)
+  # Section 03: Polynomial
   # ============================================================
   - test: test_schema_interpreter.TestPolynomialAndCompute.test_polynomial*
     requirements:
-      - M093  # At least 2 coefficients
-      - M094  # Numeric coefficients
-      - M095  # ref references decoded field
-      - M096  # type: number
-      - M097  # Floating-point arithmetic
+      - PS-109  # At least 2 coefficients
+      - PS-110  # Numeric coefficients
+      - PS-111  # ref references decoded field
+      - PS-112  # type: number
+      - PS-113  # Floating-point arithmetic
 
   # ============================================================
-  # Section 03: Transforms (M098-M101)
+  # Section 03: Transforms
   # ============================================================
   - test: test_schema_interpreter.TestTransformOperations.*
     requirements:
-      - M098  # Transform operations support
-      - M099  # sqrt clamps negative to 0
-      - M101  # Transforms applied in order
+      - PS-115  # Transform operations support
+      - PS-116  # sqrt clamps negative to 0
+      - PS-118  # Transforms applied in order
 
   # ============================================================
-  # Section 03: Compute (M102-M106)
+  # Section 03: Compute
   # ============================================================
   - test: test_schema_interpreter.TestPolynomialAndCompute.test_compute*
     requirements:
-      - M102  # op field values
-      - M103  # Operands a and b
-      - M104  # Field reference syntax
-      - M105  # Referenced fields decoded first
-      - M106  # type: number
+      - PS-119  # op field values
+      - PS-120  # Operands a and b
+      - PS-121  # Field reference syntax
+      - PS-122  # Referenced fields decoded first
+      - PS-123  # type: number
 
   # ============================================================
-  # Section 03: Guard (M107-M111)
+  # Section 03: Guard
   # ============================================================
   - test: test_schema_interpreter.TestPolynomialAndCompute.test_guard*
     requirements:
-      - M107  # when array of conditions
-      - M108  # field property
-      - M109  # Comparison operator
-      - M110  # Numeric literal
-      - M111  # Simple comparisons only
+      - PS-124  # when array of conditions
+      - PS-125  # field property
+      - PS-126  # Comparison operator
+      - PS-127  # Numeric literal
+      - PS-128  # Simple comparisons only
 
   # ============================================================
-  # Section 03: Valid Range (M112-M115)
+  # Section 03: Valid Range
   # ============================================================
   - test: test_schema_interpreter.TestSemanticFields.test_valid_range*
     requirements:
-      - M112  # Array of two numbers
-      - M113  # min <= max
-      - M114  # Out-of-range flagged in _quality
-      - M115  # Values not modified
+      - PS-129  # Array of two numbers
+      - PS-130  # min <= max
+      - PS-131  # Out-of-range flagged in _quality
+      - PS-132  # Values not modified
 
   # ============================================================
-  # Section 04: Nested Objects (M119-M121)
+  # Section 04: Nested Objects
   # ============================================================
   - test: test_schema_interpreter.TestNestedObjects.*
     requirements:
-      - M119  # Nested object support
-      - M120  # Fields processed in order
-      - M121  # At least one field
+      - PS-139  # Nested object support
+      - PS-140  # Fields processed in order
+      - PS-142  # At least one field
 
   # ============================================================
-  # Section 04: Variables (M122-M127)
+  # Section 04: Variables
   # ============================================================
   - test: test_schema_interpreter.TestVariablesComprehensive.*
     requirements:
-      - M122  # var: storage
-      - M123  # $ prefix reference
-      - M124  # Field names not starting with $
-      - M125  # Validator rejects $ field names
+      - PS-143  # var: storage
+      - PS-144  # $ prefix reference
+      - PS-145  # Field names not starting with $
+      - PS-146  # Validator rejects $ field names
 
   # ============================================================
-  # Section 04: Match (M128-M132)
+  # Section 04: Match
   # ============================================================
   - test: test_schema_interpreter.TestMatchConditional.*
     requirements:
-      - M128  # match construct support
-      - M129  # Exactly one matching case
-      - M130  # Cases evaluated in order
-      - M131  # Range start <= end
-      - M132  # All three patterns supported
+      - PS-148  # match construct support
+      - PS-149  # Exactly one matching case
+      - PS-150  # Cases evaluated in order
+      - PS-151  # Range start <= end
+      - PS-152  # All three patterns supported
 
   # ============================================================
-  # Section 04: TLV (M133-M137)
+  # Section 04: TLV
   # ============================================================
   - test: test_schema_interpreter.TestTLV.*
     requirements:
-      - M133  # tlv construct support
-      - M134  # Parse until end
-      - M135  # Unknown tag handling
-      - M136  # Fields merged to parent
-      - M137  # Repeated tags as arrays
+      - PS-153  # tlv construct support
+      - PS-154  # Parse until end
+      - PS-155  # Unknown tag handling
+      - PS-156  # Fields merged to parent
+      - PS-157  # Repeated tags as arrays
 
   # ============================================================
-  # Section 04: Flagged (M138-M148)
+  # Section 04: Flagged
   # ============================================================
   - test: test_schema_interpreter.TestFlaggedConstruct.*
     requirements:
-      - M138  # flagged construct support
-      - M139  # Flags field previously parsed
-      - M140  # Groups evaluated in order
-      - M141  # Bit set → decode fields
-      - M142  # Bit clear → skip group
-      - M143  # Fields merged to parent
+      - PS-158  # flagged construct support
+      - PS-159  # Flags field previously parsed
+      - PS-160  # Groups evaluated in order
+      - PS-161  # Bit set → decode fields
+      - PS-162  # Bit clear → skip group
+      - PS-163  # Fields merged to parent
 
   # ============================================================
-  # Section 05: Compact Mode (M149-M156)
+  # Section 05: Compact Mode
   # ============================================================
   - test: test_schema_interpreter.TestCompactFormat.*
     requirements:
-      - M149  # Compact encoding mode
-      - M150  # No type/channel markers
-      - M151  # Field order matches schema
-      - M152  # Sequential reading
+      # UNRESOLVED M149  # Compact encoding mode
+      #   withdrawn from the specification: '- Implementations MUST support compact encoding mode when'
+      # UNRESOLVED M150  # No type/channel markers
+      #   withdrawn from the specification: '- Compact payloads MUST NOT include any type, channel, or'
+      # UNRESOLVED M151  # Field order matches schema
+      #   withdrawn from the specification: '- Field order MUST match the schema definition exactly'
+      # UNRESOLVED M152  # Sequential reading
+      #   withdrawn from the specification: '- Decoders MUST read fields sequentially according to the'
 
   # ============================================================
-  # Section 06: TS013 Generation (M157-M165)
+  # Section 06: TS013 Generation
   # ============================================================
   # Note: TS013 tests are in separate test file
 
   # ============================================================
-  # Section 07: Compact Format Strings (M166-M169)
+  # Section 07: Compact Format Strings
   # ============================================================
   - test: test_schema_interpreter.TestCompactFormat.*
     requirements:
-      - M166  # Functionally equivalent
-      - M167  # Simple sequential fields only
-      - M168  # Complex features not supported
-      - M169  # Big-endian default
+      # UNRESOLVED M166  # Functionally equivalent
+      #   withdrawn from the specification: '- When supported, compact format MUST be functionally equ'
+      # UNRESOLVED M167  # Simple sequential fields only
+      #   withdrawn from the specification: '- Compact format SHALL only be used for simple sequential'
+      # UNRESOLVED M168  # Complex features not supported
+      #   withdrawn from the specification: '- Complex features (conditional parsing, nested objects,'
+      # UNRESOLVED M169  # Big-endian default
+      #   withdrawn from the specification: '- If byte order prefix is omitted, big-endian MUST be ass'
 
   # ============================================================
   # Section 08: Output Formats (_quality) (M170)
   # ============================================================
   - test: test_schema_interpreter.TestSemanticFields.*
     requirements:
-      - M170  # _quality only when valid_range
+      - PS-182  # _quality only when valid_range
 
   # ============================================================
-  # Section 09: Validation (M179-M188)
+  # Section 09: Validation
   # ============================================================
   - test: test_schema_interpreter.TestValidationLevels.*
     requirements:
-      - M179  # Reject invalid schemas
-      - M180  # Fixed-width no length
-      - M185  # Schema not used if errors
+      - PS-189  # Reject invalid schemas
+      - PS-190  # Fixed-width no length
+      - PS-196  # Schema not used if errors
 
   # ============================================================
-  # Section 11: Testing & Safety (M189-M201)
+  # Section 11: Testing & Safety
   # ============================================================
   - test: test_schema_interpreter.TestEdgeCasesAndSecurity.*
     requirements:
-      - M190  # Handle invalid inputs safely
-      - M191  # MUST NOT crash
-      - M192  # MUST NOT infinite loop
-      - M194  # Return error for invalid
+      - PS-218  # Handle invalid inputs safely
+      - PS-219  # MUST NOT crash
+      - PS-220  # MUST NOT infinite loop
+      - PS-222  # Return error for invalid
 
   # ============================================================
-  # Section 13: Downlink (M210-M213)
+  # Section 13: Downlink
   # ============================================================
   - test: test_schema_interpreter.TestDownlinkCommands.*
     requirements:
-      - M210  # JSON to binary encoding
-      - M211  # Reverse arithmetic transformations
-      - M212  # Validate values fit
+      - PS-166  # JSON to binary encoding
+      - PS-167  # Reverse arithmetic transformations
+      - PS-168  # Validate values fit
 
   # ============================================================
-  # Section 18: Schema Composition (M226-M231)
+  # Section 18: Schema Composition
   # ============================================================
   - test: test_schema_interpreter.TestDefinitionsComprehensive.*
     requirements:
-      - M226  # Detect circular references
-      - M227  # Resolve ref references
-      - M228  # Reject circular with error
-      - M229  # Undefined definitions error
+      - PS-226  # Detect circular references
+      # UNRESOLVED M227  # Resolve ref references
+      #   withdrawn from the specification: "Implementations supporting composition MUST resolve 'ref'"
+      - PS-226  # Reject circular with error
+      # UNRESOLVED M229  # Undefined definitions error
+      #   withdrawn from the specification: 'References to undefined definitions MUST produce an error'
 
   # ============================================================
-  # Section 01: Ports (M016-M023)
+  # Section 01: Ports
   # ============================================================
   - test: test_schema_interpreter.TestPortBasedSchemas.*
     requirements:
-      - M016  # fields array required
-      - M017  # Port numbers 1-223
-      - M018  # Each port has fields
-      - M019  # Extract FPort from input
-      - M020  # Select matching port
-      - M021  # Default entry fallback
-      - M022  # No match → error
+      # UNRESOLVED M016  # fields array required
+      #   never a requirement, an example YAML line: 'fields: array REQUIRED: Field definitions for this port'
+      - PS-018  # Port numbers 1-223
+      - PS-019  # Each port has fields
+      - PS-022  # Extract FPort from input
+      - PS-023  # Select matching port
+      - PS-024  # Default entry fallback
+      - PS-025  # No match → error
 
   # ============================================================
   # Recommended Requirements
   # ============================================================
   - test: test_schema_interpreter.TestSemanticOutput.*
     requirements:
-      - R024  # SenML unit codes
+      - PS-186  # SenML unit codes
 
   - test: test_schema_interpreter.TestValidationLevels.test_validation_warning*
     requirements:
-      - R027  # IPSO for standard sensors
-      - R028  # SenML for unit fields
-      - R029  # Common sensor detection
+      - PS-199  # IPSO for standard sensors
+      - PS-200  # SenML for unit fields
+      - PS-201  # Common sensor detection
 
   # ============================================================
   # Optional Requirements
   # ============================================================
   - test: test_schema_interpreter.TestDirectionProperty.*
     requirements:
-      - O005  # direction property
-      - O028  # direction: downlink
+      # UNRESOLVED O005  # direction property
+      #   never a requirement, an example YAML line: 'direction: string OPTIONAL: uplink-downlink-both (default'
+      - PS-170  # direction: downlink
 
   - test: test_schema_interpreter.TestCompactFormat.*
     requirements:
-      - O021  # Compact string format
-      - O022  # Parsers MAY support compact
+      # UNRESOLVED O021  # Compact string format
+      #   withdrawn from the specification: 'For simple sequential field definitions, a compact string'
+      # UNRESOLVED O022  # Parsers MAY support compact
+      #   withdrawn from the specification: '- Parsers MAY support compact format strings as an altern'
 
   # ============================================================
   # Binary Schema
   # ============================================================
   - test: test_binary_schema.*
     requirements:
-      - M222  # Network resolution order
-      - M223  # Version 2 accepts version 1
+      # UNRESOLVED M222  # Network resolution order
+      #   withdrawn from the specification: 'Networks SHALL support the following resolution order:'
+      # UNRESOLVED M223  # Version 2 accepts version 1
+      #   withdrawn from the specification: 'Version 2 decoders MUST accept version 1 data.'
 
   # ============================================================
   # QR Schema
   # ============================================================
   - test: test_qr_schema.*
     requirements:
-      - R043  # QR provisioning
-      - O040  # Embed binary schema in QR
+      # UNRESOLVED R043  # QR provisioning
+      #   withdrawn from the specification: 'When a device is provisioned via QR code containing an em'
+      # UNRESOLVED O040  # Embed binary schema in QR
+      #   withdrawn from the specification: 'Devices MAY embed their binary schema in the provisioning'
 
   # ============================================================
   # Encoder/Roundtrip
   # ============================================================
   - test: test_schema_interpreter.TestEncoder.*
     requirements:
-      - M153  # Modifiers reversed in order
-      - M154  # Round non-integer values
+      # UNRESOLVED M153  # Modifiers reversed in order
+      #   withdrawn from the specification: 'Modifiers MUST be reversed in the opposite order from dec'
+      # UNRESOLVED M154  # Round non-integer values
+      #   withdrawn from the specification: 'When the reversed value is not an integer, encoders MUST'
 
   - test: test_schema_interpreter.TestEncodings.*
     requirements:
-      - M044  # Endian support (encodings use this)
+      - PS-053  # Endian support (encodings use this)
       # Note: sign_magnitude, bcd, gray not yet in spec requirements
 
 # Summary mapping for quick reference
 summary:
-  spec_version: "la-payload-schema A4-requirements.md"
-  total_requirements_referenced: 145
-  mandatory_coverage: "M003-M231 (partial)"
-  recommended_coverage: "R024, R027-R029, R043"
-  optional_coverage: "O005, O021, O022, O028, O040"
+  requirement_ids: "stable PS-nnn tags; see spec/sections/10-conformance.md, Tag column"
+  requirement_references: 115
+  distinct_requirements: 107
+  unresolved_references: 24
   coverage_areas:
-    - Schema format and structure (M003-M040)
-    - Integer types and endianness (M041-M045)
-    - Float types (M046-M047)
-    - Bitfield syntaxes (M048-M053)
-    - Boolean type (M054-M055)
-    - Enum type (M056-M058)
-    - Byte groups (M059-M060)
-    - String types (M061-M064)
-    - Computed fields (M065-M067)
-    - Repeat/arrays (M072-M076)
-    - Modifiers (M085-M092)
-    - Polynomial (M093-M097)
-    - Transforms (M098-M101)
-    - Compute operations (M102-M106)
-    - Guard conditions (M107-M111)
-    - Valid range (M112-M115)
-    - Nested objects (M119-M121)
-    - Variables (M122-M127)
-    - Match conditionals (M128-M132)
-    - TLV parsing (M133-M137)
-    - Flagged construct (M138-M148)
-    - Compact format (M149-M156, M166-M169)
-    - Validation (M179-M188)
-    - Safety (M189-M201)
-    - Downlink encoding (M210-M213)
-    - Schema composition (M226-M231)
-    - Ports (M016-M023)
+    # Named by clause rather than by id range: the M/R/O ranges this block used to list
+    # were positional and moved whenever a requirement was inserted.
+    - Schema format, structure and ports (clause 1)
+    - Field types: integers, floats, bitfields, boolean, enum, byte groups, strings (clause 2)
+    - Modifiers, polynomial, transforms, compute, guard, valid range (clause 3)
+    - Nested objects, variables, match, TLV, flagged (clause 4)
+    - Downlink encoding (clause 5)
+    - Validation and safety (clause 8)
+    - TS013 codec generation (clause 9)
 
   notes:
     - "Encodings (sign_magnitude, bcd, gray) implemented but not yet in spec"
