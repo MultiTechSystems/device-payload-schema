@@ -144,3 +144,16 @@
     'category': 17
     'cid': 2
     'confirm': 170
+
+# Encode vector: the same bytes built from the values, verified
+# against the interpreter's encoder and this schema's generated
+# codec, which agree on them (PS-047).
+- 'name': encode_clear_log
+  'description': "Encode the values decoded from clear_log"
+  'direction': downlink
+  'source': generated
+  'input':
+    'category': 17
+    'cid': 2
+    'confirm': 170
+  'expected_payload': "1102aa"

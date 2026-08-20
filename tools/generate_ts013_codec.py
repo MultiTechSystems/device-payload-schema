@@ -1271,7 +1271,12 @@ function writeS(buf, pos, size, value, endian) {
                 fname = f'encodePort{port_key}'
                 fields = port_def.get('fields', [])
                 parts.append(self._gen_encode_fn(fname, fields))
-        elif self.has_commands:
+        else:
+            # A schema with neither ports nor downlink_commands used to get no encoder at
+            # all, so its generated codec could not build a downlink even where the
+            # interpreter encoded the same schema without complaint - encodeDownlink
+            # returned "No downlink encoding defined". PS-287 reads an entry that declares
+            # no direction as accepting either, so refusing to encode contradicts it.
             fields = self.schema.get('fields', [])
             parts.append(self._gen_encode_fn('encodePayload', fields))
         return '\n\n'.join(parts)
@@ -1699,13 +1704,26 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append('  }')
                 lines.append('}')
             else:
+                # No ports and no command table: the schema's own fields are the payload,
+                # in both directions.
                 lines.append('function decodeDownlink(input) {')
-                lines.append('  return { data: {}, warnings: ["No downlink encoding defined"], errors: [] };')
+                lines.append('  try {')
+                lines.append(f'    var endian = "{self.endian}";')
+                lines.append('    var r = decodePayload(input.bytes, endian);')
+                lines.append('    return { data: r.data, warnings: r.warnings || [], errors: [] };')
+                lines.append('  } catch (e) {')
+                lines.append('    return { data: {}, warnings: [], errors: [e.message] };')
+                lines.append('  }')
                 lines.append('}')
                 lines.append('')
 
                 lines.append('function encodeDownlink(input) {')
-                lines.append('  return { bytes: [], fPort: 1, warnings: ["No downlink encoding defined"], errors: [] };')
+                lines.append('  try {')
+                lines.append(f'    var bytes = encodePayload(input.data, "{self.endian}");')
+                lines.append('    return { bytes: bytes, fPort: input.fPort || 1, warnings: [], errors: [] };')
+                lines.append('  } catch (e) {')
+                lines.append('    return { bytes: [], fPort: input.fPort || 1, warnings: [], errors: [e.message] };')
+                lines.append('  }')
                 lines.append('}')
 
         return '\n'.join(lines)

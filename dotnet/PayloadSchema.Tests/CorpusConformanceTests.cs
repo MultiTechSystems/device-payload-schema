@@ -83,7 +83,12 @@ public class CorpusConformanceTests
                 total++;
                 try
                 {
-                    var payloadHex = Text(vector, "payload").Replace(" ", "");
+                    // An encode vector carries the values to encode and no payload to decode
+            // (PS-047); it is not a failed decode. tools/vector-verdicts.py runs those
+            // on both conformance paths.
+            var payloadHex = Text(vector, "payload").Replace(" ", "");
+            if (payloadHex.Length == 0)
+                continue;
                     var fportText = Text(vector, "fPort");
                     if (fportText.Length == 0) fportText = Text(vector, "fport");
                     var payload = Convert.FromHexString(payloadHex);

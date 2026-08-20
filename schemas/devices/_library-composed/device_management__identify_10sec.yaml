@@ -170,3 +170,16 @@
     'category': 18
     'cid': 2
     'duration_sec': 10
+
+# Encode vector: the same bytes built from the values, verified
+# against the interpreter's encoder and this schema's generated
+# codec, which agree on them (PS-047).
+- 'name': encode_identify_10sec
+  'description': "Encode the values decoded from identify_10sec"
+  'direction': downlink
+  'source': generated
+  'input':
+    'category': 18
+    'cid': 2
+    'duration_sec': 10
+  'expected_payload': "12020a"
