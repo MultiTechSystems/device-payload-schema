@@ -219,7 +219,8 @@
           "fport": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 255
+            "maximum": 255,
+            "description": "Deprecated spelling of fPort; accepted, not emitted (PS-300)"
           },
           "fPort": {
             "type": "integer",
@@ -250,7 +251,20 @@
             "description": "Values to encode, for an encode vector (PS-047)"
           },
           "expected_payload": {
-            "description": "Expected encoded bytes as a hex string or byte array (PS-047)"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255
+                }
+              }
+            ],
+            "description": "Expected encoded bytes, hex string or byte array (PS-047, PS-299)"
           },
           "direction": {
             "type": "string",
@@ -259,6 +273,12 @@
               "downlink"
             ],
             "description": "Direction the vector exercises; inferred from the keys when absent"
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 255,
+            "description": "Deprecated spelling of fPort; accepted, not emitted (PS-300)"
           }
         },
         "oneOf": [
@@ -270,8 +290,17 @@
               "expected"
             ],
             "not": {
-              "required": [
-                "input"
+              "anyOf": [
+                {
+                  "required": [
+                    "input"
+                  ]
+                },
+                {
+                  "required": [
+                    "expected_payload"
+                  ]
+                }
               ]
             }
           },
@@ -283,8 +312,17 @@
               "expected_payload"
             ],
             "not": {
-              "required": [
-                "payload"
+              "anyOf": [
+                {
+                  "required": [
+                    "payload"
+                  ]
+                },
+                {
+                  "required": [
+                    "expected"
+                  ]
+                }
               ]
             }
           }

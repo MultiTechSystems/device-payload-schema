@@ -769,6 +769,13 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
                 # only evidence there is for the downlink clauses - could not be written
                 # in a schema that validates.
                 encode_vector = 'input' in tv or 'expected_payload' in tv
+                if encode_vector and ('payload' in tv or 'expected' in tv):
+                    # PS-297: the two kinds are exclusive. A vector carrying both is
+                    # ambiguous about how it should be run.
+                    errors.append(
+                        f"Test vector {i} ({tv.get('name', '?')}): carries both encode "
+                        "keys ('input'/'expected_payload') and decode keys "
+                        "('payload'/'expected'); a vector is one kind or the other")
                 if encode_vector:
                     if 'input' not in tv:
                         errors.append(
