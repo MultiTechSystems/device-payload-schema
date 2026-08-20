@@ -145,3 +145,17 @@
     'cid': 0
     'enable': 1
     'max_records': 256
+
+# Encode vector: the same bytes built from the values, verified
+# against the interpreter's encoder and this schema's generated
+# codec, which agree on them (PS-047).
+- 'name': encode_enable_logging
+  'description': "Encode the values decoded from enable_logging"
+  'direction': downlink
+  'source': generated
+  'input':
+    'category': 17
+    'cid': 0
+    'enable': 1
+    'max_records': 256
+  'expected_payload': "1100010100"

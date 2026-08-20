@@ -84,6 +84,9 @@ CONSTRUCT_CLAUSES = {
     # reported unexercised while all 162 schemas exercised them.
     "document": ["Document Structure", "Document Requirements"],
     "remaining": ["The `remaining` Keyword"],
+    # An encode vector is the only evidence the downlink clauses can have from the corpus.
+    "encode": ["Downlink Requirements", "Binary Conversion Requirements",
+               "Encoding Test Vectors"],
     "integer_division": ["Integer Division and Modulo"],
     "name_from": ["Computed Field Names"],
 }
@@ -93,8 +96,6 @@ CONSTRUCT_CLAUSES = {
 #: with malformed input, or about the shape of generated code. Reported separately so
 #: "not exercised" does not read as "untested" for clauses that need other evidence.
 OUT_OF_SCOPE_CLAUSES = {
-    "Downlink Requirements": "encode path; needs downlink vectors",
-    "Binary Conversion Requirements": "encode path; needs downlink vectors",
     "Decoder Safety": "negative input; needs malformed-payload cases",
     "Validator Safety": "negative input; needs invalid-schema cases",
     "Fuzz Testing Requirements": "covered by the fuzz targets, not the corpus",
@@ -125,8 +126,11 @@ def constructs_used(schema: dict) -> set:
     happens to change.
     """
     found = {"document"}
-    if schema.get("test_vectors"):
+    vectors = schema.get("test_vectors") or []
+    if vectors:
         found.add("test_vector")
+    if any("input" in v or "expected_payload" in v for v in vectors if isinstance(v, dict)):
+        found.add("encode")
 
     def walk(node):
         if isinstance(node, dict):
@@ -217,10 +221,41 @@ def matches(expected: dict, actual: dict) -> tuple[bool, str]:
     return True, ""
 
 
+def is_encode_vector(vector: dict) -> bool:
+    """An encode vector carries the values to encode, not the bytes to decode (PS-047)."""
+    return "input" in vector or "expected_payload" in vector
+
+
+def expected_bytes(vector: dict) -> bytes:
+    want = vector.get("expected_payload")
+    if isinstance(want, list):
+        return bytes(want)
+    return bytes.fromhex(str(want).replace(" ", "").replace("0x", ""))
+
+
+def run_interpreted_encode(schema: dict, vector: dict) -> tuple:
+    """Verdict for one encode vector from the interpreter's encoder."""
+    try:
+        result = SchemaInterpreter(schema).encode(
+            vector.get("input") or {}, fPort=vector_fport(vector)
+        )
+    except Exception as exc:
+        return FAIL, f"{type(exc).__name__}: {exc}"[:120]
+    if not result.success:
+        return FAIL, "; ".join(result.errors)[:120]
+    want = expected_bytes(vector)
+    if result.payload != want:
+        return FAIL, f"want {want.hex()}, got {result.payload.hex()}"
+    return PASS, ""
+
+
 def run_interpreted(schema: dict, vectors: list) -> list:
     """Verdict per vector from a schema-aware decoder."""
     out = []
     for vector in vectors:
+        if is_encode_vector(vector):
+            out.append(run_interpreted_encode(schema, vector))
+            continue
         try:
             result = SchemaInterpreter(schema).decode(
                 vector_bytes(vector), fPort=vector_fport(vector)
@@ -246,16 +281,35 @@ def run_generated(schema: dict, vectors: list) -> list:
     except Exception as exc:
         return [(UNSUPPORTED, f"no codec: {type(exc).__name__}: {exc}"[:120])] * len(vectors)
 
-    calls = [
-        {"bytes": list(vector_bytes(v)), "fPort": vector_fport(v) or 1} for v in vectors
-    ]
+    calls = []
+    for vector in vectors:
+        if is_encode_vector(vector):
+            calls.append({
+                "encode": True,
+                "data": vector.get("input") or {},
+                "fPort": vector_fport(vector) or 1,
+            })
+        else:
+            calls.append({
+                "encode": False,
+                "bytes": list(vector_bytes(vector)),
+                "fPort": vector_fport(vector) or 1,
+            })
     driver = (
         js
         + "\nvar _out = [];\n"
         + f"var _calls = {json.dumps(calls)};\n"
         + "for (var i = 0; i < _calls.length; i++) {\n"
-        + "  try { var r = decodeUplink(_calls[i]); _out.push({data: r.data, errors: r.errors || []}); }\n"
-        + "  catch (e) { _out.push({data: null, errors: [String(e && e.message || e)]}); }\n"
+        + "  var c = _calls[i];\n"
+        + "  try {\n"
+        + "    if (c.encode) {\n"
+        + "      var e = encodeDownlink({data: c.data, fPort: c.fPort});\n"
+        + "      _out.push({bytes: e.bytes, errors: e.errors || [], warnings: e.warnings || []});\n"
+        + "    } else {\n"
+        + "      var r = decodeUplink(c);\n"
+        + "      _out.push({data: r.data, errors: r.errors || []});\n"
+        + "    }\n"
+        + "  } catch (e) { _out.push({data: null, bytes: null, errors: [String(e && e.message || e)]}); }\n"
         + "}\nconsole.log(JSON.stringify(_out));"
     )
     try:
@@ -277,6 +331,21 @@ def run_generated(schema: dict, vectors: list) -> list:
         if result.get("errors"):
             out.append((FAIL, "; ".join(result["errors"])[:120]))
             continue
+
+        if is_encode_vector(vector):
+            produced = result.get("bytes")
+            if produced is None:
+                warnings = "; ".join(result.get("warnings") or []) or "no bytes"
+                out.append((UNSUPPORTED, f"codec cannot encode: {warnings}"[:120]))
+                continue
+            want = expected_bytes(vector)
+            got = bytes(produced)
+            out.append(
+                (PASS, "") if got == want
+                else (FAIL, f"want {want.hex()}, got {got.hex()}")
+            )
+            continue
+
         ok, detail = matches(vector.get("expected"), result.get("data") or {})
         out.append((PASS if ok else FAIL, detail))
     return out

@@ -56,6 +56,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 from schema_interpreter import SchemaInterpreter  # noqa: E402
+from validate_schema import is_encode_vector  # noqa: E402
 
 DEVICES = REPO_ROOT / "schemas" / "devices"
 
@@ -102,6 +103,8 @@ def round_trip_results():
             continue
         shape = schema_shape(schema)
         for vector in schema.get("test_vectors") or []:
+            if is_encode_vector(vector):
+                continue
             raw = str(vector.get("payload", "")).replace(" ", "")
             if not raw:
                 continue
@@ -239,6 +242,8 @@ def test_tlv_payload_round_trips():
     lossy = {"ch255_type9_midscale", "ch255_type9_hex_letters"}
     checked = 0
     for vector in schema["test_vectors"]:
+        if is_encode_vector(vector):
+            continue
         if vector["name"] in lossy:
             continue
         payload = bytes.fromhex(str(vector["payload"]).replace(" ", ""))
@@ -312,6 +317,8 @@ def test_match_construct_round_trips():
     )
     exact = 0
     for vector in schema["test_vectors"]:
+        if is_encode_vector(vector):
+            continue
         payload = bytes.fromhex(str(vector["payload"]).replace(" ", ""))
         decoded = SchemaInterpreter(schema).decode(payload)
         if decoded.errors:
@@ -401,6 +408,8 @@ def test_ref_is_spliced_when_encoding():
         .read_text(encoding="utf-8")
     )
     for vector in schema["test_vectors"]:
+        if is_encode_vector(vector):
+            continue
         payload = bytes.fromhex(str(vector["payload"]).replace(" ", ""))
         decoded = SchemaInterpreter(schema).decode(payload)
         encoded = SchemaInterpreter(schema).encode(dict(decoded.data))
@@ -421,6 +430,8 @@ def test_repeat_records_round_trip():
             .read_text(encoding="utf-8")
         )
         for vector in schema["test_vectors"]:
+            if is_encode_vector(vector):
+                continue
             payload = bytes.fromhex(str(vector["payload"]).replace(" ", ""))
             decoded = SchemaInterpreter(schema).decode(payload)
             assert isinstance(decoded.data["items"], list), decoded.data

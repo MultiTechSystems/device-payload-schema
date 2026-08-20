@@ -69,7 +69,7 @@
         "resolution": {
           "type": "number",
           "exclusiveMinimum": 0,
-          "description": "Minimum detectable change (e.g., 0.01 for 0.01°C steps)"
+          "description": "Minimum detectable change (e.g., 0.01 for 0.01\u00b0C steps)"
         },
         "unece": {
           "type": "string",
@@ -244,12 +244,50 @@
               "generated"
             ],
             "description": "Provenance of the expected values (PS-263). Absent means unknown, which certification treats as 'generated'."
+          },
+          "input": {
+            "type": "object",
+            "description": "Values to encode, for an encode vector (PS-047)"
+          },
+          "expected_payload": {
+            "description": "Expected encoded bytes as a hex string or byte array (PS-047)"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "uplink",
+              "downlink"
+            ],
+            "description": "Direction the vector exercises; inferred from the keys when absent"
           }
         },
-        "required": [
-          "name",
-          "payload",
-          "expected"
+        "oneOf": [
+          {
+            "title": "decode vector",
+            "required": [
+              "name",
+              "payload",
+              "expected"
+            ],
+            "not": {
+              "required": [
+                "input"
+              ]
+            }
+          },
+          {
+            "title": "encode vector",
+            "required": [
+              "name",
+              "input",
+              "expected_payload"
+            ],
+            "not": {
+              "required": [
+                "payload"
+              ]
+            }
+          }
         ]
       },
       "description": "Test cases for validation"

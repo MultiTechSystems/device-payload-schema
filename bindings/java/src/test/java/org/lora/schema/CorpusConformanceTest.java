@@ -69,6 +69,12 @@ class CorpusConformanceTest {
             for (Object vectorRaw : vectors) {
                 total++;
                 if (!(vectorRaw instanceof Map<?, ?> vector)) continue;
+                // An encode vector carries the values to encode and no payload to
+                // decode (PS-047); it is not a failed decode. tools/vector-verdicts.py
+                // runs those on both conformance paths.
+                if (vector.get("payload") == null) {
+                    continue;
+                }
                 String payloadHex = String.valueOf(vector.get("payload")).replace(" ", "");
                 Object expectedRaw = vector.get("expected");
                 if (!(expectedRaw instanceof Map<?, ?> expected)) continue;

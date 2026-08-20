@@ -135,3 +135,17 @@
     'cid': 0
     'field_id': 2
     'delta': 10
+
+# Encode vector: the same bytes built from the values, verified
+# against the interpreter's encoder and this schema's generated
+# codec, which agree on them (PS-047).
+- 'name': encode_set_delta_threshold
+  'description': "Encode the values decoded from set_delta_threshold"
+  'direction': downlink
+  'source': generated
+  'input':
+    'category': 3
+    'cid': 0
+    'field_id': 2
+    'delta': 10
+  'expected_payload': "030002000a"

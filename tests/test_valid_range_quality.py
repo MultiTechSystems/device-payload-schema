@@ -28,6 +28,7 @@ sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 from generate_ts013_codec import TS013Generator  # noqa: E402
 from schema_interpreter import SchemaInterpreter  # noqa: E402
+from validate_schema import is_encode_vector  # noqa: E402
 
 pytestmark = pytest.mark.skipif(
     shutil.which("node") is None, reason="Node.js is not installed"
@@ -184,6 +185,8 @@ class TestTheSchemasThatNeededIt:
         schema = yaml.safe_load(path.read_text(encoding="utf-8"))
         seen = set()
         for vector in schema["test_vectors"]:
+            if is_encode_vector(vector):
+                continue
             payload = str(vector["payload"])
             js = run_codec(schema, payload)
             py = run_interpreter(schema, payload)

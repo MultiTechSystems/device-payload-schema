@@ -170,3 +170,16 @@
     'category': 18
     'cid': 3
     'delay_sec': 0
+
+# Encode vector: the same bytes built from the values, verified
+# against the interpreter's encoder and this schema's generated
+# codec, which agree on them (PS-047).
+- 'name': encode_reboot_immediate
+  'description': "Encode the values decoded from reboot_immediate"
+  'direction': downlink
+  'source': generated
+  'input':
+    'category': 18
+    'cid': 3
+    'delay_sec': 0
+  'expected_payload': "120300"
