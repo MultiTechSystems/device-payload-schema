@@ -122,6 +122,13 @@ test-dotnet:
 		-v $(CACHE_DIR)/nuget:/root/.nuget \
 		mcr.microsoft.com/dotnet/sdk:8.0 dotnet test --nologo
 
+# Every corpus vector through both conformance paths - the interpreted schema and the
+# generated TS013 codec - with a verdict apiece. The corpus runners cover the interpreted
+# path in five languages; nothing covered the generated path over the corpus until this.
+verdicts:
+	@mkdir -p build
+	$(PYTHON) tools/vector-verdicts.py --json build/verdicts.json
+
 test-languages: test selftest test-go test-java test-dotnet
 	@echo "Python, C, Go, Java and C# implementations all pass."
 
