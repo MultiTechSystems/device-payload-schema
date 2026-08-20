@@ -11,6 +11,34 @@ import (
 	"testing"
 )
 
+// sameNumber compares two decoded values, numerically where both are numbers.
+//
+// A table of `map[string]any` wants compared with != against a decoded value now fails on
+// the dynamic type alone: uint64(2) != float64(2) even though the numbers agree.
+func sameNumber(got, want any) bool {
+	gotNum, gotOK := toFloat64(got)
+	wantNum, wantOK := toFloat64(want)
+	if gotOK && wantOK {
+		return gotNum == wantNum
+	}
+	return got == want
+}
+
+// mustNum reads a decoded numeric field whatever channel it came through.
+//
+// These tests used to assert `mustNum(result["x"])`, which pinned the representation
+// rather than the value. Since CR-2026-011 an integer-typed field carrying no modifier
+// is reported as int64 or uint64 so that a u64 above 2^53 survives (PS-293, PS-294), and
+// a float64 assertion panics on it. Tests that care about the channel assert it
+// explicitly; these care about the number.
+func mustNum(v any) float64 {
+	number, ok := toFloat64(v)
+	if !ok {
+		panic(fmt.Sprintf("not a number: %v (%T)", v, v))
+	}
+	return number
+}
+
 func TestDecodeUint(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -136,7 +164,7 @@ func TestCompactFormat(t *testing.T) {
 			}
 			if !tt.wantErr {
 				for k, v := range tt.want {
-					if got[k] != v {
+					if !sameNumber(got[k], v) {
 						t.Errorf("DecodeCompact()[%s] = %v, want %v", k, got[k], v)
 					}
 				}
@@ -176,13 +204,13 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if result["version"] != float64(1) {
+	if mustNum(result["version"]) != float64(1) {
 		t.Errorf("version = %v, want 1", result["version"])
 	}
-	if result["temperature"] != float64(26) {
+	if mustNum(result["temperature"]) != float64(26) {
 		t.Errorf("temperature = %v, want 26", result["temperature"])
 	}
-	if result["humidity"] != float64(100) {
+	if mustNum(result["humidity"]) != float64(100) {
 		t.Errorf("humidity = %v, want 100", result["humidity"])
 	}
 }
@@ -213,10 +241,10 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if math.Abs(result["temperature"].(float64)-25.0) > 0.001 {
+	if math.Abs(mustNum(result["temperature"])-25.0) > 0.001 {
 		t.Errorf("temperature = %v, want 25.0", result["temperature"])
 	}
-	if result["offset_value"] != float64(60) {
+	if mustNum(result["offset_value"]) != float64(60) {
 		t.Errorf("offset_value = %v, want 60", result["offset_value"])
 	}
 }
@@ -280,10 +308,10 @@ fields:
 	if !ok {
 		t.Fatalf("sensor is not a map")
 	}
-	if sensor["temp"] != float64(25) {
+	if mustNum(sensor["temp"]) != float64(25) {
 		t.Errorf("sensor.temp = %v, want 25", sensor["temp"])
 	}
-	if sensor["humid"] != float64(50) {
+	if mustNum(sensor["humid"]) != float64(50) {
 		t.Errorf("sensor.humid = %v, want 50", sensor["humid"])
 	}
 }
@@ -324,7 +352,7 @@ fields:
 	if !ok {
 		t.Fatalf("msg is not a map")
 	}
-	if msg1["temp"] != float64(25) {
+	if mustNum(msg1["temp"]) != float64(25) {
 		t.Errorf("msg.temp = %v, want 25", msg1["temp"])
 	}
 
@@ -339,7 +367,7 @@ fields:
 	if !ok {
 		t.Fatalf("msg is not a map")
 	}
-	if msg2["count"] != float64(1000) {
+	if mustNum(msg2["count"]) != float64(1000) {
 		t.Errorf("msg.count = %v, want 1000", msg2["count"])
 	}
 }
@@ -383,7 +411,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if result["type"] != float64(1) {
+	if mustNum(result["type"]) != float64(1) {
 		t.Errorf("type = %v, want 1", result["type"])
 	}
 
@@ -391,7 +419,7 @@ fields:
 	if !ok {
 		t.Fatalf("data is not a map")
 	}
-	if dataField["temp"] != float64(25) {
+	if mustNum(dataField["temp"]) != float64(25) {
 		t.Errorf("data.temp = %v, want 25", dataField["temp"])
 	}
 }
@@ -461,12 +489,12 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	temp, ok := result["temperature"].(float64)
+	temp, ok := toFloat64(result["temperature"])
 	if !ok || math.Abs(temp-23.1) > 0.01 {
 		t.Errorf("temperature = %v, want 23.1", result["temperature"])
 	}
 
-	humid, ok := result["humidity"].(float64)
+	humid, ok := toFloat64(result["humidity"])
 	if !ok || humid != 30 {
 		t.Errorf("humidity = %v, want 30", result["humidity"])
 	}
@@ -522,17 +550,17 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	battery, ok := result["battery"].(float64)
+	battery, ok := toFloat64(result["battery"])
 	if !ok || battery != 100 {
 		t.Errorf("battery = %v, want 100", result["battery"])
 	}
 
-	temp, ok := result["temperature"].(float64)
+	temp, ok := toFloat64(result["temperature"])
 	if !ok || math.Abs(temp-27.2) > 0.01 {
 		t.Errorf("temperature = %v, want 27.2", result["temperature"])
 	}
 
-	humid, ok := result["humidity"].(float64)
+	humid, ok := toFloat64(result["humidity"])
 	if !ok || math.Abs(humid-45.0) > 0.01 {
 		t.Errorf("humidity = %v, want 45.0", result["humidity"])
 	}
@@ -675,7 +703,7 @@ fields:
 	if len(arr) != 4 {
 		t.Errorf("len(raw) = %d, want 4", len(arr))
 	}
-	if arr[0] != float64(1) || arr[3] != float64(4) {
+	if mustNum(arr[0]) != float64(1) || mustNum(arr[3]) != float64(4) {
 		t.Errorf("raw = %v, want [1,2,3,4]", arr)
 	}
 }
@@ -727,10 +755,10 @@ fields:
 	if !ok {
 		t.Fatalf("readings[0] is not a map")
 	}
-	if r0["temp"] != float64(-10) {
+	if mustNum(r0["temp"]) != float64(-10) {
 		t.Errorf("readings[0].temp = %v, want -10", r0["temp"])
 	}
-	if r0["humid"] != float64(50) {
+	if mustNum(r0["humid"]) != float64(50) {
 		t.Errorf("readings[0].humid = %v, want 50", r0["humid"])
 	}
 }
@@ -771,7 +799,7 @@ fields:
 	if !ok {
 		t.Fatalf("values[0] is not a map")
 	}
-	if v0["value"] != float64(1) {
+	if mustNum(v0["value"]) != float64(1) {
 		t.Errorf("values[0].value = %v, want 1", v0["value"])
 	}
 }
@@ -803,7 +831,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if result["count"] != float64(3) {
+	if mustNum(result["count"]) != float64(3) {
 		t.Errorf("count = %v, want 3", result["count"])
 	}
 
@@ -1032,13 +1060,13 @@ fields:
 	}
 
 	// Check values match (with floating point tolerance)
-	if decoded["version"] != float64(2) {
+	if mustNum(decoded["version"]) != float64(2) {
 		t.Errorf("version = %v, want 2", decoded["version"])
 	}
-	if math.Abs(decoded["temperature"].(float64)-25.5) > 0.01 {
+	if math.Abs(mustNum(decoded["temperature"])-25.5) > 0.01 {
 		t.Errorf("temperature = %v, want 25.5", decoded["temperature"])
 	}
-	if math.Abs(decoded["humidity"].(float64)-45.0) > 0.01 {
+	if math.Abs(mustNum(decoded["humidity"])-45.0) > 0.01 {
 		t.Errorf("humidity = %v, want 45.0", decoded["humidity"])
 	}
 }
@@ -1081,10 +1109,10 @@ ports:
 	if err != nil {
 		t.Fatalf("DecodeWithPort(1) error = %v", err)
 	}
-	if math.Abs(result["temperature"].(float64)-23.5) > 0.01 {
+	if math.Abs(mustNum(result["temperature"])-23.5) > 0.01 {
 		t.Errorf("temperature = %v, want 23.5", result["temperature"])
 	}
-	if result["humidity"] != float64(50) {
+	if mustNum(result["humidity"]) != float64(50) {
 		t.Errorf("humidity = %v, want 50", result["humidity"])
 	}
 
@@ -1093,7 +1121,7 @@ ports:
 	if err != nil {
 		t.Fatalf("DecodeWithPort(100) error = %v", err)
 	}
-	if result["report_interval"] != float64(60) {
+	if mustNum(result["report_interval"]) != float64(60) {
 		t.Errorf("report_interval = %v, want 60", result["report_interval"])
 	}
 
@@ -1102,7 +1130,7 @@ ports:
 	if err != nil {
 		t.Fatalf("DecodeWithPort(42) error = %v", err)
 	}
-	if result["raw_byte"] != float64(0xAB) {
+	if mustNum(result["raw_byte"]) != float64(0xAB) {
 		t.Errorf("raw_byte = %v, want 171", result["raw_byte"])
 	}
 
@@ -1230,16 +1258,16 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if result["protocol_version"] != float64(2) {
+	if mustNum(result["protocol_version"]) != float64(2) {
 		t.Errorf("protocol_version = %v, want 2", result["protocol_version"])
 	}
-	if math.Abs(result["dielectric_permittivity"].(float64)-6.82) > 0.01 {
+	if math.Abs(mustNum(result["dielectric_permittivity"])-6.82) > 0.01 {
 		t.Errorf("dielectric = %v, want 6.82", result["dielectric_permittivity"])
 	}
-	if math.Abs(result["soil_temperature"].(float64)-0.0) > 0.1 {
+	if math.Abs(mustNum(result["soil_temperature"])-0.0) > 0.1 {
 		t.Errorf("soil_temperature = %v, want 0.0", result["soil_temperature"])
 	}
-	if math.Abs(result["battery_voltage"].(float64)-3.166) > 0.001 {
+	if math.Abs(mustNum(result["battery_voltage"])-3.166) > 0.001 {
 		t.Errorf("battery = %v, want 3.166", result["battery_voltage"])
 	}
 }
@@ -1282,13 +1310,13 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if result["flags"] != float64(2) {
+	if mustNum(result["flags"]) != float64(2) {
 		t.Errorf("flags = %v, want 2", result["flags"])
 	}
 	if _, ok := result["dielectric_permittivity"]; ok {
 		t.Error("dielectric_permittivity should not be present when bit 0 is clear")
 	}
-	if math.Abs(result["battery_voltage"].(float64)-3.166) > 0.001 {
+	if math.Abs(mustNum(result["battery_voltage"])-3.166) > 0.001 {
 		t.Errorf("battery = %v, want 3.166", result["battery_voltage"])
 	}
 }
@@ -1317,12 +1345,12 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if math.Abs(result["dielectric"].(float64)-6.82) > 0.01 {
+	if math.Abs(mustNum(result["dielectric"])-6.82) > 0.01 {
 		t.Errorf("dielectric = %v, want 6.82", result["dielectric"])
 	}
 
 	expectedVWC := 0.0000043*math.Pow(6.82, 3) - 0.00055*math.Pow(6.82, 2) + 0.0292*6.82 - 0.053
-	if math.Abs(result["vwc"].(float64)-expectedVWC) > 0.001 {
+	if math.Abs(mustNum(result["vwc"])-expectedVWC) > 0.001 {
 		t.Errorf("vwc = %v, want %v", result["vwc"], expectedVWC)
 	}
 }
@@ -1347,7 +1375,7 @@ fields:
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if math.Abs(result["soil_temperature"].(float64)-5.0) > 0.01 {
+	if math.Abs(mustNum(result["soil_temperature"])-5.0) > 0.01 {
 		t.Errorf("soil_temperature = %v, want 5.0", result["soil_temperature"])
 	}
 }
@@ -1385,7 +1413,7 @@ fields:
 		if err != nil {
 			t.Fatalf("Decode() error = %v", err)
 		}
-		if math.Abs(result["soil_temperature"].(float64)-(-337.5)) > 0.01 {
+		if math.Abs(mustNum(result["soil_temperature"])-(-337.5)) > 0.01 {
 			t.Errorf("soil_temperature = %v, want -337.5 regardless of key order",
 				result["soil_temperature"])
 		}
@@ -1410,7 +1438,7 @@ fields:
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if math.Abs(result["soil_temperature"].(float64)-22.5) > 0.01 {
+	if math.Abs(mustNum(result["soil_temperature"])-22.5) > 0.01 {
 		t.Errorf("soil_temperature = %v, want 22.5 ((625 - 400) / 10)",
 			result["soil_temperature"])
 	}
@@ -1444,7 +1472,7 @@ fields:
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if math.Abs(result["soil_temperature"].(float64)-(-337.5)) > 0.01 {
+	if math.Abs(mustNum(result["soil_temperature"])-(-337.5)) > 0.01 {
 		t.Errorf("roundtrip soil_temperature = %v, want -337.5", result["soil_temperature"])
 	}
 
@@ -1497,7 +1525,7 @@ fields:
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if math.Abs(result["albedo"].(float64)-0.5) > 0.01 {
+	if math.Abs(mustNum(result["albedo"])-0.5) > 0.01 {
 		t.Errorf("albedo = %v, want 0.5", result["albedo"])
 	}
 
@@ -1506,7 +1534,7 @@ fields:
 	if err != nil {
 		t.Fatalf("Decode() zero guard error = %v", err)
 	}
-	if result["albedo"].(float64) != 0 {
+	if mustNum(result["albedo"]) != 0 {
 		t.Errorf("albedo = %v, want 0 (zero guard)", result["albedo"])
 	}
 }
@@ -1716,10 +1744,10 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if math.Abs(decoded["temperature"].(float64)-25.0) > 0.1 {
+	if math.Abs(mustNum(decoded["temperature"])-25.0) > 0.1 {
 		t.Errorf("roundtrip temperature = %v, want ~25.0", decoded["temperature"])
 	}
-	if math.Abs(decoded["battery"].(float64)-3.166) > 0.01 {
+	if math.Abs(mustNum(decoded["battery"])-3.166) > 0.01 {
 		t.Errorf("roundtrip battery = %v, want ~3.166", decoded["battery"])
 	}
 }
@@ -1753,7 +1781,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if calibrated, ok := decoded["calibrated"].(float64); !ok || math.Abs(calibrated-630) > 0.01 {
+	if calibrated, ok := toFloat64(decoded["calibrated"]); !ok || math.Abs(calibrated-630) > 0.01 {
 		t.Errorf("polynomial result = %v, want 630", decoded["calibrated"])
 	}
 }
@@ -1785,7 +1813,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if ratio, ok := decoded["ratio"].(float64); !ok || math.Abs(ratio-0.3) > 0.001 {
+	if ratio, ok := toFloat64(decoded["ratio"]); !ok || math.Abs(ratio-0.3) > 0.001 {
 		t.Errorf("compute div result = %v, want 0.3", decoded["ratio"])
 	}
 }
@@ -1817,7 +1845,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if product, ok := decoded["product"].(float64); !ok || product != 60 {
+	if product, ok := toFloat64(decoded["product"]); !ok || product != 60 {
 		t.Errorf("compute mul result = %v, want 60", decoded["product"])
 	}
 }
@@ -1853,7 +1881,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if temp, ok := decoded["temperature"].(float64); !ok || math.Abs(temp-25.0) > 0.01 {
+	if temp, ok := toFloat64(decoded["temperature"]); !ok || math.Abs(temp-25.0) > 0.01 {
 		t.Errorf("guard pass result = %v, want 25.0", decoded["temperature"])
 	}
 
@@ -1863,7 +1891,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if temp, ok := decoded2["temperature"].(float64); !ok || temp != -999 {
+	if temp, ok := toFloat64(decoded2["temperature"]); !ok || temp != -999 {
 		t.Errorf("guard fail result = %v, want -999", decoded2["temperature"])
 	}
 }
@@ -1893,7 +1921,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if celsius, ok := decoded["celsius"].(float64); !ok || math.Abs(celsius-25.0) > 0.01 {
+	if celsius, ok := toFloat64(decoded["celsius"]); !ok || math.Abs(celsius-25.0) > 0.01 {
 		t.Errorf("ref with transform result = %v, want 25.0", decoded["celsius"])
 	}
 }
@@ -2113,10 +2141,10 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["high_nibble"] != float64(0xA) {
+	if mustNum(decoded["high_nibble"]) != float64(0xA) {
 		t.Errorf("high_nibble = %v, want 10", decoded["high_nibble"])
 	}
-	if decoded["low_nibble"] != float64(0xB) {
+	if mustNum(decoded["low_nibble"]) != float64(0xB) {
 		t.Errorf("low_nibble = %v, want 11", decoded["low_nibble"])
 	}
 }
@@ -2145,13 +2173,13 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["flags"] != float64(0xA) {
+	if mustNum(decoded["flags"]) != float64(0xA) {
 		t.Errorf("flags = %v, want 10", decoded["flags"])
 	}
-	if decoded["version"] != float64(0x5) {
+	if mustNum(decoded["version"]) != float64(0x5) {
 		t.Errorf("version = %v, want 5", decoded["version"])
 	}
-	if decoded["next_byte"] != float64(0xFF) {
+	if mustNum(decoded["next_byte"]) != float64(0xFF) {
 		t.Errorf("next_byte = %v, want 255", decoded["next_byte"])
 	}
 }
@@ -2186,13 +2214,13 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["version"] != float64(1) {
+	if mustNum(decoded["version"]) != float64(1) {
 		t.Errorf("version = %v, want 1", decoded["version"])
 	}
-	if decoded["msg_type"] != float64(2) {
+	if mustNum(decoded["msg_type"]) != float64(2) {
 		t.Errorf("msg_type = %v, want 2", decoded["msg_type"])
 	}
-	if decoded["payload"] != float64(100) {
+	if mustNum(decoded["payload"]) != float64(100) {
 		t.Errorf("payload = %v, want 100", decoded["payload"])
 	}
 }
@@ -2222,10 +2250,10 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["sensor_id"] != float64(1) {
+	if mustNum(decoded["sensor_id"]) != float64(1) {
 		t.Errorf("sensor_id = %v, want 1", decoded["sensor_id"])
 	}
-	if math.Abs(decoded["temp"].(float64)-23.1) > 0.01 {
+	if math.Abs(mustNum(decoded["temp"])-23.1) > 0.01 {
 		t.Errorf("temp = %v, want 23.1", decoded["temp"])
 	}
 }
@@ -2257,10 +2285,10 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["start"] != float64(1) {
+	if mustNum(decoded["start"]) != float64(1) {
 		t.Errorf("start = %v, want 1", decoded["start"])
 	}
-	if decoded["end"] != float64(2) {
+	if mustNum(decoded["end"]) != float64(2) {
 		t.Errorf("end = %v, want 2", decoded["end"])
 	}
 	// _reserved should not appear in output
@@ -2290,10 +2318,10 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["a"] != float64(10) {
+	if mustNum(decoded["a"]) != float64(10) {
 		t.Errorf("a = %v, want 10", decoded["a"])
 	}
-	if decoded["b"] != float64(11) {
+	if mustNum(decoded["b"]) != float64(11) {
 		t.Errorf("b = %v, want 11", decoded["b"])
 	}
 }
@@ -2325,10 +2353,10 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if math.Abs(decoded["temperature"].(float64)-23.1) > 0.01 {
+	if math.Abs(mustNum(decoded["temperature"])-23.1) > 0.01 {
 		t.Errorf("temperature = %v, want 23.1", decoded["temperature"])
 	}
-	if decoded["humidity"] != float64(50) {
+	if mustNum(decoded["humidity"]) != float64(50) {
 		t.Errorf("humidity = %v, want 50", decoded["humidity"])
 	}
 }
@@ -2358,7 +2386,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if math.Abs(decoded["temperature"].(float64)-23.1) > 0.01 {
+	if math.Abs(mustNum(decoded["temperature"])-23.1) > 0.01 {
 		t.Errorf("temperature = %v, want 23.1", decoded["temperature"])
 	}
 }
@@ -2383,7 +2411,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if math.Abs(decoded["temp"].(float64)-23.1) > 0.01 {
+	if math.Abs(mustNum(decoded["temp"])-23.1) > 0.01 {
 		t.Errorf("temp = %v, want 23.1", decoded["temp"])
 	}
 }
@@ -2429,7 +2457,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["value"] != float64(0x123456) {
+	if mustNum(decoded["value"]) != float64(0x123456) {
 		t.Errorf("value = %v, want %v", decoded["value"], 0x123456)
 	}
 }
@@ -2453,7 +2481,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["value"] != float64(-1) {
+	if mustNum(decoded["value"]) != float64(-1) {
 		t.Errorf("value = %v, want -1", decoded["value"])
 	}
 }
@@ -2484,13 +2512,13 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["max_u8"] != float64(255) {
+	if mustNum(decoded["max_u8"]) != float64(255) {
 		t.Errorf("max_u8 = %v, want 255", decoded["max_u8"])
 	}
-	if decoded["max_u16"] != float64(65535) {
+	if mustNum(decoded["max_u16"]) != float64(65535) {
 		t.Errorf("max_u16 = %v, want 65535", decoded["max_u16"])
 	}
-	if decoded["max_u32"] != float64(4294967295) {
+	if mustNum(decoded["max_u32"]) != float64(4294967295) {
 		t.Errorf("max_u32 = %v, want 4294967295", decoded["max_u32"])
 	}
 }
@@ -2518,10 +2546,10 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["min_s8"] != float64(-128) {
+	if mustNum(decoded["min_s8"]) != float64(-128) {
 		t.Errorf("min_s8 = %v, want -128", decoded["min_s8"])
 	}
-	if decoded["min_s16"] != float64(-32768) {
+	if mustNum(decoded["min_s16"]) != float64(-32768) {
 		t.Errorf("min_s16 = %v, want -32768", decoded["min_s16"])
 	}
 }
@@ -2547,13 +2575,13 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["a"] != float64(0) {
+	if mustNum(decoded["a"]) != float64(0) {
 		t.Errorf("a = %v, want 0", decoded["a"])
 	}
-	if decoded["b"] != float64(0) {
+	if mustNum(decoded["b"]) != float64(0) {
 		t.Errorf("b = %v, want 0", decoded["b"])
 	}
-	if decoded["c"] != float64(0) {
+	if mustNum(decoded["c"]) != float64(0) {
 		t.Errorf("c = %v, want 0", decoded["c"])
 	}
 }
@@ -2578,7 +2606,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if math.Abs(decoded["value"].(float64)-60.0) > 0.01 {
+	if math.Abs(mustNum(decoded["value"])-60.0) > 0.01 {
 		t.Errorf("value = %v, want 60.0", decoded["value"])
 	}
 }
@@ -2602,7 +2630,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["percentage"] != float64(50) {
+	if mustNum(decoded["percentage"]) != float64(50) {
 		t.Errorf("percentage = %v, want 50", decoded["percentage"])
 	}
 }
@@ -2723,7 +2751,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if math.Abs(decoded["temp"].(float64)-23.45) > 0.001 {
+	if math.Abs(mustNum(decoded["temp"])-23.45) > 0.001 {
 		t.Errorf("temp = %v, want 23.45", decoded["temp"])
 	}
 }
@@ -2747,7 +2775,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["temp"] != float64(60) {
+	if mustNum(decoded["temp"]) != float64(60) {
 		t.Errorf("temp = %v, want 60", decoded["temp"])
 	}
 }
@@ -2775,7 +2803,7 @@ fields:
 	}
 
 	// Value should be transformed
-	if _, ok := decoded["value"].(float64); !ok {
+	if _, ok := toFloat64(decoded["value"]); !ok {
 		t.Errorf("value should be float64")
 	}
 }
@@ -2801,7 +2829,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if math.Abs(decoded["celsius"].(float64)-25.0) > 0.01 {
+	if math.Abs(mustNum(decoded["celsius"])-25.0) > 0.01 {
 		t.Errorf("celsius = %v, want 25.0", decoded["celsius"])
 	}
 }
@@ -2825,7 +2853,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["value"] != float64(0x12345678) {
+	if mustNum(decoded["value"]) != float64(0x12345678) {
 		t.Errorf("value = %v, want %v", decoded["value"], 0x12345678)
 	}
 }
@@ -2852,10 +2880,10 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["big_val"] != float64(256) {
+	if mustNum(decoded["big_val"]) != float64(256) {
 		t.Errorf("big_val = %v, want 256", decoded["big_val"])
 	}
-	if decoded["little_val"] != float64(256) {
+	if mustNum(decoded["little_val"]) != float64(256) {
 		t.Errorf("little_val = %v, want 256", decoded["little_val"])
 	}
 }
@@ -2917,7 +2945,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["flags"] != float64(0xAB) {
+	if mustNum(decoded["flags"]) != float64(0xAB) {
 		t.Errorf("flags = %v, want %v", decoded["flags"], 0xAB)
 	}
 }
@@ -2947,13 +2975,13 @@ fields:
 	}
 
 	header := decoded["header"].(map[string]any)
-	if header["version"] != float64(1) {
+	if mustNum(header["version"]) != float64(1) {
 		t.Errorf("header.version = %v, want 1", header["version"])
 	}
-	if header["type"] != float64(2) {
+	if mustNum(header["type"]) != float64(2) {
 		t.Errorf("header.type = %v, want 2", header["type"])
 	}
-	if decoded["payload"] != float64(100) {
+	if mustNum(decoded["payload"]) != float64(100) {
 		t.Errorf("payload = %v, want 100", decoded["payload"])
 	}
 }
@@ -3012,7 +3040,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["count"] != float64(3) {
+	if mustNum(decoded["count"]) != float64(3) {
 		t.Errorf("count = %v, want 3", decoded["count"])
 	}
 
@@ -3054,7 +3082,7 @@ fields:
 	}
 
 	data := decoded["data"].(map[string]any)
-	if data["raw"] != float64(100) {
+	if mustNum(data["raw"]) != float64(100) {
 		t.Errorf("raw = %v, want 100", data["raw"])
 	}
 }
@@ -3078,7 +3106,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if math.Abs(decoded["value"].(float64)-1.0) > 0.001 {
+	if math.Abs(mustNum(decoded["value"])-1.0) > 0.001 {
 		t.Errorf("value = %v, want 1.0", decoded["value"])
 	}
 }
@@ -3133,13 +3161,13 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["nibble_low"] != float64(5) {
+	if mustNum(decoded["nibble_low"]) != float64(5) {
 		t.Errorf("nibble_low = %v, want 5", decoded["nibble_low"])
 	}
-	if decoded["bit4"] != float64(0) {
+	if mustNum(decoded["bit4"]) != float64(0) {
 		t.Errorf("bit4 = %v, want 0", decoded["bit4"])
 	}
-	if decoded["bits_567"] != float64(7) {
+	if mustNum(decoded["bits_567"]) != float64(7) {
 		t.Errorf("bits_567 = %v, want 7", decoded["bits_567"])
 	}
 }
@@ -3425,7 +3453,7 @@ fields:
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if decoded["start"] != float64(1) || decoded["end"] != float64(2) {
+	if mustNum(decoded["start"]) != float64(1) || mustNum(decoded["end"]) != float64(2) {
 		t.Errorf("roundtrip failed: %v", decoded)
 	}
 }
@@ -3576,7 +3604,7 @@ fields:
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if decoded["result"] != float64(1) {
+	if mustNum(decoded["result"]) != float64(1) {
 		t.Errorf("result = %v, want 1", decoded["result"])
 	}
 
@@ -3585,7 +3613,7 @@ fields:
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if decoded2["result"] != float64(0) {
+	if mustNum(decoded2["result"]) != float64(0) {
 		t.Errorf("result = %v, want 0", decoded2["result"])
 	}
 }
@@ -3611,7 +3639,7 @@ fields:
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if decoded["result"] != float64(1) {
+	if mustNum(decoded["result"]) != float64(1) {
 		t.Errorf("result = %v, want 1", decoded["result"])
 	}
 }
@@ -3636,7 +3664,7 @@ fields:
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if decoded["result"] != float64(1) {
+	if mustNum(decoded["result"]) != float64(1) {
 		t.Errorf("result = %v, want 1", decoded["result"])
 	}
 
@@ -3644,7 +3672,7 @@ fields:
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if decoded2["result"] != float64(0) {
+	if mustNum(decoded2["result"]) != float64(0) {
 		t.Errorf("result = %v, want 0", decoded2["result"])
 	}
 }
@@ -3669,7 +3697,7 @@ fields:
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if decoded["result"] != float64(1) {
+	if mustNum(decoded["result"]) != float64(1) {
 		t.Errorf("result = %v, want 1", decoded["result"])
 	}
 }
@@ -3698,7 +3726,7 @@ fields:
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if decoded["result"] != float64(1) {
+	if mustNum(decoded["result"]) != float64(1) {
 		t.Errorf("result = %v, want 1", decoded["result"])
 	}
 
@@ -3707,7 +3735,7 @@ fields:
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if decoded2["result"] != float64(0) {
+	if mustNum(decoded2["result"]) != float64(0) {
 		t.Errorf("result = %v, want 0", decoded2["result"])
 	}
 }
@@ -3732,7 +3760,7 @@ fields:
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if decoded["result"] != float64(-10) {
+	if mustNum(decoded["result"]) != float64(-10) {
 		t.Errorf("result = %v, want -10", decoded["result"])
 	}
 }
@@ -3757,7 +3785,7 @@ fields:
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if decoded["result"] != float64(5) {
+	if mustNum(decoded["result"]) != float64(5) {
 		t.Errorf("result = %v, want 5", decoded["result"])
 	}
 }
@@ -3783,7 +3811,7 @@ fields:
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if decoded["result"] != float64(0) {
+	if mustNum(decoded["result"]) != float64(0) {
 		t.Errorf("result = %v, want 0", decoded["result"])
 	}
 }
@@ -3824,7 +3852,7 @@ fields:
 			if err != nil {
 				t.Fatalf("Decode() error = %v", err)
 			}
-			if math.Abs(decoded["result"].(float64)-tt.want) > 0.001 {
+			if math.Abs(mustNum(decoded["result"])-tt.want) > 0.001 {
 				t.Errorf("result = %v, want %v", decoded["result"], tt.want)
 			}
 		})
@@ -4021,7 +4049,7 @@ fields:
 	if _, present := out["result"]; present {
 		t.Error("expected the computed field to be absent for a zero divisor")
 	}
-	if out["a"] != float64(10) && out["a"] != 10 {
+	if mustNum(out["a"]) != float64(10) && out["a"] != 10 {
 		t.Errorf("decoding should continue past the omitted field, got a = %v", out["a"])
 	}
 }
@@ -4092,7 +4120,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if math.Abs(decoded["value"].(float64)-1.0) > 0.001 {
+	if math.Abs(mustNum(decoded["value"])-1.0) > 0.001 {
 		t.Errorf("value = %v, want 1.0", decoded["value"])
 	}
 }
@@ -4116,7 +4144,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if math.Abs(decoded["value"].(float64)-1.0) > 0.001 {
+	if math.Abs(mustNum(decoded["value"])-1.0) > 0.001 {
 		t.Errorf("value = %v, want 1.0", decoded["value"])
 	}
 }
@@ -4139,7 +4167,7 @@ fields:
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if !math.IsInf(decoded["value"].(float64), 1) {
+	if !math.IsInf(mustNum(decoded["value"]), 1) {
 		t.Errorf("value = %v, want +Inf", decoded["value"])
 	}
 
@@ -4148,7 +4176,7 @@ fields:
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if !math.IsNaN(decoded2["value"].(float64)) {
+	if !math.IsNaN(mustNum(decoded2["value"])) {
 		t.Errorf("value = %v, want NaN", decoded2["value"])
 	}
 }
@@ -4176,7 +4204,7 @@ fields:
 	if len(arr) != 4 {
 		t.Errorf("array length = %d, want 4", len(arr))
 	}
-	if arr[0] != float64(1) {
+	if mustNum(arr[0]) != float64(1) {
 		t.Errorf("arr[0] = %v, want 1", arr[0])
 	}
 }
@@ -4207,7 +4235,7 @@ ports:
 	if err != nil {
 		t.Fatalf("DecodeWithPort(1) error = %v", err)
 	}
-	if math.Abs(decoded1["temp"].(float64)-23.1) > 0.01 {
+	if math.Abs(mustNum(decoded1["temp"])-23.1) > 0.01 {
 		t.Errorf("temp = %v, want 23.1", decoded1["temp"])
 	}
 
@@ -4216,7 +4244,7 @@ ports:
 	if err != nil {
 		t.Fatalf("DecodeWithPort(2) error = %v", err)
 	}
-	if decoded2["humidity"] != float64(50) {
+	if mustNum(decoded2["humidity"]) != float64(50) {
 		t.Errorf("humidity = %v, want 50", decoded2["humidity"])
 	}
 }
@@ -4315,7 +4343,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 	cat := decoded["category"].(map[string]any)
-	if cat["label"] != float64(1) {
+	if mustNum(cat["label"]) != float64(1) {
 		t.Errorf("label = %v, want 1", cat["label"])
 	}
 
@@ -4325,7 +4353,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 	cat2 := decoded2["category"].(map[string]any)
-	if cat2["label"] != float64(2) {
+	if mustNum(cat2["label"]) != float64(2) {
 		t.Errorf("label = %v, want 2", cat2["label"])
 	}
 }
@@ -4361,7 +4389,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 	result := decoded["result"].(map[string]any)
-	if result["group"] != float64(10) {
+	if mustNum(result["group"]) != float64(10) {
 		t.Errorf("group = %v, want 10", result["group"])
 	}
 }
@@ -4588,10 +4616,10 @@ fields:
 	}
 
 	// Verify values (field names are auto-generated: field_0, field_1)
-	if math.Abs(decoded["field_0"].(float64)-23.1) > 0.01 {
+	if math.Abs(mustNum(decoded["field_0"])-23.1) > 0.01 {
 		t.Errorf("field_0 = %v, want 23.1", decoded["field_0"])
 	}
-	if decoded["field_1"] != float64(50) {
+	if mustNum(decoded["field_1"]) != float64(50) {
 		t.Errorf("field_1 = %v, want 50", decoded["field_1"])
 	}
 }
@@ -4636,10 +4664,10 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["tag"] != float64(1) {
+	if mustNum(decoded["tag"]) != float64(1) {
 		t.Errorf("tag = %v, want 1", decoded["tag"])
 	}
-	if decoded["len"] != float64(2) {
+	if mustNum(decoded["len"]) != float64(2) {
 		t.Errorf("len = %v, want 2", decoded["len"])
 	}
 }
@@ -4675,7 +4703,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["result"] != float64(30) {
+	if mustNum(decoded["result"]) != float64(30) {
 		t.Errorf("result = %v, want 30", decoded["result"])
 	}
 }
@@ -4707,7 +4735,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["result"] != float64(30) {
+	if mustNum(decoded["result"]) != float64(30) {
 		t.Errorf("result = %v, want 30", decoded["result"])
 	}
 }
@@ -4739,7 +4767,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["result"] != float64(30) {
+	if mustNum(decoded["result"]) != float64(30) {
 		t.Errorf("result = %v, want 30", decoded["result"])
 	}
 }
@@ -4771,7 +4799,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["result"] != float64(30) {
+	if mustNum(decoded["result"]) != float64(30) {
 		t.Errorf("result = %v, want 30", decoded["result"])
 	}
 }
@@ -4886,7 +4914,7 @@ func TestParseSchemaJSONFormat(t *testing.T) {
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["value"] != float64(42) {
+	if mustNum(decoded["value"]) != float64(42) {
 		t.Errorf("value = %v, want 42", decoded["value"])
 	}
 }
@@ -4931,7 +4959,7 @@ fields:
 	}
 
 	// Big endian: 0x12345678
-	if decoded["value"] != float64(0x12345678) {
+	if mustNum(decoded["value"]) != float64(0x12345678) {
 		t.Errorf("value = %v, want %v", decoded["value"], 0x12345678)
 	}
 }
@@ -4954,7 +4982,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["value"] != float64(-1) {
+	if mustNum(decoded["value"]) != float64(-1) {
 		t.Errorf("value = %v, want -1", decoded["value"])
 	}
 }
@@ -4980,7 +5008,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["value"] != float64(256) {
+	if mustNum(decoded["value"]) != float64(256) {
 		t.Errorf("value = %v, want 256", decoded["value"])
 	}
 }
@@ -5004,7 +5032,7 @@ fields:
 	}
 
 	// 1024 + (-1000) = 24
-	if decoded["value"] != float64(24) {
+	if mustNum(decoded["value"]) != float64(24) {
 		t.Errorf("value = %v, want 24", decoded["value"])
 	}
 }
@@ -5087,7 +5115,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if math.Abs(decoded["temp"].(float64)-23.1) > 0.01 {
+	if math.Abs(mustNum(decoded["temp"])-23.1) > 0.01 {
 		t.Errorf("temp = %v, want 23.1", decoded["temp"])
 	}
 }
@@ -5110,7 +5138,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["value"] != float64(10) {
+	if mustNum(decoded["value"]) != float64(10) {
 		t.Errorf("value = %v, want 10", decoded["value"])
 	}
 }
@@ -5140,7 +5168,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["result"] != float64(15) {
+	if mustNum(decoded["result"]) != float64(15) {
 		t.Errorf("result = %v, want 15", decoded["result"])
 	}
 }
@@ -5169,7 +5197,7 @@ fields:
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if decoded["result"] != float64(1) {
+	if mustNum(decoded["result"]) != float64(1) {
 		t.Errorf("result = %v, want 1", decoded["result"])
 	}
 
@@ -5178,7 +5206,7 @@ fields:
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if decoded2["result"] != float64(0) {
+	if mustNum(decoded2["result"]) != float64(0) {
 		t.Errorf("result = %v, want 0", decoded2["result"])
 	}
 }
@@ -5204,7 +5232,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["result"] != float64(20) {
+	if mustNum(decoded["result"]) != float64(20) {
 		t.Errorf("result = %v, want 20", decoded["result"])
 	}
 }
@@ -5229,7 +5257,7 @@ fields:
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if decoded["result"] != float64(1) {
+	if mustNum(decoded["result"]) != float64(1) {
 		t.Errorf("result = %v, want 1", decoded["result"])
 	}
 }
@@ -5254,7 +5282,7 @@ fields:
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if decoded["result"] != float64(1) {
+	if mustNum(decoded["result"]) != float64(1) {
 		t.Errorf("result = %v, want 1", decoded["result"])
 	}
 }
@@ -5282,7 +5310,7 @@ fields:
 	}
 
 	// Big endian: 0x0102 = 258
-	if decoded["value"] != float64(258) {
+	if mustNum(decoded["value"]) != float64(258) {
 		t.Errorf("value = %v, want 258", decoded["value"])
 	}
 }
@@ -5387,7 +5415,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["value"] != float64(-1) {
+	if mustNum(decoded["value"]) != float64(-1) {
 		t.Errorf("value = %v, want -1", decoded["value"])
 	}
 }
@@ -5410,7 +5438,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["value"] != float64(-1) {
+	if mustNum(decoded["value"]) != float64(-1) {
 		t.Errorf("value = %v, want -1", decoded["value"])
 	}
 }
@@ -5562,7 +5590,7 @@ fields:
 	}
 
 	// ref field just copies the value
-	if decoded["scaled"] != float64(231) {
+	if mustNum(decoded["scaled"]) != float64(231) {
 		t.Errorf("scaled = %v, want 231", decoded["scaled"])
 	}
 }
@@ -5586,7 +5614,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if math.Abs(decoded["value"].(float64)-1.0) > 0.001 {
+	if math.Abs(mustNum(decoded["value"])-1.0) > 0.001 {
 		t.Errorf("value = %v, want 1.0", decoded["value"])
 	}
 }
@@ -5608,7 +5636,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["value"] != float64(0x123456) {
+	if mustNum(decoded["value"]) != float64(0x123456) {
 		t.Errorf("value = %v, want %v", decoded["value"], 0x123456)
 	}
 }
@@ -5631,7 +5659,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["value"] != float64(-1) {
+	if mustNum(decoded["value"]) != float64(-1) {
 		t.Errorf("value = %v, want -1", decoded["value"])
 	}
 }
@@ -5662,12 +5690,12 @@ fields:
 	}
 
 	// temp = 231 * 0.1 = 23.1
-	if math.Abs(decoded["temp"].(float64)-23.1) > 0.01 {
+	if math.Abs(mustNum(decoded["temp"])-23.1) > 0.01 {
 		t.Errorf("temp = %v, want 23.1", decoded["temp"])
 	}
 
 	// humidity = 100 * 0.5 = 50
-	if decoded["humidity"] != float64(50) {
+	if mustNum(decoded["humidity"]) != float64(50) {
 		t.Errorf("humidity = %v, want 50", decoded["humidity"])
 	}
 }
@@ -5741,7 +5769,7 @@ fields:
 
 	outer := decoded["outer"].(map[string]any)
 	inner := outer["inner"].(map[string]any)
-	if inner["b"] != float64(0x1234) {
+	if mustNum(inner["b"]) != float64(0x1234) {
 		t.Errorf("inner.b = %v, want 0x1234", inner["b"])
 	}
 }
@@ -5768,7 +5796,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["result"] != float64(0) {
+	if mustNum(decoded["result"]) != float64(0) {
 		t.Errorf("result = %v, want 0", decoded["result"])
 	}
 }
@@ -5795,7 +5823,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["result"] != float64(30) {
+	if mustNum(decoded["result"]) != float64(30) {
 		t.Errorf("result = %v, want 30", decoded["result"])
 	}
 }
@@ -5871,7 +5899,7 @@ fields:
 	}
 
 	// Should be a very small positive value
-	if decoded["value"].(float64) <= 0 {
+	if mustNum(decoded["value"]) <= 0 {
 		t.Errorf("value = %v, want > 0", decoded["value"])
 	}
 }
@@ -5897,7 +5925,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if math.Abs(decoded["raw"].(float64)-23.1) > 0.01 {
+	if math.Abs(mustNum(decoded["raw"])-23.1) > 0.01 {
 		t.Errorf("raw = %v, want 23.1", decoded["raw"])
 	}
 }
@@ -6090,7 +6118,7 @@ ports:
 	if err != nil {
 		t.Fatalf("DecodeWithPort() error = %v", err)
 	}
-	if decoded1["temp"] != float64(50) {
+	if mustNum(decoded1["temp"]) != float64(50) {
 		t.Errorf("temp = %v, want 50", decoded1["temp"])
 	}
 
@@ -6099,7 +6127,7 @@ ports:
 	if err != nil {
 		t.Fatalf("DecodeWithPort() error = %v", err)
 	}
-	if decoded2["command"] != float64(1) {
+	if mustNum(decoded2["command"]) != float64(1) {
 		t.Errorf("command = %v, want 1", decoded2["command"])
 	}
 }
@@ -6125,12 +6153,12 @@ fields:
 	}
 
 	// Big endian: 0x0102
-	if decoded["be_value"] != float64(0x0102) {
+	if mustNum(decoded["be_value"]) != float64(0x0102) {
 		t.Errorf("be_value = %v, want %v", decoded["be_value"], 0x0102)
 	}
 
 	// Little endian: 0x0403
-	if decoded["le_value"] != float64(0x0403) {
+	if mustNum(decoded["le_value"]) != float64(0x0403) {
 		t.Errorf("le_value = %v, want %v", decoded["le_value"], 0x0403)
 	}
 }
@@ -6155,7 +6183,7 @@ ports:
 		t.Fatalf("DecodeWithPort() error = %v", err)
 	}
 
-	if decoded["value"] != float64(0x42) {
+	if mustNum(decoded["value"]) != float64(0x42) {
 		t.Errorf("value = %v, want %v", decoded["value"], 0x42)
 	}
 }
@@ -6181,7 +6209,7 @@ ports:
 		t.Fatalf("DecodeWithPort() error = %v", err)
 	}
 
-	if decoded["data"] != float64(0x1234) {
+	if mustNum(decoded["data"]) != float64(0x1234) {
 		t.Errorf("data = %v, want %v", decoded["data"], 0x1234)
 	}
 }
@@ -6300,7 +6328,7 @@ fields:
 	}
 
 	// Should return raw value when not found
-	if decoded["mode"] != float64(99) {
+	if mustNum(decoded["mode"]) != float64(99) {
 		t.Errorf("mode = %v, want 99", decoded["mode"])
 	}
 }
@@ -6334,10 +6362,10 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["high_byte"] != float64(0x12) {
+	if mustNum(decoded["high_byte"]) != float64(0x12) {
 		t.Errorf("high_byte = %v, want 0x12", decoded["high_byte"])
 	}
-	if decoded["low_byte"] != float64(0x34) {
+	if mustNum(decoded["low_byte"]) != float64(0x34) {
 		t.Errorf("low_byte = %v, want 0x34", decoded["low_byte"])
 	}
 }
@@ -6395,13 +6423,13 @@ fields:
 	}
 
 	header := decoded["header"].(map[string]any)
-	if header["version"] != float64(1) {
+	if mustNum(header["version"]) != float64(1) {
 		t.Errorf("header.version = %v, want 1", header["version"])
 	}
-	if header["flags"] != float64(0xFF) {
+	if mustNum(header["flags"]) != float64(0xFF) {
 		t.Errorf("header.flags = %v, want 0xFF", header["flags"])
 	}
-	if decoded["data"] != float64(0x1234) {
+	if mustNum(decoded["data"]) != float64(0x1234) {
 		t.Errorf("data = %v, want 0x1234", decoded["data"])
 	}
 }
@@ -6520,7 +6548,7 @@ fields:
 	}
 
 	data := decoded["data"].(map[string]any)
-	if data["a"] != float64(0x42) {
+	if mustNum(data["a"]) != float64(0x42) {
 		t.Errorf("a = %v, want 0x42", data["a"])
 	}
 }
@@ -6759,7 +6787,7 @@ fields:
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if decoded["result"] != float64(60) {
+	if mustNum(decoded["result"]) != float64(60) {
 		t.Errorf("result = %v, want 60", decoded["result"])
 	}
 
@@ -6767,7 +6795,7 @@ fields:
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	if decoded2["result"] != float64(-1) {
+	if mustNum(decoded2["result"]) != float64(-1) {
 		t.Errorf("result = %v, want -1", decoded2["result"])
 	}
 }
@@ -6855,10 +6883,10 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["tag"] != float64(1) {
+	if mustNum(decoded["tag"]) != float64(1) {
 		t.Errorf("tag = %v, want 1", decoded["tag"])
 	}
-	if decoded["len"] != float64(3) {
+	if mustNum(decoded["len"]) != float64(3) {
 		t.Errorf("len = %v, want 3", decoded["len"])
 	}
 }
@@ -6922,7 +6950,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["len"] != float64(3) {
+	if mustNum(decoded["len"]) != float64(3) {
 		t.Errorf("len = %v, want 3", decoded["len"])
 	}
 }
@@ -6966,7 +6994,7 @@ fields:
 		t.Fatal("expected data to be present")
 	}
 	data1 := decoded1["data"].(map[string]any)
-	if math.Abs(data1["temp"].(float64)-23.1) > 0.01 {
+	if math.Abs(mustNum(data1["temp"])-23.1) > 0.01 {
 		t.Errorf("temp = %v, want 23.1", data1["temp"])
 	}
 
@@ -6976,7 +7004,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 	data2 := decoded2["data"].(map[string]any)
-	if data2["humidity"] != float64(50) {
+	if mustNum(data2["humidity"]) != float64(50) {
 		t.Errorf("humidity = %v, want 50", data2["humidity"])
 	}
 }
@@ -7006,10 +7034,10 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if decoded["type"] != float64(0x0100) {
+	if mustNum(decoded["type"]) != float64(0x0100) {
 		t.Errorf("type = %v, want 256", decoded["type"])
 	}
-	if decoded["length"] != float64(4) {
+	if mustNum(decoded["length"]) != float64(4) {
 		t.Errorf("length = %v, want 4", decoded["length"])
 	}
 }
@@ -7049,7 +7077,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 	pt := decoded["payload_type"].(map[string]any)
-	if pt["short_data"] != float64(0x42) {
+	if mustNum(pt["short_data"]) != float64(0x42) {
 		t.Errorf("short_data = %v, want 0x42", pt["short_data"])
 	}
 }
@@ -7290,7 +7318,7 @@ fields:
 	}
 
 	// Undefined var should default to 0, so result is 0 + 1 = 1
-	if result["x"] != float64(1) {
+	if mustNum(result["x"]) != float64(1) {
 		t.Errorf("x = %v, want 1", result["x"])
 	}
 }
@@ -7340,7 +7368,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	x := result["x"].(float64)
+	x := mustNum(result["x"])
 	if x > -0.05 || x < -0.15 {
 		t.Errorf("x = %v, want approximately -0.1", x)
 	}
@@ -7438,7 +7466,7 @@ fields:
 	}
 
 	// $x is 0 before assignment, so result should be 0 + 1 = 1
-	if result["x"] != float64(1) {
+	if mustNum(result["x"]) != float64(1) {
 		t.Errorf("x = %v, want 1", result["x"])
 	}
 }
@@ -7501,7 +7529,7 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	x := result["x"].(float64)
+	x := mustNum(result["x"])
 	if x <= 0 {
 		t.Errorf("x = %v, want positive large number", x)
 	}
@@ -7792,7 +7820,7 @@ fields:
 		t.Fatalf("Decode error: %v", err)
 	}
 
-	temp, ok := result["temperature"].(float64)
+	temp, ok := toFloat64(result["temperature"])
 	if !ok {
 		t.Fatalf("temperature not float64: %T", result["temperature"])
 	}
@@ -7829,7 +7857,7 @@ fields:
 		t.Fatalf("Decode error: %v", err)
 	}
 
-	temp, ok := result["temperature"].(float64)
+	temp, ok := toFloat64(result["temperature"])
 	if !ok {
 		t.Fatalf("temperature not float64: %T", result["temperature"])
 	}

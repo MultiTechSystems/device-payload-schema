@@ -228,6 +228,8 @@ public class PayloadSchemaDefinition
     public int Version { get; set; }
     public string? Description { get; set; }
     public string Endian { get; set; } = "big";
+    /// <summary>Applies to the whole schema where it has no Ports (PS-291).</summary>
+    public string? Direction { get; set; }
     public List<SchemaField> Fields { get; set; } = new();
     public Dictionary<string, PortDef>? Ports { get; set; }
     public Dictionary<string, DefinitionDef>? Definitions { get; set; }

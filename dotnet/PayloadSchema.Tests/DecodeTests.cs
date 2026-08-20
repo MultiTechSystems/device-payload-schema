@@ -57,8 +57,8 @@ fields:
     type: u8
 ");
         var result = SchemaDecoder.Decode(schema, new byte[] { 0x01, 0xF4, 0x32 });
-        Assert.Equal(500.0, result["temperature"]);
-        Assert.Equal(50.0, result["humidity"]);
+        Assert.Equal(500.0, Decoded.Num(result["temperature"]));
+        Assert.Equal(50.0, Decoded.Num(result["humidity"]));
     }
 
     [Fact]
@@ -72,7 +72,7 @@ fields:
     type: u16
 ");
         var result = SchemaDecoder.Decode(schema, new byte[] { 0xF4, 0x01 });
-        Assert.Equal(500.0, result["value"]);
+        Assert.Equal(500.0, Decoded.Num(result["value"]));
     }
 
     [Fact]
@@ -87,7 +87,7 @@ fields:
 ");
         // -100 in big-endian s16: 0xFF9C
         var result = SchemaDecoder.Decode(schema, new byte[] { 0xFF, 0x9C });
-        Assert.Equal(-100.0, result["temp"]);
+        Assert.Equal(-100.0, Decoded.Num(result["temp"]));
     }
 
     [Fact]
@@ -101,7 +101,7 @@ fields:
     type: u24
 ");
         var result = SchemaDecoder.Decode(schema, new byte[] { 0x01, 0x00, 0x00 });
-        Assert.Equal(65536.0, result["val"]);
+        Assert.Equal(65536.0, Decoded.Num(result["val"]));
     }
 
     [Fact]
@@ -208,7 +208,7 @@ fields:
     type: u8
 ");
         var result = SchemaDecoder.Decode(schema, new byte[] { 0x00, 0x00, 0x42 });
-        Assert.Equal(66.0, result["value"]);
+        Assert.Equal(66.0, Decoded.Num(result["value"]));
         Assert.False(result.ContainsKey("_pad"));
     }
 
@@ -225,8 +225,8 @@ fields:
     type: be_u16
 ");
         var result = SchemaDecoder.Decode(schema, new byte[] { 0xF4, 0x01, 0x01, 0xF4 });
-        Assert.Equal(500.0, result["le_val"]);
-        Assert.Equal(500.0, result["be_val"]);
+        Assert.Equal(500.0, Decoded.Num(result["le_val"]));
+        Assert.Equal(500.0, Decoded.Num(result["be_val"]));
     }
 }
 
@@ -345,8 +345,8 @@ fields:
 ");
         // msg_type=1, temp=-10 (0xFFF6)
         var result = SchemaDecoder.Decode(schema, new byte[] { 0x01, 0xFF, 0xF6 });
-        Assert.Equal(1.0, result["msg_type"]);
-        Assert.Equal(-10.0, result["temperature"]);
+        Assert.Equal(1.0, Decoded.Num(result["msg_type"]));
+        Assert.Equal(-10.0, Decoded.Num(result["temperature"]));
         Assert.False(result.ContainsKey("humidity"));
     }
 
@@ -373,9 +373,9 @@ fields:
 ");
         // flags=0x03 (both bits set), temp=250, hum=65
         var result = SchemaDecoder.Decode(schema, new byte[] { 0x03, 0x00, 0xFA, 0x41 });
-        Assert.Equal(3.0, result["flags"]);
-        Assert.Equal(250.0, result["temperature"]);
-        Assert.Equal(65.0, result["humidity"]);
+        Assert.Equal(3.0, Decoded.Num(result["flags"]));
+        Assert.Equal(250.0, Decoded.Num(result["temperature"]));
+        Assert.Equal(65.0, Decoded.Num(result["humidity"]));
     }
 
     [Fact]
@@ -401,9 +401,9 @@ fields:
 ");
         // flags=0x02 (only bit 1), hum=65
         var result = SchemaDecoder.Decode(schema, new byte[] { 0x02, 0x41 });
-        Assert.Equal(2.0, result["flags"]);
+        Assert.Equal(2.0, Decoded.Num(result["flags"]));
         Assert.False(result.ContainsKey("temperature"));
-        Assert.Equal(65.0, result["humidity"]);
+        Assert.Equal(65.0, Decoded.Num(result["humidity"]));
     }
 }
 
@@ -427,7 +427,7 @@ fields:
         var readings = (List<object?>)result["readings"]!;
         Assert.Equal(3, readings.Count);
         var r0 = (Dictionary<string, object?>)readings[0]!;
-        Assert.Equal(1.0, r0["value"]);
+        Assert.Equal(1.0, Decoded.Num(r0["value"]));
     }
 
     [Fact]
@@ -622,9 +622,9 @@ ports:
         type: u8
 ");
         var r1 = SchemaDecoder.DecodeWithPort(schema, new byte[] { 0x00, 0xE7 }, 1);
-        Assert.Equal(231.0, r1["temperature"]);
+        Assert.Equal(231.0, Decoded.Num(r1["temperature"]));
 
         var r2 = SchemaDecoder.DecodeWithPort(schema, new byte[] { 0x64 }, 2);
-        Assert.Equal(100.0, r2["battery"]);
+        Assert.Equal(100.0, Decoded.Num(r2["battery"]));
     }
 }

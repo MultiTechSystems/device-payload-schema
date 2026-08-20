@@ -63,6 +63,16 @@ _COLON_STRING_TYPES = frozenset({'hex:upper'})
 OMITTED = object()
 
 
+#: Directions a message can be travelling, as supplied to ``decode`` (PS-290).
+MESSAGE_DIRECTIONS = frozenset({'uplink', 'downlink'})
+
+#: Values `direction` may take on a schema or a port entry (PS-287). An entry declaring
+#: `both`, or declaring nothing, accepts either direction. `bidirectional` appeared in a
+#: clause 5 example and is not one of them; CR-2026-010 withdrew that spelling so that a
+#: schema carrying it surfaces rather than being read as `both`.
+DECLARED_DIRECTIONS = frozenset({'uplink', 'downlink', 'both'})
+
+
 #: Byte width and signedness of every integer type spelling, including aliases. Lifted
 #: out of _encode_field so the TLV case ranking can ask whether a value fits a field
 #: before believing that field wrote it.
@@ -477,49 +487,81 @@ class SchemaInterpreter:
         
         return fields, endian_override
     
-    def _resolve_fields(self, fPort: int = None) -> list:
-        """Resolve fields for a given fPort (port-based schema selection)."""
+    def _select_port_entry(self, fPort: int = None) -> Tuple[Optional[Dict[str, Any]], str]:
+        """The `ports` entry a decode of `fPort` uses, with a label naming it.
+
+        Returns ``(None, label)`` where the schema has no `ports` and the top-level
+        `fields` apply. The label names the entry for diagnostics, and distinguishes a
+        matched port from the `default` entry standing in for one, because saying
+        "fPort 42" of a payload the default entry accepted describes the wrong thing.
+
+        The direction check (PS-289) reads the entry this returns, so that the direction
+        verified and the fields decoded always come from the same entry.
+        """
         ports = self.schema.get('ports')
         if not ports:
-            fields = self.schema.get('fields', [])
-            # Handle compact format string
-            if isinstance(fields, str):
-                parsed_fields, endian_override = self._parse_compact_format(fields)
-                if endian_override:
-                    self.endian = endian_override
-                return parsed_fields
-            return fields
-        
+            return None, f"schema '{self.name}'"
+
         if fPort is not None:
             port_key = str(fPort)
             if port_key in ports:
-                fields = ports[port_key].get('fields', [])
-                if isinstance(fields, str):
-                    parsed_fields, endian_override = self._parse_compact_format(fields)
-                    if endian_override:
-                        self.endian = endian_override
-                    return parsed_fields
-                return fields
+                return ports[port_key], f'fPort {fPort}'
             # Try int key (YAML may parse as int)
             if fPort in ports:
-                fields = ports[fPort].get('fields', [])
-                if isinstance(fields, str):
-                    parsed_fields, endian_override = self._parse_compact_format(fields)
-                    if endian_override:
-                        self.endian = endian_override
-                    return parsed_fields
-                return fields
-        
+                return ports[fPort], f'fPort {fPort}'
+
         if 'default' in ports:
-            fields = ports['default'].get('fields', [])
-            if isinstance(fields, str):
-                parsed_fields, endian_override = self._parse_compact_format(fields)
-                if endian_override:
-                    self.endian = endian_override
-                return parsed_fields
-            return fields
-        
+            return ports['default'], 'the default port entry'
+
         raise ValueError(f"No port definition for fPort {fPort} and no default in schema '{self.name}'")
+
+    def _resolve_fields(self, fPort: int = None) -> list:
+        """Resolve fields for a given fPort (port-based schema selection)."""
+        entry, _ = self._select_port_entry(fPort)
+        fields = self.schema.get('fields', []) if entry is None else entry.get('fields', [])
+
+        # Handle compact format string
+        if isinstance(fields, str):
+            parsed_fields, endian_override = self._parse_compact_format(fields)
+            if endian_override:
+                self.endian = endian_override
+            return parsed_fields
+        return fields
+
+    def _direction_error(self, fPort: int = None, direction: str = None) -> Optional[str]:
+        """The PS-288 error for decoding a `direction` message here, or None to proceed.
+
+        None means no check applies: the caller did not state the direction (PS-290), or
+        the selected entry declares `both`, or it declares nothing, which PS-287 reads as
+        `both`. A declaration is a statement about which way traffic on that entry runs,
+        so a message travelling the other way does not match the schema.
+
+        The check reads the raw declaration rather than ``self.direction``, which defaults
+        to 'uplink' for reporting. Enforcing that default would make every unannotated
+        single-port schema reject downlinks, narrowing schemas already written -
+        CR-2026-010 rejects that reading and keeps the annotation opt-in.
+        """
+        if direction is None:
+            return None
+        if direction not in MESSAGE_DIRECTIONS:
+            raise ValueError(
+                f"unknown message direction {direction!r}; "
+                f"expected one of {', '.join(sorted(MESSAGE_DIRECTIONS))}"
+            )
+
+        entry, label = self._select_port_entry(fPort)
+        declared = self.schema.get('direction') if entry is None else entry.get('direction')
+
+        if declared is None:
+            return None
+        if declared not in DECLARED_DIRECTIONS:
+            return (
+                f"{label} declares unknown direction {declared!r}; "
+                f"expected {', '.join(sorted(DECLARED_DIRECTIONS))}"
+            )
+        if declared in ('both', direction):
+            return None
+        return f'{label} is declared direction:{declared}; message direction is {direction}'
     
     def _resolve_ref(self, ref: str) -> Dict[str, Any]:
         """
@@ -2034,7 +2076,8 @@ class SchemaInterpreter:
         
         return value
     
-    def decode(self, payload: bytes, fPort: int = None, input_metadata: Dict[str, Any] = None) -> DecodeResult:
+    def decode(self, payload: bytes, fPort: int = None, input_metadata: Dict[str, Any] = None,
+               direction: str = None) -> DecodeResult:
         """
         Decode payload bytes using schema.
         
@@ -2042,11 +2085,24 @@ class SchemaInterpreter:
             payload: Raw payload bytes
             fPort: LoRaWAN fPort (for port-based schema selection)
             input_metadata: Optional TS013 input metadata (recvTime, rxMetadata, etc.)
+            direction: Direction the message was travelling, 'uplink' or 'downlink'.
+                Omit where the caller cannot know it, such as a schema-authoring tool
+                decoding a captured payload; the check is then skipped and PS-021 is
+                not satisfied (PS-290).
             
         Returns:
             DecodeResult with decoded data
         """
         result = DecodeResult(data={}, bytes_consumed=0)
+
+        # PS-021: a message travelling the way the selected entry says it does not is
+        # not decoded at all. Uplink bytes read through downlink field definitions
+        # produce numbers with no relationship to what the device measured, and nothing
+        # in the output would mark them as such, so no field is reported (PS-288).
+        direction_error = self._direction_error(fPort, direction)
+        if direction_error:
+            result.errors.append(direction_error)
+            return result
 
         # Track current data for match references
         self._current_data = result.data
@@ -2375,18 +2431,32 @@ class SchemaInterpreter:
                     except Exception:
                         pass
     
-    def encode(self, data: Dict[str, Any], fPort: int = None) -> EncodeResult:
+    def encode(self, data: Dict[str, Any], fPort: int = None,
+               direction: str = None) -> EncodeResult:
         """
         Encode data dict to payload bytes using schema.
         
         Args:
             data: Dictionary of field values
             fPort: Optional LoRaWAN fPort for port-based schema selection
+            direction: Direction the message will travel, 'uplink' or 'downlink'.
+                Omit where the caller cannot know it; the check is then skipped and
+                PS-292 is not satisfied.
             
         Returns:
             EncodeResult with encoded payload
         """
         result = EncodeResult(payload=b'')
+
+        # PS-292, the mirror of the decode check: encoding for an entry that disclaims
+        # this direction produces bytes the far end will read against different field
+        # definitions. Emitting them would put a malformed frame on the air, so nothing
+        # is encoded.
+        direction_error = self._direction_error(fPort, direction)
+        if direction_error:
+            result.errors.append(direction_error)
+            return result
+
         output = bytearray()
         
         fields = self._resolve_fields(fPort)

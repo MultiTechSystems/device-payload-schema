@@ -30,6 +30,8 @@ public static class SchemaParser
             schema.Endian = Scalar(endian);
         if (string.IsNullOrEmpty(schema.Endian))
             schema.Endian = "big";
+        if (root.TryGetValue("direction", out var direction))
+            schema.Direction = Scalar(direction);
 
         // No `header:` block. It was never in the specification, and honouring it
         // here while Python and Go ignored it meant the same schema decoded
