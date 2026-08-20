@@ -20,22 +20,8 @@ fields:
             # low word first, so those four bytes are not a big-endian u32 and
             # cannot be read as one field. Reading only the low word also left the
             # high word unconsumed, misaligning every group after it.
-            - name: _dendrometer_position_low
-              type: u16
-            - name: _dendrometer_position_high
-              type: u16
-            - name: _dendrometer_position_high_scaled
-              type: number
-              compute:
-                op: mul
-                a: $_dendrometer_position_high
-                b: 65536
             - name: dendrometer_position
-              type: number
-              compute:
-                op: add
-                a: $_dendrometer_position_low
-                b: $_dendrometer_position_high_scaled
+              type: u32le16
               transform:
                 - mult: 0.002384185791015625
                 - add: -20000
@@ -46,3 +32,20 @@ fields:
               type: u16
               div: 1000
               unit: "V"
+
+test_vectors:
+  # The word-ordered field's bytes are the vendor-documented pair from
+  # CR-2026-005: words a9fd 0134, which the device reports as 20228605 and a
+  # big-endian u32 misreads as 2851930420 (PS-271). The other fields carry chosen
+  # bytes and their expectations come from decoding, so the provenance is
+  # `generated`: this pins the word-ordered read and the agreement between the
+  # five implementations, not the vendor's own values.
+  - name: word_ordered_sensor_id
+    description: "Group with the word-ordered identifier enabled"
+    source: generated
+    payload: "0230c50001a9fd0134"
+    expected:
+      protocol_version: 2
+      device_id: 12485
+      flags: 1
+      dendrometer_position: 28228.752613067627

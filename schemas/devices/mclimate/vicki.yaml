@@ -508,3 +508,38 @@ test_vectors:
       antiFreezeProtection: 0
       valveOpenness: 72
       targetTemperatureFloat: 21.0
+
+  # Encode vector: the same bytes built from the values, verified
+  # against the interpreter's encoder and this schema's generated
+  # codec, which agree on them (PS-047).
+  - name: encode_keepalive_standard
+    description: "Encode the values decoded from keepalive_standard"
+    direction: downlink
+    source: generated
+    input:
+      reason: 1
+      targetTemperature: 21
+      sensorTemperatureRaw: 96
+      sensorTemperature: 21.88
+      relativeHumidityRaw: 128
+      relativeHumidity: 50
+      motorPositionLow: 32
+      motorRangeLow: 0
+      motorPositionHigh: 1
+      motorRangeHigh: 4
+      batteryLevel: 10
+      openWindow: 0
+      highMotorConsumption: 1
+      lowMotorConsumption: 0
+      brokenSensor: 0
+      childLock: 1
+      calibrationFailed: 0
+      attachedBackplate: 0
+      perceiveAsOnline: 1
+      antiFreezeProtection: 0
+      batteryVoltage: 3
+      motorRange: 1024
+      motorPosition: 288
+      valveOpenness: 72
+      targetTemperatureFloat: 21
+    expected_payload: "01156080200014a490"

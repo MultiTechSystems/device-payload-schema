@@ -43,6 +43,7 @@ def type_size(t: str) -> Optional[int]:
         'u16': 2, 's16': 2, 'i16': 2, 'uint16': 2, 'int16': 2,
         'u24': 3, 's24': 3, 'i24': 3,
         'u32': 4, 's32': 4, 'i32': 4, 'uint32': 4, 'int32': 4,
+        'u32le16': 4, 's32le16': 4,
         'u64': 8, 's64': 8, 'i64': 8, 'uint64': 8, 'int64': 8,
         'f16': 2, 'f32': 4, 'f64': 8,
     }
@@ -70,6 +71,11 @@ def parse_bit_slice_type(t: str) -> Optional[Tuple[str, int, int]]:
         return base_t, lo, (hi - lo + 1)
 
     return None
+
+
+def is_word_ordered(t: str) -> bool:
+    """Whether the type carries its 32 bits as two 16-bit units, low unit first."""
+    return t in ('u32le16', 's32le16')
 
 
 def is_signed(t: str) -> bool:
@@ -519,6 +525,19 @@ function readU(buf, pos, size, endian) {
   return v;
 }
 
+/* Two 16-bit big-endian units, least significant unit first (PS-271). The type fixes
+ * both orders, so the endian argument is deliberately absent (PS-272). */
+function readU32LE16(buf, pos) {
+  var low = ((buf[pos] || 0) << 8) | (buf[pos + 1] || 0);
+  var high = ((buf[pos + 2] || 0) << 8) | (buf[pos + 3] || 0);
+  return low + high * 65536;
+}
+
+function readS32LE16(buf, pos) {
+  var v = readU32LE16(buf, pos);
+  return v >= 2147483648 ? v - 4294967296 : v;
+}
+
 function readS(buf, pos, size, endian) {
   if (size >= 7) {
     var bytes = orderedBytes(buf, pos, size, endian);
@@ -571,6 +590,19 @@ function writeU(buf, pos, size, value, endian) {
   } else {
     for (var i = 0; i < size; i++) { buf[pos + i] = value & 0xFF; value = (value >>> 8); }
   }
+}
+
+/* The inverse of readU32LE16: low 16-bit unit first, each unit big-endian (PS-271). */
+function writeU32LE16(buf, pos, value) {
+  var v = Math.round(value);
+  if (v < 0) v += 4294967296;
+  v = v % 4294967296;
+  var low = v % 65536;
+  var high = Math.floor(v / 65536);
+  buf[pos] = (low >> 8) & 0xFF;
+  buf[pos + 1] = low & 0xFF;
+  buf[pos + 2] = (high >> 8) & 0xFF;
+  buf[pos + 3] = high & 0xFF;
 }
 
 function writeS(buf, pos, size, value, endian) {
@@ -1059,8 +1091,14 @@ function writeS(buf, pos, size, value, endian) {
         eo = field_endian_override(ftype)
         endian_arg = f'"{eo}"' if eo else 'endian'
 
-        lines.append(f'{i}  var {js_name} = {read_fn}(buf, pos, {sz}, {endian_arg});')
-        lines.append(f'{i}  pos += {sz};')
+        if ftype in ('u32le16', 's32le16'):
+            # Its own reader: the layout is not a size-and-endianness pair (PS-271).
+            reader = 'readS32LE16' if ftype == 's32le16' else 'readU32LE16'
+            lines.append(f'{i}  var {js_name} = {reader}(buf, pos);')
+            lines.append(f'{i}  pos += 4;')
+        else:
+            lines.append(f'{i}  var {js_name} = {read_fn}(buf, pos, {sz}, {endian_arg});')
+            lines.append(f'{i}  pos += {sz};')
 
         val_expr = self._apply_modifiers_expr(js_name, field)
         lines.append(f'{i}  var {js_name}_out = {val_expr};')
@@ -1271,7 +1309,12 @@ function writeS(buf, pos, size, value, endian) {
                 fname = f'encodePort{port_key}'
                 fields = port_def.get('fields', [])
                 parts.append(self._gen_encode_fn(fname, fields))
-        elif self.has_commands:
+        else:
+            # A schema with neither ports nor downlink_commands used to get no encoder at
+            # all, so its generated codec could not build a downlink even where the
+            # interpreter encoded the same schema without complaint - encodeDownlink
+            # returned "No downlink encoding defined". PS-287 reads an entry that declares
+            # no direction as accepting either, so refusing to encode contradicts it.
             fields = self.schema.get('fields', [])
             parts.append(self._gen_encode_fn('encodePayload', fields))
         return '\n\n'.join(parts)
@@ -1400,6 +1443,17 @@ function writeS(buf, pos, size, value, endian) {
         eo = field_endian_override(ftype)
         endian_arg = f'"{eo}"' if eo else 'endian'
         write_fn = 'writeS' if signed else 'writeU'
+
+        if is_word_ordered(ftype):
+            # One writer for both, since the sign only affects how the value was read.
+            if name.startswith('_') or 'value' in field:
+                source = str(field.get('value', 0))
+            else:
+                source = self._reverse_modifiers_expr(
+                    f'(d.{js_name} !== undefined ? d.{js_name} : 0)', field)
+            lines.append(f'{i}  writeU32LE16(buf, pos, {source});')
+            lines.append(f'{i}  pos += 4;')
+            return lines
 
         if name.startswith('_'):
             const_val = field.get('value', 0)
@@ -1699,13 +1753,26 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append('  }')
                 lines.append('}')
             else:
+                # No ports and no command table: the schema's own fields are the payload,
+                # in both directions.
                 lines.append('function decodeDownlink(input) {')
-                lines.append('  return { data: {}, warnings: ["No downlink encoding defined"], errors: [] };')
+                lines.append('  try {')
+                lines.append(f'    var endian = "{self.endian}";')
+                lines.append('    var r = decodePayload(input.bytes, endian);')
+                lines.append('    return { data: r.data, warnings: r.warnings || [], errors: [] };')
+                lines.append('  } catch (e) {')
+                lines.append('    return { data: {}, warnings: [], errors: [e.message] };')
+                lines.append('  }')
                 lines.append('}')
                 lines.append('')
 
                 lines.append('function encodeDownlink(input) {')
-                lines.append('  return { bytes: [], fPort: 1, warnings: ["No downlink encoding defined"], errors: [] };')
+                lines.append('  try {')
+                lines.append(f'    var bytes = encodePayload(input.data, "{self.endian}");')
+                lines.append('    return { bytes: bytes, fPort: input.fPort || 1, warnings: [], errors: [] };')
+                lines.append('  } catch (e) {')
+                lines.append('    return { bytes: [], fPort: input.fPort || 1, warnings: [], errors: [e.message] };')
+                lines.append('  }')
                 lines.append('}')
 
         return '\n'.join(lines)

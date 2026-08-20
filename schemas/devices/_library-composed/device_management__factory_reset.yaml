@@ -170,3 +170,16 @@
     'category': 18
     'cid': 0
     'magic': 3735928559
+
+# Encode vector: the same bytes built from the values, verified
+# against the interpreter's encoder and this schema's generated
+# codec, which agree on them (PS-047).
+- 'name': encode_factory_reset
+  'description': "Encode the values decoded from factory_reset"
+  'direction': downlink
+  'source': generated
+  'input':
+    'category': 18
+    'cid': 0
+    'magic': 3735928559
+  'expected_payload': "1200deadbeef"

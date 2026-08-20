@@ -96,6 +96,13 @@ func TestCorpusConformance(t *testing.T) {
 			continue
 		}
 		for _, vector := range meta.TestVectors {
+			// An encode vector carries the values to encode and no payload to decode
+			// (PS-047). Counting it as a failed decode would be wrong twice: it was
+			// never decoded, and tools/vector-verdicts.py already runs it on both
+			// conformance paths.
+			if vector.Payload == "" {
+				continue
+			}
 			total++
 			payload, err := hexToBytes(vector.Payload)
 			if err != nil {

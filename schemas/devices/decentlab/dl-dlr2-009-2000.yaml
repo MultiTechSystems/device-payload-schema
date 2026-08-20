@@ -18,22 +18,8 @@ fields:
           fields:
             # Both outputs come from one ratio built out of two words, low word
             # first, so the four bytes are not a big-endian u32 and are read as two.
-            - name: _ratio_low
-              type: u16
-            - name: _ratio_high
-              type: u16
-            - name: _ratio_high_scaled
-              type: number
-              compute:
-                op: mul
-                a: $_ratio_high
-                b: 65536
             - name: _ratio
-              type: number
-              compute:
-                op: add
-                a: $_ratio_low
-                b: $_ratio_high_scaled
+              type: u32le16
               transform:
                 - div: 8388608
                 - add: -1

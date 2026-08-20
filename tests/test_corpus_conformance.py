@@ -27,7 +27,7 @@ sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 from schema_interpreter import SchemaInterpreter  # noqa: E402
 from score_schema import CONFORMANCE_TOLERANCE  # noqa: E402
-from validate_schema import values_match  # noqa: E402
+from validate_schema import is_encode_vector, values_match  # noqa: E402
 
 CORPUS = REPO_ROOT / "schemas" / "devices"
 
@@ -41,6 +41,10 @@ def corpus_vectors():
             yield pytest.param(path, None, None, id="%s-unparseable" % path.stem)
             continue
         for index, vector in enumerate(schema.get("test_vectors") or []):
+            # An encode vector has no payload to decode; tools/vector-verdicts.py runs
+            # those on both conformance paths (PS-047).
+            if is_encode_vector(vector):
+                continue
             name = vector.get("name", "vector%d" % index)
             yield pytest.param(
                 path, schema, vector,

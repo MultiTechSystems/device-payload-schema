@@ -133,3 +133,21 @@ test_vectors:
       protocol_version: 2
       device_id: 0x1234
       flags: 0
+
+  # Encode vector: the same bytes built from the values, verified
+  # against the interpreter's encoder and this schema's generated
+  # codec, which agree on them (PS-047).
+  - name: encode_typical_reading
+    description: "Encode the values decoded from typical_reading"
+    direction: downlink
+    source: generated
+    input:
+      protocol_version: 2
+      device_id: 4660
+      flags: 3
+      dielectric_permittivity: 10
+      volumetric_water_content: 0.1883
+      soil_temperature_raw: 550
+      soil_temperature: 15
+      battery_voltage: 3.166
+    expected_payload: "021234000301f402260c5e"

@@ -245,3 +245,16 @@ test_vectors:
     source: vendor-codec
     expected:
       temperature: -0.1
+
+  # Encode vector: the same bytes built from the values, verified
+  # against the interpreter's encoder and this schema's generated
+  # codec, which agree on them (PS-047).
+  - name: encode_vendor_reference
+    description: "Encode the values decoded from vendor_reference"
+    direction: downlink
+    source: generated
+    input:
+      battery: 100
+      temperature: 28
+      humidity: 54.5
+    expected_payload: "0175640367180104686d"

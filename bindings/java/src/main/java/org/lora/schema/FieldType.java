@@ -3,6 +3,8 @@ package org.lora.schema;
 public enum FieldType {
     // Unsigned integers
     U8, U16, U24, U32, U64,
+    /** Two 16-bit big-endian units, least significant unit first (PS-271). */
+    U32LE16, S32LE16,
     // Signed integers
     I8, I16, I24, I32, I64, S8, S16, S24, S32, S64,
     // Floating point
@@ -37,6 +39,8 @@ public enum FieldType {
             // reading s24 fell through to U8 and every field after it was misaligned.
             case "u24", "uint24" -> U24;
             case "u32" -> U32;
+            case "u32le16" -> U32LE16;
+            case "s32le16" -> S32LE16;
             case "u64" -> U64;
             case "i8", "s8" -> I8;
             case "i16", "s16" -> I16;
@@ -73,7 +77,7 @@ public enum FieldType {
             case U8, I8, S8, BOOL, BYTE -> 1;
             case U16, I16, S16, F16 -> 2;
             case U24, I24, S24 -> 3;
-            case U32, I32, S32, F32, UINT, SINT, BINT -> 4;
+            case U32, I32, S32, F32, UINT, SINT, BINT, U32LE16, S32LE16 -> 4;
             case U64, I64, S64, F64 -> 8;
             default -> 1;
         };
@@ -82,14 +86,14 @@ public enum FieldType {
     public boolean isInteger() {
         return switch (this) {
             case U8, U16, U24, U32, U64, I8, I16, I24, I32, I64, S8, S16, S24, S32, S64,
-                 BYTE, UINT, SINT, BINT, BITS -> true;
+                 BYTE, UINT, SINT, BINT, BITS, U32LE16, S32LE16 -> true;
             default -> false;
         };
     }
 
     public boolean isSigned() {
         return switch (this) {
-            case I8, I16, I24, I32, I64, S8, S16, S24, S32, S64, SINT -> true;
+            case I8, I16, I24, I32, I64, S8, S16, S24, S32, S64, SINT, S32LE16 -> true;
             default -> false;
         };
     }

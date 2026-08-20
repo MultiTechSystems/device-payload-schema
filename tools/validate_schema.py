@@ -184,6 +184,20 @@ def parse_payload(payload: Any) -> bytes:
     raise ValueError(f"Cannot parse payload: {payload}")
 
 
+def is_encode_vector(vector) -> bool:
+    """Whether a test vector exercises encoding rather than decoding (PS-047).
+
+    An encode vector carries the values to encode and the bytes expected out; it has no
+    `payload` to decode. Every consumer that walks `test_vectors` expecting to decode
+    needs this, and the four language corpus runners need their own copy of the same
+    question - a vector without a payload is not a failing decode, it is a different kind
+    of vector.
+    """
+    if not isinstance(vector, dict):
+        return False
+    return "input" in vector or "expected_payload" in vector
+
+
 def values_match(expected: Any, actual: Any, tolerance: float = 0.001) -> Tuple[bool, str]:
     """Compare expected and actual values with tolerance for floats."""
     if expected is None and actual is None:
@@ -270,6 +284,8 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
     """Validate a list of field definitions recursively."""
     KNOWN_TYPES = {
         'u8', 'u16', 'u24', 'u32', 'u64',
+        # Two 16-bit big-endian units, low unit first (PS-271).
+        'u32le16', 's32le16',
         'uint8', 'uint16', 'uint24', 'uint32', 'uint64',
         's8', 's16', 's24', 's32', 's64',
         'i8', 'i16', 'i24', 'i32', 'i64',
@@ -748,12 +764,35 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
                 
                 if 'name' not in tv:
                     errors.append(f"Test vector {i}: missing 'name'")
-                
-                if 'payload' not in tv:
-                    errors.append(f"Test vector {i} ({tv.get('name', '?')}): missing 'payload'")
-                
-                if 'expected' not in tv:
-                    errors.append(f"Test vector {i} ({tv.get('name', '?')}): missing 'expected'")
+
+                # A vector exercises decoding or encoding. An encode vector carries the
+                # values to encode and the bytes expected out (PS-047); requiring
+                # `payload` and `expected` of every vector meant an encode vector - the
+                # only evidence there is for the downlink clauses - could not be written
+                # in a schema that validates.
+                encode_vector = 'input' in tv or 'expected_payload' in tv
+                if encode_vector and ('payload' in tv or 'expected' in tv):
+                    # PS-297: the two kinds are exclusive. A vector carrying both is
+                    # ambiguous about how it should be run.
+                    errors.append(
+                        f"Test vector {i} ({tv.get('name', '?')}): carries both encode "
+                        "keys ('input'/'expected_payload') and decode keys "
+                        "('payload'/'expected'); a vector is one kind or the other")
+                if encode_vector:
+                    if 'input' not in tv:
+                        errors.append(
+                            f"Test vector {i} ({tv.get('name', '?')}): encode vector "
+                            "missing 'input'")
+                    if 'expected_payload' not in tv:
+                        errors.append(
+                            f"Test vector {i} ({tv.get('name', '?')}): encode vector "
+                            "missing 'expected_payload'")
+                else:
+                    if 'payload' not in tv:
+                        errors.append(f"Test vector {i} ({tv.get('name', '?')}): missing 'payload'")
+
+                    if 'expected' not in tv:
+                        errors.append(f"Test vector {i} ({tv.get('name', '?')}): missing 'expected'")
                 
                 # Port-based schemas should have fport in test vectors
                 if has_ports and not has_fields:
@@ -776,6 +815,28 @@ def run_test_vector(interpreter: SchemaInterpreter, tv: Dict[str, Any]) -> TestR
         expected=tv.get('expected', {}),
     )
     
+    # An encode vector states the values and the bytes expected out (PS-047). Check it by
+    # encoding: there is no payload to decode, and treating its absence as a decode
+    # failure reported "Buffer too short" for a vector that was never meant to be decoded.
+    if is_encode_vector(tv):
+        want = parse_payload(tv.get('expected_payload', ''))
+        result.payload_hex = want.hex().upper()
+        try:
+            encoded = interpreter.encode(tv.get('input') or {}, fPort=tv.get('fport') or tv.get('fPort'))
+        except Exception as exc:
+            result.errors.append(f"Encode failed: {exc}")
+            return result
+        if not encoded.success:
+            result.errors.extend(encoded.errors)
+            return result
+        if bytes(encoded.payload) != want:
+            result.errors.append(
+                f"Encoded {bytes(encoded.payload).hex()}, expected {want.hex()}"
+            )
+            return result
+        result.passed = True
+        return result
+
     # Parse payload
     try:
         payload = parse_payload(tv.get('payload', ''))

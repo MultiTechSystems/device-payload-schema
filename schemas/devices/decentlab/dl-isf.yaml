@@ -85,22 +85,8 @@ fields:
             # x[12] + x[13] * 65536, low word first, so a big-endian u32 takes the
             # halves the wrong way round. The vendor's own test payload happens not
             # to expose the difference, so cross-validation passed either way.
-            - name: _diagnostic_low
-              type: u16
-            - name: _diagnostic_high
-              type: u16
-            - name: _diagnostic_high_scaled
-              type: number
-              compute:
-                op: mul
-                a: $_diagnostic_high
-                b: 65536
             - name: diagnostic
-              type: number
-              compute:
-                op: add
-                a: $_diagnostic_low
-                b: $_diagnostic_high_scaled
+              type: u32le16
             - name: upstream_tmax_outer
               type: u16
               transform:
@@ -117,3 +103,34 @@ fields:
               type: u16
               div: 1000
               unit: "V"
+
+test_vectors:
+  # The word-ordered field's bytes are the vendor-documented pair from
+  # CR-2026-005: words a9fd 0134, which the device reports as 20228605 and a
+  # big-endian u32 misreads as 2851930420 (PS-271). The other fields carry chosen
+  # bytes and their expectations come from decoding, so the provenance is
+  # `generated`: this pins the word-ordered read and the agreement between the
+  # five implementations, not the vendor's own values.
+  - name: word_ordered_sensor_id
+    description: "Group with the word-ordered identifier enabled"
+    source: generated
+    payload: "0230c50001138813881388138813881388138813881388138813881388a9fd013413881388"
+    expected:
+      protocol_version: 2
+      device_id: 12485
+      flags: 1
+      sap_flow: 30
+      heat_velocity_outer: 30
+      heat_velocity_inner: 30
+      alpha_outer: -8.4
+      alpha_inner: -8.4
+      beta_outer: -8.4
+      beta_inner: -8.4
+      tmax_outer: 10
+      tmax_inner: 10
+      temperature_outer: -277.68
+      max_voltage: -27.768
+      min_voltage: -27.768
+      diagnostic: 20228605
+      upstream_tmax_outer: 10
+      upstream_tmax_inner: 10

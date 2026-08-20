@@ -145,3 +145,17 @@
     'cid': 1
     'start_time': 0
     'end_time': 0
+
+# Encode vector: the same bytes built from the values, verified
+# against the interpreter's encoder and this schema's generated
+# codec, which agree on them (PS-047).
+- 'name': encode_fetch_all
+  'description': "Encode the values decoded from fetch_all"
+  'direction': downlink
+  'source': generated
+  'input':
+    'category': 17
+    'cid': 1
+    'start_time': 0
+    'end_time': 0
+  'expected_payload': "11010000000000000000"

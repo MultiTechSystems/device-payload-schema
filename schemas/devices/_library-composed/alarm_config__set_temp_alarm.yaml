@@ -136,3 +136,18 @@
     'field_id': 1
     'low_threshold': 0
     'high_threshold': 500
+
+# Encode vector: the same bytes built from the values, verified
+# against the interpreter's encoder and this schema's generated
+# codec, which agree on them (PS-047).
+- 'name': encode_set_temp_alarm
+  'description': "Encode the values decoded from set_temp_alarm"
+  'direction': downlink
+  'source': generated
+  'input':
+    'category': 3
+    'cid': 1
+    'field_id': 1
+    'low_threshold': 0
+    'high_threshold': 500
+  'expected_payload': "030101000001f4"
