@@ -52,6 +52,7 @@ UNSUPPORTED = "UNSUPPORTED"
 #: follows its heading.
 CONSTRUCT_CLAUSES = {
     "integer": ["Integer Type Requirements", "Decoded Value Types"],
+    "word_ordered": ["Word-Ordered 32-bit Types"],
     "float": ["Floating Point Requirements", "Decoded Value Types"],
     "bitfield": ["Bitfield Requirements", "The `consume` Property"],
     "bool": ["Boolean Requirements", "Decoded Value Types"],
@@ -149,7 +150,12 @@ def constructs_used(schema: dict) -> set:
                     base = value.split("[")[0]
                     if "[" in value:
                         found.add("bitfield")
-                    if base in INTEGER_TYPES:
+                    if base in ("u32le16", "s32le16"):
+                        # An integer type, and the only exercise the word-ordered clause
+                        # can get (PS-271).
+                        found.add("integer")
+                        found.add("word_ordered")
+                    elif base in INTEGER_TYPES:
                         found.add("integer")
                     elif base in ("f16", "f32", "f64", "number"):
                         found.add("float")

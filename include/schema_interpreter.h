@@ -70,6 +70,11 @@ typedef enum {
     FIELD_TYPE_U16,
     FIELD_TYPE_U24,
     FIELD_TYPE_U32,
+    /* Two 16-bit big-endian units, least significant unit first (PS-271). Appended near
+     * its siblings rather than at the end because this enum is not serialised - the
+     * binary format writes its own type bytes. */
+    FIELD_TYPE_U32LE16,
+    FIELD_TYPE_S32LE16,
     FIELD_TYPE_U64,
     FIELD_TYPE_S8,
     FIELD_TYPE_S16,
@@ -525,6 +530,7 @@ static inline bool field_reports_as_integer(const field_def_t* field) {
         case FIELD_TYPE_U32: case FIELD_TYPE_U64:
         case FIELD_TYPE_S8:  case FIELD_TYPE_S16: case FIELD_TYPE_S24:
         case FIELD_TYPE_S32: case FIELD_TYPE_S64:
+        case FIELD_TYPE_U32LE16: case FIELD_TYPE_S32LE16:
             break;
         default:
             return false;
@@ -576,6 +582,23 @@ static inline int decode_field(
                 read_u32_be(buf + *pos) : read_u32_le(buf + *pos);
             *pos += 4;
             break;
+
+        /* The type fixes both the unit order and the byte order within a unit, so the
+         * endian setting is deliberately not consulted (PS-272). */
+        case FIELD_TYPE_U32LE16:
+        case FIELD_TYPE_S32LE16: {
+            if (*pos + 4 > len) return SCHEMA_ERR_BUFFER;
+            uint32_t low = read_u16_be(buf + *pos);
+            uint32_t high = read_u16_be(buf + *pos + 2);
+            uint32_t combined = low | (high << 16);
+            if (field->type == FIELD_TYPE_S32LE16 && combined >= 0x80000000u) {
+                raw_value = (int64_t)combined - 0x100000000LL;
+            } else {
+                raw_value = (int64_t)combined;
+            }
+            *pos += 4;
+            break;
+        }
             
         case FIELD_TYPE_S8:
             if (*pos + 1 > len) return SCHEMA_ERR_BUFFER;

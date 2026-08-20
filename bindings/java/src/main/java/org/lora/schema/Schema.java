@@ -783,6 +783,19 @@ public class Schema {
         Object value = null;
         
         switch (field.getType()) {
+            // The type fixes both orders, so fieldEndian is deliberately not consulted
+            // (PS-272): honouring it would make u32le16 with endian little a second
+            // spelling of little-endian u32.
+            case U32LE16, S32LE16 -> {
+                byte[] data = ctx.read(4);
+                long low = ((data[0] & 0xFFL) << 8) | (data[1] & 0xFFL);
+                long high = ((data[2] & 0xFFL) << 8) | (data[3] & 0xFFL);
+                long combined = low | (high << 16);
+                value = field.getType() == FieldType.S32LE16 && combined >= 0x80000000L
+                        ? combined - 0x100000000L
+                        : combined;
+            }
+
             case U8, U16, U24, U32, U64, BYTE, UINT -> {
                 byte[] data = ctx.read(length);
                 long raw = ctx.decodeUnsigned(data, fieldEndian);
@@ -973,7 +986,7 @@ public class Schema {
             case U8: case U16: case U24: case U32: case U64: case BYTE: case UINT:
             case I8: case I16: case I24: case I32: case I64:
             case S8: case S16: case S24: case S32: case S64: case SINT:
-            case BINT:
+            case BINT: case U32LE16: case S32LE16:
                 break;
             default:
                 return false;
