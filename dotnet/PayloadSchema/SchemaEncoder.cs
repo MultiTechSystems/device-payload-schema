@@ -56,10 +56,21 @@ public static class SchemaEncoder
         Dictionary<string, object?> data, IReadOnlyList<string>? order = null)
         => new Encoding(schema, schema.Fields, order).Run(data);
 
-    /// <summary>Encode with port-based schema selection.</summary>
+    /// <summary>
+    /// Encode with port-based schema selection.
+    ///
+    /// Pass <paramref name="direction"/> where the caller knows which way the message
+    /// will travel. The mirror of the decode check (PS-292): encoding for an entry that
+    /// disclaims this direction produces bytes the far end reads against different field
+    /// definitions, so nothing is encoded.
+    /// </summary>
     public static EncodeResult EncodeWithPort(PayloadSchemaDefinition schema,
-        Dictionary<string, object?> data, int fPort, IReadOnlyList<string>? order = null)
-        => new Encoding(schema, ResolveFieldsForEncode(schema, fPort), order).Run(data);
+        Dictionary<string, object?> data, int fPort, IReadOnlyList<string>? order = null,
+        string? direction = null)
+    {
+        SchemaDirection.Check(schema, fPort, direction);
+        return new Encoding(schema, ResolveFieldsForEncode(schema, fPort), order).Run(data);
+    }
 
     static List<SchemaField> ResolveFieldsForEncode(PayloadSchemaDefinition schema, int fPort)
     {

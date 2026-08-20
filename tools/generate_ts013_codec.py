@@ -24,6 +24,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 
+#: What a port entry declaring no `direction` means (PS-287). `both` keeps the annotation
+#: opt-in: a schema that says nothing about a port keeps that port reachable from either
+#: TS013 entry point, rather than being narrowed to uplink after the fact (CR-2026-010).
+DEFAULT_PORT_DIRECTION = 'both'
+
+
 def to_js_name(name: str) -> str:
     return re.sub(r'[^a-zA-Z0-9_]', '_', name)
 
@@ -460,7 +466,50 @@ function roundHalfEven(v, decimals) {
 }
 
 // --- Binary helpers ---
+/* A JavaScript number holds integers exactly to 2^53-1, so a 7- or 8-byte field can
+ * carry a value this codec cannot represent. PS-295 forbids reporting the rounded
+ * number, and PS-296 records the limit: above it the exact value is reported as a
+ * decimal string. The digits are accumulated in base 10 rather than through BigInt,
+ * which not every network server's codec sandbox provides. */
+var SAFE_INTEGER = 9007199254740991;
+
+function orderedBytes(buf, pos, size, endian) {
+  var out = [];
+  var i;
+  if (endian === 'big') {
+    for (i = 0; i < size; i++) out.push(buf[pos + i] || 0);
+  } else {
+    for (i = size - 1; i >= 0; i--) out.push(buf[pos + i] || 0);
+  }
+  return out;
+}
+
+/* Exact base-256 to decimal, most significant byte first. */
+function decimalOf(bytes) {
+  var digits = [0];
+  for (var k = 0; k < bytes.length; k++) {
+    var carry = bytes[k];
+    for (var d = 0; d < digits.length; d++) {
+      var cur = digits[d] * 256 + carry;
+      digits[d] = cur % 10;
+      carry = Math.floor(cur / 10);
+    }
+    while (carry > 0) {
+      digits.push(carry % 10);
+      carry = Math.floor(carry / 10);
+    }
+  }
+  var text = '';
+  for (var j = digits.length - 1; j >= 0; j--) text += digits[j];
+  return text;
+}
+
 function readU(buf, pos, size, endian) {
+  if (size >= 7) {
+    var text = decimalOf(orderedBytes(buf, pos, size, endian));
+    var n = Number(text);
+    return n <= SAFE_INTEGER ? n : text;
+  }
   var v = 0;
   if (endian === 'big') {
     for (var i = 0; i < size; i++) v = (v * 256) + (buf[pos + i] || 0);
@@ -471,6 +520,26 @@ function readU(buf, pos, size, endian) {
 }
 
 function readS(buf, pos, size, endian) {
+  if (size >= 7) {
+    var bytes = orderedBytes(buf, pos, size, endian);
+    var negative = (bytes[0] & 0x80) !== 0;
+    if (negative) {
+      /* Two's complement: invert and add one, then report the magnitude. Math.pow was
+       * used for the sign extension before, which is inexact above 2^53. */
+      var carry = 1;
+      for (var i = bytes.length - 1; i >= 0; i--) {
+        var inv = (~bytes[i] & 0xFF) + carry;
+        bytes[i] = inv & 0xFF;
+        carry = inv >> 8;
+      }
+      var magnitude = decimalOf(bytes);
+      var negated = Number('-' + magnitude);
+      return negated >= -SAFE_INTEGER ? negated : '-' + magnitude;
+    }
+    var text = decimalOf(bytes);
+    var n = Number(text);
+    return n <= SAFE_INTEGER ? n : text;
+  }
   var v = readU(buf, pos, size, endian);
   var sign = Math.pow(2, size * 8 - 1);
   if (v >= sign) v -= sign * 2;
@@ -1539,47 +1608,43 @@ function writeS(buf, pos, size, value, endian) {
         lines = []
 
         if self.has_ports:
+            # Rejects a `default` port entry, which this generator cannot express as an
+            # fPort comparison. Keep it: without it the loops below emit
+            # `input.fPort === default`.
             port_map = {}
             for port_key, port_def in self.schema['ports'].items():
                 port_map[int(port_key)] = {
-                    'direction': port_def.get('direction', 'uplink'),
+                    'direction': port_def.get('direction', DEFAULT_PORT_DIRECTION),
                 }
 
-            # decodeUplink
-            lines.append('function decodeUplink(input) {')
-            lines.append('  try {')
-            lines.append(f'    var endian = "{self.endian}";')
-            for port_key in self.schema['ports']:
-                direction = self.schema['ports'][port_key].get('direction', 'uplink')
-                if direction == 'uplink':
+            # decodeUplink and decodeDownlink. Each entry point decodes the ports
+            # declared for its direction, and refuses the ports declared for the other
+            # one - naming the declared direction, because "unknown fPort" describes a
+            # port the schema does not define and sends an implementer looking for a
+            # missing definition (PS-288, CR-2026-010).
+            for fn_name, direction in (('decodeUplink', 'uplink'),
+                                       ('decodeDownlink', 'downlink')):
+                lines.append(f'function {fn_name}(input) {{')
+                lines.append('  try {')
+                lines.append(f'    var endian = "{self.endian}";')
+                for port_key in self.schema['ports']:
+                    declared = self.schema['ports'][port_key].get(
+                        'direction', DEFAULT_PORT_DIRECTION)
                     lines.append(f'    if (input.fPort === {port_key}) {{')
-                    lines.append(f'      var r = decodePort{port_key}(input.bytes, endian);')
-                    lines.append(f'      return {{ data: r.data, warnings: r.warnings || [], errors: [] }};')
+                    if declared in (direction, 'both'):
+                        lines.append(f'      var r = decodePort{port_key}(input.bytes, endian);')
+                        lines.append(f'      return {{ data: r.data, warnings: r.warnings || [], errors: [] }};')
+                    else:
+                        message = (f'fPort {port_key} is declared direction:{declared}; '
+                                   f'message direction is {direction}')
+                        lines.append(f'      return {{ data: {{}}, warnings: [], errors: ["{message}"] }};')
                     lines.append(f'    }}')
-            lines.append(f'    return {{ data: {{}}, warnings: ["Unknown fPort: " + input.fPort], errors: [] }};')
-            lines.append('  } catch (e) {')
-            lines.append('    return { data: {}, warnings: [], errors: [e.message] };')
-            lines.append('  }')
-            lines.append('}')
-            lines.append('')
-
-            # decodeDownlink
-            lines.append('function decodeDownlink(input) {')
-            lines.append('  try {')
-            lines.append(f'    var endian = "{self.endian}";')
-            for port_key in self.schema['ports']:
-                direction = self.schema['ports'][port_key].get('direction', 'uplink')
-                if direction == 'downlink':
-                    lines.append(f'    if (input.fPort === {port_key}) {{')
-                    lines.append(f'      var r = decodePort{port_key}(input.bytes, endian);')
-                    lines.append(f'      return {{ data: r.data, warnings: r.warnings || [], errors: [] }};')
-                    lines.append(f'    }}')
-            lines.append(f'    return {{ data: {{}}, warnings: ["Unknown fPort: " + input.fPort], errors: [] }};')
-            lines.append('  } catch (e) {')
-            lines.append('    return { data: {}, warnings: [], errors: [e.message] };')
-            lines.append('  }')
-            lines.append('}')
-            lines.append('')
+                lines.append(f'    return {{ data: {{}}, warnings: ["Unknown fPort: " + input.fPort], errors: [] }};')
+                lines.append('  } catch (e) {')
+                lines.append('    return { data: {}, warnings: [], errors: [e.message] };')
+                lines.append('  }')
+                lines.append('}')
+                lines.append('')
 
             # encodeDownlink
             lines.append('function encodeDownlink(input) {')

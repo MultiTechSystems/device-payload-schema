@@ -10,6 +10,8 @@
  *
  * Binary schema format (compact, ~4 bytes/field):
  *   Header: 'P' 'S' version flags field_count
+ *     flags bit 0    : 1 = little-endian
+ *     flags bits 1-2 : declared direction, 0 unset / 1 uplink / 2 downlink / 3 both
  *   Per field: type_byte mult_exp field_id[2] [options]
  *
  * Usage (programmatic):
@@ -169,12 +171,30 @@ typedef struct {
     bool valid;
 } decoded_field_t;
 
+/* Which way a message travels, for a schema or a decode call.
+ *
+ * SCHEMA_DIR_UNSET is zero, so a schema built before this existed reads as "declares
+ * nothing", which PS-287 treats as `both`: the check is opt-in and no existing schema
+ * changes meaning. There is deliberately no spelling for the withdrawn `bidirectional`
+ * value - an enum cannot express it, so the case the other implementations detect and
+ * reject at runtime is unrepresentable here. */
+typedef enum {
+    SCHEMA_DIR_UNSET = 0,
+    SCHEMA_DIR_UPLINK,
+    SCHEMA_DIR_DOWNLINK,
+    SCHEMA_DIR_BOTH
+} schema_direction_t;
+
 typedef struct {
     char name[SCHEMA_MAX_NAME_LEN];
     int version;
     endian_t endian;
     field_def_t fields[SCHEMA_MAX_FIELDS];
     int field_count;
+    /* This interpreter has no port selection, so a direction can only be declared for
+     * the schema as a whole (PS-291). Last member, so existing initializers leave it
+     * SCHEMA_DIR_UNSET. */
+    schema_direction_t direction;
 } schema_t;
 
 typedef struct {
@@ -182,7 +202,12 @@ typedef struct {
     int field_count;
     int bytes_consumed;
     int error_code;
-    char error_msg[64];
+    /* 112 rather than 64: the PS-288 message names the schema and both directions, and
+     * the point of a shared message text is that every implementation reports the same
+     * string. A SCHEMA_MAX_NAME_LEN name puts the longest at 103 bytes, and the build
+     * treats a possible truncation as an error, so the buffer has to hold the worst
+     * case rather than the typical one. */
+    char error_msg[112];
 } decode_result_t;
 
 /* Variable storage for match conditions */
@@ -209,6 +234,7 @@ typedef struct {
 #define SCHEMA_ERR_UNSUPPORTED -6
 #define SCHEMA_ERR_MISSING    -7
 #define SCHEMA_ERR_LOOKUP     -8   /* Out-of-bounds sequence lookup index (PS-105) */
+#define SCHEMA_ERR_DIRECTION  -9   /* Message travels a direction the schema disclaims (PS-288) */
 
 /* ============================================
  * Byte Reading Utilities
@@ -486,6 +512,26 @@ static inline void schema_add_field(schema_t* schema, const field_def_t* field) 
  * Decode Single Field
  * ============================================ */
 
+/* Whether this field's declared type selects `integer` in the clause 1 table and nothing
+ * in the field turns it into a `number` (PS-279, PS-293).
+ *
+ * Every numeric field used to be stored in the union's double member with the declared
+ * type in the tag beside it, so the tag said integer while the value was a double: a
+ * consumer trusting the tag and reading value.i64 on a u16 of 60 got
+ * 4633641066610819072, the bit pattern of 60.0. */
+static inline bool field_reports_as_integer(const field_def_t* field) {
+    switch (field->type) {
+        case FIELD_TYPE_U8:  case FIELD_TYPE_U16: case FIELD_TYPE_U24:
+        case FIELD_TYPE_U32: case FIELD_TYPE_U64:
+        case FIELD_TYPE_S8:  case FIELD_TYPE_S16: case FIELD_TYPE_S24:
+        case FIELD_TYPE_S32: case FIELD_TYPE_S64:
+            break;
+        default:
+            return false;
+    }
+    return !field->has_mult && !field->has_div && !field->has_add;
+}
+
 static inline int decode_field(
     const field_def_t* field,
     const uint8_t* buf,
@@ -563,14 +609,22 @@ static inline int decode_field(
             out->value.u64 = endian == ENDIAN_BIG ?
                 read_u64_be(buf + *pos) : read_u64_le(buf + *pos);
             *pos += 8;
-            /* Apply modifiers on u64 directly */
+            if (field->var_name[0]) var_set(vars, field->var_name, (int64_t)out->value.u64);
+            if (field_reports_as_integer(field)) {
+                /* PS-294: the exact value is already in value.u64. It used to be
+                 * overwritten with (double)value.u64 four lines further on, which is how
+                 * a u64 of 2^64-1 came back as 18446744073709551616. */
+                out->valid = true;
+                return SCHEMA_OK;
+            }
+            /* Carrying a modifier makes the field a `number` (PS-279). */
             final_value = (double)out->value.u64;
             if (field->has_mult) final_value *= field->mult;
             if (field->has_div && field->div != 0) final_value /= field->div;
             if (field->has_add) final_value += field->add;
             out->value.f64 = final_value;
+            out->type = FIELD_TYPE_F64;
             out->valid = true;
-            if (field->var_name[0]) var_set(vars, field->var_name, (int64_t)out->value.u64);
             return SCHEMA_OK;
             
         case FIELD_TYPE_S64:
@@ -797,8 +851,16 @@ static inline int decode_field(
             return SCHEMA_ERR_LOOKUP;
         }
         return SCHEMA_OK;
+    } else if (field_reports_as_integer(field)) {
+        /* PS-293: an integer-typed field is delivered through the integer member, so the
+         * type tag and the value channel agree. */
+        out->value.i64 = raw_value;
     } else {
+        /* A field carrying a modifier is a `number`, and the tag says so (PS-279). It
+         * used to keep the declared integer type, so a scaled field was reported as an
+         * integer while holding a fraction. */
         out->value.f64 = final_value;
+        out->type = FIELD_TYPE_F64;
     }
     
     out->valid = true;
@@ -809,13 +871,52 @@ static inline int decode_field(
  * Main Decode Function
  * ============================================ */
 
-static inline int schema_decode(
+/* SCHEMA_ERR_DIRECTION where the message travels the way the schema says it does not,
+ * SCHEMA_OK where no check applies: the caller stated nothing (PS-290), or the schema
+ * declares SCHEMA_DIR_BOTH, or it declares nothing, which PS-287 reads as `both`.
+ *
+ * Writes the message the other implementations report, so a schema's declaration reads
+ * the same whichever language decodes it. */
+static inline int schema_check_direction(
+    const schema_t* schema,
+    schema_direction_t direction,
+    decode_result_t* result
+) {
+    if (direction == SCHEMA_DIR_UNSET) return SCHEMA_OK;
+    if (schema->direction == SCHEMA_DIR_UNSET) return SCHEMA_OK;
+    if (schema->direction == SCHEMA_DIR_BOTH) return SCHEMA_OK;
+    if (schema->direction == direction) return SCHEMA_OK;
+
+    if (result) {
+        const char* declared = schema->direction == SCHEMA_DIR_UPLINK ? "uplink" : "downlink";
+        const char* travelling = direction == SCHEMA_DIR_UPLINK ? "uplink" : "downlink";
+        snprintf(result->error_msg, sizeof(result->error_msg),
+                 "schema '%s' is declared direction:%s; message direction is %s",
+                 schema->name, declared, travelling);
+    }
+    return SCHEMA_ERR_DIRECTION;
+}
+
+/* schema_decode with the direction of the message supplied.
+ *
+ * A message the schema disclaims is not decoded at all (PS-021): its bytes read through
+ * the wrong field definitions produce numbers with no relationship to what the device
+ * sent, and nothing in the output would mark them as such, so no field is reported
+ * (PS-288). Pass SCHEMA_DIR_UNSET to skip the check. */
+static inline int schema_decode_direction(
     const schema_t* schema,
     const uint8_t* buf,
     size_t len,
+    schema_direction_t direction,
     decode_result_t* result
 ) {
     memset(result, 0, sizeof(decode_result_t));
+
+    int direction_err = schema_check_direction(schema, direction, result);
+    if (direction_err != SCHEMA_OK) {
+        result->error_code = direction_err;
+        return direction_err;
+    }
     
     size_t pos = 0;
     var_context_t vars = {0};
@@ -897,6 +998,18 @@ static inline int schema_decode(
     
     result->bytes_consumed = (int)pos;
     return SCHEMA_OK;
+}
+
+/* The direction of the message is unstated, so no direction check runs and PS-021 is
+ * not satisfied. Use schema_decode_direction where the caller knows which way the
+ * message was travelling. */
+static inline int schema_decode(
+    const schema_t* schema,
+    const uint8_t* buf,
+    size_t len,
+    decode_result_t* result
+) {
+    return schema_decode_direction(schema, buf, len, SCHEMA_DIR_UNSET, result);
 }
 
 /* ============================================
@@ -1099,12 +1212,39 @@ static inline int encode_field(
 }
 
 /* Main encode function */
+/* schema_encode with the direction the message will travel supplied.
+ *
+ * The mirror of the decode check (PS-292): encoding against a schema that disclaims this
+ * direction produces bytes the far end reads against different field definitions, so
+ * nothing is encoded. Pass SCHEMA_DIR_UNSET to skip the check. */
+static inline int schema_encode_direction(
+    const schema_t* schema,
+    const encode_inputs_t* inputs,
+    schema_direction_t direction,
+    encode_result_t* result
+);
+
 static inline int schema_encode(
     const schema_t* schema,
     const encode_inputs_t* inputs,
     encode_result_t* result
 ) {
+    return schema_encode_direction(schema, inputs, SCHEMA_DIR_UNSET, result);
+}
+
+static inline int schema_encode_direction(
+    const schema_t* schema,
+    const encode_inputs_t* inputs,
+    schema_direction_t direction,
+    encode_result_t* result
+) {
     memset(result, 0, sizeof(*result));
+
+    int direction_err = schema_check_direction(schema, direction, NULL);
+    if (direction_err != SCHEMA_OK) {
+        return direction_err;
+    }
+
     size_t pos = 0;
     
     for (int i = 0; i < schema->field_count; i++) {
@@ -1489,6 +1629,12 @@ static inline int schema_load_binary(
     schema_init(schema);
     schema->version = data[2];
     schema->endian = (data[3] & 0x01) ? ENDIAN_LITTLE : ENDIAN_BIG;
+    /* Bits 1-2 carry the schema's declared direction. Without this a binary-loaded
+     * schema lost its declaration at load time and the check silently did nothing -
+     * the same failure mode CR-2026-009 found when the binary format flattened a
+     * sequence lookup into a mapping. Zero means unset, so schemas emitted before this
+     * bit was defined keep reading as "declares nothing". */
+    schema->direction = (schema_direction_t)((data[3] >> 1) & 0x03);
     
     uint8_t field_count = data[4];
     size_t offset = 5;

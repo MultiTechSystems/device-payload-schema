@@ -29,7 +29,14 @@ public static class Helpers
         int bits = data.Length * 8;
         ulong signBit = 1UL << (bits - 1);
         if (uval >= signBit)
+        {
+            // C# masks a shift count to the operand's width, so `1L << 64` is `1L << 0`,
+            // and the subtraction wrapped s64 minimum to s64 maximum: 8000000000000000
+            // decoded as 9223372036854775807. At a full 64 bits the unsigned bit pattern
+            // already is the two's-complement value (PS-294).
+            if (bits >= 64) return unchecked((long)uval);
             return (long)uval - (1L << bits);
+        }
         return (long)uval;
     }
 

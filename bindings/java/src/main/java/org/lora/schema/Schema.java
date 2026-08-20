@@ -31,6 +31,8 @@ public class Schema {
     private int version;
     private String description;
     private String endian = "big";
+    /** Applies to the whole schema where it has no ports (PS-291). */
+    private String direction;
     private List<Field> fields;
     private Map<String, PortDef> ports;
 
@@ -50,6 +52,9 @@ public class Schema {
     
     public String getEndian() { return endian; }
     public void setEndian(String endian) { this.endian = endian; }
+
+    public String getDirection() { return direction; }
+    public void setDirection(String direction) { this.direction = direction; }
     
     public List<Field> getFields() { return fields; }
     public void setFields(List<Field> fields) { this.fields = fields; }
@@ -80,6 +85,7 @@ public class Schema {
         schema.version = toInt(raw.get("version"), 1);
         schema.description = (String) raw.get("description");
         schema.endian = (String) raw.getOrDefault("endian", "big");
+        schema.direction = (String) raw.get("direction");
         
         // Parse fields, splicing any `$ref` into the list first.
         Object fieldsRaw = raw.get("fields");
@@ -531,6 +537,21 @@ public class Schema {
     }
 
     public Map<String, Object> decodeWithPort(byte[] data, int fPort) {
+        return decodeWithPort(data, fPort, null);
+    }
+
+    /**
+     * {@link #decodeWithPort(byte[], int)} with the direction of the message supplied.
+     *
+     * <p>A message travelling the way the selected entry says it does not is not decoded
+     * at all (PS-021): uplink bytes read through downlink field definitions produce
+     * numbers with no relationship to what the device measured, and nothing in the output
+     * would mark them as such, so nothing is returned (PS-288). Pass {@code null} for
+     * direction to skip the check.
+     */
+    public Map<String, Object> decodeWithPort(byte[] data, int fPort, String direction) {
+        checkDirection(fPort, direction);
+
         List<Field> resolvedFields = resolveFields(fPort);
         
         DecodeContext ctx = new DecodeContext(data, endian);
@@ -558,7 +579,87 @@ public class Schema {
 
     /** {@link #encode} with port-based schema selection. */
     public EncodeResult encodeWithPort(Map<String, Object> data, int fPort) {
+        return encodeWithPort(data, fPort, null);
+    }
+
+    /**
+     * {@link #encodeWithPort(Map, int)} with the direction the message will travel
+     * supplied.
+     *
+     * <p>The mirror of the decode check (PS-292): encoding for an entry that disclaims
+     * this direction produces bytes the far end reads against different field
+     * definitions, so nothing is encoded.
+     */
+    public EncodeResult encodeWithPort(Map<String, Object> data, int fPort, String direction) {
+        checkDirection(fPort, direction);
         return new Encoder(this, resolveFields(fPort)).run(data);
+    }
+
+    /** Directions a message can be travelling, as passed to the three-argument
+     * decode and encode methods (PS-290). */
+    public static final String DIRECTION_UPLINK = "uplink";
+    public static final String DIRECTION_DOWNLINK = "downlink";
+    public static final String DIRECTION_BOTH = "both";
+
+    /**
+     * Values {@code direction} may take on a schema or a port entry (PS-287).
+     * {@code bidirectional} appeared in a clause 5 example and is not one of them;
+     * CR-2026-010 withdrew that spelling so a schema carrying it surfaces rather than
+     * being read as {@code both}.
+     */
+    private static final Set<String> DECLARED_DIRECTIONS =
+            Set.of(DIRECTION_UPLINK, DIRECTION_DOWNLINK, DIRECTION_BOTH);
+
+    /**
+     * Throws where handling a message of this direction contradicts the entry the decode
+     * or encode would use (PS-021), and returns quietly where no check applies: the
+     * caller stated no direction (PS-290), or the entry declares {@code both}, or it
+     * declares nothing, which PS-287 reads as {@code both}.
+     *
+     * <p>Before this, {@code PortDef.getDirection()} had no call site. An uplink on a
+     * port declared {@code direction: downlink} decoded against that port's fields and
+     * came back as command=0, reporting_interval=60225 - three bytes that were a
+     * temperature and a humidity, reported as a configuration value with no error.
+     */
+    private void checkDirection(int fPort, String direction) {
+        if (direction == null || direction.isEmpty()) {
+            return;
+        }
+        if (!DIRECTION_UPLINK.equals(direction) && !DIRECTION_DOWNLINK.equals(direction)) {
+            throw new IllegalArgumentException(String.format(
+                    "unknown message direction \"%s\"; expected one of downlink, uplink", direction));
+        }
+
+        // Mirrors resolveFields' selection order, so the direction checked and the fields
+        // used come from the same entry (PS-289). The label distinguishes a matched port
+        // from the default entry standing in for one: naming "fPort 42" of a payload the
+        // default entry accepted describes the wrong thing.
+        String declared;
+        String label;
+        if (ports == null) {
+            declared = this.direction;
+            label = String.format("schema '%s'", name);
+        } else if (ports.containsKey(String.valueOf(fPort))) {
+            declared = ports.get(String.valueOf(fPort)).getDirection();
+            label = "fPort " + fPort;
+        } else if (ports.containsKey("default")) {
+            declared = ports.get("default").getDirection();
+            label = "the default port entry";
+        } else {
+            // No entry to check. resolveFields reports this.
+            return;
+        }
+
+        if (declared == null || DIRECTION_BOTH.equals(declared) || declared.equals(direction)) {
+            return;
+        }
+        if (!DECLARED_DIRECTIONS.contains(declared)) {
+            throw new SchemaException.DecodeException(String.format(
+                    "%s declares unknown direction \"%s\"; expected both, downlink, uplink",
+                    label, declared));
+        }
+        throw new SchemaException.DecodeException(String.format(
+                "%s is declared direction:%s; message direction is %s", label, declared, direction));
     }
 
     private List<Field> resolveFields(int fPort) {
@@ -684,7 +785,17 @@ public class Schema {
         switch (field.getType()) {
             case U8, U16, U24, U32, U64, BYTE, UINT -> {
                 byte[] data = ctx.read(length);
-                value = ctx.decodeUnsigned(data, fieldEndian);
+                long raw = ctx.decodeUnsigned(data, fieldEndian);
+                if (length >= 8 && raw < 0) {
+                    // A u64 at or above 2^63 does not fit a Java long: the bit pattern
+                    // reads as a negative number, and this decoder reported -1 for
+                    // 18446744073709551615. PS-295 forbids a sign-changed value and
+                    // permits the exact value as a decimal string, which is what an
+                    // unsigned reading of the same bits is.
+                    value = Long.toUnsignedString(raw);
+                } else {
+                    value = raw;
+                }
             }
 
             case I8, I16, I24, I32, I64, S8, S16, S24, S32, S64, SINT -> {
@@ -816,6 +927,10 @@ public class Schema {
             if (value instanceof Number) {
                 value = FormulaEvaluator.evaluate(field.getFormula(), ((Number) value).doubleValue(), ctx);
             }
+        } else if (reportsAsInteger(field)) {
+            // PS-293, PS-294: an integer-typed field carrying no modifier keeps the exact
+            // long it was read as. The doubleValue() below is what used to lose it - a u64
+            // of 2^53+1 came back as 9007199254740992.
         } else if (value instanceof Number && field.getType() != FieldType.NUMBER) {
             value = applyArithmetic(((Number) value).doubleValue(), field);
         }
@@ -847,6 +962,25 @@ public class Schema {
         }
         
         return value;
+    }
+
+    /**
+     * Whether this field's declared type selects `integer` in the clause 1 table and
+     * nothing in the field turns it into a `number` (PS-279, PS-293).
+     */
+    private static boolean reportsAsInteger(Field field) {
+        switch (field.getType()) {
+            case U8: case U16: case U24: case U32: case U64: case BYTE: case UINT:
+            case I8: case I16: case I24: case I32: case I64:
+            case S8: case S16: case S24: case S32: case S64: case SINT:
+            case BINT:
+                break;
+            default:
+                return false;
+        }
+        return field.getMult() == null && field.getDiv() == null && field.getAdd() == null
+                && (field.getTransform() == null || field.getTransform().isEmpty())
+                && (field.getFormula() == null || field.getFormula().isEmpty());
     }
 
     private Object decodeMatch(Field field, DecodeContext ctx) {

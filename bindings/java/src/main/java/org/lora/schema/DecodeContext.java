@@ -85,6 +85,13 @@ public class DecodeContext {
     public long decodeSigned(byte[] bytes, String endian) {
         long uval = decodeUnsigned(bytes, endian);
         int bits = bytes.length * 8;
+        // Java masks a shift count to the operand's width, so `1L << 64` is 1, and the
+        // subtraction below wrapped s64 minimum to s64 maximum: 8000000000000000 decoded
+        // as 9223372036854775807. At a full 64 bits the pattern decodeUnsigned returns
+        // already is the two's-complement value (PS-294).
+        if (bits >= 64) {
+            return uval;
+        }
         long signBit = 1L << (bits - 1);
         if (uval >= signBit) {
             return uval - (1L << bits);

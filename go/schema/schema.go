@@ -263,6 +263,8 @@ type Schema struct {
 	Version     int                       `json:"version,omitempty" yaml:"version,omitempty"`
 	Description string                    `json:"description,omitempty" yaml:"description,omitempty"`
 	Endian      string                    `json:"endian,omitempty" yaml:"endian,omitempty"`
+	// Direction applies to the whole schema where it has no Ports (PS-291).
+	Direction   string                    `json:"direction,omitempty" yaml:"direction,omitempty"`
 	Header      []Field                   `json:"header,omitempty" yaml:"header,omitempty"`
 	Fields      []Field                   `json:"fields,omitempty" yaml:"fields,omitempty"`
 	Ports       map[string]*PortDef       `json:"-" yaml:"-"` // Port-based schema selection
@@ -448,6 +450,38 @@ func (ctx *DecodeContext) Peek(n int, offset int) ([]byte, error) {
 // applied the modifiers in that order, which JSON input could not supply -- so
 // this path and the JSON fallback disagreed with each other and with the other
 // language implementations. Order-dependent arithmetic uses Transform instead.
+// isIntegerTyped reports whether the field's declared type selects `integer` in the
+// clause 1 table (PS-279): the fixed-width integer widths and their aliases.
+func isIntegerTyped(field Field) bool {
+	switch field.Type {
+	case TypeByte, TypeUInt, TypeU8, TypeU16, TypeU24, TypeU32, TypeU64,
+		TypeSInt, TypeS8, TypeS16, TypeS24, TypeS32, TypeS64,
+		TypeI8, TypeI16, TypeI32, TypeI64, TypeBInt:
+		return true
+	}
+	return false
+}
+
+// carriesModifier reports whether anything in the field turns its value into a `number`
+// rather than an integer (PS-279): the bare modifiers, a transform, a formula, or the
+// legacy modifiers array.
+func carriesModifier(field Field) bool {
+	return field.Mult != nil || field.Div != nil || field.Add != nil ||
+		len(field.Transform) > 0 || len(field.Modifiers) > 0 ||
+		field.Formula != "" || field.Ref != "" || field.Compute != nil
+}
+
+// reportsAsInteger reports whether this field must be reported through an integer
+// channel with its exact value (PS-293, PS-294).
+//
+// The float64 conversion below is what this exists to avoid: a u64 above 2^53 does not
+// survive it, and this decoder reported 1.8446744073709552e+19 for a field whose exact
+// value was 18446744073709551615. The exact value is already in hand - decodeUint
+// returns uint64 - so the fix is to leave it alone rather than to recover it later.
+func reportsAsInteger(field Field) bool {
+	return isIntegerTyped(field) && !carriesModifier(field)
+}
+
 func applyCanonicalModifiers(value float64, field Field) float64 {
 	if field.Mult != nil {
 		value = value * *field.Mult
@@ -654,6 +688,12 @@ func ParseSchema(data string) (*Schema, error) {
 	}
 	if schema.Endian == "" {
 		schema.Endian = "big"
+	}
+	// Schema-level direction, which applies where the schema has no ports (PS-291).
+	// Absent means neither direction is disclaimed, so no check runs; the struct tag
+	// alone would not populate it because this parser reads every key by hand.
+	if direction, ok := raw["direction"].(string); ok {
+		schema.Direction = direction
 	}
 
 	// Parse definitions
@@ -1447,26 +1487,111 @@ func collectFieldMetadata(fields []Field, result map[string]FieldMetadata) {
 	}
 }
 
-// ResolveFields returns the field set for a given fPort.
-// If the schema uses ports, selects the matching port entry.
-// Otherwise returns the top-level fields.
-func (s *Schema) ResolveFields(fPort int) ([]Field, error) {
+// Directions a message can be travelling, as passed to the Direction variants (PS-290).
+// The empty string means the caller did not state one and no check runs.
+const (
+	DirectionUplink   = "uplink"
+	DirectionDownlink = "downlink"
+	DirectionBoth     = "both"
+)
+
+// declaredDirections are the values `direction` may take on a schema or port entry
+// (PS-287). `bidirectional` appeared in a clause 5 example and is not one of them;
+// CR-2026-010 withdrew that spelling so a schema carrying it surfaces rather than
+// being read as `both`.
+var declaredDirections = map[string]bool{
+	DirectionUplink: true, DirectionDownlink: true, DirectionBoth: true,
+}
+
+// selectPortEntry returns the port entry a decode of fPort uses, with a label naming it.
+//
+// A nil entry means the schema has no ports and the top-level fields apply. The label
+// distinguishes a matched port from the default entry standing in for one, because
+// naming "fPort 42" of a payload the default entry accepted describes the wrong thing.
+func (s *Schema) selectPortEntry(fPort int) (*PortDef, string, error) {
 	if s.Ports == nil {
-		return s.Fields, nil
+		return nil, fmt.Sprintf("schema '%s'", s.Name), nil
 	}
 
 	portKey := strconv.Itoa(fPort)
 	if pd, ok := s.Ports[portKey]; ok {
-		return pd.Fields, nil
+		return pd, fmt.Sprintf("fPort %d", fPort), nil
 	}
 	if pd, ok := s.Ports["default"]; ok {
-		return pd.Fields, nil
+		return pd, "the default port entry", nil
 	}
-	return nil, fmt.Errorf("no port definition for fPort %d and no default in schema '%s'", fPort, s.Name)
+	return nil, "", fmt.Errorf("no port definition for fPort %d and no default in schema '%s'", fPort, s.Name)
+}
+
+// checkDirection reports the PS-288 error for handling a message of this direction
+// against the selected entry, or nil to proceed.
+//
+// nil means no check applies: the caller did not state a direction (PS-290), or the
+// entry declares `both`, or it declares nothing, which PS-287 reads as `both`. A
+// declaration states which way traffic on that entry runs, so a message travelling the
+// other way does not match the schema.
+func (s *Schema) checkDirection(fPort int, direction string) error {
+	if direction == "" {
+		return nil
+	}
+	if direction != DirectionUplink && direction != DirectionDownlink {
+		return fmt.Errorf("unknown message direction %q; expected one of downlink, uplink", direction)
+	}
+
+	entry, label, err := s.selectPortEntry(fPort)
+	if err != nil {
+		return err
+	}
+
+	declared := s.Direction
+	if entry != nil {
+		declared = entry.Direction
+	}
+
+	if declared == "" || declared == DirectionBoth || declared == direction {
+		return nil
+	}
+	if !declaredDirections[declared] {
+		return fmt.Errorf("%s declares unknown direction %q; expected both, downlink, uplink", label, declared)
+	}
+	return fmt.Errorf("%s is declared direction:%s; message direction is %s", label, declared, direction)
+}
+
+// ResolveFields returns the field set for a given fPort.
+// If the schema uses ports, selects the matching port entry.
+// Otherwise returns the top-level fields.
+func (s *Schema) ResolveFields(fPort int) ([]Field, error) {
+	entry, _, err := s.selectPortEntry(fPort)
+	if err != nil {
+		return nil, err
+	}
+	if entry == nil {
+		return s.Fields, nil
+	}
+	return entry.Fields, nil
 }
 
 // DecodeWithPort decodes binary data using the schema, selecting fields by fPort.
+//
+// The direction of the message is unstated, so no direction check runs and PS-021 is
+// not satisfied. Use DecodeWithPortDirection where the caller knows which way the
+// message was travelling.
 func (s *Schema) DecodeWithPort(data []byte, fPort int) (map[string]any, error) {
+	return s.DecodeWithPortDirection(data, fPort, "")
+}
+
+// DecodeWithPortDirection is DecodeWithPort with the direction of the message supplied.
+//
+// A message travelling the way the selected entry says it does not is not decoded at
+// all (PS-021): uplink bytes read through downlink field definitions produce numbers
+// with no relationship to what the device measured, and nothing in the output would
+// mark them as such, so no field is returned (PS-288). Pass "" for direction to skip
+// the check.
+func (s *Schema) DecodeWithPortDirection(data []byte, fPort int, direction string) (map[string]any, error) {
+	if err := s.checkDirection(fPort, direction); err != nil {
+		return nil, err
+	}
+
 	fields, err := s.ResolveFields(fPort)
 	if err != nil {
 		return nil, err
@@ -2113,6 +2238,11 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 		// -0.4999999996 where the vendor decoder says 0.0064094, because its
 		// `div: 16777216` and `add: -0.5` were each applied a second time. Nothing
 		// caught it: that schema had no test vectors at all.
+	} else if reportsAsInteger(field) {
+		// PS-293, PS-294: an integer-typed field with no modifier keeps the exact
+		// uint64 or int64 decodeUint/decodeSint produced. Falling through to the
+		// float64 branch below would round it, which is how a u64 of 2^64-1 came back
+		// as 1.8446744073709552e+19.
 	} else if numVal, ok := toFloat64(value); ok {
 		// Apply transformations in order
 		// Support both top-level shortcuts and transform array
@@ -2677,6 +2807,19 @@ func (s *Schema) EncodeWithPort(data map[string]any, fPort int) ([]byte, error) 
 		return nil, err
 	}
 	return ctx.Buffer, nil
+}
+
+// EncodeWithPortDirection is EncodeWithPort with the direction the message will travel
+// supplied.
+//
+// The mirror of the decode check (PS-292): encoding for an entry that disclaims this
+// direction produces bytes the far end reads against different field definitions, so
+// nothing is encoded. Pass "" for direction to skip the check.
+func (s *Schema) EncodeWithPortDirection(data map[string]any, fPort int, direction string) ([]byte, error) {
+	if err := s.checkDirection(fPort, direction); err != nil {
+		return nil, err
+	}
+	return s.EncodeWithPort(data, fPort)
 }
 
 // EncodeToResult is EncodeWithPort with the warnings retained, matching what the

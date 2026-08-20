@@ -270,6 +270,11 @@ def encode_schema(schema: Dict) -> bytes:
     flags = 0
     if schema.get('endian', 'big') == 'little':
         flags |= 0x01
+    # Bits 1-2 carry the schema's declared direction, so a binary-loaded schema keeps it
+    # (PS-291). Dropping it here would leave the C interpreter unable to perform the
+    # check no matter what the caller supplied - the failure CR-2026-009 found when this
+    # format flattened a sequence lookup into a mapping.
+    flags |= {None: 0, 'uplink': 1, 'downlink': 2, 'both': 3}[schema.get('direction')] << 1
     result.append(flags)
     
     # Field count

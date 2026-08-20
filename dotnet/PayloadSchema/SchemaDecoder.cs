@@ -21,8 +21,21 @@ public static class SchemaDecoder
         return result;
     }
 
-    public static Dictionary<string, object?> DecodeWithPort(PayloadSchemaDefinition schema, byte[] data, int fPort)
+    /// <summary>
+    /// Decode with port-based schema selection.
+    ///
+    /// Pass <paramref name="direction"/> where the caller knows which way the message
+    /// was travelling. A message travelling the way the selected entry says it does not
+    /// is not decoded at all: uplink bytes read through downlink field definitions
+    /// produce numbers with no relationship to what the device measured, and nothing in
+    /// the output would mark them as such, so nothing is returned (PS-288). Omitting it
+    /// skips the check and does not satisfy PS-021 (PS-290).
+    /// </summary>
+    public static Dictionary<string, object?> DecodeWithPort(PayloadSchemaDefinition schema, byte[] data, int fPort,
+        string? direction = null)
     {
+        SchemaDirection.Check(schema, fPort, direction);
+
         var fields = ResolveFields(schema, fPort);
         var ctx = new DecodeContext(data, schema.Endian);
         var result = new Dictionary<string, object?>();
@@ -239,6 +252,10 @@ public static class SchemaDecoder
 
         switch (field.Type)
         {
+            // The cast to double used to happen here, which discarded the exact value
+            // before anything could report it: a u64 of 2^64-1 came back as
+            // 1.8446744073709552E+19. The integer is kept, and ApplyModifiers below
+            // converts only where a modifier makes the field a `number` (PS-293, PS-294).
             case FieldType.U8:
             case FieldType.U16:
             case FieldType.U24:
@@ -246,7 +263,7 @@ public static class SchemaDecoder
             case FieldType.U64:
             {
                 var data = ctx.Read(length);
-                value = (double)Helpers.DecodeUint(data, endian);
+                value = Helpers.DecodeUint(data, endian);
                 break;
             }
 
@@ -257,7 +274,7 @@ public static class SchemaDecoder
             case FieldType.S64:
             {
                 var data = ctx.Read(length);
-                value = (double)Helpers.DecodeSint(data, endian);
+                value = Helpers.DecodeSint(data, endian);
                 break;
             }
 
@@ -437,6 +454,11 @@ public static class SchemaDecoder
         {
             // already handled in DecodeNumber
         }
+        else if (ReportsAsInteger(field))
+        {
+            // PS-293, PS-294: an integer-typed field carrying no modifier keeps the
+            // ulong or long it was read as, so a u64 above 2^53 survives.
+        }
         else
         {
             var (ok, numVal) = Helpers.ToFloat64(value);
@@ -574,6 +596,22 @@ public static class SchemaDecoder
     /// modifier. The modifiers run in the canonical order mult, div, add, whatever
     /// order the keys were written in (PS-101).
     /// </summary>
+    /// <summary>
+    /// Whether this field's declared type selects `integer` in the clause 1 table and
+    /// nothing in the field turns it into a `number` (PS-279, PS-293).
+    /// </summary>
+    static bool ReportsAsInteger(SchemaField field)
+    {
+        var integerType = field.Type is FieldType.U8 or FieldType.U16 or FieldType.U24
+            or FieldType.U32 or FieldType.U64 or FieldType.S8 or FieldType.S16
+            or FieldType.S24 or FieldType.S32 or FieldType.S64;
+        if (!integerType) return false;
+
+        return field.Mult == null && field.Div == null && field.Add == null
+            && (field.Transform == null || field.Transform.Count == 0)
+            && string.IsNullOrEmpty(field.Formula);
+    }
+
     static double ApplyModifiers(double numVal, SchemaField field)
     {
         if (field.Mult.HasValue) numVal *= field.Mult.Value;

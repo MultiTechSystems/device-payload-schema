@@ -25,13 +25,13 @@ func TestDraginoLAQ4Schema(t *testing.T) {
         t.Fatalf("Error decoding LAQ4: %v", err)
     }
     
-    if result["battery"].(float64) != 3.0 {
+    if mustNum(result["battery"]) != 3.0 {
         t.Errorf("battery = %v, want 3.0", result["battery"])
     }
-    if result["mode"].(float64) != 1 {
+    if mustNum(result["mode"]) != 1 {
         t.Errorf("mode = %v, want 1", result["mode"])
     }
-    if result["co2"].(float64) != 1000 {
+    if mustNum(result["co2"]) != 1000 {
         t.Errorf("co2 = %v, want 1000", result["co2"])
     }
 }
@@ -54,8 +54,8 @@ func TestDigitalMatterOysterS24(t *testing.T) {
         t.Fatalf("Error decoding Oyster port 1: %v", err)
     }
     
-    lat1 := result1["latitude"].(float64)
-    lon1 := result1["longitude"].(float64)
+    lat1 := mustNum(result1["latitude"])
+    lon1 := mustNum(result1["longitude"])
     if math.Abs(lat1 - (-33.8688)) > 0.0001 {
         t.Errorf("Port 1 latitude = %v, want -33.8688", lat1)
     }
@@ -70,8 +70,8 @@ func TestDigitalMatterOysterS24(t *testing.T) {
         t.Fatalf("Error decoding Oyster port 4: %v", err)
     }
     
-    lat4 := result4["latitude"].(float64)
-    lon4 := result4["longitude"].(float64)
+    lat4 := mustNum(result4["latitude"])
+    lon4 := mustNum(result4["longitude"])
     if math.Abs(lat4 - (-10.0)) > 0.01 {
         t.Errorf("Port 4 latitude = %v, want -10.0", lat4)
     }
