@@ -1,8 +1,22 @@
 [project]
 name = "payload-codec-proto"
 version = "0.2.0"
-description = "LoRaWAN Payload Schema - Declarative device codec definitions"
+description = "LoRaWAN® Payload Schema — declarative device codec definitions with reference interpreters and code generators"
+readme = "README.md"
 requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "Jason Reiss", email = "jreiss@multitech.com" }]
+keywords = ["lorawan", "iot", "payload", "codec", "schema", "ts013"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Networking",
+]
+
+[project.urls]
+Homepage = "https://github.com/MultiTechSystems/device-payload-schema"
+"Integration Layer" = "https://github.com/MultiTechSystems/device-integration-layer"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
