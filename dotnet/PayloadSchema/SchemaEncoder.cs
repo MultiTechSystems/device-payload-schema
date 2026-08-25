@@ -201,18 +201,78 @@ public static class SchemaEncoder
                 value = 0.0;
             else if (flagsPatches.TryGetValue(field.Name, out var flags))
                 value = (double)flags;
-            else if (data.TryGetValue(field.Name, out var supplied))
-                value = supplied;
             else
             {
-                if (topLevel)
-                    _result.Warnings.Add($"Missing field: {field.Name}");
-                value = 0.0;
+                // `name_from` reports the value under a templated key, so that is the key
+                // to read it back from (CR-2026-030).
+                var lookupName = ResolveEncodeName(field, data);
+                if (lookupName is null)
+                    throw new InvalidOperationException($"name_from '{field.NameFrom}' "
+                        + "references a field the data does not carry, so its output key "
+                        + "cannot be rebuilt");
+                if (data.TryGetValue(lookupName, out var supplied))
+                    value = supplied;
+                else
+                {
+                    if (topLevel)
+                        _result.Warnings.Add($"Missing field: {lookupName}");
+                    value = 0.0;
+                }
             }
 
             return EncodeField(field, ReverseModifiers(value, field));
         }
 
+
+
+        /// <summary>
+        /// The output key a <c>name_from</c> field was reported under, resolved from the
+        /// data rather than from decode variables.
+        ///
+        /// Encoding is handed the decoded output, keyed by field name, and has no variables
+        /// to resolve a template against. So a <c>${ref}</c> is looked for in the data
+        /// first, and failing that through a top-level field declaring <c>var: ref</c> -
+        /// whose name is often not the variable's (PS-267).
+        ///
+        /// Without this the encoder looked the value up under the schema-declared name,
+        /// found nothing, warned about a key the schema never reports, and wrote a zero:
+        /// name-from.yaml re-encoded <c>032a</c> as <c>0300</c> (CR-2026-030).
+        /// </summary>
+        /// <returns>the resolved key, or null where the template cannot be rebuilt</returns>
+        string? ResolveEncodeName(SchemaField field, Dictionary<string, object?> data)
+        {
+            if (string.IsNullOrEmpty(field.NameFrom))
+                return field.Name;
+
+            var unresolved = false;
+            var resolved = System.Text.RegularExpressions.Regex.Replace(
+                field.NameFrom!, @"\$\{(\w+)}", match =>
+                {
+                    var reference = match.Groups[1].Value;
+                    if (!data.TryGetValue(reference, out var value) || value is null)
+                    {
+                        value = null;
+                        foreach (var sibling in _fields)
+                        {
+                            if (sibling.Var == reference && !string.IsNullOrEmpty(sibling.Name))
+                            {
+                                data.TryGetValue(sibling.Name!, out value);
+                                break;
+                            }
+                        }
+                    }
+                    if (value is null)
+                    {
+                        unresolved = true;
+                        return "";
+                    }
+                    var (ok, numeric) = Helpers.ToFloat64(value);
+                    if (ok && numeric == Math.Floor(numeric))
+                        return ((long)numeric).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    return value.ToString() ?? "";
+                });
+            return unresolved ? null : resolved;
+        }
 
         /// <summary>
         /// Whether a plain field reads a bit range out of a byte it may share with others.

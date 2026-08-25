@@ -202,10 +202,13 @@ class TestTheFloorMovedWithTheFix:
     def test_the_raise_is_explained(self):
         assert "CR-2026-026" in GO_FLOORS.read_text()
 
-    def test_the_python_floor_did_not_move(self):
-        """No reference behaviour changed, so its ratchet must not have been touched."""
+    def test_the_python_floor_was_not_lowered(self):
+        """No reference behaviour changed here. A bound, not an equality: CR-2026-030
+        raised this floor legitimately and an equality would have called that a
+        regression."""
         text = (REPO_ROOT / "tests" / "test_encode_round_trip.py").read_text()
-        assert "FLOOR_TOTAL = 1160" in text
+        found = re.search(r"FLOOR_TOTAL = (\d+)", text)
+        assert found and int(found.group(1)) >= 1160, found and found.group(1)
         assert "CR-2026-026" not in text, (
             "this CR changed no reference behaviour; its floor should not cite it"
         )

@@ -54,14 +54,14 @@ from validate_schema import is_encode_vector  # noqa: E402
 DEVICES = REPO_ROOT / "schemas" / "devices"
 
 #: Exact round-trips required overall. Raise as encoding improves.
-FLOOR_TOTAL = 1160
+FLOOR_TOTAL = 1161
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
 FLOOR_BY_SHAPE = {
     "tlv": 900,
     "flagged": 135,
-    "plain fixed": 58,
+    "plain fixed": 59,
     "match": 44,
     "byte_group": 17,
     "repeat": 6,

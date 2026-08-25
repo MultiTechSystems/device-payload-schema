@@ -44,7 +44,9 @@ import (
 // CR-2026-027 gave this encoder the `default:` key beside a match's `cases`, so
 // match-default-fields.yaml round-trips: `match` rises from 43 to 44 and the total
 // to 1170.
-const encodeFloorTotal = 1170
+// CR-2026-030 resolved a `name_from` template on encode, so name-from.yaml
+// round-trips: `plain fixed` rises from 58 to 59 and the total to 1171.
+const encodeFloorTotal = 1171
 
 // encodeFloorByShape guards each layout separately, so a regression in one that works
 // cannot hide behind the mass of one that does not. It has earned that: raising the total
@@ -60,7 +62,7 @@ const encodeFloorTotal = 1170
 var encodeFloorByShape = map[string]int{
 	"tlv":         910,
 	"flagged":     135,
-	"plain fixed": 58,
+	"plain fixed": 59,
 	"match":       44,
 	"byte_group":  17,
 	"repeat":      6,
@@ -196,7 +198,7 @@ func TestCorpusEncodeRoundTrip(t *testing.T) {
 // plain API documents a weaker contract - it assumes ascending tag order, which is how most
 // devices in this corpus lay their channels out and not how ws515 and wt101 do - so its
 // failures are not all defects, and this floor is lower than the ordered one on purpose.
-const encodePlainFloorTotal = 1161
+const encodePlainFloorTotal = 1162
 
 // TestCorpusEncodePlainRoundTrip measures the unordered pair, so the two contracts are
 // ratcheted separately and neither can be mistaken for the other.

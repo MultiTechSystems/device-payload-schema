@@ -1689,6 +1689,45 @@ class SchemaInterpreter:
         
         return value
     
+
+    def _resolve_encode_name(self, field_def: Dict[str, Any], name: str,
+                             data: Dict[str, Any]) -> Optional[str]:
+        """The output key a `name_from` field was reported under, or None if unresolvable.
+
+        Decoding resolves the template against `_variables`, which encoding does not have:
+        it is handed the decoded output, keyed by field name. So a `${ref}` is looked for
+        in the data first, and failing that through the field that declared `var: ref` -
+        whose name is often not the variable's (PS-267).
+
+        Without this the encoder looked the value up under the schema-declared name,
+        found nothing, warned "Missing field: reading" - naming a key the schema never
+        reports - and wrote a zero byte. name-from.yaml re-encoded `032a` as `0300`
+        (CR-2026-030).
+        """
+        template = field_def.get('name_from')
+        if not template:
+            return name
+
+        missing: List[str] = []
+
+        def substitute(match):
+            reference = match.group(1)
+            if reference in data:
+                value = data[reference]
+            else:
+                source = self._field_declaring_var(reference)
+                if source and source.get('name') in data:
+                    value = reverse_lookup(data[source['name']], source.get('lookup'))
+                else:
+                    missing.append(reference)
+                    return ''
+            if isinstance(value, float) and value == int(value):
+                value = int(value)
+            return str(value)
+
+        resolved = re.sub(r'\$\{(\w+)\}', substitute, str(template))
+        return None if missing else resolved
+
     def _resolve_field_name(self, field_def: Dict[str, Any], name: str) -> str:
         """Resolve a field's output key, honouring `name_from` (PS-265, PS-266).
 
@@ -2641,9 +2680,18 @@ class SchemaInterpreter:
             elif name in flags_patches:
                 value = flags_patches[name]
             else:
-                value = data.get(name)
+                # `name_from` reports the value under a templated key, so that is the key
+                # to read it back from (CR-2026-030).
+                lookup_name = self._resolve_encode_name(field_def, name, data)
+                if lookup_name is None:
+                    result.errors.append(
+                        f"Error encoding {name}: name_from "
+                        f"{field_def.get('name_from')!r} references a field the data does "
+                        "not carry, so its output key cannot be rebuilt")
+                    continue
+                value = data.get(lookup_name)
                 if value is None:
-                    result.warnings.append(f"Missing field: {name}")
+                    result.warnings.append(f"Missing field: {lookup_name}")
                     value = 0
             
             try:
@@ -3068,7 +3116,9 @@ class SchemaInterpreter:
             if not name or name.startswith('_'):
                 value = f.get('default', 0)
             else:
-                value = data.get(name, f.get('default', 0))
+                # As in the top-level loop: a templated key is where the value lives.
+                lookup_name = self._resolve_encode_name(f, name, data) or name
+                value = data.get(lookup_name, f.get('default', 0))
             value = self._reverse_modifiers(value, f)
             out.extend(self._encode_field(f, value))
         return bytes(out)
