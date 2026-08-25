@@ -25,9 +25,12 @@ were being written a byte apiece; the same cases in Java and C# fail for a diffe
 reason, which is the `ambiguous-case` class CR-2026-023 catalogued - several cases sharing
 field names, so the tag is not recoverable. Different defects behind the same count.
 
-**Go now round-trips ten tlv vectors the Python reference does not.** A round-trip is
-byte-exact, so that is Go being *ahead*, not wrong: the reference encoder's TLV case
-selection is the weaker of the two. Recorded here rather than chased.
+**The claim that Go round-trips ten tlv vectors the reference does not was wrong**, and
+CR-2026-025 withdrew it. It came from subtracting two per-shape counts built by harnesses
+that bucket schemas differently and count different denominators. Comparing the vector sets
+instead: every vector the Python encoder fails, Go fails too, and Go fails 28 more. The
+shape counts below are still the right ratchets for each harness over time; they are not
+comparable between harnesses.
 
 `flagged` moves on none of them. No `flagged` group in the corpus holds a bit range -
 they are `u16`, `u32le16` and computed members - so the 14 that differ there are a
