@@ -1153,10 +1153,21 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   (CR-2026-032).** `make test-c` builds the three previously-orphaned C test files and runs
   `tools/c-corpus-harness.py`, which generates C that builds each expressible corpus schema
   through the struct API, compiles it, and compares the decode against the vectors.
-  **453 of 453 attempted vectors pass** since CR-2026-033 added `tlv` (it was 50 of 50
-  before). 786 of 1239 are still in schemas the struct API cannot build - 34 need
-  `flagged`, 24 a `bitfield_string`, 15 more cases than `SCHEMA_MAX_CASES` allows, 3
-  `repeat`, one an enum/lookup `default` the struct has no slot for.
+  **488 of 488 attempted vectors pass** since CR-2026-033 added `tlv` and CR-2026-034
+  `flagged` (it was 50 of 50 before either). 751 of 1239 are still in schemas the struct API
+  cannot build - 26 use a `transform` chain, 24 a `bitfield_string`, 15 more cases than
+  `SCHEMA_MAX_CASES` allows, 3 `repeat`, 3 a `u32le16` **the interpreter has and the harness
+  has no constructor for**. The report names which side each limit is on, and that
+  distinction is load-bearing: `no constructor for type 'u32le16'` used to read as a C gap
+  when C decodes it perfectly well.
+
+  **A `flagged` construct's mask field must declare `var_name`.** This interpreter records a
+  value in its variable table only where a field declares one, while a YAML `flagged` names a
+  field - so the harness patches it in. `var_has()` exists so a missing reference is
+  `SCHEMA_ERR_MATCH` rather than a mask of zero, which would decode nothing and report
+  success. A `tlv`, `flagged` or `match` case body goes **above `field_count`**, reached only
+  through `case_def_t.field_start`; adding it as a counted field makes the top-level loop
+  decode it twice, which is what the existing `match` tests tolerate.
 
   **`tlv` in C, and its limits.** A tag is packed into `case_def_t.match_value` - one byte
   is its own value, two components are `(first << 8) | second`, which is exact because
@@ -1172,8 +1183,9 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   **The fixed-size limits are the real boundary, not an oversight.** `sizeof(schema_t)` is
   51 KB because every `field_def` carries `cases[16]` and `lookup[16]` unconditionally.
   Raising `SCHEMA_MAX_FIELDS` to fit mla20's 67 fields would put it past 110 KB, which
-  defeats the point of a firmware-tier interpreter. `flagged` is the largest remaining gap
-  and the next construct if C is to go further.
+  defeats the point of a firmware-tier interpreter. `repeat` is the last construct it has
+  no field type for, and at 3 schemas it is worth less than widening the harness to cover
+  `transform` (26) and `bitfield_string` (24).
 
   Two things to keep straight when reading that report. **A skipped schema is not a passing
   one**, and **a harness limitation is not a C gap** - inline `match`, `byte_group`,
