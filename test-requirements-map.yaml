@@ -260,6 +260,62 @@ mappings:
       - PS-157  # Repeated tags as arrays
 
   # ============================================================
+  # Section 04: TLV - unknown tag handling
+  # ============================================================
+  # PS-155 above says a tag the schema does not describe is handled; PS-301 to PS-304 say
+  # it is reported, which is a different claim and was the whole of CR-2026-013. Mapped
+  # separately because the tests are separate: TestTLV covers a tlv whose every tag is
+  # described, and no test here read a warning until these.
+  - test: test_cr_2026_013_unknown_tlv.TestTheDefaultIsReported.*
+    requirements:
+      - PS-155  # Unknown tag handling
+      - PS-301  # The tag is named
+      - PS-302  # The bytes lost are counted, from the tag rather than after it
+  - test: test_cr_2026_013_unknown_tlv.TestTheWarningNamesTheTag.*
+    requirements:
+      - PS-301
+  - test: test_cr_2026_013_unknown_tlv.TestErrorMode.*
+    requirements:
+      - PS-155
+  - test: test_cr_2026_013_unknown_tlv.TestRawMode.*
+    requirements:
+      - PS-303  # The captured entry, under `unknown_tags` in merged output
+  - test: test_cr_2026_013_unknown_tlv.TestTheGeneratedCodecAgrees.*
+    requirements:
+      - PS-304  # A generated codec reports what an interpreter reading the schema does
+  - test: test_cr_2026_013_unknown_tlv.TestTheCorpus.*
+    requirements:
+      - PS-301
+      - PS-302
+
+  # ============================================================
+  # Section 10: Conformance - expected_warnings
+  # ============================================================
+  # CR-2026-014. A vector may pin what an execution said as well as what it read; before
+  # it, a decode that lost bytes and one that read a shorter payload compared equal.
+  - test: test_cr_2026_014_expected_warnings.TestAbsenceAssertsNothing.*
+    requirements:
+      - PS-308  # Absent asserts nothing, which is most of the corpus
+  - test: test_cr_2026_014_expected_warnings.TestTheListIsComplete.*
+    requirements:
+      - PS-305  # The complete list, in order; `[]` asserts none were reported
+  - test: test_cr_2026_014_expected_warnings.TestEntriesAreSubstrings.*
+    requirements:
+      - PS-306  # An entry is a substring, or several all of which must appear in it
+  - test: test_cr_2026_014_expected_warnings.TestTheKeyIsValidated.*
+    requirements:
+      - PS-305
+  - test: test_cr_2026_014_expected_warnings.TestTheCorpusUsesIt.*
+    requirements:
+      - PS-305
+      - PS-307  # Checked on the interpreted path and the generated one alike
+  - test: test_corpus_conformance.test_corpus_vector
+    requirements:
+      - PS-305
+      - PS-307
+      - PS-308
+
+  # ============================================================
   # Section 04: Flagged
   # ============================================================
   - test: test_schema_interpreter.TestFlaggedConstruct.*
@@ -432,8 +488,8 @@ mappings:
 # Summary mapping for quick reference
 summary:
   requirement_ids: "stable PS-nnn tags; see spec/sections/10-conformance.md, Tag column"
-  requirement_references: 115
-  distinct_requirements: 107
+  requirement_references: 133
+  distinct_requirements: 115
   unresolved_references: 24
   coverage_areas:
     # Named by clause rather than by id range: the M/R/O ranges this block used to list
@@ -444,6 +500,8 @@ summary:
     - Nested objects, variables, match, TLV, flagged (clause 4)
     - Downlink encoding (clause 5)
     - Validation and safety (clause 8)
+    - Unknown TLV tag reporting (PS-301 to PS-304) and `expected_warnings`
+      (PS-305 to PS-308), added by CR-2026-013 and CR-2026-014
     - TS013 codec generation (clause 9)
 
   notes:

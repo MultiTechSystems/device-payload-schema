@@ -414,7 +414,22 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                 f"{path}[{i}]: must have "
                 f"{', '.join(repr(k) for k in field_constructs[:-1])} or "
                 f"{field_constructs[-1]!r}")
-        
+
+        # PS-301 to PS-304: the three modes do materially different things in five
+        # implementations, and all five fall back to `skip` on a value they do not
+        # recognise. A typo therefore silently chose the mode that abandons the rest of
+        # the payload - the exact failure CR-2026-013 exists to make visible. Nothing
+        # else describes the key: `definitions.field` in payload-schema.json does not
+        # describe `tlv` at all and takes additionalProperties, so this is the only
+        # place a misspelling can be caught.
+        if 'tlv' in fld and isinstance(fld['tlv'], dict) and 'unknown' in fld['tlv']:
+            unknown_modes = ('skip', 'raw', 'error')
+            declared = fld['tlv']['unknown']
+            if declared not in unknown_modes:
+                errors.append(
+                    f"{path}[{i}] ({name}): tlv 'unknown' must be "
+                    f"{'/'.join(unknown_modes)}, got {declared!r}")
+
         if 'type' in fld:
             ftype = fld['type']
             

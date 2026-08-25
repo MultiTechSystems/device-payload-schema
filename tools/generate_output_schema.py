@@ -730,6 +730,50 @@ def unknown_tags_property(yaml_schema: Dict[str, Any]) -> Optional[Dict[str, Any
     }
 
 
+def reports_unknown_tags(node: Any) -> bool:
+    """Whether any `tlv` in the schema can warn about a tag it does not describe.
+
+    Every mode but `error` reports and carries on; `error` fails the decode instead, so
+    a schema whose every `tlv` sets it has no warning to describe from this source. The
+    default is `skip`, so a `tlv` that says nothing counts.
+    """
+    if isinstance(node, dict):
+        tlv = node.get('tlv')
+        if isinstance(tlv, dict) and tlv.get('unknown', 'skip') != 'error':
+            return True
+        return any(reports_unknown_tags(value) for value in node.values())
+    if isinstance(node, list):
+        return any(reports_unknown_tags(item) for item in node)
+    return False
+
+
+def warnings_property(yaml_schema: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The `_warnings` property, or None where this schema can produce none.
+
+    Declared for the reason `_quality` and `unknown_tags` are: a key a decoder can
+    report and this schema does not describe is a key nobody reading the schema can
+    learn about. CR-2026-013 gave decoding this channel and CR-2026-014 made it
+    assertable, but nothing described it, so it survived only on
+    `additionalProperties`.
+
+    Two things put a warning here, and both are visible in the schema: a `valid_range`
+    that a value can fall outside, and a `tlv` that meets a tag it does not describe.
+    Gated on them rather than declared unconditionally, so a schema that cannot warn
+    does not advertise a key it will never emit.
+    """
+    if not (collect_quality_fields(yaml_schema) or reports_unknown_tags(yaml_schema)):
+        return None
+    return {
+        "type": "array",
+        "description": (
+            "What the decode had to say that did not stop it - a value outside its "
+            "`valid_range`, or a TLV tag the schema does not describe (PS-301, "
+            "PS-302). Present only when something was reported."
+        ),
+        "items": {"type": "string"},
+    }
+
+
 def generate_output_schema(yaml_schema: Dict[str, Any]) -> Dict[str, Any]:
     """Generate JSON Schema for codec output from YAML payload schema."""
     
@@ -764,6 +808,10 @@ def generate_output_schema(yaml_schema: Dict[str, Any]) -> Dict[str, Any]:
     if unknown_tags:
         properties['unknown_tags'] = unknown_tags
 
+    warnings = warnings_property(yaml_schema)
+    if warnings:
+        properties['_warnings'] = warnings
+
     # Build output schema
     output_schema = {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -772,8 +820,9 @@ def generate_output_schema(yaml_schema: Dict[str, Any]) -> Dict[str, Any]:
         "description": description,
         "type": "object",
         "properties": properties,
-        # Metadata enrichment and implementation extensions may add keys; `_quality`
-        # itself is declared above.
+        # Metadata enrichment and implementation extensions may add keys; the keys a
+        # decoder itself reports - `_quality`, `_warnings`, `unknown_tags` - are
+        # declared above rather than left to this.
         "additionalProperties": True
     }
 
