@@ -527,9 +527,25 @@ Two things worth keeping from it:
 - **An unlisted type in Go's encode switch is a reported failure, not a silent zero-byte
   write.** That is why this was findable. Keep it that way.
 
-Go's remaining 14 (measured by identity, never by bucket) are TLV channel ordering in the
-`em400-*`/`ws203` schemas, four `ch8_type230`, two vendor references, and
-`match-default-fields.yaml` — a CR-2026-020 fixture Go decodes and cannot re-encode.
+`match-default-fields.yaml` was one of them, and CR-2026-027 fixed it in Go, Java and C#
+together: **the `default:` key beside a match's `cases` was never read on encode**, so a
+schema declaring a fallback wrote the discriminator and nothing else. Java and C# honoured
+a `default` *case* and not the sibling key, and both ran the claimable-name heuristic ahead
+of it — backwards where the discriminator is known and matched nothing, because the schema
+already said what that means. The heuristic stays first only when the discriminator is
+absent, which is the case it exists for.
+
+**Java and C# still have no `u32le16`/`s32le16` encode case** — the gap CR-2026-026 closed
+in Go, worth about 14 vectors each, showing up as their `flagged` bucket reading 121 where
+Go's and the reference's read 135. Read from their source rather than inferred; a test
+holds the claim.
+
+Go's remaining 13 (measured by identity, never by bucket) are TLV channel ordering in the
+`em400-*`/`ws203` schemas, four `ch8_type230`, and two vendor references.
+
+**Do not pin a running floor total in a CR-specific test.** CR-2026-024 and CR-2026-026
+each did, and each was broken by the next CR that raised the same floor. Pin the bucket the
+CR moved, and read the total as a lower bound.
 
 **The encode round-trip residue is classified, not counted.** `tools/encode-round-trip.py`
 gives a reason for every vector that does not re-encode to its payload, and

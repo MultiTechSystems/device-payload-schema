@@ -423,12 +423,32 @@ final class Encoder {
                 }
             }
         }
-        if (matched == null) {
+        // A known discriminator that matched no case takes the default, and takes it
+        // ahead of the claimable-name heuristic: the schema said what an unmatched value
+        // means, so guessing a case from the names present would contradict it. The
+        // heuristic stays for an inline match whose discriminator is not in the data.
+        List<Field> fallbackFields = null;
+        if (matched == null && discriminator != null) {
+            for (Field.Case c : cases) {
+                if (c.isDefault()) {
+                    matched = c;
+                    break;
+                }
+            }
+            if (matched == null && match.getMatchDefault() instanceof List<?> declared) {
+                // The `default:` key beside `cases`, which nothing read here: a schema
+                // declaring a fallback wrote the discriminator and nothing else, so
+                // match-default-fields.yaml re-encoded `097f` as `09` (CR-2026-027).
+                // Already Fields; the parser converts the list once.
+                fallbackFields = (List<Field>) declared;
+            }
+        }
+        if (matched == null && fallbackFields == null) {
             // An inline match with no name reports nothing of itself, so the case has to
             // be recovered from which of its fields the data carries.
             matched = casePresent(cases, data);
         }
-        if (matched == null) {
+        if (matched == null && fallbackFields == null) {
             for (Field.Case c : cases) {
                 if (c.isDefault()) {
                     matched = c;
@@ -436,9 +456,19 @@ final class Encoder {
                 }
             }
         }
-        if (matched == null) {
+        if (matched == null && fallbackFields == null) {
             // Nothing in the data belongs to any case.
             return EMPTY;
+        }
+        if (fallbackFields != null) {
+            ByteBuf fallbackOut = new ByteBuf();
+            if (match.getLength() > 0) {
+                Long value = asLong(discriminator);
+                fallbackOut.write(writeInt(value == null ? 0 : value,
+                        match.getLength(), false));
+            }
+            fallbackOut.write(encodeFieldList(fallbackFields, data));
+            return fallbackOut.toArray();
         }
 
         ByteBuf out = new ByteBuf();

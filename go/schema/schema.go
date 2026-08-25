@@ -3563,6 +3563,32 @@ func encodeMatch(field Field, data map[string]any, ctx *EncodeContext) error {
 			}
 		}
 	}
+	// A discriminator that matched no case takes the default, the same order decoding
+	// uses: a `default` case inside `cases` first, then the `default` beside them
+	// (CR-2026-020 settled that precedence for decode). Encoding consulted neither, so a
+	// schema declaring a fallback wrote the discriminator and nothing else -
+	// match-default-fields.yaml re-encoded `097f` as `09` (CR-2026-027).
+	//
+	// Only where the discriminator is known. Where it is not, the claimable-name
+	// heuristic below is the only thing that can choose a branch, and a default that
+	// claims no names would beat a case that does.
+	if chosen == nil && discriminator != nil {
+		for _, c := range field.Cases {
+			if c.Default {
+				chosen, chosenKey = c.Fields, "default"
+				break
+			}
+		}
+		if chosen == nil {
+			switch fallback := field.MatchDefault.(type) {
+			case []any:
+				chosen, chosenKey = parseFieldsRaw(fallback), "default"
+			case []Field:
+				chosen, chosenKey = fallback, "default"
+			}
+		}
+	}
+
 	if chosen == nil {
 		best := -1
 		for _, c := range field.Cases {

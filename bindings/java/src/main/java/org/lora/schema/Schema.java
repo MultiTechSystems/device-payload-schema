@@ -513,7 +513,16 @@ public class Schema {
                 matchField.setVar(matchVar);
             }
             if (matchMap.containsKey("default")) {
-                matchField.setMatchDefault(matchMap.get("default"));
+                // Parsed here rather than at decode time so the encoder can use it too:
+                // it is handed already-parsed Fields and has no parseFields of its own
+                // (CR-2026-027).
+                Object declared = matchMap.get("default");
+                if (declared instanceof List<?> declaredFields) {
+                    matchField.setMatchDefault(
+                            parseFields((List<Map<String, Object>>) declaredFields));
+                } else {
+                    matchField.setMatchDefault(declared);
+                }
             }
             matchField.setCases(parseCaseMap(matchMap.get("cases")));
             f.setMatchInline(matchField);
@@ -1068,8 +1077,8 @@ public class Schema {
         // declaring a fallback got none.
         Object fallback = field.getMatchDefault();
         if (fallback instanceof List<?> fallbackFields) {
-            return mergeMatch(inline,
-                    decodeFields(parseFields((List<Map<String, Object>>) fallbackFields), ctx));
+            // Already Fields: the parser converts the `default:` list once (CR-2026-027).
+            return mergeMatch(inline, decodeFields((List<Field>) fallbackFields, ctx));
         }
         if (fallback == null || !"skip".equals(String.valueOf(fallback))) {
             throw new SchemaException.DecodeException(

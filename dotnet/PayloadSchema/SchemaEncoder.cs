@@ -506,12 +506,41 @@ public static class SchemaEncoder
                     }
                 }
             }
+            // A known discriminator that matched no case takes the default, and takes it
+            // ahead of the claimable-name heuristic: the schema said what an unmatched
+            // value means, so guessing a case from the names present would contradict it.
+            List<SchemaField>? fallbackFields = null;
+            if (matched == null && discriminator != null)
+            {
+                matched = match.Cases.FirstOrDefault(IsDefaultCase);
+                // The `default:` key beside `cases`, which nothing read here: a schema
+                // declaring a fallback wrote the discriminator and nothing else, so
+                // match-default-fields.yaml re-encoded `097f` as `09` (CR-2026-027).
+                if (matched == null && match.MatchDefault is List<SchemaField> declared)
+                    fallbackFields = declared;
+            }
             // An inline match with no name reports nothing of itself, so the case has to be
             // recovered from which of its fields the data carries.
-            matched ??= CasePresent(match.Cases, data);
-            matched ??= match.Cases.FirstOrDefault(IsDefaultCase);
-            if (matched == null)
+            if (fallbackFields == null)
+            {
+                matched ??= CasePresent(match.Cases, data);
+                matched ??= match.Cases.FirstOrDefault(IsDefaultCase);
+            }
+            if (matched == null && fallbackFields == null)
                 return Array.Empty<byte>();   // nothing in the data belongs to any case
+
+            if (fallbackFields != null)
+            {
+                var fallbackOut = new List<byte>();
+                if (match.Length > 0)
+                {
+                    var (ok, numeric) = Helpers.ToFloat64(discriminator);
+                    var value = ok ? (long)Math.Round(numeric, MidpointRounding.ToEven) : 0L;
+                    fallbackOut.AddRange(Helpers.EncodeUint((ulong)value, match.Length, _endian));
+                }
+                fallbackOut.AddRange(EncodeFieldList(fallbackFields, data));
+                return fallbackOut.ToArray();
+            }
 
             var output = new List<byte>();
             if (match.Length > 0)
