@@ -916,6 +916,25 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   bare string. It accepts an unknown wire type such as `s17`, a field with no
   `name`, and `mult: "0.1"`. For real structural checking use
   `tools/validate_schema.py`, which knows the type vocabulary.
+
+  `tlv` is the one exception, described by CR-2026-016 in `definitions.tlv` and
+  closed with `additionalProperties: false`, because its vocabulary is fixed at the
+  seven keys the five implementations read — a misspelt `tag_sze` is a mistake and not
+  an extension nobody has described yet. The `unknown` enum is stated in both places
+  and `test_cr_2026_016_tlv_meta_schema.py` fails if they drift apart. Describing
+  another construct is the same shape of change; closing `definitions.field` itself is
+  not, and nothing depends on it.
+- **`tools/generate_jsonschema.py` does not produce
+  `schemas/payload-schema.json` any more.** Nothing in the Makefile or CI runs it, so
+  the drift went unnoticed while CR after CR edited the file directly. Regenerating
+  would have deleted eleven keys — `source` (PS-263), `expected_warnings`
+  (CR-2026-014), `valid_range`, `resolution`, `unece`, the whole `tlv` description,
+  and five `test_vectors` keys — silently, because JSON Schema treats an absent
+  property as merely undescribed. CR-2026-016 made the generator refuse to overwrite a
+  file describing more than it does, and name what would be lost; `--force` still
+  overwrites. **Edit the file by hand.** Teaching the generator the current file was
+  the other option and was not taken: two definitions of the same thing to keep in
+  step is the arrangement that produced the drift.
 - **CR-2026-004 is implemented in Python, Go, Java and C#, not in C.** `name_from`
   and `!`/`*` case keys do not apply to the C interpreter: it has no TLV support and
   fixed-size name buffers, and it consumes a binary schema with no place for a
