@@ -162,6 +162,88 @@
         },
         "match": {
           "$ref": "#/definitions/match"
+        },
+        "byte_group": {
+          "description": "Fields sharing one span of bytes: each is read from the same starting position and none advances it, so bit ranges over the same byte can be named separately (PS-070). The span is stepped over once, at the end.\n\nTwo spellings, both honoured everywhere. The object form carries its own `size`; the array form is the field list alone and takes `size` from the field beside it, defaulting to 1 byte. The corpus uses the object form throughout.\n\nA member must not carry `consume` (PS-017): the construct sets it, and a member trying to advance the position would defeat the sharing.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "size": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "default": 1,
+                  "description": "Width of the shared span in bytes."
+                },
+                "fields": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/field"
+                  },
+                  "minItems": 1,
+                  "description": "The fields sharing the span."
+                }
+              },
+              "required": [
+                "fields"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/field"
+              },
+              "minItems": 1,
+              "description": "The array form: the field list alone, with `size` beside it."
+            }
+          ]
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Width in bytes of a `byte_group` written in its array form. Ignored by the object form, which carries its own."
+        },
+        "count": {
+          "description": "`type: repeat`: a fixed number of iterations, as an integer or a `$variable` naming a field already decoded. Exactly one of `count`, `byte_length` and `until` belongs on a repeat (PS-083); where more than one appears this wins, silently.",
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "pattern": "^\\$"
+            }
+          ]
+        },
+        "byte_length": {
+          "description": "`type: repeat`: iterate until this many bytes are consumed, as an integer or a `$variable`. The members must divide the span exactly; a decode that ends elsewhere is an error, not a short array (PS-088). Beaten by `count` where both appear.",
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "pattern": "^\\$"
+            }
+          ]
+        },
+        "until": {
+          "const": "end",
+          "description": "`type: repeat`: iterate until the payload is exhausted. `end` is the only value (PS-086) - any other is refused rather than treated as a bound. Beaten by `count` or `byte_length` where they appear."
+        },
+        "max": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 1000,
+          "description": "`type: repeat`: iteration ceiling, a guard against a malformed payload. Honoured by the four interpreters and not read by the TS013 generator, which relies on its own no-progress check instead."
+        },
+        "min": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "`type: repeat`: fewest iterations that count as a valid decode; fewer is an error. Honoured by the four interpreters, not read by the TS013 generator."
         }
       },
       "additionalProperties": true

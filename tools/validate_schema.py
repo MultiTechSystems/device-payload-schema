@@ -442,11 +442,40 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
         # Handle byte_group - add contained fields to known_field_names
         if 'byte_group' in fld:
             bg = fld['byte_group']
+            bgpath = f"{path}[{i}].byte_group"
             # Support both formats: list of fields directly, or {size: N, fields: [...]}
+            # Nothing checked the shape before CR-2026-019, so `byte_group: 7` and a
+            # group with no members were both reported valid and then decoded as
+            # nothing - the construct returns early on an empty field list.
             if isinstance(bg, dict):
                 bg_fields = bg.get('fields', [])
+                if not isinstance(bg_fields, list) or not bg_fields:
+                    errors.append(f"{bgpath}: needs a non-empty 'fields'")
+                span = bg.get('size')
+            elif isinstance(bg, list):
+                bg_fields = bg
+                if not bg_fields:
+                    errors.append(f"{bgpath}: must not be empty")
+                # The array form takes its width from the field beside it.
+                span = fld.get('size')
             else:
-                bg_fields = bg if isinstance(bg, list) else []
+                errors.append(
+                    f"{bgpath}: must be a field array or an object with 'fields'")
+                bg_fields = []
+                span = None
+            if span is not None and (not isinstance(span, int)
+                                     or isinstance(span, bool) or span < 1):
+                errors.append(f"{bgpath}: 'size' must be an integer of at least 1")
+            # PS-017: the construct sets `consume` itself, and a member that advances
+            # the position defeats the sharing the construct exists for.
+            for bi, bgf in enumerate(bg_fields):
+                if isinstance(bgf, dict) and 'consume' in bgf:
+                    errors.append(
+                        f"{bgpath}[{bi}] ({bgf.get('name', '?')}): a byte_group member "
+                        "must not set 'consume' (PS-017)")
+            if bg_fields:
+                validate_field_list(bg_fields, f"{bgpath}.fields", errors,
+                                    known_field_names)
             for bgf in bg_fields:
                 if isinstance(bgf, dict) and 'name' in bgf:
                     known_field_names.append(bgf['name'])
@@ -482,7 +511,64 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
 
         if 'type' in fld:
             ftype = fld['type']
-            
+
+            # `type: repeat`. Nothing checked this before CR-2026-019: a repeat with
+            # none of count/byte_length/until, or with all three, or with `until:
+            # banana`, or with no members at all, was reported valid. The first and
+            # third raise at decode in every interpreter; the second silently takes
+            # `count` by the if/elif order, which is the one PS-083 exists to forbid.
+            if ftype == 'repeat':
+                bounds = [key for key in ('count', 'byte_length', 'until') if key in fld]
+                if not bounds:
+                    errors.append(
+                        f"{path}[{i}] ({name}): repeat needs one of 'count', "
+                        "'byte_length' or 'until'")
+                elif len(bounds) > 1:
+                    # Not a warning: the decode silently follows count > byte_length >
+                    # until, so the bounds that lost say something the schema does not do.
+                    errors.append(
+                        f"{path}[{i}] ({name}): repeat declares {', '.join(bounds)}; "
+                        "exactly one is allowed (PS-083)")
+                if 'until' in fld and fld['until'] != 'end':
+                    errors.append(
+                        f"{path}[{i}] ({name}): repeat 'until' must be 'end' (PS-086), "
+                        f"got {fld['until']!r}")
+                for key in ('count', 'byte_length'):
+                    if key in fld:
+                        bound = fld[key]
+                        variable = isinstance(bound, str) and bound.startswith('$')
+                        counted = (isinstance(bound, int) and not isinstance(bound, bool)
+                                   and bound >= 0)
+                        if not (variable or counted):
+                            errors.append(
+                                f"{path}[{i}] ({name}): repeat {key!r} must be a "
+                                "non-negative integer or a $variable")
+                for key in ('max', 'min'):
+                    if key in fld:
+                        limit = fld[key]
+                        if not isinstance(limit, int) or isinstance(limit, bool) \
+                                or limit < 0:
+                            errors.append(
+                                f"{path}[{i}] ({name}): repeat {key!r} must be a "
+                                "non-negative integer")
+                # Only where both are written: `max` defaults differently across the
+                # implementations, so comparing against a default would refuse schemas
+                # that work.
+                if isinstance(fld.get('min'), int) and isinstance(fld.get('max'), int) \
+                        and not isinstance(fld['min'], bool) \
+                        and not isinstance(fld['max'], bool) \
+                        and fld['min'] > fld['max']:
+                    errors.append(
+                        f"{path}[{i}] ({name}): repeat 'min' ({fld['min']}) exceeds "
+                        f"'max' ({fld['max']}), so no decode can satisfy it")
+                if not isinstance(fld.get('fields'), list) or not fld['fields']:
+                    errors.append(
+                        f"{path}[{i}] ({name}): repeat needs a non-empty 'fields'")
+                else:
+                    validate_field_list(fld['fields'], f"{path}[{i}].fields", errors,
+                                        known_field_names)
+                continue
+
             # Bitfield string validation
             if ftype == 'bitfield_string':
                 if 'parts' not in fld:
