@@ -2540,7 +2540,18 @@ class SchemaInterpreter:
                         flags |= (1 << bit)
                 flags_patches[field_name] = flags
         
-        for field_def in fields:
+        for _kind, _item in self._bitfield_runs(fields):
+            # A run of bit ranges shares one span of bytes, so it is packed once rather
+            # than a byte per field (CR-2026-023). The LoRaWAN MHDR's three ranges used to
+            # come back as three bytes of unshifted values: `40` encoded as `020000`.
+            if _kind == 'bits':
+                try:
+                    output.extend(self._encode_bitfield_run(_item, data))
+                except Exception as e:
+                    names = ", ".join(str(f.get('name')) for f in _item)
+                    result.errors.append(f"Error encoding bit range(s) {names}: {e}")
+                continue
+            field_def = _item
             if '$ref' in field_def:
                 # Decoding splices the referenced definition's fields in place; encoding
                 # never did, so the whole header collapsed to one zero byte -
@@ -2761,6 +2772,105 @@ class SchemaInterpreter:
         byteorder = 'little' if self.endian == Endian.LITTLE else 'big'
         return int(packed).to_bytes(max(1, size), byteorder)
 
+    @staticmethod
+    def _is_bare_bitfield(field_def: Dict[str, Any]) -> bool:
+        """Whether a plain field reads a bit range out of a byte it may share.
+
+        The same test `_encode_field` uses to recognise one, minus the string types whose
+        names carry no bracket.
+        """
+        if not isinstance(field_def, dict) or 'byte_group' in field_def:
+            return False
+        ftype = str(field_def.get('type', ''))
+        if ftype in ('bitfield_string', 'version_string'):
+            return False
+        return any(marker in ftype for marker in ('[', ':', '<'))
+
+    def _bitfield_runs(self, fields: List[Dict[str, Any]]):
+        """Group a field list so bitfields sharing a span are emitted together.
+
+        Yields ``('field', field_def)`` for an ordinary field and ``('bits', [fields])``
+        for a run that occupies one span of bytes.
+
+        A run ends at the field that advances the position - `consume` of 1 or more - the
+        way decoding does: every bitfield before it reads from the same offset without
+        moving. Encoding had no notion of this at all. `_encode_field` wrote each bitfield
+        as a whole byte holding its unshifted value, so the three bit ranges of a LoRaWAN
+        MHDR came back as three bytes of raw values, `40` encoding as `020000`: the wrong
+        length, the wrong bits, and no error (CR-2026-023). `byte_group` was given this
+        treatment when its own encoding was fixed; a bare run never was.
+        """
+        run: List[Dict[str, Any]] = []
+        for field_def in fields:
+            if not isinstance(field_def, dict):
+                continue
+            if not self._is_bare_bitfield(field_def):
+                if run:
+                    yield 'bits', run
+                    run = []
+                yield 'field', field_def
+                continue
+            run.append(field_def)
+            # `consume` of 1 or more closes the span, which is where the run ends.
+            if int(field_def.get('consume', 0) or 0) >= 1:
+                yield 'bits', run
+                run = []
+        if run:
+            yield 'bits', run
+
+    @staticmethod
+    def _bitfield_label_value(label: str, field_def: Dict[str, Any]) -> Any:
+        """The number a bit range's label stands for, under `enum:` or `values:`.
+
+        Both spellings appear in the corpus - the LoRaWAN frame definitions use `enum:` on
+        a `u8[5:7]` - and neither was reachable from encoding before, because a bit range
+        never got as far as needing one.
+        """
+        for key in ('enum', 'values'):
+            table = field_def.get(key)
+            if isinstance(table, dict):
+                for number, name in table.items():
+                    if name == label:
+                        return int(number)
+            elif isinstance(table, list) and label in table:
+                return table.index(label)
+        raise ValueError(
+            f"{label!r} is not a declared value of {field_def.get('name')!r}")
+
+    def _encode_bitfield_run(self, run: List[Dict[str, Any]],
+                             data: Dict[str, Any]) -> bytes:
+        """Pack one run of bit ranges into the byte(s) they share.
+
+        The same shape as `_encode_byte_group`, which is the construct that already did
+        this correctly - a run of bare bitfields is the same thing without the wrapper.
+        """
+        packed = 0
+        size = 1
+        for field_def in run:
+            name = field_def.get('name', '')
+            ftype = str(field_def.get('type', ''))
+            if not name or str(name).startswith('_'):
+                value = field_def.get('default', 0)
+            else:
+                value = data.get(name, field_def.get('default', 0))
+            value = self._reverse_modifiers(value, field_def)
+            if isinstance(value, str):
+                # A bit range carrying `enum:` or `values:` reports a label, so the number
+                # has to be recovered before it can be shifted into place. Raised rather
+                # than skipped: writing zero for a label nobody could map is the silent
+                # wrong answer this CR exists to remove.
+                value = self._bitfield_label_value(value, field_def)
+            if not isinstance(value, (int, float)):
+                raise ValueError(
+                    f"cannot encode {field_def.get('name')!r} into its bit range: "
+                    f"{value!r} is not a number")
+            value = int(round(value))
+            base_size, start, width = self._parse_bitfield_type(ftype)
+            size = max(size, base_size, int(field_def.get('consume', 0) or 0))
+            packed |= (value & ((1 << width) - 1)) << start
+        byteorder = 'little' if self.endian == Endian.LITTLE else 'big'
+        return int(packed).to_bytes(max(1, size), byteorder)
+
     def _field_declaring_var(self, var_name: str) -> Optional[Dict[str, Any]]:
         """The field that declared ``var: <var_name>``, searched anywhere in the schema.
 
@@ -2912,7 +3022,13 @@ class SchemaInterpreter:
     def _encode_field_list(self, fields: List[Dict[str, Any]], data: Dict[str, Any]) -> bytes:
         """Encode a list of plain fields - a TLV case's value bytes."""
         out = bytearray()
-        for f in fields:
+        for kind, item in self._bitfield_runs(fields):
+            # A run of bit ranges shares one span of bytes, so it is packed once rather
+            # than a byte per field (CR-2026-023).
+            if kind == 'bits':
+                out.extend(self._encode_bitfield_run(item, data))
+                continue
+            f = item
             if not isinstance(f, dict):
                 continue
             # A case body may hold another construct rather than a plain field.

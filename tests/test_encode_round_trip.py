@@ -14,32 +14,25 @@ value is dropped by design (PS-269). So the floors below are ratchets, not a tar
 1190: they pin what round-trips today, per schema shape, so a regression in a working
 shape cannot hide behind the mass of a broken one.
 
-Measured state when this was written, and the reason for the shape breakdown:
+Measured state, and where the breakdown now lives:
 
-| shape       | round-trips | length differs | bytes differ | errors |
-|-------------|-------------|----------------|--------------|--------|
-| tlv         |         899 |              7 |           43 |      0 |
-| flagged     |         121 |              1 |            0 |      0 |
-| plain fixed |          54 |              3 |            3 |      3 |
-| match       |          34 |              0 |            0 |      0 |
-| byte_group  |          17 |              0 |            2 |      0 |
-| repeat      |           4 |              0 |            0 |      0 |
+    python tools/encode-round-trip.py
 
-1129 of 1191, from 120 when this began. **Every construct now has an encoder**, so what
-is left is information the decoded output does not carry, not a missing implementation:
+CR-2026-023 stopped this docstring carrying a hand-maintained table. It listed
+"1129 of 1191" with a four-point analysis of the residue, and both went stale as vectors
+were added - by the time it was replaced the corpus was 1237 and the shape counts were
+wrong in every row. The tool classifies every difference instead, and
+`tests/test_cr_2026_023_encode_round_trip.py` asserts that none of them is unexplained,
+which is the property worth holding: a new encoder defect appears as an unexplained row
+rather than as a number that was already large.
 
-1. **37 TLV, lossy by the vendor's design.** A `bitfield_string` hardware version keeps
-   only the high nibble of byte 1, so bits 8-11 are discarded by the format itself.
-2. **13 TLV**: a channel repeated within one payload collapses to a single dict key while
-   decoding, so which occurrence a value came from is gone.
-3. **3 errors, each a deliberate refusal** rather than a failure. Two are a `default`
-   label, which stands for every value a table does not list (PS-269), so no original can
-   be recovered; the third is `sqrt`, which cannot be inverted. Reported against the field
-   rather than guessed at.
-4. **9 in plain fixed, flagged and byte_group**: `skip` padding whose bytes the output
-   does not carry, `name_from` whose key is built at run time, and two vicki vectors.
+The residue is dominated by information the decode does not carry - undescribed bits in a
+`bitfield_string`, an internal `_` field, an unknown TLV tag's bytes, a `default` label
+standing for every unmapped value (PS-269), a `sqrt` that cannot be inverted. One entry is
+recoverable and nobody has done it: `name_from` builds its output key at run time, and the
+encoders look the value up by the schema-declared name.
 
-Raising any of those floors is the measure of progress on encoding.
+Raising the floors below is the measure of progress on encoding.
 """
 
 from __future__ import annotations
@@ -61,17 +54,17 @@ from validate_schema import is_encode_vector  # noqa: E402
 DEVICES = REPO_ROOT / "schemas" / "devices"
 
 #: Exact round-trips required overall. Raise as encoding improves.
-FLOOR_TOTAL = 1131
+FLOOR_TOTAL = 1160
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
 FLOOR_BY_SHAPE = {
     "tlv": 900,
-    "flagged": 121,
-    "plain fixed": 55,
-    "match": 34,
+    "flagged": 135,
+    "plain fixed": 58,
+    "match": 44,
     "byte_group": 17,
-    "repeat": 4,
+    "repeat": 6,
 }
 
 #: Encoding must never raise. It used to, 26 times: "Cannot encode type: number" for any
