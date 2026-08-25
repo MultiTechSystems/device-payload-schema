@@ -153,16 +153,79 @@ final class Encoder {
             value = 0L;
         } else if (flagsPatches.containsKey(name)) {
             value = flagsPatches.get(name);
-        } else if (data.containsKey(name)) {
-            value = data.get(name);
         } else {
-            if (topLevel) {
-                warnings.add("Missing field: " + name);
+            // `name_from` reports the value under a templated key, so that is the key to
+            // read it back from (CR-2026-030).
+            String lookupName = resolveEncodeName(field, data);
+            if (lookupName == null) {
+                throw new SchemaException.EncodeException("name_from '"
+                        + field.getNameFrom() + "' references a field the data does not "
+                        + "carry, so its output key cannot be rebuilt");
             }
-            value = 0L;
+            if (data.containsKey(lookupName)) {
+                value = data.get(lookupName);
+            } else {
+                if (topLevel) {
+                    warnings.add("Missing field: " + lookupName);
+                }
+                value = 0L;
+            }
         }
 
         return encodeField(field, reverseModifiers(value, field));
+    }
+
+
+    /**
+     * The output key a {@code name_from} field was reported under, resolved from the data
+     * rather than from decode variables.
+     *
+     * <p>Encoding is handed the decoded output, keyed by field name, and has no variables
+     * to resolve a template against. So a {@code ${ref}} is looked for in the data first,
+     * and failing that through a top-level field declaring {@code var: ref} - whose name
+     * is often not the variable's (PS-267).
+     *
+     * <p>Without this the encoder looked the value up under the schema-declared name,
+     * found nothing, warned about a key the schema never reports, and wrote a zero:
+     * name-from.yaml re-encoded {@code 032a} as {@code 0300} (CR-2026-030).
+     *
+     * @return the resolved key, or null where the template cannot be rebuilt
+     */
+    private String resolveEncodeName(Field field, Map<String, Object> data) {
+        String template = field.getNameFrom();
+        if (template == null || template.isEmpty()) {
+            return field.getName();
+        }
+        StringBuilder out = new StringBuilder();
+        java.util.regex.Matcher matcher =
+                java.util.regex.Pattern.compile("\\$\\{(\\w+)}").matcher(template);
+        int last = 0;
+        while (matcher.find()) {
+            out.append(template, last, matcher.start());
+            String reference = matcher.group(1);
+            Object value = data.get(reference);
+            if (value == null) {
+                for (Field sibling : fields) {
+                    if (reference.equals(sibling.getVar()) && sibling.getName() != null) {
+                        value = data.get(sibling.getName());
+                        break;
+                    }
+                }
+            }
+            if (value == null) {
+                return null;
+            }
+            Long whole = asLong(value);
+            Double asDouble = asDouble(value);
+            if (whole != null && asDouble != null && asDouble == whole.doubleValue()) {
+                out.append(whole);
+            } else {
+                out.append(value);
+            }
+            last = matcher.end();
+        }
+        out.append(template.substring(last));
+        return out.toString();
     }
 
     /** Encode a list of fields - a TLV case's value bytes, a match case's body. */

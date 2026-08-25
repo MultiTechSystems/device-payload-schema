@@ -596,6 +596,20 @@ Do not re-add a hand-maintained residue table. `tests/test_encode_round_trip.py`
 one; it said "1129 of 1191" with a four-point analysis, and every row was wrong by the time
 the corpus reached 1237.
 
+**The residue holds nothing recoverable now.** CR-2026-030 gave all four encoders
+encode-side `name_from` resolution, which was the one entry the tool classified as a gap
+rather than a loss: the value is reported under a templated key (`channel_3_reading`) and
+every encoder looked it up under the declared name (`reading`), found nothing, and wrote a
+zero. An unresolvable template is an error now, and the "missing field" warning names the
+resolved key rather than one the schema never reports. Note there are two resolvers per
+implementation, deliberately — decode resolves against its variables, encode against the
+data it was handed.
+
+**A CR-specific test must bound every floor it names, never pin one.** Both the total and
+the per-shape bucket are running values that later CRs raise. CR-2026-024, -026 and -027
+pinned a total and were each broken by the next CR; CR-2026-028 fixed that by bounding the
+total and pinning the *bucket*, which CR-2026-030 then broke. Bound both.
+
 **Rounding is half-to-even everywhere, and the generator now emits a helper for it.**
 `Math.round` is half-up and asymmetric for negatives, which put the generated codec at
 78.13 against the interpreters' 78.12 for `vicki.relativeHumidity`. Two traps are baked

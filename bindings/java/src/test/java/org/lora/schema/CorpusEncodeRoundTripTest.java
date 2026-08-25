@@ -49,7 +49,9 @@ class CorpusEncodeRoundTripTest {
     // CR-2026-028 gave this encoder the word-ordered u32le16/s32le16 case it never
     // had, so the flagged members of that type round-trip: `flagged` rises from 121
     // to 135 and the total to 1160.
-    private static final int ENCODE_FLOOR_TOTAL = 1160;
+    // CR-2026-030 resolved a `name_from` template on encode, so name-from.yaml
+    // round-trips: `plain fixed` rises from 58 to 59 and the total to 1161.
+    private static final int ENCODE_FLOOR_TOTAL = 1161;
 
     /**
      * Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -58,7 +60,7 @@ class CorpusEncodeRoundTripTest {
     private static final Map<String, Integer> ENCODE_FLOOR_BY_SHAPE = Map.of(
             "tlv", 900,
             "flagged", 135,
-            "plain fixed", 58,
+            "plain fixed", 59,
             "match", 44,
             "byte_group", 17,
             "repeat", 6);

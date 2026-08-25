@@ -181,7 +181,9 @@ class TestTheFloorsMovedWithTheFix:
     def test_the_raise_is_explained(self, path):
         assert "CR-2026-028" in path.read_text(), path.name
 
-    def test_the_reference_floor_did_not_move(self):
-        """Nothing about the reference changed; it always encoded these."""
+    def test_the_reference_floor_was_not_lowered(self):
+        """Nothing about the reference changed here; it always encoded these. A bound
+        rather than an equality - CR-2026-030 raised it legitimately."""
         text = (REPO_ROOT / "tests" / "test_encode_round_trip.py").read_text()
-        assert "FLOOR_TOTAL = 1160" in text
+        found = re.search(r"FLOOR_TOTAL = (\d+)", text)
+        assert found and int(found.group(1)) >= 1160, found and found.group(1)

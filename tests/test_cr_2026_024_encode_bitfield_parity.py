@@ -66,14 +66,26 @@ ENCODERS = {
 #: every later CR that raised a floor broke it - CR-2026-026 and CR-2026-027 each did. The
 #: total is not this CR's to own; `plain fixed` is the bucket it moved, and the pattern
 #: below reads the total as a lower bound instead.
+#: (total-name, total-floor, shape-name, shape-floor) per file. Both are read as lower
+#: bounds. Bounding only the total was CR-2026-028's half-fix: the bucket is a running
+#: value too, and CR-2026-030 raised `plain fixed` from 58 to 59 and broke this.
 FLOORS = {
     REPO_ROOT / "bindings" / "java" / "src" / "test" / "java" / "org" / "lora" / "schema"
-    / "CorpusEncodeRoundTripTest.java": ("ENCODE_FLOOR_TOTAL", 1145, '"plain fixed", 58'),
+    / "CorpusEncodeRoundTripTest.java": ("ENCODE_FLOOR_TOTAL", 1145, '"plain fixed", ', 58),
     REPO_ROOT / "dotnet" / "PayloadSchema.Tests" / "CorpusEncodeRoundTripTests.cs":
-        ("EncodeFloorTotal", 1146, '["plain fixed"] = 58'),
+        ("EncodeFloorTotal", 1146, '["plain fixed"] = ', 58),
     REPO_ROOT / "go" / "schema" / "corpus_encode_test.go":
-        ("encodeFloorTotal", 1155, '"plain fixed": 58'),
+        ("encodeFloorTotal", 1155, '"plain fixed": ', 58),
 }
+
+
+def floor_at_least(path, name, minimum, pattern=None):
+    """Assert a floor in `path` is at least `minimum`, whatever later CRs raised it to."""
+    text = path.read_text()
+    probe = pattern if pattern else rf"{name}\s*=\s*(\d+)"
+    found = re.search(probe if pattern else probe, text)
+    assert found, f"{path.name}: no {name}"
+    assert int(found.group(1)) >= minimum, (path.name, found.group(1), minimum)
 
 #: The corpus vectors this CR exists to make round-trip.
 WITNESSES = (
@@ -113,18 +125,15 @@ class TestEveryEncoderPacksABareRun:
 
 class TestTheFloorsMovedWithTheFix:
     @pytest.mark.parametrize("path", sorted(FLOORS, key=str))
-    def test_the_shape_floor_is_raised(self, path):
-        _, _, shape = FLOORS[path]
-        assert shape in path.read_text(), f"{path.name}: expected {shape}"
+    def test_the_shape_floor_is_at_least_what_this_cr_reached(self, path):
+        _, _, shape_prefix, shape_floor = FLOORS[path]
+        floor_at_least(path, shape_prefix, shape_floor,
+                       pattern=re.escape(shape_prefix) + r"(\d+)")
 
     @pytest.mark.parametrize("path", sorted(FLOORS, key=str))
     def test_the_total_floor_is_at_least_what_this_cr_reached(self, path):
-        """A lower bound, not an equality: later CRs raise it and should not break this."""
-        import re as _re
-        name, floor, _ = FLOORS[path]
-        found = _re.search(rf"{name}\s*=\s*(\d+)", path.read_text())
-        assert found, f"{path.name}: no {name}"
-        assert int(found.group(1)) >= floor, (path.name, found.group(1), floor)
+        name, floor, _, _ = FLOORS[path]
+        floor_at_least(path, name, floor)
 
     @pytest.mark.parametrize("path", sorted(FLOORS, key=str))
     def test_the_raise_is_explained(self, path):

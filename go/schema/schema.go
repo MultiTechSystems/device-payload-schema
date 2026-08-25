@@ -2819,6 +2819,55 @@ func matchCompositeCaseKey(key string, tag []int) (bool, int) {
 	return true, specificity
 }
 
+
+// resolveEncodeName is the output key a name_from field was reported under, resolved from
+// the data rather than from decode variables.
+//
+// Encoding is handed the decoded output, keyed by field name, and has no populated
+// Variables to resolve a template against. So a ${ref} is looked for in the data first,
+// and failing that through a sibling field declaring `var: ref` - whose name is often not
+// the variable's (PS-267). Searching the sibling list rather than the whole schema keeps
+// this from needing a schema reference the encode context does not carry; a template
+// referencing a variable declared in another field list is not resolvable here, and no
+// corpus schema does that.
+//
+// Without any of this the encoder looked the value up under the schema-declared name,
+// found nothing, warned about a key the schema never reports, and wrote a zero:
+// name-from.yaml re-encoded `032a` as `0300` (CR-2026-030).
+func resolveEncodeName(field Field, siblings []Field, data map[string]any) (string, error) {
+	if field.NameFrom == "" {
+		return field.Name, nil
+	}
+	var missing []string
+	resolved := nameFromPattern.ReplaceAllStringFunc(field.NameFrom, func(match string) string {
+		reference := match[2 : len(match)-1]
+		value, ok := data[reference]
+		if !ok {
+			for _, sibling := range siblings {
+				if sibling.Var == reference && sibling.Name != "" {
+					if v, present := data[sibling.Name]; present {
+						value, ok = v, true
+					}
+					break
+				}
+			}
+		}
+		if !ok {
+			missing = append(missing, reference)
+			return ""
+		}
+		if number, isNum := toFloat64(value); isNum && number == float64(int64(number)) {
+			return strconv.FormatInt(int64(number), 10)
+		}
+		return fmt.Sprintf("%v", value)
+	})
+	if len(missing) > 0 {
+		return "", fmt.Errorf("name_from for %q references %s, which the data does not carry",
+			field.Name, strings.Join(missing, ", "))
+	}
+	return resolved, nil
+}
+
 // resolveFieldName resolves a field's output key, honouring name_from (PS-265).
 func resolveFieldName(field Field, ctx *DecodeContext) (string, error) {
 	if field.NameFrom == "" {
@@ -3951,8 +4000,14 @@ func encodeFields(fields []Field, data map[string]any, ctx *EncodeContext) error
 		if patchedFlags, ok := flagsPatches[field.Name]; ok {
 			value = float64(patchedFlags)
 		} else {
+			// `name_from` reports the value under a templated key, so that is the key
+			// to read it back from (CR-2026-030).
+			lookupName, nameErr := resolveEncodeName(field, fields, data)
+			if nameErr != nil {
+				return nameErr
+			}
 			var exists bool
-			value, exists = data[field.Name]
+			value, exists = data[lookupName]
 			if !exists {
 				// A field the input omits is written as zero and reported, which
 				// is what Python, Java and C# all do. Skipping it wrote no bytes
@@ -3962,7 +4017,7 @@ func encodeFields(fields []Field, data map[string]any, ctx *EncodeContext) error
 				// that keeps the layout intact while the warning says the value
 				// was never supplied. encodeFieldList, used for tlv/match/repeat
 				// cases, already did exactly this.
-				ctx.Warnings = append(ctx.Warnings, "Missing field: "+field.Name)
+				ctx.Warnings = append(ctx.Warnings, "Missing field: "+lookupName)
 				value = 0
 			}
 		}
