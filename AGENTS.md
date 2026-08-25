@@ -470,6 +470,20 @@ declines to compare, it silently blesses.** Both the generator and the compariso
 fixed; if you extend the tool, make sure a new value shape is compared rather than
 skipped.
 
+**That lesson recurred, worse, and CR-2026-021 found it.** `matches()` in the same tool
+tested `if not values_match(...)`. `values_match` returns `(ok, detail)`, and a
+two-element tuple is always truthy, so the condition could never hold: from the day the
+second return value was added, the tool compared **key presence only**. Every value the
+two paths disagreed on was reported as a pass, and the reassuring
+`0 vectors where the two paths disagree` line meant only that both paths produced the same
+*keys*. It is how the repeat `max` gap survived — the generated codec put four records
+under a key where every interpreter put two, and both paths passed.
+
+`test_cr_2026_021_repeat_limits.py` guards it two ways: it asserts the source no longer
+contains `if not values_match(`, and it calls `matches()` on a known-unequal pair. **A
+helper that returns a pair is a trap for `if not helper(...)`** — `warnings_match` has the
+same shape and is unpacked correctly at all four of its call sites. Check any new one.
+
 **Rounding is half-to-even everywhere, and the generator now emits a helper for it.**
 `Math.round` is half-up and asymmetric for negatives, which put the generated codec at
 78.13 against the interpreters' 78.12 for `vicki.relativeHumidity`. Two traps are baked
@@ -937,6 +951,14 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
     spellings, an object carrying its own `size` and an array taking `size` from the
     field beside it; only the object form has corpus coverage, and a test says so
     rather than forbidding the other.
+
+  `repeat`'s `max` and `min` were honoured by the four interpreters and not by the TS013
+  generator until CR-2026-021, which closed the last such gap: `max` is now a ceiling on
+  all five (defaulting to 1000, clamping a `count` and bounding the byte_length and
+  until-end loops) and falling below `min` fails the decode on all five. `min` has no
+  corpus fixture on purpose — it fails the decode, and no vector kind expects a failure.
+  Note that `max` and `byte_length` can conflict: stopping at the ceiling before the span
+  is consumed is a `byte_length mismatch` error, in every implementation.
 
   Every construct is now described. **Closing `definitions.field` itself is a different
   and much larger change** — it declares no required keys and types `type` as a bare

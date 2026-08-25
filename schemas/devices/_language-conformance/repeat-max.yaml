@@ -1,0 +1,42 @@
+# `max` on a repeat: the iteration ceiling, and the one repeat key the TS013 generator
+# never read.
+#
+# The four interpreters cap a `count` at it and guard the byte_length and until-end loops
+# with it, so a payload holding more records than `max` allows yields exactly `max` of
+# them. The generator had only a no-progress guard - which stops a zero-width member but
+# is not a ceiling - so it iterated to the end of the payload and produced more records
+# than any interpreter would. CR-2026-019 described the key and recorded the gap;
+# CR-2026-021 closes it.
+#
+# `min` cannot be pinned here: it fails the decode when too few records are produced, and
+# no vector kind expects a failure. It is covered by tests/test_cr_2026_021_repeat_limits.py
+# on the interpreted and generated paths alike.
+name: probe_repeat_max
+endian: big
+fields:
+  - name: capped_to_end
+    type: repeat
+    until: end
+    max: 2
+    fields:
+      - name: v
+        type: u8
+test_vectors:
+  - name: until_end_stops_at_the_ceiling
+    description: "Four records are present and `max: 2` allows two, so the last two bytes are left unread"
+    payload: "0A141E28"
+    source: generated
+    expected:
+      capped_to_end:
+        - v: 10
+        - v: 20
+    expected_warnings: []
+  - name: a_payload_within_the_ceiling_is_unaffected
+    description: "Two records, which is what the ceiling allows anyway"
+    payload: "0A14"
+    source: generated
+    expected:
+      capped_to_end:
+        - v: 10
+        - v: 20
+    expected_warnings: []

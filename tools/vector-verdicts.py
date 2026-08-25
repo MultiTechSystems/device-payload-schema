@@ -224,12 +224,22 @@ def vector_fport(vector: dict):
 
 
 def matches(expected: dict, actual: dict) -> tuple[bool, str]:
-    """Whether every expected field is present and equal, and what differs if not."""
+    """Whether every expected field is present and equal, and what differs if not.
+
+    `values_match` returns `(ok, detail)`. This tested `not values_match(...)` on the
+    tuple, and a two-element tuple is always truthy, so the condition could never hold:
+    from the day the second return value was added until CR-2026-021 this function
+    compared *key presence only*, and every value the two paths disagreed on was reported
+    as a pass. The `0 vectors where the two paths disagree` line was that much weaker than
+    it read, and it is how `max` on a repeat stayed invisible - the generated codec
+    produced four records where every interpreter produced two, and both paths passed.
+    """
     for name, want in (expected or {}).items():
         if name not in actual:
             return False, f"{name} missing"
-        if not values_match(want, actual[name]):
-            return False, f"{name}: want {want!r}, got {actual[name]!r}"
+        ok, detail = values_match(want, actual[name])
+        if not ok:
+            return False, f"{name}: {detail}"
     return True, ""
 
 

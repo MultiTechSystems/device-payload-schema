@@ -33,9 +33,9 @@ import (
 // CR-2026-014's `expected_warnings` added three fixtures for the `unknown` parameter,
 // which no device schema sets, and the floor had drifted 29 below the full count as
 // vectors were added without it being raised. It is the full count again: 1222.
-// CR-2026-020 brought the five implementations onto the same `match`, so its six
-// fixtures pass everywhere and the full count is 1233.
-const corpusFloor = 1233
+// CR-2026-020 brought the five implementations onto the same `match` and CR-2026-021
+// the same repeat `max`, so their fixtures pass everywhere and the full count is 1236.
+const corpusFloor = 1236
 
 type corpusVector struct {
 	Name    string `yaml:"name"`

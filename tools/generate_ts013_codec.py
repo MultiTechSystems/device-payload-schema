@@ -862,6 +862,18 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append(f'{i}  d.{arr} = {arr};')
                 return lines
 
+            # `max` is the iteration ceiling the four interpreters enforce: they clamp a
+            # `count` to it and guard the byte_length and until-end loops with it, so a
+            # payload holding more records than it allows yields exactly that many. This
+            # generator had only the no-progress guard below, which stops a zero-width
+            # member but is not a ceiling, so it ran to the end of the payload and
+            # produced more records than any interpreter would (CR-2026-021). The default
+            # is the interpreters' 1000.
+            ceiling = field.get('max')
+            ceiling = int(ceiling) if isinstance(ceiling, int) and ceiling > 0 else 1000
+            lines.append(f'{i}  var {arr}_max = {ceiling};')
+            condition = f'({condition}) && {arr}.length < {arr}_max'
+
             # A member set that consumes nothing would spin forever; bound the loop by
             # the payload as well and stop if the position does not advance.
             lines.append(f'{i}  while ({condition}) {{')
@@ -883,6 +895,17 @@ function writeS(buf, pos, size, value, endian) {
             lines.append(f'{i}    if (pos <= {arr}_before) break;')
             lines.append(f'{i}    if (pos >= buf.length && !({condition})) break;')
             lines.append(f'{i}  }}')
+            # `min` is the fewest iterations that count as a valid decode, and fewer is an
+            # error in all four interpreters. This generator returned the short array
+            # instead, so a payload the interpreters refused decoded here as a schema that
+            # simply found less (CR-2026-021). Emitted only where declared: the default is
+            # zero, which nothing can fall below.
+            floor = field.get('min')
+            if isinstance(floor, int) and not isinstance(floor, bool) and floor > 0:
+                lines.append(f'{i}  if ({arr}.length < {floor}) {{')
+                lines.append(f'{i}    throw new Error("repeat produced " + {arr}.length'
+                             f' + " elements, but minimum is {floor}");')
+                lines.append(f'{i}  }}')
             lines.append(f'{i}  vars.{arr} = {arr};')
             if not str(field.get('name', '')).startswith('_'):
                 lines.append(f'{i}  d.{arr} = {arr};')
