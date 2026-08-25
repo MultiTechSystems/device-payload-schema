@@ -484,6 +484,29 @@ contains `if not values_match(`, and it calls `matches()` on a known-unequal pai
 helper that returns a pair is a trap for `if not helper(...)`** — `warnings_match` has the
 same shape and is unpacked correctly at all four of its call sites. Check any new one.
 
+**A bare run of bit ranges is packed on encode by the Python reference encoder only.**
+CR-2026-023 found `_encode_field` writing each bitfield as a whole byte holding its
+unshifted value, ignoring the bit range and `consume: 0` alike — a LoRaWAN MHDR's three
+ranges came back as three bytes, `40` encoding as `020000`. `byte_group` was given packing
+when its own encoding was fixed; a bare run, the same thing without the wrapper, never
+was. **Java, C# and Go still pack only `byte_group`**, which is the same class of
+divergence CR-2026-020 closed for `match` and wants its own CR;
+`test_cr_2026_023_encode_round_trip.py` reads their source so the claim cannot go stale
+unnoticed.
+
+**The encode round-trip residue is classified, not counted.** `tools/encode-round-trip.py`
+gives a reason for every vector that does not re-encode to its payload, and
+`test_cr_2026_023_encode_round_trip.py` asserts none is `unexplained`. That is the property
+worth keeping: the count alone was 77 and read as an encoder full of holes, when all but
+one entry is information the decode does not carry — undescribed bits, an internal `_`
+field, an unknown tag's bytes, a `default` label (PS-269), an uninvertible `sqrt`. The one
+recoverable entry is `name_from`, whose output key is built at run time while the encoders
+look the value up by the declared name.
+
+Do not re-add a hand-maintained residue table. `tests/test_encode_round_trip.py` carried
+one; it said "1129 of 1191" with a four-point analysis, and every row was wrong by the time
+the corpus reached 1237.
+
 **Rounding is half-to-even everywhere, and the generator now emits a helper for it.**
 `Math.round` is half-up and asymmetric for negatives, which put the generated codec at
 78.13 against the interpreters' 78.12 for `vicki.relativeHumidity`. Two traps are baked

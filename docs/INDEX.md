@@ -88,6 +88,7 @@ Generated inventory of this repository: what lives where, what each document cov
 | `tools/crossvalidate_decentlab.py` | Check decentlab schemas against the vendor's decoders. |
 | `tools/crossvalidate_js_json.py` | diff interpreter JSON against the generated TS013 codec. |
 | `tools/crossvalidate_ttn.py` | Check schemas against The Things Network device repository. |
+| `tools/encode-round-trip.py` | Every corpus vector through `encode(decode(payload))`, with a reason where it differs. |
 | `tools/fuzz_decoder.py` | Fuzz test the schema interpreter |
 | `tools/generate-c.py` | Generate C codec from Payload Schema YAML |
 | `tools/generate_codec.py` | Generate C codec AND unit tests from Payload Schema |
