@@ -100,7 +100,8 @@ typedef enum {
     FIELD_TYPE_UNKNOWN,
     /* Appended after UNKNOWN on purpose: UNKNOWN is parse_type_string's sentinel and
      * inserting before it would renumber it (CR-2026-033). */
-    FIELD_TYPE_TLV
+    FIELD_TYPE_TLV,
+    FIELD_TYPE_FLAGGED
 } field_type_t;
 
 typedef enum {
@@ -515,6 +516,16 @@ static inline void var_set(var_context_t* ctx, const char* name, int64_t value) 
     }
 }
 
+/* Whether a variable was ever set. `var_get` returns 0 for a miss, which for a `flagged`
+ * mask is indistinguishable from "no bits set" - so the construct would decode nothing and
+ * report success. The reference interpreter raises instead (CR-2026-034). */
+static inline bool var_has(const var_context_t* ctx, const char* name) {
+    for (int i = 0; i < ctx->count; i++) {
+        if (strcmp(ctx->vars[i].name, name) == 0) return true;
+    }
+    return false;
+}
+
 static inline int64_t var_get(var_context_t* ctx, const char* name) {
     for (int i = 0; i < ctx->count; i++) {
         if (strcmp(ctx->vars[i].name, name) == 0) {
@@ -558,6 +569,41 @@ static inline int schema_tlv_tag(const int* parts, int count) {
     int packed = 0;
     for (int i = 0; i < count; i++) packed = (packed << 8) | (parts[i] & 0xFF);
     return packed;
+}
+
+/* A `flagged` construct: a previously decoded field read as a bitmask, with a group of
+ * fields per bit (PS-158..PS-163).
+ *
+ * `flags_field` names the field holding the mask. **That field must carry `var_name`**, or
+ * the mask cannot be found: this interpreter records a value in the variable table only
+ * where a field declares one, and `flagged` refers to a field by name rather than by
+ * variable. A builder that forgets it gets SCHEMA_ERR_MATCH rather than a silent decode of
+ * nothing (CR-2026-034).
+ *
+ * Reuses `match_var` and `cases[]`: a group is a case whose match_value is its bit
+ * position, and whose field_start/field_count point at a body placed above field_count. */
+static inline field_def_t field_flagged(const char* flags_field) {
+    field_def_t f;
+    memset(&f, 0, sizeof(f));
+    f.type = FIELD_TYPE_FLAGGED;
+    strncpy(f.match_var, flags_field, SCHEMA_MAX_NAME_LEN - 1);
+    return f;
+}
+
+/* Add a flagged group: the bit that selects it, and the range of fields it contributes.
+ * Groups are evaluated in the order added, which is the order their bytes appear (PS-160). */
+static inline bool field_add_flagged_group(field_def_t* f, int bit,
+                                           int field_start, int field_count) {
+    if (f->case_count >= SCHEMA_MAX_CASES) return false;
+    if (bit < 0 || bit > 63) return false;
+    case_def_t* c = &f->cases[f->case_count];
+    memset(c, 0, sizeof(*c));
+    c->match_value = bit;
+    c->match_list[0] = -1;
+    c->field_start = field_start;
+    c->field_count = field_count;
+    f->case_count++;
+    return true;
 }
 
 /* Add a tlv case: its packed tag, and the range of schema fields holding its body. */
@@ -1033,6 +1079,54 @@ static inline int schema_decode_direction(
     for (int i = 0; i < schema->field_count; i++) {
         const field_def_t* field = &schema->fields[i];
         
+        /* A `flagged` construct: the bits of an already-decoded field select which groups
+         * contribute (PS-158). Groups are walked in the order they were added, which is the
+         * order their bytes appear (PS-160); a clear bit consumes nothing (PS-162) and a set
+         * one decodes its body into the flat result (PS-163). Added by CR-2026-034.
+         *
+         * The mask is read from the variable table, so the field holding it must declare
+         * `var_name` - see field_flagged(). A missing reference is an error rather than a
+         * mask of zero, which would decode nothing and report success. */
+        if (field->type == FIELD_TYPE_FLAGGED) {
+            const char* flags_name = field->match_var;
+            if (flags_name[0] == '$') flags_name++;
+            if (!var_has(&vars, flags_name)) {
+                result->error_code = SCHEMA_ERR_MATCH;
+                snprintf(result->error_msg, sizeof(result->error_msg),
+                         "flagged field reference not found: %s", flags_name);
+                return SCHEMA_ERR_MATCH;
+            }
+            const int64_t flags = var_get(&vars, flags_name);
+
+            for (int c = 0; c < field->case_count; c++) {
+                const case_def_t* group = &field->cases[c];
+                if (((flags >> group->match_value) & 1) == 0) continue;
+
+                for (int f = 0; f < group->field_count; f++) {
+                    int field_idx = group->field_start + f;
+                    /* Bounded by the array: a group body is placed above field_count so
+                     * the top-level loop does not walk it, exactly as a tlv case is. */
+                    if (field_idx < 0 || field_idx >= SCHEMA_MAX_FIELDS) break;
+                    if (result->field_count >= SCHEMA_MAX_FIELDS) break;
+
+                    int rc = decode_field(
+                        &schema->fields[field_idx],
+                        buf, len, &pos,
+                        &result->fields[result->field_count],
+                        &vars, schema->endian
+                    );
+                    if (rc != SCHEMA_OK) {
+                        result->error_code = rc;
+                        return rc;
+                    }
+                    if (result->fields[result->field_count].valid) {
+                        result->field_count++;
+                    }
+                }
+            }
+            continue;
+        }
+
         /* A tlv loop: read a tag, decode the case describing it, repeat to the end of the
          * payload (PS-153, PS-154). Added by CR-2026-033; before it this interpreter had
          * no field type for the construct at all, so 79 of the corpus's schemas could not

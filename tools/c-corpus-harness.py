@@ -59,11 +59,17 @@ INT_CTORS = {
 }
 SIZED_CTORS = {"ascii": "field_ascii", "hex": "field_hex", "bytes": "field_bytes_type"}
 
+#: Wire types the interpreter has a FIELD_TYPE_ for but this harness has no constructor
+#: mapping for. Reported apart from a type C genuinely lacks, because "no constructor for
+#: type 'u32le16'" reads as a C gap when C decodes it perfectly well - the same
+#: misattribution the tlv/flagged reasons are careful to avoid.
+C_HAS_NO_CONSTRUCTOR_HERE = {"u32le16", "s32le16", "udec", "sdec", "base64"}
+
 #: Keys that put a schema or a field outside the subset, and the reason to report.
 UNREACHABLE_KEYS = {
-    # `tlv` was here until CR-2026-033 gave the interpreter a field type for it. What
-    # remains unreachable about a tlv is size, not shape - see tlv_source().
-    "flagged": "no flagged field type",
+    # `tlv` was here until CR-2026-033 and `flagged` until CR-2026-034; the interpreter has
+    # a field type for both now. What remains unreachable about either is size, not shape -
+    # see tlv_source() and flagged_source().
     "match": "no inline match support in this harness",
     "byte_group": "no byte_group support in this harness",
     "object": "no nested object support in this harness",
@@ -146,7 +152,10 @@ def field_source(field, schema_endian):
                 return None, "enum key is not an integer"
             lines.append(f"    field_add_lookup(&f, {number}, {c_string(label)});")
     else:
-        return None, f"no constructor for type {ftype!r}"
+        if ftype in C_HAS_NO_CONSTRUCTOR_HERE:
+            return None, (f"this harness has no constructor for {ftype!r} "
+                          "(the interpreter has the type)")
+        return None, f"no {ftype!r} field type"
 
     lookup = field.get("lookup")
     if isinstance(lookup, dict):
@@ -257,6 +266,53 @@ def tlv_case_key(key, parts):
         return None
 
 
+
+def flagged_source(field, schema_endian):
+    """The C that builds a `flagged` construct (CR-2026-034).
+
+    Returns (groups, flags_field_name, reason) where groups is [(bit, [member lines])].
+    The bodies are placed above `field_count` by the caller, as a tlv case body is.
+
+    The field holding the mask must carry `var_name`, because this interpreter records a
+    value in its variable table only where a field declares one while `flagged` refers to a
+    field by name. The caller patches that in - see schema_source().
+    """
+    flagged = field["flagged"]
+    if not isinstance(flagged, dict):
+        return None, None, "flagged is not a mapping"
+    flags_field = flagged.get("field")
+    if not isinstance(flags_field, str) or not flags_field:
+        return None, None, "flagged names no field to read the mask from"
+
+    groups = flagged.get("groups")
+    if not isinstance(groups, list) or not groups:
+        return None, None, "flagged has no groups"
+    if len(groups) > 16:
+        return None, None, "more groups than SCHEMA_MAX_CASES (16) allows"
+
+    built = []
+    for group in groups:
+        if not isinstance(group, dict):
+            return None, None, "a flagged group is not a mapping"
+        bit = group.get("bit")
+        if not isinstance(bit, int) or isinstance(bit, bool) or not 0 <= bit <= 63:
+            return None, None, f"group bit {bit!r} is not a bit position"
+        members = group.get("fields")
+        if not isinstance(members, list) or not members:
+            return None, None, "a flagged group has no fields"
+        lines_per_member = []
+        for member in members:
+            if not isinstance(member, dict):
+                return None, None, "a group member is not a mapping"
+            lines, reason = field_source(member, schema_endian)
+            if lines is None:
+                return None, None, reason
+            lines_per_member.append(lines)
+        built.append((bit, lines_per_member))
+
+    return built, flags_field, None
+
+
 def schema_source(index, schema):
     """The C that builds one schema, or (None, reason)."""
     if schema.get("ports"):
@@ -271,8 +327,9 @@ def schema_source(index, schema):
             f"    s->endian = {'ENDIAN_LITTLE' if schema.get('endian') == 'little' else 'ENDIAN_BIG'};"]
     # The flat field index a tlv case body will start at. Top-level fields are added in
     # order, so it advances by one per plain field and by the body size per tlv.
-    # Pass one: the fields the top-level loop walks, in order. A tlv is one of them.
-    top_level, deferred = [], []
+    # Pass one: the fields the top-level loop walks, in order. A tlv or a flagged is one
+    # of them; their bodies are deferred to pass two.
+    top_level, deferred, mask_fields = [], [], set()
     for field in fields:
         if not isinstance(field, dict):
             return None, "field is not a mapping"
@@ -283,10 +340,27 @@ def schema_source(index, schema):
             top_level.append(("tlv", ctor, len(deferred)))
             deferred.append(members)
             continue
+        if "flagged" in field and not field.get("type"):
+            groups, flags_field, reason = flagged_source(field, schema.get("endian"))
+            if groups is None:
+                return None, reason
+            mask_fields.add(flags_field)
+            top_level.append(("flagged", flags_field, len(deferred)))
+            deferred.append([(bit, members) for bit, members in groups])
+            continue
         lines, reason = field_source(field, schema.get("endian"))
         if lines is None:
             return None, reason
         top_level.append(("plain", lines, None))
+
+    # The mask field has to declare `var_name` or the construct cannot find it. Patched in
+    # here rather than required of the schema: a YAML `flagged` names a field, not a
+    # variable, so no corpus schema carries `var:` for it.
+    if mask_fields:
+        declared = {f.get("name") for f in fields if isinstance(f, dict)}
+        missing = mask_fields - declared
+        if missing:
+            return None, f"flagged reads a mask from {sorted(missing)!r}, not a field here"
 
     counted = len(top_level)
     # Pass two: case bodies go above `field_count`, so the top-level loop never walks
@@ -306,6 +380,21 @@ def schema_source(index, schema):
     for kind, payload, group_index in top_level:
         if kind == "plain":
             body.extend(payload)
+            # A mask field needs `var_name` set before it is added, so the construct that
+            # reads it can find it in the variable table.
+            name = next((line.split('"')[1] for line in payload
+                         if 'f = field_' in line and '"' in line), None)
+            if name in mask_fields:
+                # Insert the var_name assignment before the add.
+                add = body.pop()
+                body.append(f'    strncpy(f.var_name, "{name}", SCHEMA_MAX_NAME_LEN - 1);')
+                body.append(add)
+            continue
+        if kind == "flagged":
+            body.append(f"    f = field_flagged({c_string(payload)});")
+            for bit, start, count in case_calls[group_index]:
+                body.append(f"    field_add_flagged_group(&f, {bit}, {start}, {count});")
+            body.append("    schema_add_field(s, &f);")
             continue
         body.append(f"    f = {payload};")
         for packed, start, count in case_calls[group_index]:

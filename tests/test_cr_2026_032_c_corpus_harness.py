@@ -57,9 +57,10 @@ ATTEMPTED_FLOOR = 50
 
 #: Constructs the C interpreter has no field type for. Distinct from what the harness
 #: cannot build, and the distinction is the point.
-#: `no tlv field type` was here until CR-2026-033 added one; the interpreter now decodes
-#: the construct and the harness builds it, so it is no longer a reason at all.
-C_GAPS = ("no flagged field type", "no constructor for type 'repeat'")
+#: `no tlv field type` was here until CR-2026-033 added one and `no flagged field type`
+#: until CR-2026-034; the interpreter decodes both now and the harness builds them, so
+#: neither is a reason any more. `repeat` is the last construct it has no field type for.
+C_GAPS = ("no 'repeat' field type",)
 
 
 def harness(*args):

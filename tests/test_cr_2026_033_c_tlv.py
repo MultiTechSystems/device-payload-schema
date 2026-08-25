@@ -22,8 +22,9 @@ The representation, and why:
 - **`unknown: raw` is not supported**, for the same reason: the captured bytes need
   somewhere to go. `skip` and `error` are.
 
-What the C interpreter still cannot do, now measured rather than assumed: 34 schemas need
-`flagged`, 24 a `bitfield_string`, 15 more cases than `SCHEMA_MAX_CASES` allows, 3 `repeat`.
+What the C interpreter still could not do when this landed: 34 schemas needed `flagged`
+(closed by CR-2026-034), 24 a `bitfield_string`, 15 more cases than `SCHEMA_MAX_CASES`
+allows, 3 `repeat`.
 That last group is the fixed-size boundary and is the honest limit of a firmware-tier
 interpreter: `sizeof(schema_t)` is already 51 KB because every `field_def` carries
 `cases[16]` and `lookup[16]` unconditionally, and raising the limits to fit mla20's 67
@@ -68,9 +69,14 @@ class TestTheInterpreterDecodesTlv:
         assert "FIELD_TYPE_TLV" in HEADER.read_text()
 
     def test_it_is_appended_after_the_sentinel(self):
-        """UNKNOWN is parse_type_string's sentinel; inserting before it renumbers it."""
+        """UNKNOWN is parse_type_string's sentinel; inserting before it renumbers it.
+
+        Compared by position, not by adjacency to the closing brace. This asserted
+        `"FIELD_TYPE_TLV\n} field_type_t;"` - which pinned TLV as the *last* member, an
+        incidental fact that CR-2026-034 broke by appending FIELD_TYPE_FLAGGED after it.
+        """
         text = HEADER.read_text()
-        assert text.index("FIELD_TYPE_UNKNOWN,") < text.index("FIELD_TYPE_TLV\n} field_type_t;")
+        assert text.index("FIELD_TYPE_UNKNOWN,") < text.index("FIELD_TYPE_TLV")
 
     def test_there_is_a_constructor_for_both_tag_forms(self):
         text = HEADER.read_text()
@@ -172,10 +178,10 @@ class TestTheMeasurementImproved:
     def test_the_accounting_still_holds(self, report):
         assert report["attempted"] + report["skipped_vectors"] == report["corpus_vectors"]
 
-    def test_flagged_is_now_the_largest_gap(self, report):
-        """Which makes it the next construct, if C is to go further."""
-        largest = max(report["skips"].items(), key=lambda kv: kv[1])
-        assert largest[0] == "no flagged field type", largest
+    def test_flagged_is_no_longer_a_gap_either(self, report):
+        """It was the largest when this CR landed; CR-2026-034 closed it."""
+        assert not any("flagged field type" in r for r in report["skips"]), \
+            sorted(report["skips"])
 
 
 class TestTheExistingSelftestsStillPass:
