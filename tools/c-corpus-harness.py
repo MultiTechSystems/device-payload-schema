@@ -61,7 +61,8 @@ SIZED_CTORS = {"ascii": "field_ascii", "hex": "field_hex", "bytes": "field_bytes
 
 #: Keys that put a schema or a field outside the subset, and the reason to report.
 UNREACHABLE_KEYS = {
-    "tlv": "no tlv field type",
+    # `tlv` was here until CR-2026-033 gave the interpreter a field type for it. What
+    # remains unreachable about a tlv is size, not shape - see tlv_source().
     "flagged": "no flagged field type",
     "match": "no inline match support in this harness",
     "byte_group": "no byte_group support in this harness",
@@ -173,6 +174,89 @@ def field_source(field, schema_endian):
     return lines, None
 
 
+
+def tlv_source(field, schema_endian, next_index):
+    """The C that builds a `tlv` field and its case bodies (CR-2026-033).
+
+    Returns (case-body lines, tlv lines, fields consumed, reason). The bodies are emitted
+    as ordinary schema fields first, because a case keys a range of the flat field array -
+    `case_def_t.field_start`/`field_count` - which is also why the limits below are real
+    rather than defensive: every case body counts against SCHEMA_MAX_FIELDS.
+    """
+    tlv = field["tlv"]
+    if tlv.get("merge") is False:
+        return None, None, 0, "merge:false needs a channel list decode_result_t cannot hold"
+    if tlv.get("unknown") == "raw":
+        return None, None, 0, "unknown:raw needs somewhere to put the captured bytes"
+
+    tag_fields = tlv.get("tag_fields") or []
+    if tag_fields:
+        if any(str(f.get("type")) != "u8" for f in tag_fields):
+            return None, None, 0, "a tag component wider than u8 does not pack into a case key"
+        parts = len(tag_fields)
+        if parts > 4:
+            return None, None, 0, "more than four tag components do not pack into an int"
+        ctor = f"field_tlv_composite({parts}, {int(tlv.get('length_size', 0) or 0)})"
+    else:
+        parts = 0
+        ctor = (f"field_tlv({int(tlv.get('tag_size', 1) or 1)}, "
+                f"{int(tlv.get('length_size', 0) or 0)})")
+
+    cases = tlv.get("cases") or {}
+    if len(cases) > 16:
+        # One message rather than one per count, so the report groups them: this is a
+        # single boundary - the fixed SCHEMA_MAX_CASES - not fifteen separate reasons.
+        return None, None, 0, "more cases than SCHEMA_MAX_CASES (16) allows"
+
+    members = []          # [(packed, [per-member build lines])]
+    for key, body in cases.items():
+        if not isinstance(body, list):
+            return None, None, 0, "a case body is not a field list"
+        packed = tlv_case_key(key, parts)
+        if packed is None:
+            return None, None, 0, f"case key {key!r} is not a tag this interpreter can key on"
+        built = []
+        for member in body:
+            if not isinstance(member, dict):
+                return None, None, 0, "a case member is not a mapping"
+            lines, reason = field_source(member, schema_endian)
+            if lines is None:
+                return None, None, 0, reason
+            built.append(lines)
+        members.append((packed, built))
+
+    return members, ctor, sum(len(b) for _, b in members), None
+
+
+def tlv_case_key(key, parts):
+    """A case key packed the way the interpreter packs a tag, or None."""
+    if isinstance(key, bool):
+        return None
+    if isinstance(key, int):
+        return key if parts <= 1 else None
+    text = str(key).strip()
+    if text.startswith("[") and text.endswith("]"):
+        pieces = [p.strip().strip("\"'") for p in text[1:-1].split(",")]
+        if len(pieces) != parts:
+            return None
+        packed = 0
+        for piece in pieces:
+            if piece == "*" or piece.startswith("!"):
+                return None      # a range of tags; encoding cannot choose one (PS-270)
+            try:
+                value = int(piece, 0)
+            except ValueError:
+                return None
+            if not 0 <= value <= 0xFF:
+                return None
+            packed = (packed << 8) | value
+        return packed
+    try:
+        return int(text, 0) if parts <= 1 else None
+    except ValueError:
+        return None
+
+
 def schema_source(index, schema):
     """The C that builds one schema, or (None, reason)."""
     if schema.get("ports"):
@@ -185,13 +269,55 @@ def schema_source(index, schema):
             "    field_def_t f;",
             "    memset(s, 0, sizeof(*s));",
             f"    s->endian = {'ENDIAN_LITTLE' if schema.get('endian') == 'little' else 'ENDIAN_BIG'};"]
+    # The flat field index a tlv case body will start at. Top-level fields are added in
+    # order, so it advances by one per plain field and by the body size per tlv.
+    # Pass one: the fields the top-level loop walks, in order. A tlv is one of them.
+    top_level, deferred = [], []
     for field in fields:
         if not isinstance(field, dict):
             return None, "field is not a mapping"
+        if "tlv" in field and not field.get("type"):
+            members, ctor, _, reason = tlv_source(field, schema.get("endian"), 0)
+            if members is None:
+                return None, reason
+            top_level.append(("tlv", ctor, len(deferred)))
+            deferred.append(members)
+            continue
         lines, reason = field_source(field, schema.get("endian"))
         if lines is None:
             return None, reason
-        body.extend(lines)
+        top_level.append(("plain", lines, None))
+
+    counted = len(top_level)
+    # Pass two: case bodies go above `field_count`, so the top-level loop never walks
+    # them - they are reached only through case_def_t.field_start.
+    placements, slot = [], counted
+    case_calls = collections.defaultdict(list)
+    for group_index, members in enumerate(deferred):
+        for packed, built in members:
+            start = slot
+            for member_lines in built:
+                placements.append((slot, member_lines))
+                slot += 1
+            case_calls[group_index].append((packed, start, slot - start))
+    if slot > 32:
+        return None, "more fields than SCHEMA_MAX_FIELDS (32) allows"
+
+    for kind, payload, group_index in top_level:
+        if kind == "plain":
+            body.extend(payload)
+            continue
+        body.append(f"    f = {payload};")
+        for packed, start, count in case_calls[group_index]:
+            body.append(f"    field_add_tlv_case(&f, {packed}, {start}, {count});")
+        body.append("    schema_add_field(s, &f);")
+
+    for index, member_lines in placements:
+        # The member's own build lines end in schema_add_field; placed instead.
+        body.extend(line for line in member_lines
+                    if "schema_add_field" not in line)
+        body.append(f"    schema_place_field(s, {index}, &f);")
+
     body.append("}")
     return body, None
 
@@ -228,7 +354,13 @@ static void emit(const char* schema, const char* vector,
          * consulted - `lookup_count` is the only reliable signal available. */
         bool labelled = false;
         int width = 0;
-        for (int j = 0; j < s.field_count; j++) {
+        /* The whole array, not `field_count`: a tlv case body is placed above field_count
+         * so the top-level loop does not walk it, which also makes it invisible to a
+         * search bounded by field_count. Bounding it there printed every lookup label in
+         * a case body through the integer branch - 31 vectors reported as C type
+         * mismatches that were this harness not finding the field. Unused slots are
+         * zeroed, so their empty name never matches. */
+        for (int j = 0; j < SCHEMA_MAX_FIELDS; j++) {
             if (strcmp(s.fields[j].name, d->name) == 0) {
                 labelled = s.fields[j].lookup_count > 0;
                 width = s.fields[j].size;
