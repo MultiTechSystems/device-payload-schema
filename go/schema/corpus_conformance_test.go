@@ -30,7 +30,10 @@ import (
 // CR-2026-007 settled the floored `idiv`/`mod` convention and this interpreter
 // implements it, so the negative-operand vectors that used to be excluded now pass
 // and the floor is the full corpus again.
-const corpusFloor = 1193
+// CR-2026-014's `expected_warnings` added three fixtures for the `unknown` parameter,
+// which no device schema sets, and the floor had drifted 29 below the full count as
+// vectors were added without it being raised. It is the full count again: 1222.
+const corpusFloor = 1222
 
 type corpusVector struct {
 	Name    string `yaml:"name"`
@@ -41,6 +44,62 @@ type corpusVector struct {
 	// missing - a runner defect that looked like an interpreter gap.
 	FPortLower *int           `yaml:"fport"`
 	Expected   map[string]any `yaml:"expected"`
+	// PS-305 to PS-308: what the decode must say, as well as what it must read. A
+	// pointer rather than a slice, because absent and `[]` mean different things -
+	// absent asserts nothing, `[]` asserts that no warning was reported, which is the
+	// form that catches a schema edit beginning to discard data - and both unmarshal
+	// to an empty slice.
+	// An entry is a string or a list of strings, all of which must appear in that one
+	// warning (PS-306) - the tag and the byte count are not contiguous in any
+	// implementation's text - so the element type is `any`.
+	ExpectedWarnings *[]any `yaml:"expected_warnings"`
+}
+
+// corpusWarningsMismatch reports how the warnings a decode produced differ from what the
+// vector expects, or "" where they agree or the vector asserts nothing (PS-308).
+//
+// Entries are matched as substrings and positionally: the specification fixes what a
+// warning must contain, not its wording (PS-306), and the list is complete rather than a
+// subset (PS-305), so an unexpected warning fails just as a missing one does.
+func corpusWarningsMismatch(vector corpusVector, out map[string]any) string {
+	if vector.ExpectedWarnings == nil {
+		return ""
+	}
+	want := *vector.ExpectedWarnings
+	var got []string
+	if reported, present := out["_warnings"]; present {
+		if list, ok := reported.([]string); ok {
+			got = list
+		}
+	}
+	if len(got) != len(want) {
+		return fmt.Sprintf("expected %d warning(s), got %d: %v", len(want), len(got), got)
+	}
+	for i, entry := range want {
+		for _, fragment := range corpusWarningFragments(entry) {
+			if !strings.Contains(got[i], fragment) {
+				return fmt.Sprintf("warning[%d]: %q not found in %q", i, fragment, got[i])
+			}
+		}
+	}
+	return ""
+}
+
+// corpusWarningFragments reads one `expected_warnings` entry, which is a string or a list
+// of strings all of which must appear in the same warning (PS-306).
+func corpusWarningFragments(entry any) []string {
+	switch value := entry.(type) {
+	case string:
+		return []string{value}
+	case []any:
+		fragments := make([]string, 0, len(value))
+		for _, part := range value {
+			fragments = append(fragments, fmt.Sprintf("%v", part))
+		}
+		return fragments
+	default:
+		return []string{fmt.Sprintf("%v", value)}
+	}
 }
 
 // port returns the vector's fPort under either spelling.
@@ -128,7 +187,13 @@ func TestCorpusConformance(t *testing.T) {
 				continue
 			}
 			mismatch := ""
+			if problem := corpusWarningsMismatch(vector, out); problem != "" {
+				mismatch = problem
+			}
 			for key, want := range vector.Expected {
+				if mismatch != "" {
+					break
+				}
 				got, present := out[key]
 				if !present {
 					mismatch = fmt.Sprintf("%s missing", key)

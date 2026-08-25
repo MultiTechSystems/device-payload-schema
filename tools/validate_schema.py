@@ -279,6 +279,41 @@ def values_match(expected: Any, actual: Any, tolerance: float = 0.001) -> Tuple[
     return True, ""
 
 
+def warnings_match(expected: Any, actual: List[str]) -> Tuple[bool, str]:
+    """Whether the warnings an execution reported are the ones a vector expects.
+
+    PS-305 to PS-308. Three decisions are worth stating, because they differ from how
+    `expected` works:
+
+    - Absent asserts nothing (PS-308), which is every vector written before the key
+      existed. `None` and a missing key are the same thing here.
+    - Present, it is the *complete* list in order (PS-305), not a subset. The value of the
+      key is mostly in what must not be reported: `expected_warnings: []` is the only way
+      a vector can say "this payload decodes with nothing left over", and a subset rule
+      would make the empty list assert nothing at all.
+    - Each entry is matched as a substring, or as several substrings that must all appear
+      in that one warning (PS-306). The specification fixes what a warning must contain -
+      the tag, the byte count - and not its wording, so a vector that reproduced a whole
+      sentence would pass on the implementation whose author wrote it and fail on a
+      conformant one that words it differently. The two fragments a CR-2026-013 warning
+      carries are not contiguous in any implementation's text, which is why an entry may
+      be a list.
+    """
+    if expected is None:
+        return True, ""
+    expected = list(expected)
+    actual = list(actual or [])
+    if len(actual) != len(expected):
+        return False, (f"expected {len(expected)} warning(s), got {len(actual)}: "
+                       f"{actual}"[:200])
+    for index, (want, got) in enumerate(zip(expected, actual)):
+        fragments = want if isinstance(want, (list, tuple)) else [want]
+        for fragment in fragments:
+            if str(fragment) not in got:
+                return False, f"warning[{index}]: {fragment!r} not found in {got!r}"[:200]
+    return True, ""
+
+
 def validate_field_list(fields: List[Dict], path: str, errors: List[str], 
                         known_field_names: List[str]) -> None:
     """Validate a list of field definitions recursively."""
@@ -794,6 +829,22 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
                     if 'expected' not in tv:
                         errors.append(f"Test vector {i} ({tv.get('name', '?')}): missing 'expected'")
                 
+                if 'expected_warnings' in tv:
+                    # PS-305: an array of strings. A bare string is the likely slip and
+                    # would otherwise be read as a list of its characters.
+                    declared = tv['expected_warnings']
+                    entry_ok = lambda entry: isinstance(entry, str) or (
+                        isinstance(entry, list)
+                        and entry
+                        and all(isinstance(part, str) for part in entry)
+                    )
+                    if not isinstance(declared, list) or not all(
+                            entry_ok(entry) for entry in declared):
+                        errors.append(
+                            f"Test vector {i} ({tv.get('name', '?')}): "
+                            "'expected_warnings' must be an array whose entries are "
+                            "strings or non-empty arrays of strings")
+
                 # Port-based schemas should have fport in test vectors
                 if has_ports and not has_fields:
                     if 'fport' not in tv and 'fPort' not in tv:
@@ -834,6 +885,10 @@ def run_test_vector(interpreter: SchemaInterpreter, tv: Dict[str, Any]) -> TestR
                 f"Encoded {bytes(encoded.payload).hex()}, expected {want.hex()}"
             )
             return result
+        matched, detail = warnings_match(tv.get('expected_warnings'), encoded.warnings)
+        if not matched:
+            result.errors.append(detail)
+            return result
         result.passed = True
         return result
 
@@ -868,7 +923,11 @@ def run_test_vector(interpreter: SchemaInterpreter, tv: Dict[str, Any]) -> TestR
         match, msg = values_match(expected_value, actual_value)
         if not match:
             result.errors.append(f"{field_name}: {msg}")
-    
+
+    matched, detail = warnings_match(tv.get('expected_warnings'), decode_result.warnings)
+    if not matched:
+        result.errors.append(detail)
+
     result.passed = len(result.errors) == 0
     return result
 

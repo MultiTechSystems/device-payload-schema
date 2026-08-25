@@ -1,0 +1,32 @@
+# An unknown TLV tag under `unknown: skip` where `length_size` says how long it is.
+#
+# The other half of the skip behaviour, and the case clause 4 describes: with a length
+# field the decoder steps over the entry and carries on, so only that one tag's data is
+# lost and the fields after it are still trustworthy. Two of the corpus's 87 tlv
+# constructs are in this shape; neither has a vector with an undescribed tag.
+name: probe_unknown_tlv_skip_delimited
+endian: big
+fields:
+  - tlv:
+      tag_size: 1
+      length_size: 1
+      unknown: skip
+      cases:
+        1:
+          - name: known
+            type: u16
+        2:
+          - name: also_known
+            type: u16
+test_vectors:
+  - name: undescribed_tag_is_stepped_over
+    description: "Tag 0x09 is not described, but its length is known, so 0x01 after it still decodes"
+    payload: "0102003C0902FFFF0202004B"
+    source: generated
+    expected:
+      known: 60
+      also_known: 75
+    # PS-302's byte count is absent here on purpose: nothing was abandoned, so the
+    # warning states what one entry discarded rather than what the decode lost.
+    expected_warnings:
+      - ["0x09", "2 byte(s) discarded"]
