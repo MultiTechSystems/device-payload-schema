@@ -153,9 +153,71 @@
         "prefix": {
           "type": "string",
           "description": "Prefix for bitfield_string/version_string output"
+        },
+        "tlv": {
+          "$ref": "#/definitions/tlv"
         }
       },
       "additionalProperties": true
+    },
+    "tlv": {
+      "type": "object",
+      "description": "TLV loop: read a tag, select the case describing it, decode that case's fields, repeat to the end of the payload (PS-153, PS-154).",
+      "properties": {
+        "tag_size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4,
+          "description": "Width in bytes of a tag read as one integer. Mutually exclusive with tag_fields."
+        },
+        "tag_fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/field"
+          },
+          "minItems": 1,
+          "description": "A composite tag, read as named fields; the tag is their values in this order. Mutually exclusive with tag_size."
+        },
+        "tag_key": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "description": "Names of the tag_fields that form the key, in order. Read on encode to write each component back through its own tag_fields entry. Not read by the TS013 generator, which derives the key from tag_fields directly."
+        },
+        "length_size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4,
+          "description": "Width in bytes of a length field following the tag. 0 or absent means the entry is undelimited, so an unrecognised tag cannot be stepped over (PS-302)."
+        },
+        "merge": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether a case's fields go into the parent object (PS-156). False collects each entry into a channel list instead."
+        },
+        "unknown": {
+          "enum": [
+            "skip",
+            "raw",
+            "error"
+          ],
+          "default": "skip",
+          "description": "What to do with a tag no case describes (PS-155, PS-301 to PS-304). `skip` steps over it where a length says how long it is and otherwise abandons the rest of the payload; `raw` captures its bytes under `unknown_tags` (PS-303); `error` fails the decode. Every mode but `error` reports what it did. Implementations fall back to `skip` on an unrecognised value, so a misspelling silently discards data - tools/validate_schema.py refuses one."
+        },
+        "cases": {
+          "type": "object",
+          "description": "Tag to the fields it introduces. A key is an integer (`1`, or `0x20` which YAML reads as 32); a range `\"2..5\"` or a list `[1, 2, 3]` for a single tag; a composite `\"[1, 117]\"` for a tag read through tag_fields, where a part may be `*` for any value or `!0` for any value but that one (PS-270); or `default`.",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/field"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
     }
   },
   "properties": {

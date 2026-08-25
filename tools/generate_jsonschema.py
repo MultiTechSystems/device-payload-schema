@@ -463,27 +463,80 @@ def generate_payload_schema() -> dict:
     return schema
 
 
+def stale_against(generated, path):
+    """Keys the file at `path` describes and `generated` does not.
+
+    `schemas/payload-schema.json` stopped being this script's output a long time ago.
+    Nothing in the Makefile or CI runs the generator, so the drift went unnoticed while
+    CR after CR edited the file directly - `source` (PS-263), `expected_warnings`
+    (CR-2026-014), `valid_range`, `resolution`, `unece`, and the `tlv` description added
+    by CR-2026-016. Regenerating would delete every one of them, silently, because JSON
+    Schema treats an absent property as merely undescribed.
+
+    Reported as a refusal rather than fixed by teaching the generator the current file:
+    that would leave two definitions of the same thing to keep in step, which is the
+    arrangement that produced this drift.
+    """
+    try:
+        with open(path) as fh:
+            existing = json.load(fh)
+    except (OSError, ValueError):
+        return []
+
+    stale = []
+
+    def compare(want, got, where):
+        if not isinstance(want, dict) or not isinstance(got, dict):
+            return
+        for key in ('properties', 'definitions'):
+            for name in (want.get(key) or {}):
+                if name not in (got.get(key) or {}):
+                    stale.append(f"{where}{key}.{name}")
+                else:
+                    compare(want[key][name], got[key][name], f"{where}{key}.{name}.")
+        if isinstance(want.get('items'), dict):
+            compare(want['items'], got.get('items') or {}, f"{where}items.")
+
+    compare(existing, generated, "")
+    return sorted(stale)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Generate JSON Schema for Payload Schema validation'
     )
     parser.add_argument('-o', '--output', help='Output file path (default: stdout)')
     parser.add_argument('--compact', action='store_true', help='Compact JSON output')
+    parser.add_argument('--force', action='store_true',
+                        help='Overwrite the output even where it describes more than '
+                             'this generator does')
     args = parser.parse_args()
     
     schema = generate_payload_schema()
-    
+
     indent = None if args.compact else 2
     output = json.dumps(schema, indent=indent)
-    
+
     if args.output:
+        stale = stale_against(schema, args.output)
+        if stale and not args.force:
+            print(
+                f"Refusing to overwrite {args.output}: it is maintained by hand and "
+                "this generator has not kept up.\n"
+                "Writing it would drop keys that CRs added directly to the file:\n"
+                + "".join(f"  - {item}\n" for item in stale)
+                + "Edit the file instead. --force overwrites anyway.",
+                file=sys.stderr,
+            )
+            return 1
         with open(args.output, 'w') as f:
             f.write(output)
             f.write('\n')
         print(f"JSON Schema written to {args.output}", file=sys.stderr)
     else:
         print(output)
+    return 0
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())
