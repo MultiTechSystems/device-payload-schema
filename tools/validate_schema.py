@@ -383,7 +383,57 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                             if isinstance(gf, dict) and 'name' in gf:
                                 known_field_names.append(gf['name'])
             continue
-        
+
+        # An Option B `match:` block. Nothing checked this construct at all before
+        # CR-2026-018 - it was listed as an allowed key and never looked inside - so a
+        # block with no discriminator, or cases mapping to something other than a field
+        # list, was reported valid and then decoded as nothing.
+        #
+        # Deliberately shallower than the flagged checks above: `length`, `name`, `var`
+        # and `default` are honoured by some implementations and ignored by others, so
+        # this refuses what no implementation can use rather than what only some can.
+        if 'match' in fld and not fld.get('type'):
+            match = fld['match']
+            mpath = f"{path}[{i}].match"
+            if not isinstance(match, dict):
+                errors.append(f"{mpath}: must be an object")
+                continue
+            if 'field' not in match and 'length' not in match:
+                errors.append(
+                    f"{mpath}: needs 'field' (a discriminator already decoded) or "
+                    "'length' (one read from the payload here)")
+            if 'field' in match and not isinstance(match['field'], str):
+                errors.append(f"{mpath}.field: must be a string")
+            if 'length' in match:
+                width = match['length']
+                if not isinstance(width, int) or isinstance(width, bool) \
+                        or not 1 <= width <= 8:
+                    errors.append(f"{mpath}.length: must be an integer from 1 to 8")
+            if 'default' in match:
+                fallback = match['default']
+                if not (fallback in ('error', 'skip') or isinstance(fallback, list)):
+                    errors.append(
+                        f"{mpath}.default: must be 'error', 'skip', or a field list")
+            if 'cases' in match:
+                cases = match['cases']
+                if not isinstance(cases, dict):
+                    errors.append(f"{mpath}.cases: must be a mapping of value to fields")
+                else:
+                    # The block's own `name` names the discriminator in the output, so
+                    # it is claimable by a later reference just as a plain field is.
+                    if isinstance(match.get('name'), str):
+                        known_field_names.append(match['name'])
+                    for case_key, case_fields in cases.items():
+                        cpath = f"{mpath}.cases[{case_key!r}]"
+                        if not isinstance(case_fields, list):
+                            errors.append(f"{cpath}: must be an array of fields")
+                            continue
+                        validate_field_list(case_fields, cpath, errors, known_field_names)
+                        for cf in case_fields:
+                            if isinstance(cf, dict) and 'name' in cf:
+                                known_field_names.append(cf['name'])
+            continue
+
         # Normal named field
         name = fld.get('name')
         if name:

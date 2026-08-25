@@ -929,9 +929,25 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
     The validator already enforced all four, so there was no behaviour to change. It
     also refuses two groups claiming the same bit, which JSON Schema cannot express —
     `test_cr_2026_017_flagged_meta_schema.py` records that division of labour.
+  - `definitions.match` (CR-2026-018), six keys, describing the Option B block under a
+    `match:` key. The older `type: match` with `on:` spelling keeps its keys on
+    `definitions.field`.
 
-  `match`, `byte_group` and `repeat` are still undescribed. Each is the same shape of
-  change. Closing `definitions.field` itself is not, and nothing depends on it.
+  `byte_group` and `repeat` are still undescribed. Each is the same shape of change.
+  Closing `definitions.field` itself is not, and nothing depends on it.
+- **`match` is the least uniformly implemented construct.** Only `field` and `cases`
+  are honoured everywhere. `length` and `name` are honoured by the Python, Java and C#
+  interpreters and **ignored by the Go interpreter and the TS013 generator**, so a
+  match reading its own discriminator from the payload decodes differently on those
+  two. `var` and `default` are honoured by the **Python interpreter alone** — on the
+  other four, a value matching no case is silently skipped whatever `default` says.
+
+  The five paths agree today only because nothing in the corpus uses the uneven keys,
+  bar one `default: skip` whose vectors never reach it.
+  `test_cr_2026_018_match_meta_schema.py` has a tripwire that fails if a schema starts
+  using them, and the gaps are recorded in each key's description in the meta-schema.
+  Closing them is behaviour work in four implementations and wants its own CR, with
+  `_language-conformance` vectors for the inline-discriminator and `default` paths.
 - **`tools/generate_jsonschema.py` does not produce
   `schemas/payload-schema.json` any more.** Nothing in the Makefile or CI runs it, so
   the drift went unnoticed while CR after CR edited the file directly. Regenerating
