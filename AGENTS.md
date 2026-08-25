@@ -932,9 +932,16 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   - `definitions.match` (CR-2026-018), six keys, describing the Option B block under a
     `match:` key. The older `type: match` with `on:` spelling keeps its keys on
     `definitions.field`.
+  - `byte_group` and `repeat` (CR-2026-019), seven field-level keys — `byte_group`,
+    `size`, `count`, `byte_length`, `until`, `max`, `min`. `byte_group` has two
+    spellings, an object carrying its own `size` and an array taking `size` from the
+    field beside it; only the object form has corpus coverage, and a test says so
+    rather than forbidding the other.
 
-  `byte_group` and `repeat` are still undescribed. Each is the same shape of change.
-  Closing `definitions.field` itself is not, and nothing depends on it.
+  Every construct is now described. **Closing `definitions.field` itself is a different
+  and much larger change** — it declares no required keys and types `type` as a bare
+  string, so `s17` and a nameless field are still accepted — and nothing depends on it.
+  `tools/validate_schema.py` remains the place for real structural checking.
 - **`match` is the least uniformly implemented construct.** Only `field` and `cases`
   are honoured everywhere. `length` and `name` are honoured by the Python, Java and C#
   interpreters and **ignored by the Go interpreter and the TS013 generator**, so a
