@@ -1200,6 +1200,24 @@ public static class SchemaDecoder
                 result.Add(DecodeFields(field.Fields, ctx, schema));
                 iterations++;
             }
+
+            // PS-088: the members must divide the span exactly. This implementation had
+            // no check at all, so it accepted both ways they do not - an iteration
+            // starting inside the span and finishing past it, and a ceiling stopping the
+            // loop early - and left the read position somewhere other than the span's
+            // end. Every field after the repeat then came from the wrong offset with
+            // nothing reported: a 2-byte member over a 5-byte span produced a third
+            // record holding the following field's byte, and the following field read
+            // past the payload (CR-2026-022).
+            if (ctx.Offset != endOffset)
+            {
+                if (iterations >= maxIterations && ctx.Offset < endOffset)
+                    throw new InvalidOperationException(
+                        $"Repeat stopped at its max of {maxIterations} iteration(s) with "
+                        + $"{endOffset - ctx.Offset} of {byteLength} byte(s) of the span unread");
+                throw new InvalidOperationException(
+                    $"Repeat byte_length mismatch: expected end at {endOffset}, got {ctx.Offset}");
+            }
         }
         else if (field.Until == "end")
         {

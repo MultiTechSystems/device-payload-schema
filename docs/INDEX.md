@@ -111,8 +111,8 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Device schemas
 
-231 schemas under `schemas/devices/`.
-Mean quality score 69.1% (PLATINUM 30, GOLD 40, SILVER 97, BRONZE 18, REJECTED 46). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+232 schemas under `schemas/devices/`.
+Mean quality score 69.1% (PLATINUM 30, GOLD 40, SILVER 98, BRONZE 18, REJECTED 46). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
@@ -121,7 +121,7 @@ Mean quality score 69.1% (PLATINUM 30, GOLD 40, SILVER 97, BRONZE 18, REJECTED 4
 | milesight | 84 | 948 | PLATINUM 18, GOLD 33, SILVER 22, REJECTED 11 |
 | decentlab | 58 | 136 | PLATINUM 12, GOLD 7, SILVER 1, BRONZE 14, REJECTED 24 |
 | _library-composed | 49 | 57 | SILVER 48, BRONZE 1 |
-| _language-conformance | 24 | 38 | SILVER 20, BRONZE 2, REJECTED 2 |
+| _language-conformance | 25 | 39 | SILVER 21, BRONZE 2, REJECTED 2 |
 | makerfabs | 6 | 0 | REJECTED 6 |
 | mclimate | 3 | 12 | SILVER 1, REJECTED 2 |
 | digital-matter | 1 | 7 | SILVER 1 |
@@ -151,6 +151,7 @@ Mean quality score 69.1% (PLATINUM 30, GOLD 40, SILVER 97, BRONZE 18, REJECTED 4
 | `_language-conformance/match-var` | 2 | 1 | fields | 57% | REJECTED |
 | `_language-conformance/name-from` | 2 | 1 | fields | 71% | SILVER |
 | `_language-conformance/ref-header` | 1 | 1 | fields | 71% | SILVER |
+| `_language-conformance/repeat-byte-length-span` | 4 | 1 | fields | 73% | SILVER |
 | `_language-conformance/repeat-byte-length` | 4 | 1 | fields | 73% | SILVER |
 | `_language-conformance/repeat-count` | 3 | 1 | fields | 71% | SILVER |
 | `_language-conformance/repeat-max-count` | 3 | 1 | fields | 71% | SILVER |
