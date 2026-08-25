@@ -13,6 +13,23 @@ otherwise. The second list is the one worth working on, and it is meant to stay 
     python tools/encode-round-trip.py             # summary and the unexplained list
     python tools/encode-round-trip.py --all       # every difference, with its reason
     python tools/encode-round-trip.py --json out.json
+    python tools/encode-round-trip.py --list      # `schema::vector` per line, sorted
+
+**Comparing implementations: use `--list`, never the per-shape counts.** Those counts are
+ratchets for one harness over time. Across implementations they are not comparable, and
+CR-2026-024 drew a false conclusion from them - it reported that Go round-tripped ten
+`tlv` vectors this encoder did not, and therefore that the reference was the weaker of the
+two. Comparing the actual vector sets showed the opposite: every vector this encoder fails,
+Go fails too, and Go fails 28 more. CR-2026-025 corrected it.
+
+The counts differ because each harness buckets schemas its own way - this one serialises to
+JSON and looks for a `"tlv"` key, the Go, Java and C# tests scan the raw YAML for `tlv:`
+(and for `repeat` with no colon) - and because their denominators differ by a vector. Two
+numbers built that differently cannot be subtracted. Diff the lists:
+
+    python tools/encode-round-trip.py --list > /tmp/py.txt
+    # each language's round-trip test prints its own failures; sort them the same way
+    diff /tmp/py.txt /tmp/go.txt
 
 The `inherent` reasons, each of which is a decision recorded elsewhere:
 
@@ -169,6 +186,9 @@ def run():
     parser.add_argument("--all", action="store_true",
                         help="list every difference, not only the unexplained ones")
     parser.add_argument("--json", metavar="PATH", help="write the full result as JSON")
+    parser.add_argument("--list", action="store_true",
+                        help="print `schema::vector` per line, sorted, for diffing "
+                             "against another implementation's failures")
     args = parser.parse_args()
 
     rows = []
@@ -218,6 +238,13 @@ def run():
                       else f"want {want.hex()} got {got.hex()}")
             rows.append({"schema": path.name, "vector": name, "kind": kind,
                          "reason": reason, "detail": detail})
+
+    if args.list:
+        # Nothing but the identifiers, so `diff` against another implementation's list
+        # says exactly which vectors differ rather than by how many a bucket moved.
+        for row in sorted(rows, key=lambda r: (r["schema"], r["vector"])):
+            print(f"{row['schema']}::{row['vector']}")
+        return 0
 
     total = counts["round-trip"] + counts["length"] + counts["bytes"] + counts["error"]
     print("=" * 74)

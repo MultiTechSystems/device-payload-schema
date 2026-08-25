@@ -494,15 +494,26 @@ encoder has one run packer, wired through its field list, its construct bodies a
 `flagged` path, and `test_cr_2026_024_encode_bitfield_parity.py` reads all three sources
 so a removal shows up there rather than as a puzzling floor break.
 
-Two things that fix surfaced, neither chased:
+**Never compare implementations by their per-shape round-trip counts.** Those counts are
+ratchets for one harness over time. Across implementations they are not comparable: each
+harness buckets schemas its own way — `tests/test_encode_round_trip.py` serialises to JSON
+and looks for a `"tlv"` key, the Go, Java and C# tests scan raw YAML for `tlv:` (and for
+`repeat` with no colon) — and their denominators differ by a vector.
 
-- **Go round-trips ten `tlv` vectors the Python reference does not** (910 against 900). A
-  round-trip is byte-exact, so Go is *ahead*: the reference encoder's TLV case selection
-  is the weaker of the two. The Python floor is the one to raise if anyone works on it.
-- **`flagged` is 14 behind Python in all three** (121 against 135) and bit ranges are not
-  the cause — no `flagged` group in the corpus holds one; they are `u16`, `u32le16` and
-  computed members. That is a separate gap, and a test pins the premise so it cannot be
-  misattributed later.
+CR-2026-024 subtracted two of those numbers anyway and got a false result. It reported
+that Go round-tripped ten `tlv` vectors the Python encoder did not, and concluded the
+reference was the weaker of the two. CR-2026-025 compared the actual vector sets:
+**every vector the Python encoder fails, Go fails too, and Go fails 28 more.** The
+reference is ahead, not behind. Use `tools/encode-round-trip.py --list` and diff the
+identifiers.
+
+The measured gap, for whoever closes it: 14 of Go's 28 are `word_ordered_sensor_id` in the
+`dl-*` schemas — the `u32le16` word-ordered type (PS-271/PS-272) — and one is
+`match-default-fields.yaml`, which Go decodes and cannot re-encode.
+
+**`flagged` is 14 behind Python in all three** (121 against 135) and bit ranges are not the
+cause — no `flagged` group in the corpus holds one; they are `u16`, `u32le16` and computed
+members. A test pins that premise so it cannot be misattributed later.
 
 **The encode round-trip residue is classified, not counted.** `tools/encode-round-trip.py`
 gives a reason for every vector that does not re-encode to its payload, and
