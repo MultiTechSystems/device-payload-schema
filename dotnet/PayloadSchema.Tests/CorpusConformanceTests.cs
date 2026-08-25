@@ -26,11 +26,64 @@ public class CorpusConformanceTests
     // CR-2026-007 settled the floored `idiv`/`mod` convention and this
     // implementation follows it, so the negative-operand vectors pass and the floor
     // is the full corpus.
-    const int CorpusFloor = 1193;
+    // CR-2026-014's `expected_warnings` added three fixtures for the `unknown`
+    // parameter, which no device schema sets, and the floor had drifted 29 below the
+    // full count as vectors were added without it being raised. It is the full count
+    // again: 1222.
+    const int CorpusFloor = 1222;
 
     readonly ITestOutputHelper _output;
 
     public CorpusConformanceTests(ITestOutputHelper output) => _output = output;
+
+    /// <summary>
+    /// How the warnings a decode produced differ from what the vector expects, or null
+    /// where they agree or the vector asserts nothing (PS-305 to PS-308).
+    ///
+    /// Absent and <c>[]</c> mean different things: absent asserts nothing, which is most
+    /// of the corpus, while <c>[]</c> asserts that no warning was reported - the form
+    /// that catches a schema edit beginning to discard data. Entries are matched as
+    /// substrings, because the specification fixes what a warning must contain and not
+    /// its wording (PS-306), and positionally against a complete list (PS-305), so an
+    /// unexpected warning fails just as a missing one does.
+    /// </summary>
+    static string? WarningsMismatch(YamlMappingNode vector, Dictionary<string, object?> result)
+    {
+        if (!vector.Children.TryGetValue(new YamlScalarNode("expected_warnings"), out var node)
+            || node is not YamlSequenceNode declared)
+        {
+            return null;
+        }
+        // An entry is a string, or a list of strings all of which must appear in that one
+        // warning (PS-306): the tag and the byte count are not contiguous in any
+        // implementation's text.
+        var want = declared.Children
+            .Select(entry => entry switch
+            {
+                YamlScalarNode scalar => new List<string> { scalar.Value ?? "" },
+                YamlSequenceNode parts => parts.Children.OfType<YamlScalarNode>()
+                    .Select(part => part.Value ?? "").ToList(),
+                _ => new List<string>(),
+            })
+            .ToList();
+        var got = result.TryGetValue("_warnings", out var reported) && reported is List<string> list
+            ? list
+            : new List<string>();
+        if (got.Count != want.Count)
+        {
+            return $"expected {want.Count} warning(s), got {got.Count}: "
+                   + string.Join(" | ", got);
+        }
+        for (int i = 0; i < want.Count; i++)
+        {
+            foreach (var fragment in want[i])
+            {
+                if (!got[i].Contains(fragment))
+                    return $"warning[{i}]: \"{fragment}\" not found in \"{got[i]}\"";
+            }
+        }
+        return null;
+    }
 
     static string? FindCorpus()
     {
@@ -101,9 +154,10 @@ public class CorpusConformanceTests
                     {
                         continue;
                     }
-                    string? mismatch = null;
+                    string? mismatch = WarningsMismatch(vector, result);
                     foreach (var kv in expected.Children)
                     {
+                        if (mismatch != null) break;
                         var key = ((YamlScalarNode)kv.Key).Value ?? "";
                         if (!result.TryGetValue(key, out var got))
                         {

@@ -50,11 +50,33 @@ defects this directory has caught:
   case-fidelity ranking beside it; all four are fixed, and every encode floor moved
   with this fixture. See AGENTS.md.
 
+The three `unknown-tlv-tag-*.yaml` fixtures pin the `unknown` parameter of a `tlv`, which
+**no device schema in the corpus sets** - so every mode of it went unexercised while 85 of
+the corpus's 87 tlv constructs sat in the shape where the default abandons the rest of the
+payload. They are the first vectors to use `expected_warnings` (CR-2026-014) for what it
+was added for: asserting what a decode *said*, not only what it read.
+
+- `unknown-tlv-tag-skip.yaml` - the tag-only default. One vector asserts the warning and
+  the count of bytes lost; the other asserts `expected_warnings: []`, which is the form
+  that catches an edit beginning to discard data.
+- `unknown-tlv-tag-skip-delimited.yaml` - the same mode with `length_size`, where the
+  entry is stepped over and the fields after it are still trustworthy. Two of the 87
+  constructs are in this shape and neither had a vector with an undescribed tag.
+- `unknown-tlv-tag-raw.yaml` - the captured entry under `unknown_tags` (PS-303), which
+  every implementation built and then dropped under the default `merge: true`. It is the
+  only vector in the corpus that reads the key, and adding it found the fifth defect this
+  directory has caught: the generated output JSON Schema did not describe `unknown_tags`
+  at all, so a consumer reading it could not learn the key exists.
+
 Not covered here, deliberately:
 
 - **The `header:` block.** Java and C# honour it while Python and Go ignore it
   entirely, and the specification does not define it, so there is no authority to
   pin either behaviour. See AGENTS.md.
+- **`unknown: error`.** It fails the decode by design, and a vector cannot assert a
+  failed decode - there is no vector kind whose expectation is a failure. The unit tests
+  in `tests/test_cr_2026_013_unknown_tlv.py` and each language's `CR2026013` file cover
+  it; the corpus cannot.
 - **A `flagged` inside a `tlv` case.** The same nameless-construct shape as
   `tlv-nameless-case.yaml`, and the claiming fix covers it in Go and Python, but no
   device schema uses it and a fixture would only re-pin what the byte_group one

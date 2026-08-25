@@ -37,7 +37,7 @@ sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 from generate_ts013_codec import TS013Generator  # noqa: E402
 from schema_interpreter import SchemaInterpreter  # noqa: E402
-from validate_schema import values_match  # noqa: E402
+from validate_schema import values_match, warnings_match  # noqa: E402
 
 PASS = "PASS"
 FAIL = "FAIL"
@@ -74,6 +74,12 @@ CONSTRUCT_CLAUSES = {
     "variable": ["Variable Requirements"],
     "match": ["Match Requirements", "Conditional Requirements"],
     "tlv": ["TLV Requirements"],
+    # Attributed per vector rather than per schema: a `tlv` schema has unknown-tag
+    # behaviour whether or not any vector asserts it, and 85 of 87 constructs in the
+    # corpus went years without one. The clause is credited to the vectors that pin the
+    # warning with `expected_warnings` (PS-305), which are the ones that would fail if the
+    # behaviour changed.
+    "unknown_tlv": ["Unknown Tag Handling"],
     "flagged": ["Flagged Requirements"],
     "ports": ["Ports Requirements", "Decoder Behavior"],
     "endian": ["Integer Type Requirements"],
@@ -252,7 +258,8 @@ def run_interpreted_encode(schema: dict, vector: dict) -> tuple:
     want = expected_bytes(vector)
     if result.payload != want:
         return FAIL, f"want {want.hex()}, got {result.payload.hex()}"
-    return PASS, ""
+    ok, detail = warnings_match(vector.get("expected_warnings"), result.warnings)
+    return (PASS, "") if ok else (FAIL, detail)
 
 
 def run_interpreted(schema: dict, vectors: list) -> list:
@@ -270,6 +277,12 @@ def run_interpreted(schema: dict, vectors: list) -> list:
                 out.append((FAIL, "; ".join(result.errors)[:120]))
                 continue
             ok, detail = matches(vector.get("expected"), result.data)
+            if ok:
+                # PS-307: the key is checked on this path and on the generated one, so a
+                # warning only one of them reports is a disagreement rather than a pass.
+                ok, detail = warnings_match(
+                    vector.get("expected_warnings"), result.warnings
+                )
             out.append((PASS if ok else FAIL, detail))
         except Exception as exc:  # a raising decoder is a failure, not a crash of this tool
             out.append((FAIL, f"{type(exc).__name__}: {exc}"[:120]))
@@ -313,7 +326,8 @@ def run_generated(schema: dict, vectors: list) -> list:
         + "      _out.push({bytes: e.bytes, errors: e.errors || [], warnings: e.warnings || []});\n"
         + "    } else {\n"
         + "      var r = decodeUplink(c);\n"
-        + "      _out.push({data: r.data, errors: r.errors || []});\n"
+        + "      _out.push({data: r.data, errors: r.errors || [], "
+        + "warnings: r.warnings || []});\n"
         + "    }\n"
         + "  } catch (e) { _out.push({data: null, bytes: null, errors: [String(e && e.message || e)]}); }\n"
         + "}\nconsole.log(JSON.stringify(_out));"
@@ -346,13 +360,20 @@ def run_generated(schema: dict, vectors: list) -> list:
                 continue
             want = expected_bytes(vector)
             got = bytes(produced)
-            out.append(
-                (PASS, "") if got == want
-                else (FAIL, f"want {want.hex()}, got {got.hex()}")
+            if got != want:
+                out.append((FAIL, f"want {want.hex()}, got {got.hex()}"))
+                continue
+            ok, detail = warnings_match(
+                vector.get("expected_warnings"), result.get("warnings") or []
             )
+            out.append((PASS if ok else FAIL, detail))
             continue
 
         ok, detail = matches(vector.get("expected"), result.get("data") or {})
+        if ok:
+            ok, detail = warnings_match(
+                vector.get("expected_warnings"), result.get("warnings") or []
+            )
         out.append((PASS if ok else FAIL, detail))
     return out
 
@@ -373,9 +394,15 @@ def collect(schema_root: Path) -> Suite:
         interpreted = run_interpreted(schema, vectors)
         generated = run_generated(schema, vectors)
         constructs = sorted(constructs_used(schema))
+        has_tlv = "tlv" in constructs
         for vector, (i_verdict, i_detail), (g_verdict, g_detail) in zip(
             vectors, interpreted, generated
         ):
+            vector_constructs = constructs
+            if has_tlv and vector.get("expected_warnings") is not None:
+                # This vector asserts what the decode said, not only what it read, so it
+                # is evidence about unknown-tag handling in a way its siblings are not.
+                vector_constructs = sorted(set(constructs) | {"unknown_tlv"})
             suite.verdicts.append(
                 VectorVerdict(
                     schema=schema.get("name", schema_file.stem),
@@ -385,7 +412,7 @@ def collect(schema_root: Path) -> Suite:
                     interpreted=i_verdict,
                     generated=g_verdict,
                     detail=i_detail or g_detail,
-                    constructs=constructs,
+                    constructs=vector_constructs,
                 )
             )
     return suite

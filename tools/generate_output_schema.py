@@ -682,6 +682,54 @@ def quality_property(yaml_schema: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return prop
 
 
+def declares_raw_unknown_tags(node: Any) -> bool:
+    """Whether any `tlv` in the schema captures undescribed tags rather than dropping them."""
+    if isinstance(node, dict):
+        tlv = node.get('tlv')
+        if isinstance(tlv, dict) and tlv.get('unknown') == 'raw':
+            return True
+        return any(declares_raw_unknown_tags(value) for value in node.values())
+    if isinstance(node, list):
+        return any(declares_raw_unknown_tags(item) for item in node)
+    return False
+
+
+def unknown_tags_property(yaml_schema: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The `unknown_tags` property, or None where no `tlv` sets `unknown: raw`.
+
+    PS-303 names the key rather than leaving it to the implementation, so a consumer
+    reading merged output knows where a captured tag goes. Declared for the same reason
+    `_quality` is: a key a decoder can report and this schema does not describe is a key
+    nobody reading the schema can learn about.
+    """
+    if not declares_raw_unknown_tags(yaml_schema):
+        return None
+    return {
+        "type": "array",
+        "description": (
+            "Tags the schema does not describe, captured rather than dropped "
+            "(`unknown: raw`, PS-303). Present only when such a tag was met."
+        ),
+        "items": {
+            "type": "object",
+            "properties": {
+                "tag": {
+                    "type": "array",
+                    "items": {"type": "integer", "minimum": 0, "maximum": 255},
+                    "description": "The tag's components, in key order",
+                },
+                "raw": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]*$",
+                    "description": "The entry's bytes, lowercase hex",
+                },
+            },
+            "required": ["tag", "raw"],
+            "additionalProperties": False,
+        },
+    }
+
+
 def generate_output_schema(yaml_schema: Dict[str, Any]) -> Dict[str, Any]:
     """Generate JSON Schema for codec output from YAML payload schema."""
     
@@ -711,6 +759,10 @@ def generate_output_schema(yaml_schema: Dict[str, Any]) -> Dict[str, Any]:
     quality = quality_property(yaml_schema)
     if quality:
         properties['_quality'] = quality
+
+    unknown_tags = unknown_tags_property(yaml_schema)
+    if unknown_tags:
+        properties['unknown_tags'] = unknown_tags
 
     # Build output schema
     output_schema = {

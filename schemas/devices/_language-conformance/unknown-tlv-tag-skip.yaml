@@ -1,0 +1,43 @@
+# An unknown TLV tag under the default `unknown: skip`, with no `length_size`.
+#
+# This is the shape 85 of the corpus's 87 tlv constructs are in: tag-only, so there is
+# nothing to skip over and `skip` abandons the remainder of the payload. CR-2026-013 made
+# that observable and CR-2026-014 makes it assertable; before either, a decode that lost
+# four bytes was indistinguishable from a device that sent fewer fields.
+#
+# The fixture is here rather than under a vendor because no device schema in the corpus
+# sets `unknown` at all, so nothing exercised any mode of it.
+name: probe_unknown_tlv_skip
+endian: big
+fields:
+  - tlv:
+      tag_size: 1
+      unknown: skip
+      cases:
+        1:
+          - name: known
+            type: u16
+        2:
+          - name: also_known
+            type: u16
+test_vectors:
+  - name: every_tag_described
+    description: "Two described tags and nothing left over"
+    payload: "01003C02004B"
+    source: generated
+    expected:
+      known: 60
+      also_known: 75
+    # PS-305: the empty array is the assertion. Nothing was discarded, and an edit that
+    # started discarding something would fail here rather than reporting one field fewer.
+    expected_warnings: []
+  - name: undescribed_tag_stops_the_decode
+    description: "Tag 0x09 is not described, and nothing delimits it"
+    payload: "01003C090BB8"
+    source: generated
+    expected:
+      known: 60
+    # One warning, pinned by the two things the requirements fix: the tag PS-301 names,
+    # and the count of bytes lost that PS-302 states. Not the sentence around them.
+    expected_warnings:
+      - ["0x09", "3 of 6 byte(s)"]

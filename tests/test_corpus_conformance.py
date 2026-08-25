@@ -27,7 +27,11 @@ sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 from schema_interpreter import SchemaInterpreter  # noqa: E402
 from score_schema import CONFORMANCE_TOLERANCE  # noqa: E402
-from validate_schema import is_encode_vector, values_match  # noqa: E402
+from validate_schema import (  # noqa: E402
+    is_encode_vector,
+    values_match,
+    warnings_match,
+)
 
 CORPUS = REPO_ROOT / "schemas" / "devices"
 
@@ -73,3 +77,8 @@ def test_corpus_vector(path, schema, vector):
         assert key in result.data, "%s: %s missing from output" % (path.name, key)
         match, message = values_match(want, result.data[key], CONFORMANCE_TOLERANCE)
         assert match, "%s: %s: %s" % (path.name, key, message)
+
+    # PS-305 to PS-308. A vector may pin what the decode said as well as what it read;
+    # a vector without the key asserts nothing, which is most of the corpus.
+    match, message = warnings_match(vector.get("expected_warnings"), result.warnings)
+    assert match, "%s: %s" % (path.name, message)

@@ -1,0 +1,31 @@
+# An unknown TLV tag under `unknown: raw`, which captures the bytes instead of dropping
+# them.
+#
+# `merge` defaults to true, and under it every implementation that had this mode built the
+# captured entry and then discarded it - there is no channel list in merged output to put
+# it in. CR-2026-013 named `unknown_tags` as the key so a consumer knows where to look
+# (PS-303), and this is the only vector in the corpus that reads it.
+name: probe_unknown_tlv_raw
+endian: big
+fields:
+  - tlv:
+      tag_size: 1
+      unknown: raw
+      cases:
+        1:
+          - name: known
+            type: u16
+test_vectors:
+  - name: undescribed_tag_is_captured
+    description: "Tag 0x09 is not described, so its bytes are reported rather than lost"
+    payload: "01003C090BB8"
+    source: generated
+    expected:
+      known: 60
+      unknown_tags:
+        - tag: [9]
+          raw: "0bb8"
+    # Nothing delimits the entry, so the capture ran to the end of the buffer and may
+    # hold more than one entry. That is worth saying even though no bytes were lost.
+    expected_warnings:
+      - ["0x09", "could not be delimited"]

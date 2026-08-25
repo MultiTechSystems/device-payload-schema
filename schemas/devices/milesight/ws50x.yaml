@@ -146,6 +146,8 @@ test_vectors:
       switch_2_change: "no"
       switch_3: "off"
       switch_3_change: "no"
+    expected_warnings:
+      - ["0x11, 0x11", "5 of 8 byte(s)"]
   - name: ch255_type1_zero_values
     description: "Channel 255 type 1, zero values bytes, decoded by the vendor's own decoder"
     payload: "FF0100"
@@ -193,6 +195,8 @@ test_vectors:
       switch_2_change: "no"
       switch_3: "off"
       switch_3_change: "no"
+    expected_warnings:
+      - ["0x00, 0x00", "5 of 8 byte(s)"]
   - name: ch255_type1_max_values
     description: "Channel 255 type 1, max values bytes, decoded by the vendor's own decoder"
     payload: "FF01FF"

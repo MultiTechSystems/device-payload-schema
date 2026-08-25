@@ -30,7 +30,11 @@ class CorpusConformanceTest {
     // CR-2026-007 settled the floored convention and this binding now uses
     // Math.floorMod for `mod` as well as Math.floorDiv for `idiv`, so its two
     // operators agree and the floor is the full corpus.
-    private static final int CORPUS_FLOOR = 1193;
+    // CR-2026-014's `expected_warnings` added three fixtures for the `unknown`
+    // parameter, which no device schema sets, and the floor had drifted 29 below the
+    // full count as vectors were added without it being raised. It is the full count
+    // again: 1222.
+    private static final int CORPUS_FLOOR = 1222;
 
     @Test
     void corpusVectorsDecodeAsExpected() throws IOException {
@@ -89,8 +93,9 @@ class CorpusConformanceTest {
                     Map<String, Object> out = fport instanceof Number n
                             ? schema.decodeWithPort(payload, n.intValue())
                             : schema.decode(payload);
-                    String mismatch = null;
+                    String mismatch = warningsMismatch(vector, out);
                     for (Map.Entry<?, ?> entry : expected.entrySet()) {
+                        if (mismatch != null) break;
                         String key = String.valueOf(entry.getKey());
                         if (!out.containsKey(key)) {
                             mismatch = key + " missing";
@@ -167,6 +172,46 @@ class CorpusConformanceTest {
             return Math.abs(a - b) <= 0.001;
         }
         return String.valueOf(want).equals(String.valueOf(got));
+    }
+
+    /**
+     * How the warnings a decode produced differ from what the vector expects, or null
+     * where they agree or the vector asserts nothing (PS-305 to PS-308).
+     *
+     * <p>Absent and {@code []} mean different things: absent asserts nothing, which is
+     * most of the corpus, while {@code []} asserts that no warning was reported - the
+     * form that catches a schema edit beginning to discard data. Entries are matched as
+     * substrings, because the specification fixes what a warning must contain and not its
+     * wording (PS-306), and positionally against a complete list (PS-305), so an
+     * unexpected warning fails just as a missing one does.
+     */
+    @SuppressWarnings("unchecked")
+    private static String warningsMismatch(Map<?, ?> vector, Map<String, Object> out) {
+        Object declared = vector.get("expected_warnings");
+        if (!(declared instanceof List<?> want)) {
+            return null;
+        }
+        Object reported = out.get("_warnings");
+        List<String> got = reported instanceof List
+                ? (List<String>) reported
+                : List.of();
+        if (got.size() != want.size()) {
+            return "expected " + want.size() + " warning(s), got " + got.size() + ": " + got;
+        }
+        for (int i = 0; i < want.size(); i++) {
+            // An entry is a string, or a list of strings all of which must appear in that
+            // one warning (PS-306): the tag and the byte count are not contiguous in any
+            // implementation's text.
+            Object entry = want.get(i);
+            List<?> fragments = entry instanceof List<?> parts ? parts : List.of(entry);
+            for (Object fragment : fragments) {
+                if (!got.get(i).contains(String.valueOf(fragment))) {
+                    return "warning[" + i + "]: \"" + fragment + "\" not found in \""
+                            + got.get(i) + "\"";
+                }
+            }
+        }
+        return null;
     }
 
     /**

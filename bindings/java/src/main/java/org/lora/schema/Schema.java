@@ -532,7 +532,8 @@ public class Schema {
         // Decode main fields
         Map<String, Object> fieldsResult = decodeFields(fields, ctx);
         result.putAll(fieldsResult);
-        
+        reportWarnings(result, ctx);
+
         return result;
     }
 
@@ -560,8 +561,20 @@ public class Schema {
         // Decode resolved fields
         Map<String, Object> fieldsResult = decodeFields(resolvedFields, ctx);
         result.putAll(fieldsResult);
-        
+        reportWarnings(result, ctx);
+
         return result;
+    }
+
+    /**
+     * Copies anything the decode wanted to say into the result under {@code _warnings}.
+     *
+     * <p>Absent unless something was collected, so a clean decode carries no extra key.
+     */
+    private static void reportWarnings(Map<String, Object> result, DecodeContext ctx) {
+        if (!ctx.getWarnings().isEmpty()) {
+            result.put("_warnings", new ArrayList<>(ctx.getWarnings()));
+        }
     }
 
     // Encode methods
@@ -1056,6 +1069,7 @@ public class Schema {
         List<Map<String, Object>> channels = new ArrayList<>();
         
         while (ctx.remaining() > 0) {
+            int entryStart = ctx.getOffset();
             List<Integer> tag = new ArrayList<>();
             Map<String, Integer> tagValues = new HashMap<>();
             
@@ -1123,11 +1137,57 @@ public class Schema {
                     channels.add(entry);
                 }
             } else {
+                // A tag the schema does not describe. Whatever the mode, the fact is
+                // reported: silence cannot be told from a device that sent fewer fields
+                // (PS-301, PS-302).
+                StringBuilder label = new StringBuilder();
+                for (Integer part : tag) {
+                    if (label.length() > 0) {
+                        label.append(", ");
+                    }
+                    label.append(String.format("0x%02X", part));
+                }
+
                 if ("error".equals(unknownMode)) {
-                    throw new SchemaException.DecodeException("Unknown TLV tag: " + tag);
+                    throw new SchemaException.DecodeException("Unknown TLV tag: " + label);
+                } else if ("raw".equals(unknownMode)) {
+                    int span = dataLength >= 0 ? dataLength : ctx.remaining();
+                    byte[] raw = ctx.read(span);
+                    Map<String, Object> entry = new LinkedHashMap<>();
+                    entry.put("tag", tag);
+                    entry.put("raw", bytesToHex(raw));
+                    // PS-303: reported either way. Merged output has no channel list, so
+                    // it goes under `unknown_tags`.
+                    if (merge) {
+                        Object existing = result.get("unknown_tags");
+                        if (existing instanceof List) {
+                            ((List<Object>) existing).add(entry);
+                        } else {
+                            List<Object> list = new ArrayList<>();
+                            list.add(entry);
+                            result.put("unknown_tags", list);
+                        }
+                    } else {
+                        channels.add(entry);
+                    }
+                    if (dataLength < 0) {
+                        ctx.addWarning(String.format(
+                            "unknown TLV tag (%s) captured raw; %d byte(s) after it could not be delimited",
+                            label, span));
+                        break;
+                    }
                 } else if (dataLength >= 0) {
+                    // skip, the default
+                    ctx.addWarning(String.format(
+                        "unknown TLV tag (%s) skipped, %d byte(s) discarded", label, dataLength));
                     ctx.read(dataLength);
                 } else {
+                    // Nothing to skip over, so decoding stops and everything from the tag
+                    // onwards is lost (PS-302).
+                    ctx.addWarning(String.format(
+                        "unknown TLV tag (%s) at offset %d: %d of %d byte(s) left undecoded",
+                        label, entryStart, ctx.getData().length - entryStart,
+                        ctx.getData().length));
                     break;
                 }
             }

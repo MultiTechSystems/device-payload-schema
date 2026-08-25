@@ -108,6 +108,8 @@ test_vectors:
       battery: 92
       temperature: 30.8
       humidity: 50.5
+    expected_warnings:
+      - ["0x05, 0x6A", "4 of 14 byte(s)"]
   - name: vendor_reference_2
     description: "Example declared by the vendor in the TTN device repository"
     payload: "077DE704087D070009733F27"

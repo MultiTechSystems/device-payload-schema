@@ -2,7 +2,10 @@ package org.lora.schema;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 public class DecodeContext {
@@ -10,13 +13,24 @@ public class DecodeContext {
     private int offset;
     private String endian;
     private final Map<String, Object> variables;
+    /**
+     * Things worth telling the caller that do not stop the decode. Encoding already had
+     * this channel through {@link EncodeResult}; decoding had none, so an unknown TLV tag
+     * had nowhere to surface and a payload that stopped short read as a complete decode
+     * (PS-301, PS-302).
+     */
+    private final List<String> warnings;
 
     public DecodeContext(byte[] data, String endian) {
         this.data = data;
         this.offset = 0;
         this.endian = endian != null ? endian : "big";
         this.variables = new HashMap<>();
+        this.warnings = new ArrayList<>();
     }
+
+    /** The payload being decoded, whose length a warning counts undecoded bytes against. */
+    public byte[] getData() { return data; }
 
     public int remaining() {
         return data.length - offset;
@@ -57,6 +71,10 @@ public class DecodeContext {
     public void setEndian(String endian) { this.endian = endian; }
     
     public Map<String, Object> getVariables() { return variables; }
+
+    public List<String> getWarnings() { return Collections.unmodifiableList(warnings); }
+
+    public void addWarning(String warning) { warnings.add(warning); }
     
     public void setVariable(String name, Object value) {
         variables.put(name, value);

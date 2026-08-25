@@ -279,6 +279,24 @@
             "minimum": 1,
             "maximum": 255,
             "description": "Deprecated spelling of fPort; accepted, not emitted (PS-300)"
+          },
+          "expected_warnings": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "minItems": 1
+                }
+              ]
+            },
+            "description": "Warnings the execution must report, complete and in order (PS-305). An entry is a substring of the warning at that position, or an array of substrings all of which must appear in it (PS-306). An empty array asserts that none were reported; absent asserts nothing (PS-308)."
           }
         },
         "oneOf": [

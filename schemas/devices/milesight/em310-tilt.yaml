@@ -161,6 +161,8 @@ test_vectors:
       threshold_x: "trigger"
       threshold_y: "normal"
       threshold_z: "normal"
+    expected_warnings:
+      - ["0x11, 0x11", "2 of 11 byte(s)"]
   - name: ch255_type1_zero_values
     description: "Channel 255 type 1, zero values bytes, decoded by the vendor's own decoder"
     payload: "FF0100"
