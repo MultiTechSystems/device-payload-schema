@@ -11,29 +11,45 @@ Green as of the last run:
 
 | | |
 |---|---|
-| Python | **2639** passed / 4 skipped |
+| Python | **2684** passed / 4 skipped |
 | Go | `go vet` + `go test -count=1` clean; decode 1239/1239, encode 1173 ordered / 1164 plain |
 | Java | BUILD SUCCESS, 46 tests; decode 1239 of 1250 |
 | C# | 92/92; decode 1239 of 1250, encode 1164 |
 | `vector-verdicts.py` | **1250 vectors, interpreted 100%, generated 100%, 0 disagreements** |
 | `encode-round-trip.py` | 1163 of 1239, **0 unexplained** |
+| `make test-c` | 3 C test binaries pass; corpus harness **453 of 453 attempted, 0 differ** |
 | validate-devices / validate-examples / selftest / score-check / docs-index-check | pass |
 
 Corpus 1229 -> 1250. Decode floors 1193 -> 1239. Encode round-trip: reference 1131 ->
 1163, Go 1144 -> 1173, Java 1143 -> 1163, C# 1144 -> 1164.
 
-**There is no obvious next CR, and that is the honest state rather than a stopping point.**
-Every construct is described in the meta-schema and validated; all five implementations
-agree on all 1250 vectors; the encode residue is 76 vectors, every one classified as
-information the decode does not carry. What remains in AGENTS.md is scoped decisions, not
-defect hunts:
+**The one obvious next CR is `flagged` in the C interpreter** - 34 corpus schemas need it,
+which is now the largest single reason a schema cannot be reached there. It is measurable
+the moment it is written, because `tools/c-corpus-harness.py` exists; do not add a construct
+to C without extending the harness in the same change, or the new field type lands
+uncovered.
+
+Everything else is a scoped decision rather than a defect hunt. Every construct is described
+in the meta-schema and validated; the five YAML-driven implementations agree on all 1250
+vectors; the encode residue is 76 vectors, every one classified as information the decode
+does not carry.
 
 - `definitions.field` stays permissive - accepts `s17`, a nameless field, `mult: "0.1"`.
   Closing it is real rejection risk across 189 schemas for a payoff `validate_schema.py`
   already delivers.
-- The C interpreter has no TLV and no `name_from`, and `bindings/c/schema_ffi.c`'s
-  `schema_create_yaml()` is still a stub whose `result_to_json()` destroys precision with
-  `%g`. Unchanged today.
+- **The C interpreter is measured now and has `tlv`** (CR-2026-032 and -033). It reaches
+  453 of 1239 vectors and decodes every one correctly. What it still cannot express:
+  `flagged` (34 schemas), `bitfield_string` (24), more than `SCHEMA_MAX_CASES` cases (15),
+  `repeat` (3), and an enum/lookup `default` the struct has no slot for (1). It also has no
+  warning channel, so it cannot report what it could not read the way the other five do.
+
+  **The fixed-size limits are the boundary, not a to-do.** `sizeof(schema_t)` is 51 KB
+  because every `field_def` carries `cases[16]` and `lookup[16]` unconditionally; raising
+  `SCHEMA_MAX_FIELDS` to fit mla20's 67 fields would put it past 110 KB.
+
+  Still true and untouched: `bindings/c/schema_ffi.c`'s `schema_create_yaml()` is a stub
+  and its `result_to_json()` destroys precision with `%g`. And `src/test_comprehensive.c`
+  is out of `make test-c` - 22 of its 160 assertions are stale, not defects.
 - 11 corpus vectors are genuinely unreversible encodes (enum `default`, lookup `default`,
   `sqrt`), tolerated by the Java and C# decode floors.
 - Go's plain `Encode` is 2 behind the reference on `ws515`/`wt101`, whose devices lay
@@ -41,13 +57,16 @@ defect hunts:
   `EncodeOrdered` handles them.
 
 **Read the "How the measurements went wrong" section below before trusting any figure in
-this file.** Nine of the day's mistakes were in measurement rather than in fixes, and one
-produced a plausible *success* story that was repeated across four PRs before anyone
-checked it.
+this file.** Every mistake of the day was in measurement rather than in a fix. One produced
+a plausible *success* story repeated across four PRs before anyone checked it; seven more
+were instrument bugs in the C harness that would have been reported as C defects had the
+harness not been built before the feature. The section deliberately carries no running
+total - keeping one correct is the same trap it describes.
 
 ## Session: Aug 25, 2026
 
-Nineteen CRs, PRs #12-#29. Every one merged to `master` individually.
+Twenty-one CRs, PRs #12-#32, plus the notes themselves (#30). Every one merged to `master`
+individually.
 
 ### What was fixed
 
@@ -118,11 +137,55 @@ entry was information the decode does not carry. **Do not re-add a hand-maintain
 table** - the one in `test_encode_round_trip.py`'s docstring said "1129 of 1191" and every
 row was wrong by the time the corpus reached 1237.
 
+### The C interpreter: measured first, then given `tlv`
+
+Asked for TLV in C. The scope was wrong, and the investigation is why: **nothing measured
+that interpreter at all.** Its four dedicated test files were in no build target,
+`src/selftest_schema.c` exercises hand-built schemas rather than corpus vectors, and
+`grep corpus src/*.c` returned nothing. There is no YAML reader (`schema_create_yaml()` is a
+declared stub) and the header parses no binary format - a schema is built through the struct
+API. Adding a large construct there would have produced a feature verifiable only against
+tests I also wrote.
+
+So **CR-2026-032 built the harness** (`tools/c-corpus-harness.py`): it generates C that
+builds each expressible corpus schema through the struct API, compiles it once, runs it, and
+compares against the vectors with the same `values_match` the other runners use. First
+measurement: **50 of 50 attempted vectors correct**, 1189 of 1239 unreachable. The C
+interpreter was never wrong - it was unmeasured, and supported 4% of the corpus.
+
+**CR-2026-033 then added `tlv`,** and the harness in the same change. Attempted went 50 ->
+453, all passing. The representation:
+
+- A tag packs into `case_def_t.match_value` - one byte is its own value, two components are
+  `(first << 8) | second`. Exact rather than a hash: every corpus tag component is a `u8`
+  and none has more than two. `schema_tlv_tag()` is the only place that encoding lives.
+- **Case bodies are placed above `field_count`** via a new `schema_place_field()`. The
+  existing `match` convention adds them as *counted* fields, so the top-level loop decodes
+  each a second time from wherever the position happens to be;
+  `src/test_comprehensive.c`'s match test tolerates that only because it asserts
+  `field_count >= 2` rather than what was decoded. **Do not follow the match pattern here.**
+- `merge: false` and `unknown: raw` are not represented - both need a channel
+  `decode_result_t` does not have. Claiming them would be worse than lacking them.
+
+**Seven apparent C defects across the two CRs, and not one was real.** Three were harness
+bugs in CR-2026-032 (`bytes` printed through the integer branch - `field_value_t` is a
+union; a `skip` built and never added, so every field after it read from the padding's
+offset). Two were `test_comprehensive.c`'s stale little-endian assertions, which I probed
+directly and found correct. Two more were harness bugs in CR-2026-033 (the case-body guard
+copied from the match block whose invariant I had just changed, and a field-by-name search
+bounded by `field_count` so case-body lookup labels printed as integers - that one reported
+31 vectors as C *type mismatches*).
+
+That is the return on doing the harness first, and it is concrete: without it, those four
+harness bugs were indistinguishable from interpreter faults and I would have filed them as
+such.
+
 ### How the measurements went wrong
 
-Five kinds, eleven instances, all in test scaffolding rather than in a fix. Worth reading
-because the failure mode is consistent and the notes above are only as good as the figures
-behind them.
+Eight kinds, all in test scaffolding or measuring tools rather than in a fix. No running
+total: this section carried one, it went stale within the same day, and keeping it correct is
+the very trap described below. Worth reading because the failure mode is consistent and the
+notes above are only as good as the figures behind them.
 
 1. **A tuple read as a boolean** (#19). The conformance cross-check had never compared a
    value. Announced itself only because a vector I had just predicted would fail, passed.
@@ -147,6 +210,17 @@ behind them.
    own test measures, Go fails a strict subset of what the reference fails.** The fixes in
    those CRs were real and their floors moved; the comparison figures were not.
 
+6. **An instrument's own bugs read as findings about the thing measured** (#31, #32, four
+   times). The C harness is a measuring device; every one of its early bugs presented as a C
+   interpreter defect. The defence is not care, it is *order*: build the instrument before
+   the feature, so its bugs surface while nothing depends on the answer.
+7. **A ratio recorded as an invariant** (#31, broken by #32). CR-2026-032's test asserted
+   `skipped > attempted * 10` - true at 1189 against 50, false at 786 against 453. Same
+   error as pinning a floor total, in a different disguise.
+8. **The wrong stream** (#32). A test read `make selftest`'s result from stdout; the binary
+   logs to stderr. The shell checks that seemed to prove otherwise used `2>&1`, which merged
+   the streams before I looked.
+
 The pattern: a wrong measurement that *fails* is self-correcting, and a wrong measurement
 that agrees with what you expected is not. Writing rules into AGENTS.md demonstrably did not
 stop me repeating them inside the same session - re-measuring differently did. The
@@ -163,6 +237,12 @@ cross-implementation comparison cannot be made loosely.
   encode against the data it was handed.
 - **An unlisted type in Go's encode switch is a reported failure**, not a silent zero-byte
   write. That is what made the `u32le16` gap findable. Keep it.
+- **Build the instrument before the feature.** A construct added to the C interpreter
+  without extending `tools/c-corpus-harness.py` in the same change lands uncovered, and the
+  harness's own bugs then read as interpreter defects.
+- **A tlv or match case body goes above `field_count`**, reached only through
+  `case_def_t.field_start`. Adding it as a counted field makes the top-level loop decode it
+  twice.
 
 
 ## Session: Aug 11, 2026 (later)
