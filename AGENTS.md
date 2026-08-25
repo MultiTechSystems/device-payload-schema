@@ -484,15 +484,25 @@ contains `if not values_match(`, and it calls `matches()` on a known-unequal pai
 helper that returns a pair is a trap for `if not helper(...)`** — `warnings_match` has the
 same shape and is unpacked correctly at all four of its call sites. Check any new one.
 
-**A bare run of bit ranges is packed on encode by the Python reference encoder only.**
-CR-2026-023 found `_encode_field` writing each bitfield as a whole byte holding its
-unshifted value, ignoring the bit range and `consume: 0` alike — a LoRaWAN MHDR's three
-ranges came back as three bytes, `40` encoding as `020000`. `byte_group` was given packing
-when its own encoding was fixed; a bare run, the same thing without the wrapper, never
-was. **Java, C# and Go still pack only `byte_group`**, which is the same class of
-divergence CR-2026-020 closed for `match` and wants its own CR;
-`test_cr_2026_023_encode_round_trip.py` reads their source so the claim cannot go stale
-unnoticed.
+**A bare run of bit ranges is packed on encode by all four encoders.** CR-2026-023 found
+`_encode_field` writing each bitfield as a whole byte holding its unshifted value,
+ignoring the bit range and `consume: 0` alike — a LoRaWAN MHDR's three ranges came back as
+three bytes, `40` encoding as `020000`. `byte_group` was given packing when its own
+encoding was fixed; a bare run, the same thing without the wrapper, never was.
+CR-2026-024 brought Java, C# and Go onto it. Do not add a fifth code path for this: each
+encoder has one run packer, wired through its field list, its construct bodies and its
+`flagged` path, and `test_cr_2026_024_encode_bitfield_parity.py` reads all three sources
+so a removal shows up there rather than as a puzzling floor break.
+
+Two things that fix surfaced, neither chased:
+
+- **Go round-trips ten `tlv` vectors the Python reference does not** (910 against 900). A
+  round-trip is byte-exact, so Go is *ahead*: the reference encoder's TLV case selection
+  is the weaker of the two. The Python floor is the one to raise if anyone works on it.
+- **`flagged` is 14 behind Python in all three** (121 against 135) and bit ranges are not
+  the cause — no `flagged` group in the corpus holds one; they are `u16`, `u32le16` and
+  computed members. That is a separate gap, and a test pins the premise so it cannot be
+  misattributed later.
 
 **The encode round-trip residue is classified, not counted.** `tools/encode-round-trip.py`
 gives a reason for every vector that does not re-encode to its payload, and

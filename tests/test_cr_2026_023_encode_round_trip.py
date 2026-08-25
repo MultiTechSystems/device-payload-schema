@@ -204,17 +204,15 @@ class TestTheCorpusResidueIsExplained:
         )
 
 
-class TestTheOtherEncodersStillDiffer:
-    """Recorded, not fixed here: Java, C# and Go pack `byte_group` and not a bare run.
+class TestTheOtherEncodersHaveCaughtUp:
+    """CR-2026-024 brought Java, C# and Go onto this too.
 
-    Their round-trip tests are ratchets, so the gap is not a failure there - it is three
-    implementations encoding a shared-byte run differently from the reference, which is
-    the same class of defect CR-2026-020 closed for `match`. Left to its own CR because
-    four encoders plus this audit is more than one change should carry.
+    This class was the inverse when CR-2026-023 landed: it read their source to assert
+    they packed `byte_group` and *not* a bare run, so the gap could not go stale
+    unnoticed. It now asserts the opposite, which is what stops the gap reopening.
     """
 
     def test_the_reference_encoder_packs(self):
-        """The property the others need to acquire, stated where it can be pointed at."""
         mhdr = {
             "name": "mhdr", "endian": "little",
             "fields": [
@@ -226,13 +224,15 @@ class TestTheOtherEncodersStillDiffer:
         _, got, _ = round_trip(mhdr, "40")
         assert got == bytes.fromhex("40")
 
-    def test_java_and_dotnet_pack_only_byte_group(self):
-        """Read from their source, so the claim above cannot go stale unnoticed."""
-        java = (REPO_ROOT / "bindings" / "java" / "src" / "main" / "java" / "org"
-                / "lora" / "schema" / "Encoder.java").read_text()
-        dotnet = (REPO_ROOT / "dotnet" / "PayloadSchema" / "SchemaEncoder.cs").read_text()
-        for source, name in ((java, "Encoder.java"), (dotnet, "SchemaEncoder.cs")):
-            assert "packed" in source, name
-            assert "bitfieldRun" not in source and "BitfieldRun" not in source, (
-                f"{name} has grown a bare-run packer; update this test and the CR note"
-            )
+    def test_all_four_encoders_have_a_bare_run_packer(self):
+        """Read from their source, so a removal shows up here rather than in a floor."""
+        sources = {
+            "Encoder.java": (REPO_ROOT / "bindings" / "java" / "src" / "main" / "java"
+                             / "org" / "lora" / "schema" / "Encoder.java"),
+            "SchemaEncoder.cs": REPO_ROOT / "dotnet" / "PayloadSchema" / "SchemaEncoder.cs",
+            "schema.go": REPO_ROOT / "go" / "schema" / "schema.go",
+        }
+        for name, path in sources.items():
+            text = path.read_text()
+            assert "itfieldRun" in text, f"{name} has no bare-run packer"
+            assert "CR-2026-024" in text, f"{name} does not say where the fix came from"

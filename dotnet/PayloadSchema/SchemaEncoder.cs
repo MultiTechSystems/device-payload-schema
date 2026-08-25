@@ -124,17 +124,11 @@ public static class SchemaEncoder
                     flagsPatches[field.Flagged.Field] = flags;
             }
 
-            foreach (var field in _fields)
-            {
-                try
-                {
-                    output.AddRange(EncodeOne(field, data, flagsPatches, topLevel: true));
-                }
-                catch (Exception e)
-                {
-                    _result.Errors.Add($"Error encoding {Describe(field)}: {e.Message}");
-                }
-            }
+            // Bit ranges sharing a byte are packed together rather than a byte apiece
+            // (CR-2026-024), so the whole list is walked at once: a run cannot be found
+            // by looking at one field in isolation.
+            output.AddRange(EncodeWithBitfieldRuns(_fields, data, flagsPatches,
+                                                   topLevel: true));
 
             _result.Payload = output.ToArray();
             return _result;
@@ -219,15 +213,127 @@ public static class SchemaEncoder
             return EncodeField(field, ReverseModifiers(value, field));
         }
 
+
+        /// <summary>
+        /// Whether a plain field reads a bit range out of a byte it may share with others.
+        /// A byte_group member is excluded: that construct packs its own.
+        /// </summary>
+        static bool IsBareBitfield(SchemaField field)
+            => field.ByteGroup.Count == 0
+               && Helpers.ParseBitRange(field.RawType) != null;
+
+        /// <summary>
+        /// Encode a field list, packing each run of bit ranges into the byte or bytes it
+        /// shares (CR-2026-024).
+        ///
+        /// Encoding wrote each bit range as a whole byte holding its unshifted value,
+        /// ignoring the range and <c>consume: 0</c> alike, so a LoRaWAN MHDR's three
+        /// ranges came back as three bytes: <c>40</c> encoded as <c>020000</c>, the wrong
+        /// length and the wrong bits, with no error. byte_group was given packing when its
+        /// own encoding was fixed; a bare run - the same thing without the wrapper - never
+        /// was. CR-2026-023 fixed the Python reference encoder; this is the same fix here.
+        ///
+        /// A run ends at the field whose <c>consume</c> closes the span, which is where
+        /// decoding stops reading from the same offset.
+        /// </summary>
+        byte[] EncodeWithBitfieldRuns(List<SchemaField> fields,
+                                      Dictionary<string, object?> data,
+                                      Dictionary<string, int> patches, bool topLevel)
+        {
+            var output = new List<byte>();
+            var run = new List<SchemaField>();
+
+            void Flush()
+            {
+                if (run.Count == 0) return;
+                var pending = new List<SchemaField>(run);
+                run.Clear();
+                try
+                {
+                    output.AddRange(EncodeBitfieldRun(pending, data));
+                }
+                catch (Exception e)
+                {
+                    if (!topLevel) throw;
+                    var names = string.Join(", ", pending.Select(f => f.Name));
+                    _result.Errors.Add($"Error encoding bit range(s) {names}: {e.Message}");
+                }
+            }
+
+            foreach (var field in fields)
+            {
+                if (!IsBareBitfield(field))
+                {
+                    Flush();
+                    try
+                    {
+                        output.AddRange(EncodeOne(field, data, patches, topLevel));
+                    }
+                    catch (Exception e)
+                    {
+                        if (!topLevel) throw;
+                        _result.Errors.Add($"Error encoding {Describe(field)}: {e.Message}");
+                    }
+                    continue;
+                }
+                run.Add(field);
+                if (field.Consume >= 1) Flush();
+            }
+            Flush();
+            return output.ToArray();
+        }
+
+        /// <summary>Pack one run of bit ranges into the byte or bytes they share.</summary>
+        byte[] EncodeBitfieldRun(List<SchemaField> run, Dictionary<string, object?> data)
+        {
+            ulong packed = 0;
+            int size = 1;
+            foreach (var member in run)
+            {
+                object? value = string.IsNullOrEmpty(member.Name) || member.Name.StartsWith("_")
+                    ? 0.0
+                    : (data.TryGetValue(member.Name, out var v) ? v : 0.0);
+                value = ReverseModifiers(value, member);
+                var (ok, numeric) = Helpers.ToFloat64(value);
+                if (!ok)
+                {
+                    if (value is bool flag) numeric = flag ? 1 : 0;
+                    else
+                        // A label on a bit range: recover the number rather than writing
+                        // zero, which would be the silent wrong answer this fix removes.
+                        numeric = BitfieldLabelValue(value, member);
+                }
+                long raw = (long)Math.Round(numeric, MidpointRounding.ToEven);
+                var bitRange = Helpers.ParseBitRange(member.RawType)!.Value;
+                int bitLen = bitRange.end - bitRange.start + 1;
+                size = Math.Max(size, Math.Max(1,
+                    Math.Max(member.BitBaseBytes, member.Consume)));
+                ulong mask = bitLen >= 64 ? ulong.MaxValue : (1UL << bitLen) - 1;
+                packed |= ((ulong)raw & mask) << bitRange.start;
+            }
+            return Helpers.EncodeUint(packed, Math.Max(1, size), _endian);
+        }
+
+        /// <summary>The number a bit range's enum label stands for.</summary>
+        static double BitfieldLabelValue(object? value, SchemaField member)
+        {
+            var label = value?.ToString() ?? "";
+            if (member.Values != null)
+            {
+                foreach (var kv in member.Values)
+                    if (kv.Value == label)
+                        return kv.Key;
+            }
+            throw new InvalidOperationException($"bit range '{member.Name}': '{label}' "
+                + "is not one of its declared values");
+        }
+
         /// <summary>Encode a list of fields - a TLV case's value bytes, a match case's body.</summary>
         byte[] EncodeFieldList(List<SchemaField> fields, Dictionary<string, object?> data)
         {
             if (fields.Count == 0) return Array.Empty<byte>();
-            var output = new List<byte>();
-            var none = new Dictionary<string, int>();
-            foreach (var field in fields)
-                output.AddRange(EncodeOne(field, data, none, topLevel: false));
-            return output.ToArray();
+            return EncodeWithBitfieldRuns(fields, data, new Dictionary<string, int>(),
+                                          topLevel: false);
         }
 
         List<SchemaField> ResolveDefinition(string refPath)
@@ -253,12 +359,14 @@ public static class SchemaEncoder
             foreach (var group in fd.Groups)
             {
                 if (!GroupHasData(group, data)) continue;
-                foreach (var gf in group.Fields)
-                {
-                    if (string.IsNullOrEmpty(gf.Name) || gf.Name.StartsWith("_")) continue;
-                    if (gf.Type == FieldType.Number) continue;
-                    output.AddRange(EncodeOne(gf, data, none, topLevel: false));
-                }
+                // Routed through the run packing for consistency with every other field
+                // list, not because anything needs it today: no `flagged` group in the
+                // corpus holds a bit range. One that grows a run will pack correctly.
+                var emit = group.Fields
+                    .Where(gf => !string.IsNullOrEmpty(gf.Name) && !gf.Name.StartsWith("_")
+                                 && gf.Type != FieldType.Number)
+                    .ToList();
+                output.AddRange(EncodeWithBitfieldRuns(emit, data, none, topLevel: false));
             }
             return output.ToArray();
         }

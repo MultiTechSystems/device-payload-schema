@@ -40,7 +40,10 @@ class CorpusEncodeRoundTripTest {
      * map the encoder reads back, which is what lets a multi-channel payload round-trip
      * rather than come back rearranged.
      */
-    private static final int ENCODE_FLOOR_TOTAL = 1131;
+    // CR-2026-024 packed a bare run of bit ranges the way byte_group was already
+    // packed, so the three LoRaWAN header schemas round-trip: `plain fixed` rises from
+    // 55 to 58 and the total to 1145.
+    private static final int ENCODE_FLOOR_TOTAL = 1145;
 
     /**
      * Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -49,10 +52,10 @@ class CorpusEncodeRoundTripTest {
     private static final Map<String, Integer> ENCODE_FLOOR_BY_SHAPE = Map.of(
             "tlv", 900,
             "flagged", 121,
-            "plain fixed", 55,
-            "match", 34,
+            "plain fixed", 58,
+            "match", 43,
             "byte_group", 17,
-            "repeat", 4);
+            "repeat", 6);
 
     /** The construct that dominates a schema's layout. */
     private static String schemaShape(String raw) {

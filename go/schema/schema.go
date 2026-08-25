@@ -3696,6 +3696,72 @@ func encodeRepeat(field Field, data map[string]any, ctx *EncodeContext) error {
 //
 // The flagged pre-scan is a no-op for a list with no flagged construct, so the
 // callers that never had one pay a single pass over their own fields.
+
+// isBareBitfieldField reports whether a plain field reads a bit range out of a byte it may
+// share with others. A byte_group member is excluded: that construct packs its own.
+func isBareBitfieldField(f Field) bool {
+	return len(f.ByteGroup) == 0 &&
+		bitRangePattern.FindStringSubmatch(string(f.Type)) != nil
+}
+
+// encodeBitfieldRun packs one run of bit ranges into the byte or bytes they share.
+//
+// Encoding wrote each bit range as a whole byte holding its unshifted value, ignoring the
+// range and `consume: 0` alike, so a LoRaWAN MHDR's three ranges came back as three bytes:
+// `40` encoded as `020000`, the wrong length and the wrong bits, with no error.
+// byte_group was given packing when its own encoding was fixed; a bare run - the same
+// thing without the wrapper - never was. CR-2026-023 fixed the Python reference encoder;
+// this is the same fix here (CR-2026-024).
+func encodeBitfieldRun(run []Field, data map[string]any, ctx *EncodeContext) error {
+	packed := uint64(0)
+	size := 1
+	for _, gf := range run {
+		var value any = 0
+		if gf.Name != "" && !strings.HasPrefix(gf.Name, "_") {
+			if v, ok := data[gf.Name]; ok {
+				value = v
+			}
+		}
+		raw, ok := rawForField(gf, value)
+		if !ok {
+			// A label on a bit range: recover the number rather than writing zero, which
+			// would be the silent wrong answer this fix exists to remove.
+			resolved, err := bitfieldLabelValue(value, gf)
+			if err != nil {
+				return err
+			}
+			raw = resolved
+		}
+		num := uint64(int64(math.Round(raw)))
+		m := bitRangePattern.FindStringSubmatch(string(gf.Type))
+		bits, _ := strconv.Atoi(strings.TrimLeft(m[1], "usf"))
+		start, _ := strconv.Atoi(m[2])
+		end, _ := strconv.Atoi(m[3])
+		if base := bits / 8; base > size {
+			size = base
+		}
+		if gf.Consume > size {
+			size = gf.Consume
+		}
+		width := uint(end - start + 1)
+		packed |= (num & ((1 << width) - 1)) << uint(start)
+	}
+	ctx.Write(encodeUint(packed, size, ctx.Endian))
+	return nil
+}
+
+// bitfieldLabelValue is the number a bit range's enum label stands for.
+func bitfieldLabelValue(value any, gf Field) (float64, error) {
+	label := fmt.Sprintf("%v", value)
+	for number, name := range gf.Lookup {
+		if name == label {
+			return float64(number), nil
+		}
+	}
+	return 0, fmt.Errorf("bit range %q: %q is not one of its declared values",
+		gf.Name, label)
+}
+
 func encodeFields(fields []Field, data map[string]any, ctx *EncodeContext) error {
 	// Pre-scan flagged constructs to compute flag values
 	flagsPatches := map[string]int{}
@@ -3716,7 +3782,25 @@ func encodeFields(fields []Field, data map[string]any, ctx *EncodeContext) error
 		}
 	}
 
-	for _, field := range fields {
+	for i := 0; i < len(fields); i++ {
+		field := fields[i]
+
+		// Bit ranges sharing a byte are packed together rather than a byte apiece
+		// (CR-2026-024). The run ends at the field whose `consume` closes the span,
+		// which is where decoding stops reading from the same offset.
+		if isBareBitfieldField(field) {
+			run := []Field{field}
+			for field.Consume < 1 && i+1 < len(fields) && isBareBitfieldField(fields[i+1]) {
+				i++
+				field = fields[i]
+				run = append(run, field)
+			}
+			if err := encodeBitfieldRun(run, data, ctx); err != nil {
+				return err
+			}
+			continue
+		}
+
 		// $ref: decoding splices the referenced definition's fields in place, and
 		// encoding did not, so a referenced header contributed nothing - ref-header
 		// re-encoded 01020304 as 0304.
@@ -3866,6 +3950,19 @@ func encodeFlagged(fd *FlaggedDef, data map[string]any, ctx *EncodeContext) erro
 		if (flags>>group.Bit)&1 == 0 {
 			continue
 		}
+		// Routed through the run packing for consistency with every other field list,
+		// not because anything needs it today: no `flagged` group in the corpus holds a
+		// bit range - they are u16, u32le16 and computed members. A group that grows one
+		// will pack correctly rather than silently not (CR-2026-024).
+		var run []Field
+		flush := func() error {
+			if len(run) == 0 {
+				return nil
+			}
+			pending := run
+			run = nil
+			return encodeBitfieldRun(pending, data, ctx)
+		}
 		for _, gf := range group.Fields {
 			if gf.Name == "" || strings.HasPrefix(gf.Name, "_") {
 				continue
@@ -3880,6 +3977,18 @@ func encodeFlagged(fd *FlaggedDef, data map[string]any, ctx *EncodeContext) erro
 			if gf.Type == TypeNumber || gf.Type == "number" {
 				continue
 			}
+			if isBareBitfieldField(gf) {
+				run = append(run, gf)
+				if gf.Consume >= 1 {
+					if err := flush(); err != nil {
+						return err
+					}
+				}
+				continue
+			}
+			if err := flush(); err != nil {
+				return err
+			}
 			value, ok := data[gf.Name]
 			if !ok {
 				continue
@@ -3887,6 +3996,9 @@ func encodeFlagged(fd *FlaggedDef, data map[string]any, ctx *EncodeContext) erro
 			if err := encodeField(gf, value, ctx); err != nil {
 				return err
 			}
+		}
+		if err := flush(); err != nil {
+			return err
 		}
 	}
 	return nil
