@@ -97,7 +97,10 @@ typedef enum {
     FIELD_TYPE_BYTE_GROUP,
     FIELD_TYPE_UDEC,    /* Nibble-decimal: upper=whole, lower=tenths */
     FIELD_TYPE_SDEC,    /* Signed nibble-decimal */
-    FIELD_TYPE_UNKNOWN
+    FIELD_TYPE_UNKNOWN,
+    /* Appended after UNKNOWN on purpose: UNKNOWN is parse_type_string's sentinel and
+     * inserting before it would renumber it (CR-2026-033). */
+    FIELD_TYPE_TLV
 } field_type_t;
 
 typedef enum {
@@ -167,7 +170,30 @@ struct field_def {
     /* For nested objects */
     int nested_start;
     int nested_count;
+
+    /* For tlv (CR-2026-033). Last members, so existing initializers leave them zero,
+     * which is the "not a tlv" state.
+     *
+     * A tag is packed into case_def_t.match_value: a one-byte tag is its own value, and a
+     * two-component tag is (first << 8) | second. Every tag component in the corpus is a
+     * u8 and no tag has more than two, so the packing is exact rather than a hash - and
+     * `tlv_tag_parts` records which form was meant so a mismatch cannot be silent.
+     *
+     * `merge` is not represented: this interpreter reports a flat field list, which is
+     * merge:true, and no corpus schema sets merge at all. A schema that did would need a
+     * channel list decode_result_t cannot express, so the harness skips it rather than
+     * reporting a wrong shape. */
+    uint8_t tlv_tag_size;      /* bytes, when the tag is one integer */
+    uint8_t tlv_tag_parts;     /* 0 = use tlv_tag_size, else the component count */
+    uint8_t tlv_length_size;   /* bytes of length after the tag, 0 for none */
+    uint8_t tlv_unknown;       /* SCHEMA_TLV_UNKNOWN_* */
 };
+
+/* What to do with a tag no case describes (PS-155, PS-301..PS-304). `raw` is absent
+ * deliberately: capturing the bytes needs somewhere to put them, and decode_result_t has
+ * no channel for it - claiming support would be worse than not having it. */
+#define SCHEMA_TLV_UNKNOWN_SKIP  0
+#define SCHEMA_TLV_UNKNOWN_ERROR 1
 
 typedef struct {
     char name[SCHEMA_MAX_NAME_LEN];
@@ -507,10 +533,70 @@ static inline void schema_init(schema_t* schema) {
     schema->endian = ENDIAN_BIG;
 }
 
+/* A tlv whose tag is one integer of `tag_size` bytes. */
+static inline field_def_t field_tlv(uint8_t tag_size, uint8_t length_size) {
+    field_def_t f;
+    memset(&f, 0, sizeof(f));
+    f.type = FIELD_TYPE_TLV;
+    f.tlv_tag_size = tag_size ? tag_size : 1;
+    f.tlv_tag_parts = 0;
+    f.tlv_length_size = length_size;
+    f.tlv_unknown = SCHEMA_TLV_UNKNOWN_SKIP;
+    return f;
+}
+
+/* A tlv whose tag is `parts` single-byte components, read in order. */
+static inline field_def_t field_tlv_composite(uint8_t parts, uint8_t length_size) {
+    field_def_t f = field_tlv(1, length_size);
+    f.tlv_tag_parts = parts;
+    return f;
+}
+
+/* Pack a tag into the integer a case is keyed by. Mirrors the decode side exactly, so a
+ * builder and the interpreter cannot disagree about the encoding. */
+static inline int schema_tlv_tag(const int* parts, int count) {
+    int packed = 0;
+    for (int i = 0; i < count; i++) packed = (packed << 8) | (parts[i] & 0xFF);
+    return packed;
+}
+
+/* Add a tlv case: its packed tag, and the range of schema fields holding its body. */
+static inline bool field_add_tlv_case(field_def_t* f, int packed_tag,
+                                      int field_start, int field_count) {
+    if (f->case_count >= SCHEMA_MAX_CASES) return false;
+    case_def_t* c = &f->cases[f->case_count];
+    memset(c, 0, sizeof(*c));
+    c->match_value = packed_tag;
+    c->match_list[0] = -1;
+    c->field_start = field_start;
+    c->field_count = field_count;
+    f->case_count++;
+    return true;
+}
+
 static inline void schema_add_field(schema_t* schema, const field_def_t* field) {
     if (schema->field_count < SCHEMA_MAX_FIELDS) {
         schema->fields[schema->field_count++] = *field;
     }
+}
+
+/* Place a field the top-level loop must NOT walk, at an explicit index above
+ * `field_count` - a tlv or match case body, reached only through
+ * `case_def_t.field_start` (CR-2026-033).
+ *
+ * The alternative, which src/test_comprehensive.c's match test does, is to add case bodies
+ * as counted fields after the construct. Then the top-level loop decodes each of them a
+ * second time, from wherever the position happens to be: that test passes only because it
+ * asserts `field_count >= 2` rather than what was decoded. A tlv cannot be built that way
+ * at all - its bodies are re-read as garbage and the payload runs out.
+ *
+ * Returns false where the index is outside the array, so a caller cannot silently lose a
+ * case body. */
+static inline bool schema_place_field(schema_t* schema, int index,
+                                      const field_def_t* field) {
+    if (index < 0 || index >= SCHEMA_MAX_FIELDS) return false;
+    schema->fields[index] = *field;
+    return true;
 }
 
 /* ============================================
@@ -947,6 +1033,89 @@ static inline int schema_decode_direction(
     for (int i = 0; i < schema->field_count; i++) {
         const field_def_t* field = &schema->fields[i];
         
+        /* A tlv loop: read a tag, decode the case describing it, repeat to the end of the
+         * payload (PS-153, PS-154). Added by CR-2026-033; before it this interpreter had
+         * no field type for the construct at all, so 79 of the corpus's schemas could not
+         * be expressed, let alone decoded.
+         *
+         * Bounded by the payload rather than by a case count: a tag no case describes ends
+         * the loop under SCHEMA_TLV_UNKNOWN_SKIP where nothing delimits it, because there
+         * is no length to step over (PS-302). This interpreter has no warning channel, so
+         * it cannot say so the way the other five now do - a real gap, recorded rather
+         * than papered over. */
+        if (field->type == FIELD_TYPE_TLV) {
+            const int parts = field->tlv_tag_parts ? field->tlv_tag_parts : 0;
+            const int tag_bytes = parts ? parts : (field->tlv_tag_size ? field->tlv_tag_size : 1);
+
+            while (pos < len) {
+                if (pos + tag_bytes > len) break;
+
+                int packed = 0;
+                for (int b = 0; b < tag_bytes; b++) {
+                    packed = (packed << 8) | buf[pos + b];
+                }
+                pos += tag_bytes;
+
+                int entry_len = -1;
+                if (field->tlv_length_size) {
+                    if (pos + field->tlv_length_size > len) return SCHEMA_ERR_BUFFER;
+                    entry_len = 0;
+                    for (int b = 0; b < field->tlv_length_size; b++) {
+                        entry_len = (entry_len << 8) | buf[pos + b];
+                    }
+                    pos += field->tlv_length_size;
+                }
+
+                const case_def_t* chosen = NULL;
+                for (int c = 0; c < field->case_count; c++) {
+                    if (field->cases[c].match_value == packed) {
+                        chosen = &field->cases[c];
+                        break;
+                    }
+                }
+
+                if (chosen == NULL) {
+                    if (field->tlv_unknown == SCHEMA_TLV_UNKNOWN_ERROR) {
+                        result->error_code = SCHEMA_ERR_MATCH;
+                        snprintf(result->error_msg, sizeof(result->error_msg),
+                                 "unknown TLV tag: 0x%X", (unsigned)packed);
+                        return SCHEMA_ERR_MATCH;
+                    }
+                    if (entry_len >= 0) {
+                        pos += entry_len;   /* delimited: step over it and carry on */
+                        continue;
+                    }
+                    break;                  /* nothing to skip over (PS-302) */
+                }
+
+                for (int f = 0; f < chosen->field_count; f++) {
+                    int field_idx = chosen->field_start + f;
+                    /* Bounded by the array, not by field_count: a case body is placed
+                     * above field_count on purpose, so that the top-level loop does not
+                     * walk it. The match block's guard is `>= field_count` because its
+                     * bodies are counted fields; copying it here rejected every body this
+                     * construct owns and the loop decoded nothing at all. */
+                    if (field_idx < 0 || field_idx >= SCHEMA_MAX_FIELDS) break;
+                    if (result->field_count >= SCHEMA_MAX_FIELDS) break;
+
+                    int rc = decode_field(
+                        &schema->fields[field_idx],
+                        buf, len, &pos,
+                        &result->fields[result->field_count],
+                        &vars, schema->endian
+                    );
+                    if (rc != SCHEMA_OK) {
+                        result->error_code = rc;
+                        return rc;
+                    }
+                    if (result->fields[result->field_count].valid) {
+                        result->field_count++;
+                    }
+                }
+            }
+            continue;
+        }
+
         /* Handle match type */
         if (field->type == FIELD_TYPE_MATCH) {
             /* Get match variable value */

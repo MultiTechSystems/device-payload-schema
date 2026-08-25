@@ -16,7 +16,7 @@ the vectors' `expected` with the same `values_match` the other runners use.
 interpreter is not wrong about what it supports. It supports 4% of the corpus, and that is
 the finding - 1189 of 1239 vectors are in schemas the struct API cannot build:
 
-    79  no tlv field type
+    79  no tlv field type       <- closed by CR-2026-033
     34  no flagged field type
      3  no constructor for type 'repeat'
      1  no enum/lookup default in the struct API (a known C gap)
@@ -57,8 +57,9 @@ ATTEMPTED_FLOOR = 50
 
 #: Constructs the C interpreter has no field type for. Distinct from what the harness
 #: cannot build, and the distinction is the point.
-C_GAPS = ("no tlv field type", "no flagged field type",
-          "no constructor for type 'repeat'")
+#: `no tlv field type` was here until CR-2026-033 added one; the interpreter now decodes
+#: the construct and the harness builds it, so it is no longer a reason at all.
+C_GAPS = ("no flagged field type", "no constructor for type 'repeat'")
 
 
 def harness(*args):
@@ -93,9 +94,16 @@ class TestTheHarnessRunsAndTheCInterpreterIsCorrect:
 class TestTheGapIsCoverageNotCorrectness:
     """The finding: C is right about what it supports and supports very little."""
 
-    def test_most_of_the_corpus_is_unreachable(self, report):
-        assert report["skipped_vectors"] > report["attempted"] * 10, (
-            report["skipped_vectors"], report["attempted"])
+    def test_some_of_the_corpus_is_still_unreachable(self, report):
+        """That there is a gap, not how wide it is.
+
+        This asserted `skipped > attempted * 10` when CR-2026-032 landed - true then, at
+        1189 against 50, and false as soon as CR-2026-033 added tlv and took it to 786
+        against 453. A ratio measured on the day is no more an invariant than a floor
+        total is; the accounting test below is the durable one.
+        """
+        assert report["skipped_vectors"] > 0
+        assert report["skips"], "unreachable vectors with no reason recorded"
 
     def test_the_corpus_total_is_accounted_for(self, report):
         assert report["attempted"] + report["skipped_vectors"] == report["corpus_vectors"]
@@ -104,10 +112,10 @@ class TestTheGapIsCoverageNotCorrectness:
     def test_each_missing_field_type_is_reported(self, gap, report):
         assert gap in report["skips"], sorted(report["skips"])
 
-    def test_tlv_is_the_largest_single_reason(self, report):
-        """Which is why TLV was the construct asked about, and is CR-2026-033."""
-        largest = max(report["skips"].items(), key=lambda kv: kv[1])
-        assert largest[0] == "no tlv field type", largest
+    def test_tlv_is_no_longer_a_reason_at_all(self):
+        """It was the largest when this CR landed; CR-2026-033 removed it."""
+        out = harness()
+        assert "no tlv field type" not in out, out
 
     def test_harness_limits_are_named_apart_from_c_gaps(self, report):
         """A harness limitation reported as a C gap would flatter the harness."""
