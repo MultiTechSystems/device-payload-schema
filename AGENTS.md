@@ -1149,6 +1149,24 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   overwrites. **Edit the file by hand.** Teaching the generator the current file was
   the other option and was not taken: two definitions of the same thing to keep in
   step is the arrangement that produced the drift.
+- **The C interpreter is measured now, and the gap is coverage rather than correctness
+  (CR-2026-032).** `make test-c` builds the three previously-orphaned C test files and runs
+  `tools/c-corpus-harness.py`, which generates C that builds each expressible corpus schema
+  through the struct API, compiles it, and compares the decode against the vectors.
+  **50 of 50 attempted vectors pass**; 1189 of 1239 are in schemas the struct API cannot
+  build - 79 need `tlv`, 34 `flagged`, 3 `repeat`, and one an enum/lookup `default` the
+  struct has no slot for.
+
+  Two things to keep straight when reading that report. **A skipped schema is not a passing
+  one**, and **a harness limitation is not a C gap** - inline `match`, `byte_group`,
+  `object`, `$ref` and ports are named separately because C supports them and the harness
+  does not. Adding a construct to C without extending the harness would produce a feature
+  with no cross-check, which is why the TLV work is CR-2026-033 and not CR-2026-032.
+
+  `src/test_comprehensive.c` is deliberately out of `make test-c`: 22 of its 160 assertions
+  encode the pre-CR-2026-009 lookup and enum behaviour that PS-105/PS-269 changed, and its
+  little-endian `s24`/`u64` cases fail while the interpreter decodes both correctly when
+  driven directly. Stale test, not a defect - updating it is its own change.
 - **CR-2026-004 is implemented in Python, Go, Java and C#, not in C.** `name_from`
   and `!`/`*` case keys do not apply to the C interpreter: it has no TLV support and
   fixed-size name buffers, and it consumes a binary schema with no place for a

@@ -82,6 +82,7 @@ Generated inventory of this repository: what lives where, what each document cov
 | `tools/binary_schema.py` | Binary Schema Encoder/Decoder for OTA Schema Transfer |
 | `tools/binary_schema_loader.py` | Load binary schemas for fast interpretation |
 | `tools/binary_schema_v2.py` | Extended Binary Schema Encoder/Decoder |
+| `tools/c-corpus-harness.py` | Run corpus vectors through the C interpreter, and say what it cannot reach. |
 | `tools/compose_library_vectors.py` | Make the schema library's test vectors runnable. |
 | `tools/convert_decentlab.py` | Decentlab Protocol V2 Codec → Payload Schema Schema Converter |
 | `tools/convert_milesight.py` | Milesight IoT Codec → Payload Schema Schema Converter |
