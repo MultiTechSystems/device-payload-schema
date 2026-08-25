@@ -15,6 +15,7 @@ package schema
 // are ratchets, not a target of 1191.
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -179,5 +180,89 @@ func TestCorpusEncodeRoundTrip(t *testing.T) {
 		if got := byShape[shape]["round-trips"]; got < floor {
 			t.Errorf("%s: %d re-encode exactly, floor is %d", shape, got, floor)
 		}
+	}
+}
+
+// encodePlainFloorTotal is the number of corpus vectors that re-encode exactly through the
+// *unordered* API - Decode then Encode, with no channel order carried between them.
+//
+// TestCorpusEncodeRoundTrip above uses DecodeOrdered/EncodeOrdered, so until CR-2026-029
+// nothing measured the plain pair over the corpus at all. That let a real defect sit in it
+// unseen: with several tlv cases claiming overlapping field names, the claiming pass ran in
+// tag order and emitted both a case claiming one name and a case claiming that name and
+// another, so em400-mud's `8367000000` came back as `036700008367000000`.
+//
+// It also let a comparison against the Python reference be made on the wrong path. The
+// plain API documents a weaker contract - it assumes ascending tag order, which is how most
+// devices in this corpus lay their channels out and not how ws515 and wt101 do - so its
+// failures are not all defects, and this floor is lower than the ordered one on purpose.
+const encodePlainFloorTotal = 1161
+
+// TestCorpusEncodePlainRoundTrip measures the unordered pair, so the two contracts are
+// ratcheted separately and neither can be mistaken for the other.
+func TestCorpusEncodePlainRoundTrip(t *testing.T) {
+	root := filepath.Join("..", "..", "schemas", "devices")
+	exact, total := 0, 0
+
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".yaml") {
+			return nil
+		}
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		var doc encodeSchemaFile
+		if yaml.Unmarshal(raw, &doc) != nil || len(doc.TestVectors) == 0 {
+			return nil
+		}
+		parsed, parseErr := ParseSchema(string(raw))
+		if parseErr != nil {
+			return nil
+		}
+		for _, v := range doc.TestVectors {
+			if v.Payload == "" {
+				continue
+			}
+			payload, hexErr := hex.DecodeString(strings.ReplaceAll(v.Payload, " ", ""))
+			if hexErr != nil {
+				continue
+			}
+			total++
+			fport := v.FPort
+			if fport == nil {
+				fport = v.FPortLower
+			}
+			var decoded map[string]any
+			var decErr error
+			if fport != nil {
+				decoded, decErr = parsed.DecodeWithPort(payload, *fport)
+			} else {
+				decoded, decErr = parsed.Decode(payload)
+			}
+			if decErr != nil {
+				continue
+			}
+			var out []byte
+			var encErr error
+			if fport != nil {
+				out, encErr = parsed.EncodeWithPort(decoded, *fport)
+			} else {
+				out, encErr = parsed.Encode(decoded)
+			}
+			if encErr == nil && bytes.Equal(out, payload) {
+				exact++
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Skipf("corpus unavailable: %v", err)
+	}
+
+	t.Log(fmt.Sprintf("plain (unordered) round-trips: %d of %d vectors decoded", exact, total))
+	if exact < encodePlainFloorTotal {
+		t.Errorf("only %d corpus vectors re-encode exactly through the unordered API, "+
+			"floor is %d", exact, encodePlainFloorTotal)
 	}
 }

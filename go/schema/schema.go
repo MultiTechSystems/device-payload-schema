@@ -3457,14 +3457,29 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 		candidates = append(candidates, candidate{tag, lossy, matches, key, caseFields, claimed})
 	}
 
+	// Ordered for the claiming pass below, not for emission - the chosen set is re-sorted
+	// by tag before anything is written.
+	//
+	// The most specific case claims first. Sorting by tag instead let a case claiming one
+	// name spend it before a case claiming that name *and another* was considered, and the
+	// spend rule below only skips a case whose every name is already taken - so both were
+	// emitted. em400-mud declares `[3, 103] -> (temperature)` and
+	// `[131, 103] -> (temperature, temperature_abnormal)`, and data carrying both names
+	// came back as two channels, `036700008367000000` where the payload was
+	// `8367000000` (CR-2026-029).
 	sort.SliceStable(candidates, func(i, j int) bool {
-		if c := bytes.Compare(candidates[i].tag, candidates[j].tag); c != 0 {
-			return c < 0
+		if len(candidates[i].claimed) != len(candidates[j].claimed) {
+			return len(candidates[i].claimed) > len(candidates[j].claimed)
 		}
 		if candidates[i].lossy != candidates[j].lossy {
 			return candidates[i].lossy < candidates[j].lossy
 		}
-		return candidates[i].matches > candidates[j].matches
+		if candidates[i].matches != candidates[j].matches {
+			return candidates[i].matches > candidates[j].matches
+		}
+		// Tag order last, so the choice is deterministic where nothing else separates two
+		// cases - a Go map's iteration order is not.
+		return bytes.Compare(candidates[i].tag, candidates[j].tag) < 0
 	})
 
 	// With the order DecodeOrdered reported, the channels go back exactly where they
