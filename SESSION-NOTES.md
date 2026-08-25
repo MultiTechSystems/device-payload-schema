@@ -11,23 +11,28 @@ Green as of the last run:
 
 | | |
 |---|---|
-| Python | **2684** passed / 4 skipped |
+| Python | **2706** passed / 4 skipped |
 | Go | `go vet` + `go test -count=1` clean; decode 1239/1239, encode 1173 ordered / 1164 plain |
 | Java | BUILD SUCCESS, 46 tests; decode 1239 of 1250 |
 | C# | 92/92; decode 1239 of 1250, encode 1164 |
 | `vector-verdicts.py` | **1250 vectors, interpreted 100%, generated 100%, 0 disagreements** |
 | `encode-round-trip.py` | 1163 of 1239, **0 unexplained** |
-| `make test-c` | 3 C test binaries pass; corpus harness **453 of 453 attempted, 0 differ** |
+| `make test-c` | 3 C test binaries pass; corpus harness **488 of 488 attempted, 0 differ** |
 | validate-devices / validate-examples / selftest / score-check / docs-index-check | pass |
 
 Corpus 1229 -> 1250. Decode floors 1193 -> 1239. Encode round-trip: reference 1131 ->
 1163, Go 1144 -> 1173, Java 1143 -> 1163, C# 1144 -> 1164.
 
-**The one obvious next CR is `flagged` in the C interpreter** - 34 corpus schemas need it,
-which is now the largest single reason a schema cannot be reached there. It is measurable
-the moment it is written, because `tools/c-corpus-harness.py` exists; do not add a construct
-to C without extending the harness in the same change, or the new field type lands
-uncovered.
+**The next work on C is widening the harness, not the interpreter.** `tlv` (CR-2026-033)
+and `flagged` (CR-2026-034) are done, and `repeat` is the last construct C has no field type
+for - 3 schemas, worth less than the two harness limits above it: `transform` (26 schemas)
+and `bitfield_string` (24). Whether C supports either is unknown *because the harness cannot
+build them*, which is exactly the question the harness exists to answer.
+
+Whatever is done next: **do not add a construct to C without extending
+`tools/c-corpus-harness.py` in the same change**, or the new field type lands uncovered - and
+the harness's own bugs then read as interpreter defects, which happened four times across
+CR-2026-032 and -033.
 
 Everything else is a scoped decision rather than a defect hunt. Every construct is described
 in the meta-schema and validated; the five YAML-driven implementations agree on all 1250
@@ -37,11 +42,24 @@ does not carry.
 - `definitions.field` stays permissive - accepts `s17`, a nameless field, `mult: "0.1"`.
   Closing it is real rejection risk across 189 schemas for a payoff `validate_schema.py`
   already delivers.
-- **The C interpreter is measured now and has `tlv`** (CR-2026-032 and -033). It reaches
-  453 of 1239 vectors and decodes every one correctly. What it still cannot express:
-  `flagged` (34 schemas), `bitfield_string` (24), more than `SCHEMA_MAX_CASES` cases (15),
-  `repeat` (3), and an enum/lookup `default` the struct has no slot for (1). It also has no
-  warning channel, so it cannot report what it could not read the way the other five do.
+- **The C interpreter is measured now and has `tlv` and `flagged`** (CR-2026-032, -033,
+  -034). It reaches 488 of 1239 vectors and decodes every one correctly. What blocks the
+  rest, with the side each limit sits on: a `transform` chain (26 schemas, harness),
+  `bitfield_string` (24, harness), more than `SCHEMA_MAX_CASES` cases (15, interpreter),
+  `repeat` (3, interpreter - no field type), `u32le16` (3, **harness only - the interpreter
+  decodes it**), an enum/lookup `default` the struct has no slot for (1, interpreter). It
+  also has no warning channel, so it cannot report what it could not read the way the other
+  five do.
+
+  That side-naming is load-bearing. `no constructor for type 'u32le16'` used to read as a C
+  gap when C decodes it perfectly well; CR-2026-034 corrected the message. In a report whose
+  purpose is telling C's gaps from the harness's, a reason that does not say which is worse
+  than no reason.
+
+  **A `flagged` mask field must declare `var_name`**, because this interpreter records a
+  variable only where a field declares one while a YAML `flagged` names a field. `var_has()`
+  exists so a missing reference is `SCHEMA_ERR_MATCH` rather than a mask of zero, which would
+  decode nothing and report success.
 
   **The fixed-size limits are the boundary, not a to-do.** `sizeof(schema_t)` is 51 KB
   because every `field_def` carries `cases[16]` and `lookup[16]` unconditionally; raising
@@ -65,8 +83,8 @@ total - keeping one correct is the same trap it describes.
 
 ## Session: Aug 25, 2026
 
-Twenty-one CRs, PRs #12-#32, plus the notes themselves (#30). Every one merged to `master`
-individually.
+Twenty-two CRs, PRs #12-#34, plus two notes updates (#30, #33). Every one merged to
+`master` individually.
 
 ### What was fixed
 
@@ -137,7 +155,7 @@ entry was information the decode does not carry. **Do not re-add a hand-maintain
 table** - the one in `test_encode_round_trip.py`'s docstring said "1129 of 1191" and every
 row was wrong by the time the corpus reached 1237.
 
-### The C interpreter: measured first, then given `tlv`
+### The C interpreter: measured first, then given `tlv` and `flagged`
 
 Asked for TLV in C. The scope was wrong, and the investigation is why: **nothing measured
 that interpreter at all.** Its four dedicated test files were in no build target,
@@ -180,19 +198,36 @@ That is the return on doing the harness first, and it is concrete: without it, t
 harness bugs were indistinguishable from interpreter faults and I would have filed them as
 such.
 
+**CR-2026-034 then added `flagged`**, the construct CR-2026-033 had named as the largest
+remaining gap. Attempted went 453 -> 488, all passing. It reuses the same shape as `tlv`:
+`match_var` holds the mask field's name, each group is a `case_def_t` keyed by its bit
+position, and bodies are placed above `field_count`.
+
+The one thing that shape did *not* cover: **the mask field must declare `var_name`.** This
+interpreter records a variable only where a field declares one, while a YAML `flagged` refers
+to a field by name - so the harness patches it in, and a new `var_has()` makes a missing
+reference `SCHEMA_ERR_MATCH` rather than a mask of zero. That distinction matters because
+`var_get` returns 0 for a miss, which for a bitmask is indistinguishable from "no bits set":
+the construct would have decoded nothing and reported success.
+
+Six of the 34 flagged schemas build; the rest are blocked by `transform`, `bitfield_string`
+or computed fields, **not** by `flagged`. There is a test asserting a flagged schema is
+genuinely built and its `var_name` patched, because "0 differ" proves nothing if no group
+ever fires - the vector checked has `flags = 0x0003` with both bits firing.
+
 ### How the measurements went wrong
 
-Eight kinds, all in test scaffolding or measuring tools rather than in a fix. No running
-total: this section carried one, it went stale within the same day, and keeping it correct is
-the very trap described below. Worth reading because the failure mode is consistent and the
-notes above are only as good as the figures behind them.
+Nine kinds, all in test scaffolding, measuring tools, or the editing of them - none in a
+fix. No running total of instances: this section carried one, it went stale within the same
+day, and keeping it correct is the very trap described below. Worth reading because the
+failure mode is consistent and the notes above are only as good as the figures behind them.
 
 1. **A tuple read as a boolean** (#19). The conformance cross-check had never compared a
    value. Announced itself only because a vector I had just predicted would fail, passed.
 2. **Loose source anchors**, four times - #22 (a method name matching its call site), #24
    (`func encodeField` matching `encodeFields`), and #26 twice (`index("ncode")` matching an
-   unrelated word, then a `case` line spelled identically in decode and encode). Every one failed
-   on correct code, and one was **hiding a real omission behind the false failure** - Go's
+   unrelated word, then a `case` line spelled identically in decode and encode). Every one
+   failed on correct code, and one was **hiding a real omission behind the false failure** - Go's
    flagged path genuinely was not wired. Anchor on something that occurs once, and say where
    you searched from.
 3. **Two bucketings subtracted as comparable** (#23). Per-shape round-trip counts are
@@ -220,6 +255,12 @@ notes above are only as good as the figures behind them.
 8. **The wrong stream** (#32). A test read `make selftest`'s result from stdout; the binary
    logs to stderr. The shell checks that seemed to prove otherwise used `2>&1`, which merged
    the streams before I looked.
+9. **An edit script that aborted and wrote nothing** (#34, twice in a row). A multi-edit
+   Python script asserts each anchor as it goes and writes at the end; when a later anchor
+   failed, the earlier in-memory edits were discarded and the file was left untouched - and
+   the `git commit --amend` that followed happily committed the unchanged content. The edit
+   silently had not happened and the commit looked fine. **Verify every anchor before writing
+   any**, and check the effect rather than the intention.
 
 The pattern: a wrong measurement that *fails* is self-correcting, and a wrong measurement
 that agrees with what you expected is not. Writing rules into AGENTS.md demonstrably did not
@@ -240,7 +281,7 @@ cross-implementation comparison cannot be made loosely.
 - **Build the instrument before the feature.** A construct added to the C interpreter
   without extending `tools/c-corpus-harness.py` in the same change lands uncovered, and the
   harness's own bugs then read as interpreter defects.
-- **A tlv or match case body goes above `field_count`**, reached only through
+- **A tlv, flagged or match case body goes above `field_count`**, reached only through
   `case_def_t.field_start`. Adding it as a counted field makes the top-level loop decode it
   twice.
 
