@@ -1,98 +1,169 @@
 # Session Notes
 
-## RESUME HERE - state at the end of 2026-08-11
+## RESUME HERE - state at the end of 2026-08-25
 
-**Everything is committed**, on a topic branch in each repo rather than the default
-branch:
+**Everything is merged to `master` and pushed.** Nineteen CRs landed as PRs #12-#29;
+`master` is the only remote branch and the working tree is clean. `master` is
+branch-protected, so every change goes through `gh pr create --base master` - a direct
+push is refused with `GH013`.
 
-| Repo | Branch | Commits ahead of default |
-|---|---|---|
-| `payload-codec-proto` | `session/2026-08-10-language-alignment` | 8 (plus the 16 pre-existing on `master`) |
-| `la-payload-schema` | `session/2026-08-10-cr-006-007-008` | 4 (plus 1 pre-existing on `main`) |
+Green as of the last run:
 
-Neither branch is pushed. Merge or rebase onto `master`/`main` as you prefer - the repo
-convention has been to keep everything on `master`, so a fast-forward is fine; the branch
-exists so nothing landed on the default branch unreviewed.
+| | |
+|---|---|
+| Python | **2639** passed / 4 skipped |
+| Go | `go vet` + `go test -count=1` clean; decode 1239/1239, encode 1173 ordered / 1164 plain |
+| Java | BUILD SUCCESS, 46 tests; decode 1239 of 1250 |
+| C# | 92/92; decode 1239 of 1250, encode 1164 |
+| `vector-verdicts.py` | **1250 vectors, interpreted 100%, generated 100%, 0 disagreements** |
+| `encode-round-trip.py` | 1163 of 1239, **0 unexplained** |
+| validate-devices / validate-examples / selftest / score-check / docs-index-check | pass |
 
-Green as of the last run: Python **1804** passed / 4 skipped, Go, Java and C# corpus
-runners at the full **1190**, C selftests pass, `compose_library_vectors.py --check`
-clean, and zero regressions against a freshly regenerated `score-baseline.json`.
+Corpus 1229 -> 1250. Decode floors 1193 -> 1239. Encode round-trip: reference 1131 ->
+1163, Go 1144 -> 1173, Java 1143 -> 1163, C# 1144 -> 1164.
 
-The interpreter/codec cross-check is at **1141 identical with zero value differences and
-zero key-set differences** - the first time the two agree on every comparable field.
+**There is no obvious next CR, and that is the honest state rather than a stopping point.**
+Every construct is described in the meta-schema and validated; all five implementations
+agree on all 1250 vectors; the encode residue is 76 vectors, every one classified as
+information the decode does not carry. What remains in AGENTS.md is scoped decisions, not
+defect hunts:
 
-Corpus 1166 -> 1190 over the three days. Tiers: BRONZE 3, SILVER 76, GOLD 40, PLATINUM 30,
-REJECTED 69 of 218.
+- `definitions.field` stays permissive - accepts `s17`, a nameless field, `mult: "0.1"`.
+  Closing it is real rejection risk across 189 schemas for a payoff `validate_schema.py`
+  already delivers.
+- The C interpreter has no TLV and no `name_from`, and `bindings/c/schema_ffi.c`'s
+  `schema_create_yaml()` is still a stub whose `result_to_json()` destroys precision with
+  `%g`. Unchanged today.
+- 11 corpus vectors are genuinely unreversible encodes (enum `default`, lookup `default`,
+  `sqrt`), tolerated by the Java and C# decode floors.
+- Go's plain `Encode` is 2 behind the reference on `ws515`/`wt101`, whose devices lay
+  channels out non-ascending. That is the documented limitation of that API;
+  `EncodeOrdered` handles them.
 
-**Done on 2026-08-11**, all five items from yesterday's list:
+**Read the "How the measurements went wrong" section below before trusting any figure in
+this file.** Nine of the day's mistakes were in measurement rather than in fixes, and one
+produced a plausible *success* story that was repeated across four PRs before anyone
+checked it.
 
-1. Committed - in four groups per repo rather than the nine I had sketched. The nine were
-   not achievable: each hub file (`schema_interpreter.py`, `validate_schema.py`,
-   `generate_ts013_codec.py`, `go/schema/schema.go`) carries two to four of those topics,
-   so they cannot be split without hunk-level surgery, and the intermediate states would
-   not have built. The specification repo *did* split cleanly, one commit per CR.
-2. **CR-2026-008 implemented and moved to `implemented/`.** Normalization runs once
-   where `decode()` returns, so no decode path can bypass it. Java narrowed too, since a
-   binding returning native values reaches the rendering rule through its reported type.
-3. **`score-baseline.json` regenerated** - zero regressions against it now.
-4. **`round` made decimal-correct in Go and C#.**
-5. **Nested `object` support in the TS013 generator**, which restored ct303/ct305/ct310
-   to SILVER.
+## Session: Aug 25, 2026
 
-**Four bugs found by doing that work, none of them anticipated:**
+Nineteen CRs, PRs #12-#29. Every one merged to `master` individually.
 
-- **The encoder silently zeroed a `bytes` field.** Once the decoder reported hex,
-  `encode(decode(payload))` turned `deadbeef0064` into `000000000064` with no error,
-  because `_encode_field` fell through to `bytes(length)` for anything that was not
-  already a bytes object. PS-281 needed the symmetric change; the encoder now takes a
-  bytes object, a hex string or an octet list and reports anything else.
-- **The output-schema generator was wrong for four constructs** - `bitfield_string` and
-  `version_string` declared "number" while reporting "v1.2.52" (280 of the mismatches),
-  `repeat` and `object` also fell through to "number", and a key produced by more than
-  one branch took whichever branch the walk saw last. Found by checking every decoded
-  corpus value against its declared type: 2718 values, now zero mismatches.
-- **The TS013 generator advanced past every bitfield.** `consume` defaulted to 1 against
-  PS-060, so several bitfields sharing a byte each moved on and read different bytes.
-- **A plain typed field in Go dropped its bare modifier when it also had a transform** -
-  `div: 1000` silently ignored, reporting 2355 instead of 2.35. The same either/or was
-  fixed on the ref and compute paths earlier and this branch was missed.
+### What was fixed
 
-Also corrected a sentence in CR-2026-008 that contradicted its own normative table: it
-claimed the output-schema generator should stop demoting a modified field to "number",
-where the table says a modified field *is* a number. The generator was already right.
+**CR-2026-013/014 - unknown TLV tags (#12).** An unknown tag was handled in silence: with
+a length field the entry was skipped and nothing recorded, without one the decoder `break`'d
+and abandoned the rest of the payload. The caller got a result indistinguishable from a
+device that sent fewer fields. All five implementations now report it; Go, Java and C#
+gained a `_warnings` key alongside `_quality`, and `unknown: raw` was implemented in three
+of them for the first time. `expected_warnings` on a test vector makes it assertable -
+absent asserts nothing, `[]` asserts none were reported, and each entry is matched as
+substrings because the specification fixes what a warning must contain and not its wording.
 
-**Where to pick up, highest value first:**
+**That found six vendor vectors losing bytes in silence.** AM307/AM307L/AM308/AM308L drop 4
+of 14 bytes on tag `0x05, 0x6A`; WS50x drops 5 of 8, twice; EM310-tilt 2 of 11. Payloads and
+expected fields unchanged - what they lost is now written down.
 
-1. **Push the two branches** and decide whether they merge to `master`/`main`. Also the
-   three `td-tools` branches still have no PRs, and the catalog fix should go first.
-2. **The TS013 generator gaps are closed.** `lookup: default`, `$ref` splicing,
-   `$field` resolution, `name_from`, `repeat` and the plain-`tag_size` TLV form are all
-   done, and `tools/crossvalidate_js_json.py` now reports **1141 identical, zero value
-   differences, zero key-set differences**.
+**CR-2026-015 to -019 - the meta-schema (#13-#17).** `definitions.field` took
+`additionalProperties` and described no construct. `tlv`, `flagged`, `match`, `byte_group`
+and `repeat` are all described now and closed with `additionalProperties: false`, and
+`_warnings`/`unknown_tags` are declared rather than merely tolerated. Reading the
+implementations to write those descriptions is what produced everything below - the
+descriptions themselves were the least valuable part.
 
-   `valid_range` -> `_quality` is done too, so `_quality` is compared as a first-class
-   value again rather than counted separately.
-   The `repeat` fixtures now pin the record shape in their `expected` blocks. They did
-   not before, which is exactly why the generator could omit the construct entirely
-   while all four runners passed.
-   **`vars` is now the variable table and `d` is only the reported output.** Six
-   emitters record into `vars`, all of them post-modifier, matching the interpreters -
-   the two plain-type paths, the bit-range path, the byte_group member path, the float
-   path (post-modifier), the enum path (the mapped label, not the raw integer) and the
-   computed-field path (which previously wrote `d` alone). If you add an emitter, write
-   `vars` too or every `$ref` to that field silently resolves to undefined.
-   Two lessons from getting this wrong the first time: switching the references without
-   fixing what `vars` holds loses 15 comparisons, and the computed-field path is the easy
-   one to miss because it has six separate `d.{name} =` sites.
+Three things the reading turned up:
 
-3. **A round-trip/encode corpus.** Still the least-tested part of the project and the MCU
-   tier's whole job: every vector is decode-only, `src/test_encoder.c` is in no build
-   target, and Java and C# have no encoder at all.
-4. **The C gateway front-end** - YAML reader and JSON writer. `result_to_json()`'s `%g`
-   destroys precision and `schema_create_yaml()` is a stub.
-5. Then items 3 onward in the Next list below: the two Decentlab hints, the preprocessor
-   in validate/score, provenance for the three Silver-capped schemas, `name_from` for
-   milesight, and the milesight vector counts.
+- **`tools/generate_jsonschema.py` had not produced `schemas/payload-schema.json` for a
+  long time.** Nothing in the Makefile or CI ran it, so nobody noticed. One `--output` run
+  would have deleted eleven keys, `expected_warnings` among them. It refuses now and names
+  what would be lost; `--force` still overwrites. **Edit that file by hand.**
+- **`match` had no validation at all** - a block with no discriminator was reported valid
+  and decoded as nothing.
+- **`repeat` and `byte_group` had none either**, including PS-017 (`consume` forbidden on a
+  `byte_group` member), which had been prose-only and never enforced.
+
+**CR-2026-020 - `match` parity (#18).** Go dropped `length`, `name`, `var` and `default` in
+its parser while `decodeMatch` already honoured `length` - and since it defaults to 1, a
+two-byte discriminator was read as one byte and every field after the construct came from
+the wrong offset. It also built its case list by ranging over a Go map, so where two keys
+could match the same value **the winner varied between runs of the same binary**. The TS013
+generator emitted `vars.kind === 2..5` for a range key, which is not valid JavaScript - the
+whole codec failed to parse, so such a schema had *no* generated path rather than a wrong
+one.
+
+**CR-2026-021 - `repeat` limits, and the tooling defect (#19).** `max` was no ceiling in the
+generated codec and `min` was unchecked. But the reason that was invisible is the bigger
+half: `tools/vector-verdicts.py` compared values with `if not values_match(...)`, and
+`values_match` returns `(ok, detail)` - a two-element tuple is always truthy, so **the
+condition could never hold**. From the day the second return value was added the tool
+compared *key presence only*. Its `0 vectors where the two paths disagree` line meant only
+that both paths produced the same keys.
+
+**CR-2026-022 - `byte_length` spans (#20).** PS-088 requires the members to divide the span.
+Python, Go and Java enforced it; **C# and the TS013 generator had no post-loop check at
+all**, so both ways of failing were accepted and the read position ended somewhere other
+than the span's end. A 2-byte member over a 5-byte span produced a third record holding the
+*following field's* byte, and the following field read past the payload as zero.
+
+**CR-2026-023 to -031 - the encode side (#21-#29).** Bare runs of bit ranges were written a
+byte apiece with unshifted values (`40` encoding as `020000`); Go had no `u32le16` encode
+case and truncated its integer conversions; three encoders never read a match's `default:`
+key; `name_from` values were looked up under the declared name rather than the templated
+key. All fixed in all four encoders, each with a fixture.
+
+`tools/encode-round-trip.py` is new and is the durable artefact: it classifies every vector
+that does not re-encode, and `test_cr_2026_023_encode_round_trip.py` asserts none is
+`unexplained`. The count alone was 77 and read as an encoder full of holes; all but one
+entry was information the decode does not carry. **Do not re-add a hand-maintained residue
+table** - the one in `test_encode_round_trip.py`'s docstring said "1129 of 1191" and every
+row was wrong by the time the corpus reached 1237.
+
+### How the measurements went wrong
+
+Five kinds, eleven instances, all in test scaffolding rather than in a fix. Worth reading
+because the failure mode is consistent and the notes above are only as good as the figures
+behind them.
+
+1. **A tuple read as a boolean** (#19). The conformance cross-check had never compared a
+   value. Announced itself only because a vector I had just predicted would fail, passed.
+2. **Loose source anchors**, four times - #22 (a method name matching its call site), #24
+   (`func encodeField` matching `encodeFields`), and #26 twice (`index("ncode")` matching an
+   unrelated word, then a `case` line spelled identically in decode and encode). Every one failed
+   on correct code, and one was **hiding a real omission behind the false failure** - Go's
+   flagged path genuinely was not wired. Anchor on something that occurs once, and say where
+   you searched from.
+3. **Two bucketings subtracted as comparable** (#23). Per-shape round-trip counts are
+   ratchets for one harness over time; each harness buckets schemas its own way and their
+   denominators differ. Compare vector *sets* - `encode-round-trip.py --list` exists for it.
+4. **CR tests pinning running floors**, four times (#22, #24, #25 pinned the total; #26
+   bounded the total and pinned the per-shape bucket instead, which #28 then broke). Both
+   are running values. I documented the rule after the first occurrence and reproduced it
+   twice more, once in the very commit that was fixing the other two. Bound both, never pin
+   either.
+5. **Two different APIs compared as one** (#27), and this is the one that misled. Go has
+   `Encode` and `EncodeOrdered` with different contracts; the corpus test uses the ordered
+   pair and my probe used the plain one. So "Go is 28 behind the reference", then 14, then
+   13, across four PRs - all measured on a path those PRs were not about. **On the API its
+   own test measures, Go fails a strict subset of what the reference fails.** The fixes in
+   those CRs were real and their floors moved; the comparison figures were not.
+
+The pattern: a wrong measurement that *fails* is self-correcting, and a wrong measurement
+that agrees with what you expected is not. Writing rules into AGENTS.md demonstrably did not
+stop me repeating them inside the same session - re-measuring differently did. The
+structural defences are what hold: separate ratchets per contract
+(`TestCorpusEncodePlainRoundTrip`), bounds instead of equalities, and `--list` so a
+cross-implementation comparison cannot be made loosely.
+
+### Conventions established
+
+- **`master` is branch-protected.** `gh pr create --base master`; a direct push is refused.
+- **`schemas/payload-schema.json` is hand-maintained.** Its generator refuses to clobber it.
+- **A CR-specific test bounds every floor it names.** Never an equality.
+- **Two `name_from` resolvers per implementation, deliberately** - decode against variables,
+  encode against the data it was handed.
+- **An unlisted type in Go's encode switch is a reported failure**, not a silent zero-byte
+  write. That is what made the `u32le16` gap findable. Keep it.
+
 
 ## Session: Aug 11, 2026 (later)
 
