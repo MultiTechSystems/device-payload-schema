@@ -63,7 +63,7 @@ PROTO_C = $(patsubst proto/%.proto,src/%.pb.c,$(PROTO_SRCS))
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra -O3 -Iinclude
 
-.PHONY: all clean test selftest validate-devices ci docs-index docs-index-check score-check validate-examples hypothesis coverage proto help codec benchmark generate-codec pytest pytest-cov coverage-html coverage-all validate fuzz fuzz-quick fuzz-hypothesis fuzz-go fuzz-c test-go test-java test-dotnet test-languages
+.PHONY: all clean test test-c selftest validate-devices ci docs-index docs-index-check score-check validate-examples hypothesis coverage proto help codec benchmark generate-codec pytest pytest-cov coverage-html coverage-all validate fuzz fuzz-quick fuzz-hypothesis fuzz-go fuzz-c test-go test-java test-dotnet test-languages
 
 all: $(TEST_BIN)
 
@@ -157,7 +157,31 @@ pytest: $(VENV)/bin/activate
 # disagree. Added after two jobs went red on pushes that `make test` had approved:
 # the device-schema validation (quality.yml) and the repository index check, neither
 # of which existed as a local target. Whenever a workflow gains a step, add it here.
-ci: test validate-examples docs-index-check score-check hypothesis test-go test-java test-dotnet
+# The C interpreter's own tests, and the corpus harness that measures it (CR-2026-032).
+#
+# src/test_interpreter.c, src/test_binary_schema.c and src/test_encoder.c were in no build
+# target at all - the comment at the top of src/selftest_schema.c says so - so nothing ran
+# them and nothing noticed when the interpreter drifted from them. They pass; they are
+# built and run here.
+#
+# src/test_comprehensive.c is deliberately NOT here. It fails 22 of its 160 assertions
+# against *stale expectations*, not defects: it asserts the pre-CR-2026-009 lookup and enum
+# behaviour that PS-105/PS-269 deliberately changed, and its little-endian s24/u64 cases
+# fail while the interpreter decodes both correctly when driven directly. Updating it is its
+# own change; adding it here would just make `make test-c` red.
+C_TESTS = test_interpreter test_binary_schema test_encoder
+
+test-c: $(VENV)/bin/activate
+	@mkdir -p $(BUILD_DIR)/bin
+	@for t in $(C_TESTS); do \
+		echo "  cc  src/$$t.c"; \
+		$(CC) -std=c11 -Iinclude -o $(BUILD_DIR)/bin/$$t src/$$t.c -lm || exit 1; \
+		$(BUILD_DIR)/bin/$$t > /dev/null || { echo "FAILED: $$t"; exit 1; }; \
+	done
+	@echo "C interpreter tests pass."
+	$(PYTHON) tools/c-corpus-harness.py
+
+ci: test validate-examples docs-index-check score-check hypothesis test-c test-go test-java test-dotnet
 	@echo "All CI checks passed."
 
 # quality.yml: the index is generated, so a stale one fails the build.
