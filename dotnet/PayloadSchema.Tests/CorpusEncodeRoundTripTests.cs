@@ -29,7 +29,10 @@ public class CorpusEncodeRoundTripTests
     /// Corpus vectors that re-encode to their exact payload. Raise it as encoding improves;
     /// never lower it without saying why.
     /// </summary>
-    const int EncodeFloorTotal = 1131;
+    // CR-2026-024 packed a bare run of bit ranges the way byte_group was already
+    // packed, so the three LoRaWAN header schemas round-trip: `plain fixed` rises from
+    // 55 to 58 and the total to 1145.
+    const int EncodeFloorTotal = 1146;
 
     /// <summary>
     /// Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -37,12 +40,12 @@ public class CorpusEncodeRoundTripTests
     /// </summary>
     static readonly Dictionary<string, int> EncodeFloorByShape = new()
     {
-        ["tlv"] = 900,
+        ["tlv"] = 901,
         ["flagged"] = 121,
-        ["plain fixed"] = 55,
-        ["match"] = 34,
+        ["plain fixed"] = 58,
+        ["match"] = 43,
         ["byte_group"] = 17,
-        ["repeat"] = 4,
+        ["repeat"] = 6,
     };
 
     readonly ITestOutputHelper _output;

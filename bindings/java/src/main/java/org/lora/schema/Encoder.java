@@ -80,13 +80,10 @@ final class Encoder {
             }
         }
 
-        for (Field field : fields) {
-            try {
-                out.write(encodeOne(field, input, flagsPatches, true));
-            } catch (RuntimeException e) {
-                errors.add("Error encoding " + describe(field) + ": " + e.getMessage());
-            }
-        }
+        // Bit ranges sharing a byte are packed together rather than a byte apiece
+        // (CR-2026-024), so the whole list is walked at once: a run cannot be found by
+        // looking at one field in isolation.
+        out.write(encodeWithBitfieldRuns(fields, input, flagsPatches, true));
 
         return new EncodeResult(out.toArray(), warnings, errors);
     }
@@ -171,11 +168,7 @@ final class Encoder {
     /** Encode a list of fields - a TLV case's value bytes, a match case's body. */
     private byte[] encodeFieldList(List<Field> list, Map<String, Object> data) {
         if (list == null || list.isEmpty()) return EMPTY;
-        ByteBuf out = new ByteBuf();
-        for (Field f : list) {
-            out.write(encodeOne(f, data, Map.of(), false));
-        }
-        return out.toArray();
+        return encodeWithBitfieldRuns(list, data, Map.of(), false);
     }
 
     // --- constructs ----------------------------------------------------------------
@@ -194,14 +187,128 @@ final class Encoder {
         ByteBuf out = new ByteBuf();
         for (Field.FlaggedGroup group : fd.getGroups()) {
             if (!groupHasData(group, data)) continue;
+            // Routed through the run packing for consistency with every other field
+            // list, not because anything needs it today: no `flagged` group in the corpus
+            // holds a bit range - they are u16, u32le16 and computed members. A group
+            // that grows one will pack correctly rather than silently not.
+            List<Field> emit = new ArrayList<>();
             for (Field gf : group.getFields()) {
                 String name = gf.getName();
                 if (name == null || name.isEmpty() || name.startsWith("_")) continue;
                 if (gf.getType() == FieldType.NUMBER) continue;
-                out.write(encodeOne(gf, data, Map.of(), false));
+                emit.add(gf);
             }
+            out.write(encodeWithBitfieldRuns(emit, data, Map.of(), false));
         }
         return out.toArray();
+    }
+
+    /**
+     * Whether a plain field reads a bit range out of a byte it may share with others.
+     *
+     * <p>A {@code byte_group} member is excluded: that construct packs its own.
+     */
+    private static boolean isBareBitfield(Field field) {
+        return field != null && field.getBits() > 0
+                && (field.getByteGroup() == null || field.getByteGroup().isEmpty());
+    }
+
+    /**
+     * Encode a field list, packing each run of bit ranges into the byte or bytes it
+     * shares (CR-2026-024).
+     *
+     * <p>Encoding wrote each bit range as a whole byte holding its unshifted value,
+     * ignoring the range and {@code consume: 0} alike, so a LoRaWAN MHDR's three ranges
+     * came back as three bytes: {@code 40} encoded as {@code 020000}, the wrong length and
+     * the wrong bits, with no error. {@code byte_group} was given packing when its own
+     * encoding was fixed; a bare run - the same thing without the wrapper - never was, and
+     * neither was a {@code flagged} group made of them. CR-2026-023 fixed the Python
+     * reference encoder; this is the same fix here.
+     *
+     * <p>A run ends at the field whose {@code consume} closes the span, which is where
+     * decoding stops reading from the same offset.
+     */
+    private byte[] encodeWithBitfieldRuns(List<Field> list, Map<String, Object> data,
+                                          Map<String, Integer> patches, boolean topLevel) {
+        ByteBuf out = new ByteBuf();
+        List<Field> run = new ArrayList<>();
+        for (Field field : list) {
+            if (!isBareBitfield(field)) {
+                flushRun(out, run, data, topLevel);
+                try {
+                    out.write(encodeOne(field, data, patches, topLevel));
+                } catch (RuntimeException e) {
+                    if (!topLevel) throw e;
+                    errors.add("Error encoding " + describe(field) + ": " + e.getMessage());
+                }
+                continue;
+            }
+            run.add(field);
+            // `consume` of 1 or more closes the span, which is where the run ends.
+            if (field.getConsume() >= 1) {
+                flushRun(out, run, data, topLevel);
+            }
+        }
+        flushRun(out, run, data, topLevel);
+        return out.toArray();
+    }
+
+    /** Emit a pending run, if any, and clear it. */
+    private void flushRun(ByteBuf out, List<Field> run, Map<String, Object> data,
+                          boolean topLevel) {
+        if (run.isEmpty()) return;
+        try {
+            out.write(encodeBitfieldRun(run, data));
+        } catch (RuntimeException e) {
+            if (!topLevel) {
+                run.clear();
+                throw e;
+            }
+            List<String> names = new ArrayList<>();
+            for (Field field : run) names.add(String.valueOf(field.getName()));
+            errors.add("Error encoding bit range(s) " + String.join(", ", names)
+                    + ": " + e.getMessage());
+        }
+        run.clear();
+    }
+
+    /** Pack one run of bit ranges into the byte or bytes they share. */
+    private byte[] encodeBitfieldRun(List<Field> run, Map<String, Object> data) {
+        long packed = 0;
+        int size = 1;
+        for (Field member : run) {
+            String name = member.getName();
+            Object value = (name == null || name.isEmpty() || name.startsWith("_"))
+                    ? Long.valueOf(0)
+                    : data.getOrDefault(name, Long.valueOf(0));
+            value = reverseModifiers(value, member);
+            Long raw = asLong(value);
+            if (raw == null) {
+                // A label on a bit range: recover the number rather than writing zero,
+                // which would be the silent wrong answer this fix exists to remove.
+                raw = bitfieldLabelValue(value, member);
+            }
+            size = Math.max(size, Math.max(1, Math.max(member.getBitBaseBytes(),
+                    member.getConsume())));
+            long mask = member.getBits() >= 64 ? -1L : (1L << member.getBits()) - 1;
+            packed |= (raw & mask) << member.getBitOffset();
+        }
+        return writeInt(packed, size, false);
+    }
+
+    /** The number a bit range's {@code enum} or {@code values} label stands for. */
+    private static Long bitfieldLabelValue(Object value, Field member) {
+        String label = String.valueOf(value);
+        Map<?, ?> table = member.getValues();
+        if (table != null) {
+            for (Map.Entry<?, ?> entry : table.entrySet()) {
+                if (String.valueOf(entry.getValue()).equals(label)) {
+                    return Long.parseLong(String.valueOf(entry.getKey()));
+                }
+            }
+        }
+        throw new SchemaException.EncodeException("bit range '" + member.getName()
+                + "': '" + label + "' is not one of its declared values");
     }
 
     /**
