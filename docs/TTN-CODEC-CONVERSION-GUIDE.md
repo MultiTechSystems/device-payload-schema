@@ -544,5 +544,6 @@ output/vendor-device/
 
 - [Schema Language Reference](SCHEMA-LANGUAGE-REFERENCE.md)
 - [Formula Migration Guide](FORMULA-MIGRATION-TRACKING.md)
-- [TS013 Compliance Analysis](TS013-COMPLIANCE-ANALYSIS.md)
+- [Implementation Status](SPEC-IMPLEMENTATION-STATUS.md) - TS013 compliance is covered
+  under `JavaScript (tools/generate_ts013_codec.py output)`
 - [TTN Device Repository](https://github.com/TheThingsNetwork/lorawan-devices)

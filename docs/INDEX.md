@@ -30,7 +30,7 @@ Generated inventory of this repository: what lives where, what each document cov
 | Document | Purpose | Lines |
 |---|---|---|
 | [`AUDIT-REPORT.md`](AUDIT-REPORT.md) | Payload Codec Proto - Spec Completeness Audit | 183 |
-| [`BIDIRECTIONAL-CODEC.md`](BIDIRECTIONAL-CODEC.md) | The Payload Schema codec is symmetric - both devices and networks use the same encode/decode... | 368 |
+| [`BIDIRECTIONAL-CODEC.md`](BIDIRECTIONAL-CODEC.md) | The Payload Schema codec is symmetric - both devices and networks use the same encode/decode... | 369 |
 | [`C-CODE-GENERATION.md`](C-CODE-GENERATION.md) | Generate standalone C codec headers from Payload Schema YAML files. | 218 |
 | [`CODEC-ANALYSIS-NOTES.md`](CODEC-ANALYSIS-NOTES.md) | Analysis of complex codecs from lorawan-devices repository to identify schema language gaps. | 607 |
 | [`FAQ.md`](FAQ.md) | A declarative, YAML/JSON-based format for defining the structure of binary LoRaWAN device payloads.... | 448 |
@@ -45,7 +45,7 @@ Generated inventory of this repository: what lives where, what each document cov
 | [`SCHEMA-LANGUAGE-REFERENCE.md`](SCHEMA-LANGUAGE-REFERENCE.md) | Complete reference for the LoRa Alliance Payload Schema specification (v0.5.0). | 1152 |
 | [`SESSION-NOTES-2026-02-25.md`](SESSION-NOTES-2026-02-25.md) | The prototype tests were using a custom REQ-xxx-yyy numbering scheme that was inconsistent with the... | 78 |
 | [`SPEC-IMPLEMENTATION-STATUS.md`](SPEC-IMPLEMENTATION-STATUS.md) | Feature support matrix across reference implementations. | 439 |
-| [`TTN-CODEC-CONVERSION-GUIDE.md`](TTN-CODEC-CONVERSION-GUIDE.md) | Complete guide for AI-assisted conversion of The Things Network device repository codecs to Payload... | 548 |
+| [`TTN-CODEC-CONVERSION-GUIDE.md`](TTN-CODEC-CONVERSION-GUIDE.md) | Complete guide for AI-assisted conversion of The Things Network device repository codecs to Payload... | 549 |
 | [`WOT-REFERENCE.md`](WOT-REFERENCE.md) | Reference for mapping LoRaWAN payload schema fields to W3C WoT Thing Descriptions and SAREF... | 316 |
 
 ### Document sections
