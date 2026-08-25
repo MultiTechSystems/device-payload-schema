@@ -1,0 +1,29 @@
+# A `match` that reads its own discriminator from the payload, rather than naming a field
+# already decoded.
+#
+# `length` is the width of that read and `name` reports it. Java and C# gained both when
+# a two-byte discriminator was found being read as one byte; the Go interpreter's
+# decodeMatch honours `length` but its parser never set it, and the TS013 generator had
+# no notion of an inline discriminator at all - it emitted `vars.` for the field it was
+# not given. Either way the position advanced by the wrong amount and every field after
+# this one was read from the wrong offset, which is why this is the first vector of
+# CR-2026-020.
+name: probe_match_inline_discriminator
+endian: big
+fields:
+  - match:
+      length: 2
+      name: kind
+      cases:
+        258:
+          - name: reading
+            type: u8
+test_vectors:
+  - name: two_byte_discriminator_is_read_whole
+    description: "0x0102 selects case 258 and the byte after it is the case's field"
+    payload: "01027F"
+    source: generated
+    expected:
+      kind: 258
+      reading: 127
+    expected_warnings: []

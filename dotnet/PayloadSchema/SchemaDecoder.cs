@@ -773,6 +773,9 @@ public static class SchemaDecoder
     static object? DecodeMatch(SchemaField field, DecodeContext ctx)
     {
         int matchValue;
+        // What this construct contributes on its own: the discriminator under `name`,
+        // where it was read here and named. Null where there is nothing to report.
+        Dictionary<string, object?>? inline = null;
 
         if (!string.IsNullOrEmpty(field.On))
         {
@@ -787,33 +790,100 @@ public static class SchemaDecoder
             int length = field.Length > 0 ? field.Length : 1;
             var data = ctx.Read(length);
             matchValue = (int)Helpers.DecodeUint(data, ctx.Endian);
+
+            // A discriminator read from the payload is reported where `name` asks for it
+            // and stored where `var` does (CR-2026-020). Both were parsed and then
+            // discarded, so a schema naming its discriminator decoded one field fewer and
+            // a later `$ref` to the variable resolved to nothing. One taken from `field`
+            // needs neither: it is already in the output under its own name.
+            if (!string.IsNullOrEmpty(field.Var))
+                ctx.Variables[field.Var!] = matchValue;
+            if (!string.IsNullOrEmpty(field.Name))
+            {
+                inline = new Dictionary<string, object?> { [field.Name!] = matchValue };
+                ctx.Variables[field.Name!] = matchValue;
+            }
         }
 
+        // A default case is sorted last by the parser, so reaching one here means no
+        // explicit case matched.
         foreach (var c in field.Cases)
         {
             if (c.IsDefault)
-                return DecodeFields(c.Fields, ctx, null);
+                return MergeMatch(inline, DecodeFields(c.Fields, ctx, null));
 
             var caseVal = c.CaseValue;
             if (caseVal == null) continue;
 
-            bool matched = caseVal switch
-            {
-                int iv => matchValue == iv,
-                double dv => matchValue == (int)dv,
-                List<object?> list => list.Any(item =>
-                {
-                    var (ok2, itemInt) = Helpers.ToInt(item);
-                    return ok2 && matchValue == itemInt;
-                }),
-                _ => false
-            };
-
-            if (matched)
-                return DecodeFields(c.Fields, ctx, null);
+            if (MatchesCase(matchValue, caseVal))
+                return MergeMatch(inline, DecodeFields(c.Fields, ctx, null));
         }
 
-        return null;
+        // `default` decides what an unmatched value means and defaults to "error".
+        // Nothing read the key, so every value of it behaved as "skip" and a schema
+        // declaring a fallback got none.
+        if (field.MatchDefault is List<SchemaField> fallbackFields)
+            return MergeMatch(inline, DecodeFields(fallbackFields, ctx, null));
+        if (field.MatchDefault is null || (field.MatchDefault as string) != "skip")
+            throw new InvalidOperationException($"No matching case for value {matchValue}");
+        return inline;
+    }
+
+    /// <summary>
+    /// Whether a discriminator satisfies one case key, matching what the Python
+    /// interpreter's <c>_match_case_pattern</c> accepts.
+    ///
+    /// The string range spelling <c>"2..5"</c> was missing: only numbers and lists were
+    /// compared, so a range key matched nothing at all and the construct decoded silently
+    /// empty (CR-2026-020).
+    /// </summary>
+    static bool MatchesCase(int matchValue, object caseVal)
+    {
+        switch (caseVal)
+        {
+            case int iv:
+                return matchValue == iv;
+            case double dv:
+                return matchValue == (int)dv;
+            case string text:
+                var separator = text.IndexOf("..", StringComparison.Ordinal);
+                if (separator > 0)
+                {
+                    return int.TryParse(text[..separator].Trim(), out var lo)
+                           && int.TryParse(text[(separator + 2)..].Trim(), out var hi)
+                           && matchValue >= lo && matchValue <= hi;
+                }
+                return int.TryParse(text.Trim(), out var exact) && matchValue == exact;
+            case List<object?> list:
+                return list.Any(item =>
+                {
+                    var (ok, itemInt) = Helpers.ToInt(item);
+                    return ok && matchValue == itemInt;
+                });
+            case Dictionary<string, object?> rangeMap:
+                var low = rangeMap.TryGetValue("min", out var minNode)
+                    ? Helpers.ToInt(minNode).Item2 : int.MinValue;
+                var high = rangeMap.TryGetValue("max", out var maxNode)
+                    ? Helpers.ToInt(maxNode).Item2 : int.MaxValue;
+                return matchValue >= low && matchValue <= high;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Folds a case's fields onto the discriminator this construct reported, so
+    /// <c>name</c> survives whichever branch decoded.
+    /// </summary>
+    static object? MergeMatch(Dictionary<string, object?>? inline, object? decoded)
+    {
+        if (inline is null)
+            return decoded;
+        if (decoded is Dictionary<string, object?> decodedMap)
+        {
+            foreach (var kv in decodedMap)
+                inline[kv.Key] = kv.Value;
+        }
+        return inline;
     }
 
     static Dictionary<string, object?> DecodeTLV(SchemaField field, DecodeContext ctx)

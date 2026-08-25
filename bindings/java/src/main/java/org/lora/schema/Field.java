@@ -162,7 +162,17 @@ public class Field {
     
     public String getVar() { return var; }
     public void setVar(String var) { this.var = var; }
-    
+
+    /**
+     * The {@code default} of an Option B match: {@code "error"}, {@code "skip"}, or a
+     * field list decoded when no case matches (CR-2026-020). Distinct from
+     * {@link Case#isDefault()}, which marks a case in the legacy list spelling.
+     */
+    private Object matchDefault;
+
+    public Object getMatchDefault() { return matchDefault; }
+    public void setMatchDefault(Object matchDefault) { this.matchDefault = matchDefault; }
+
     public Object getValue() { return value; }
     public void setValue(Object value) { this.value = value; }
     

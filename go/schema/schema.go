@@ -185,6 +185,10 @@ type Field struct {
 	TLVInline *Field `json:"-" yaml:"-"`
 	// Match inline (for Option B syntax: `- match: { field: $var, cases: {...} }`)
 	MatchInline *Field `json:"-" yaml:"-"`
+	// The `default` of an Option B match: "error", "skip", or a field list decoded when
+	// no case matches (CR-2026-020). Distinct from Case.Default, which marks a case in
+	// the legacy list spelling.
+	MatchDefault any `json:"-" yaml:"-"`
 }
 
 // Transform represents a single transformation stage.
@@ -1391,46 +1395,23 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 		if fieldRef, ok := matchRaw["field"].(string); ok {
 			matchField.On = fieldRef
 		}
-		if casesRaw, ok := matchRaw["cases"].(map[string]any); ok {
-			for caseKey, caseVal := range casesRaw {
-				c := Case{}
-				// Parse case key (could be int or string)
-				if keyInt, err := strconv.Atoi(caseKey); err == nil {
-					c.Case = keyInt
-				} else {
-					c.Case = caseKey
-				}
-				// Parse case fields
-				if caseFields, ok := caseVal.([]any); ok {
-					c.Fields = parseFieldsRaw(caseFields)
-				}
-				matchField.Cases = append(matchField.Cases, c)
-			}
+		// `length`, `name` and `var` were all dropped here, which mattered most for
+		// `length`: decodeMatch defaults it to 1, so a two-byte discriminator was read
+		// as one byte and every field after the construct came from the wrong offset.
+		// Java and C# had the same defect and fixed it; this parser did not (CR-2026-020).
+		if width, ok := toInt(matchRaw["length"]); ok {
+			matchField.Length = width
 		}
-		// Also check for cases as map[any]any (YAML parsing quirk)
-		if casesRaw, ok := matchRaw["cases"].(map[any]any); ok {
-			for caseKey, caseVal := range casesRaw {
-				c := Case{}
-				switch k := caseKey.(type) {
-				case int:
-					c.Case = k
-				case float64:
-					c.Case = int(k)
-				case string:
-					if keyInt, err := strconv.Atoi(k); err == nil {
-						c.Case = keyInt
-					} else {
-						c.Case = k
-					}
-				default:
-					c.Case = fmt.Sprintf("%v", k)
-				}
-				if caseFields, ok := caseVal.([]any); ok {
-					c.Fields = parseFieldsRaw(caseFields)
-				}
-				matchField.Cases = append(matchField.Cases, c)
-			}
+		if name, ok := matchRaw["name"].(string); ok {
+			matchField.Name = name
 		}
+		if varName, ok := matchRaw["var"].(string); ok {
+			matchField.Var = varName
+		}
+		if fallback, present := matchRaw["default"]; present {
+			matchField.MatchDefault = fallback
+		}
+		matchField.Cases = parseMatchCases(matchRaw["cases"])
 		f.MatchInline = &matchField
 	}
 	
@@ -2350,8 +2331,132 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 	return value, nil
 }
 
+// parseMatchCases reads an Option B `cases` mapping in a deterministic order.
+//
+// Two things this fixes. A `default` key became an ordinary case whose value was the
+// string "default", matching no integer, so the fallback never ran; it is now marked as
+// the default. And the cases were appended while ranging over a Go map, whose order is
+// randomised, so where two keys could both match the same value the winner varied between
+// runs of the same binary. They are sorted now: exact integers ascending, then the string
+// keys, with the default held out and tried last by decodeMatch.
+func parseMatchCases(raw any) []Case {
+	type entry struct {
+		key   any
+		order string
+		def   bool
+		body  any
+	}
+	var entries []entry
+
+	add := func(key any, body any) {
+		switch k := key.(type) {
+		case int:
+			entries = append(entries, entry{key: k, order: fmt.Sprintf("0%020d", k), body: body})
+		case float64:
+			entries = append(entries, entry{key: int(k), order: fmt.Sprintf("0%020d", int(k)), body: body})
+		case string:
+			if k == "default" {
+				entries = append(entries, entry{def: true, order: "2", body: body})
+				return
+			}
+			if keyInt, err := strconv.Atoi(k); err == nil {
+				entries = append(entries, entry{key: keyInt, order: fmt.Sprintf("0%020d", keyInt), body: body})
+				return
+			}
+			entries = append(entries, entry{key: k, order: "1" + k, body: body})
+		default:
+			text := fmt.Sprintf("%v", key)
+			entries = append(entries, entry{key: text, order: "1" + text, body: body})
+		}
+	}
+
+	switch cases := raw.(type) {
+	case map[string]any:
+		for key, body := range cases {
+			add(key, body)
+		}
+	case map[any]any:
+		for key, body := range cases {
+			add(key, body)
+		}
+	default:
+		return nil
+	}
+
+	sort.Slice(entries, func(a, b int) bool { return entries[a].order < entries[b].order })
+
+	parsed := make([]Case, 0, len(entries))
+	for _, e := range entries {
+		c := Case{Case: e.key, Default: e.def}
+		if fields, ok := e.body.([]any); ok {
+			c.Fields = parseFieldsRaw(fields)
+		}
+		parsed = append(parsed, c)
+	}
+	return parsed
+}
+
+// matchCasePattern reports whether a discriminator satisfies one case key, matching what
+// the Python interpreter's `_match_case_pattern` accepts. The string range spelling
+// "2..5" was missing: this interpreter compared only ints, floats, lists and {min,max}
+// maps, so a range key matched nothing at all and the construct decoded silently empty.
+func matchCasePattern(value int, pattern any) bool {
+	switch v := pattern.(type) {
+	case int:
+		return value == v
+	case float64:
+		return value == int(v)
+	case string:
+		lo, hi, ok := parseRangePattern(v)
+		if ok {
+			return value >= lo && value <= hi
+		}
+		if exact, err := strconv.Atoi(v); err == nil {
+			return value == exact
+		}
+		return false
+	case []any:
+		for _, item := range v {
+			if itemInt, ok := toInt(item); ok && value == itemInt {
+				return true
+			}
+		}
+		return false
+	case map[string]any:
+		lo, hi := math.MinInt, math.MaxInt
+		if min, ok := v["min"]; ok {
+			lo, _ = toInt(min)
+		}
+		if max, ok := v["max"]; ok {
+			hi, _ = toInt(max)
+		}
+		return value >= lo && value <= hi
+	}
+	return false
+}
+
+// parseRangePattern reads the "2..5" spelling, inclusive at both ends (PS-270).
+func parseRangePattern(text string) (int, int, bool) {
+	parts := strings.SplitN(text, "..", 2)
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	lo, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return 0, 0, false
+	}
+	hi, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil {
+		return 0, 0, false
+	}
+	return lo, hi, true
+}
+
 func decodeMatch(field Field, ctx *DecodeContext) (any, error) {
 	var matchValue int
+	// What this construct contributes on its own: the discriminator under `name`, where
+	// it was read here and named. nil where there is nothing to report.
+	var inline map[string]any
 
 	if field.On != "" {
 		// Variable-based match
@@ -2372,55 +2477,86 @@ func decodeMatch(field Field, ctx *DecodeContext) (any, error) {
 			return nil, err
 		}
 		matchValue = int(decodeUint(data, ctx.Endian))
+
+		// A discriminator read from the payload is reported where `name` asks for it and
+		// stored where `var` does (CR-2026-020). Both were parsed and then discarded, so
+		// a schema naming its discriminator decoded one field fewer and a later `$ref` to
+		// the variable resolved to nothing. One taken from `field` needs neither: it is
+		// already in the output and the variables under its own name.
+		if field.Var != "" {
+			ctx.Variables[field.Var] = matchValue
+		}
+		if field.Name != "" {
+			inline = map[string]any{field.Name: matchValue}
+			ctx.Variables[field.Name] = matchValue
+		}
 	}
 
-	// Find matching case
-	for _, c := range field.Cases {
+	// Find the matching case. The default is held back rather than returned the moment it
+	// is seen: it used to win over an exact case that appeared after it, which for a Go
+	// map meant winning at random.
+	var defaultCase *Case
+	for i := range field.Cases {
+		c := field.Cases[i]
 		if c.Default {
-			return decodeFields(c.Fields, ctx)
+			defaultCase = &field.Cases[i]
+			continue
 		}
 
 		caseVal := c.Case
 		if caseVal == nil {
 			caseVal = c.Match // Legacy support
 		}
-
 		if caseVal == nil {
 			continue
 		}
 
-		matched := false
-
-		switch v := caseVal.(type) {
-		case int:
-			matched = matchValue == v
-		case float64:
-			matched = matchValue == int(v)
-		case []any:
-			for _, item := range v {
-				if itemInt, ok := toInt(item); ok && matchValue == itemInt {
-					matched = true
-					break
-				}
-			}
-		case map[string]any:
-			minVal := math.MinInt
-			maxVal := math.MaxInt
-			if min, ok := v["min"]; ok {
-				minVal, _ = toInt(min)
-			}
-			if max, ok := v["max"]; ok {
-				maxVal, _ = toInt(max)
-			}
-			matched = matchValue >= minVal && matchValue <= maxVal
-		}
-
-		if matched {
-			return decodeFields(c.Fields, ctx)
+		if matchCasePattern(matchValue, caseVal) {
+			decoded, err := decodeFields(c.Fields, ctx)
+			return mergeMatchResult(inline, decoded, err)
 		}
 	}
 
-	return nil, nil
+	// A `default` case inside `cases` takes precedence over the `default` beside them.
+	if defaultCase != nil {
+		decoded, err := decodeFields(defaultCase.Fields, ctx)
+		return mergeMatchResult(inline, decoded, err)
+	}
+
+	// `default` decides what an unmatched value means, and defaults to "error". Nothing
+	// read the key here, so every value of it behaved as "skip" and a schema declaring a
+	// fallback got none.
+	switch fallback := field.MatchDefault.(type) {
+	case nil:
+		return inline, fmt.Errorf("no matching case for value %d", matchValue)
+	case string:
+		if fallback == "skip" {
+			return inline, nil
+		}
+		return inline, fmt.Errorf("no matching case for value %d", matchValue)
+	case []any:
+		decoded, err := decodeFields(parseFieldsRaw(fallback), ctx)
+		return mergeMatchResult(inline, decoded, err)
+	case []Field:
+		decoded, err := decodeFields(fallback, ctx)
+		return mergeMatchResult(inline, decoded, err)
+	}
+	return inline, nil
+}
+
+// mergeMatchResult folds a case's fields onto the discriminator this construct reported,
+// so `name` survives whichever branch decoded.
+func mergeMatchResult(inline map[string]any, decoded map[string]any, err error) (any, error) {
+	if err != nil {
+		return nil, err
+	}
+	if inline == nil {
+		return decoded, nil
+	}
+	for key, value := range decoded {
+		inline[key] = value
+	}
+	return inline, nil
 }
 
 func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {

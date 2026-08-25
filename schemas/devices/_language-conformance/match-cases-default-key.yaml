@@ -1,0 +1,39 @@
+# `default` as a key inside `cases`, which is the other way to spell the fallback and
+# takes precedence over the `default` beside it.
+#
+# The Go interpreter turned this key into an ordinary case whose value was the string
+# "default", which matched no integer, so the fallback never ran. Its `Case.Default` flag
+# existed for the legacy `cases: [{default: true}]` list form and was never set from the
+# Option B mapping - and the loop returned on it before testing any other case, so had it
+# been set the default would have won over an exact match.
+name: probe_match_cases_default_key
+endian: big
+fields:
+  - name: kind
+    type: u8
+  - match:
+      field: kind
+      cases:
+        1:
+          - name: known
+            type: u8
+        default:
+          - name: fallback
+            type: u8
+test_vectors:
+  - name: an_unmatched_value_takes_the_default_case
+    description: "9 has no case of its own"
+    payload: "097F"
+    source: generated
+    expected:
+      kind: 9
+      fallback: 127
+    expected_warnings: []
+  - name: an_exact_case_beats_the_default_case
+    description: "1 matches, so the default case must not win despite being present"
+    payload: "017F"
+    source: generated
+    expected:
+      kind: 1
+      known: 127
+    expected_warnings: []

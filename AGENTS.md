@@ -942,19 +942,32 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   and much larger change** — it declares no required keys and types `type` as a bare
   string, so `s17` and a nameless field are still accepted — and nothing depends on it.
   `tools/validate_schema.py` remains the place for real structural checking.
-- **`match` is the least uniformly implemented construct.** Only `field` and `cases`
-  are honoured everywhere. `length` and `name` are honoured by the Python, Java and C#
-  interpreters and **ignored by the Go interpreter and the TS013 generator**, so a
-  match reading its own discriminator from the payload decodes differently on those
-  two. `var` and `default` are honoured by the **Python interpreter alone** — on the
-  other four, a value matching no case is silently skipped whatever `default` says.
+- **`match` is now uniform across the five implementations — CR-2026-020 closed the
+  gap CR-2026-018 found.** Every key (`field`, `length`, `name`, `var`, `cases`,
+  `default`) is honoured everywhere. Do not reintroduce a partial reader: the six
+  `match-*.yaml` fixtures in `_language-conformance` exercise each key on all five
+  paths, and `test_cr_2026_018_match_meta_schema.py` now fails if the corpus *stops*
+  exercising them, which is the opposite of what it originally asserted.
 
-  The five paths agree today only because nothing in the corpus uses the uneven keys,
-  bar one `default: skip` whose vectors never reach it.
-  `test_cr_2026_018_match_meta_schema.py` has a tripwire that fails if a schema starts
-  using them, and the gaps are recorded in each key's description in the meta-schema.
-  Closing them is behaviour work in four implementations and wants its own CR, with
-  `_language-conformance` vectors for the inline-discriminator and `default` paths.
+  What had gone wrong is worth knowing, because three of the four were parse-time
+  drops that no test could see:
+
+  - **Go** dropped `length`, `name`, `var` and `default` in the parser while
+    `decodeMatch` already honoured `length` — and since it defaults to 1, a two-byte
+    discriminator was read as one byte and every field after the construct came from
+    the wrong offset. It also had no `"2..5"` case keys, made a `default` case key an
+    ordinary case matching the string `"default"`, and built its case list by ranging
+    over a Go map, so where two keys could match the same value the winner varied
+    between runs. Cases are sorted now: integers ascending, then strings, default last.
+  - **Java and C#** read `length` but never reported `name`, stored `var`, or read
+    `default`.
+  - **The TS013 generator** had no inline discriminator at all, and interpolated case
+    keys straight into a comparison — a range key emitted `vars.kind === 2..5`, which
+    is not valid JavaScript, so the whole codec failed to parse and the schema had *no*
+    generated path rather than a wrong one.
+
+  `default` defaults to `error`, so an unmatched value with no `default` now fails the
+  decode on all five instead of silently skipping on four.
 - **`tools/generate_jsonschema.py` does not produce
   `schemas/payload-schema.json` any more.** Nothing in the Makefile or CI runs it, so
   the drift went unnoticed while CR after CR edited the file directly. Regenerating

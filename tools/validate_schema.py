@@ -419,10 +419,13 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                 if not isinstance(cases, dict):
                     errors.append(f"{mpath}.cases: must be a mapping of value to fields")
                 else:
-                    # The block's own `name` names the discriminator in the output, so
-                    # it is claimable by a later reference just as a plain field is.
-                    if isinstance(match.get('name'), str):
-                        known_field_names.append(match['name'])
+                    # The block's own `name` names the discriminator in the output, and
+                    # `var` stores it for later fields, so both are claimable by a later
+                    # reference just as a plain field is. `var` was missed when these
+                    # checks went in, so a schema referencing one was reported invalid.
+                    for introduced in ('name', 'var'):
+                        if isinstance(match.get(introduced), str):
+                            known_field_names.append(match[introduced])
                     for case_key, case_fields in cases.items():
                         cpath = f"{mpath}.cases[{case_key!r}]"
                         if not isinstance(case_fields, list):

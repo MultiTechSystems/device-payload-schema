@@ -1,0 +1,37 @@
+# What a `match` does when no case matches: `default` decides, and a field list is one of
+# the three things it can be.
+#
+# Only the Python interpreter read the key. On the other four a value matching no case was
+# silently skipped whatever `default` said, so a schema declaring a fallback got none and
+# the bytes it described were left in the payload.
+name: probe_match_default_fields
+endian: big
+fields:
+  - name: kind
+    type: u8
+  - match:
+      field: kind
+      default:
+        - name: fallback
+          type: u8
+      cases:
+        1:
+          - name: known
+            type: u8
+test_vectors:
+  - name: an_unmatched_value_takes_the_default
+    description: "9 has no case, so the default's fields are decoded instead"
+    payload: "097F"
+    source: generated
+    expected:
+      kind: 9
+      fallback: 127
+    expected_warnings: []
+  - name: a_matched_value_ignores_the_default
+    description: "1 has a case, so the default is not reached"
+    payload: "017F"
+    source: generated
+    expected:
+      kind: 1
+      known: 127
+    expected_warnings: []

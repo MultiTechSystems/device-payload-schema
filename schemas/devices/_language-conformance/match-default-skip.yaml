@@ -1,0 +1,35 @@
+# `default: skip` - an unmatched value leaves the construct's fields absent and decoding
+# carries on, rather than failing.
+#
+# This is the one form the four non-Python implementations happened to agree with, because
+# returning nothing is what they did for every value of `default`. The vector is here so
+# that agreement is pinned rather than coincidental: an implementation gaining `default`
+# support must keep skipping here while it starts falling back elsewhere.
+name: probe_match_default_skip
+endian: big
+fields:
+  - name: kind
+    type: u8
+  - match:
+      field: kind
+      default: skip
+      cases:
+        1:
+          - name: known
+            type: u8
+test_vectors:
+  - name: an_unmatched_value_is_skipped
+    description: "9 has no case and no fields are reported for it"
+    payload: "097F"
+    source: generated
+    expected:
+      kind: 9
+    expected_warnings: []
+  - name: a_matched_value_still_decodes
+    description: "1 has a case"
+    payload: "017F"
+    source: generated
+    expected:
+      kind: 1
+      known: 127
+    expected_warnings: []

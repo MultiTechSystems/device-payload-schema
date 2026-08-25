@@ -509,6 +509,12 @@ public class Schema {
             if (matchMap.get("length") != null) {
                 matchField.setLength(toInt(matchMap.get("length"), 0));
             }
+            if (matchMap.get("var") instanceof String matchVar) {
+                matchField.setVar(matchVar);
+            }
+            if (matchMap.containsKey("default")) {
+                matchField.setMatchDefault(matchMap.get("default"));
+            }
             matchField.setCases(parseCaseMap(matchMap.get("cases")));
             f.setMatchInline(matchField);
         }
@@ -1011,6 +1017,9 @@ public class Schema {
 
     private Object decodeMatch(Field field, DecodeContext ctx) {
         int matchValue;
+        // What this construct contributes on its own: the discriminator under `name`,
+        // where it was read here and named. Null where there is nothing to report.
+        Map<String, Object> inline = null;
         
         if (field.getOn() != null && !field.getOn().isEmpty()) {
             String varName = field.getOn().startsWith("$") ? field.getOn().substring(1) : field.getOn();
@@ -1023,39 +1032,113 @@ public class Schema {
             int length = field.getLength() > 0 ? field.getLength() : 1;
             byte[] data = ctx.read(length);
             matchValue = (int) ctx.decodeUnsigned(data, ctx.getEndian());
+
+            // A discriminator read from the payload is reported where `name` asks for it
+            // and stored where `var` does (CR-2026-020). Both were parsed and then
+            // discarded, so a schema naming its discriminator decoded one field fewer
+            // and a later `$ref` to the variable resolved to nothing. One taken from
+            // `field` needs neither: it is already in the output under its own name.
+            if (field.getVar() != null && !field.getVar().isEmpty()) {
+                ctx.setVariable(field.getVar(), matchValue);
+            }
+            if (field.getName() != null && !field.getName().isEmpty()) {
+                inline = new LinkedHashMap<>();
+                inline.put(field.getName(), matchValue);
+                ctx.setVariable(field.getName(), matchValue);
+            }
         }
-        
+
+        // parseCaseMap sorts a default case last, so reaching one here means no explicit
+        // case matched.
         for (Field.Case c : field.getCases()) {
             if (c.isDefault()) {
-                return decodeFields(c.getFields(), ctx);
+                return mergeMatch(inline, decodeFields(c.getFields(), ctx));
             }
-            
+
             Object caseVal = c.getCaseValue();
             if (caseVal == null) continue;
-            
-            boolean matched = false;
-            
-            if (caseVal instanceof Number) {
-                matched = matchValue == ((Number) caseVal).intValue();
-            } else if (caseVal instanceof List<?> list) {
-                for (Object item : list) {
-                    if (item instanceof Number && matchValue == ((Number) item).intValue()) {
-                        matched = true;
-                        break;
-                    }
-                }
-            } else if (caseVal instanceof Map<?, ?> rangeMap) {
-                int minVal = toInt(rangeMap.get("min"), Integer.MIN_VALUE);
-                int maxVal = toInt(rangeMap.get("max"), Integer.MAX_VALUE);
-                matched = matchValue >= minVal && matchValue <= maxVal;
-            }
-            
-            if (matched) {
-                return decodeFields(c.getFields(), ctx);
+
+            if (matchesCase(matchValue, caseVal)) {
+                return mergeMatch(inline, decodeFields(c.getFields(), ctx));
             }
         }
-        
-        return null;
+
+        // `default` decides what an unmatched value means and defaults to "error".
+        // Nothing read the key, so every value of it behaved as "skip" and a schema
+        // declaring a fallback got none.
+        Object fallback = field.getMatchDefault();
+        if (fallback instanceof List<?> fallbackFields) {
+            return mergeMatch(inline,
+                    decodeFields(parseFields((List<Map<String, Object>>) fallbackFields), ctx));
+        }
+        if (fallback == null || !"skip".equals(String.valueOf(fallback))) {
+            throw new SchemaException.DecodeException(
+                    "No matching case for value " + matchValue);
+        }
+        return inline;
+    }
+
+    /**
+     * Whether a discriminator satisfies one case key, matching what the Python
+     * interpreter's {@code _match_case_pattern} accepts.
+     *
+     * <p>The string range spelling {@code "2..5"} was missing: only numbers, lists and
+     * {@code {min,max}} maps were compared, so a range key matched nothing at all and the
+     * construct decoded silently empty (CR-2026-020).
+     */
+    private int rangeBound(String text) {
+        return Integer.parseInt(text.trim());
+    }
+
+    private boolean matchesCase(int matchValue, Object caseVal) {
+        if (caseVal instanceof Number number) {
+            return matchValue == number.intValue();
+        }
+        if (caseVal instanceof String text) {
+            int separator = text.indexOf("..");
+            if (separator > 0) {
+                try {
+                    return matchValue >= rangeBound(text.substring(0, separator))
+                            && matchValue <= rangeBound(text.substring(separator + 2));
+                } catch (NumberFormatException ignored) {
+                    return false;
+                }
+            }
+            try {
+                return matchValue == rangeBound(text);
+            } catch (NumberFormatException ignored) {
+                return false;
+            }
+        }
+        if (caseVal instanceof List<?> list) {
+            for (Object item : list) {
+                if (item instanceof Number number && matchValue == number.intValue()) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (caseVal instanceof Map<?, ?> rangeMap) {
+            int minVal = toInt(rangeMap.get("min"), Integer.MIN_VALUE);
+            int maxVal = toInt(rangeMap.get("max"), Integer.MAX_VALUE);
+            return matchValue >= minVal && matchValue <= maxVal;
+        }
+        return false;
+    }
+
+    /**
+     * Folds a case's fields onto the discriminator this construct reported, so {@code
+     * name} survives whichever branch decoded.
+     */
+    @SuppressWarnings("unchecked")
+    private static Object mergeMatch(Map<String, Object> inline, Object decoded) {
+        if (inline == null) {
+            return decoded;
+        }
+        if (decoded instanceof Map<?, ?> decodedMap) {
+            inline.putAll((Map<String, Object>) decodedMap);
+        }
+        return inline;
     }
 
     @SuppressWarnings("unchecked")
