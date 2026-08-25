@@ -546,9 +546,30 @@ path in Java**, and a test asserts that ordering.
 One silent failure and one loud one from a single missing case is worth remembering: their
 `flagged` buckets both read 121, one with 14 `bytes differ` and one with 14 `error`.
 
-Go's remaining 13 (measured by identity, never by bucket) are TLV channel ordering in the
-`em400-*`/`ws203` schemas, four `ch8_type230`, and two vendor references — one cluster,
-where Go emits an extra channel: `want 8367000000, got 036700008367000000`.
+**`Encode` and `EncodeOrdered` are different contracts, and a comparison must say which one
+it measures.** `EncodeOrdered` carries the TLV channel sequence a Go map cannot hold;
+`Encode` assumes ascending tag order. `TestCorpusEncodeRoundTrip` uses the ordered pair,
+`TestCorpusEncodePlainRoundTrip` the plain one, and they have separate floors.
+
+The "Go is N behind the reference" figures in CR-2026-024, -026, -027 and -028 were measured
+on the plain pair, which is not the API those CRs' tests exercise. Measured per path:
+
+    reference fails 77
+    Go ORDERED fails 68  — the reference passes 0 of them
+    Go PLAIN   fails 76  — the reference passes 2 of them
+
+**On the API its corpus test measures, Go has no gap against the reference** — it fails a
+strict subset. The two on the plain path are `ws515` and `wt101`, whose devices lay channels
+out non-ascending, which is the documented limitation rather than a defect. The fixes in
+those CRs were real and moved the ordered floors; it was the comparison figures that were on
+the wrong path.
+
+CR-2026-029 also fixed a real defect the plain path was hiding: `encodeTLV`'s claiming pass
+ran in tag order, and its spend rule skips a case only when every name it claims is already
+taken — so a case claiming one name spent it before a case claiming that name *and another*
+was considered, and both were emitted. `em400-mud`'s `8367000000` came back as
+`036700008367000000`. The claiming pass is ordered by specificity now; emission is still by
+ascending tag.
 
 **Do not pin a running floor total in a CR-specific test.** CR-2026-024, CR-2026-026 and
 CR-2026-027 each did, and each was broken by the next CR that raised the same floor —
