@@ -1,0 +1,30 @@
+# The other half of `max`: it caps a declared `count` rather than only bounding a loop.
+#
+# The interpreters do this by clamping the count itself, so a `count` above `max` yields
+# `max` records and no error. Kept apart from repeat-max.yaml because the generator's fix
+# has to hold for both spellings, and a single fixture would let one pass on the other's
+# behaviour.
+name: probe_repeat_max_count
+endian: big
+fields:
+  - name: n
+    type: u8
+    var: n
+  - name: capped_count
+    type: repeat
+    count: $n
+    max: 2
+    fields:
+      - name: v
+        type: u8
+test_vectors:
+  - name: a_count_above_the_ceiling_is_clamped
+    description: "The payload says four records; `max: 2` allows two"
+    payload: "040A141E28"
+    source: generated
+    expected:
+      n: 4
+      capped_count:
+        - v: 10
+        - v: 20
+    expected_warnings: []
