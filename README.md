@@ -226,6 +226,12 @@ Contributions welcome! Please:
 
 MIT — see [LICENSE](LICENSE). Author: Jason Reiss, Multi-Tech Systems, Inc.
 
+The device schemas in `schemas/devices/` describe third-party devices and were
+written from each manufacturer's own material. That descriptive content
+originates with the manufacturer rather than with this project:
+[PROVENANCE.md](PROVENANCE.md) records where every schema came from and what it
+means for reuse.
+
 MIT License
 
 Copyright (c) 2024-2026 Multitech Systems, Inc.
