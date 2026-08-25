@@ -1,0 +1,30 @@
+# `var` on a `match` that reads its own discriminator: the value is stored for later
+# fields to reference, without necessarily being reported.
+#
+# The Python interpreter alone read the key. Elsewhere the reference that follows resolved
+# to nothing, so the schema decoded one field fewer with no indication why.
+#
+# `name` is deliberately absent here: this vector is about the variable, and pairing them
+# would let an implementation pass by reporting the discriminator and never storing it.
+name: probe_match_var
+endian: big
+fields:
+  - match:
+      length: 1
+      var: kind
+      cases:
+        2:
+          - name: reading
+            type: u8
+  - name: echoed_kind
+    type: number
+    ref: $kind
+test_vectors:
+  - name: the_stored_value_is_visible_to_a_later_field
+    description: "The discriminator is not reported, but the field referencing it is"
+    payload: "027F"
+    source: generated
+    expected:
+      reading: 127
+      echoed_kind: 2
+    expected_warnings: []

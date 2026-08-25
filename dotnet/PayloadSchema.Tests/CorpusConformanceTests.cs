@@ -30,7 +30,9 @@ public class CorpusConformanceTests
     // parameter, which no device schema sets, and the floor had drifted 29 below the
     // full count as vectors were added without it being raised. It is the full count
     // again: 1222.
-    const int CorpusFloor = 1222;
+    // CR-2026-020 brought the five implementations onto the same `match`, so its six
+    // fixtures pass everywhere and the full count is 1233.
+    const int CorpusFloor = 1233;
 
     readonly ITestOutputHelper _output;
 

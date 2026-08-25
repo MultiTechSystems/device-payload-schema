@@ -1,0 +1,47 @@
+# A `match` case keyed by a range rather than a single value.
+#
+# `"2..5"` is the spelling `_match_case_pattern` has always accepted. The Go interpreter
+# compared only ints, floats, lists and {min,max} maps, so a range string matched nothing
+# and the construct decoded silently empty. The TS013 generator was worse: it
+# interpolated the key straight into a comparison, emitting `vars.kind === 2..5`, which
+# is not valid JavaScript - the whole generated codec failed to parse, so the schema had
+# no working generated path at all rather than a wrong one.
+name: probe_match_case_range
+endian: big
+fields:
+  - name: kind
+    type: u8
+  - match:
+      field: kind
+      cases:
+        "2..5":
+          - name: in_range
+            type: u8
+        9:
+          - name: exact
+            type: u8
+test_vectors:
+  - name: a_value_inside_the_range_matches
+    description: "3 falls in 2..5"
+    payload: "037F"
+    source: generated
+    expected:
+      kind: 3
+      in_range: 127
+    expected_warnings: []
+  - name: the_range_bounds_are_inclusive
+    description: "5 is the last value the range covers"
+    payload: "057F"
+    source: generated
+    expected:
+      kind: 5
+      in_range: 127
+    expected_warnings: []
+  - name: an_exact_key_beside_a_range_still_works
+    description: "9 is outside the range and has its own case"
+    payload: "097F"
+    source: generated
+    expected:
+      kind: 9
+      exact: 127
+    expected_warnings: []

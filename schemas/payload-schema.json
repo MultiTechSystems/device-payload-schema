@@ -357,7 +357,7 @@
     },
     "match": {
       "type": "object",
-      "description": "Conditional fields chosen by a discriminator: read it, find the case that matches, decode that case's fields. The discriminator comes either from a field already decoded (`field`) or from the payload at this position (`length`).\n\nThis is the Option B spelling, the block under a `match:` key. The older spelling puts `type: match` with `on:` and a list of `{case:, fields:}` on the field itself; those keys are described on `field` rather than here.\n\nSupport is uneven, unlike `tlv` and `flagged`. `field` and `cases` are honoured by all five implementations. `length` and `name` are honoured by the Python, Java and C# interpreters and ignored by the Go interpreter and the TS013 generator, so a match reading its own discriminator decodes differently on those two. `var` and `default` are honoured by the Python interpreter alone. Nothing in the corpus uses the uneven keys except one `default`, which is why the paths still agree.",
+      "description": "Conditional fields chosen by a discriminator: read it, find the case that matches, decode that case's fields. The discriminator comes either from a field already decoded (`field`) or from the payload at this position (`length`).\n\nThis is the Option B spelling, the block under a `match:` key. The older spelling puts `type: match` with `on:` and a list of `{case:, fields:}` on the field itself; those keys are described on `field` rather than here.\n\nEvery key here is honoured by all five implementations. That was not true until CR-2026-020: `length` and `name` were ignored by the Go interpreter and the TS013 generator, and `var` and `default` were honoured by the Python interpreter alone, so a match reading its own discriminator decoded differently on two of the five and an unmatched value was silently skipped on four.",
       "properties": {
         "field": {
           "type": "string",
@@ -367,19 +367,19 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 8,
-          "description": "Width in bytes of a discriminator read from the payload here, consuming those bytes. Also the width the encoder writes. Not honoured by the Go interpreter or the TS013 generator, which read `field` only."
+          "description": "Width in bytes of a discriminator read from the payload here, consuming those bytes. Also the width the encoder writes. Where absent and `field` is too, one byte is read."
         },
         "name": {
           "type": "string",
-          "description": "Reports the discriminator under this key. Applies only where it was read via `length`; a discriminator taken from `field` is already in the output under its own name. Not honoured by the Go interpreter or the TS013 generator."
+          "description": "Reports the discriminator under this key. Applies only where it was read via `length`; a discriminator taken from `field` is already in the output under its own name."
         },
         "var": {
           "type": "string",
-          "description": "Stores the discriminator as a variable for later fields to reference. Applies only where it was read via `length`. Honoured by the Python interpreter alone."
+          "description": "Stores the discriminator as a variable for later fields to reference, without necessarily reporting it. Applies only where it was read via `length`."
         },
         "cases": {
           "type": "object",
-          "description": "Discriminator value to the fields it selects, the first match winning. A key is an integer (`1`, or `0x20` which YAML reads as 32); a range `\"2..5\"`; a list `[1, 2, 3]` meaning any of them; or `default`, which is the same as the `default` key beside it and takes precedence over it. Only integer keys are honoured by the TS013 generator, which compares them literally.",
+          "description": "Discriminator value to the fields it selects, the first match winning. A key is an integer (`1`, or `0x20` which YAML reads as 32); an inclusive range `\"2..5\"`; or `default`, which is the same as the `default` key beside it and takes precedence over it. A key that is neither an integer nor a range matches nothing on any implementation - a YAML mapping key cannot be a list, so the `[1, 2, 3]` spelling belongs to the older `case:` value form and not here.",
           "additionalProperties": {
             "type": "array",
             "items": {
@@ -388,7 +388,7 @@
           }
         },
         "default": {
-          "description": "What to do when no case matches: `error` fails the decode, `skip` leaves the remaining fields absent, or a list of fields is decoded instead. Unlike a `tlv`, whose `unknown` defaults to `skip`, this defaults to `error`. Honoured by the Python interpreter alone, so on the other four a value matching no case is silently skipped whatever this says.",
+          "description": "What to do when no case matches: `error` fails the decode, `skip` leaves the remaining fields absent, or a list of fields is decoded instead. Unlike a `tlv`, whose `unknown` defaults to `skip`, this defaults to `error`.",
           "oneOf": [
             {
               "enum": [

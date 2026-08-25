@@ -1362,28 +1362,112 @@ function writeS(buf, pos, size, value, endian) {
         return lines
 
     def _gen_decode_match(self, match: Dict) -> List[str]:
+        """An Option B `match`, to parity with the interpreters (CR-2026-020).
+
+        Three things were missing and each failed differently:
+
+        - **An inline discriminator.** `length` and `name` were not read at all, so a
+          match with no `field:` emitted `vars.` - a syntax error - and never consumed the
+          discriminator's bytes.
+        - **A range case key.** The key was interpolated straight into a comparison, so
+          `"2..5"` emitted `vars.kind === 2..5`. That is not valid JavaScript: the whole
+          codec failed to parse, leaving the schema no generated path at all rather than a
+          wrong one.
+        - **`default`.** Unmatched values silently decoded nothing whatever the schema
+          said, where the interpreters fall back, skip, or fail.
+        """
         i = self._i()
         lines = []
-        match_field = match.get('field', '')
-        if match_field.startswith('$'):
-            match_field = match_field[1:]
-        match_var = to_js_name(match_field)
-        cases = match.get('cases', {})
+        cases = match.get('cases', {}) or {}
+        width = match.get('length')
 
-        lines.append(f'{i}  // match on {match_var}')
+        if match.get('field'):
+            reference = match['field']
+            discriminator = f'vars.{to_js_name(reference.lstrip("$"))}'
+            lines.append(f'{i}  // match on {discriminator}')
+        else:
+            # Read it here, and consume it: the bytes belong to this construct.
+            span = int(width) if width else 1
+            lines.append(f'{i}  // match on an inline {span}-byte discriminator')
+            lines.append(f'{i}  var _mv = readU(buf, pos, {span}, endian);')
+            lines.append(f'{i}  pos += {span};')
+            discriminator = '_mv'
+            if match.get('var'):
+                lines.append(f'{i}  vars.{to_js_name(match["var"])} = _mv;')
+            if match.get('name'):
+                reported = to_js_name(match['name'])
+                lines.append(f'{i}  d.{reported} = _mv;')
+                lines.append(f'{i}  vars.{reported} = _mv;')
+
+        # `default` inside `cases` is the fallback, not a case keyed by the string, and it
+        # is tried only once every explicit case has failed.
+        explicit = [(key, body) for key, body in cases.items() if key != 'default']
+        fallback = cases.get('default', match.get('default'))
+
         first = True
-        for case_val, case_fields in cases.items():
+        for case_key, case_fields in explicit:
+            condition = self._match_condition(discriminator, case_key)
+            if condition is None:
+                continue
             kw = 'if' if first else '} else if'
             first = False
-            lines.append(f'{i}  {kw} (vars.{match_var} === {case_val}) {{')
+            lines.append(f'{i}  {kw} ({condition}) {{')
             self.indent += 1
             if isinstance(case_fields, list):
                 for cf in case_fields:
                     lines.extend(self._gen_decode_field(cf))
             self.indent -= 1
-        if not first:
-            lines.append(f'{i}  }}')
+
+        fallback_lines: List[str] = []
+        if isinstance(fallback, list):
+            self.indent += 1
+            for cf in fallback:
+                fallback_lines.extend(self._gen_decode_field(cf))
+            self.indent -= 1
+        elif fallback is None or fallback == 'error':
+            # `error` is the default default, and the interpreters raise on it.
+            fallback_lines = [
+                f'{i}    throw new Error("No matching case for value " + {discriminator});'
+            ]
+
+        if first:
+            # No usable case at all, so the fallback is unconditional.
+            lines.extend(fallback_lines)
+            return lines
+
+        if fallback_lines:
+            lines.append(f'{i}  }} else {{')
+            lines.extend(fallback_lines)
+        lines.append(f'{i}  }}')
         return lines
+
+    def _match_condition(self, discriminator: str, case_key) -> Optional[str]:
+        """The test for one case key, or None where no value could ever satisfy it.
+
+        Mirrors the interpreters' `_match_case_pattern`: an integer compares equal, and
+        `"2..5"` is an inclusive range. A key that is neither - `"[1, 2]"`, say, which YAML
+        cannot express as a list and no interpreter matches either - yields no branch at
+        all rather than an expression that is never true, so the generated codec does not
+        carry a test that cannot fire.
+        """
+        if isinstance(case_key, bool):
+            return None
+        if isinstance(case_key, int):
+            return f'{discriminator} === {case_key}'
+        if isinstance(case_key, str):
+            text = case_key.strip()
+            if '..' in text:
+                low, _, high = text.partition('..')
+                try:
+                    return (f'{discriminator} >= {int(low.strip(), 0)}'
+                            f' && {discriminator} <= {int(high.strip(), 0)}')
+                except ValueError:
+                    return None
+            try:
+                return f'{discriminator} === {int(text, 0)}'
+            except ValueError:
+                return None
+        return None
 
     # ---------------------------------------------------------------
     # Encoder generation

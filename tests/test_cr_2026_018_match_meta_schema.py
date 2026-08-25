@@ -9,16 +9,16 @@ looked inside, so a block with no discriminator - no `field` and no `length` - w
 reported valid and then decoded as nothing. `flagged` had every key enforced; `match` had
 none. This adds the checks that hold on every implementation.
 
-**Support is uneven.** Only `field` and `cases` are honoured by all five. `length` and
-`name` are honoured by the Python, Java and C# interpreters and ignored by the Go
-interpreter and the TS013 generator. `var` and `default` are honoured by Python alone.
-The tests below assert the description records that, because a schema author choosing
-`var:` in a match block is choosing something four of five implementations discard, and
-the meta-schema is where they would look.
+**Support was uneven, and CR-2026-020 closed it.** Only `field` and `cases` used to be
+honoured by all five: `length` and `name` were ignored by the Go interpreter and the TS013
+generator, and `var` and `default` were honoured by the Python interpreter alone. The
+tests below now assert the reverse of what they were written to assert - that the
+description claims parity and does not warn about any key - and the corpus tripwire that
+fired when the fixtures landed has become a test that the corpus exercises the keys.
 
-The uneven keys are deliberately *not* enforced by the validator: refusing what only some
-implementations honour would reject schemas that work on the one the author uses. The
-validator refuses what nothing can use.
+The uneven keys were deliberately *not* enforced by the validator, and still are not:
+refusing what only some implementations honour would have rejected schemas that work.
+The validator refuses what nothing can use.
 """
 
 import json
@@ -43,10 +43,12 @@ MATCH = META["definitions"]["match"]
 #: `_decode_match_option_b`, go/schema/schema.go (the `fm["match"]` block),
 #: bindings/java/.../Schema.java, dotnet/PayloadSchema/SchemaParser.cs, and
 #: tools/generate_ts013_codec.py `_gen_decode_match`.
+#: Honoured by all five since CR-2026-020. The split below is kept because it names what
+#: each group used to be, and the tests assert the warnings for them are gone.
 UNIVERSAL = {"field", "cases"}
-THREE_OF_FIVE = {"length", "name"}
-PYTHON_ONLY = {"var", "default"}
-DESCRIBED = UNIVERSAL | THREE_OF_FIVE | PYTHON_ONLY
+WAS_THREE_OF_FIVE = {"length", "name"}
+WAS_PYTHON_ONLY = {"var", "default"}
+DESCRIBED = UNIVERSAL | WAS_THREE_OF_FIVE | WAS_PYTHON_ONLY
 
 
 def every_match():
@@ -118,28 +120,27 @@ class TestTheDescriptionExists:
         assert props["flagged"] == {"$ref": "#/definitions/flagged"}
 
 
-class TestTheDescriptionRecordsTheSupportGap:
-    """The uneven keys say so, because that is what a schema author needs to know."""
+class TestTheDescriptionClaimsParity:
+    """CR-2026-020 closed the gap, so no key may still warn about being ignored."""
 
-    @pytest.mark.parametrize("key", sorted(THREE_OF_FIVE))
-    def test_the_three_of_five_keys_name_who_ignores_them(self, key):
+    @pytest.mark.parametrize("key", sorted(DESCRIBED))
+    def test_no_key_warns_that_it_is_ignored(self, key):
         text = MATCH["properties"][key]["description"]
-        assert "Go" in text and "TS013" in text, text
+        for weasel in ("ignored by", "alone", "TS013", "Go interpreter"):
+            assert weasel not in text, f"{key} still warns: {text}"
 
-    @pytest.mark.parametrize("key", sorted(PYTHON_ONLY))
-    def test_the_python_only_keys_say_so(self, key):
-        text = MATCH["properties"][key]["description"]
-        assert "Python" in text and "alone" in text, text
-
-    def test_the_universal_keys_claim_no_exception(self):
-        for key in sorted(UNIVERSAL):
-            text = MATCH["properties"][key]["description"]
-            assert "alone" not in text, text
-
-    def test_the_construct_description_states_it_once_plainly(self):
+    def test_the_construct_says_every_key_is_honoured(self):
         text = MATCH["description"]
-        assert "uneven" in text
-        assert "all five implementations" in text
+        assert "honoured by all five implementations" in text
+
+    def test_it_records_what_used_to_be_wrong(self):
+        """The history is the reason the fixtures exist; losing it invites a regression."""
+        assert "CR-2026-020" in MATCH["description"]
+
+    def test_the_cases_key_no_longer_claims_a_list_spelling(self):
+        """A YAML mapping key cannot be a list, so Option B never accepted one."""
+        text = MATCH["properties"]["cases"]["description"]
+        assert "cannot be a list" in text
 
     def test_the_default_default_is_recorded_as_error(self):
         """It differs from a tlv's `unknown`, which defaults to skip."""
@@ -269,22 +270,24 @@ class TestTheCorpusConforms:
                     problems.append(f"{path.name}: default={fallback!r}")
         assert not problems, problems
 
-    def test_the_corpus_only_uses_what_every_path_honours(self):
-        """Why the five paths still agree despite the gap - and a tripwire if that ends.
+    def test_the_corpus_now_exercises_the_keys_that_used_to_diverge(self):
+        """The inverse of the tripwire this test was.
 
-        A schema reaching for `var`, `length` or `name` would decode differently on the
-        Go interpreter and the generated codec. None does today. If this fails, the
-        support gap has stopped being theoretical and wants its own CR.
+        It used to assert no schema reached for `length`, `name` or `var`, because those
+        decoded differently on the Go interpreter and the generated codec, and it fired
+        when CR-2026-020's fixtures landed. That was its purpose. Keeping it pointed the
+        other way is what stops the gap reopening unobserved: parity with no vector
+        exercising it is parity nobody is checking.
         """
-        risky = sorted({
-            f"{path.name}: {key}"
-            for match, path in every_match()
-            for key in (THREE_OF_FIVE | {"var"})
+        covered = {
+            key
+            for match, _ in every_match()
+            for key in (WAS_THREE_OF_FIVE | WAS_PYTHON_ONLY)
             if key in match
-        })
-        assert not risky, (
-            "these use keys the Go interpreter and TS013 generator ignore: "
-            + ", ".join(risky)
+        }
+        assert covered == (WAS_THREE_OF_FIVE | WAS_PYTHON_ONLY), (
+            "no corpus vector exercises: "
+            + ", ".join(sorted((WAS_THREE_OF_FIVE | WAS_PYTHON_ONLY) - covered))
         )
 
     def test_the_corpus_actually_exercises_the_construct(self):

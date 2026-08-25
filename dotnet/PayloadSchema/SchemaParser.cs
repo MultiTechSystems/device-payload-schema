@@ -483,17 +483,37 @@ public static class SchemaParser
             // discriminator read as one byte.
             if (matchMap.TryGetValue("name", out var mn)) matchField.Name = Scalar(mn);
             if (matchMap.TryGetValue("length", out var ml)) matchField.Length = Int(ml);
+            if (matchMap.TryGetValue("var", out var mv)) matchField.Var = Scalar(mv);
+            // `default`: "error", "skip", or a field list decoded when no case matches
+            // (CR-2026-020). Parsed here rather than at decode time, because by then the
+            // YAML nodes are gone.
+            if (matchMap.TryGetValue("default", out var md))
+            {
+                matchField.MatchDefault = md is YamlSequenceNode mdSeq
+                    ? ParseFields(mdSeq)
+                    : Scalar(md);
+            }
             if (matchMap.TryGetValue("cases", out var mc) && mc is YamlMappingNode mcMap)
             {
                 // As above: hex keys need ParseScalarValue, not int.TryParse.
                 foreach (var kv in mcMap.Children)
                 {
                     var c = new MatchCase();
-                    c.CaseValue = ParseScalarValue(kv.Key);
+                    // A `default` key is the fallback, not a case whose value is the
+                    // string "default" - which matched no integer, so the fallback never
+                    // ran (CR-2026-020).
+                    if (kv.Key is YamlScalarNode { Value: "default" })
+                        c.IsDefault = true;
+                    else
+                        c.CaseValue = ParseScalarValue(kv.Key);
                     if (kv.Value is YamlSequenceNode cfSeq)
                         c.Fields = ParseFields(cfSeq);
                     matchField.Cases.Add(c);
                 }
+                // A default must be tried only after every explicit case, whatever order
+                // the document lists them in; DecodeMatch returns on the first it sees.
+                matchField.Cases = matchField.Cases
+                    .OrderBy(entry => entry.IsDefault).ToList();
             }
             f.MatchInline = matchField;
         }
