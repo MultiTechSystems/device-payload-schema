@@ -917,13 +917,21 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   `name`, and `mult: "0.1"`. For real structural checking use
   `tools/validate_schema.py`, which knows the type vocabulary.
 
-  `tlv` is the one exception, described by CR-2026-016 in `definitions.tlv` and
-  closed with `additionalProperties: false`, because its vocabulary is fixed at the
-  seven keys the five implementations read — a misspelt `tag_sze` is a mistake and not
-  an extension nobody has described yet. The `unknown` enum is stated in both places
-  and `test_cr_2026_016_tlv_meta_schema.py` fails if they drift apart. Describing
-  another construct is the same shape of change; closing `definitions.field` itself is
-  not, and nothing depends on it.
+  Two constructs are exceptions, each described and closed with
+  `additionalProperties: false` because its vocabulary is fixed at the keys the five
+  implementations read — a misspelt `tag_sze` is a mistake, not an extension nobody has
+  described yet:
+
+  - `definitions.tlv` (CR-2026-016), seven keys. The `unknown` enum is stated here and
+    in `tools/validate_schema.py`, and `test_cr_2026_016_tlv_meta_schema.py` fails if
+    they drift apart.
+  - `definitions.flagged` and `definitions.flagged_group` (CR-2026-017), four keys.
+    The validator already enforced all four, so there was no behaviour to change. It
+    also refuses two groups claiming the same bit, which JSON Schema cannot express —
+    `test_cr_2026_017_flagged_meta_schema.py` records that division of labour.
+
+  `match`, `byte_group` and `repeat` are still undescribed. Each is the same shape of
+  change. Closing `definitions.field` itself is not, and nothing depends on it.
 - **`tools/generate_jsonschema.py` does not produce
   `schemas/payload-schema.json` any more.** Nothing in the Makefile or CI runs it, so
   the drift went unnoticed while CR after CR edited the file directly. Regenerating

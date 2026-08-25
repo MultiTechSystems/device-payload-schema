@@ -156,6 +156,9 @@
         },
         "tlv": {
           "$ref": "#/definitions/tlv"
+        },
+        "flagged": {
+          "$ref": "#/definitions/flagged"
         }
       },
       "additionalProperties": true
@@ -217,6 +220,54 @@
           }
         }
       },
+      "additionalProperties": false
+    },
+    "flagged": {
+      "type": "object",
+      "description": "Bitmask-driven presence: a previously decoded field is read as a mask, and each group whose bit is set contributes its fields (PS-158). Groups are evaluated in the order written, which is the order their bytes appear (PS-160).",
+      "properties": {
+        "field": {
+          "type": "string",
+          "description": "Name of the field holding the mask, which must already have been decoded (PS-159). A bare name - `flags`, not `$flags` - unlike the $-prefixed references used by `ref` and `compute`."
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/flagged_group"
+          },
+          "minItems": 1,
+          "description": "The bits and what each introduces."
+        }
+      },
+      "required": [
+        "field",
+        "groups"
+      ],
+      "additionalProperties": false
+    },
+    "flagged_group": {
+      "type": "object",
+      "description": "One bit of the mask and the fields its being set introduces.",
+      "properties": {
+        "bit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 63,
+          "description": "Bit position, 0 being the least significant (PS-161, PS-162). Set means this group's fields are read from the payload; clear means the group is skipped and consumes nothing. The ceiling is 63 because u64 is a flags type; the useful ceiling is the width of the referenced field. tools/validate_schema.py also refuses two groups claiming the same bit, which JSON Schema cannot express."
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/field"
+          },
+          "minItems": 1,
+          "description": "Read in order where the bit is set, and merged into the parent object (PS-163). A name beginning with _ is internal: it becomes a variable later fields can reference and is not reported."
+        }
+      },
+      "required": [
+        "bit",
+        "fields"
+      ],
       "additionalProperties": false
     }
   },
