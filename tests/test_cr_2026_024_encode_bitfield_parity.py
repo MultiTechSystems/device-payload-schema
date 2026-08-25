@@ -66,8 +66,10 @@ FLOORS = {
     / "CorpusEncodeRoundTripTest.java": ("ENCODE_FLOOR_TOTAL = 1145", '"plain fixed", 58'),
     REPO_ROOT / "dotnet" / "PayloadSchema.Tests" / "CorpusEncodeRoundTripTests.cs":
         ("EncodeFloorTotal = 1146", '["plain fixed"] = 58'),
+    # Go's total was raised again by CR-2026-026, which gave it the word-ordered
+    # u32le16 case; `plain fixed` is the part this CR moved and is what it pins.
     REPO_ROOT / "go" / "schema" / "corpus_encode_test.go":
-        ("encodeFloorTotal = 1155", '"plain fixed": 58'),
+        ("encodeFloorTotal = 1169", '"plain fixed": 58'),
 }
 
 #: The corpus vectors this CR exists to make round-trip.
