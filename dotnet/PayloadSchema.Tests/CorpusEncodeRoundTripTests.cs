@@ -32,7 +32,10 @@ public class CorpusEncodeRoundTripTests
     // CR-2026-024 packed a bare run of bit ranges the way byte_group was already
     // packed, so the three LoRaWAN header schemas round-trip: `plain fixed` rises from
     // 55 to 58 and the total to 1145.
-    const int EncodeFloorTotal = 1146;
+    // CR-2026-027 gave this encoder the `default:` key beside a match's `cases`, so
+    // match-default-fields.yaml round-trips: `match` rises from 43 to 44 and the
+    // total to 1147.
+    const int EncodeFloorTotal = 1147;
 
     /// <summary>
     /// Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -43,7 +46,7 @@ public class CorpusEncodeRoundTripTests
         ["tlv"] = 901,
         ["flagged"] = 121,
         ["plain fixed"] = 58,
-        ["match"] = 43,
+        ["match"] = 44,
         ["byte_group"] = 17,
         ["repeat"] = 6,
     };

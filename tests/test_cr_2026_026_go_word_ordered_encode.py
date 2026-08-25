@@ -189,10 +189,15 @@ class TestTheWitnessesAreRealAndRoundTripOnTheReference:
 
 
 class TestTheFloorMovedWithTheFix:
-    def test_the_go_total_and_flagged_floors_are_raised(self):
-        text = GO_FLOORS.read_text()
-        assert "encodeFloorTotal = 1169" in text
-        assert '"flagged":     135,' in text
+    def test_the_go_flagged_floor_is_raised(self):
+        """The bucket this CR moved. The total is asserted as a bound below."""
+        assert '"flagged":     135,' in GO_FLOORS.read_text()
+
+    def test_the_go_total_floor_is_at_least_what_this_cr_reached(self):
+        """A bound, not an equality: CR-2026-027 raised it to 1170 straight after."""
+        found = re.search(r"encodeFloorTotal\s*=\s*(\d+)", GO_FLOORS.read_text())
+        assert found, "no encodeFloorTotal"
+        assert int(found.group(1)) >= 1169, found.group(1)
 
     def test_the_raise_is_explained(self):
         assert "CR-2026-026" in GO_FLOORS.read_text()

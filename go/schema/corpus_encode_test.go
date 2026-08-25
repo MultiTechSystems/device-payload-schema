@@ -40,7 +40,10 @@ import (
 // rounded its integer conversions instead of truncating them, so the fourteen
 // `word_ordered_sensor_id` vectors round-trip: `flagged` rises from 121 to 135 and the
 // total to 1169.
-const encodeFloorTotal = 1169
+// CR-2026-027 gave this encoder the `default:` key beside a match's `cases`, so
+// match-default-fields.yaml round-trips: `match` rises from 43 to 44 and the total
+// to 1170.
+const encodeFloorTotal = 1170
 
 // encodeFloorByShape guards each layout separately, so a regression in one that works
 // cannot hide behind the mass of one that does not. It has earned that: raising the total
@@ -57,7 +60,7 @@ var encodeFloorByShape = map[string]int{
 	"tlv":         910,
 	"flagged":     135,
 	"plain fixed": 58,
-	"match":       43,
+	"match":       44,
 	"byte_group":  17,
 	"repeat":      6,
 }
