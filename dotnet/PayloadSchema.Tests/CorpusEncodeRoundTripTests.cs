@@ -40,7 +40,9 @@ public class CorpusEncodeRoundTripTests
     // to 135 and the total to 1161.
     // CR-2026-030 resolved a `name_from` template on encode, so name-from.yaml
     // round-trips: `plain fixed` rises from 58 to 59 and the total to 1162.
-    const int EncodeFloorTotal = 1162;
+    // CR-2026-031's name_from var-mismatch fixture round-trips here too, so
+    // `plain fixed` rises from 59 to 61 and the total to 1164.
+    const int EncodeFloorTotal = 1164;
 
     /// <summary>
     /// Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -50,7 +52,7 @@ public class CorpusEncodeRoundTripTests
     {
         ["tlv"] = 901,
         ["flagged"] = 135,
-        ["plain fixed"] = 59,
+        ["plain fixed"] = 61,
         ["match"] = 44,
         ["byte_group"] = 17,
         ["repeat"] = 6,

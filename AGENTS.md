@@ -603,7 +603,10 @@ every encoder looked it up under the declared name (`reading`), found nothing, a
 zero. An unresolvable template is an error now, and the "missing field" warning names the
 resolved key rather than one the schema never reports. Note there are two resolvers per
 implementation, deliberately — decode resolves against its variables, encode against the
-data it was handed.
+data it was handed. CR-2026-031 added `name-from-var.yaml`, whose `var: idx` sits on a field
+called `channel_id`, so the PS-267 fallback through the declaring field is exercised rather
+than merely written; the corpus's other `name_from` names a field and a variable that agree,
+which a resolver ignoring `var:` would have passed.
 
 **A CR-specific test must bound every floor it names, never pin one.** Both the total and
 the per-shape bucket are running values that later CRs raise. CR-2026-024, -026 and -027

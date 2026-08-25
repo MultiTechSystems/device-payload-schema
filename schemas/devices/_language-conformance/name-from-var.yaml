@@ -1,0 +1,38 @@
+# A `name_from` template referencing a variable whose name is not its field's.
+#
+# `name-from.yaml` covers the construct, but its `${idx}` names a field also called `idx`,
+# so a resolver that ignored `var:` entirely and looked the reference up as a field name
+# would pass it. PS-267 says the two are distinct - rbs30x has `name: event_type` with
+# `var: evt` - and CR-2026-030 gave all four encoders a fallback through the declaring
+# field for exactly that. Nothing exercised the fallback: it was written because the
+# requirement says so, and this vector is what makes it true rather than intended.
+#
+# Decoding resolves the template against its variables, where `idx` is present. Encoding is
+# handed the decoded output, which has no `idx` key at all - only `channel_id` - so the
+# encoders have to get from the variable name to the field that declared it.
+name: probe_name_from_var
+endian: big
+fields:
+  - name: channel_id
+    type: u8
+    var: idx
+  - name: reading
+    type: u8
+    name_from: channel_${idx}_reading
+test_vectors:
+  - name: the_template_resolves_through_the_declaring_field
+    description: "Channel 3, so the reading is reported as channel_3_reading"
+    payload: "032A"
+    source: generated
+    expected:
+      channel_id: 3
+      channel_3_reading: 42
+    expected_warnings: []
+  - name: a_different_channel_moves_the_key
+    description: "The key is built from the payload, so channel 7 names a different one"
+    payload: "072A"
+    source: generated
+    expected:
+      channel_id: 7
+      channel_7_reading: 42
+    expected_warnings: []
