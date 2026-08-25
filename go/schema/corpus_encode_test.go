@@ -36,7 +36,11 @@ import (
 // CR-2026-024 packed a bare run of bit ranges the way byte_group was already packed, so
 // the three LoRaWAN header schemas round-trip and several tlv cases built from bit ranges
 // do too: `plain fixed` rises from 55 to 58, `tlv` from 906 to 910, the total to 1155.
-const encodeFloorTotal = 1155
+// CR-2026-026 gave this encoder the word-ordered u32le16/s32le16 case it never had, and
+// rounded its integer conversions instead of truncating them, so the fourteen
+// `word_ordered_sensor_id` vectors round-trip: `flagged` rises from 121 to 135 and the
+// total to 1169.
+const encodeFloorTotal = 1169
 
 // encodeFloorByShape guards each layout separately, so a regression in one that works
 // cannot hide behind the mass of one that does not. It has earned that: raising the total
@@ -51,7 +55,7 @@ const encodeFloorTotal = 1155
 // keys, which cannot tell those two cases apart, and pick the first.
 var encodeFloorByShape = map[string]int{
 	"tlv":         910,
-	"flagged":     121,
+	"flagged":     135,
 	"plain fixed": 58,
 	"match":       43,
 	"byte_group":  17,

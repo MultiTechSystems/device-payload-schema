@@ -4150,6 +4150,28 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 	// field wrote no bytes, the payload came back the right shape minus one value, and
 	// the encoder called it a success.
 	switch field.Type {
+	// The word-ordered spellings: least significant 16-bit unit first, each unit
+	// big-endian, and `endian` plays no part (PS-271, PS-272). decodeField has had this
+	// since the type was added; encodeField never did, so every field of the type hit the
+	// default and reported "cannot encode type" - fourteen `word_ordered_sensor_id`
+	// vectors across the dl-* schemas could be decoded and not re-encoded (CR-2026-026).
+	//
+	// Deliberately not consulting `endian`, for the reason the decode case gives:
+	// honouring it would make u32le16 with endian little a second spelling of
+	// little-endian u32.
+	case TypeU32LE16, TypeS32LE16:
+		numVal, ok := toFloat64(value)
+		if !ok {
+			return notANumber(field, value)
+		}
+		combined := int64(math.RoundToEven(numVal))
+		if combined < 0 {
+			combined += 0x100000000
+		}
+		unsigned := uint64(combined) & 0xFFFFFFFF
+		ctx.Write(encodeUint(unsigned&0xFFFF, 2, "big"))
+		ctx.Write(encodeUint(unsigned>>16, 2, "big"))
+
 	// The 24-bit spellings are in decodeField's two integer cases and were in neither of
 	// these, so a u24 or an s24 wrote nothing at all: oyster's port 4 re-encoded its
 	// latitude and longitude as no bytes and kept the three fields after them.
@@ -4158,7 +4180,12 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 		if !ok {
 			return notANumber(field, value)
 		}
-		ctx.Write(encodeUint(uint64(numVal), length, endian))
+		// Rounded, not truncated. Reversing a transform lands just short of the integer
+		// it should reach - dl-isf's `mult: 0.00032` reverses 1.6 to 4999.999999999999 -
+		// and a conversion that truncates writes 4999. The reference interpreter rounds
+		// here (`int(round(value))`), and half-to-even is the repo's convention, so
+		// RoundToEven rather than Round (CR-2026-026).
+		ctx.Write(encodeUint(uint64(math.RoundToEven(numVal)), length, endian))
 
 	case TypeSInt, TypeS8, TypeS16, TypeS24, TypeS32, TypeS64, TypeI8, TypeI16, TypeI32,
 		TypeI64:
@@ -4166,7 +4193,8 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 		if !ok {
 			return notANumber(field, value)
 		}
-		ctx.Write(encodeSint(int64(numVal), length, endian))
+		// Rounded, not truncated, for the reason the unsigned case above gives.
+		ctx.Write(encodeSint(int64(math.RoundToEven(numVal)), length, endian))
 
 	case TypeFloat32, TypeF32:
 		numVal, ok := toFloat64(value)

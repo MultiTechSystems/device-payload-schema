@@ -511,9 +511,25 @@ The measured gap, for whoever closes it: 14 of Go's 28 are `word_ordered_sensor_
 `dl-*` schemas — the `u32le16` word-ordered type (PS-271/PS-272) — and one is
 `match-default-fields.yaml`, which Go decodes and cannot re-encode.
 
-**`flagged` is 14 behind Python in all three** (121 against 135) and bit ranges are not the
-cause — no `flagged` group in the corpus holds one; they are `u16`, `u32le16` and computed
-members. A test pins that premise so it cannot be misattributed later.
+**That `flagged` gap was `u32le16`, and CR-2026-026 closed it in Go.** The note here used
+to say `flagged` was 14 behind Python in all three and that bit ranges were not the cause.
+The first half was right and unhelpful; the cause was that **Go's encoder had no
+`u32le16`/`s32le16` case at all**, and those members live in flagged groups. Go's `flagged`
+now reads 135, the same as the reference's.
+
+Two things worth keeping from it:
+
+- **Go truncated its integer conversions where the reference rounds** — found only because
+  the type fix let `dl-isf` get far enough to be wrong by one. It uses
+  `math.RoundToEven` now. C# already had `MidpointRounding.ToEven` and Java `Math.rint`, so
+  this was Go's alone; that was checked rather than assumed, because assuming a shared
+  defect is how CR-2026-024 went wrong.
+- **An unlisted type in Go's encode switch is a reported failure, not a silent zero-byte
+  write.** That is why this was findable. Keep it that way.
+
+Go's remaining 14 (measured by identity, never by bucket) are TLV channel ordering in the
+`em400-*`/`ws203` schemas, four `ch8_type230`, two vendor references, and
+`match-default-fields.yaml` — a CR-2026-020 fixture Go decodes and cannot re-encode.
 
 **The encode round-trip residue is classified, not counted.** `tools/encode-round-trip.py`
 gives a reason for every vector that does not re-encode to its payload, and
