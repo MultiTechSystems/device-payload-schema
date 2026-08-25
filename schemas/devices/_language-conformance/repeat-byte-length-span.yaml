@@ -1,0 +1,41 @@
+# A `byte_length` repeat whose members divide the span exactly, with a field after it.
+#
+# PS-088 requires the exact division, and the field after the repeat is what makes a
+# failure to enforce it visible: the C# interpreter and the TS013 generator had no
+# post-loop check at all, so an iteration could start inside the span and finish beyond
+# it, leaving the read position somewhere other than the span's end. Every field after the
+# repeat then came from the wrong offset with nothing reported - a 2-byte member over a
+# 5-byte span produced a third record holding this `tail` byte, and `tail` itself read past
+# the payload (CR-2026-022).
+#
+# The two ways the division fails are both errors, and no vector kind expects a failure, so
+# they are covered by tests/test_cr_2026_022_byte_length_span.py. This fixture pins the
+# valid case, which is what a new check could break: it must not fire where the span is
+# consumed exactly, and `tail` must still be read from the right offset.
+name: probe_repeat_byte_length_span
+endian: big
+fields:
+  - name: pairs
+    type: repeat
+    byte_length: 4
+    max: 2
+    fields:
+      - name: a
+        type: u8
+      - name: b
+        type: u8
+  - name: tail
+    type: u8
+test_vectors:
+  - name: the_span_is_consumed_exactly_and_the_tail_follows
+    description: "Two 2-byte records fill the 4-byte span, so tail is the fifth byte"
+    payload: "01020304FF"
+    source: generated
+    expected:
+      pairs:
+        - a: 1
+          b: 2
+        - a: 3
+          b: 4
+      tail: 255
+    expected_warnings: []

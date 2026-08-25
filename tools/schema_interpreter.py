@@ -1069,8 +1069,18 @@ class SchemaInterpreter:
                 iterations += 1
             
             if pos != end_pos:
-                raise ValueError(f"repeat byte_length mismatch: expected end at {end_pos}, got {pos}")
-                
+                # PS-088: the members must divide the span exactly. Two ways they do not,
+                # and the message used to blame the payload for both - "expected end at 4,
+                # got 2" reads as a short payload even where the schema's own ceiling
+                # stopped the loop with bytes to spare (CR-2026-022).
+                if iterations >= max_iterations and pos < end_pos:
+                    raise ValueError(
+                        f"repeat stopped at its max of {max_iterations} iteration(s) with "
+                        f"{end_pos - pos} of {byte_length} byte(s) of the span unread")
+                raise ValueError(
+                    f"repeat byte_length mismatch: expected end at {end_pos}, got {pos}")
+
+
         elif until == 'end':
             # Until-end: repeat until payload exhausted
             while pos < len(buf) and iterations < max_iterations:

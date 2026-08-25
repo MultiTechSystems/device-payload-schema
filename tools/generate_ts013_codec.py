@@ -895,6 +895,26 @@ function writeS(buf, pos, size, value, endian) {
             lines.append(f'{i}    if (pos <= {arr}_before) break;')
             lines.append(f'{i}    if (pos >= buf.length && !({condition})) break;')
             lines.append(f'{i}  }}')
+            # PS-088: a byte_length span must be divided exactly by the members. There was
+            # no check, so this codec accepted both ways it is not - an iteration starting
+            # inside the span and finishing past it, and the ceiling stopping the loop
+            # early - and left `pos` somewhere other than the span's end. Every field after
+            # the repeat then came from the wrong offset with nothing reported: a 2-byte
+            # member over a 5-byte span produced a third record holding the following
+            # field's byte, and the following field read past the payload (CR-2026-022).
+            if byte_length is not None:
+                end = f'{arr}_start + {arr}_len'
+                lines.append(f'{i}  if (pos !== {end}) {{')
+                lines.append(f'{i}    if ({arr}.length >= {arr}_max && pos < {end}) {{')
+                lines.append(f'{i}      throw new Error("repeat stopped at its max of "'
+                             f' + {arr}_max + " iteration(s) with " + ({end} - pos)'
+                             f' + " of " + {arr}_len + " byte(s) of the span unread");')
+                lines.append(f'{i}    }}')
+                # Parenthesised: `"..." + a + b` concatenates left to right, so the sum
+                # rendered as "05" rather than 5.
+                lines.append(f'{i}    throw new Error("repeat byte_length mismatch:'
+                             f' expected end at " + ({end}) + ", got " + pos);')
+                lines.append(f'{i}  }}')
             # `min` is the fewest iterations that count as a valid decode, and fewer is an
             # error in all four interpreters. This generator returned the short array
             # instead, so a payload the interpreters refused decoded here as a schema that

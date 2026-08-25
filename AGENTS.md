@@ -957,8 +957,27 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   all five (defaulting to 1000, clamping a `count` and bounding the byte_length and
   until-end loops) and falling below `min` fails the decode on all five. `min` has no
   corpus fixture on purpose — it fails the decode, and no vector kind expects a failure.
-  Note that `max` and `byte_length` can conflict: stopping at the ceiling before the span
-  is consumed is a `byte_length mismatch` error, in every implementation.
+- **A `byte_length` span must be consumed exactly, and CR-2026-022 made that true on all
+  five paths.** PS-088 requires the members to divide the span; the Python, Go and Java
+  interpreters enforced it and **the C# interpreter and the TS013 generator had no
+  post-loop check at all**. Both ways of failing were accepted silently, and both leave
+  the read position somewhere other than the span's end, so **every field after the
+  repeat comes from the wrong offset with nothing reported**:
+
+  - a ceiling stopping the loop early (`byte_length: 4` with `max: 2` over one-byte
+    members leaves two bytes unread);
+  - members that do not divide the span — a 2-byte member over a 5-byte span starts an
+    iteration at offset 4, inside the span, and finishes at 6, past it. That one produced
+    a third record holding the *following field's* byte, and the following field then read
+    past the payload as zero.
+
+  Both are errors now, everywhere. `max` and `byte_length` no longer report the conflict
+  as a payload problem either: stopping at the ceiling names the ceiling and the bytes
+  left, rather than the old `byte_length mismatch: expected end at 4, got 2`, which read
+  as a short payload when the cause was the schema's own cap. The failing cases have no
+  fixtures — no vector kind expects a failure — so
+  `repeat-byte-length-span.yaml` pins the valid case with a field after the repeat, which
+  is what makes a position left short visible at all.
 
   Every construct is now described. **Closing `definitions.field` itself is a different
   and much larger change** — it declares no required keys and types `type` as a bare

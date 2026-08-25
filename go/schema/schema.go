@@ -2961,6 +2961,15 @@ func decodeRepeat(field Field, ctx *DecodeContext) ([]any, error) {
 		}
 
 		if ctx.Offset != endOffset {
+			// PS-088: the members must divide the span exactly. The message used to blame
+			// the payload for both ways they do not - "expected end at 4, got 2" reads as
+			// a short payload even where the schema's own ceiling stopped the loop with
+			// bytes to spare (CR-2026-022).
+			if iterations >= maxIterations && ctx.Offset < endOffset {
+				return nil, fmt.Errorf(
+					"repeat stopped at its max of %d iteration(s) with %d of %d byte(s) of the span unread",
+					maxIterations, endOffset-ctx.Offset, byteLength)
+			}
 			return nil, fmt.Errorf("repeat byte_length mismatch: expected end at %d, got %d",
 				endOffset, ctx.Offset)
 		}

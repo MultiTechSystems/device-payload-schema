@@ -34,10 +34,10 @@ class CorpusConformanceTest {
     // parameter, which no device schema sets, and the floor had drifted 29 below the
     // full count as vectors were added without it being raised. It is the full count
     // again: 1222.
-    // CR-2026-020 brought the five implementations onto the same `match` and
-    // CR-2026-021 the same repeat `max`, so their fixtures pass everywhere and the
-    // full count is 1236.
-    private static final int CORPUS_FLOOR = 1236;
+    // CR-2026-020 brought the five implementations onto the same `match`, CR-2026-021
+    // the same repeat `max`, and CR-2026-022 the same byte_length span, so their
+    // fixtures pass everywhere and the full count is 1237.
+    private static final int CORPUS_FLOOR = 1237;
 
     @Test
     void corpusVectorsDecodeAsExpected() throws IOException {
