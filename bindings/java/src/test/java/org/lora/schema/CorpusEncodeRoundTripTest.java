@@ -46,7 +46,10 @@ class CorpusEncodeRoundTripTest {
     // CR-2026-027 gave this encoder the `default:` key beside a match's `cases`, so
     // match-default-fields.yaml round-trips: `match` rises from 43 to 44 and the
     // total to 1146.
-    private static final int ENCODE_FLOOR_TOTAL = 1146;
+    // CR-2026-028 gave this encoder the word-ordered u32le16/s32le16 case it never
+    // had, so the flagged members of that type round-trip: `flagged` rises from 121
+    // to 135 and the total to 1160.
+    private static final int ENCODE_FLOOR_TOTAL = 1160;
 
     /**
      * Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -54,7 +57,7 @@ class CorpusEncodeRoundTripTest {
      */
     private static final Map<String, Integer> ENCODE_FLOOR_BY_SHAPE = Map.of(
             "tlv", 900,
-            "flagged", 121,
+            "flagged", 135,
             "plain fixed", 58,
             "match", 44,
             "byte_group", 17,

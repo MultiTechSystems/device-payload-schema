@@ -59,13 +59,19 @@ ENCODERS = {
     "SchemaEncoder.cs": REPO_ROOT / "dotnet" / "PayloadSchema" / "SchemaEncoder.cs",
 }
 
+#: The bucket this CR moved, and the total it reached, per file.
+#:
+#: The total is read as a lower bound. This file was written in the same commit that fixed
+#: CR-2026-024's and CR-2026-026's tests for pinning an exact total - and then pinned one
+#: itself, which CR-2026-028 broke two files later. The lesson only counts if it is applied
+#: to the test being written, not just the ones being repaired.
 FLOORS = {
     REPO_ROOT / "go" / "schema" / "corpus_encode_test.go":
-        ("encodeFloorTotal = 1170", '"match":       44,'),
+        ("encodeFloorTotal", 1170, '"match":       44,'),
     REPO_ROOT / "bindings" / "java" / "src" / "test" / "java" / "org" / "lora" / "schema"
-    / "CorpusEncodeRoundTripTest.java": ("ENCODE_FLOOR_TOTAL = 1146", '"match", 44,'),
+    / "CorpusEncodeRoundTripTest.java": ("ENCODE_FLOOR_TOTAL", 1146, '"match", 44,'),
     REPO_ROOT / "dotnet" / "PayloadSchema.Tests" / "CorpusEncodeRoundTripTests.cs":
-        ("EncodeFloorTotal = 1147", '["match"] = 44,'),
+        ("EncodeFloorTotal", 1147, '["match"] = 44,'),
 }
 
 
@@ -157,11 +163,16 @@ class TestJavaParsesTheDefaultOnce:
 
 class TestTheFloorsMovedWithTheFix:
     @pytest.mark.parametrize("path", sorted(FLOORS, key=str))
-    def test_the_total_and_match_floors_are_raised(self, path):
-        text = path.read_text()
-        total, shape = FLOORS[path]
-        assert total in text, f"{path.name}: expected {total}"
-        assert shape in text, f"{path.name}: expected {shape}"
+    def test_the_match_floor_is_raised(self, path):
+        _, _, shape = FLOORS[path]
+        assert shape in path.read_text(), f"{path.name}: expected {shape}"
+
+    @pytest.mark.parametrize("path", sorted(FLOORS, key=str))
+    def test_the_total_floor_is_at_least_what_this_cr_reached(self, path):
+        name, floor, _ = FLOORS[path]
+        found = re.search(rf"{name}\s*=\s*(\d+)", path.read_text())
+        assert found, f"{path.name}: no {name}"
+        assert int(found.group(1)) >= floor, (path.name, found.group(1), floor)
 
     @pytest.mark.parametrize("path", sorted(FLOORS, key=str))
     def test_the_raise_is_explained(self, path):
@@ -173,23 +184,20 @@ class TestTheFloorsMovedWithTheFix:
         assert "FLOOR_TOTAL = 1160" in text
 
 
-class TestWhatWasFoundAndNotFixed:
-    """Java and C# still have no `u32le16` encode case. Checked, not inferred."""
+class TestWhatWasFoundHereAndFixedNext:
+    """This class was the inverse when CR-2026-027 landed.
 
-    @pytest.mark.parametrize("name", ["Encoder.java", "SchemaEncoder.cs"])
-    def test_they_declare_the_type_but_cannot_encode_it(self, name):
-        enum_paths = {
-            "Encoder.java": (REPO_ROOT / "bindings" / "java" / "src" / "main" / "java"
-                             / "org" / "lora" / "schema" / "FieldType.java"),
-            "SchemaEncoder.cs": REPO_ROOT / "dotnet" / "PayloadSchema" / "Schema.cs",
-        }
-        assert "U32LE16" in enum_paths[name].read_text(), f"{name}: type gone from the enum"
+    It asserted Java and C# declared `u32le16` and had no encode case for it, so the gap
+    could not go stale unnoticed. CR-2026-028 closed it; the assertions are turned round.
+    """
+
+    @pytest.mark.parametrize("name", ["Encoder.java", "SchemaEncoder.cs", "schema.go"])
+    def test_every_encoder_handles_the_word_ordered_type(self, name):
         encoder = ENCODERS[name].read_text()
-        # Only the flagged-path comment mentions it; no case handles it.
-        assert not re.search(r"case (FieldType\.)?U32LE16|U32LE16 =>", encoder), (
-            f"{name} has grown a word-ordered encode case - update this test and the note"
+        assert re.search(r"U32LE16", encoder), (
+            f"{name} lost its word-ordered encode case"
         )
 
-    def test_go_has_one(self):
-        """The reference for that port, when someone makes it."""
-        assert "case TypeU32LE16, TypeS32LE16:" in ENCODERS["schema.go"].read_text()
+    @pytest.mark.parametrize("name", ["Encoder.java", "SchemaEncoder.cs"])
+    def test_the_fix_is_attributed(self, name):
+        assert "CR-2026-028" in ENCODERS[name].read_text(), name
