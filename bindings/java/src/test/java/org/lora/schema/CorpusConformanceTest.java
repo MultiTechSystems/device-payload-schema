@@ -37,7 +37,9 @@ class CorpusConformanceTest {
     // CR-2026-020 brought the five implementations onto the same `match`, CR-2026-021
     // the same repeat `max`, and CR-2026-022 the same byte_length span, so their
     // fixtures pass everywhere and the full count is 1237.
-    private static final int CORPUS_FLOOR = 1237;
+    // CR-2026-031 added the name_from var-mismatch fixture, whose two vectors decode
+    // everywhere, so the full count is 1239.
+    private static final int CORPUS_FLOOR = 1239;
 
     @Test
     void corpusVectorsDecodeAsExpected() throws IOException {
