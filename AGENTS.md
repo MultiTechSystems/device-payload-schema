@@ -535,17 +535,32 @@ of it — backwards where the discriminator is known and matched nothing, becaus
 already said what that means. The heuristic stays first only when the discriminator is
 absent, which is the case it exists for.
 
-**Java and C# still have no `u32le16`/`s32le16` encode case** — the gap CR-2026-026 closed
-in Go, worth about 14 vectors each, showing up as their `flagged` bucket reading 121 where
-Go's and the reference's read 135. Read from their source rather than inferred; a test
-holds the claim.
+**All four encoders handle `u32le16`/`s32le16` now** — CR-2026-026 in Go, CR-2026-028 in
+Java and C#. They had failed differently and the Java form was the worse one: C# had no
+case and threw `Cannot encode type`, while Java's `FieldType.isInteger()` *includes* both
+types, so they fell through to the plain integer path and were written as an ordinary
+four-byte value in the schema's byte order — right length, wrong order, no error, and bytes
+the decoder would not read back. **A guard for these two must precede the `isInteger()`
+path in Java**, and a test asserts that ordering.
+
+One silent failure and one loud one from a single missing case is worth remembering: their
+`flagged` buckets both read 121, one with 14 `bytes differ` and one with 14 `error`.
 
 Go's remaining 13 (measured by identity, never by bucket) are TLV channel ordering in the
-`em400-*`/`ws203` schemas, four `ch8_type230`, and two vendor references.
+`em400-*`/`ws203` schemas, four `ch8_type230`, and two vendor references — one cluster,
+where Go emits an extra channel: `want 8367000000, got 036700008367000000`.
 
-**Do not pin a running floor total in a CR-specific test.** CR-2026-024 and CR-2026-026
-each did, and each was broken by the next CR that raised the same floor. Pin the bucket the
-CR moved, and read the total as a lower bound.
+**Do not pin a running floor total in a CR-specific test.** CR-2026-024, CR-2026-026 and
+CR-2026-027 each did, and each was broken by the next CR that raised the same floor —
+CR-2026-027 while its own commit was fixing the other two. Pin the bucket the CR moved, and
+read the total as a lower bound.
+
+**Anchor a source-reading test on something that occurs once, and say where you searched
+from.** Four of these tests have lied this session by matching the wrong place: a method
+name matching its call site (CR-2026-024), `func encodeField` matching `encodeFields`
+(CR-2026-026), `index("ncode")` matching an unrelated word, and a `case` line spelled
+identically in decode and encode (both CR-2026-028). Every one failed on correct code, and
+one of them was hiding a real omission behind the false failure.
 
 **The encode round-trip residue is classified, not counted.** `tools/encode-round-trip.py`
 gives a reason for every vector that does not re-encode to its payload, and

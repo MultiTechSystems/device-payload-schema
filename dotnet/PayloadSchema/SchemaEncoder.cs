@@ -1011,6 +1011,25 @@ public static class SchemaEncoder
 
             switch (field.Type)
             {
+                // The word-ordered spellings: least significant 16-bit unit first, each
+                // unit big-endian, and `endian` plays no part (PS-271, PS-272). There was
+                // no case for either, so both fell to the throw at the end of this method
+                // and a schema carrying one could be decoded and not re-encoded
+                // (CR-2026-028).
+                //
+                // Deliberately not passing `endian`, for the reason the decoder gives:
+                // honouring it would make u32le16 with endian little a second spelling of
+                // little-endian u32.
+                case FieldType.U32LE16 or FieldType.S32LE16:
+                {
+                    long raw = RequireNumber(field, value);
+                    long combined = raw < 0 ? raw + 0x100000000L : raw;
+                    combined &= 0xFFFFFFFFL;
+                    var wordOrdered = new List<byte>();
+                    wordOrdered.AddRange(Helpers.EncodeUint((ulong)(combined & 0xFFFF), 2, "big"));
+                    wordOrdered.AddRange(Helpers.EncodeUint((ulong)(combined >> 16), 2, "big"));
+                    return wordOrdered.ToArray();
+                }
                 case FieldType.U8 or FieldType.U16 or FieldType.U24 or FieldType.U32
                         or FieldType.U64:
                 {

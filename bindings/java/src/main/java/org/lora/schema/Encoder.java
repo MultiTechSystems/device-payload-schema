@@ -923,6 +923,31 @@ final class Encoder {
             return encodeEnum(field, value);
         }
 
+        // The word-ordered spellings: least significant 16-bit unit first, each unit
+        // big-endian, and `endian` plays no part (PS-271, PS-272). Both are in
+        // FieldType.isInteger(), so without this they fell through to the plain integer
+        // path below and were written as an ordinary four-byte value in the schema's byte
+        // order - the right length, the wrong order, and no error to say so. The decoder
+        // has always read them the word-ordered way, so every such field re-encoded to
+        // bytes it would not decode back (CR-2026-028).
+        //
+        // Deliberately not consulting `endian`, for the reason the decoder gives:
+        // honouring it would make u32le16 with endian little a second spelling of
+        // little-endian u32.
+        if (type == FieldType.U32LE16 || type == FieldType.S32LE16) {
+            Long raw = asLong(value);
+            if (raw == null) {
+                throw new SchemaException.EncodeException("field '" + field.getName()
+                        + "': expected a number, got " + describeValue(value));
+            }
+            long combined = raw < 0 ? raw + 0x100000000L : raw;
+            combined &= 0xFFFFFFFFL;
+            ByteBuf wordOrdered = new ByteBuf();
+            wordOrdered.write(writeInt(combined & 0xFFFF, 2, false, false));
+            wordOrdered.write(writeInt(combined >>> 16, 2, false, false));
+            return wordOrdered.toArray();
+        }
+
         if (type.isInteger()) {
             Long raw = asLong(value);
             if (raw == null) {
