@@ -53,7 +53,7 @@ class CorpusEncodeRoundTripTest {
     // round-trips: `plain fixed` rises from 58 to 59 and the total to 1161.
     // CR-2026-031's name_from var-mismatch fixture round-trips here too, so
     // `plain fixed` rises from 59 to 61 and the total to 1163.
-    private static final int ENCODE_FLOOR_TOTAL = 1163;
+    private static final int ENCODE_FLOOR_TOTAL = 1166;
 
     /**
      * Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -62,7 +62,7 @@ class CorpusEncodeRoundTripTest {
     private static final Map<String, Integer> ENCODE_FLOOR_BY_SHAPE = Map.of(
             "tlv", 900,
             "flagged", 135,
-            "plain fixed", 61,
+            "plain fixed", 64,
             "match", 44,
             "byte_group", 17,
             "repeat", 6);
