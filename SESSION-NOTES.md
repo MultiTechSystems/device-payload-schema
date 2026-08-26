@@ -13,7 +13,7 @@ started running ahead of them:
 | Repository | State |
 |---|---|
 | `la-payload-schema` | `main` @ `e8f8eda`; CR-2026-013/014/036 merged; only branch |
-| `la-integration-layer` | `master` @ `6bf80b7`; 6 CRs implemented, 2 open; only branch |
+| `la-integration-layer` | `master` @ `d6b0156`; 7 CRs implemented, 1 open; only branch |
 
 **That GitLab server does not accept push options, and there is no `glab` or API token on
 this machine**, so every merge request has to be opened in a browser. `git push` prints the
@@ -179,7 +179,7 @@ of twelve, because the five found were the five whose names are not ordinary wor
 reasons, so a name-match reported "documented" for keys nothing described. **Check whether
 the construct is described, not whether its key names occur.**
 
-**LA-IL - six CRs implemented, IL-132 to IL-162.** Five were submitted and then
+**LA-IL - seven CRs implemented, IL-132 to IL-162.** Five were submitted and then
 implemented the same day: CRT-2026-003 (Modbus register allocation - field order undefined
 and no address pinning, so two conforming implementations could allocate different maps;
 now declaration order, append-only, and the map emitted as an artifact that is also an
@@ -192,6 +192,31 @@ unified on resolve-or-reject), 007 (the Sparkplug `NOT_AVAILABLE` row specified 
 removed its carrier in the same cell, and "Not in DBIRTH" breaks the alias binding; now
 Present with `is_null`, and the appendix stops publishing six fabricated zeros including a
 battery at 0.0 V).
+
+**CRT-2026-002 landed last**, and it is the one with outside corroboration. The guide
+modelled every decoded value as a WoT property carrying `readOnly` and `observable`, which
+describes an interaction no consumer can perform: a property is read on demand and a
+LoRaWAN device cannot be polled. The affordance now follows the endpoint rather than the
+value - no endpoint means events carrying their schema under `data` (IL-052), a served
+endpoint such as a Modbus register map means properties with `readproperty` forms, because
+there the Integration Layer is answering rather than the device (IL-154). A downlink-only
+field is not an event at all (IL-155), and a writable field may be an action, so a
+bidirectional field is both (IL-156).
+
+Two smaller things it corrected are worth remembering. The Thing Description versus Thing
+Model rule keyed off `device_eui`; the real distinction is whether the document names an
+endpoint, so it keys off the protocol binding now with `device_eui` as the separate input
+that populates `id` (IL-157). And the guide's *downlink* example was demonstrating the
+property model this CR removes - an example can carry a defect the prose no longer states.
+
+**The corroboration is what makes this one different from the other six.** The
+eclipse-thingweb reference implementation reached the same conclusion independently: its
+LoRaWAN converter models uplinks as events, giving this reason in its own docstring, a
+generated Thing Description carries six events and no properties, and a Thing Description
+declaring `properties` is **rejected outright** with a migration message naming `events`,
+`data` and the `subscribeevent` ops. Before this CR our guide described output that
+converter refuses. Checking `td-tools` is what turned an assertion in the CR into evidence,
+and it is worth doing again whenever a CR claims upstream agreement.
 
 CRT-2026-008 came out of implementing them. Eight identifiers were declared in bold inside
 the mapping guides while the clause introducing those guides declared them non-normative,
@@ -232,7 +257,8 @@ specification text, which is exactly where a submitted CR's proposals are not.
 ### What today cost, in mistakes
 
 **Seven, and the pattern is the same one this file has recorded all along: measuring
-against a model instead of against the artifact.** No running total is kept across sessions - one
+against a model instead of against the artifact.** No running total is kept across sessions
+- one
 was, it went stale, and the section below on measurement explains why.
 
 1. **The cross-reference fix was wrong on the first attempt, by one, and my own checker
@@ -267,13 +293,9 @@ was, it went stale, and the section below on measurement explains why.
 
 ### Where to pick up
 
-**CRT-2026-002 is the one to implement next.** It is unblocked: its modifications to
-IL-050 to IL-052 are legitimate - those are live requirements in the WoT TD guide, not
-withdrawn ones - and CRT-2026-008 made that guide binding for an implementation claiming the
-format, so its requirements will actually bind. The evidence also arrived: the events
-refactor has landed in eclipse-thingweb upstream, whose LoRaWAN converter models uplinks as
-events and **rejects a Thing Description declaring `properties` outright**. Our `wot-td.md`
-still describes output that converter refuses.
+**CRP-2026-001 is the only CR still open**, and CRT-2026-008 put it in a better position
+than it was written in: a mapping guide's requirements now bind whoever claims that format,
+which is the mechanism a peer-integration-platform target needs.
 
 CRT-2026-003's open question is narrower than it was. CRT-2026-008 removed the "and both
 conform" half for any implementation claiming Modbus; whether allocation *also* belonged in
