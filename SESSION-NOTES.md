@@ -24,7 +24,7 @@ Green as of the last run:
 
 | | |
 |---|---|
-| Python | **2819** passed / 4 skipped |
+| Python | **2838** passed / 4 skipped |
 | Go | `go vet` + `go test -count=1` clean |
 | Java | BUILD SUCCESS, 46 tests |
 | C# | 92/92 |
@@ -32,17 +32,29 @@ Green as of the last run:
 | `encode-round-trip.py` | 1166 of 1242, **0 unexplained** |
 | `make test-c` | 3 C test binaries pass; corpus harness **491 of 491 attempted, 0 differ** |
 | `make bench-c` | C 8.5M decodes/s against Python 40K on a 15-field `flagged` frame |
+| `make check-floors` | all **32** floors sit exactly at their own implementation's actual |
 | validate-devices / validate-examples / selftest / score-check / docs-index-check | pass |
 
-Corpus 1229 -> 1253. Decode floors 1193 -> 1239. Encode round-trip: reference 1131 ->
-1166, Go 1144 -> 1173, Java 1143 -> 1163, C# 1144 -> 1164.
+Corpus 1229 -> 1253. Decode floors 1193 -> 1242. Encode round-trip: reference 1131 ->
+1166, Go 1144 -> 1176, Java 1143 -> 1166, C# 1144 -> 1167.
 
-**The decode and encode floors were not raised by CR-2026-036 and should be.** Actual
-decode is 1242 against a floor of 1239, and reference encode round-trip is 1166 against
-`FLOOR_TOTAL = 1163` - three vectors of headroom in each that nothing locks in. Earlier CRs
-raised the floors in the same change that raised the counts; this one added the fixture and
-did not. A one-line change per floor, and the reason to bother is that an edit which starts
-losing those three vectors would pass.
+**All 32 floors are at their actuals, and `make check-floors` is how you know.** Reading
+them by hand is how they go wrong: they live in seven files across four languages in four
+syntaxes, and the mistake was made twice in one day - a claim that Go's TLV encode beat the
+reference, repeated across four pull requests, and later a claim that the `tlv` floor was
+loose at "900 against an actual of 910", which was Python's floor read next to Go's actual
+with both exactly at their own. The tool prints each floor beside the actual *its own
+implementation* reaches and differences nothing across them.
+
+Two exit behaviours, because the directions are not equivalent. A floor **above** its actual
+is a regression - the ratchet asserts something untrue - and always fails. A floor **below**
+its actual is a judgement, since headroom can be deliberate, so it is reported and `--loose`
+enforces it. `make check-floors-python` is instant; the full run drives four Docker
+toolchains and is deliberately not in `ci`.
+
+Go's tlv floor is 910, Python's and Java's are 900, C#'s is 901 - each at its own actual,
+because each harness buckets schemas its own way. **Those four numbers are not comparable,
+and treating them as one is the specific error the tool exists to prevent.**
 
 **The next work on C is the interpreter, and the two biggest items are `transform` (26
 schemas) and `bitfield_string` (24).** CR-2026-035 corrected this paragraph, which said the
@@ -219,8 +231,8 @@ specification text, which is exactly where a submitted CR's proposals are not.
 
 ### What today cost, in mistakes
 
-**Six, and the pattern is the same one this file has recorded all along: measuring against
-a model instead of against the artifact.** No running total is kept across sessions - one
+**Seven, and the pattern is the same one this file has recorded all along: measuring
+against a model instead of against the artifact.** No running total is kept across sessions - one
 was, it went stale, and the section below on measurement explains why.
 
 1. **The cross-reference fix was wrong on the first attempt, by one, and my own checker
@@ -247,6 +259,11 @@ was, it went stale, and the section below on measurement explains why.
 6. **I allocated four identifiers over a submitted CR's proposals**, by taking the next
    number after the highest in the specification text - which is the one place a pending
    proposal is guaranteed not to be. The checker reserves them now.
+7. **These notes were merged two minutes before the work they described as outstanding.**
+   The floor item read "were not raised and should be" while the pull request raising them
+   was already open, so the first thing the next session would have read was a task already
+   done. Notes describing outstanding work go stale the moment it lands, and merging them
+   first guarantees it - write them last.
 
 ### Where to pick up
 
