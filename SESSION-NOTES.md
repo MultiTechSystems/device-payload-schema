@@ -1,27 +1,48 @@
 # Session Notes
 
-## RESUME HERE - state at the end of 2026-08-25
+## RESUME HERE - state at the end of 2026-08-26
 
-**Everything is merged to `master` and pushed.** Nineteen CRs landed as PRs #12-#29;
-`master` is the only remote branch and the working tree is clean. `master` is
-branch-protected, so every change goes through `gh pr create --base master` - a direct
-push is refused with `GH013`.
+**Everything is merged and pushed, in three repositories.** The prototype landed CRs as
+PRs #12-#38; `master` is the only remote branch there and the working tree is clean.
+`master` is branch-protected, so every change goes through `gh pr create --base master` -
+a direct push is refused with `GH013`.
+
+The two specification repositories are on GitLab and matter now, because the prototype has
+started running ahead of them:
+
+| Repository | State |
+|---|---|
+| `la-payload-schema` | `main` @ `e8f8eda`; CR-2026-013/014/036 merged; only branch |
+| `la-integration-layer` | `master` @ `6bf80b7`; 6 CRs implemented, 2 open; only branch |
+
+**That GitLab server does not accept push options, and there is no `glab` or API token on
+this machine**, so every merge request has to be opened in a browser. `git push` prints the
+URL; that is the whole mechanism. A `GITLAB_TOKEN` in the environment would remove the
+manual step.
 
 Green as of the last run:
 
 | | |
 |---|---|
-| Python | **2706** passed / 4 skipped |
-| Go | `go vet` + `go test -count=1` clean; decode 1239/1239, encode 1173 ordered / 1164 plain |
-| Java | BUILD SUCCESS, 46 tests; decode 1239 of 1250 |
-| C# | 92/92; decode 1239 of 1250, encode 1164 |
-| `vector-verdicts.py` | **1250 vectors, interpreted 100%, generated 100%, 0 disagreements** |
-| `encode-round-trip.py` | 1163 of 1239, **0 unexplained** |
-| `make test-c` | 3 C test binaries pass; corpus harness **488 of 488 attempted, 0 differ** |
+| Python | **2819** passed / 4 skipped |
+| Go | `go vet` + `go test -count=1` clean |
+| Java | BUILD SUCCESS, 46 tests |
+| C# | 92/92 |
+| `vector-verdicts.py` | **1253 vectors, interpreted 100%, generated 100%, 0 disagreements** |
+| `encode-round-trip.py` | 1166 of 1242, **0 unexplained** |
+| `make test-c` | 3 C test binaries pass; corpus harness **491 of 491 attempted, 0 differ** |
+| `make bench-c` | C 8.5M decodes/s against Python 40K on a 15-field `flagged` frame |
 | validate-devices / validate-examples / selftest / score-check / docs-index-check | pass |
 
-Corpus 1229 -> 1250. Decode floors 1193 -> 1239. Encode round-trip: reference 1131 ->
-1163, Go 1144 -> 1173, Java 1143 -> 1163, C# 1144 -> 1164.
+Corpus 1229 -> 1253. Decode floors 1193 -> 1239. Encode round-trip: reference 1131 ->
+1166, Go 1144 -> 1173, Java 1143 -> 1163, C# 1144 -> 1164.
+
+**The decode and encode floors were not raised by CR-2026-036 and should be.** Actual
+decode is 1242 against a floor of 1239, and reference encode round-trip is 1166 against
+`FLOOR_TOTAL = 1163` - three vectors of headroom in each that nothing locks in. Earlier CRs
+raised the floors in the same change that raised the counts; this one added the fixture and
+did not. A one-line change per floor, and the reason to bother is that an edit which starts
+losing those three vectors would pass.
 
 **The next work on C is the interpreter, and the two biggest items are `transform` (26
 schemas) and `bitfield_string` (24).** CR-2026-035 corrected this paragraph, which said the
@@ -87,6 +108,169 @@ a plausible *success* story repeated across four PRs before anyone checked it; s
 were instrument bugs in the C harness that would have been reported as C defects had the
 harness not been built before the feature. The section deliberately carries no running
 total - keeping one correct is the same trap it describes.
+
+## Session: Aug 26, 2026
+
+Three PRs in the prototype (#36, #37, #38), four merges in LA-PS, and two in LA-IL. The
+centre of gravity moved to the specifications: most of the day was spent finding that the
+prototype had implemented things no clause described, and that two specifications
+contradicted themselves in ways nothing checked.
+
+### The prototype
+
+**Three dangling documentation links (#36).** Two of them - `C-INTERPRETER-STATUS.md` and
+`TS013-COMPLIANCE-ANALYSIS.md` - had never resolved: both files exist only on the
+unrelated-history `internal-docs` root commit (`a4d7ec3`), which was never merged, so the
+links were dead the day they were written. Both now point at `SPEC-IMPLEMENTATION-STATUS.md`.
+The third was off by one directory level: `../la-payload-schema/...` written as if relative
+to the repository root, from a file in `docs/`. `tests/test_docs_links.py` parametrises over
+every relative link and asserts the in-repo ones resolve - 37 links. Links leaving the
+repository are checked for shape, not existence, because the companion spec repo is absent
+in a fresh clone.
+
+**CR-2026-035 - the stale `flagged` claim, and what it was covering (#37).** The benchmark
+section justified a simplified C frame by saying the interpreter "has no `flagged` or
+`polynomial` support"; CR-2026-034 had given it `flagged`. Fixing one sentence exposed three
+larger things. *The numbers were not reproducible* - nothing committed produced the 20.5M
+ops/s in that table, `src/benchmark.cpp` times an interpreter it defines inline and never
+includes `schema_interpreter.h`, and a third figure of 32M sat three sections above with no
+derivation. `tools/benchmark-c-interpreter.py` and `make bench-c` regenerate both rows, and
+build the C schema from the same YAML the Python reference reads by reusing the corpus
+harness's `schema_source()` - a transcribed C copy can drift, and then the two rows are not
+measuring the same work. *Ten cells of the feature matrix were wrong about C*, crediting
+`polynomial`, five transform operations, all three `repeat` rows and `ports` - each zero
+occurrences in the header - and denying `var`, which `flagged` reads its mask through. The
+test re-derives that column from the header rather than hardcoding the corrections.
+
+**CR-2026-036 - the `metadata` enrichment block (#38).** Paired with the LA-PS side below.
+Three defects, all silent, found by probing the implementation in order to describe it: an
+`include` entry named for a decoded field *overwrote* it, so a `u16` decoding to 60 came
+back as an ISO timestamp string; `mode: rx_time` with no `recvTime` emitted
+`measured_at: null`, indistinguishable from a device that reported nothing; and four
+swallowed exceptions produced neither a value nor a warning. `validate_schema.py` validates
+the block for the first time, and `vector-verdicts.py` now passes a vector's
+`input_metadata` to `decode`, without which no vector could reach the block on any path.
+
+### The specifications
+
+**LA-PS.** CR-2026-013 and CR-2026-014 were sitting *uncommitted* on a stale branch six days
+old while the prototype had implemented, tested and shipped both. `expected_warnings`
+(PS-305 to PS-308) existed only as working-tree text - `git grep expected_warnings HEAD`
+returned nothing on any branch - while nine prototype files depended on it. Committed,
+merged, and the CR-013 branch merged too; it had been pushed and never opened as an MR.
+
+Then CR-2026-036 described the `metadata` block, `encode_formula` and `input_metadata` -
+PS-309 to PS-325, four of them OPTIONAL. **The count in the original report was wrong and
+the reason is worth keeping.** It said five undocumented keys; the real answer was a block
+of twelve, because the five found were the five whose names are not ordinary words. `mode`,
+`source`, `field`, `name` and `format` all appear in the specification for unrelated
+reasons, so a name-match reported "documented" for keys nothing described. **Check whether
+the construct is described, not whether its key names occur.**
+
+**LA-IL - six CRs implemented, IL-132 to IL-162.** Five were submitted and then
+implemented the same day: CRT-2026-003 (Modbus register allocation - field order undefined
+and no address pinning, so two conforming implementations could allocate different maps;
+now declaration order, append-only, and the map emitted as an artifact that is also an
+input), 004 (the conflict window presented an optimistic write indistinguishable from a
+confirmed one; now PENDING / CONFIRMED / REJECTED / EXPIRED with a bounded window), 005
+(IL-002 "MUST NOT modify decoded field values" against IL-021 "MUST transform the value",
+both unqualified; resolved by separating the quantity a value denotes from its
+representation), 006 (three requirements, two answers on an unresolved variable reference;
+unified on resolve-or-reject), 007 (the Sparkplug `NOT_AVAILABLE` row specified a state and
+removed its carrier in the same cell, and "Not in DBIRTH" breaks the alias binding; now
+Present with `is_null`, and the appendix stops publishing six fabricated zeros including a
+battery at 0.0 V).
+
+CRT-2026-008 came out of implementing them. Eight identifiers were declared in bold inside
+the mapping guides while the clause introducing those guides declared them non-normative,
+and a bold marker is how this specification declares a requirement - so one statement had
+to go. **Kept and scoped rather than removed:** a guide requirement is normative for an
+implementation that claims that target format. That needed no new machinery, because IL-119
+already permits a per-format claim and requires it to name its formats. Removing the markers
+was coherent but would leave the per-format behaviour that decides interoperability outside
+conformance, which is the same hole CRT-2026-003 had to fix by lifting Modbus allocation
+into the specification.
+
+Two open: CRP-2026-001 (peer integration platforms) and CRT-2026-002 (WoT affordance model).
+CRT-2026-002 is ready - its new requirements are IL-154 to IL-157, reserved and pending, and
+CRT-2026-008 made the guide it edits binding for anyone claiming WoT TD.
+
+**And an editorial pass that found more than it expected.** All 24 section
+cross-references were wrong, by two or three, because they were written against section
+*file* prefixes while pandoc numbers by position. Each now carries the section's name,
+which is what makes it checkable, and `tools/check-section-refs.py` validates it. The 27
+identifier gaps are recorded rather than renumbered, and `tools/check-requirement-ids.py`
+requires every future gap to be accounted for. Both are wired into `quality-all`.
+
+**The first version of that record was wrong, and the correction is the more useful
+entry.** I recorded seven identifiers as withdrawn by the restructure on the evidence that
+they were absent from `spec/`. They are declared, in bold, in the companion guides - the
+restructure moved the requirement text *and kept the identifiers*. Nothing was withdrawn;
+the twenty gaps are IL-079 and IL-081 to IL-099, never allocated. Concluding a withdrawal
+from an absence, without looking where the content had gone, is the same error as measuring
+against a model rather than the artifact, in a new costume. The corrected section also
+carries a single machine-readable line for the tool to read, because the prose parser I
+wrote first read the correction and counted the seven it says are *not* withdrawn.
+
+The checker also now reserves identifiers a submitted CR proposes, and `--next` reports the
+first number free of both. That gap let me allocate IL-132 to IL-135 to CRT-2026-003 while
+CRT-2026-002 had already proposed them - I took the next number after the highest in the
+specification text, which is exactly where a submitted CR's proposals are not.
+
+### What today cost, in mistakes
+
+**Six, and the pattern is the same one this file has recorded all along: measuring against
+a model instead of against the artifact.** No running total is kept across sessions - one
+was, it went stale, and the section below on measurement explains why.
+
+1. **The cross-reference fix was wrong on the first attempt, by one, and my own checker
+   agreed with it.** I assumed one included file equals one numbered section.
+   `01c-references.md` opens with `## Normative References` at level 2, so it folds into the
+   preceding section instead of becoming one, and every number I wrote was one too high from
+   that file onward. The checker was built on the same assumption, so it validated the error.
+   Only building the PDF and reading its table of contents against the text caught it.
+2. **Then I verified the corrected numbers against a PDF dated five weeks earlier.** Its
+   structure happened to match, so the numbers were right and the verification was worthless.
+   Rebuilt and re-checked.
+3. **Two guard simulations reported success against guards that were working.** Neither
+   `sed` created the condition claimed - one removed a bold marker while the identifier
+   remained in the conformance tables, the other never matched. Rewritten against the real
+   files, both fire. A guard proven by a test that does not exercise it is not proven.
+4. **A spec edit broke the PDF build in a way pandoc cannot report.** An unescaped
+   underscore in a table cell fails with `! Missing $ inserted.` and no line reference, even
+   inside a code span, because the table filters re-process cell content and lose the
+   escaping. `pandoc -t latex` on the same file succeeds. Now in that repo's STYLE-GUIDE.md,
+   because it is invisible until a full build fails.
+5. **I concluded seven identifiers had been withdrawn because they were absent from
+   `spec/`.** They were in the companion guides all along, which that scan could not see. An
+   absence is evidence about where you looked, not about what exists.
+6. **I allocated four identifiers over a submitted CR's proposals**, by taking the next
+   number after the highest in the specification text - which is the one place a pending
+   proposal is guaranteed not to be. The checker reserves them now.
+
+### Where to pick up
+
+**CRT-2026-002 is the one to implement next.** It is unblocked: its modifications to
+IL-050 to IL-052 are legitimate - those are live requirements in the WoT TD guide, not
+withdrawn ones - and CRT-2026-008 made that guide binding for an implementation claiming the
+format, so its requirements will actually bind. The evidence also arrived: the events
+refactor has landed in eclipse-thingweb upstream, whose LoRaWAN converter models uplinks as
+events and **rejects a Thing Description declaring `properties` outright**. Our `wot-td.md`
+still describes output that converter refuses.
+
+CRT-2026-003's open question is narrower than it was. CRT-2026-008 removed the "and both
+conform" half for any implementation claiming Modbus; whether allocation *also* belonged in
+the specification, which is already merged, is now a judgement about that one rule rather
+than a hole in the conformance model.
+
+CRP-2026-001 has an implementation to point at that did not exist when it was written:
+`MultiTech-Systems/edgex-device-lorawan`, an EdgeX device service with uplink and downlink
+live-verified against an MTCAP3 running mPower 7.4.1, and §4b quality and reachability
+working. That is the strongest evidence in the set for a peer-integration-platform target.
+
+On the prototype side the C interpreter's position is unchanged from yesterday - `transform`
+(26 schemas) and `bitfield_string` (24) are its own gaps, not the harness's - and
+`make bench-c` now gives a reproducible baseline to measure any change against.
 
 ## Session: Aug 25, 2026
 
