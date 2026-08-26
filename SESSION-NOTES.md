@@ -13,7 +13,7 @@ started running ahead of them:
 | Repository | State |
 |---|---|
 | `la-payload-schema` | `main` @ `e8f8eda`; CR-2026-013/014/036 merged; only branch |
-| `la-integration-layer` | `master` @ `1a32345`; 7 CRs awaiting AWG review; only branch |
+| `la-integration-layer` | `master` @ `6bf80b7`; 6 CRs implemented, 2 open; only branch |
 
 **That GitLab server does not accept push options, and there is no `glab` or API token on
 this machine**, so every merge request has to be opened in a browser. `git push` prints the
@@ -167,27 +167,61 @@ of twelve, because the five found were the five whose names are not ordinary wor
 reasons, so a name-match reported "documented" for keys nothing described. **Check whether
 the construct is described, not whether its key names occur.**
 
-**LA-IL - seven CRs submitted.** CRT-2026-003 (Modbus register allocation: field order
-undefined, no address pinning, and the rule now sits in a non-normative companion guide),
-004 (the conflict window presents an optimistic write indistinguishable from a confirmed
-one), 005 (IL-002 "MUST NOT modify decoded field values" against IL-021 "MUST transform the
-value", both unqualified), 006 (three requirements, two answers, on an unresolved variable
-reference), 007 (the Sparkplug `NOT_AVAILABLE` row specifies a state and removes its carrier
-in the same cell, and "Not in DBIRTH" breaks the alias contract).
+**LA-IL - six CRs implemented, IL-132 to IL-162.** Five were submitted and then
+implemented the same day: CRT-2026-003 (Modbus register allocation - field order undefined
+and no address pinning, so two conforming implementations could allocate different maps;
+now declaration order, append-only, and the map emitted as an artifact that is also an
+input), 004 (the conflict window presented an optimistic write indistinguishable from a
+confirmed one; now PENDING / CONFIRMED / REJECTED / EXPIRED with a bounded window), 005
+(IL-002 "MUST NOT modify decoded field values" against IL-021 "MUST transform the value",
+both unqualified; resolved by separating the quantity a value denotes from its
+representation), 006 (three requirements, two answers on an unresolved variable reference;
+unified on resolve-or-reject), 007 (the Sparkplug `NOT_AVAILABLE` row specified a state and
+removed its carrier in the same cell, and "Not in DBIRTH" breaks the alias binding; now
+Present with `is_null`, and the appendix stops publishing six fabricated zeros including a
+battery at 0.0 V).
+
+CRT-2026-008 came out of implementing them. Eight identifiers were declared in bold inside
+the mapping guides while the clause introducing those guides declared them non-normative,
+and a bold marker is how this specification declares a requirement - so one statement had
+to go. **Kept and scoped rather than removed:** a guide requirement is normative for an
+implementation that claims that target format. That needed no new machinery, because IL-119
+already permits a per-format claim and requires it to name its formats. Removing the markers
+was coherent but would leave the per-format behaviour that decides interoperability outside
+conformance, which is the same hole CRT-2026-003 had to fix by lifting Modbus allocation
+into the specification.
+
+Two open: CRP-2026-001 (peer integration platforms) and CRT-2026-002 (WoT affordance model).
+CRT-2026-002 is ready - its new requirements are IL-154 to IL-157, reserved and pending, and
+CRT-2026-008 made the guide it edits binding for anyone claiming WoT TD.
 
 **And an editorial pass that found more than it expected.** All 24 section
 cross-references were wrong, by two or three, because they were written against section
 *file* prefixes while pandoc numbers by position. Each now carries the section's name,
 which is what makes it checkable, and `tools/check-section-refs.py` validates it. The 27
-identifier gaps are recorded as retired rather than renumbered - seven withdrawn by one
-restructure with their requirements traced into the mapping guides, twenty never allocated -
-and `tools/check-requirement-ids.py` requires every future gap to be accounted for. Both are
-wired into `quality-all`.
+identifier gaps are recorded rather than renumbered, and `tools/check-requirement-ids.py`
+requires every future gap to be accounted for. Both are wired into `quality-all`.
+
+**The first version of that record was wrong, and the correction is the more useful
+entry.** I recorded seven identifiers as withdrawn by the restructure on the evidence that
+they were absent from `spec/`. They are declared, in bold, in the companion guides - the
+restructure moved the requirement text *and kept the identifiers*. Nothing was withdrawn;
+the twenty gaps are IL-079 and IL-081 to IL-099, never allocated. Concluding a withdrawal
+from an absence, without looking where the content had gone, is the same error as measuring
+against a model rather than the artifact, in a new costume. The corrected section also
+carries a single machine-readable line for the tool to read, because the prose parser I
+wrote first read the correction and counted the seven it says are *not* withdrawn.
+
+The checker also now reserves identifiers a submitted CR proposes, and `--next` reports the
+first number free of both. That gap let me allocate IL-132 to IL-135 to CRT-2026-003 while
+CRT-2026-002 had already proposed them - I took the next number after the highest in the
+specification text, which is exactly where a submitted CR's proposals are not.
 
 ### What today cost, in mistakes
 
-**Four, and the pattern is the same one this file has recorded all along: measuring against
-a model instead of against the artifact.**
+**Six, and the pattern is the same one this file has recorded all along: measuring against
+a model instead of against the artifact.** No running total is kept across sessions - one
+was, it went stale, and the section below on measurement explains why.
 
 1. **The cross-reference fix was wrong on the first attempt, by one, and my own checker
    agreed with it.** I assumed one included file equals one numbered section.
@@ -207,13 +241,32 @@ a model instead of against the artifact.**
    inside a code span, because the table filters re-process cell content and lose the
    escaping. `pandoc -t latex` on the same file succeeds. Now in that repo's STYLE-GUIDE.md,
    because it is invisible until a full build fails.
+5. **I concluded seven identifiers had been withdrawn because they were absent from
+   `spec/`.** They were in the companion guides all along, which that scan could not see. An
+   absence is evidence about where you looked, not about what exists.
+6. **I allocated four identifiers over a submitted CR's proposals**, by taking the next
+   number after the highest in the specification text - which is the one place a pending
+   proposal is guaranteed not to be. The checker reserves them now.
 
 ### Where to pick up
 
-**CRT-2026-003 is the one to settle first**, and not only because it is the
-highest-consequence. It asks whether protocol mappings should be normative at all, and the
-answers to 004 and 007 both depend on that, since each proposes a requirement that lands in
-a mapping guide.
+**CRT-2026-002 is the one to implement next.** It is unblocked: its modifications to
+IL-050 to IL-052 are legitimate - those are live requirements in the WoT TD guide, not
+withdrawn ones - and CRT-2026-008 made that guide binding for an implementation claiming the
+format, so its requirements will actually bind. The evidence also arrived: the events
+refactor has landed in eclipse-thingweb upstream, whose LoRaWAN converter models uplinks as
+events and **rejects a Thing Description declaring `properties` outright**. Our `wot-td.md`
+still describes output that converter refuses.
+
+CRT-2026-003's open question is narrower than it was. CRT-2026-008 removed the "and both
+conform" half for any implementation claiming Modbus; whether allocation *also* belonged in
+the specification, which is already merged, is now a judgement about that one rule rather
+than a hole in the conformance model.
+
+CRP-2026-001 has an implementation to point at that did not exist when it was written:
+`MultiTech-Systems/edgex-device-lorawan`, an EdgeX device service with uplink and downlink
+live-verified against an MTCAP3 running mPower 7.4.1, and §4b quality and reachability
+working. That is the strongest evidence in the set for a peer-integration-platform target.
 
 On the prototype side the C interpreter's position is unchanged from yesterday - `transform`
 (26 schemas) and `bitfield_string` (24) are its own gaps, not the harness's - and
