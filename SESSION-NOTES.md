@@ -23,11 +23,18 @@ Green as of the last run:
 Corpus 1229 -> 1250. Decode floors 1193 -> 1239. Encode round-trip: reference 1131 ->
 1163, Go 1144 -> 1173, Java 1143 -> 1163, C# 1144 -> 1164.
 
-**The next work on C is widening the harness, not the interpreter.** `tlv` (CR-2026-033)
-and `flagged` (CR-2026-034) are done, and `repeat` is the last construct C has no field type
-for - 3 schemas, worth less than the two harness limits above it: `transform` (26 schemas)
-and `bitfield_string` (24). Whether C supports either is unknown *because the harness cannot
-build them*, which is exactly the question the harness exists to answer.
+**The next work on C is the interpreter, and the two biggest items are `transform` (26
+schemas) and `bitfield_string` (24).** CR-2026-035 corrected this paragraph, which said the
+opposite: it called those two *harness* limits whose status was "unknown because the harness
+cannot build them". They are the interpreter's own gaps, and the status was never unknown -
+`grep -cw transform include/schema_interpreter.h` is 0, as are `polynomial`, `sqrt`, `pow`,
+`log`, `floor`, `clamp`, `compute` and `version_string`. The harness cannot build them
+because there is nothing in C to build them with.
+
+The misreading came from the skip reasons themselves, which said "not built by the struct
+API" - true, but it reads as a limit on the harness, and I took it that way and wrote it
+down. They now say "the interpreter has no transform pipeline". After `transform` and
+`bitfield_string`, `repeat` is the last construct with no field type at all (3 schemas).
 
 Whatever is done next: **do not add a construct to C without extending
 `tools/c-corpus-harness.py` in the same change**, or the new field type lands uncovered - and

@@ -44,7 +44,7 @@ Generated inventory of this repository: what lives where, what each document cov
 | [`SCHEMA-DEVELOPMENT-GUIDE.md`](SCHEMA-DEVELOPMENT-GUIDE.md) | Best practices for creating complete, validated payload schemas. | 194 |
 | [`SCHEMA-LANGUAGE-REFERENCE.md`](SCHEMA-LANGUAGE-REFERENCE.md) | Complete reference for the LoRa Alliance Payload Schema specification (v0.5.0). | 1152 |
 | [`SESSION-NOTES-2026-02-25.md`](SESSION-NOTES-2026-02-25.md) | The prototype tests were using a custom REQ-xxx-yyy numbering scheme that was inconsistent with the... | 78 |
-| [`SPEC-IMPLEMENTATION-STATUS.md`](SPEC-IMPLEMENTATION-STATUS.md) | Feature support matrix across reference implementations. | 439 |
+| [`SPEC-IMPLEMENTATION-STATUS.md`](SPEC-IMPLEMENTATION-STATUS.md) | Feature support matrix across reference implementations. | 457 |
 | [`TTN-CODEC-CONVERSION-GUIDE.md`](TTN-CODEC-CONVERSION-GUIDE.md) | Complete guide for AI-assisted conversion of The Things Network device repository codecs to Payload... | 549 |
 | [`WOT-REFERENCE.md`](WOT-REFERENCE.md) | Reference for mapping LoRaWAN payload schema fields to W3C WoT Thing Descriptions and SAREF... | 316 |
 
@@ -77,6 +77,7 @@ Generated inventory of this repository: what lives where, what each document cov
 | `tools/analyze_codec.js` | Load and execute codec in sandbox |
 | `tools/analyze_ttn_codec.py` | TTN Codec Analyzer |
 | `tools/batch_analyze_codecs.py` | Batch analyze TTN Device Repository codecs. |
+| `tools/benchmark-c-interpreter.py` | Benchmark the C interpreter against the Python reference on one corpus schema. |
 | `tools/benchmark_all.py` | Comprehensive codec benchmark |
 | `tools/benchmark_codecs.js` | Default test configuration |
 | `tools/binary_schema.py` | Binary Schema Encoder/Decoder for OTA Schema Transfer |
