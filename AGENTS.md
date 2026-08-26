@@ -494,6 +494,13 @@ encoder has one run packer, wired through its field list, its construct bodies a
 `flagged` path, and `test_cr_2026_024_encode_bitfield_parity.py` reads all three sources
 so a removal shows up there rather than as a puzzling floor break.
 
+**`make check-floors` reads the floors so you do not have to.** There are 32 across four
+languages in four syntaxes, and it prints each beside the actual *its own implementation*
+reaches. Use it before claiming a floor is loose or tight. The rule below was broken a
+second time without it - `tlv` reported loose at "900 against an actual of 910", which was
+Python's floor next to Go's actual, both exactly at their own. `check-floors-python` is
+instant; the full run drives four Docker toolchains.
+
 **Never compare implementations by their per-shape round-trip counts.** Those counts are
 ratchets for one harness over time. Across implementations they are not comparable: each
 harness buckets schemas its own way — `tests/test_encode_round_trip.py` serialises to JSON

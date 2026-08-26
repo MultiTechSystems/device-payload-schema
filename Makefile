@@ -63,7 +63,7 @@ PROTO_C = $(patsubst proto/%.proto,src/%.pb.c,$(PROTO_SRCS))
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra -O3 -Iinclude
 
-.PHONY: all clean test test-c selftest validate-devices ci docs-index docs-index-check score-check validate-examples hypothesis coverage proto help codec benchmark bench-c generate-codec pytest pytest-cov coverage-html coverage-all validate fuzz fuzz-quick fuzz-hypothesis fuzz-go fuzz-c test-go test-java test-dotnet test-languages
+.PHONY: all clean test test-c selftest validate-devices ci docs-index docs-index-check score-check validate-examples hypothesis coverage proto help codec benchmark bench-c check-floors check-floors-python generate-codec pytest pytest-cov coverage-html coverage-all validate fuzz fuzz-quick fuzz-hypothesis fuzz-go fuzz-c test-go test-java test-dotnet test-languages
 
 all: $(TEST_BIN)
 
@@ -264,6 +264,18 @@ benchmark: $(BENCHMARK_BIN)
 # interpreter defined inline in src/benchmark.cpp and never includes that header - the
 # figures in docs/SPEC-IMPLEMENTATION-STATUS.md come from this target, not that one.
 # Not in `ci`: it is a measurement, and its numbers depend on the machine.
+# Prints every corpus floor beside the actual its own implementation reaches. Floors are
+# ratchets living in seven places across four languages, and reading them by eye is how they
+# go wrong - twice, most recently reporting `tlv` loose at "900 against an actual of 910",
+# which was Python's floor next to Go's actual with both exactly at their own.
+# `check-floors` covers all four and runs their toolchains in Docker; `check-floors-python`
+# needs nothing and is the one worth running while editing.
+check-floors: $(VENV)/bin/activate
+	$(PYTHON) tools/check-floors.py
+
+check-floors-python: $(VENV)/bin/activate
+	$(PYTHON) tools/check-floors.py --python
+
 bench-c: $(VENV)/bin/activate
 	$(PYTHON) tools/benchmark-c-interpreter.py
 
