@@ -35,7 +35,7 @@ public class CorpusConformanceTests
     // fixtures pass everywhere and the full count is 1237.
     // CR-2026-031 added the name_from var-mismatch fixture, whose two vectors decode
     // everywhere, so the full count is 1239.
-    const int CorpusFloor = 1239;
+    const int CorpusFloor = 1242;
 
     readonly ITestOutputHelper _output;
 

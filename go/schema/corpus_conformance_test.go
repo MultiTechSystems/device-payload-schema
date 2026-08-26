@@ -38,7 +38,7 @@ import (
 // pass everywhere and the full count is 1237.
 // CR-2026-031 added the name_from var-mismatch fixture, whose two vectors decode
 // everywhere, so the full count is 1239.
-const corpusFloor = 1239
+const corpusFloor = 1242
 
 type corpusVector struct {
 	Name    string `yaml:"name"`
