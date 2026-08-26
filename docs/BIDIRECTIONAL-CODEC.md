@@ -363,6 +363,7 @@ void handle_downlink(const uint8_t* payload, int len) {
 
 ## See Also
 
-- [C-INTERPRETER-STATUS.md](C-INTERPRETER-STATUS.md) - Implementation status
-- [OTA-SCHEMA-TRANSFER.md](../la-payload-schema/docs/features/OTA-SCHEMA-TRANSFER.md) - Schema transfer protocol
+- [SPEC-IMPLEMENTATION-STATUS.md](SPEC-IMPLEMENTATION-STATUS.md) - Feature support per
+  implementation; see the `C (include/schema_interpreter.h)` section
+- [OTA-SCHEMA-TRANSFER.md](../../la-payload-schema/docs/features/OTA-SCHEMA-TRANSFER.md) - Schema transfer protocol
 - [Binary Schema Format](../tools/schema_binary.py) - Binary encoding tool
