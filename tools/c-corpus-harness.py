@@ -75,13 +75,25 @@ UNREACHABLE_KEYS = {
     "object": "no nested object support in this harness",
     "$ref": "no $ref splicing in this harness",
     "name_from": "no name template in C (fixed-size name buffers)",
-    "transform": "transform chain not built by the struct API",
-    "polynomial": "computed field not built by the struct API",
-    "compute": "computed field not built by the struct API",
-    "ref": "computed field not built by the struct API",
-    "guard": "guard not built by the struct API",
-    "parts": "bitfield_string/version_string not built by the struct API",
-    "encoding": "sign_magnitude/bcd/gray not built by the struct API",
+    # These say "the interpreter has none" rather than "not built by the struct API",
+    # which was the wording here and read as a limit on this harness. It is not: the
+    # header has no transform machinery at all - `transform`, `polynomial`, `sqrt`,
+    # `pow`, `log`, `floor`, `clamp` and `compute` are each zero occurrences in
+    # include/schema_interpreter.h, as are `version_string`, `sign_magnitude`, `bcd`
+    # and `gray`. The struct API cannot build them because there is nothing to build.
+    #
+    # The distinction is the whole point of this harness and the old wording inverted
+    # it: SESSION-NOTES.md concluded "the next work on C is widening the harness, not
+    # the interpreter" and named `transform` (26 schemas) and `bitfield_string` (24) as
+    # harness limits whose status was "unknown". They are the interpreter's largest
+    # gaps and their status was knowable by grep. CR-2026-035 corrected both.
+    "transform": "the interpreter has no transform pipeline",
+    "polynomial": "the interpreter has no transform pipeline (polynomial)",
+    "compute": "the interpreter has no computed fields",
+    "ref": "the interpreter has no computed fields (ref)",
+    "guard": "the interpreter has no guard",
+    "parts": "the interpreter has no bitfield_string/version_string",
+    "encoding": "the interpreter has no sign_magnitude/bcd/gray encodings",
     "var": "variables are only read by match, which this harness skips",
     # AGENTS.md records this one: a `default` on a lookup or enum is Python, Go, Java and
     # C# only, because the struct has no slot for it. Building such a field without its

@@ -1183,15 +1183,23 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   **The fixed-size limits are the real boundary, not an oversight.** `sizeof(schema_t)` is
   51 KB because every `field_def` carries `cases[16]` and `lookup[16]` unconditionally.
   Raising `SCHEMA_MAX_FIELDS` to fit mla20's 67 fields would put it past 110 KB, which
-  defeats the point of a firmware-tier interpreter. `repeat` is the last construct it has
-  no field type for, and at 3 schemas it is worth less than widening the harness to cover
-  `transform` (26) and `bitfield_string` (24).
+  defeats the point of a firmware-tier interpreter. Its largest *capability* gaps are
+  `transform` (26 schemas, and with it `polynomial`, `sqrt`, `pow`, `log`, `floor`,
+  `clamp`) and `bitfield_string`/`version_string` (24); `repeat` is the last construct with
+  no field type at all, at 3. This said the first two were worth "widening the harness to
+  cover", which was backwards - they are the interpreter's gaps, not the harness's, and
+  CR-2026-035 corrected it here, in SESSION-NOTES.md and in the harness's own skip
+  reasons, which had said "not built by the struct API" and were read as harness limits.
 
   Two things to keep straight when reading that report. **A skipped schema is not a passing
   one**, and **a harness limitation is not a C gap** - inline `match`, `byte_group`,
-  `object`, `$ref` and ports are named separately because C supports them and the harness
-  does not. Adding a construct to C without extending the harness would produce a feature
-  with no cross-check, which is why the TLV work is CR-2026-033 and not CR-2026-032.
+  `object` and `$ref` are named separately because C supports them and the harness does
+  not. Ports are the other way round and were listed here in error: the header says
+  outright that it has no port selection, so a port-based schema is a C gap. When in
+  doubt, grep the header before writing down which side a limit sits on - every
+  misattribution in this file and in SESSION-NOTES.md would have been caught by that.
+  Adding a construct to C without extending the harness would produce a feature with no
+  cross-check, which is why the TLV work is CR-2026-033 and not CR-2026-032.
 
   `src/test_comprehensive.c` is deliberately out of `make test-c`: 22 of its 160 assertions
   encode the pre-CR-2026-009 lookup and enum behaviour that PS-105/PS-269 changed, and its

@@ -63,7 +63,7 @@ PROTO_C = $(patsubst proto/%.proto,src/%.pb.c,$(PROTO_SRCS))
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra -O3 -Iinclude
 
-.PHONY: all clean test test-c selftest validate-devices ci docs-index docs-index-check score-check validate-examples hypothesis coverage proto help codec benchmark generate-codec pytest pytest-cov coverage-html coverage-all validate fuzz fuzz-quick fuzz-hypothesis fuzz-go fuzz-c test-go test-java test-dotnet test-languages
+.PHONY: all clean test test-c selftest validate-devices ci docs-index docs-index-check score-check validate-examples hypothesis coverage proto help codec benchmark bench-c generate-codec pytest pytest-cov coverage-html coverage-all validate fuzz fuzz-quick fuzz-hypothesis fuzz-go fuzz-c test-go test-java test-dotnet test-languages
 
 all: $(TEST_BIN)
 
@@ -258,6 +258,14 @@ $(BENCHMARK_BIN): src/benchmark.cpp include/env_sensor_codec.h | $(BUILD_DIR)
 
 benchmark: $(BENCHMARK_BIN)
 	$(BENCHMARK_BIN)
+
+# Benchmarks the runtime interpreter in include/schema_interpreter.h against the Python
+# reference on one corpus schema. Distinct from `benchmark` above, which times a small
+# interpreter defined inline in src/benchmark.cpp and never includes that header - the
+# figures in docs/SPEC-IMPLEMENTATION-STATUS.md come from this target, not that one.
+# Not in `ci`: it is a measurement, and its numbers depend on the machine.
+bench-c: $(VENV)/bin/activate
+	$(PYTHON) tools/benchmark-c-interpreter.py
 
 # Generate C codec from schema (old single-file generator)
 generate-codec:

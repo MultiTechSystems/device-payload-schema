@@ -79,12 +79,12 @@ ordinary-field path, disagreeing with its own enum path.
 
 | Feature | Python | Java | Go | C | JS |
 |---------|--------|------|-----|---|-----|
-| `sqrt` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `abs` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `pow` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `log` / `log10` | ✓ | - | ✓ | ✓ | ✓ |
-| `floor` / `ceiling` | ✓ | - | ✓ | ✓ | ✓ |
-| `clamp` | ✓ | - | ✓ | ✓ | ✓ |
+| `sqrt` | ✓ | ✓ | ✓ | - | ✓ |
+| `abs` | ✓ | ✓ | ✓ | - | ✓ |
+| `pow` | ✓ | ✓ | ✓ | - | ✓ |
+| `log` / `log10` | ✓ | - | ✓ | - | ✓ |
+| `floor` / `ceiling` | ✓ | - | ✓ | - | ✓ |
+| `clamp` | ✓ | - | ✓ | - | ✓ |
 | `round` | ✓ | - | ✓ | - | ✓ |
 
 ### Computed Fields
@@ -93,7 +93,7 @@ ordinary-field path, disagreeing with its own enum path.
 |---------|--------|------|-----|---|-----|
 | `type: number` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `ref: $field` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `polynomial` | ✓ | - | ✓ | ✓ | ✓ |
+| `polynomial` | ✓ | - | ✓ | - | ✓ |
 | `compute: {op, a, b}` | ✓ | - | ✓ | - | ✓ |
 | `guard` conditions | ✓ | - | ✓ | - | ✓ |
 
@@ -113,12 +113,12 @@ ordinary-field path, disagreeing with its own enum path.
 | Feature | Python | Java | Go | C | JS |
 |---------|--------|------|-----|---|-----|
 | `type: object` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `type: repeat` (count) | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `repeat` (count_field) | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `repeat` (until: end) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `type: repeat` (count) | ✓ | ✓ | ✓ | - | ✓ |
+| `repeat` (count_field) | ✓ | ✓ | ✓ | - | ✓ |
+| `repeat` (until: end) | ✓ | ✓ | ✓ | - | ✓ |
 | `definitions` / `use` | ✓ | - | ✓ | - | ✓ |
-| `ports` (fPort routing) | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `var` (variables) | ✓ | ✓ | ✓ | - | ✓ |
+| `ports` (fPort routing) | ✓ | ✓ | ✓ | - | ✓ |
+| `var` (variables) | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 ### Encodings
 
@@ -233,12 +233,18 @@ but report no quality object; the interpreters and the generated JS agree on it,
 
 **Embedded-optimized** - no dynamic allocation required.
 
-- Full decode support
 - Binary schema loading (no YAML)
 - Programmatic schema building
-- 32M msg/s throughput
-- Missing: complex computed fields, definitions
+- 8.5M decodes/s on a 15-field `flagged` frame - see Performance Benchmarks below,
+  and regenerate with `make bench-c` rather than trusting this figure
+- Decodes every construct the corpus needs except `repeat`, and has no `transform`
+  pipeline at all, so no `polynomial`, `sqrt`, `pow`, `log`, `floor`, `clamp`
+- Also missing: computed fields, `definitions` / `use`, `ports` (fPort routing)
+- Has `tlv` (CR-2026-033) and `flagged` (CR-2026-034); `unknown: raw` is not
+  representable because there is nowhere to put the captured bytes
 - No encode support (decode-only)
+- Measured against the corpus by `tools/c-corpus-harness.py`: 488 of 1239 vectors are
+  in schemas the struct API can build, and all 488 decode exactly as the corpus expects
 
 ### JavaScript (`tools/generate_ts013_codec.py` output)
 
@@ -317,20 +323,32 @@ Tested with DL-5TM schema (8 fields, flagged construct, polynomial transform).
 
 ### C Interpreter (AMD Ryzen 9 7950X3D)
 
-**Not comparable to the DL-5TM rows above** — the C interpreter has no `flagged` or
-`polynomial` support, so this uses a simpler 5-field frame (u8 protocol, u16 device
-id, s16 temperature with `div`, u8 humidity with `div`, u16 battery). The Python
-figure was measured on the same machine with the same schema and payload, so the two
-rows here are comparable to each other and to nothing else in this document.
+Regenerate with `make bench-c` (`tools/benchmark-c-interpreter.py`). Frame:
+`schemas/devices/decentlab/dl-lid.yaml`, vector `vendor_reference_2` — a 29-byte
+payload decoding to **15 fields**: three plain, then a two-group `flagged` covering
+twelve more, two of them scaled with `div`.
+
+**Still not comparable to the DL-5TM rows above**, but for one reason now rather than
+two. The C interpreter gained `flagged` in CR-2026-034, so the frame no longer avoids
+it; what it has no support for at all is `transform` and `polynomial`, which DL-5TM
+needs for two of its fields. Both rows below were measured on the same machine from
+the same schema file and the same payload, so they are comparable to each other and to
+nothing else in this document.
 
 | Implementation | Throughput | Latency |
 |----------------|------------|---------|
-| C interpreter (`include/schema_interpreter.h`) | 20.5M ops/s | 0.05 µs |
-| Python interpreter | 141K ops/s | 7.1 µs |
-| **Ratio** | **145x** | |
+| C interpreter (`include/schema_interpreter.h`) | 8.5M ops/s | 0.12 µs |
+| Python interpreter (`tools/schema_interpreter.py`) | 40K ops/s | 25 µs |
+| **Ratio** | **~210x** | |
 
-Stripped executable including the whole interpreter and the schema: **18.6 KB**
-(`gcc -O2 -Os`, header-only so everything inlines). That size and throughput are why
+Both figures time `decode` alone, with the schema built once outside the loop, so
+neither includes YAML parsing or schema construction. Across three runs C held
+8.4–8.6M ops/s and Python 39–41K, so the ratio is good to about ±5%; the table is
+rounded to match. The earlier numbers here (20.5M ops/s, 145x) were measured on a
+5-field frame with no `flagged`, and are not comparable to these.
+
+Stripped executable including the whole interpreter and the schema: **18.2 KB**
+(`cc -O2 -Os`, header-only so everything inlines). That size and throughput are why
 the C interpreter is a candidate for a full-featured embedded-Linux gateway decoder
 and not only for the MCU binary-schema path — see AGENTS.md for what it still lacks.
 
