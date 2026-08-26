@@ -1,0 +1,63 @@
+# CR-2026-036 / PS-309 to PS-325: a schema carrying a `metadata` block.
+#
+# What every implementation must agree on is the *payload*, which is why `expected` lists
+# only the two decoded fields. Enrichment is OPTIONAL (PS-309, PS-310): the Python
+# reference derives `received_at` and `measured_at` from `input_metadata` and the others
+# derive nothing, and both are conformant. Asserting the enriched keys here would fail
+# four conformant implementations, so the enrichment semantics are checked in
+# tests/test_cr_2026_036_metadata_enrichment.py instead.
+#
+# The fixture's job is PS-310 and PS-311: a schema with a `metadata` block MUST decode its
+# fields exactly as it would without one, and MUST NOT be rejected for carrying it.
+name: metadata_enrichment_conformance
+version: 1
+endian: big
+description: A metadata block must not disturb the payload decode (PS-310, PS-311)
+
+metadata:
+  include:
+    - name: received_at
+      source: $recvTime
+  timestamps:
+    # The device says how long ago it sampled; only the network knows when it arrived.
+    - name: measured_at
+      mode: elapsed_to_absolute
+      elapsed_field: seconds_ago
+      time_base: rx_time
+
+fields:
+  - name: seconds_ago
+    type: u16
+    unit: "s"
+  - name: temperature
+    type: s16
+    div: 10
+    unit: "C"
+
+test_vectors:
+  - name: sampled_a_minute_ago
+    description: Runtime context present; enrichment adds keys where supported
+    payload: "003c00eb"
+    input_metadata:
+      recvTime: "2026-08-26T12:00:00Z"
+    expected:
+      seconds_ago: 60
+      temperature: 23.5
+    expected_warnings: []
+
+  - name: negative_temperature
+    payload: "0000ff9c"
+    input_metadata:
+      recvTime: "2026-08-26T12:00:00Z"
+    expected:
+      seconds_ago: 0
+      temperature: -10.0
+    expected_warnings: []
+
+  - name: no_runtime_context
+    description: PS-312 - with no input_metadata the block is ignored entirely
+    payload: "003c00eb"
+    expected:
+      seconds_ago: 60
+      temperature: 23.5
+    expected_warnings: []
