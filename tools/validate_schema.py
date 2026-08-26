@@ -942,6 +942,46 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
             errors.append(f"'endian' must be 'big' or 'little', got '{schema['endian']}'")
     
     # Validate test vectors
+    # PS-315 to PS-317: the `metadata` enrichment block. Optional to support, but a
+    # schema that carries one must carry a well-formed one - nothing validated it before
+    # CR-2026-036, so `mode: elapsed_to_absolut` was accepted and silently derived nothing.
+    if 'metadata' in schema:
+        md = schema['metadata']
+        if not isinstance(md, dict):
+            errors.append("'metadata' must be an object")
+        else:
+            for i, inc in enumerate(md.get('include', []) or []):
+                path = f"metadata.include[{i}]"
+                if not isinstance(inc, dict):
+                    errors.append(f"{path}: must be an object")
+                    continue
+                for key in ('name', 'source'):          # PS-315
+                    if not inc.get(key):
+                        errors.append(f"{path}: missing required '{key}'")
+            # PS-316/PS-317: the mode, and the companion key each one needs.
+            NEEDS = {'subtract': ('offset_field',),
+                     'unix_epoch': ('field',),
+                     'iso8601': ('field',),
+                     'elapsed_to_absolute': ('elapsed_field', 'offset_field')}
+            MODES = ('rx_time',) + tuple(NEEDS)
+            for i, ts in enumerate(md.get('timestamps', []) or []):
+                path = f"metadata.timestamps[{i}]"
+                if not isinstance(ts, dict):
+                    errors.append(f"{path}: must be an object")
+                    continue
+                if not ts.get('name'):
+                    errors.append(f"{path}: missing required 'name'")
+                mode = ts.get('mode')
+                if mode is None:
+                    if ts.get('source') != '$recvTime':
+                        errors.append(f"{path}: missing required 'mode'")
+                elif mode not in MODES:
+                    errors.append(f"{path}: unknown mode '{mode}', expected one of "
+                                  f"{', '.join(MODES)}")
+                elif mode in NEEDS and not any(ts.get(k) for k in NEEDS[mode]):
+                    errors.append(f"{path}: mode '{mode}' requires "
+                                  f"{' or '.join(NEEDS[mode])}")
+
     if 'test_vectors' in schema:
         if not isinstance(schema['test_vectors'], list):
             errors.append("'test_vectors' must be an array")

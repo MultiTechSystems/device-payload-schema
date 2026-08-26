@@ -2422,7 +2422,8 @@ class SchemaInterpreter:
         # Metadata enrichment
         metadata_def = self.schema.get('metadata')
         if metadata_def and input_metadata is not None:
-            self._enrich_metadata(result.data, metadata_def, input_metadata)
+            self._enrich_metadata(result.data, metadata_def, input_metadata,
+                                  result.warnings)
         
         # Add quality dict to output if any quality flags were set
         if result.quality:
@@ -2464,76 +2465,104 @@ class SchemaInterpreter:
         return current
     
     def _enrich_metadata(self, data: Dict[str, Any], metadata_def: Dict[str, Any],
-                         input_meta: Dict[str, Any]) -> None:
-        """Enrich decoded data with network metadata from TS013 input."""
+                         input_meta: Dict[str, Any],
+                         warnings: Optional[List[str]] = None) -> None:
+        """Add runtime-context values to a decoded output. PS-309 to PS-320.
+
+        Enrichment runs after every field has been read and contributes no bytes, which
+        is what makes an implementation free to decline it entirely (PS-310, PS-311).
+
+        Two rules here were defects until CR-2026-036, and both were silent:
+
+        - **A decoded field wins a name collision** (PS-313). An `include` entry named
+          for a field already decoded from the payload used to replace it, so a `u16`
+          decoding to 60 came back as an ISO timestamp string.
+        - **An unresolved value omits its key** (PS-314). `mode: rx_time` with no
+          `recvTime` in the input used to write `None`, which no consumer can tell from
+          a device that reported nothing. Four swallowed exceptions did the same for a
+          malformed input, and reported nothing either way.
+        """
         from datetime import datetime, timedelta, timezone
-        
-        # Include mappings
+
+        warn = warnings if warnings is not None else []
+        # Every key present now came from the payload. PS-313 gives those precedence.
+        decoded = set(data)
+
+        def place(name: str, value: Any, what: str) -> None:
+            """Assign an enriched value, or say why it was not assigned."""
+            if name in decoded:
+                warn.append(f"metadata: '{name}' not added, a decoded field has that name")
+                return
+            if value is None:
+                warn.append(f"metadata: '{name}' omitted, {what} could not be resolved")
+                return
+            data[name] = value
+
+        def as_utc(iso: str) -> Optional[Any]:
+            try:
+                return datetime.fromisoformat(str(iso).replace('Z', '+00:00'))
+            except Exception:
+                return None
+
+        def stamp(dt) -> str:
+            return dt.strftime('%Y-%m-%dT%H:%M:%S.') + f'{dt.microsecond // 1000:03d}Z'
+
         for mapping in metadata_def.get('include', []):
-            name = mapping.get('name')
-            source = mapping.get('source')
+            name, source = mapping.get('name'), mapping.get('source')
             if name and source:
-                value = self._resolve_metadata_ref(source, input_meta)
-                if value is not None:
-                    data[name] = value
-        
-        # Timestamp enrichment
+                place(name, self._resolve_metadata_ref(source, input_meta), source)
+
         for ts in metadata_def.get('timestamps', []):
             name = ts.get('name', 'timestamp')
             mode = ts.get('mode')
-            
+
             if mode == 'rx_time' or ts.get('source') == '$recvTime':
-                data[name] = input_meta.get('recvTime')
-            
-            elif mode == 'subtract':
-                offset_field = ts.get('offset_field')
-                recv_time = input_meta.get('recvTime')
-                if recv_time and offset_field and offset_field in data:
-                    try:
-                        rx_dt = datetime.fromisoformat(recv_time.replace('Z', '+00:00'))
-                        offset_sec = data[offset_field]
-                        meas_dt = rx_dt - timedelta(seconds=offset_sec)
-                        data[name] = meas_dt.strftime('%Y-%m-%dT%H:%M:%S.') + \
-                            f'{meas_dt.microsecond // 1000:03d}Z'
-                    except Exception:
-                        pass
-            
-            elif mode == 'unix_epoch':
+                place(name, input_meta.get('recvTime'), 'the receive time')
+
+            elif mode == 'subtract' or mode == 'elapsed_to_absolute':
+                # PS-318: `offset_field` is the older spelling of `elapsed_field`.
+                field = (ts.get('offset_field') if mode == 'subtract'
+                         else (ts.get('elapsed_field') or ts.get('offset_field')))
+                # PS-319: the base defaults to the receive time.
+                base = ts.get('time_base', 'rx_time')
+                recv = input_meta.get('recvTime') if base == 'rx_time' else None
+                if not field:
+                    warn.append(f"metadata: '{name}' omitted, mode '{mode}' names no field")
+                    continue
+                if field not in data:
+                    place(name, None, f"field '{field}'")
+                    continue
+                rx_dt = as_utc(recv) if recv else None
+                if rx_dt is None:
+                    place(name, None, f"the {base} base")
+                    continue
+                try:
+                    place(name, stamp(rx_dt - timedelta(seconds=data[field])), field)
+                except Exception as exc:
+                    warn.append(f"metadata: '{name}' omitted, {field} is not a number "
+                                f"of seconds ({exc})")
+
+            elif mode in ('unix_epoch', 'iso8601'):
                 field = ts.get('field')
-                if field and field in data:
-                    try:
-                        dt = datetime.fromtimestamp(data[field], tz=timezone.utc)
-                        data[name] = dt.strftime('%Y-%m-%dT%H:%M:%S.') + \
-                            f'{dt.microsecond // 1000:03d}Z'
-                    except Exception:
-                        pass
-            
-            elif mode == 'iso8601':
-                # Format a raw epoch/offset field as ISO 8601 string
-                field = ts.get('field')
+                if not field:
+                    warn.append(f"metadata: '{name}' omitted, mode '{mode}' names no field")
+                    continue
+                if field not in data:
+                    place(name, None, f"field '{field}'")
+                    continue
                 fmt = ts.get('format', '%Y-%m-%dT%H:%M:%SZ')
-                if field and field in data:
-                    try:
-                        dt = datetime.fromtimestamp(data[field], tz=timezone.utc)
-                        data[name] = dt.strftime(fmt)
-                    except Exception:
-                        pass
-            
-            elif mode == 'elapsed_to_absolute':
-                # Convert elapsed seconds to absolute time: rx_time - elapsed
-                elapsed_field = ts.get('elapsed_field') or ts.get('offset_field')
-                time_base = ts.get('time_base', 'rx_time')
-                recv_time = input_meta.get('recvTime') if time_base == 'rx_time' else None
-                if recv_time and elapsed_field and elapsed_field in data:
-                    try:
-                        rx_dt = datetime.fromisoformat(recv_time.replace('Z', '+00:00'))
-                        offset_sec = data[elapsed_field]
-                        abs_dt = rx_dt - timedelta(seconds=offset_sec)
-                        data[name] = abs_dt.strftime('%Y-%m-%dT%H:%M:%S.') + \
-                            f'{abs_dt.microsecond // 1000:03d}Z'
-                    except Exception:
-                        pass
-    
+                try:
+                    # PS-320: derived times are UTC.
+                    dt = datetime.fromtimestamp(data[field], tz=timezone.utc)
+                    place(name, stamp(dt) if mode == 'unix_epoch' else dt.strftime(fmt),
+                          field)
+                except Exception as exc:
+                    warn.append(f"metadata: '{name}' omitted, {field} is not a Unix "
+                                f"timestamp ({exc})")
+
+            elif mode is not None:
+                warn.append(f"metadata: '{name}' omitted, unknown mode '{mode}'")
+
     def encode(self, data: Dict[str, Any], fPort: int = None,
                direction: str = None) -> EncodeResult:
         """

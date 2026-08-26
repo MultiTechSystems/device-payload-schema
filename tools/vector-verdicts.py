@@ -281,7 +281,11 @@ def run_interpreted(schema: dict, vectors: list) -> list:
             continue
         try:
             result = SchemaInterpreter(schema).decode(
-                vector_bytes(vector), fPort=vector_fport(vector)
+                vector_bytes(vector), fPort=vector_fport(vector),
+                # PS-324: a schema with a `metadata` block reads runtime context no
+                # payload can supply. Absent, PS-312 says the block is ignored, which is
+                # every vector in the corpus.
+                input_metadata=vector.get("input_metadata"),
             )
             if not result.success:
                 out.append((FAIL, "; ".join(result.errors)[:120]))
