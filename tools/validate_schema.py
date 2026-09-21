@@ -892,7 +892,7 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
         )
 
 
-    # Must have either 'fields' or 'ports' (or both)
+    # Must have either 'fields' or 'ports', and not both (PS-004)
     if 'fields' in schema:
         has_fields = True
         if not isinstance(schema['fields'], list):
@@ -911,10 +911,13 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
                 if pk != 'default':
                     try:
                         port_num = int(pk)
-                        if port_num < 1 or port_num > 255:
-                            errors.append(f"ports.{pk}: port number must be 1-255")
+                        # PS-018 is the LoRaWAN *application* port range. 0 is the MAC
+                        # port and 224-255 are reserved, so the FPort byte range is the
+                        # wrong bound even though it is the wider one.
+                        if port_num < 1 or port_num > 223:
+                            errors.append(f"ports.{pk}: port number must be 1-223 (PS-018)")
                     except ValueError:
-                        errors.append(f"ports.{pk}: key must be an integer (1-255) or 'default'")
+                        errors.append(f"ports.{pk}: key must be an integer (1-223) or 'default' (PS-018)")
                 
                 if not isinstance(port_def, dict):
                     errors.append(f"ports.{pk}: must be an object")
@@ -928,8 +931,12 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
                     known_names = []
                     validate_field_list(port_def['fields'], f"ports.{pk}.fields", errors, known_names)
     
-    if not has_fields and not has_ports:
-        errors.append("Schema must have either 'fields' or 'ports' (or both)")
+    if has_fields and has_ports:
+        # Carrying both is not additive: the interpreter resolves the port entry and
+        # decodes its fields alone, so the top-level ones are dropped without a word.
+        errors.append("Schema must have 'fields' or 'ports', not both (PS-004)")
+    elif not has_fields and not has_ports:
+        errors.append("Schema must have either 'fields' or 'ports' (PS-004)")
     
     # Validate top-level fields
     if has_fields and isinstance(schema.get('fields'), list) and len(schema['fields']) > 0:
