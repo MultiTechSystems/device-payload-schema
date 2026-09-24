@@ -66,9 +66,9 @@ def anchor_at(name):
 
 FLOORS = {
     REPO_ROOT / "bindings" / "java" / "src" / "test" / "java" / "org" / "lora" / "schema"
-    / "CorpusEncodeRoundTripTest.java": ("ENCODE_FLOOR_TOTAL", 1160, '"flagged", 135,'),
+    / "CorpusEncodeRoundTripTest.java": ("ENCODE_FLOOR_TOTAL", 1160, r'"flagged",\s*(\d+)'),
     REPO_ROOT / "dotnet" / "PayloadSchema.Tests" / "CorpusEncodeRoundTripTests.cs":
-        ("EncodeFloorTotal", 1161, '["flagged"] = 135,'),
+        ("EncodeFloorTotal", 1161, r'\["flagged"\]\s*=\s*(\d+),'),
 }
 
 
@@ -130,6 +130,25 @@ class TestTheJavaFailureModeIsRecorded:
         )
 
 
+def _word_ordered_only_feeds_computes(schema):
+    """True when every word-ordered field is internal, so only computes report it."""
+    names = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if str(node.get("type", "")) in ("u32le16", "s32le16"):
+                names.append(str(node.get("name", "")))
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(schema.get("fields") or [])
+    walk(schema.get("ports") or {})
+    return bool(names) and all(n.startswith("_") for n in names)
+
+
 class TestTheWitnessesRoundTripOnTheReference:
     """The other three are held by their floors; this pins the fixtures."""
 
@@ -142,6 +161,11 @@ class TestTheWitnessesRoundTripOnTheReference:
             try:
                 schema = yaml.safe_load(text)
             except yaml.YAMLError:
+                continue
+            if _word_ordered_only_feeds_computes(schema):
+                # dl-zn2 reads its two words as `_`-prefixed u32le16 and reports their
+                # difference through a `compute`, which no encoder can invert. It
+                # witnesses the decode, not this round trip.
                 continue
             for vector in schema.get("test_vectors") or []:
                 if vector.get("payload"):
@@ -165,8 +189,10 @@ class TestTheWitnessesRoundTripOnTheReference:
 class TestTheFloorsMovedWithTheFix:
     @pytest.mark.parametrize("path", sorted(FLOORS, key=str))
     def test_the_flagged_floor_is_raised(self, path):
+        # A bound, not the literal: the Milesight wrong-decode pass raised it to 145.
         _, _, shape = FLOORS[path]
-        assert shape in path.read_text(), f"{path.name}: expected {shape}"
+        found = re.search(shape, path.read_text())
+        assert found and int(found.group(1)) >= 135, (path.name, found and found.group(1))
 
     @pytest.mark.parametrize("path", sorted(FLOORS, key=str))
     def test_the_total_floor_is_at_least_what_this_cr_reached(self, path):
