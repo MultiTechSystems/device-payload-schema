@@ -88,7 +88,19 @@ def is_float(t: str) -> bool:
     return clean.startswith('f')
 
 
-def field_endian_override(t: str) -> Optional[str]:
+def field_endian_override(t: str, field: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """The byte order this field reads in, or None to use the schema's.
+
+    A field's own `endian:` wins. The generator only ever derived byte order from a
+    `le_`/`be_` type prefix, so a schema using the key generated a codec that read the
+    schema's order instead - the interpreter and the generated codec then disagreed on
+    the same schema, which is the one divergence `tools/crossvalidate_js_json.py` exists
+    to keep at zero.
+    """
+    if field is not None:
+        declared = field.get('endian')
+        if declared in ('big', 'little'):
+            return declared
     if t.startswith('be_'):
         return 'big'
     if t.startswith('le_'):
@@ -1042,7 +1054,7 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append(f'{i}  // TODO: unsupported base type for {ftype}')
                 return lines
 
-            eo = field_endian_override(base_type)
+            eo = field_endian_override(base_type, field)
             endian_arg = f'"{eo}"' if eo else 'endian'
             mask = (1 << bit_width) - 1
             # PS-060: a bitfield extraction does not advance the read position unless
@@ -1132,7 +1144,7 @@ function writeS(buf, pos, size, value, endian) {
         # float
         if is_float(ftype):
             sz = type_size(ftype) or 4
-            eo = field_endian_override(ftype)
+            eo = field_endian_override(ftype, field)
             endian_arg = f'"{eo}"' if eo else 'endian'
             if sz == 4:
                 lines.append(f'{i}  var {js_name} = readF32(buf, pos, {endian_arg});')
@@ -1157,7 +1169,7 @@ function writeS(buf, pos, size, value, endian) {
 
         signed = is_signed(ftype)
         read_fn = 'readS' if signed else 'readU'
-        eo = field_endian_override(ftype)
+        eo = field_endian_override(ftype, field)
         endian_arg = f'"{eo}"' if eo else 'endian'
 
         if ftype in ('u32le16', 's32le16'):
@@ -1653,7 +1665,7 @@ function writeS(buf, pos, size, value, endian) {
             return lines
 
         signed = is_signed(ftype)
-        eo = field_endian_override(ftype)
+        eo = field_endian_override(ftype, field)
         endian_arg = f'"{eo}"' if eo else 'endian'
         write_fn = 'writeS' if signed else 'writeU'
 

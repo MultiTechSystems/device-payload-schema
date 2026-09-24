@@ -26,6 +26,23 @@ public enum FieldType {
     // Legacy names
     BYTE, UINT, SINT, BINT, FLOAT16, FLOAT32, FLOAT64;
 
+    /**
+     * The field type a schema's `type:` string names.
+     *
+     * <p>An unrecognised spelling is a schema error, not a U8. This used to return U8 for
+     * anything it did not list, which made every typo and every unimplemented type a silent
+     * one-byte read that misaligned all following fields and still reported success - the
+     * u24 comment below records one instance that was found and fixed without fixing the
+     * cause. Go, C# and the Python interpreter all reject an unknown type; Java alone
+     * absorbed it.
+     *
+     * <p>An absent or empty type is still U8: a field carrying a construct instead
+     * (`tlv:`, `match:`, `flagged:`, `byte_group:`, `$ref`) declares no `type:` at all, and
+     * the decoder dispatches on the construct before consulting this.
+     *
+     * <p>A `u8[lo:hi]` bit range never reaches here - {@link Schema} matches the bracket
+     * form before calling this, because this method cannot recognise it.
+     */
     public static FieldType fromString(String type) {
         if (type == null || type.isEmpty()) {
             return U8;
@@ -68,7 +85,7 @@ public enum FieldType {
             case "uint" -> UINT;
             case "sint" -> SINT;
             case "bint" -> BINT;
-            default -> U8;
+            default -> throw new SchemaException("Unknown field type: " + type);
         };
     }
 

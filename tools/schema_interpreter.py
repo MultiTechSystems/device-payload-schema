@@ -775,8 +775,43 @@ class SchemaInterpreter:
         # advance on reaching bit 0 went with CR-2026-006.
         return value, pos, False
     
-    def _decode_field(self, field_def: Dict[str, Any], buf: bytes, 
+    # A field's own `endian:` overrides the schema's for that field's read only. The
+    # constructs are excluded because their members re-derive the default themselves:
+    # Go and Java both compute an effective endian per field from the *context* endian,
+    # so a parent's override does not reach a nested member there, and this must not be
+    # the one implementation where it does.
+    _ENDIAN_OPAQUE_TYPES = ('object', 'repeat', 'match', 'switch')
+
+    def _decode_field(self, field_def: Dict[str, Any], buf: bytes,
                       pos: int) -> Tuple[Any, int]:
+        """Decode a single field, honouring a field-level `endian:` override (PS-053).
+
+        The override was parsed by Go, Java, C# and the C interpreter and silently
+        ignored here: every read site consults ``self.endian``, which is schema-level,
+        so a field declaring `endian: little` under a big-endian schema decoded
+        big-endian and nothing reported it. The reference implementation was the only
+        one of the five that got it wrong, and it is the surface `td-tools` imports.
+        """
+        endian_override = field_def.get('endian')
+        if (endian_override is None
+                or field_def.get('type', 'u8') in self._ENDIAN_OPAQUE_TYPES):
+            return self._decode_field_inner(field_def, buf, pos)
+
+        try:
+            override = Endian(endian_override)
+        except ValueError:
+            raise ValueError(
+                f"field 'endian' must be 'big' or 'little', got {endian_override!r}"
+            )
+        saved = self.endian
+        self.endian = override
+        try:
+            return self._decode_field_inner(field_def, buf, pos)
+        finally:
+            self.endian = saved
+
+    def _decode_field_inner(self, field_def: Dict[str, Any], buf: bytes,
+                            pos: int) -> Tuple[Any, int]:
         """Decode a single field from buffer."""
         field_type = field_def.get('type', 'u8')
         consume = field_def.get('consume', None)
@@ -3357,6 +3392,30 @@ class SchemaInterpreter:
         return int(round(value))
     
     def _encode_field(self, field_def: Dict[str, Any], value: Any) -> bytes:
+        """Encode a single field value, honouring a field-level `endian:` override.
+
+        The mirror of the decode override. Without it a schema using the key round-trips
+        to different bytes than it decoded from, which is the defect the round-trip
+        suite exists to catch.
+        """
+        endian_override = field_def.get('endian')
+        if (endian_override is not None
+                and field_def.get('type', 'u8') not in self._ENDIAN_OPAQUE_TYPES):
+            try:
+                override = Endian(endian_override)
+            except ValueError:
+                raise ValueError(
+                    f"field 'endian' must be 'big' or 'little', got {endian_override!r}"
+                )
+            saved = self.endian
+            self.endian = override
+            try:
+                return self._encode_field_inner(field_def, value)
+            finally:
+                self.endian = saved
+        return self._encode_field_inner(field_def, value)
+
+    def _encode_field_inner(self, field_def: Dict[str, Any], value: Any) -> bytes:
         """Encode a single field value."""
         field_type = field_def.get('type', 'u8')
         
