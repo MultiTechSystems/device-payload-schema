@@ -30,8 +30,8 @@ re-measured from the code on 2026-09-24** with a one-construct probe per row in 
 paths. It replaced a table that was wrong throughout; the ∅ (silently ignored) and ⚠
 cells there are the work list, and it should be re-probed rather than hand-edited.
 
-**Where the work stands.** The specification side is ahead of the prototype: CR-2026-037
-to -055 sit in `la-payload-schema/change-requests/submitted/`. Corpus-wide analysis of
+**Where the work stands.** The specification side is ahead of the prototype: CR-2026-038
+to -056 sit in `la-payload-schema/change-requests/submitted/`. Corpus-wide analysis of
 third-party codecs is kept outside this repository and does not belong in it.
 
 Open items:
