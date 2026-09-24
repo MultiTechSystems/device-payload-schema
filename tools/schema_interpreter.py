@@ -3938,6 +3938,47 @@ def encode_payload(schema: Dict[str, Any], data: Dict[str, Any]) -> bytes:
     return result.payload
 
 
+def _cli(argv: List[str]) -> int:
+    """``decode <schema.yaml> <hex> [--fport N]``: print the result as JSON.
+
+    The documentation had shown this command for as long as it existed while the
+    script only ran its demo, so every documented invocation printed the demo's
+    output and ignored its arguments.
+    """
+    import argparse
+    import json
+
+    import yaml
+
+    parser = argparse.ArgumentParser(
+        prog='schema_interpreter.py',
+        description='Decode a payload with a Payload Schema (reference interpreter).')
+    sub = parser.add_subparsers(dest='command', required=True)
+    dec = sub.add_parser('decode', help='decode a hex payload')
+    dec.add_argument('schema', help='schema YAML or JSON file')
+    dec.add_argument('payload', help='payload as hex; spaces are ignored')
+    dec.add_argument('--fport', type=int, default=None, help='LoRaWAN FPort')
+    args = parser.parse_args(argv)
+
+    with open(args.schema, encoding='utf-8') as handle:
+        schema = yaml.safe_load(handle)
+    payload = bytes.fromhex(args.payload.replace(' ', ''))
+    result = SchemaInterpreter(schema).decode(payload, fPort=args.fport)
+    print(json.dumps({
+        'success': result.success,
+        'data': result.data,
+        'errors': result.errors,
+        'warnings': result.warnings,
+    }, indent=2, default=lambda v: v.hex() if isinstance(v, (bytes, bytearray))
+       else str(v)))
+    return 0 if result.success else 1
+
+
+if __name__ == '__main__':
+    import sys
+    if len(sys.argv) > 1:
+        sys.exit(_cli(sys.argv[1:]))
+
 if __name__ == '__main__':
     # Demo
     print("=== Schema Interpreter Demo ===\n")
