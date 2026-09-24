@@ -115,14 +115,24 @@ class TestTheTwoFailureDirections:
         assert "sits exactly at its own implementation's actual" in out
 
     def test_a_floor_below_actual_is_reported_but_does_not_fail(self, tmp_path):
-        """Loose is a judgement, not a defect: leaving headroom can be deliberate."""
+        """Loose is a judgement, not a defect: leaving headroom can be deliberate.
+
+        The lowered floor is derived from the declared one rather than written as a
+        literal, so the assertion is about the gap being reported and not about a
+        running total. Pinning both the floor and the "N unlocked" it implies made this
+        test fail the moment the corpus grew by a vector, which is the trap AGENTS.md
+        names for CR-specific tests and which applies here for the same reason.
+        """
         target = REPO_ROOT / "tests" / "test_encode_round_trip.py"
         original = target.read_text()
+        declared = int(re.search(r"FLOOR_TOTAL = (\d+)", original).group(1))
+        gap = 6
         try:
-            target.write_text(re.sub(r"FLOOR_TOTAL = \d+", "FLOOR_TOTAL = 1160", original))
+            target.write_text(re.sub(r"FLOOR_TOTAL = \d+",
+                                     f"FLOOR_TOTAL = {declared - gap}", original))
             code, out = self._run()
             assert code == 0, out
-            assert "loose" in out and "6 unlocked" in out
+            assert "loose" in out and f"{gap} unlocked" in out
             code_strict, _ = self._run("--loose")
             assert code_strict == 1
         finally:

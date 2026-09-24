@@ -497,6 +497,15 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                 f"{', '.join(repr(k) for k in field_constructs[:-1])} or "
                 f"{field_constructs[-1]!r}")
 
+        # A field-level `endian:` is honoured by all five implementations, so a value
+        # outside the two it can take is a silent wrong byte order rather than a typo
+        # anyone notices. Only the schema-level key was checked here; the field-level
+        # one was described nowhere and validated nowhere.
+        if 'endian' in fld and fld['endian'] not in ('big', 'little'):
+            errors.append(
+                f"{path}[{i}]{f' ({name})' if name else ''}: field 'endian' must be "
+                f"'big' or 'little', got {fld['endian']!r}")
+
         # PS-301 to PS-304: the three modes do materially different things in five
         # implementations, and all five fall back to `skip` on a value they do not
         # recognise. A typo therefore silently chose the mode that abandons the rest of

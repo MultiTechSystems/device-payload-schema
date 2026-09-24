@@ -131,7 +131,13 @@ def field_source(field, schema_endian):
     if not name:
         return None, "field has no name"
 
-    endian = "ENDIAN_LITTLE" if schema_endian == "little" else "ENDIAN_BIG"
+    # A field's own `endian:` wins over the schema's. The C interpreter has carried
+    # this since it had a field struct (`field_def_t.endian`, applied in
+    # schema_interpreter.h), but this harness only ever passed the schema-level value,
+    # so field-endian.yaml failed here and read as a C gap when C decodes it correctly.
+    # Which side a limit sits on is the whole point of this report.
+    field_endian = field.get("endian") or schema_endian
+    endian = "ENDIAN_LITTLE" if field_endian == "little" else "ENDIAN_BIG"
     lines = []
 
     match = BIT_RANGE.match(ftype)

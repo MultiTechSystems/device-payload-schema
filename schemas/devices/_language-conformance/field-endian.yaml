@@ -1,0 +1,43 @@
+# A field-level `endian:` overrides the schema's byte order for that field alone.
+#
+# Go, Java, C# and the C interpreter all parsed and honoured this key. The Python
+# reference parsed nothing: every read site consults the schema-level `self.endian`,
+# so `endian: little` on a field decoded big-endian and nothing reported it - the
+# reference implementation was the only one of five that got it wrong, and it is the
+# surface td-tools imports. Four-to-one divergences do not announce themselves, so
+# the construct gets a fixture rather than a comment.
+#
+# The override applies to the field's own read and does not reach the members of a
+# nested construct, which re-derive the schema default themselves. That is what Go and
+# Java do, and it is why this fixture keeps the override on scalars only - a fixture
+# asserting the cascade would pin behaviour no other implementation has.
+#
+# The nested constructs are deliberately not named above. The Go, Java and C# encode
+# harnesses pick a schema's shape bucket by scanning its raw YAML for a construct name,
+# and the iterating one is matched without a trailing colon - so naming it in a COMMENT
+# filed this schema, which has no construct at all, under that shape in three languages
+# while Python filed it under plain fixed. The per-shape floors are only meaningful if a
+# schema's bucket reflects its fields, so prose here avoids the bare names.
+#
+# Payload 0102 0102 0102 under a big-endian schema: the middle field is the only one
+# that reads 0x0201. It round-trips, so the encode side is asserted too - without
+# that an implementation could honour the key on the way in and not on the way out.
+name: probe_field_endian
+endian: big
+fields:
+- name: be_default
+  type: u16
+- name: le_override
+  type: u16
+  endian: little
+- name: be_override
+  type: u16
+  endian: big
+test_vectors:
+- name: field_endian_override
+  payload: '010201020102'
+  source: generated
+  expected:
+    be_default: 258
+    le_override: 513
+    be_override: 258

@@ -494,6 +494,61 @@ encoder has one run packer, wired through its field list, its construct bodies a
 `flagged` path, and `test_cr_2026_024_encode_bitfield_parity.py` reads all three sources
 so a removal shows up there rather than as a puzzling floor break.
 
+**The per-implementation vector counts in the two tables above are stale.** They say
+1193/1131/1137; `make check-floors` reports decode 1243 and re-encode 1167 (Python, Java),
+1177 (Go), 1168 (C#) as of the field-endian work below. Read the tool, not the tables.
+
+**A field's own `endian:` is honoured by all five implementations, and was ignored by the
+reference alone.** Go, Java, C# and C all parsed and applied it; `tools/schema_interpreter.py`
+consulted only the schema-level `self.endian` at every read site, so a field declaring
+`endian: little` under a big-endian schema decoded big-endian and reported success. Four-to-one,
+silent, on the surface `td-tools` imports. `_decode_field`/`_encode_field` now wrap the
+inner dispatch with the override; `_language-conformance/field-endian.yaml` holds all five
+to it and `tests/test_field_endian.py` covers what a fixture cannot.
+
+Three things that fell out of it, each worth knowing before touching byte order again:
+
+- **The override does not reach the members of a nested construct.** Go and Java derive
+  each field's effective order from the *context*, so a parent's declaration does not
+  cascade. Python matches that deliberately (`_ENDIAN_OPAQUE_TYPES`); a cascade is
+  defensible language design and would have made the reference the only one doing it.
+- **`u32le16`/`s32le16` remain untouched by it** (PS-272). The type fixes both orders, and
+  honouring `endian` there would make it a second spelling of little-endian `u32`.
+- **The TS013 generator had the same gap and the fixture found it immediately.**
+  `field_endian_override()` derived byte order from a `le_`/`be_` *type prefix* only, so a
+  schema using the key generated a codec that disagreed with the interpreter. It now
+  prefers the field's key. `tools/vector-verdicts.py` is back to 1254/1254 on both paths.
+
+**A `_language-conformance` fixture's COMMENTS change its shape bucket in three languages.**
+The Go, Java and C# encode harnesses classify a schema by scanning its raw YAML for a
+construct name, and the iterating one is matched without a trailing colon - so a prose
+mention of it in a comment filed `field-endian.yaml`, which has no construct at all, under
+that shape in three languages while Python filed it under `plain fixed`. The per-shape
+floors only mean anything if a schema's bucket reflects its fields. Keep construct names
+out of fixture prose, or fix the classifiers.
+
+**An unknown `type:` is an error in all four YAML implementations now; Java read it as one
+byte.** `FieldType.fromString` returned `U8` for anything it did not list, so a typo, or a
+type the binding had not implemented, read a single byte, returned success, and shifted
+every following field. Measured before the fix: Go `unknown field type: totally_bogus`, C#
+`Unknown field type`, Python `Unknown type: totally_bogus`, Java `{v=1, w=2}` and no error.
+It is why Java appeared to support the `le_`/`be_` prefixes - it had simply never rejected
+anything. Two constraints on the fix, both pinned by `UnknownFieldTypeTest`:
+
+- **The bracket bit range must be matched before `fromString`**, which cannot parse it.
+  Getting that order wrong turns every bitfield in the corpus into a parse failure.
+- **An absent or empty `type:` must stay `U8`.** A field carrying a construct instead
+  (`tlv:`, `match:`, `flagged:`, `byte_group:`, `$ref`) declares no type at all.
+
+No corpus vector could catch either defect: the corpus contains only spellings Java already
+knew, and `type: array` - the one unknown spelling in the tree - lives in `schemas/library/`,
+which the runners never walk.
+
+**`tools/c-corpus-harness.py` passed only the schema-level endian**, so `field-endian.yaml`
+failed there and read as a C gap when the C interpreter decodes it correctly
+(`field_def_t.endian`). Fixed in the harness; C is 492/492 attempted. This is the third time
+a harness limit has been written down as an interpreter limit - grep the header first.
+
 **`make check-floors` reads the floors so you do not have to.** There are 32 across four
 languages in four syntaxes, and it prints each beside the actual *its own implementation*
 reaches. Use it before claiming a floor is loose or tight. The rule below was broken a
