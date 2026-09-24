@@ -16,20 +16,35 @@ fields:
       groups:
         - bit: 0
           fields:
-            # The vendor reads this as x[0] + x[1] * 65536: two 16-bit words,
-            # low word first, so those four bytes are not a big-endian u32 and
-            # cannot be read as one field. Reading only the low word also left the
-            # high word unconsumed, misaligning every group after it.
-            - name: dendrometer_a_position
+            # The group is four 16-bit words. The vendor reads two word-ordered
+            # values from them, x[0] + x[1] * 65536 and x[2] + x[3] * 65536: low word
+            # first, so neither is a big-endian u32 (PS-271/PS-272). Reading only
+            # x[2] for the second value left x[3] unconsumed and misaligned the
+            # battery group after it.
+            - name: _a_raw
               type: u32le16
+            - name: dendrometer_a_position
+              type: number
+              ref: $_a_raw
+              # ((a / 8388608) - 1) * 20000 == a * (20000 / 8388608) - 20000
               transform:
                 - mult: 0.002384185791015625
                 - add: -20000
               unit: "µm"
+            - name: _b_raw
+              type: u32le16
             - name: dendrometer_b_position
-              type: u16
+              type: number
+              # (a / 8388608 - b / 8388608) * 20000 == (a - b) * (20000 / 8388608).
+              # 8388608 is 2^23 and 20000 / 2^23 is exact in binary, so both forms
+              # are exact for any pair of 32-bit words.
+              compute:
+                op: sub
+                a: $_a_raw
+                b: $_b_raw
+              transform:
+                - mult: 0.002384185791015625
               unit: "µm"
-              # formula: ((x[0] + x[1]*65536) / 8388608 - (x[2] + x[3]*65536) / 8388608) * 20000
         - bit: 1
           fields:
             - name: battery_voltage
@@ -38,19 +53,67 @@ fields:
               unit: "V"
 
 test_vectors:
-  # The word-ordered field's bytes are the vendor-documented pair from
-  # CR-2026-005: words a9fd 0134, which the device reports as 20228605 and a
-  # big-endian u32 misreads as 2851930420 (PS-271). The other fields carry chosen
-  # bytes and their expectations come from decoding, so the provenance is
-  # `generated`: this pins the word-ordered read and the agreement between the
-  # five implementations, not the vendor's own values.
-  - name: word_ordered_sensor_id
-    description: "Group with the word-ordered identifier enabled"
-    source: generated
-    payload: "0230c50001a9fd01341388"
+  # Payloads from main() in the vendor decoder (decentlab-decoders DL-ZN2.js) or
+  # built by hand; every expected value is the output of that decoder run under
+  # node, not of this schema.
+  - name: vendor_example
+    description: "main() example in DL-ZN2.js: both dendrometers and battery"
+    source: vendor-codec
+    payload: "0211110003409a00863039003e0c54"
     expected:
       protocol_version: 2
-      device_id: 12485
+      device_id: 4369
+      flags: 3
+      dendrometer_a_position: 976.9296646118164
+      dendrometer_b_position: 11259.996891021729
+      battery_voltage: 3.156
+  - name: battery_only
+    description: "Dendrometer group absent"
+    source: vendor-codec
+    payload: "02111100020c54"
+    expected:
+      protocol_version: 2
+      device_id: 4369
+      flags: 2
+      battery_voltage: 3.156
+  - name: zero_words
+    description: "All dendrometer words zero: A at its minimum, B zero"
+    source: vendor-codec
+    payload: "02111100010000000000000000"
+    expected:
+      protocol_version: 2
+      device_id: 4369
       flags: 1
+      dendrometer_a_position: -20000
+      dendrometer_b_position: 0
+  - name: max_a_zero_b
+    description: "A at its maximum 0xFFFFFFFF, B zero"
+    source: vendor-codec
+    payload: "0211110001ffffffff00000000"
+    expected:
+      protocol_version: 2
+      device_id: 4369
+      flags: 1
+      dendrometer_a_position: 10219999.997615814
+      dendrometer_b_position: 10239999.997615814
+  - name: negative_b
+    description: "A zero, B at its maximum: B position is negative"
+    source: vendor-codec
+    payload: "021111000100000000ffffffff"
+    expected:
+      protocol_version: 2
+      device_id: 4369
+      flags: 1
+      dendrometer_a_position: -20000
+      dendrometer_b_position: -10239999.997615814
+  - name: word_ordered_pair
+    description: "Words a9fd 0134 (CR-2026-005): low word first, 20228605 not 2851930420"
+    source: vendor-codec
+    payload: "0211110003a9fd0134a9fd01350bb8"
+    expected:
+      protocol_version: 2
+      device_id: 4369
+      flags: 3
       dendrometer_a_position: 28228.752613067627
-      dendrometer_b_position: 5000
+      dendrometer_b_position: -156.25
+      battery_voltage: 3

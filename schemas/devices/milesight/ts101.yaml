@@ -43,7 +43,9 @@ fields:
             div: 10
           - name: temperature_alert
             type: u8
+            sensor: none
             # raw: readAlertType(bytes[i + 2])
+            lookup: {0: "normal", 1: "threshold", 2: "mutation", default: "unkown"}
         # temperature mutation alert
         "[147, 215]":
           - name: temperature
@@ -59,7 +61,9 @@ fields:
             div: 100
           - name: temperature_alert
             type: u8
+            sensor: none
             # raw: readAlertType(bytes[i + 4])
+            lookup: {0: "normal", 1: "threshold", 2: "mutation", default: "unkown"}
         # temperature history
         "[32, 206]":
           - name: history
@@ -117,3 +121,29 @@ test_vectors:
     source: vendor-codec
     expected:
       temperature: -0.1
+  - name: temperature_alert_label
+    description: "Temperature alert byte is a label"
+    payload: "8367F00001"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 24
+      temperature_alert: "threshold"
+  - name: temperature_alert_unlisted
+    description: "An unlisted alert value: the vendor reports its own 'unkown' label"
+    payload: "8367F00009"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 24
+      temperature_alert: "unkown"
+  - name: temperature_mutation_alert_label
+    description: "Mutation alert channel: alert byte is a label; battery follows to prove alignment"
+    payload: "93D7F000100002017564"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 24
+      temperature_change: 0.16
+      temperature_alert: "mutation"
+      battery: 100

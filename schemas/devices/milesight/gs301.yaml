@@ -41,7 +41,7 @@ fields:
           - name: device_status
             type: u8
             sensor: none
-            lookup: ["off", "on"]
+            lookup: {1: "on", default: "on"}
             # raw: readOnOffStatus(1)
         # LORAWAN CLASS
         "[255, 15]":
@@ -96,29 +96,71 @@ fields:
             # raw: readUInt8(bytes[i]) / 2
         # NH3
         "[4, 125]":
+          # One 16-bit little-endian word. 0xFFFE and 0xFFFF are status codes: the
+          # status peeks at the word through a bit range without consuming it, and a
+          # mapping miss omits it. Only 0xFFFF is mapped: its bytes read the same in
+          # either order, while the interpreter reads a bit range's base big-endian
+          # and the TS013 generator in the schema's order, so 0xFFFE ("polarizing")
+          # cannot be mapped portably and is left to the formula below.
+          # formula: readSensorStatus(raw) -> 0xFFFE "polarizing", 0xFFFF "device error"
+          # formula: the vendor reports nh3 only when the word is not a status
+          # code; this schema still reports nh3 (655.34 or 655.35 scaled) beside
+          # the status, because a `match` inside a tlv case is not decoded by the
+          # Python interpreter.
           - name: nh3_sensor_status
-            type: u8
+            type: u16[0:15]
+            consume: 0
+            sensor: none
+            lookup: {65535: "device error"}
             # raw: readSensorStatus(nh3_raw_data)
           - name: nh3
-            type: u8
+            type: u16
             div: 100
             # raw: nh3_raw_data / 100
         # H2S
         "[5, 125]":
+          # One 16-bit little-endian word. 0xFFFE and 0xFFFF are status codes: the
+          # status peeks at the word through a bit range without consuming it, and a
+          # mapping miss omits it. Only 0xFFFF is mapped: its bytes read the same in
+          # either order, while the interpreter reads a bit range's base big-endian
+          # and the TS013 generator in the schema's order, so 0xFFFE ("polarizing")
+          # cannot be mapped portably and is left to the formula below.
+          # formula: readSensorStatus(raw) -> 0xFFFE "polarizing", 0xFFFF "device error"
+          # formula: the vendor reports h2s only when the word is not a status
+          # code; this schema still reports h2s (655.34 or 655.35 scaled) beside
+          # the status, because a `match` inside a tlv case is not decoded by the
+          # Python interpreter.
           - name: h2s_sensor_status
-            type: u8
+            type: u16[0:15]
+            consume: 0
+            sensor: none
+            lookup: {65535: "device error"}
             # raw: readSensorStatus(h2s_raw_data)
           - name: h2s
-            type: u8
+            type: u16
             div: 100
             # raw: h2s_raw_data / 100
         # H2S (@since v1.2)
         "[6, 125]":
+          # One 16-bit little-endian word. 0xFFFE and 0xFFFF are status codes: the
+          # status peeks at the word through a bit range without consuming it, and a
+          # mapping miss omits it. Only 0xFFFF is mapped: its bytes read the same in
+          # either order, while the interpreter reads a bit range's base big-endian
+          # and the TS013 generator in the schema's order, so 0xFFFE ("polarizing")
+          # cannot be mapped portably and is left to the formula below.
+          # formula: readSensorStatus(raw) -> 0xFFFE "polarizing", 0xFFFF "device error"
+          # formula: the vendor reports h2s only when the word is not a status
+          # code; this schema still reports h2s (655.34 or 655.35 scaled) beside
+          # the status, because a `match` inside a tlv case is not decoded by the
+          # Python interpreter.
           - name: h2s_sensor_status
-            type: u8
+            type: u16[0:15]
+            consume: 0
+            sensor: none
+            lookup: {65535: "device error"}
             # raw: readSensorStatus(h2s_raw_data)
           - name: h2s
-            type: u8
+            type: u16
             div: 1000
             # raw: h2s_raw_data / 1000
         # SENSOR CALIBRATION RESULT (@since v1.2)
@@ -129,7 +171,8 @@ fields:
         # SENSOR ID (@since v1.2)
         "[255, 124]":
           - name: sensor_id
-            type: u8
+            type: ascii
+            length: 43
             # raw: readAscii(bytes.slice(i, i + 43))
 
 test_vectors:
@@ -238,3 +281,47 @@ test_vectors:
     source: vendor-codec
     expected:
       temperature: -0.1
+  - name: power_on_device_status
+    description: "Power-on frame: the vendor reports device_status 'on' whatever the byte holds"
+    payload: "FF0BFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      device_status: "on"
+  - name: nh3_u16_word
+    description: "NH3 is one 16-bit little-endian word scaled /100"
+    payload: "047D1102"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      nh3: 5.29
+  - name: nh3_u16_high_word
+    description: "NH3 near the top of the word: 0xFEFF is a reading, not a status code"
+    payload: "047DFFFE"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      nh3: 652.79
+  - name: h2s_u16_word
+    description: "H2S (channel 5) is one 16-bit little-endian word scaled /100"
+    payload: "057D3412"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      h2s: 46.6
+  - name: h2s_v12_u16_word
+    description: "H2S (channel 6, v1.2) is one 16-bit little-endian word scaled /1000"
+    payload: "067D3412"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      h2s: 4.66
+  - name: sensor_id_43_bytes
+    description: "Sensor ID is 43 ASCII bytes, followed here by a battery channel to prove alignment"
+    payload: "047D3412FF7C47533330312D4E48332D303132333435363738394142434445464748494A4B4C4D4E4F5051525354555657017564"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      nh3: 46.6
+      sensor_id: "GS301-NH3-0123456789ABCDEFGHIJKLMNOPQRSTUVW"
+      battery: 100

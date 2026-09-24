@@ -143,7 +143,11 @@ class TestTheTwoFailureDirections:
         target = REPO_ROOT / "tests" / "test_encode_round_trip.py"
         original = target.read_text()
         try:
-            target.write_text(re.sub(r"FLOOR_TOTAL = \d+", "FLOOR_TOTAL = 1200", original))
+            # Above whatever the actual is: a fixed number stops being "above" once the
+            # corpus grows past it, which is how this test broke at 1232.
+            declared = int(re.search(r"FLOOR_TOTAL = (\d+)", original).group(1))
+            target.write_text(re.sub(r"FLOOR_TOTAL = \d+",
+                                     f"FLOOR_TOTAL = {declared + 10000}", original))
             code, out = self._run()
             assert code == 1, out
             assert "REGRESSION" in out

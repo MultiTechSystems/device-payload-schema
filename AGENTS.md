@@ -722,7 +722,7 @@ Fidelity has two different targets, worth not confusing:
 - Replacing **our own generated** codecs is achievable now — both come from the same
   YAML, so the key sets already agree.
 - Replacing a **vendor** codec is a schema-fidelity question, tracked by
-  `crossvalidate_ttn.py` (milesight 53/84, decentlab 55/58), not an interpreter one.
+  `crossvalidate_ttn.py` (milesight 61/84, decentlab 58/58), not an interpreter one.
   Our `dl-5tm` emits `flags` and `soil_temperature_raw` where the vendor's emits
   neither — and `soil_temperature_raw` is a pure intermediate that should have been
   `_`-prefixed, so it is a schema bug that would surface as an extra JSON key.
@@ -1013,7 +1013,7 @@ Cross-validate a vendor family with:
   --vendor milesight-iot --schema-dir schemas/devices/milesight [--verbose]
 ```
 
-Milesight stands at 53 of 84 agreeing. `vs321` and `vs373` are the next region-mask
+Milesight stands at 61 of 84 agreeing. `vs321` and `vs373` are the next region-mask
 pair; both decode nothing for their declared example, so more than the regions is
 missing. Note that a bitfield range reads its base value **big-endian regardless of
 the schema's `endian`**, so a little-endian 16-bit mask must be taken as two `u8`
@@ -1074,6 +1074,19 @@ a `match`; `score_schema.py` counts branch coverage only for discriminators pres
 and never looks inside `match`/`byte_group` for semantic fields, which is most of why r718x and
 dnt stop at Silver. r718x still reads its device and command bytes through a non-advancing peek
 it adopted before the `_` fix; it can use `$_device_type` directly now.
+
+**The Milesight wrong-decode pass (2026-09-24) left three things open.**
+
+- **A peeked status beside the word it overlaps does not encode.** `em320-tilt`'s rewrite
+  read threshold flags as bit-0 peeks of the angle words and exposed an encoder defect: the
+  peek and the word are packed as separate bytes. The schema was left as it was, still
+  reading three bytes the vendor does not, so it is known-wrong, not fixed.
+- **`encode-round-trip.py` classifies a residue per schema, not per vector.** Once a schema
+  carries any lookup `default`, every failure in it reads `lossy-value` - 5 became 148 in
+  this pass - which hides real encoder defects in the same schema, such as a `type: object`
+  inside a tlv case encoding as zeros (ct303 already failed that way).
+- **Status codes inside a tlv case** (gs301 0xFFFE, ct 0xFFFD) need a `match` inside the
+  case, which the Python interpreter cannot decode; they are hints in the schemas.
 
 ## Converting a vendor codec
 
@@ -1352,12 +1365,10 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   with no test vectors and are therefore Rejected. See the per-device table in
   [`docs/INDEX.md`](docs/INDEX.md). The decentlab and milesight families have been
   through a vendor cross-validation pass; the rest have not.
-- **Decentlab: 55 of 58 agree with the vendor decoder.** The three left are
-  `dl-blg` (a thermistor needing a natural logarithm), `dl-iam` (a `max()` of two
-  linear combinations) and `dl-zn2` (a difference of two two-word values). Only
-  the logarithm needs a language feature: `log` exists as a transform stage in the
-  Python interpreter but not in Go, Java or C#, so using it would break
-  cross-language parity.
+- **Decentlab: 58 of 58 agree with the vendor decoder.** `dl-zn2` read one word of a
+  two-word value and `dl-iam` read a word the device does not send, so both mis-decoded
+  the vendor's own examples; `dl-zn2`'s only vector was `source: generated` and pinned
+  the bug. `dl-iam`'s `max(max(a,b),0)` is built from `compute` and `guard` alone.
 - **Squares are `compute`, not `pow`.** The Python interpreter accepts `pow`,
   `log` and `sqrt` transform stages; the other three do not. Where the vendor
   squares a value, multiply it by itself with `compute` — that decodes identically

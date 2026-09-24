@@ -35,4 +35,23 @@ fields:
         "[255, 63]":
           - name: alarm
             type: u8
+            sensor: none
             # raw: "power down"
+            # The vendor's switch has no default: an unlisted byte sets nothing.
+            lookup: {0: "power down", 1: "power on", 2: "sensor failure", 3: "sensor recover", 4: "sensor about to fail", 5: "sensor failed"}
+
+test_vectors:
+  - name: alarm_label
+    description: "Alarm byte is a label"
+    payload: "FF3F05"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      alarm: "sensor failed"
+  - name: alarm_power_down
+    description: "Alarm byte 0 is 'power down'"
+    payload: "FF3F00"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      alarm: "power down"

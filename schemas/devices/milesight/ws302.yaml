@@ -24,11 +24,18 @@ fields:
         # SOUND
         "[5, 91]":
           - name: freq_weight
-            type: u8
+            type: u8[0:1]
+            lookup: {0: "Z", 1: "A", 2: "C", default: ""}
             # raw: readFrequecyWeightType(bytes[i])
           - name: time_weight
-            type: u8
+            type: u8[2:3]
+            consume: 1
+            lookup: {0: "impulse", 1: "fast", 2: "slow", default: ""}
             # raw: readTimeWeightType(bytes[i])
+            # The vendor decoder passes a number where its helper indexes an
+            # array (`bytes[0] >> 2` on a number is 0), so it reports "impulse"
+            # for every byte. This schema reads bits 2-3 as the helper intends;
+            # the two agree whenever those bits are 0.
           - name: la
             type: u16
             div: 10
@@ -42,4 +49,67 @@ fields:
         "[255, 15]":
           - name: class_type
             type: u8
-            # raw: "class-a"
+            sensor: none
+            # The vendor's switch has no default, so an unlisted class emits nothing.
+            lookup: {0: "class-a", 1: "class-b", 2: "class-c"}
+
+test_vectors:
+  - name: sound_shared_weight_byte
+    description: "Sound channel: both weightings share one byte; a battery channel follows to prove alignment"
+    payload: "055B01D2021E03F403017564"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      freq_weight: "A"
+      time_weight: "impulse"
+      la: 72.2
+      laeq: 79.8
+      lamax: 101.2
+      battery: 100
+  - name: sound_unlisted_freq_weight
+    description: "Frequency weighting 3 is unlisted: the vendor reports an empty label"
+    payload: "055B03D2021E03F403"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      freq_weight: ""
+      time_weight: "impulse"
+      la: 72.2
+      laeq: 79.8
+      lamax: 101.2
+  - name: battery
+    description: "Battery channel"
+    payload: "017564"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      battery: 100
+  - name: sound_zero
+    description: "Sound channel, zero values"
+    payload: "055B00000000000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      freq_weight: "Z"
+      time_weight: "impulse"
+      la: 0
+      laeq: 0
+      lamax: 0
+  - name: sound_c_weight_max
+    description: "Sound channel, C weighting and maximum words"
+    payload: "055B02FFFFFFFFFFFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      freq_weight: "C"
+      time_weight: "impulse"
+      la: 6553.5
+      laeq: 6553.5
+      lamax: 6553.5
+  - name: class_c
+    description: "LoRaWAN class channel, class C"
+    payload: "FF0F02"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      class_type: "class-c"

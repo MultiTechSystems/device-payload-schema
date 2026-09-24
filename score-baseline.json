@@ -12087,17 +12087,17 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs370.yaml",
-      "timestamp": "2026-08-11T08:41:54.550535-05:00",
-      "score": 92.0,
+      "timestamp": "2026-09-24T11:07:49.704305-05:00",
+      "score": 89.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 20,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 20,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -12114,21 +12114,21 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 11,
-          "ipso_mapped": 2,
+          "ipso_mapped": 1,
           "ipso_missing": [
             "occupancy: add ipso: {object: 3302}"
           ],
-          "senml_mapped": 2,
+          "senml_mapped": 1,
           "senml_missing": [],
-          "semantic_mapped": 2,
-          "detectable_sensors": 3,
+          "semantic_mapped": 1,
+          "detectable_sensors": 2,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
-            "vendor-codec": 15
+            "vendor-codec": 20
           },
-          "independent_vectors": 15,
+          "independent_vectors": 20,
           "verification": "independent",
           "issues": []
         }

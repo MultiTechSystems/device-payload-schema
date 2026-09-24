@@ -163,15 +163,18 @@ class TestTheOtherImplementationsAlreadyRounded:
 class TestTheWitnessesAreRealAndRoundTripOnTheReference:
     """The Go side is held by its floors; this pins the fixtures they rely on."""
 
-    def test_there_are_fourteen_of_them(self):
+    def test_there_are_thirteen_of_them(self):
+        """Fourteen when this CR landed. dl-zn2's was a `source: generated` vector
+        that pinned a mis-decode - the schema read one of its two words - and was
+        replaced by vendor-decoder vectors, whose word pair now feeds a `compute`."""
         found = witness_schemas()
-        assert len(found) == 14, [f"{p.name}::{v['name']}" for p, _, v in found]
+        assert len(found) == 13, [f"{p.name}::{v['name']}" for p, _, v in found]
 
-    def test_thirteen_share_the_one_name(self):
+    def test_twelve_share_the_one_name(self):
         """The count and the name differ, which is worth pinning rather than rounding."""
         named = [v for _, _, v in witness_schemas()
                  if v["name"] == "word_ordered_sensor_id"]
-        assert len(named) == 13, len(named)
+        assert len(named) == 12, len(named)
 
     def test_each_carries_a_word_ordered_field(self):
         """Guaranteed by the filter in witness_schemas; asserted so it stays that way."""
@@ -191,7 +194,9 @@ class TestTheWitnessesAreRealAndRoundTripOnTheReference:
 class TestTheFloorMovedWithTheFix:
     def test_the_go_flagged_floor_is_raised(self):
         """The bucket this CR moved. The total is asserted as a bound below."""
-        assert '"flagged":     135,' in GO_FLOORS.read_text()
+        # A bound, not the literal: the Milesight wrong-decode pass raised it to 145.
+        found = re.search(r'"flagged":\s*(\d+),', GO_FLOORS.read_text())
+        assert found and int(found.group(1)) >= 135, found and found.group(1)
 
     def test_the_go_total_floor_is_at_least_what_this_cr_reached(self):
         """A bound, not an equality: CR-2026-027 raised it to 1170 straight after."""

@@ -25,14 +25,18 @@ fields:
             - name: air_temperature
               type: u16
               transform:
-                - mult: 0.002670328831921874
+                # 175 * x / 65535 - 45, stage for stage as the vendor computes it
+                - mult: 175
+                - div: 65535
                 - add: -45
               unit: "°C"
             - name: air_humidity
               type: u16
               transform:
-                - mult: 0.0015259021896696424
-                - add: -2.220446049250313e-16
+                # 100 * x / 65535. A single folded multiplier differed from the
+                # vendor in the last digit.
+                - mult: 100
+                - div: 65535
               unit: "%"
         - bit: 2
           fields:
@@ -46,10 +50,87 @@ fields:
               type: u16
             - name: ambient_light_infrared
               type: u16
+            # illuminance = max(max(1.0*x0 - 1.64*x1, 0.59*x0 - 0.86*x1), 0) * 1.5504
+            #
+            # The group is two words; illuminance is computed from them, not read.
+            # Each product and difference below is the same IEEE operation the
+            # vendor performs, so the result is identical, not merely close. The
+            # inner max selects on the sign of the difference of its operands;
+            # the outer max(..., 0) is the guard on `illuminance` itself.
+            - name: _ir_1_64
+              type: number
+              ref: $ambient_light_infrared
+              transform:
+                - mult: 1.64
+            - name: _lux_a
+              type: number
+              compute:
+                op: sub
+                a: $ambient_light_visible_infrared
+                b: $_ir_1_64
+            - name: _vis_0_59
+              type: number
+              ref: $ambient_light_visible_infrared
+              transform:
+                - mult: 0.59
+            - name: _ir_0_86
+              type: number
+              ref: $ambient_light_infrared
+              transform:
+                - mult: 0.86
+            - name: _lux_b
+              type: number
+              compute:
+                op: sub
+                a: $_vis_0_59
+                b: $_ir_0_86
+            - name: _lux_a_minus_b
+              type: number
+              compute:
+                op: sub
+                a: $_lux_a
+                b: $_lux_b
+            # max(a, b) = (a if a > b else 0) + (b if a <= b else 0)
+            - name: _lux_a_if_max
+              type: number
+              compute:
+                op: add
+                a: $_lux_a
+                b: 0
+              guard:
+                when:
+                  - field: $_lux_a_minus_b
+                    gt: 0
+                else: 0
+            - name: _lux_b_if_max
+              type: number
+              compute:
+                op: add
+                a: $_lux_b
+                b: 0
+              guard:
+                when:
+                  - field: $_lux_a_minus_b
+                    lte: 0
+                else: 0
+            - name: _lux_max
+              type: number
+              compute:
+                op: add
+                a: $_lux_a_if_max
+                b: $_lux_b_if_max
             - name: illuminance
-              type: u16
+              type: number
+              compute:
+                op: mul
+                a: $_lux_max
+                b: 1.5504
+              guard:
+                when:
+                  - field: $_lux_max
+                    gt: 0
+                else: 0
               unit: "lx"
-              # formula: Math.max(Math.max(1.0 * x[0] - 1.64 * x[1], 0.59 * x[0] - 0.86 * x[1]), 0) * 1.5504
         - bit: 4
           fields:
             - name: co2_concentration
@@ -69,3 +150,130 @@ fields:
             - name: total_voc
               type: u16
               unit: "ppb"
+
+test_vectors:
+  # Payloads are the vendor decoder's main() examples (decentlab-decoders
+  # DL-IAM.js) or built by hand to reach each branch of the illuminance max and
+  # the range extremes; every expected value is that decoder's output under node.
+  - name: vendor_example_all
+    description: "main() example 1 in DL-IAM.js: every group present"
+    source: vendor-codec
+    payload: "020bbd007f0b926a515d48bc4e0262006981c7000093d4000b0111"
+    expected:
+      protocol_version: 2
+      device_id: 3005
+      flags: 127
+      battery_voltage: 2.962
+      air_temperature: 27.67833981841764
+      air_humidity: 36.438544289311054
+      barometric_pressure: 96412
+      ambient_light_visible_infrared: 610
+      ambient_light_infrared: 105
+      illuminance: 678.76512
+      co2_concentration: 455
+      co2_sensor_status: 0
+      raw_ir_reading: 37844
+      activity_counter: 11
+      total_voc: 273
+  - name: vendor_example_no_co2
+    description: "main() example 2 in DL-IAM.js: CO2 group absent"
+    source: vendor-codec
+    payload: "020bbd006f0b926a515d48bc4e02620069000b0111"
+    expected:
+      protocol_version: 2
+      device_id: 3005
+      flags: 111
+      battery_voltage: 2.962
+      air_temperature: 27.67833981841764
+      air_humidity: 36.438544289311054
+      barometric_pressure: 96412
+      ambient_light_visible_infrared: 610
+      ambient_light_infrared: 105
+      illuminance: 678.76512
+      activity_counter: 11
+      total_voc: 273
+  - name: vendor_example_battery
+    description: "main() example 3 in DL-IAM.js: battery only"
+    source: vendor-codec
+    payload: "020bbd00010b92"
+    expected:
+      protocol_version: 2
+      device_id: 3005
+      flags: 1
+      battery_voltage: 2.962
+  - name: illuminance_second_term
+    description: "Light 100/60: 0.59*x0 - 0.86*x1 is the larger term"
+    source: vendor-codec
+    payload: "020bbd00080064003c"
+    expected:
+      protocol_version: 2
+      device_id: 3005
+      flags: 8
+      ambient_light_visible_infrared: 100
+      ambient_light_infrared: 60
+      illuminance: 11.472959999999997
+  - name: illuminance_clamped_to_zero
+    description: "Light 100/100: both terms negative, outer max gives 0"
+    source: vendor-codec
+    payload: "020bbd000800640064"
+    expected:
+      protocol_version: 2
+      device_id: 3005
+      flags: 8
+      ambient_light_visible_infrared: 100
+      ambient_light_infrared: 100
+      illuminance: 0
+  - name: illuminance_first_term_max
+    description: "Light 65535/0: first term, maximum reading"
+    source: vendor-codec
+    payload: "020bbd0008ffff0000"
+    expected:
+      protocol_version: 2
+      device_id: 3005
+      flags: 8
+      ambient_light_visible_infrared: 65535
+      ambient_light_infrared: 0
+      illuminance: 101605.464
+  - name: light_zero
+    description: "Light words zero"
+    source: vendor-codec
+    payload: "020bbd000800000000"
+    expected:
+      protocol_version: 2
+      device_id: 3005
+      flags: 8
+      ambient_light_visible_infrared: 0
+      ambient_light_infrared: 0
+      illuminance: 0
+  - name: light_max
+    description: "Light words at maximum: both terms negative"
+    source: vendor-codec
+    payload: "020bbd0008ffffffff"
+    expected:
+      protocol_version: 2
+      device_id: 3005
+      flags: 8
+      ambient_light_visible_infrared: 65535
+      ambient_light_infrared: 65535
+      illuminance: 0
+  - name: co2_negative
+    description: "CO2 word zero: offset-binary minimum -32768, status and IR at maximum"
+    source: vendor-codec
+    payload: "020bbd00100000ffffffff"
+    expected:
+      protocol_version: 2
+      device_id: 3005
+      flags: 16
+      co2_concentration: -32768
+      co2_sensor_status: 65535
+      raw_ir_reading: 65535
+  - name: temperature_humidity_extremes
+    description: "Temperature word zero (-45 C), humidity at 100 %"
+    source: vendor-codec
+    payload: "020bbd00020000ffff"
+    expected:
+      protocol_version: 2
+      device_id: 3005
+      flags: 2
+      air_temperature: -45
+      air_humidity: 100

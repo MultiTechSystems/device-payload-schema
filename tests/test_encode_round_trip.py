@@ -54,13 +54,13 @@ from validate_schema import is_encode_vector  # noqa: E402
 DEVICES = REPO_ROOT / "schemas" / "devices"
 
 #: Exact round-trips required overall. Raise as encoding improves.
-FLOOR_TOTAL = 1191
+FLOOR_TOTAL = 1232
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
 FLOOR_BY_SHAPE = {
-    "tlv": 904,
-    "flagged": 135,
+    "tlv": 935,
+    "flagged": 145,
     "plain fixed": 66,
     "match": 63,
     "byte_group": 17,
@@ -232,7 +232,11 @@ def test_tlv_payload_round_trips():
     # can reconstruct the second byte. That is a separate defect from TLV framing.
     # Both hardware-version vectors: the vendor's format keeps only the high nibble of
     # byte 1, so bits 8-11 are discarded and no encoder can put them back.
-    lossy = {"ch255_type9_midscale", "ch255_type9_hex_letters"}
+    # The power-on frames carry a constant label the vendor emits whatever the byte
+    # says (`readDeviceStatus(1)`), modelled as a lookup `default`; a default stands
+    # for every unlisted value, so the byte cannot be recovered (PS-269).
+    lossy = {"ch255_type9_midscale", "ch255_type9_hex_letters",
+             "power_on_reset_event", "power_on_device_status"}
     checked = 0
     for vector in schema["test_vectors"]:
         if is_encode_vector(vector):

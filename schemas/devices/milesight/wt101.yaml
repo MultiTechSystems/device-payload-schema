@@ -61,14 +61,14 @@ fields:
           - name: reset_event
             type: u8
             sensor: none
-            lookup: ["normal", "reset"]
+            lookup: {1: "reset", default: "reset"}
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
             sensor: none
-            lookup: ["off", "on"]
+            lookup: {1: "on", default: "on"}
             # raw: readDeviceStatus(1)
         # BATTERY
         "[1, 117]":
@@ -137,8 +137,23 @@ fields:
         # HEATING DATE
         "[249, 51]":
           - name: heating_date
-            type: u8
+            type: object
             # raw: readHeatingDate(bytes.slice(i, i + 7))
+            fields:
+              - name: enable
+                type: u8
+                sensor: none
+                lookup: {0: "disable", 1: "enable", default: "unknown"}
+              - name: report_interval
+                type: u16
+              - name: start_month
+                type: u8
+              - name: start_day
+                type: u8
+              - name: end_month
+                type: u8
+              - name: end_day
+                type: u8
         # HEATING SCHEDULE
         "[249, 52]":
           - name: heating_schedule
@@ -256,3 +271,44 @@ test_vectors:
     source: vendor-codec
     expected:
       temperature: -0.1
+  - name: power_on_reset_event
+    description: "Reset-event frame: the vendor reports reset_event 'reset' whatever the byte holds"
+    payload: "FFFEFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      reset_event: "reset"
+  - name: power_on_device_status
+    description: "Power-on frame: the vendor reports device_status 'on' whatever the byte holds"
+    payload: "FF0BFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      device_status: "on"
+  - name: heating_date_object
+    description: "Heating date is a seven-byte record; a device-status channel follows to prove alignment"
+    payload: "F933011E000A0F0314FF0BFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      heating_date:
+        enable: "enable"
+        report_interval: 30
+        start_month: 10
+        start_day: 15
+        end_month: 3
+        end_day: 20
+      device_status: "on"
+  - name: heating_date_unlisted_enable
+    description: "Heating date with an unlisted enable byte: the vendor reports 'unknown'"
+    payload: "F93307FFFF0C1F011F"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      heating_date:
+        enable: "unknown"
+        report_interval: 65535
+        start_month: 12
+        start_day: 31
+        end_month: 1
+        end_day: 31

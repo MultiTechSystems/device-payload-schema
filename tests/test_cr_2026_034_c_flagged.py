@@ -44,8 +44,11 @@ HEADER = REPO_ROOT / "include" / "schema_interpreter.h"
 HARNESS = REPO_ROOT / "tools" / "c-corpus-harness.py"
 CORPUS = REPO_ROOT / "schemas" / "devices"
 
-#: What this CR reached. A bound - closing `transform` or `bitfield_string` raises it.
-ATTEMPTED_FLOOR = 488
+#: What this CR reached, less one. A bound - closing `transform` or `bitfield_string`
+#: raises it. It was 488; dl-zn2's generated vector, which the C struct API could build,
+#: pinned a mis-decode and was replaced by vendor vectors whose correct decode needs a
+#: `compute` - which the C interpreter does not have - so C attempts one fewer.
+ATTEMPTED_FLOOR = 487
 
 
 @pytest.fixture(scope="module")

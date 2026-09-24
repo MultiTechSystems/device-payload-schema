@@ -233,7 +233,8 @@ class TestTheSkipReasonsNameTheRightSide:
 
     def test_the_measurement_did_not_regress(self, report):
         assert report["failures"] == [], report["failures"][:6]
-        assert report["attempted"] >= 488, report["attempted"]
+        # 487, not 488: dl-zn2's corrected decode needs `compute`, which C lacks.
+        assert report["attempted"] >= 487, report["attempted"]
         assert report["attempted"] + report["skipped_vectors"] == report["corpus_vectors"]
 
 
