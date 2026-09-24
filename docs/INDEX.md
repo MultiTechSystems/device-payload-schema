@@ -104,6 +104,7 @@ Generated inventory of this repository: what lives where, what each document cov
 | `tools/generate_ts013_codec.py` | Generate TS013-compliant JavaScript codec from Payload Schema YAML. |
 | `tools/payload_size_calc.py` | Calculate payload sizes for all flag/port combinations. |
 | `tools/qr_schema.py` | QR Code Schema Embedding Utilities |
+| `tools/schema-mutation.py` | How well do a schema's test vectors constrain it? Mutate the schema and see. |
 | `tools/schema_base64.py` | Encode/decode Payload Schemas to/from base64 |
 | `tools/schema_binary.py` | Compact Binary Schema Encoder/Decoder |
 | `tools/schema_interpreter.py` | Runtime Schema Interpreter for Payload Decoding |
