@@ -1022,10 +1022,12 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append(f'{i}  vars.{name} = {value_expr};')
                 return lines
             
-            # Literal value
+            # Literal value. JSON, not Python's repr: `value: true` emitted `True`,
+            # which is not JavaScript.
             if 'value' in field:
-                lines.append(f'{i}  d.{name} = {field["value"]};')
-                lines.append(f'{i}  vars.{name} = {field["value"]};')
+                literal = json.dumps(field['value'])
+                lines.append(f'{i}  d.{name} = {literal};')
+                lines.append(f'{i}  vars.{name} = {literal};')
                 return lines
             
             # Default to 0 if no source specified. `vars` is mirrored below for every
@@ -1040,6 +1042,16 @@ function writeS(buf, pos, size, value, endian) {
         name = field.get('name', '_unknown')
         ftype = field.get('type', 'u8')
         js_name = to_js_name(name)
+
+        # A string literal (spec "Literal Types"): a constant, read from no bytes.
+        # `string` fell through to the integer path, which emitted a TODO and nothing,
+        # so the key was silently missing from every generated codec.
+        if ftype == 'string' and 'value' in field and not field.get('length'):
+            literal = json.dumps(field['value'])
+            lines.append(f'{i}  vars.{js_name} = {literal};')
+            if not name.startswith('_'):
+                lines.append(f'{i}  d.{js_name} = {literal};')
+            return lines
 
         # bitfield_string
         if ftype == 'bitfield_string':

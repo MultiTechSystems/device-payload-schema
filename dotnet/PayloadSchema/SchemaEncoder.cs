@@ -1132,6 +1132,9 @@ public static class SchemaEncoder
                     var raw = ToBytes(field, value);
                     return Pad(raw, EncodeLength(field, raw.Length));
                 }
+                case FieldType.String when field.Value != null && field.Length == 0:
+                    // A literal came from no bytes, so it writes none.
+                    return Array.Empty<byte>();
                 case FieldType.Ascii or FieldType.String:
                 {
                     var raw = System.Text.Encoding.UTF8.GetBytes(value?.ToString() ?? "");

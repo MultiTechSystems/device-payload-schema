@@ -115,8 +115,8 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Device schemas
 
-240 schemas under `schemas/devices/`.
-Mean quality score 69.4% (PLATINUM 31, GOLD 40, SILVER 104, BRONZE 18, REJECTED 47). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+241 schemas under `schemas/devices/`.
+Mean quality score 69.4% (PLATINUM 31, GOLD 40, SILVER 104, BRONZE 19, REJECTED 47). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
@@ -125,7 +125,7 @@ Mean quality score 69.4% (PLATINUM 31, GOLD 40, SILVER 104, BRONZE 18, REJECTED 
 | milesight | 84 | 948 | PLATINUM 18, GOLD 33, SILVER 22, REJECTED 11 |
 | decentlab | 58 | 136 | PLATINUM 12, GOLD 7, SILVER 1, BRONZE 14, REJECTED 24 |
 | _library-composed | 49 | 57 | SILVER 48, BRONZE 1 |
-| _language-conformance | 29 | 47 | SILVER 24, BRONZE 2, REJECTED 3 |
+| _language-conformance | 30 | 48 | SILVER 24, BRONZE 3, REJECTED 3 |
 | makerfabs | 6 | 0 | REJECTED 6 |
 | mclimate | 3 | 12 | SILVER 1, REJECTED 2 |
 | dnt | 2 | 79 | SILVER 2 |
@@ -151,6 +151,7 @@ Mean quality score 69.4% (PLATINUM 31, GOLD 40, SILVER 104, BRONZE 18, REJECTED 
 | `_language-conformance/enum-spec-default` | 2 | 1 | fields | 71% | SILVER |
 | `_language-conformance/field-endian` | 3 | 1 | fields | 71% | SILVER |
 | `_language-conformance/internal-discriminator` | 3 | 2 | fields | 57% | REJECTED |
+| `_language-conformance/literal-types` | 3 | 1 | fields | 69% | BRONZE |
 | `_language-conformance/lookup-default` | 1 | 1 | fields | 71% | SILVER |
 | `_language-conformance/match-case-range` | 3 | 3 | fields | 67% | BRONZE |
 | `_language-conformance/match-cases-default-key` | 3 | 2 | fields | 65% | BRONZE |

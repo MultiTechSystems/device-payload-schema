@@ -926,6 +926,12 @@ class SchemaInterpreter:
             return value, pos + length
         
         if field_type == 'string':
+            if 'value' in field_def:
+                # A string literal (spec "Literal Types"): a constant in the output,
+                # read from no bytes. This read the payload as a one-byte string, so a
+                # `{type: string, value: "ppm"}` reported "\x07" and shifted every
+                # field after it.
+                return field_def['value'], pos
             length = resolve_length(field_def, buf, pos)
             if pos + length > len(buf):
                 raise ValueError("Buffer too short for string")
@@ -3574,6 +3580,9 @@ class SchemaInterpreter:
             length = encode_length(field_def, len(raw))
             return raw[:length].ljust(length, b'\x00')
         
+        if field_type == 'string' and 'value' in field_def:
+            # A literal came from no bytes, so it writes none.
+            return b''
         if field_type in ('string', 'ascii'):
             length = encode_length(field_def, len(str(value).encode('utf-8')))
             encoded = str(value).encode('utf-8')[:length]
