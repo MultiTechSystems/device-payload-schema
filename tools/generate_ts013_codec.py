@@ -1107,6 +1107,28 @@ function writeS(buf, pos, size, value, endian) {
             lines.append(f'{i}  {target} = {js_name}_out;')
             return lines
 
+        # bool (PS-065, PS-066): one bit of the current byte as a JSON boolean, with no
+        # advance unless `consume` says so. This emitted a TODO and no value, so a
+        # schema using the specified spelling had no generated path, and conversions
+        # fell back to a bit range with a {0: false, 1: true} lookup - outside what
+        # PS-106 lists (numbers or strings), and Go dropped it silently.
+        if ftype in ('bool', 'Bool'):
+            bit = int(field.get('bit', 0))
+            consume = field.get('consume', 0)
+            lines.append(f'{i}  if (pos >= buf.length) throw new Error("Buffer too short for bool");')
+            lines.append(f'{i}  var {js_name}_out = ((buf[pos] >> {bit}) & 1) === 1;')
+            if consume:
+                lines.append(f'{i}  pos += {int(consume)};')
+            if field.get('var'):
+                lines.append(f'{i}  vars.{to_js_name(field["var"])} = {js_name}_out;')
+            lines.append(f'{i}  vars.{js_name} = {js_name}_out;')
+            if not name.startswith('_'):
+                guards, target = name_from_to_js(field, js_name)
+                for guard in guards:
+                    lines.append(f'{i}  {guard}')
+                lines.append(f'{i}  {target} = {js_name}_out;')
+            return lines
+
         # skip
         if ftype == 'skip':
             length = field.get('length', 1)
@@ -2000,7 +2022,80 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append('  }')
                 lines.append('}')
 
-        return '\n'.join(lines)
+        return self._restore_output_keys('\n'.join(lines))
+
+    def _output_key_renames(self) -> Dict[str, str]:
+        """Map each mangled JS spelling back to the schema name it came from.
+
+        Fields are staged under `to_js_name(name)`, which is right for a local variable
+        and wrong for an output key: `pm1.0` was reported as `pm1_0`, so a vendor key
+        with a dot or a space never survived generation (arwin lrs10701). Two names
+        that mangle to one spelling cannot both be restored, so that is an error rather
+        than a silent collision.
+        """
+        names = set()
+
+        def walk(node):
+            if isinstance(node, dict):
+                name = node.get('name')
+                if isinstance(name, str) and '${' not in name:
+                    names.add(name)
+                for value in node.values():
+                    walk(value)
+            elif isinstance(node, list):
+                for value in node:
+                    walk(value)
+
+        walk(self.schema.get('fields', []))
+        walk(self.schema.get('ports', {}))
+        walk(self.schema.get('definitions', {}))
+        renames: Dict[str, str] = {}
+        for name in sorted(names):
+            mangled = to_js_name(name)
+            if mangled == name:
+                continue
+            if mangled in renames and renames[mangled] != name:
+                raise ValueError(
+                    'field names %r and %r both become %r in JavaScript'
+                    % (renames[mangled], name, mangled)
+                )
+            if mangled in names:
+                raise ValueError(
+                    'field name %r becomes %r in JavaScript, which is also a field name'
+                    % (name, mangled)
+                )
+            renames[mangled] = name
+        return renames
+
+    def _restore_output_keys(self, code: str) -> str:
+        """Report output under the schema's own names, and accept them on encode."""
+        renames = self._output_key_renames()
+        if not renames:
+            return code
+        entry = code.find('function decodeUplink(')
+        if entry < 0:
+            return code
+        helper = '\n'.join([
+            'var OUTPUT_KEYS = %s;' % json.dumps(renames, sort_keys=True),
+            'var INPUT_KEYS = %s;' % json.dumps(
+                {v: k for k, v in renames.items()}, sort_keys=True),
+            'function renameKeys(v, table) {',
+            '  if (Array.isArray(v)) return v.map(function (x) { return renameKeys(x, table); });',
+            '  if (v === null || typeof v !== "object") return v;',
+            '  var out = {};',
+            '  for (var k in v) {',
+            '    if (Object.prototype.hasOwnProperty.call(v, k)) {',
+            '      out[Object.prototype.hasOwnProperty.call(table, k) ? table[k] : k] = renameKeys(v[k], table);',
+            '    }',
+            '  }',
+            '  return out;',
+            '}',
+            '',
+        ])
+        tail = code[entry:]
+        tail = tail.replace('data: r.data,', 'data: renameKeys(r.data, OUTPUT_KEYS),')
+        tail = tail.replace('(input.data, ', '(renameKeys(input.data, INPUT_KEYS), ')
+        return code[:entry] + helper + tail
 
 
 def fix_yaml_booleans(obj):

@@ -1845,11 +1845,25 @@ func decodeByteGroup(field Field, ctx *DecodeContext) (map[string]any, error) {
 		
 		bitLen := bitEnd - bitStart + 1
 		mask := uint64((1 << bitLen) - 1)
-		value := float64((rawVal >> bitStart) & mask)
-		
-		if subfield.Name != "" {
-			result[subfield.Name] = value
+		raw := float64((rawVal >> bitStart) & mask)
+
+		// A member is an ordinary field that happens to share its bytes, so its
+		// modifiers and lookup apply as anywhere else. They were skipped here: arwin
+		// lrs10701 packs temperature as u32[0:9] with div 10 and add -30 inside a
+		// group, and Go reported the raw 1023 where Python, Java and C# gave 72.3.
+		value, err := applyLookupAndModifiers(raw, subfield, ctx)
+		if err != nil {
+			return nil, err
 		}
+		if value == omitted || subfield.Name == "" {
+			continue
+		}
+		if strings.HasPrefix(subfield.Name, "_") {
+			// Internal: bound for later references, not reported.
+			ctx.Variables[subfield.Name] = value
+			continue
+		}
+		result[subfield.Name] = value
 	}
 	
 	return result, nil

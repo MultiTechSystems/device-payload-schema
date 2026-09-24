@@ -223,10 +223,18 @@ public static class SchemaDecoder
             }
 
             ulong mask = ((1UL << bitLen) - 1);
-            double value = (double)((rawVal >> bitStart) & mask);
+            double raw = (double)((rawVal >> bitStart) & mask);
 
-            if (!string.IsNullOrEmpty(subfield.Name))
-                result[subfield.Name] = value;
+            var value = ApplyPostRead(raw, subfield, ctx);
+            if (ReferenceEquals(value, Omitted) || string.IsNullOrEmpty(subfield.Name))
+                continue;
+            if (subfield.Name.StartsWith("_"))
+            {
+                // Internal: bound for later references, not reported.
+                ctx.Variables[subfield.Name] = value;
+                continue;
+            }
+            result[subfield.Name] = value;
         }
 
         return result;
@@ -465,6 +473,17 @@ public static class SchemaDecoder
                 throw new InvalidOperationException($"Unknown field type: {field.Type} ({field.RawType})");
         }
 
+        return ApplyPostRead(value, field, ctx);
+    }
+
+    /// <summary>
+    /// What happens to a value once it has been read: modifiers, then lookup, then the
+    /// field's variable. Shared with byte_group members, which skipped all three - arwin
+    /// lrs10701's temperature, u32[0:9] with div and add inside a group, came back as
+    /// the raw 1023 where Python, Java and Go gave 72.3.
+    /// </summary>
+    static object? ApplyPostRead(object? value, SchemaField field, DecodeContext ctx)
+    {
         // Apply modifiers, skipping a Number whose value came from a ref or a
         // compute - DecodeNumber already applied its stages, so doing it again here
         // doubles them. The ref case was already skipped; compute was not, so a
