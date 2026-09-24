@@ -92,28 +92,28 @@ fields:
             lookup: ["normal", "motionless", "abnormal", "lying_down"]
             # raw: readTargetStatus(bytes[i + 1])
           - name: use_time_now
-            type: u8
+            type: u24
             # raw: readUInt24LE(bytes.slice(i + 2, i + 5))
           - name: use_time_today
-            type: u8
+            type: u24
             # raw: readUInt24LE(bytes.slice(i + 5, i + 8))
         # REGION OCCUPANCY (v1.0.1)
         "[4, 249]":
           - name: region_1_occupancy
             type: u8
-            lookup: ["vacant", "occupied"]
+            lookup: {1: "vacant", default: "occupied"}
             # raw: readOccupancyStatus(bytes[i] === 1 ? 0 : 1)
           - name: region_2_occupancy
             type: u8
-            lookup: ["vacant", "occupied"]
+            lookup: {1: "vacant", default: "occupied"}
             # raw: readOccupancyStatus(bytes[i + 1] === 1 ? 0 : 1)
           - name: region_3_occupancy
             type: u8
-            lookup: ["vacant", "occupied"]
+            lookup: {1: "vacant", default: "occupied"}
             # raw: readOccupancyStatus(bytes[i + 2] === 1 ? 0 : 1)
           - name: region_4_occupancy
             type: u8
-            lookup: ["vacant", "occupied"]
+            lookup: {1: "vacant", default: "occupied"}
             # raw: readOccupancyStatus(bytes[i + 3] === 1 ? 0 : 1)
         # OUT OF BED (v1.0.1)
         "[5, 250]":
@@ -128,30 +128,32 @@ fields:
         # OUT OF BED (v1.0.2) - REGION 1-3
         "[11, 180]":
           - name: region_1_out_of_bed_time
-            type: u8
+            type: u24
             # raw: readUInt24LE(bytes.slice(i, i + 3))
           - name: region_2_out_of_bed_time
-            type: u8
+            type: u24
             # raw: readUInt24LE(bytes.slice(i + 3, i + 6))
           - name: region_3_out_of_bed_time
-            type: u8
+            type: u24
             # raw: readUInt24LE(bytes.slice(i + 6, i + 9))
         # OUT OF BED (v1.0.2) - REGION 4-6
         "[12, 180]":
           - name: region_4_out_of_bed_time
-            type: u8
+            type: u24
             # raw: readUInt24LE(bytes.slice(i, i + 3))
           - name: region_5_out_of_bed_time
-            type: u8
+            type: u24
             # raw: readUInt24LE(bytes.slice(i + 3, i + 6))
           - name: region_6_out_of_bed_time
-            type: u8
+            type: u24
             # raw: readUInt24LE(bytes.slice(i + 6, i + 9))
         # BREATHING DETECTION
         "[8, 177]":
           - name: respiratory_status
             type: u8
+            sensor: none
             # raw: readBreathStatus(bytes[i])
+            lookup: {1: "no_data_input", 2: "normal", 3: "tachypnea", 4: "bradypnea", 5: "undetectable", default: "unknown"}
           - name: respiratory_rate
             type: u16
             div: 100
@@ -268,3 +270,71 @@ test_vectors:
     source: vendor-codec
     expected:
       ipso_version: "v15.15"
+  - name: declared_example_occupancy
+    description: "TTN declared example; a region byte of 1 is vacant, anything else occupied (new-firmware inversion)"
+    payload: "03F801001000200004F901000100"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      detection_status: "vacant"
+      target_status: "normal"
+      use_time_now: 16
+      use_time_today: 32
+      region_1_occupancy: "vacant"
+      region_2_occupancy: "occupied"
+      region_3_occupancy: "vacant"
+      region_4_occupancy: "occupied"
+  - name: detection_target_u24
+    description: "v1.0.2 detection target: use times are 24-bit little-endian"
+    payload: "07B00101102030A0B0C0"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      detection_status: "vacant"
+      target_status: "motionless"
+      use_time_now: 3153936
+      use_time_today: 12628128
+  - name: out_of_bed_regions_1_3_u24
+    description: "v1.0.2 out-of-bed regions 1-3: three 24-bit little-endian times"
+    payload: "0BB4010203A1B2C3FFEEDD"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      region_1_out_of_bed_time: 197121
+      region_2_out_of_bed_time: 12825249
+      region_3_out_of_bed_time: 14544639
+  - name: out_of_bed_regions_4_6_u24
+    description: "v1.0.2 out-of-bed regions 4-6: three 24-bit little-endian times"
+    payload: "0CB4102030405060708090"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      region_4_out_of_bed_time: 3153936
+      region_5_out_of_bed_time: 6312000
+      region_6_out_of_bed_time: 9470064
+  - name: region_occupancy_inverted
+    description: "Region occupancy: 0 and 2 are occupied, 1 is vacant"
+    payload: "04F901000201"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      region_1_occupancy: "vacant"
+      region_2_occupancy: "occupied"
+      region_3_occupancy: "occupied"
+      region_4_occupancy: "vacant"
+  - name: respiratory_status_label
+    description: "Respiratory status byte is a label"
+    payload: "08B1021027"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      respiratory_status: "normal"
+      respiratory_rate: 100
+  - name: respiratory_status_unlisted
+    description: "An unlisted respiratory status: the vendor reports 'unknown'"
+    payload: "08B1001027"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      respiratory_status: "unknown"
+      respiratory_rate: 100

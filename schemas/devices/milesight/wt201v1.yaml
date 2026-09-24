@@ -61,14 +61,14 @@ fields:
           - name: reset_event
             type: u8
             sensor: none
-            lookup: ["normal", "reset"]
+            lookup: {1: "reset", default: "reset"}
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
             sensor: none
-            lookup: ["off", "on"]
+            lookup: {1: "on", default: "on"}
             # raw: readDeviceStatus(1)
         # TEMPERATURE
         "[3, 103]":
@@ -115,6 +115,8 @@ fields:
         "[7, 188]":
           - name: plan_type
             type: u8[0:3]
+            sensor: none
+            lookup: {0: "not executed", 1: "wake", 2: "away", 3: "home", 4: "sleep", default: "unknown"}
             # raw: readPlanEvent((plan_event_value >>> 0) & 0x0f)
             consume: 1
         # SYSTEM STATUS
@@ -138,16 +140,77 @@ fields:
         # RELAY STATUS
         "[10, 110]":
           - name: wires_relay
-            type: u8
+            type: object
             # raw: readWiresRelay(bytes[i])
+            fields:
+              - name: y1
+                type: u8[0:0]
+                lookup: ["off", "on"]
+              - name: y2_gl
+                type: u8[1:1]
+                lookup: ["off", "on"]
+              - name: w1
+                type: u8[2:2]
+                lookup: ["off", "on"]
+              - name: w2_aux
+                type: u8[3:3]
+                lookup: ["off", "on"]
+              - name: e
+                type: u8[4:4]
+                lookup: ["off", "on"]
+              - name: g
+                type: u8[5:5]
+                lookup: ["off", "on"]
+              - name: ob
+                type: u8[6:6]
+                lookup: ["off", "on"]
+                consume: 1
         # TEMPERATURE MODE SUPPORT
         "[255, 203]":
           - name: temperature_control_support_mode
-            type: u8
+            type: object
             # raw: readTemperatureControlSupportMode(bytes[i])
+            fields:
+              - name: heat
+                type: u8[0:0]
+                lookup: ["disable", "enable"]
+              - name: em_heat
+                type: u8[1:1]
+                lookup: ["disable", "enable"]
+              - name: cool
+                type: u8[2:2]
+                lookup: ["disable", "enable"]
+              - name: auto
+                type: u8[3:3]
+                lookup: ["disable", "enable"]
+                consume: 1
           - name: temperature_control_support_status
-            type: u8
+            type: object
             # raw: readTemperatureControlSupportStatus(bytes[i + 1], bytes[i + 2])
+            fields:
+              - name: stage_1_heat
+                type: u8[0:0]
+                lookup: ["disable", "enable"]
+              - name: stage_2_heat
+                type: u8[1:1]
+                lookup: ["disable", "enable"]
+              - name: stage_3_heat
+                type: u8[2:2]
+                lookup: ["disable", "enable"]
+              - name: stage_4_heat
+                type: u8[3:3]
+                lookup: ["disable", "enable"]
+              - name: aux_heat
+                type: u8[4:4]
+                lookup: ["disable", "enable"]
+                consume: 1
+              - name: stage_1_cool
+                type: u8[0:0]
+                lookup: ["disable", "enable"]
+              - name: stage_2_cool
+                type: u8[1:1]
+                lookup: ["disable", "enable"]
+                consume: 1
         # TEMPERATURE ALARM
         "[131, 103]":
           - name: temperature
@@ -160,17 +223,23 @@ fields:
             div: 10
           - name: temperature_alarm
             type: u8
+            sensor: none
             # raw: readTemperatureAlarm(bytes[i + 2])
+            lookup: {1: "emergency heating timeout alarm", 2: "auxiliary heating timeout alarm", 3: "persistent low temperature alarm", 4: "persistent low temperature alarm release", 5: "persistent high temperature alarm", 6: "persistent high temperature alarm release", 7: "freeze protection alarm", 8: "freeze protection alarm release", 9: "threshold alarm", 10: "threshold alarm release", default: "unknown"}
         # TEMPERATURE EXCEPTION
         "[179, 103]":
           - name: temperature_sensor_status
             type: u8
+            sensor: none
             # raw: readSensorStatus(bytes[i])
+            lookup: {1: "read failed", 2: "out of range", default: "unknown"}
         # HUMIDITY EXCEPTION
         "[185, 104]":
           - name: humidity_sensor_status
             type: u8
+            sensor: none
             # raw: readSensorStatus(bytes[i])
+            lookup: {1: "read failed", 2: "out of range", default: "unknown"}
 
 test_vectors:
   - name: ch255_type1_midscale
@@ -278,3 +347,87 @@ test_vectors:
     source: vendor-codec
     expected:
       temperature: -0.1
+  - name: power_on_reset_event
+    description: "Reset-event frame: the vendor reports reset_event 'reset' whatever the byte holds"
+    payload: "FFFEFF"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      reset_event: "reset"
+  - name: power_on_device_status
+    description: "Power-on frame: the vendor reports device_status 'on' whatever the byte holds"
+    payload: "FF0BFF"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      device_status: "on"
+  - name: temperature_alarm_label
+    description: "Temperature alarm byte is a label"
+    payload: "8367F00009"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      temperature: 24
+      temperature_alarm: "threshold alarm"
+  - name: temperature_sensor_status_label
+    description: "Temperature sensor status byte is a label"
+    payload: "B36701"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      temperature_sensor_status: "read failed"
+  - name: humidity_sensor_status_unlisted
+    description: "An unlisted humidity sensor status: the vendor reports 'unknown'"
+    payload: "B96800"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      humidity_sensor_status: "unknown"
+  - name: plan_type_label
+    description: "Plan type nibble is a label; 0 is 'not executed'"
+    payload: "07BC02"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      plan_type: "away"
+  - name: plan_type_unlisted
+    description: "An unlisted plan type nibble: the vendor reports 'unknown'"
+    payload: "07BC0C"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      plan_type: "unknown"
+  - name: wires_relay_bits
+    description: "Wires relay: seven on/off bits in one byte"
+    payload: "0A6E55"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      wires_relay:
+        y1: "on"
+        y2_gl: "off"
+        w1: "on"
+        w2_aux: "off"
+        e: "on"
+        g: "off"
+        ob: "on"
+  - name: temperature_control_support_bits
+    description: "Temperature control support: a mode byte and two status bytes of enable bits; device status follows to prove alignment"
+    payload: "FFCB0A0A01FF0BFF"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      temperature_control_support_mode:
+        heat: "disable"
+        em_heat: "enable"
+        cool: "disable"
+        auto: "enable"
+      temperature_control_support_status:
+        stage_1_heat: "disable"
+        stage_2_heat: "enable"
+        stage_3_heat: "disable"
+        stage_4_heat: "enable"
+        aux_heat: "disable"
+        stage_1_cool: "enable"
+        stage_2_cool: "disable"
+      device_status: "on"

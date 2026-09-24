@@ -25,15 +25,15 @@ fields:
           - name: hardware_version
             type: bitfield_string
             length: 2
-            parts: [[0, 8, hex], [12, 4, decimal]]
+            parts: [[0, 8, decimal], [8, 8, decimal]]
             prefix: "v"
             # raw: readHardwareVersion(bytes.slice(i, i + 2))
         # FIRMWARE VERSION
         "[255, 31]":
           - name: firmware_version
             type: bitfield_string
-            length: 2
-            parts: [[0, 8, hex], [8, 8, hex]]
+            length: 4
+            parts: [[0, 8, decimal], [8, 8, decimal], [16, 8, decimal], [24, 8, decimal]]
             prefix: "v"
             # raw: readFirmwareVersion(bytes.slice(i, i + 4))
         # SERIAL NUMBER
@@ -186,3 +186,18 @@ test_vectors:
       region_2_child_count: 255
       region_3_child_count: 255
       region_4_child_count: 255
+  - name: hardware_version_decimal
+    description: "Hardware version: two decimal bytes, major.minor"
+    payload: "FF09FEFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      hardware_version: "v254.255"
+  - name: firmware_version_4_bytes
+    description: "Firmware version is four decimal bytes; a hardware channel follows to prove alignment"
+    payload: "FF1F01000001FF0912A3"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      firmware_version: "v1.0.0.1"
+      hardware_version: "v18.163"

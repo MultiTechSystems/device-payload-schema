@@ -61,14 +61,14 @@ fields:
           - name: reset_event
             type: u8
             sensor: none
-            lookup: ["normal", "reset"]
+            lookup: {1: "reset", default: "reset"}
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
             sensor: none
-            lookup: ["off", "on"]
+            lookup: {1: "on", default: "on"}
             # raw: readDeviceStatus(1)
         # BATTERY
         "[1, 117]":
@@ -107,10 +107,14 @@ fields:
             # raw: readIlluminanceStatus(bytes[i])
         # CONFIDENCE STATUS
         "[8, 244]":
+          # The vendor skips the channel's first byte.
+          - name: _confidence_reserved
+            type: skip
+            length: 1
           - name: detection_status
             type: u8
             sensor: none
-            lookup: ["normal", "unavailable"]
+            lookup: {0: "normal", 1: "unavailable", default: "unknown"}
             # raw: readDetectionStatus(bytes[i + 1])
         # TIMESTAMP
         "[10, 239]":
@@ -254,3 +258,32 @@ test_vectors:
     source: vendor-codec
     expected:
       ipso_version: "v15.15"
+  - name: power_on_reset_event
+    description: "Reset-event frame: the vendor reports reset_event 'reset' whatever the byte holds"
+    payload: "FFFEFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      reset_event: "reset"
+  - name: power_on_device_status
+    description: "Power-on frame: the vendor reports device_status 'on' whatever the byte holds"
+    payload: "FF0BFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      device_status: "on"
+  - name: detection_status_second_byte
+    description: "Confidence channel: the first byte is skipped, the second is the status; device status follows to prove alignment"
+    payload: "08F40001FF0BFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      detection_status: "unavailable"
+      device_status: "on"
+  - name: detection_status_unlisted
+    description: "An unlisted detection status: the vendor reports 'unknown'"
+    payload: "08F4FF05"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      detection_status: "unknown"

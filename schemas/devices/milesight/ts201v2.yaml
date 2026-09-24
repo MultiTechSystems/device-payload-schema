@@ -61,14 +61,14 @@ fields:
           - name: reset_event
             type: u8
             sensor: none
-            lookup: ["normal", "reset"]
+            lookup: {1: "reset", default: "reset"}
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
             sensor: none
-            lookup: ["off", "on"]
+            lookup: {1: "on", default: "on"}
             # raw: readOnOffStatus(1)
         # BATTERY
         "[1, 117]":
@@ -246,3 +246,17 @@ test_vectors:
     source: vendor-codec
     expected:
       temperature: -0.1
+  - name: power_on_reset_event
+    description: "Reset-event frame: the vendor reports reset_event 'reset' whatever the byte holds"
+    payload: "FFFEFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      reset_event: "reset"
+  - name: power_on_device_status
+    description: "Power-on frame: the vendor reports device_status 'on' whatever the byte holds"
+    payload: "FF0BFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      device_status: "on"

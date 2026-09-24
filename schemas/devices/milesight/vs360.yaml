@@ -61,14 +61,14 @@ fields:
           - name: reset_event
             type: u8
             sensor: none
-            lookup: ["normal", "reset"]
+            lookup: {1: "reset", default: "reset"}
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
             sensor: none
-            lookup: ["off", "on"]
+            lookup: {1: "on", default: "on"}
             # raw: readDeviceStatus(1)
         # BATTERY(MAIN)
         "[1, 117]":
@@ -100,7 +100,9 @@ fields:
             type: u16
           - name: total_count_alarm
             type: u8
+            sensor: none
             # raw: readAlarmType(bytes[i + 4])
+            lookup: {1: "threshold_alarm", default: "unknown"}
         # PERIOD IN / OUT ALARM
         "[133, 204]":
           - name: period_in
@@ -109,7 +111,9 @@ fields:
             type: u16
           - name: period_count_alarm
             type: u8
+            sensor: none
             # raw: readAlarmType(bytes[i + 4])
+            lookup: {1: "threshold_alarm", default: "unknown"}
         # TIMESTAMP
         "[10, 239]":
           - name: timestamp
@@ -228,3 +232,35 @@ test_vectors:
     source: vendor-codec
     expected:
       ipso_version: "v15.15"
+  - name: power_on_reset_event
+    description: "Reset-event frame: the vendor reports reset_event 'reset' whatever the byte holds"
+    payload: "FFFEFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      reset_event: "reset"
+  - name: power_on_device_status
+    description: "Power-on frame: the vendor reports device_status 'on' whatever the byte holds"
+    payload: "FF0BFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      device_status: "on"
+  - name: total_count_alarm_label
+    description: "Total count alarm byte is a label"
+    payload: "84CC0100020001"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      total_in: 1
+      total_out: 2
+      total_count_alarm: "threshold_alarm"
+  - name: period_count_alarm_unlisted
+    description: "An unlisted period count alarm value: the vendor reports 'unknown'"
+    payload: "85CC0100020000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      period_in: 1
+      period_out: 2
+      period_count_alarm: "unknown"

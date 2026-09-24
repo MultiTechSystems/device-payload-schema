@@ -61,14 +61,14 @@ fields:
           - name: reset_event
             type: u8
             sensor: none
-            lookup: ["normal", "reset"]
+            lookup: {1: "reset", default: "reset"}
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
             sensor: none
-            lookup: ["off", "on"]
+            lookup: {1: "on", default: "on"}
             # raw: readDeviceStatus(1)
         # BATTERY
         "[1, 117]":
@@ -88,14 +88,13 @@ fields:
             # raw: readOccupancyStatus(readUInt8(bytes[i]))
         # ILLUMINANCE
         "[4, 0]":
+          # A status label, not a lux reading, so it carries no illuminance
+          # annotation.
           - name: illuminance
-            unit: "lux"
-            sensor: illuminance
-            ipso: {object: 3301, instance: 0, resource: 5700}
-            senml: {name: "illuminance", unit: "lx"}
-            semantic: "illuminance"
             type: u8
+            sensor: none
             # raw: readIlluminanceStatus(readUInt8(bytes[i]))
+            lookup: {0: "dim", 1: "bright", 254: "disable", default: "unknown"}
 
 test_vectors:
   - name: ch255_type1_midscale
@@ -203,3 +202,38 @@ test_vectors:
     source: vendor-codec
     expected:
       ipso_version: "v15.15"
+  - name: power_on_reset_event
+    description: "Reset-event frame: the vendor reports reset_event 'reset' whatever the byte holds"
+    payload: "FFFEFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      reset_event: "reset"
+  - name: power_on_device_status
+    description: "Power-on frame: the vendor reports device_status 'on' whatever the byte holds"
+    payload: "FF0BFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      device_status: "on"
+  - name: illuminance_label
+    description: "Illuminance channel is a status label"
+    payload: "040001"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      illuminance: "bright"
+  - name: illuminance_disable
+    description: "Illuminance status 254 is 'disable'"
+    payload: "0400FE"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      illuminance: "disable"
+  - name: illuminance_unlisted
+    description: "An unlisted illuminance status: the vendor reports 'unknown'"
+    payload: "040007"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      illuminance: "unknown"

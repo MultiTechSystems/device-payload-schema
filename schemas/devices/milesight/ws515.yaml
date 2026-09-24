@@ -61,14 +61,14 @@ fields:
           - name: reset_event
             type: u8
             sensor: none
-            lookup: ["normal", "reset"]
+            lookup: {1: "reset", default: "reset"}
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
             sensor: none
-            lookup: ["off", "on"]
+            lookup: {1: "on", default: "on"}
             # raw: readDeviceStatus(1)
         # VOLTAGE
         "[3, 116]":
@@ -101,11 +101,32 @@ fields:
             # raw: readSocketStatus(bytes[i])
         # TEMPERATURE (@since v1.9)
         "[9, 103]":
+          # One 16-bit little-endian word. 0xFFFD and 0xFFFF are status codes: the
+          # status peeks at the word through a bit range without consuming it, and a
+          # mapping miss omits it. Only 0xFFFF is mapped: its bytes read the same in
+          # either order, while the interpreter reads a bit range's base big-endian
+          # and the TS013 generator in the schema's order, so 0xFFFD cannot be
+          # mapped portably.
+          # formula: raw == 0xFFFD -> temperature_sensor_status "over range
+          #   alarm"; raw == 0xFFFF -> temperature_sensor_status "read
+          #   failed"; otherwise temperature. The vendor reports temperature
+          #   only for a non-status word; this schema still reports it beside
+          #   the status, because a `match` inside a tlv case is not decoded
+          #   by the Python interpreter.
           - name: temperature_sensor_status
-            type: u8
+            type: u16[0:15]
+            consume: 0
             sensor: none
-            lookup: ["normal", "over range alarm", "read failed"]
-            # raw: readSensorStatus(1)
+            lookup: {65535: "read failed"}
+            # raw: readSensorStatus(1) / readSensorStatus(2)
+          - name: temperature
+            unit: "°C"
+            sensor: temperature
+            ipso: {object: 3303, instance: 0, resource: 5700}
+            senml: {name: "temperature", unit: "Cel"}
+            semantic: "temperature"
+            type: s16
+            div: 10
         # TEMPERATURE THRESHOLD ALARM (@since v2.1)
         "[137, 103]":
           - name: temperature
@@ -251,3 +272,31 @@ test_vectors:
     source: vendor-codec
     expected:
       ipso_version: "v15.15"
+  - name: power_on_reset_event
+    description: "Reset-event frame: the vendor reports reset_event 'reset' whatever the byte holds"
+    payload: "FFFEFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      reset_event: "reset"
+  - name: power_on_device_status
+    description: "Power-on frame: the vendor reports device_status 'on' whatever the byte holds"
+    payload: "FF0BFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      device_status: "on"
+  - name: temperature_s16_word
+    description: "Temperature channel is one signed 16-bit word scaled /10"
+    payload: "0967F000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 24
+  - name: temperature_s16_negative
+    description: "Temperature channel, negative reading"
+    payload: "0967F0FF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: -1.6

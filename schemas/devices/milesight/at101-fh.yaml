@@ -61,14 +61,14 @@ fields:
           - name: reset_event
             type: u8
             sensor: none
-            lookup: ["normal", "reset"]
+            lookup: {1: "reset", default: "reset"}
             # raw: readResetEvent(1)
         # DEVICE STATUS
         "[255, 11]":
           - name: device_status
             type: u8
             sensor: none
-            lookup: ["off", "on"]
+            lookup: {1: "on", default: "on"}
             # raw: readDeviceStatus(1)
         # BATTERY
         "[1, 117]":
@@ -106,22 +106,22 @@ fields:
         # ANGLE
         "[8, 155]":
           - name: initial_angle_x
-            type: u8
+            type: s8
             # raw: readInt8(bytes[i])
           - name: initial_angle_y
-            type: u8
+            type: s8
             # raw: readInt8(bytes[i + 1])
           - name: initial_angle_z
-            type: u8
+            type: s8
             # raw: readInt8(bytes[i + 2])
           - name: inclination_angle_x
-            type: u8
+            type: s8
             # raw: readInt8(bytes[i + 3])
           - name: inclination_angle_y
-            type: u8
+            type: s8
             # raw: readInt8(bytes[i + 4])
           - name: inclination_angle_z
-            type: u8
+            type: s8
             # raw: readInt8(bytes[i + 5])
         # TEMPERATURE WITH ABNORMAL
         "[131, 103]":
@@ -274,3 +274,29 @@ test_vectors:
     source: vendor-codec
     expected:
       temperature: -0.1
+  - name: power_on_reset_event
+    description: "Reset-event frame: the vendor reports reset_event 'reset' whatever the byte holds"
+    payload: "FFFEFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      reset_event: "reset"
+  - name: power_on_device_status
+    description: "Power-on frame: the vendor reports device_status 'on' whatever the byte holds"
+    payload: "FF0BFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      device_status: "on"
+  - name: angles_signed
+    description: "Angle channel: six signed 8-bit angles"
+    payload: "089BFEFF9C01807F"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      initial_angle_x: -2
+      initial_angle_y: -1
+      initial_angle_z: -100
+      inclination_angle_x: 1
+      inclination_angle_y: -128
+      inclination_angle_z: 127
