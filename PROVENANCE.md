@@ -16,20 +16,26 @@ reading its manufacturer's own material — a published JavaScript codec, a
 datasheet, an integration guide — and it exists to say the same thing
 declaratively.
 
-Every schema and test vector records where it came from, in a `source:` field.
-Across the 220 device schema files here:
+A test vector records where it came from in a `source:` field — most of them, not
+all. `schemas/devices/` holds 241 files: 162 device schemas (121 of them with test
+vectors) and 79 that are not devices, the 30 `_language-conformance` fixtures and 49
+`_library-composed` files. Their 1535 vectors break down as follows (measured
+2026-09-24):
 
-| `source:` | Count | Meaning |
-|---|---|---|
-| `vendor-codec` | 1021 | Derived from the vendor's published JavaScript codec |
-| `vendor-doc` | 63 | Derived from the vendor's datasheet or integration guide |
-| `generated` | 35 | Produced by the tooling in this repository |
-| `spec-example` | 1 | From a specification's own example |
+| `source:` | Device schemas | Fixtures and composed | Meaning |
+|---|---|---|---|
+| `vendor-codec` | 1300 | 0 | Derived from the vendor's published JavaScript codec |
+| `vendor-doc` | 63 | 0 | Derived from the vendor's datasheet or integration guide |
+| `generated` | 15 | 55 | Produced by the tooling in this repository |
+| `spec-example` | 0 | 47 | From a specification's own example |
+| *(none)* | 52 | 3 | Not recorded |
 
-Sixty-three schemas additionally cite the specific page or document they were
-read from. Eleven manufacturers are represented: Decentlab, Digital Matter,
-Dragino, Elsys, HBI, Makerfabs, MClimate, Milesight, Radio Bridge, RadioNode and
-RAKwireless.
+The 52 device vectors with no `source:` are in radio-bridge (27), mclimate (11),
+digital-matter (7), dragino (5) and elsys (2). Schemas carry no schema-level
+`source:` key; 63 device schemas cite the page or document they were read from in a
+header comment. Fourteen manufacturers are represented: Arwin, Decentlab, Digital
+Matter, DNT, Dragino, Elsys, HBI, Makerfabs, MClimate, Milesight, Netvox, Radio
+Bridge, RadioNode and RAKwireless.
 
 ### What that means for reuse
 

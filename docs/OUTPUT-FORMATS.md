@@ -1,6 +1,9 @@
 # Output Format Comparison
 
 The Payload Schema decoder can output data in multiple formats for different platforms and standards.
+The raw format is what every interpreter returns; the IPSO, SenML and TTN views are
+produced by the Python interpreter's `get_semantic_output()` alone (see
+[API Usage](#api-usage) for its current limits).
 
 > **Note:** Output formats (IPSO, SenML, TTN) are a **network-side concern only**. 
 > This applies to BOTH directions:
@@ -8,12 +11,13 @@ The Payload Schema decoder can output data in multiple formats for different pla
 > - **Downlink:** Network encodes config→bytes, Device decodes bytes→values
 >
 > The device never sees semantic formats - it only converts between values and bytes.
-> This keeps device firmware simple and small (~2KB).
+> This keeps device firmware simple and small.
 
 ## Example
 
-**Schema:** Environmental sensor with temperature, humidity, pressure, CO2, battery  
-**Payload:** `092982140C03520D` (8 bytes)
+**Schema:** Environmental sensor with temperature, humidity, pressure, CO2, battery
+(the schema is under [Schema Definition](#schema-definition))  
+**Payload:** `0929822794035221` (8 bytes)
 
 ---
 
@@ -24,12 +28,20 @@ Simple flat dictionary - easiest to use in applications.
 ```json
 {
   "temperature": 23.45,
-  "humidity": 65.0,
+  "humidity": 65,
   "pressure": 1013.2,
   "co2": 850,
   "battery": 3.3
 }
 ```
+
+An integral value is reported as an integer (`65`, not `65.0`), as a JavaScript codec
+would (CR-2026-008). Keys beginning with `_` are the interpreter's own: `_quality` appears
+when a decoded field declares `valid_range` (Python, Go, C# and the TS013 codec; not Java),
+and Go, Java and C# add `_warnings` when the decode had something to report (Python returns
+those in `result.warnings` instead). No interpreter emits a `_meta` key: the
+`_meta`-annotated JSON the Integration Layer (`integration-layer-proto`) consumes is not
+produced by any decoder in this repository.
 
 **Use case:** Direct application use, custom backends, simple integrations.
 
@@ -46,13 +58,10 @@ OMA LwM2M standard object IDs - interoperable with LwM2M servers.
     "unit": "°C"
   },
   "3304": {
-    "value": 65.0,
+    "value": 65,
     "unit": "%RH"
   },
-  "3315": {
-    "value": 1013.2,
-    "unit": "hPa"
-  },
+  "pressure": 1013.2,
   "3325": {
     "value": 850,
     "unit": "ppm"
@@ -63,6 +72,15 @@ OMA LwM2M standard object IDs - interoperable with LwM2M servers.
   }
 }
 ```
+
+Each annotated field is keyed by its object id, with the field's `unit:` string; a field
+with no IPSO object (here `pressure`, whose hPa is not IPSO 3315's unit) keeps its own
+name and raw value. Two fields sharing an object id collide, and the later one wins.
+
+> **Known defect:** `get_semantic_output(data, 'ipso')` reads the object id from the
+> legacy nested `semantic: {ipso: 3303}` form only. With the canonical annotations shown
+> under [Schema Definition](#schema-definition), where `semantic:` is a string, it raises
+> `AttributeError`. The output above is what it produces for the legacy form.
 
 **IPSO Object Reference:**
 | Object ID | Name | Typical Use |
@@ -106,7 +124,7 @@ IETF Sensor Measurement Lists standard.
   },
   {
     "n": "humidity",
-    "v": 65.0,
+    "v": 65,
     "u": "%RH"
   },
   {
@@ -127,11 +145,15 @@ IETF Sensor Measurement Lists standard.
 ]
 ```
 
+Records are built from the field's `name` and its `unit:` string verbatim (`°C`, not
+the SenML unit `Cel`); the `senml: {name, unit}` annotation is not used.
+
 **SenML Fields:**
 - `n` - name
 - `v` - value (numeric)
 - `vs` - value (string)
 - `vb` - value (boolean)
+- `vd` - value (bytes, hex string)
 - `u` - unit
 - `t` - time (optional)
 - `bt` - base time (optional)
@@ -142,13 +164,17 @@ IETF Sensor Measurement Lists standard.
 
 ## 4. TTN Normalized Format
 
-The Things Network v3 payload format with `normalized_payload`.
+A `decoded_payload` / `normalized_payload` pair modelled on The Things Network v3. The
+`normalized_payload` shape here is this interpreter's own (`{measurement: {<field name>:
+{value, unit}}}`); it does not follow TTN's normalized payload schema (`lib/payload.json`
+in the device repository, e.g. `{"air": {"temperature": 23.45}}`), so it is not accepted
+where TTN expects that schema. `decoded_payload` is the raw output, `_quality` included.
 
 ```json
 {
   "decoded_payload": {
     "temperature": 23.45,
-    "humidity": 65.0,
+    "humidity": 65,
     "pressure": 1013.2,
     "co2": 850,
     "battery": 3.3
@@ -165,7 +191,7 @@ The Things Network v3 payload format with `normalized_payload`.
     {
       "measurement": {
         "humidity": {
-          "value": 65.0,
+          "value": 65,
           "unit": "%RH"
         }
       }
@@ -215,25 +241,60 @@ The Things Network v3 payload format with `normalized_payload`.
 
 ## Schema Definition
 
-To enable semantic output formats, add `semantic` annotations to fields:
+Semantic annotations use the canonical form of `schemas/devices/decentlab/dl-5tm.yaml`:
+`ipso: {object, instance, resource}`, `senml: {name, unit}` and a dotted `semantic:` name.
+This is the schema behind the example above:
 
 ```yaml
+name: env_sensor
+version: 1
 fields:
   - name: temperature
     type: s16
-    mult: 0.01
+    div: 100
     unit: "°C"
-    semantic:
-      ipso: 3303
-      senml: "urn:dev:ow:temp"
-      
+    ipso: {object: 3303, instance: 0, resource: 5700}
+    senml: {name: "temperature", unit: "Cel"}
+    semantic: "air.temperature"
   - name: humidity
     type: u8
-    mult: 0.5
+    div: 2
     unit: "%RH"
-    semantic:
-      ipso: 3304
+    ipso: {object: 3304, instance: 0, resource: 5700}
+    senml: {name: "humidity", unit: "%RH"}
+    semantic: "air.humidity"
+  - name: pressure        # hPa: SenML's unit is Pa, so no annotation
+    type: u16
+    div: 10
+    unit: "hPa"
+  - name: co2
+    type: u16
+    unit: "ppm"
+    ipso: {object: 3325, instance: 0, resource: 5700}
+    senml: {name: "co2", unit: "ppm"}
+    semantic: "air.co2"
+  - name: battery
+    type: u8
+    div: 10
+    unit: "V"
+    ipso: {object: 3316, instance: 0, resource: 5700}
+    senml: {name: "vbat", unit: "V"}
+    semantic: "battery.voltage"
+test_vectors:
+  - name: example
+    payload: "0929 82 2794 0352 21"
+    source: generated     # illustrative device; values computed from the layout
+    expected:
+      temperature: 23.45
+      humidity: 65
+      pressure: 1013.2
+      co2: 850
+      battery: 3.3
 ```
+
+These annotations are what `tools/score_schema.py` scores. The nested
+`semantic: {ipso: 3303, senml: ...}` form is legacy; see the IPSO defect note above for
+the one place that still reads it.
 
 ---
 
@@ -250,7 +311,7 @@ result = interpreter.decode(payload)
 # Raw format (default)
 raw = result.data
 
-# IPSO format
+# IPSO format (legacy nested annotations only; see the defect note above)
 ipso = interpreter.get_semantic_output(result.data, 'ipso')
 
 # SenML format
@@ -259,6 +320,10 @@ senml = interpreter.get_semantic_output(result.data, 'senml')
 # TTN format
 ttn = interpreter.get_semantic_output(result.data, 'ttn')
 ```
+
+`get_semantic_output()` walks the schema's top-level `fields:` only, so fields inside
+`ports`, `flagged`, `match` or `tlv` are left out of the IPSO, SenML and TTN views. An
+unknown format name returns the raw data unchanged.
 
 ### Network Server Integration
 
@@ -286,12 +351,13 @@ standard JSON Schema tools.
 ### Generation
 
 ```bash
-python tools/generate_output_schema.py schemas/my-device.yaml > my-device-output.schema.json
+python tools/generate_output_schema.py schemas/my-device.yaml -o my-device-output.schema.json
 ```
 
 ### Example Output Schema
 
-For a temperature/humidity sensor:
+For a sensor with `temperature` (`s16`, `div: 10`, `unit: "°C"`,
+`valid_range: [-40, 85]`) and `humidity` (`u8`, `unit: "%"`):
 
 ```json
 {
@@ -303,20 +369,39 @@ For a temperature/humidity sensor:
   "properties": {
     "temperature": {
       "type": "number",
-      "description": "Unit: °C. Valid range: [-40, 85]"
+      "description": "Unit: \u00b0C. Valid range: [-40, 85]"
     },
     "humidity": {
-      "type": "number",
-      "description": "Unit: %. Valid range: [0, 100]"
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 255,
+      "description": "Unit: %"
     },
-    "battery": {
-      "type": "number",
-      "description": "Unit: V. Valid range: [2.0, 3.6]"
+    "_quality": {
+      "type": "object",
+      "description": "Per-field quality flags for fields declaring valid_range (PS-131/PS-182). Present only when at least one such field is decoded; absent otherwise.",
+      "properties": {
+        "temperature": {
+          "type": "string",
+          "enum": ["good", "out_of_range"],
+          "description": "good = within valid_range; out_of_range = outside it"
+        }
+      },
+      "additionalProperties": false
+    },
+    "_warnings": {
+      "type": "array",
+      "description": "What the decode had to say that did not stop it - a value outside its `valid_range`, or a TLV tag the schema does not describe (PS-301, PS-302). Present only when something was reported.",
+      "items": {"type": "string"}
     }
   },
   "additionalProperties": true
 }
 ```
+
+A field with no modifier is an `integer` bounded by its wire type; a scaled field is a
+`number`. `_quality` and `_warnings` are described only where the schema can produce
+them.
 
 ### Validation Usage
 
@@ -357,7 +442,9 @@ For each device schema, the following artifacts SHOULD be generated:
 
 ## Format-Specific JSON Schemas
 
-Different output formats have different validation schemas:
+Different output formats have different validation schemas. The examples below use
+SenML unit symbols (`Cel`); `get_semantic_output()` currently emits the field's `unit:`
+string (`°C`) instead, as shown in sections 2-4.
 
 | Format | Schema | Scope |
 |--------|--------|-------|
@@ -381,7 +468,7 @@ Validates the IPSO object structure (object IDs as keys, value/unit properties):
 ```json
 {
   "3303": {"value": 23.45, "unit": "Cel"},
-  "3304": {"value": 65.0, "unit": "%RH"}
+  "3304": {"value": 65, "unit": "%RH"}
 }
 ```
 
@@ -394,7 +481,7 @@ Validates SenML record arrays per IETF RFC 8428:
 ```json
 [
   {"n": "temperature", "v": 23.45, "u": "Cel"},
-  {"n": "humidity", "v": 65.0, "u": "%RH"}
+  {"n": "humidity", "v": 65, "u": "%RH"}
 ]
 ```
 

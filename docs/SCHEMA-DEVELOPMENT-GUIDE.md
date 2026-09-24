@@ -54,6 +54,11 @@ const result = decodeUplink({ bytes: [...], fPort: 2 });
 // Record exact output including all fields
 ```
 
+Record each such vector with `source: vendor-codec` (or `vendor-doc` when the values come
+from the datasheet). Never record what this toolkit's own decoder printed as if it were
+independent: label such vectors `source: generated`. A schema with no independently
+sourced vector is capped at Silver (PS-264) however high it scores.
+
 Minimum test vector coverage:
 - **One test per message type** (keepalive, each command, etc.)
 - **Boundary tests**: all zeros, all 0xFF, single bit set
@@ -68,8 +73,12 @@ Start with the simplest message type and verify before adding complexity:
 # After each change, validate
 python3 tools/validate_schema.py schemas/device.yaml
 
-# Compare generated codec against original
-node tools/compare_codecs.js original.js generated.js test-vectors.yaml
+# Compare the schema against the vendor's decoder (TTN device repository checkout)
+python3 tools/crossvalidate_ttn.py --devices-repo ../lorawan-devices \
+    --vendor milesight-iot --schema-dir schemas/devices/milesight --schema ws301
+
+# Decentlab: against the vendor's own decoders
+python3 tools/crossvalidate_decentlab.py --vendor-dir ../decentlab-decoders
 ```
 
 ### 5. Document Deviations
@@ -87,7 +96,8 @@ If the original codec has bugs or undefined behavior, document it:
 
 Ensure generated codec output matches original:
 - **Numeric precision**: Use `transform: [{op: round, decimals: 2}]`
-- **Boolean format**: Original returns `true`/`false`, schema returns `0`/`1`
+- **Boolean format**: `type: bool` decodes to `true`/`false`, as JavaScript codecs do; a
+  codec that emits `0`/`1` needs an integer field (e.g. `u8[3:3]`) instead
 - **Field names**: Must match exactly
 - **Nested objects**: Command responses often use nested structures
 
@@ -122,9 +132,11 @@ transform:
 
 ### Boolean vs Integer
 
-**Problem**: Original returns `true`/`false`, generated returns `0`/`1`.
+**Problem**: The original emits a flag as `true`/`false` in one place and `0`/`1` in another.
 
-**Solution**: For JavaScript compatibility, this is acceptable. Document the difference.
+**Solution**: Match the original per field. `type: bool` (with `bit:`) decodes to
+`true`/`false` in every implementation and the generated codec; a bit range such as
+`u8[3:3]` decodes to the integer `0`/`1`.
 
 ### Incomplete Command Support
 
@@ -133,7 +145,7 @@ transform:
 **Solution**: 
 1. Document what's supported vs unsupported
 2. Create separate schemas for complex command structures
-3. Use `switch` or `tlv` constructs for command dispatch
+3. Use `match` or `tlv` constructs for command dispatch
 
 ## Tools
 
@@ -150,7 +162,7 @@ node tools/analyze_codec.js <codec.js> --output vectors.yaml
 Validates schema and runs test vectors:
 
 ```bash
-python3 tools/validate_schema.py schema.yaml
+python3 tools/validate_schema.py schema.yaml -v
 ```
 
 ### score_schema.py
@@ -161,13 +173,18 @@ Evaluates schema quality and coverage:
 python3 tools/score_schema.py schema.yaml --verbose
 ```
 
-### compare_codecs.js
+### crossvalidate_ttn.py / crossvalidate_decentlab.py
 
-Compares original vs generated codec output:
+Compare a schema's decode against the vendor's own decoder and declared examples:
 
 ```bash
-node tools/compare_codecs.js original.js generated.js
+python3 tools/crossvalidate_ttn.py --devices-repo ../lorawan-devices \
+    --vendor milesight-iot --schema-dir schemas/devices/milesight [--verbose]
+python3 tools/crossvalidate_decentlab.py --vendor-dir ../decentlab-decoders
 ```
+
+`tools/crossvalidate_js_json.py` diffs the interpreter's JSON against the generated
+TS013 codec's, token by token.
 
 ## Checklist: Before Declaring "Complete"
 
@@ -179,6 +196,7 @@ node tools/compare_codecs.js original.js generated.js
 - [ ] Differences from original are documented
 - [ ] Schema passes validation (`validate_schema.py`)
 - [ ] Schema scores at target tier (`score_schema.py`)
+- [ ] Every test vector declares `source:`, and at least one is independent of this toolkit
 
 ## Example: MClimate Vicki
 
@@ -186,7 +204,10 @@ The Vicki schema demonstrates these principles:
 
 1. **Analyzed original**: Found 25+ command types, 3 keepalive variants
 2. **Scoped to keepalive only**: Command responses documented as future work
-3. **Generated test vectors**: 11 vectors covering all keepalive edge cases
+3. **Test vectors**: 12 vectors covering all keepalive edge cases. They were validated
+   against the interpreter's output and carry no independent `source:`, so the schema
+   scores 100% yet is capped at Silver (PS-264) until vectors from the vendor codec are
+   recorded
 4. **Added rounding transforms**: Match original's `toFixed(2)` and `Math.round()`
 5. **Documented bugs**: Original's broken reason=0x51 formula
 6. **Validated output**: Generated codec matches original for all test vectors

@@ -86,11 +86,12 @@ TAG KEYS:     "[1, 200]" exact | "[1, !0]" excluding | "[2, *]" any
 MODIFIERS:    add mult div | lookup (sequence or sparse mapping) | polynomial
               | compute | guard | transform
 CONDITIONALS: match (value) | flagged (bitmask) | tlv (tag dispatch)
-TRANSFORMS:   sqrt abs pow floor ceiling clamp log10 log
+TRANSFORMS:   sqrt abs pow log10 log round (floor ceiling clamp: Python + TS013 only)
 COMPUTE OPS:  add sub mul div mod idiv
 GUARD OPS:    gt gte lt lte eq ne
-ENCODINGS:    sign_magnitude bcd gray
-REFERENCES:   $field_name | var: name | use: definition
+ENCODINGS:    sign_magnitude bcd gray (Python only)
+REFERENCES:   $field_name | var: name | $ref: '#/definitions/name'
+LITERALS:     {type: string, value: "x"} | {type: number, value: 3}  (read no bytes)
 ```
 
 ```yaml
@@ -163,7 +164,7 @@ python3 tools/score_schema.py <schema> --no-require-provenance
 
 # Independent oracles. Use these before trusting a score.
 python3 tools/crossvalidate_decentlab.py --vendor-dir ../decentlab-decoders
-python3 tools/crossvalidate_ttn.py --devices-repo ../lorawan-devices \
+python3 tools/crossvalidate_ttn.py --devices-repo ~/Workspace/lora/tools/lorawan-devices \
     --vendor milesight-iot --schema-dir schemas/devices/milesight
 ```
 
@@ -181,22 +182,26 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 1,193 test vectors across the 162 schemas in `schemas/devices/` that carry any (of
-220 YAML files) are the shared cross-language test set. Every implementation has a
-runner that reads the same YAML and the same vectors:
+The 1535 test vectors across the 200 schemas in `schemas/devices/` that carry any (of
+241 YAML files; measured 2026-09-24 with `tools/vector-verdicts.py`) are the shared
+cross-language test set. Every implementation has a runner that reads the same YAML and
+the same vectors:
 
-| Implementation | Runner | Decode | Re-encode |
+| Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | 1193 / 1193 | 1131 |
-| Go | `go/schema/corpus_conformance_test.go` | 1193 | 1137 |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 1193 | 1131 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 1193 | 1131 |
-| C | none - consumes a binary schema, not YAML | n/a | n/a |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1232 |
+| Go | `go/schema/corpus_conformance_test.go` | 1524 | 1245 (plain API 1232) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 1524 | 1231 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 1524 | 1230 |
+| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 487 of 487 attempted | n/a |
+
+These figures move with every schema added. `make check-floors` prints each floor beside
+its own implementation's actual; trust it over this table.
 
 Every runner compares its pass count against a committed floor rather than requiring
 the whole corpus, so any gap stays visible and a regression fails the build. All four
 YAML implementations now decode the entire corpus, so **every decode floor is the full
-1193 and any failure is a regression, not a known gap.** If you add a construct that one
+corpus of payload vectors and any failure is a regression, not a known gap.** If you add a construct that one
 implementation cannot express yet, lower its floor deliberately and say why here.
 
 The re-encode column is the round-trip suite described under "Encoding" below, and its
@@ -232,9 +237,9 @@ expected value:
   and called the disagreement a CR. Measured 2026-09-24 for `bytes` of length 2 over
   `0a0b`: Python, Go, Java, C# and the generated TS013 codec all give `"0a0b"`. Vectors
   write a hex string, and `values_match` still accepts hex or a list of octets against
-  a byte sequence. What remains open is `separator:` — described in the spec with no
-  PS tag, implemented in Go, **ignored by the Python reference** (`a1b2c3` stays
-  `a1b2c3` under `separator: ":"`).
+  a byte sequence. What remains open is `bytes` `format:` and `separator:` — described in the
+  spec with no PS tag, read by Go, Java and C#, **ignored by the Python reference and the
+  TS013 generator** (`a1b2c3` stays `a1b2c3` under `separator: ":"`).
 - **`type: array` never existed.** `repeat` with `until: end` expresses exactly the
   same thing and already worked in all four. Another "missing feature" that was not
   missing — try the current language first.
@@ -272,7 +277,7 @@ five were carried deliberately while the working group chose; the range won beca
 it says where the bits are instead of depending on a bit cursor each implementation
 has to maintain identically.
 
-Every decode floor is now the full 1193. Do not re-add a withdrawn form to "support" an
+Every decode floor is the full corpus. Do not re-add a withdrawn form to "support" an
 old schema: the Python interpreter, the binary encoders, the JS and TS013
 generators and the C header all reject them, and the four tests that used to assert
 they decode now assert they are refused.
@@ -398,9 +403,10 @@ rather than the comments, which claim more than the code does (`definitions`, `$
 
 - **Has**: `u8`-`u64`/`s8`-`s64` and their aliases, `f16`/`f32`/`f64`, `bool`,
   `bytes`, `string`/`ascii`, `hex`, `base64`, `udec`/`sdec`, `enum`, `match`,
-  `object`, `skip`, the bracket bitfield range, `lookup`, `var`/`$var`, `consume`,
+  `skip`, the bracket bitfield range, `lookup`, `var`/`$var`, `consume`,
   per-field `endian`, and the three bare modifiers.
-- **Lacks**: `compute`, `polynomial`, `guard`, `ref`, `formula`, the whole
+- **Lacks**: `object` and `byte_group` (both are `field_type_t` values, and `object`
+  is even parsed from its name, but neither has a decode path), `compute`, `polynomial`, `guard`, `ref`, `formula`, the whole
   `transform` array (so no `round`, `sqrt`, `log`, `pow`, and no multi-stage),
   `name_from`, `tlv`, `flagged`, `repeat`/`until`/`count`/`byte_length`,
   `bitfield_string`, `number`, `version_string`, `definitions`/`$ref`, `ports`,
@@ -496,9 +502,9 @@ encoder has one run packer, wired through its field list, its construct bodies a
 `flagged` path, and `test_cr_2026_024_encode_bitfield_parity.py` reads all three sources
 so a removal shows up there rather than as a puzzling floor break.
 
-**The per-implementation vector counts in the two tables above are stale.** They say
-1193/1131/1137; `make check-floors` reports decode 1243 and re-encode 1167 (Python, Java),
-1177 (Go), 1168 (C#) as of the field-endian work below. Read the tool, not the tables.
+**Read `make check-floors`, not any table here.** The per-implementation counts in this
+file have gone stale three times; the corpus-table figures above were measured
+2026-09-24.
 
 **A field's own `endian:` is honoured by all five implementations, and was ignored by the
 reference alone.** Go, Java, C# and C all parsed and applied it; `tools/schema_interpreter.py`
@@ -548,7 +554,8 @@ which the runners never walk.
 
 **`tools/c-corpus-harness.py` passed only the schema-level endian**, so `field-endian.yaml`
 failed there and read as a C gap when the C interpreter decodes it correctly
-(`field_def_t.endian`). Fixed in the harness; C is 492/492 attempted. This is the third time
+(`field_def_t.endian`). Fixed in the harness; C was 492/492 attempted then, and is 487/487
+since `dl-zn2`'s corrected decode needs `compute`, which the C interpreter lacks. This is the third time
 a harness limit has been written down as an interpreter limit - grep the header first.
 
 **`make check-floors` reads the floors so you do not have to.** There are 32 across four
@@ -689,15 +696,15 @@ into `roundHalfEven`, and any reimplementation needs both:
   true - that is the shortest *representation* - while the stored value sits above the
   half. Read `toFixed(d+19)` and require a 5 at the cut with only zeros after it.
 
-**Go's `round` transform is the remaining outlier**: `math.RoundToEven(v*scale)/scale`
-inherits exactly the multiply error above, so Go gives 2.36 and 2.68 where Python, Java
-and C# give 2.35 and 2.67. Three of four are decimal-correct. No corpus vector catches
-it yet, so add one when fixing it.
+**Go's `round` transform was the outlier and is fixed**: `math.RoundToEven(v*scale)/scale`
+inherited the multiply error above (2.36 where the others gave 2.35). It now uses
+`roundHalfEvenDecimal` (`go/schema/schema.go`), and
+`_language-conformance/round-half-to-even.yaml` holds all four to it.
 
-**`score-baseline.json` is stale.** It reports 26 regressions, of which 23 are
-decentlab schemas that score identically at HEAD in a clean worktree - the baseline
-predates an edge-case scoring fix in the unpushed commits. Regenerate it before using
-it as a gate, or it will keep hiding the real regressions among false ones.
+**`score-baseline.json` is a live gate**: `make score-check` reports no regressions as of
+2026-09-24. When a score drops for a good reason - a wrong annotation removed - refresh
+that schema's entry alone and say why in the commit (PR #47 did this for vs370);
+regenerating the whole file would hide any other drop.
 
 **A more correct schema can score lower**, which is the mirror of the warning above
 that a high score is not proof of correctness. `ct303`/`ct305`/`ct310` dropped SILVER
@@ -722,7 +729,7 @@ Fidelity has two different targets, worth not confusing:
 - Replacing **our own generated** codecs is achievable now — both come from the same
   YAML, so the key sets already agree.
 - Replacing a **vendor** codec is a schema-fidelity question, tracked by
-  `crossvalidate_ttn.py` (milesight 61/84, decentlab 58/58), not an interpreter one.
+  `crossvalidate_ttn.py` (milesight 64/84, decentlab 58/58), not an interpreter one.
   Our `dl-5tm` emits `flags` and `soil_temperature_raw` where the vendor's emits
   neither — and `soil_temperature_raw` is a pure intermediate that should have been
   `_`-prefixed, so it is a schema bug that would surface as an extra JSON key.
@@ -741,11 +748,11 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1131 / 1193 |
-| Go | `go/schema/corpus_encode_test.go` | 1137 |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1131 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1131 |
-| C | none — `src/test_encoder.c` is in no build target | unverified |
+| Python | `tests/test_encode_round_trip.py` | 1232 |
+| Go | `go/schema/corpus_encode_test.go` | 1245 (plain 1232) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1230 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1231 |
+| C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
 from `tools/schema_interpreter.py`. Read that one first when changing any of them.
@@ -957,11 +964,10 @@ Cross-language method of record: **diff the failing sets, not the totals.** Two
 implementations at the same count can be failing different vectors. Every Go fix above came
 from listing what Go failed that Python passed; the set is now empty in that direction.
 
-**Four of the nine C test files are in no build target**: `test_comprehensive.c`,
-`test_interpreter.c`, `test_binary_schema.c`, `test_encoder.c`. Only `test_codec.c`
-and the `selftest_*` files are wired in — so C's encoder (`schema_encode`, `encode_field`,
-reverse modifiers) is verified by nothing that runs, and PS-061..PS-064 and the reverse of
-canonical modifier order are normative. Six compiled executables are also tracked in
+**`test_comprehensive.c` is the one C test file in no build target** - deliberately; see
+below. `test_interpreter.c`, `test_binary_schema.c` and `test_encoder.c` used to be in none
+too, which left C's encoder verified by nothing that ran; they are in `C_TESTS` now and
+`make test-c` builds them. Six compiled executables are also tracked in
 git (`src/test_binary_schema`, `test_comprehensive`, `test_interpreter`,
 `test_encoder`, and the two `_cpp` ones).
 
@@ -1013,7 +1019,7 @@ Cross-validate a vendor family with:
   --vendor milesight-iot --schema-dir schemas/devices/milesight [--verbose]
 ```
 
-Milesight stands at 61 of 84 agreeing. `vs321` and `vs373` are the next region-mask
+Milesight stands at 64 of 84 agreeing. `vs321` and `vs373` are the next region-mask
 pair; both decode nothing for their declared example, so more than the regions is
 missing. Note that a bitfield range reads its base value **big-endian regardless of
 the schema's `endian`**, so a little-endian 16-bit mask must be taken as two `u8`
@@ -1130,7 +1136,7 @@ the vendor codec and the schema over the same payloads and diff the outputs:
 
 ```bash
 python3 tools/crossvalidate_decentlab.py --vendor-dir ../decentlab-decoders
-python3 tools/crossvalidate_ttn.py --devices-repo ../lorawan-devices \
+python3 tools/crossvalidate_ttn.py --devices-repo ~/Workspace/lora/tools/lorawan-devices \
     --vendor milesight-iot --schema-dir schemas/devices/milesight
 ```
 
@@ -1142,7 +1148,7 @@ too, so check the decoder against the vendor's own documentation when they diffe
 
 **Re-clone the Decentlab oracle when you need it**; it is not vendored here:
 `git clone --depth 1 https://github.com/decentlab/decentlab-decoders`. The TTN
-checkout at `../lorawan-devices` is permanent.
+checkout at `~/Workspace/lora/tools/lorawan-devices` is permanent.
 
 ## Rules for this repository
 
@@ -1329,9 +1335,10 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   reasons, which had said "not built by the struct API" and were read as harness limits.
 
   Two things to keep straight when reading that report. **A skipped schema is not a passing
-  one**, and **a harness limitation is not a C gap** - inline `match`, `byte_group`,
-  `object` and `$ref` are named separately because C supports them and the harness does
-  not. Ports are the other way round and were listed here in error: the header says
+  one**, and **a harness limitation is not a C gap** - inline `match` and `$ref` are
+  named separately because C supports them and the harness does not. `byte_group` and
+  `object` used to be listed with them in error: they are enum values with no decode
+  path, so they are C gaps. Ports are the other way round and were listed here in error: the header says
   outright that it has no port selection, so a port-based schema is a C gap. When in
   doubt, grep the header before writing down which side a limit sits on - every
   misattribution in this file and in SESSION-NOTES.md would have been caught by that.
@@ -1343,8 +1350,8 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   little-endian `s24`/`u64` cases fail while the interpreter decodes both correctly when
   driven directly. Stale test, not a defect - updating it is its own change.
 - **CR-2026-004 is implemented in Python, Go, Java and C#, not in C.** `name_from`
-  and `!`/`*` case keys do not apply to the C interpreter: it has no TLV support and
-  fixed-size name buffers, and it consumes a binary schema with no place for a
+  and `!`/`*` case keys do not apply to the C interpreter: its TLV support (CR-2026-033)
+  packs a tag into one integer and has no wildcard keys, it has fixed-size name buffers, and it consumes a binary schema with no place for a
   template. It does honour PS-269 (an unmatched lookup omits the field). A `default`
   on a mapping lookup is Python, Go, Java and C# only, because the binary schema has
   no slot for it.
@@ -1361,19 +1368,18 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   fixture must still decode identically. `validate_schema.py` warns when a field
   carries two or more bare modifiers, since the intent reads better as a
   `transform`.
-- **Many published schemas are still unverified.** 62 of 158 device schemas ship
-  with no test vectors and are therefore Rejected. See the per-device table in
+- **Many published schemas are still unverified.** 41 of 241 device schemas ship
+  with no test vectors and are therefore Rejected (measured 2026-09-24). See the per-device table in
   [`docs/INDEX.md`](docs/INDEX.md). The decentlab and milesight families have been
   through a vendor cross-validation pass; the rest have not.
 - **Decentlab: 58 of 58 agree with the vendor decoder.** `dl-zn2` read one word of a
   two-word value and `dl-iam` read a word the device does not send, so both mis-decoded
   the vendor's own examples; `dl-zn2`'s only vector was `source: generated` and pinned
   the bug. `dl-iam`'s `max(max(a,b),0)` is built from `compute` and `guard` alone.
-- **Squares are `compute`, not `pow`.** The Python interpreter accepts `pow`,
-  `log` and `sqrt` transform stages; the other three do not. Where the vendor
-  squares a value, multiply it by itself with `compute` — that decodes identically
-  everywhere. Adding the missing ops to the other three would be the alternative,
-  and is worth doing before any schema genuinely needs a logarithm.
+- **`pow`, `sqrt`, `abs`, `log` and `log10` stages exist in all four YAML
+  interpreters** (see "The unary maths transform stages" above), so a square can be a
+  `pow: 2` stage. `floor`, `ceiling` and `clamp` do not: Go, Java and C# never parse them
+  and treat them as no-ops, so use `compute`/`guard` for those until they are ported.
 - **Two wrongly matched shapes that leave no hint.** Both were pattern-matched by
   the converter, so unlike an untranslatable expression nothing marked them
   unfinished — and a wrongly matched field is more dangerous than an unmatched one:
@@ -1444,6 +1450,9 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   carry no semantic annotations and stop at Silver; the scorer's keyword heuristic
   would read milesight `battery` as IPSO 3316 voltage when it is a percentage, so
   units have to be established per device before annotating.
-- **The JS TS013 generator has a shared-byte bug.** `generate_ts013_codec.py`
-  can drop bare bit-range fields and fail to advance the cursor. The Python
-  interpreter path is correct; only generated JavaScript is affected.
+- **The TS013 generator's shared-byte bug is fixed**: bare bit ranges, `consume` and
+  `bool` with `bit:` decode correctly in generated JavaScript, and
+  `tools/vector-verdicts.py` holds both paths to every corpus vector. What remains is
+  the generator reading a bit range's base in the schema's byte order where PS-059 says
+  big-endian (see SESSION-NOTES), and a field named `w` colliding with its `warnings`
+  array.

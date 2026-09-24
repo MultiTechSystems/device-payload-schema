@@ -25,7 +25,7 @@ The `generate_firmware_codec.py` tool creates header-only C codecs that:
    do it when reading the sensor, not in the codec
 3. **Complex math belongs server-side** - sqrt, log, polynomial calibration curves
    require floating-point math that bloats firmware (~2-8KB for `<math.h>`)
-4. **Single source of truth** - Transform logic lives in the Python/JS interpreter,
+4. **Single source of truth** - Transform logic lives in the network-side interpreters,
    not duplicated across C firmware
 5. **Smaller firmware** - No `<math.h>`, no floating-point bloat
 
@@ -56,12 +56,12 @@ This keeps the codec simple and gives you control over when/if to apply transfor
 ## Usage
 
 ```bash
-python tools/generate_firmware_codec.py schema.yaml -o output.h
+python3 tools/generate_firmware_codec.py schema.yaml -o output.h
 ```
 
 **Example:**
 ```bash
-python tools/generate_firmware_codec.py schemas/env_sensor.yaml -o include/env_sensor_codec.h
+python3 tools/generate_firmware_codec.py examples/env_sensor.yaml -o include/env_sensor_codec.h
 ```
 
 ## Generated Code Structure
@@ -70,12 +70,12 @@ For a schema like:
 
 ```yaml
 name: env_sensor
-version: "1.0"
+version: 1
 endian: little
 
 fields:
   - name: temperature
-    type: i16
+    type: s16
     div: 100        # Applied on decode (network-side), NOT in C
   - name: humidity
     type: u8
@@ -133,10 +133,12 @@ void send_uplink(void) {
 ```c
 #include "env_sensor_codec.h"
 
+// device_config_t / unpack_device_config() generated from a downlink schema
+// with fields `interval` (u16) and `threshold` (u16)
 void handle_downlink(const uint8_t* payload, size_t len) {
-    env_sensor_t config;
+    device_config_t config;
     
-    int consumed = unpack_env_sensor(payload, len, &config);
+    int consumed = unpack_device_config(payload, len, &config);
     if (consumed < 0) {
         // Error handling
         return;
@@ -153,7 +155,7 @@ void handle_downlink(const uint8_t* payload, size_t len) {
 | Value | Meaning |
 |-------|---------|
 | > 0 | Success: bytes written (pack) or consumed (unpack) |
-| -1 | Invalid parameters (NULL pointer) |
+| -1 | Invalid parameters (NULL pointer), or buffer too short (unpack) |
 
 ## Dependencies
 
@@ -172,9 +174,9 @@ No external dependencies. No `<math.h>`. Byte-order helpers are included inline.
 | Aspect | Generated (`generate_firmware_codec.py`) | Runtime (`schema_interpreter.h`) |
 |--------|------------------------------------------|----------------------------------|
 | Schema changes | Requires regenerate + recompile | Load new binary schema |
-| Code size | Smaller per-schema | Fixed ~2KB + schema |
-| Transforms | Not applied (raw values) | Applied at decode time |
-| Math library | Not required | May require for transforms |
+| Code size | Smaller per-schema | About 18 KB stripped with one schema, x86-64 (`make bench-c`, `-Os`) |
+| Transforms | Not applied (raw values) | `mult`/`div`/`add` and `lookup` only; no `transform` array, `compute` or `polynomial` |
+| Math library | Not required | Not required |
 | Performance | Fastest | Fast |
 | Use case | Production devices | Development, OTA updates |
 
@@ -184,14 +186,16 @@ No external dependencies. No `<math.h>`. Byte-order helpers are included inline.
 |---------|----------|------------|-------|
 | Basic types (u8-u64, s8-s64) | ✅ | ✅ | |
 | Float types (f32, f64) | ✅ | ✅ | IEEE 754 bit patterns |
-| byte_group | ✅ | ✅ | Bitfield extraction |
+| byte_group | ❌ | ❌ | Emitted code calls undefined `put_u8_be`/`get_u8_be` and does not compile |
 | flagged | ✅ | ✅ | Conditional on bitmask |
-| match/switch | ✅ | ✅ | C switch statement |
-| TLV | ⚠️ | ⚠️ | Partial support |
+| match | ✅ | ✅ | C switch statement; an `s32` member calls an undefined `get_s32_be` |
+| TLV | ❌ | ❌ | Emits a stub (`/* TLV decoding — use reference interpreter */`) that reads nothing |
 | Transforms (div, sqrt, etc.) | ❌ | ❌ | By design - see above |
 | Nested objects | ❌ | ❌ | Flatten in schema |
 
-For schemas requiring runtime transform application, use the binary schema interpreter.
+For schemas requiring transforms on-device, apply them in application code (above);
+the runtime C interpreter (`include/schema_interpreter.h`) applies only the three bare
+modifiers.
 
 ## Example Workflow
 
@@ -200,19 +204,20 @@ For schemas requiring runtime transform application, use the binary schema inter
 vim schemas/my_sensor.yaml
 
 # 2. Generate C header
-python tools/generate_firmware_codec.py schemas/my_sensor.yaml -o firmware/codecs/my_sensor_codec.h
+python3 tools/generate_firmware_codec.py schemas/my_sensor.yaml -o firmware/codecs/my_sensor_codec.h
 
 # 3. Include in firmware
 #include "codecs/my_sensor_codec.h"
 
 # 4. Regenerate after schema changes
-python tools/generate_firmware_codec.py schemas/my_sensor.yaml -o firmware/codecs/my_sensor_codec.h
+python3 tools/generate_firmware_codec.py schemas/my_sensor.yaml -o firmware/codecs/my_sensor_codec.h
 ```
 
 ## Batch Generation
 
-Generate codecs for all schemas in a directory:
+Generate codecs for all schemas in one directory (not recursive, so name a vendor
+directory rather than `schemas/devices/`):
 
 ```bash
-python tools/generate_firmware_codec.py schemas/devices/ -o generated/
+python3 tools/generate_firmware_codec.py schemas/devices/decentlab/ -o generated/
 ```

@@ -1,5 +1,13 @@
 # Payload Codec Proto - Spec Completeness Audit
 
+> **Historical snapshot, 2026-02-19 — not current.** It covers Python and Go only,
+> against a 31-feature list that predates Java, C#, the C corpus harness and most
+> change requests, and several of its "Complete" verdicts no longer hold (Go lacks
+> type aliases, `base64` and nested `$ref`, for example). For the current
+> per-implementation matrix, measured from the code, see
+> [SPEC-IMPLEMENTATION-STATUS.md](SPEC-IMPLEMENTATION-STATUS.md). The body below is
+> left as generated.
+
 **Generated:** 2026-02-19
 
 ---
