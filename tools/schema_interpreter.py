@@ -1218,8 +1218,9 @@ class SchemaInterpreter:
         for cf in case_fields:
             name = cf.get('name', 'unknown')
             if name.startswith('_'):
-                # Internal field - decode but don't output
-                _, pos = self._decode_field(cf, buf, pos)
+                # Internal field - decode and bind, but don't output
+                value, pos = self._decode_field(cf, buf, pos)
+                self._bind_internal(cf, name, value)
             else:
                 value, pos = self._decode_field(cf, buf, pos)
                 value = self._apply_modifiers(value, cf)
@@ -1227,6 +1228,27 @@ class SchemaInterpreter:
         
         return result, pos
     
+    def _bind_internal(self, field_def: Dict[str, Any], name: str, value: Any) -> None:
+        """Bind an internal (`_`-prefixed) field's value without reporting it.
+
+        The value is bound after modifiers, as an ordinary field's is, under its own
+        name and under its `var:` if it declares one. A skip, or a lookup with no
+        entry, binds nothing.
+        """
+        if value is None:
+            return
+        if field_def.get('formula'):
+            value = self._evaluate_formula(field_def['formula'], value)
+        else:
+            value = self._apply_modifiers(value, field_def)
+        if value is OMITTED:
+            return
+        if not hasattr(self, '_variables'):
+            self._variables = {}
+        self._variables[name] = value
+        if field_def.get('var'):
+            self._variables[field_def['var']] = value
+
     def _decode_match_option_b(self, match_def: Dict[str, Any], buf: bytes,
                                 pos: int) -> Tuple[Dict[str, Any], int]:
         """
@@ -1286,6 +1308,13 @@ class SchemaInterpreter:
                 self._variables[match_var] = discriminator
         
         if discriminator is None:
+            if field_ref:
+                # The key is present; what it names was never bound. Saying the key
+                # is missing sent the reader to the wrong line of the schema.
+                raise ValueError(
+                    "Match field %s has no value: no earlier field or var: binds it"
+                    % field_ref
+                )
             raise ValueError("Match has neither 'field' nor 'length'")
         
         # Cases in Option B are a dict: {value: [field_list], ...}
@@ -1333,7 +1362,8 @@ class SchemaInterpreter:
             
             name = cf.get('name', 'unknown')
             if name.startswith('_'):
-                _, pos = self._decode_field(cf, buf, pos)
+                value, pos = self._decode_field(cf, buf, pos)
+                self._bind_internal(cf, name, value)
             else:
                 value, pos = self._decode_field(cf, buf, pos)
                 value = self._apply_modifiers(value, cf)
@@ -2413,10 +2443,18 @@ class SchemaInterpreter:
                     result.errors.append(f"Error in match: {e}")
                 continue
             
-            # Skip internal fields
+            # An internal field is read and bound, but not reported. It used to be
+            # read and discarded, so `$_kind` in a later `match`, `ref` or `var:`
+            # resolved to nothing - while the computed-field path above already bound
+            # `_` names, which is what 31 corpus intermediates rely on. Go, Java, C#
+            # and the TS013 generator all bind it. PS-176 reserves `_` names for
+            # interpreter metadata and the specification has no other spelling for
+            # "decoded and referenced but not emitted", so this is a prototype
+            # convention pending a CR, not specified behaviour.
             if name.startswith('_'):
                 try:
-                    _, pos = self._decode_field(field_def, payload, pos)
+                    value, pos = self._decode_field(field_def, payload, pos)
+                    self._bind_internal(field_def, name, value)
                 except Exception as e:
                     result.errors.append(f"Error in internal field: {e}")
                 continue
@@ -2642,7 +2680,14 @@ class SchemaInterpreter:
                     if any(gf.get('name') and gf['name'] in data for gf in group_fields):
                         flags |= (1 << bit)
                 flags_patches[field_name] = flags
-        
+
+        # An internal field that a later `match` dispatches on is not in the data - it
+        # is internal - so it used to be written as zero while the match went on to
+        # emit the fields of whichever case the data fits. The bytes then disagreed
+        # with themselves: 0107 came back as 0007, silently. The case the data fits
+        # names the discriminator, so write that.
+        internal_patches = self._internal_discriminators(fields, data)
+
         for _kind, _item in self._bitfield_runs(fields):
             # A run of bit ranges shares one span of bytes, so it is packed once rather
             # than a byte per field (CR-2026-023). The LoRaWAN MHDR's three ranges used to
@@ -2737,10 +2782,12 @@ class SchemaInterpreter:
                 output.extend(bytes(length))
                 continue
             
-            # Skip internal fields - use default or 0
+            # Internal fields: the value a later match needs, else default or 0
             if name.startswith('_'):
-                default = field_def.get('default', 0)
-                value = default
+                if name in internal_patches:
+                    value = internal_patches[name]
+                else:
+                    value = field_def.get('default', 0)
             elif name in flags_patches:
                 value = flags_patches[name]
             else:
@@ -3027,6 +3074,41 @@ class SchemaInterpreter:
             if hits > best_hits:
                 best_key, best_fields, best_hits = case_key, case_fields, hits
         return best_key, best_fields
+
+    def _internal_discriminators(self, fields: List[Dict[str, Any]],
+                                 data: Dict[str, Any]) -> Dict[str, Any]:
+        """Values for internal fields that a `match` in the same list dispatches on.
+
+        Only a case keyed by one exact value can supply one; a range or pattern key
+        names no single value, and the field keeps its default.
+        """
+        internal = {}
+        for f in fields:
+            fname = f.get('name')
+            if isinstance(fname, str) and fname.startswith('_'):
+                internal[fname] = fname
+                if f.get('var'):
+                    internal[f['var']] = fname
+        patches: Dict[str, Any] = {}
+        for f in fields:
+            match_def = f.get('match')
+            if not isinstance(match_def, dict):
+                continue
+            ref = str(match_def.get('field') or '').lstrip('$')
+            target = internal.get(ref)
+            if not target or target in patches or ref in data:
+                continue
+            key, _fields = self._case_fields_present(match_def.get('cases') or {}, data)
+            if isinstance(key, bool):
+                continue
+            if isinstance(key, int):
+                patches[target] = key
+            elif isinstance(key, str):
+                try:
+                    patches[target] = int(key, 0)
+                except ValueError:
+                    pass
+        return patches
 
     def _encode_match(self, field_def: Dict[str, Any], data: Dict[str, Any]) -> bytes:
         """Rebuild a ``match`` construct's bytes from decoded output.

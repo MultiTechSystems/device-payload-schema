@@ -442,7 +442,13 @@ def merge_property(properties: Dict[str, Any], name: str, schema: Dict[str, Any]
         return
     old_types = existing.get('type')
     new_types = schema.get('type')
-    if old_types is None or new_types is None or old_types == new_types:
+    if old_types is None or new_types is None:
+        return
+    if old_types == new_types:
+        # Same type, possibly different constraints. netvox/r718x reports `Status` as
+        # ON/OFF from its status report and Success/Failure from a config response;
+        # keeping the first branch's enum declared the second branch's values invalid.
+        properties[name] = widen_constraints(existing, schema)
         return
     merged = []
     for candidate in (old_types if isinstance(old_types, list) else [old_types]) + \
@@ -458,6 +464,25 @@ def merge_property(properties: Dict[str, Any], name: str, schema: Dict[str, Any]
     for key in ('minimum', 'maximum', 'pattern', 'enum'):
         widened.pop(key, None)
     properties[name] = widened
+
+
+def widen_constraints(existing: Dict[str, Any], schema: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge two same-typed branch schemas into one that accepts both branches."""
+    widened = dict(existing)
+    old_enum, new_enum = existing.get('enum'), schema.get('enum')
+    if old_enum is not None and new_enum is not None:
+        widened['enum'] = old_enum + [v for v in new_enum if v not in old_enum]
+    else:
+        # One branch is open; the union is open too.
+        widened.pop('enum', None)
+    for key, pick in (('minimum', min), ('maximum', max)):
+        if key in existing and key in schema:
+            widened[key] = pick(existing[key], schema[key])
+        else:
+            widened.pop(key, None)
+    if existing.get('pattern') != schema.get('pattern'):
+        widened.pop('pattern', None)
+    return widened
 
 
 def match_branches(field: Dict[str, Any]) -> List[List[Dict]]:

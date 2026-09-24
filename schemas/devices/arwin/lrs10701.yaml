@@ -1,0 +1,457 @@
+# Arwin Technology (Senso8) LRS10701 Indoor Air Quality (IAQ) Sensor
+# Product: https://www.senso8.com/senso8-indoor-air-quality-sensors
+# Datasheet: https://www.senso8.com/_files/ugd/8cebc6_6f32d5db2af845149af9750b6d100de3.pdf
+# TTN codec: TheThingsNetwork/lorawan-devices vendor/arwin-technology/lrs10701.js
+#
+# Output keys follow the vendor decoder exactly, except where noted below.
+#
+# Deviations from the vendor decoder (deliberate, not omissions):
+#
+# 1. Bitmask-to-label strings are not expanded. The vendor joins set bits into a
+#    comma-separated label string for three keys; the language deliberately has
+#    no bitmask->joined-label construct, so the raw mask is reported instead,
+#    under a different key so a raw integer never sits under a name that promises
+#    a label:
+#      event        (port 10, byte 0) -> eventMask
+#        bit 0 heartbeat/button, 1 rsvd, 2 T/H, 3 CO2, 4 EC1, 5 EC2, 6 TVOC, 7 PMx
+#      sensorType   (port 12, byte 3) -> sensorTypeMask
+#      sensorStatus (port 12, byte 4) -> sensorStatusMask
+#        bit 0 T/H, 1 TVOC, 2 CO2, 3 PMx, 4 Gas1, 5 Gas2 (bits 6-7 undefined; the
+#        vendor decoder renders them as the literal text "undefined")
+#
+# 2. firmwareVersion is not assembled. The vendor renders "1.07.000": byte 0,
+#    byte 1 zero-padded to two digits, and bytes 2-3 (a u16) zero-padded to three
+#    digits - and `.slice(-n)` also truncates, so minor 100 renders "00" and
+#    patch 1234 renders "234". Neither bitfield_string nor version_string can pad
+#    a component, and emitting the unpadded "1.7.0" under the vendor's key would
+#    be a plausible-looking wrong value. The components are reported as integers
+#    (firmwareVersionMajor/Minor/Patch) instead.
+#
+# 3. Vendor latent bug in sensorType (port 12, ~line 57 of lrs10701.js): the
+#    accumulator `sensor_type` is an undeclared implicit global, and the
+#    first-item test checks `sensor_ok === ""` instead of `sensor_type === ""`.
+#    Consequences, all reproduced under node:
+#      - every type bit below the first *status* bit replaces the string rather
+#        than appending (types 0x17 with status 0x06 give "TVOC,CO2,Gas1",
+#        dropping T/H);
+#      - a type byte of 0 leaves the previous uplink's value in place, and on
+#        the first call in a fresh process throws ReferenceError.
+#    Correct behaviour is a local accumulator tested against itself, i.e. the
+#    label list of byte 3's set bits. The TTN declared example (types == status
+#    == 0x1D) does not depend on the bug: it produces the correct string either
+#    way. The raw sensorTypeMask reported here is unaffected by it.
+#
+# 4. The vendor's `statusLED` is "on" only for byte value 1, "off" for any other
+#    value; that is a mapping lookup with a default, reproduced exactly.
+#    gas1Type/gas2Type index a 7-entry array; an out-of-range byte is undefined
+#    in JavaScript and dropped from the JSON, which is exactly a mapping lookup's
+#    omission (PS-269), so a mapping is used rather than a sequence (which would
+#    fail the decode, PS-105).
+#
+# 5. Port 13 additionally reports `packetType` (byte 0), which the vendor reads
+#    but does not emit. An internal `_packetType` would match the vendor's key set,
+#    but the Python interpreter neither stores a top-level `_`-prefixed plain
+#    field as a variable nor honours its `var:`, so a `match` cannot select on
+#    it; and an inline `match: {length: 1}` decodes correctly but is invisible to
+#    score_schema.py's branch coverage, which reads only `match.field`. Drop this
+#    field for an inline match once either tool is fixed.
+#
+# Test vector expectations come from the vendor decoder run under node. For the
+# three *Mask keys the vendor emits a label string, not a number; the expected
+# mask is the raw payload byte, whose set bits correspond to the vendor's labels.
+
+name: arwin_lrs10701
+version: 1
+endian: big
+
+ports:
+  10:
+    description: "Sensor data: event, AQI, CO2, temperature, humidity, gases, battery"
+    fields:
+      - name: eventMask
+        type: u8
+        description: "Event bitmask (vendor key `event` joins the labels; see header)"
+      - byte_group:
+          size: 4
+          fields:
+            - name: aqi
+              type: u32[23:31]
+              description: "Air quality index"
+            - name: co2
+              type: u32[10:22]
+              unit: "ppm"
+              description: "CO2 concentration"
+              ipso: {object: 3325, instance: 0, resource: 5700}
+              senml: {name: "co2", unit: "ppm"}
+              semantic: "air.co2"
+            - name: temperature
+              type: u32[0:9]
+              transform:
+                - add: -300
+                - div: 10
+              unit: "°C"
+              description: "Air temperature, (raw - 300) / 10"
+              ipso: {object: 3303, instance: 0, resource: 5700}
+              senml: {name: "temperature", unit: "Cel"}
+              semantic: "air.temperature"
+      - name: humidity
+        type: u8
+        mult: 0.5
+        unit: "%RH"
+        ipso: {object: 3304, instance: 0, resource: 5700}
+        senml: {name: "humidity", unit: "%RH"}
+        semantic: "air.humidity"
+      - name: gas1
+        type: u16
+        div: 1000
+        unit: "ppm"
+        description: "Electrochemical gas sensor 1 (gas selected by gas1Type)"
+      - name: gas2
+        type: u16
+        div: 1000
+        unit: "ppm"
+        description: "Electrochemical gas sensor 2 (gas selected by gas2Type)"
+      - name: battery
+        type: u8
+        sensor: percentage
+        unit: "%"
+        description: "Battery level in percent (not a voltage)"
+        ipso: {object: 3320, instance: 0, resource: 5700}
+        senml: {name: "battery", unit: "%"}
+        semantic: "battery.level"
+
+  11:
+    description: "Sensor data: TVOC and particulate matter"
+    fields:
+      - name: tvoc
+        type: u16
+        unit: "ppb"
+        description: "Total volatile organic compounds (ppb; no SenML annotation, scale differs from ppm)"
+      - name: pm1.0
+        type: u24
+        div: 1000
+        unit: "ug/m3"
+      - name: pm2.5
+        type: u24
+        div: 1000
+        unit: "ug/m3"
+      - name: pm10
+        type: u24
+        div: 1000
+        unit: "ug/m3"
+
+  8:
+    description: "Firmware version (vendor renders major.MM.PPP; see header)"
+    fields:
+      - name: firmwareVersionMajor
+        type: u8
+      - name: firmwareVersionMinor
+        type: u8
+      - name: firmwareVersionPatch
+        type: u16
+
+  12:
+    description: "Device settings"
+    fields:
+      - name: dataUploadInterval
+        type: s16
+        unit: "min"
+      - name: statusLED
+        type: u8
+        lookup:
+          1: "on"
+          default: "off"
+      - name: sensorTypeMask
+        type: u8
+        description: "Installed sensors bitmask (vendor key `sensorType`; see header)"
+      - name: sensorStatusMask
+        type: u8
+        description: "Working sensors bitmask (vendor key `sensorStatus`; see header)"
+      - name: gas1Type
+        type: u8
+        lookup:
+          0: "None"
+          1: "NH3"
+          2: "H2S"
+          3: "NO2"
+          4: "CO"
+          5: "HCHO"
+          6: "Custom"
+      - name: gas2Type
+        type: u8
+        lookup:
+          0: "None"
+          1: "NH3"
+          2: "H2S"
+          3: "NO2"
+          4: "CO"
+          5: "HCHO"
+          6: "Custom"
+
+  13:
+    description: "Threshold settings, selected by byte 0"
+    fields:
+      # Reported although the vendor does not emit it (deviation 5 in the header).
+      - name: packetType
+        type: u8
+        description: "Threshold packet type: 0 T/H, 1 gases, 2 PM"
+      - match:
+          field: $packetType
+          cases:
+            0:
+              - name: highTemperatureThreshold
+                type: s16
+                unit: "°C"
+                sensor: none
+              - name: lowTemperatureThreshold
+                type: s16
+                unit: "°C"
+                sensor: none
+              - name: highHumidityThreshold
+                type: u8
+                unit: "%RH"
+                sensor: none
+              - name: lowHumidityThreshold
+                type: u8
+                unit: "%RH"
+                sensor: none
+            1:
+              - name: co2Threshold
+                type: u16
+                unit: "ppm"
+                sensor: none
+              - name: tvocThreshold
+                type: u16
+                unit: "ppb"
+              - name: gas1Threshold
+                type: u16
+                div: 1000
+                unit: "ppm"
+              - name: gas2Threshold
+                type: u16
+                div: 1000
+                unit: "ppm"
+            2:
+              - name: pm1.0 Threshold
+                type: u24
+                unit: "ug/m3"
+              - name: pm2.5 Threshold
+                type: u24
+                unit: "ug/m3"
+              - name: pm10 Threshold
+                type: u24
+                unit: "ug/m3"
+
+test_vectors:
+  # --- TTN declared examples (lrs10701-codec.yaml) ---
+  - name: ttn_sensor_data
+    description: "TTN example: AQI 34, CO2 554 ppm, 22.7 C, 62.5% RH, gas1 15, gas2 2.345, battery 90, heartbeat/button"
+    fPort: 10
+    payload: "01 11 08 AA 0F 7D 3A 98 09 29 5A"
+    source: vendor-codec
+    expected:
+      eventMask: 1
+      aqi: 34
+      co2: 554
+      temperature: 22.7
+      humidity: 62.5
+      gas1: 15
+      gas2: 2.345
+      battery: 90
+
+  - name: ttn_tvoc_pm
+    description: "TTN example: TVOC 270 ppb, PM1.0 6.3, PM2.5 7.2, PM10 8.1"
+    fPort: 11
+    payload: "01 0E 00 18 9C 00 1C 20 00 1F A4"
+    source: vendor-codec
+    expected:
+      tvoc: 270
+      pm1.0: 6.3
+      pm2.5: 7.2
+      pm10: 8.1
+
+  - name: ttn_firmware_version
+    description: "TTN example: firmware 1.07.000"
+    fPort: 8
+    payload: "01 07 00 00"
+    source: vendor-codec
+    expected:
+      firmwareVersionMajor: 1
+      firmwareVersionMinor: 7
+      firmwareVersionPatch: 0
+
+  - name: ttn_device_settings
+    description: "TTN example: 15 min, LED on, T/H,CO2,PMx,Gas1 fitted and working, gas1 NH3 (trailing byte unused by the vendor)"
+    fPort: 12
+    payload: "00 0F 01 1D 1D 01 00 01"
+    source: vendor-codec
+    expected:
+      dataUploadInterval: 15
+      statusLED: "on"
+      sensorTypeMask: 29
+      sensorStatusMask: 29
+      gas1Type: "NH3"
+      gas2Type: "None"
+
+  - name: ttn_th_thresholds
+    description: "TTN example: temperature 40/10 C, humidity 95/35 %"
+    fPort: 13
+    payload: "00 00 28 00 0A 5F 23"
+    source: vendor-codec
+    expected:
+      packetType: 0
+      highTemperatureThreshold: 40
+      lowTemperatureThreshold: 10
+      highHumidityThreshold: 95
+      lowHumidityThreshold: 35
+
+  - name: ttn_gas_thresholds
+    description: "TTN example: CO2 1500, TVOC 435, gas1 2, gas2 2"
+    fPort: 13
+    payload: "01 05 DC 01 B3 07 D0 07 D0"
+    source: vendor-codec
+    expected:
+      packetType: 1
+      co2Threshold: 1500
+      tvocThreshold: 435
+      gas1Threshold: 2
+      gas2Threshold: 2
+
+  - name: ttn_pm_thresholds
+    description: "TTN example: PM1.0 0, PM2.5 56, PM10 254"
+    fPort: 13
+    payload: "02 00 00 00 00 00 38 00 00 FE"
+    source: vendor-codec
+    expected:
+      packetType: 2
+      pm1.0 Threshold: 0
+      pm2.5 Threshold: 56
+      pm10 Threshold: 254
+
+  # --- Extra payloads, expected values from the vendor decoder under node ---
+  - name: sensor_data_all_zero
+    description: "All-zero sensor frame: temperature floor is -30 C"
+    fPort: 10
+    payload: "00 00 00 00 00 00 00 00 00 00 00"
+    source: vendor-codec
+    expected:
+      eventMask: 0
+      aqi: 0
+      co2: 0
+      temperature: -30
+      humidity: 0
+      gas1: 0
+      gas2: 0
+      battery: 0
+
+  - name: sensor_data_all_ones
+    description: "All-ones sensor frame: every bit field at its maximum"
+    fPort: 10
+    payload: "FF FF FF FF FF FF FF FF FF FF FF"
+    source: vendor-codec
+    expected:
+      eventMask: 255
+      aqi: 511
+      co2: 8191
+      temperature: 72.3
+      humidity: 127.5
+      gas1: 65.535
+      gas2: 65.535
+      battery: 255
+
+  - name: sensor_data_negative_temperature
+    description: "Mixed frame, -20 C (raw 100), heartbeat/button,T/H,TVOC,PMx"
+    fPort: 10
+    payload: "C5 0F A4 00 64 A8 03 E8 0B B8 50"
+    source: vendor-codec
+    expected:
+      eventMask: 197
+      aqi: 31
+      co2: 2304
+      temperature: -20
+      humidity: 84
+      gas1: 1
+      gas2: 3
+      battery: 80
+
+  - name: tvoc_pm_all_ones
+    description: "TVOC and PM at their maxima"
+    fPort: 11
+    payload: "FF FF FF FF FF FF FF FF FF FF FF"
+    source: vendor-codec
+    expected:
+      tvoc: 65535
+      pm1.0: 16777.215
+      pm2.5: 16777.215
+      pm10: 16777.215
+
+  - name: firmware_version_two_digit_minor
+    description: "Vendor renders 1.10.005"
+    fPort: 8
+    payload: "01 0A 00 05"
+    source: vendor-codec
+    expected:
+      firmwareVersionMajor: 1
+      firmwareVersionMinor: 10
+      firmwareVersionPatch: 5
+
+  - name: device_settings_led_off_negative_interval
+    description: "Interval 0xFFFF reads -1 (vendor hex2dec), LED byte 0xFF is off, gas types Custom"
+    fPort: 12
+    payload: "FF FF FF 3F 3F 06 06"
+    source: vendor-codec
+    expected:
+      dataUploadInterval: -1
+      statusLED: "off"
+      sensorTypeMask: 63
+      sensorStatusMask: 63
+      gas1Type: "Custom"
+      gas2Type: "Custom"
+
+  - name: device_settings_mixed
+    description: "60 min, LED off, types 0x17 status 0x06, H2S/NO2 (vendor's sensorType here shows its latent bug, see header)"
+    fPort: 12
+    payload: "00 3C 00 17 06 02 03"
+    source: vendor-codec
+    expected:
+      dataUploadInterval: 60
+      statusLED: "off"
+      sensorTypeMask: 23
+      sensorStatusMask: 6
+      gas1Type: "H2S"
+      gas2Type: "NO2"
+
+  - name: th_thresholds_negative
+    description: "High -10 C, low -40 C, humidity 90/10"
+    fPort: 13
+    payload: "00 FF F6 FF D8 5A 0A"
+    source: vendor-codec
+    expected:
+      packetType: 0
+      highTemperatureThreshold: -10
+      lowTemperatureThreshold: -40
+      highHumidityThreshold: 90
+      lowHumidityThreshold: 10
+
+  - name: gas_thresholds_all_ones
+    description: "Gas thresholds at their maxima"
+    fPort: 13
+    payload: "01 FF FF FF FF FF FF FF FF"
+    source: vendor-codec
+    expected:
+      packetType: 1
+      co2Threshold: 65535
+      tvocThreshold: 65535
+      gas1Threshold: 65.535
+      gas2Threshold: 65.535
+
+  - name: pm_thresholds_all_ones
+    description: "PM thresholds at their maxima"
+    fPort: 13
+    payload: "02 FF FF FF FF FF FF FF FF FF"
+    source: vendor-codec
+    expected:
+      packetType: 2
+      pm1.0 Threshold: 16777215
+      pm2.5 Threshold: 16777215
+      pm10 Threshold: 16777215

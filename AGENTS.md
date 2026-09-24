@@ -227,12 +227,14 @@ expected value:
   TS001 requires it, but neither set the key — so they composed as big-endian.
   `dev_nonce` read 0x1011 for a vector saying 0x1110, and LinkADRReq's `ch_mask`
   read 0xFF00 where TS001 says 0x00FF. Adding the key fixed both.
-- **A `bytes` field has no agreed output representation.** Python decodes one to a
-  bytes object, Go to a lowercase hex string. Vectors now write these as a hex
-  string, the one form that survives YAML, JSON and every language, and
-  `values_match` accepts hex or a list of octets against a byte sequence. **That the
-  four implementations disagree on the decoded type is unresolved and unspecified** —
-  worth a CR.
+- **A `bytes` field decodes to a lowercase hex string in all five, which is PS-080's
+  default.** This note used to say Python returned a bytes object and Go a hex string,
+  and called the disagreement a CR. Measured 2026-09-24 for `bytes` of length 2 over
+  `0a0b`: Python, Go, Java, C# and the generated TS013 codec all give `"0a0b"`. Vectors
+  write a hex string, and `values_match` still accepts hex or a list of octets against
+  a byte sequence. What remains open is `separator:` — described in the spec with no
+  PS tag, implemented in Go, **ignored by the Python reference** (`a1b2c3` stays
+  `a1b2c3` under `separator: ":"`).
 - **`type: array` never existed.** `repeat` with `until: end` expresses exactly the
   same thing and already worked in all four. Another "missing feature" that was not
   missing — try the current language first.
@@ -720,7 +722,7 @@ Fidelity has two different targets, worth not confusing:
 - Replacing **our own generated** codecs is achievable now — both come from the same
   YAML, so the key sets already agree.
 - Replacing a **vendor** codec is a schema-fidelity question, tracked by
-  `crossvalidate_ttn.py` (milesight 50/84, decentlab 55/58), not an interpreter one.
+  `crossvalidate_ttn.py` (milesight 53/84, decentlab 55/58), not an interpreter one.
   Our `dl-5tm` emits `flags` and `soil_temperature_raw` where the vendor's emits
   neither — and `soil_temperature_raw` is a pure intermediate that should have been
   `_`-prefixed, so it is a schema bug that would surface as an extra JSON key.
@@ -1011,7 +1013,7 @@ Cross-validate a vendor family with:
   --vendor milesight-iot --schema-dir schemas/devices/milesight [--verbose]
 ```
 
-Milesight stands at 50 of 84 agreeing. `vs321` and `vs373` are the next region-mask
+Milesight stands at 53 of 84 agreeing. `vs321` and `vs373` are the next region-mask
 pair; both decode nothing for their declared example, so more than the regions is
 missing. Note that a bitfield range reads its base value **big-endian regardless of
 the schema's `endian`**, so a little-endian 16-bit mask must be taken as two `u8`
@@ -1030,6 +1032,48 @@ report `unknown(N)`, which PS-269 replaced with omitting the field. Fix the
 assertions or wire the file into the build — but know the failures are stale
 expectations, not regressions. Being unbuilt is also how C's dead sequential
 sentinel went unnoticed.
+
+**The netvox/arwin/dnt conversions (2026-09-24) found seven defects, none visible to the
+corpus before those schemas existed.** Each is fixed; the list is here so nobody re-derives it.
+
+- **Python bound nothing for a top-level `_` field** — read the byte and discarded it, so
+  `match: {field: $_kind}` failed with "Match has neither 'field' nor 'length'" (the key *was*
+  there; the message now names the unbound reference). The computed-field path already bound
+  `_` names, which 31 intermediates in 9 corpus schemas rely on, and Go, Java, C# and the TS013
+  generator all bound them. `_bind_internal` now does it on every field-list path.
+  **This is a prototype convention pending a CR, not spec behaviour**: PS-176 reserves `_` names
+  for interpreter metadata, and the spec has no other spelling for "decoded and referenced, not
+  reported". `_language-conformance/internal-discriminator.yaml` pins it.
+- **Encoding that byte back.** An internal discriminator is not in the data, so it was written
+  as zero while the match emitted the fields of the case the data fits: `0107` re-encoded as
+  `0007`, silently. Python's encoder now infers it from that case when the case key is one exact
+  value (`_internal_discriminators`, beside the `flagged` mask pre-pass). **Go, Java and C# do not
+  yet**: they decode the fixture and fail its round trip, which is why their decode floors moved
+  and their encode floors did not.
+- **Go and C# `byte_group` members skipped their modifiers and lookup.** arwin's temperature,
+  `u32[0:9]` with `div`/`add` in a group, read the raw 1023 against 72.3. C# had no reusable
+  post-read step, so it was extracted into `ApplyPostRead`; Go's members now go through
+  `applyLookupAndModifiers`.
+- **Java's `bool` ignored `bit:` and `consume:`** — every bool read bit 0, and a flag group ending
+  in `consume: 1` left the cursor on the byte. No corpus schema used `type: bool` until dnt.
+- **The TS013 generator had no `bool` at all** (a TODO and no value), which is why the first dnt
+  draft used `{0: false, 1: true}` lookups — outside what PS-106 lists (numbers or strings), and
+  **Go drops a non-string lookup label silently**. Go still does; PS-106 also allows *numeric*
+  labels, which Go's `map[int]string` cannot hold either.
+- **The generator renamed output keys** to JS identifiers — `pm1.0` came out as `pm1_0`. Keys are
+  now restored at the entry points from a table built at generation time; two names mangling to
+  one spelling is a generation error.
+- **`generate_output_schema.py` kept the first branch's enum** when two branches report one key
+  with the same type — r718x's `Status` is ON/OFF in one message and Success/Failure in another.
+  Same-typed branches now union their enums and widen their bounds.
+
+Still open from the same work: Python's tlv case path handles only `byte_group` and
+`bitfield_string` (`flagged`, `type: number` and `var:` inside a case fail or read a phantom
+`unknown` byte); `lookup` is ignored on a `number` field; the generator drops string case keys in
+a `match`; `score_schema.py` counts branch coverage only for discriminators present in the output
+and never looks inside `match`/`byte_group` for semantic fields, which is most of why r718x and
+dnt stop at Silver. r718x still reads its device and command bytes through a non-advancing peek
+it adopted before the `_` fix; it can use `$_device_type` directly now.
 
 ## Converting a vendor codec
 
@@ -1359,10 +1403,18 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   Those two blockers are now resolved by CR-2026-004: `ws101` uses a sparse mapping
   `lookup`, and `uc1114`/`uc1152` use `"[1, !0]"` and `"[9, *]"` case keys. Enum labels, version and serial channels, packed flag bytes, units and
   annotations are done.
-- **Three TTN declared examples are stale, not two.** `ws50x`, `uc1114` and
-  `uc1152` all declare values their own vendor decoder does not produce - `true`
-  where the decoder yields `"on"`. Always prefer the decoder; `crossvalidate_ttn.py`
-  reports the two oracles separately so the difference is visible.
+- **No TTN declared example has been shown stale; the "stale" ones were a YAML
+  reader.** This note used to say `ws50x`, `uc1114` and `uc1152` declared `true`
+  where their decoders yield `"on"`. They declare `switch_1: on` *unquoted*, which is
+  the string the vendor means and which PyYAML - a YAML 1.1 reader - turns into
+  `True`. `crossvalidate_ttn.py` now reads codec files with YAML 1.2 booleans (only
+  `true`/`false`), and milesight went 50 -> 53 agreeing: `ws50x`, `ws301` and `ws52x`
+  had been blamed on the vendor's example rather than on our reader. `uc1114` and
+  `uc1152` still disagree, but with both oracles *agreeing with each other* against
+  us - schema gaps, not stale examples. **Any tool that reads TTN examples must use a
+  1.2-boolean loader**; `crossvalidate_ttn._CoreBoolLoader` is the one to reuse.
+  Still prefer the decoder when the two oracles genuinely differ; the tool reports
+  them separately so that is visible.
 - **Units come from TTN's payload schema, not from guesswork.** `lib/payload.json`
   in the device repository documents each normalized measurement and its unit, and
   the vendor's raw values are already in those units. Note that TTN's normalized
@@ -1377,10 +1429,7 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   `ws50x` and three others failed to decode the vendor's own payload for this
   reason. One case remains unsolved: `em320-tilt` packs a flag into bit 0 of bytes
   already consumed by its angle fields, which no current construct expresses.
-- **Some TTN declared examples are stale.** For `ws50x`, TTN's declared example
-  says `switch_1: true` where the vendor's own decoder in the same repository says
-  `"on"`. `crossvalidate_ttn.py` reports the two oracles separately for this
-  reason; when they disagree, the vendor's decoder is the better authority. None of these schemas declare `unit:`, so they
+- **Milesight units.** None of these schemas declare `unit:`, so they
   carry no semantic annotations and stop at Silver; the scorer's keyword heuristic
   would read milesight `battery` as IPSO 3316 voltage when it is a percentage, so
   units have to be established per device before annotating.

@@ -26,6 +26,7 @@ this can gate a pull request once a vendor family is clean.
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -41,13 +42,68 @@ from score_schema import CONFORMANCE_TOLERANCE  # noqa: E402
 from validate_schema import values_match  # noqa: E402
 
 
+class _CoreBoolLoader(yaml.SafeLoader):
+    """A SafeLoader that reads only true/false as booleans, as YAML 1.2 does.
+
+    PyYAML follows YAML 1.1, where an unquoted on/off/yes/no is a boolean. Vendor
+    examples write enum labels that way - arwin's `statusLED: on` is the string its
+    decoder emits - so a 1.1 reader turns a correct oracle value into `True` and
+    reports a disagreement the schema does not have.
+    """
+
+
+_CoreBoolLoader.yaml_implicit_resolvers = {
+    first: [(tag, rx) for tag, rx in resolvers if tag != "tag:yaml.org,2002:bool"]
+    for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+_CoreBoolLoader.add_implicit_resolver(
+    "tag:yaml.org,2002:bool",
+    re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"),
+    list("tTfF"),
+)
+
+
+def load_codec(codec_path):
+    """Read a <device>-codec.yaml, or {} when it cannot be read."""
+    try:
+        return (
+            yaml.load(codec_path.read_text(encoding="utf-8"), Loader=_CoreBoolLoader)
+            or {}
+        )
+    except (OSError, yaml.YAMLError):
+        return {}
+
+
 def declared_examples(codec_path):
     """Read the uplink examples the vendor declares for a device."""
-    try:
-        codec = yaml.safe_load(codec_path.read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError):
-        return []
-    return (codec.get("uplinkDecoder") or {}).get("examples") or []
+    return (load_codec(codec_path).get("uplinkDecoder") or {}).get("examples") or []
+
+
+def find_codec(vendor_dir, stem):
+    """Locate the codec file for a schema stem.
+
+    Usually `<stem>-codec.yaml`, but some vendors put a firmware suffix after the
+    word - dnt's `dnt-lw-wsci-codec-2-1-1.yaml` belongs to `dnt-lw-wsci-2-1-1`.
+    """
+    direct = vendor_dir / ("%s-codec.yaml" % stem)
+    if direct.exists():
+        return direct
+    for candidate in sorted(vendor_dir.glob("*-codec-*.yaml")):
+        if candidate.stem.replace("-codec-", "-", 1) == stem:
+            return candidate
+    return direct
+
+
+def find_decoder(vendor_dir, codec_path, stem):
+    """Locate the vendor JavaScript the codec file names, falling back to <stem>.js.
+
+    The codec's `uplinkDecoder.fileName` is authoritative, and may sit in a
+    subdirectory (netvox keeps every decoder under `payload/`).
+    """
+    name = (load_codec(codec_path).get("uplinkDecoder") or {}).get("fileName")
+    if name and (vendor_dir / name).exists():
+        return vendor_dir / name
+    return vendor_dir / ("%s.js" % stem)
 
 
 def run_vendor_decoder(js_path, requests):
@@ -73,7 +129,9 @@ console.log(JSON.stringify(out));
         handle.write(script)
         temp = handle.name
     try:
-        proc = subprocess.run(["node", temp], capture_output=True, text=True, timeout=60)
+        proc = subprocess.run(
+            ["node", temp], capture_output=True, text=True, timeout=60
+        )
         if proc.returncode != 0:
             return None
         return json.loads(proc.stdout.strip())
@@ -105,7 +163,7 @@ def compare(schema, payload, fport, expected):
 
 def check_schema(path, vendor_dir, use_decoder):
     """Return (status, problems) for one schema."""
-    codec = vendor_dir / ("%s-codec.yaml" % path.stem)
+    codec = find_codec(vendor_dir, path.stem)
     if not codec.exists():
         return "no-vendor-codec", []
     examples = declared_examples(codec)
@@ -125,8 +183,10 @@ def check_schema(path, vendor_dir, use_decoder):
 
     # Optionally re-decode the same payloads with the vendor's own decoder, which
     # catches cases where TTN's declared output has drifted from its codec.
-    js = vendor_dir / ("%s.js" % path.stem)
-    if use_decoder and js.exists():
+    js = find_decoder(vendor_dir, codec, path.stem)
+    if use_decoder and not js.exists():
+        problems.append("note: vendor decoder %s not found, not compared" % js.name)
+    elif use_decoder:
         requests = [
             {
                 "hex": bytes(e["input"]["bytes"]).hex(),
@@ -135,7 +195,11 @@ def check_schema(path, vendor_dir, use_decoder):
             for e in examples
         ]
         results = run_vendor_decoder(js, requests)
-        if results:
+        if not results:
+            problems.append(
+                "note: vendor decoder %s did not run, not compared" % js.name
+            )
+        else:
             for example, produced in zip(examples, results):
                 data = produced.get("data") if isinstance(produced, dict) else None
                 if not data:
@@ -148,13 +212,20 @@ def check_schema(path, vendor_dir, use_decoder):
                     )
                 ]
 
-    return ("agrees" if not problems else "disagrees"), problems
+    # A note records a comparison that could not be made; it is printed, so the
+    # skip is visible, but it is not a disagreement.
+    real = [p for p in problems if not p.startswith("note: ")]
+    return ("agrees" if not real else "disagrees"), problems
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[1])
-    parser.add_argument("--devices-repo", required=True, help="lorawan-devices checkout")
-    parser.add_argument("--vendor", required=True, help="vendor directory, e.g. milesight-iot")
+    parser.add_argument(
+        "--devices-repo", required=True, help="lorawan-devices checkout"
+    )
+    parser.add_argument(
+        "--vendor", required=True, help="vendor directory, e.g. milesight-iot"
+    )
     parser.add_argument(
         "--schema-dir", required=True, help="our schema directory for that vendor"
     )
@@ -164,7 +235,9 @@ def main():
         action="store_true",
         help="compare only against declared examples, skipping node",
     )
-    parser.add_argument("--verbose", action="store_true", help="list every disagreement")
+    parser.add_argument(
+        "--verbose", action="store_true", help="list every disagreement"
+    )
     args = parser.parse_args()
 
     vendor_dir = Path(args.devices_repo).expanduser().resolve() / "vendor" / args.vendor

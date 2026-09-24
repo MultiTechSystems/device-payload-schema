@@ -1,0 +1,1188 @@
+# dnt LW-WSCI - LoRaWAN window sensor and contact interface, firmware 1.5.2
+#
+# Converted from the vendor's TTN decoder, payload parser 2.1.1:
+#   TheThingsNetwork/lorawan-devices vendor/dnt/dnt-lw-wsci-2-1-1.js
+#   (codec dnt-lw-wsci-codec-2-1-1, served to firmware 1.5.2 by dnt-lw-wsci.yaml)
+# Firmware 1.2.0 uses parser 2.0.2; see dnt-lw-wsci.yaml beside this file.
+#
+# Wire format: every uplink (fPort 10) is a sequence of commands. Each is a one-byte
+# COMMAND_ID followed by a body whose length the ID fixes; there is no length byte.
+#
+# Deviations from the vendor's output, all deliberate and each unavoidable in the
+# current language or reference interpreter:
+#
+# 1. Units are not emitted. The vendor wraps every value as {value, unit} with a
+#    constant unit string ("mV", "string", "bool", ...). No construct emits a
+#    constant, so each object carries only `value`; the unit is declared on the field
+#    with `unit:` where it is a physical unit.
+# 2. Numbers are numbers. battery_voltage and every utc offset go through
+#    toFixed() in the vendor decoder and come out as strings ("2940", "7.50"); here
+#    they decode to the number.
+# 3. Shared parents are flattened. The vendor deep-merges several commands into
+#    `radio`, `device_time` and `update_info`. Emitting those parents from more than
+#    one tlv case would make PS-157 collect them into an array when two such
+#    commands share an uplink, so each command reports under its own key:
+#      radio.status_report                    -> radio_status_report
+#      radio.failed_commands                  -> radio_failed_commands
+#      radio.cyclic_rejoin.remaining_time...  -> radio_cyclic_rejoin_remaining_time_until_rejoin
+#      radio.cyclic_rejoin.conf               -> radio_cyclic_rejoin_conf
+#      radio.data_rate                        -> radio_data_rate
+#      device_time.local / .config            -> device_time_local / device_time_config
+#      update_info.auto_update_installation_en-> update_info_auto_update_installation_en
+#      update_info.update_image               -> update_info_update_image
+#    Keys with a single writer (status_report, version, button_action, ...) keep the
+#    vendor's nesting.
+# 4. failed_commands is a list of {command} records, not the vendor's index-keyed
+#    object {"0": ..., "1": ...}; `repeat` has no index-keyed output form.
+# 5. version.payload_parser is not emitted: it is a constant of the vendor's parser
+#    ([2,1,1]), not payload data. The three-part versions (application, bootloader,
+#    lorawan_l2, update_image.version) are {major, minor, patch} where the vendor
+#    writes an index-keyed {"0", "1", "2"}: a field named "0" makes the TS013
+#    generator emit `var 0 = ...`, which is not valid JavaScript.
+# 6. radio.cyclic_rejoin.interval is not emitted; see the formula hint on tag 250.
+# 7. A command ID the vendor's table does not list is consumed as a lone byte by the
+#    vendor decoder, which then carries on. Here it ends the tlv loop with a PS-302
+#    warning. A repeated command (e.g. two hall-state reports) is collected into an
+#    array by PS-157 where the vendor keeps only the last.
+# 8. `first_command` (the uplink's first command ID) is reported; the vendor does not
+#    report it. It is how the status report below is reached; see there.
+# 9. A flag is `type: bool` with `bit:` (PS-065/066). An earlier draft used a bit range
+#    with a {0: false, 1: true} lookup, which is outside what PS-106 lists (lookup values
+#    are numbers or strings) and which Go dropped silently.
+#
+# Why the status report (COMMAND_ID_GET_STATUS, 0x04) sits outside the tlv:
+# its body is a presence mask followed by up to four bytes, which is `flagged`. The
+# Python reference interpreter decodes a tlv case through a reduced path that
+# dispatches only byte_group and bitfield_string - a `flagged`, a `type: number` or a
+# `var:` inside a case is not supported there. So a status report is decoded only
+# when it is the FIRST command of the uplink, which is how the device sends its
+# periodic status: the first byte is peeked (a bit range with consume: 0), and a
+# status mask is read only when it is 0x04. A status report later in the
+# same uplink is an unknown tag to the tlv below and ends decoding with a warning.
+name: dnt_lw_wsci_2_1_1
+version: 1
+endian: big
+description: >-
+  dnt LW-WSCI window sensor and contact interface (firmware 1.5.2, payload parser
+  2.1.1). Status reports, sensor states and configuration responses on fPort 10.
+
+fields:
+  # Mask defaults to "nothing present" when the first command is not a status report.
+  - name: _status_mask
+    type: number
+    compute: {op: mul, a: 0, b: 0}
+
+  # Peek the first command ID without consuming it. A bit range with consume: 0
+  # leaves the read position where it was, so the tlv below still sees this byte.
+  # It has to be a reported field: a `_`-prefixed top-level field is not recorded
+  # as a variable by the Python reference, and a byte_group cannot have size 0.
+  - name: first_command
+    type: u8[0:7]
+    consume: 0
+    var: first_command
+
+  - match:
+      field: $first_command
+      default: skip
+      cases:
+        4:
+          - name: _status_command
+            type: skip
+            length: 1
+          # Read the presence mask into _status_mask; nothing is reported for it.
+          - match:
+              length: 1
+              var: _status_mask
+              default: skip
+              cases: {}
+
+  - flagged:
+      field: _status_mask
+      groups:
+        - bit: 7
+          fields:
+            - name: battery_voltage
+              type: object
+              fields:
+                - name: value
+                  type: u8
+                  transform:
+                    - mult: 10
+                    - add: 1500
+                  unit: "mV"
+                  sensor: voltage
+                  # SenML has no mV unit, and the vendor reports millivolts, so a
+                  # senml annotation would have to misdeclare the value by 1000x.
+                  ipso: {object: 3316, instance: 0, resource: 5700}
+                  semantic: "battery.voltage"
+        - bit: 6
+          fields:
+            - name: sabotage_contact_state
+              type: object
+              fields:
+                - name: value
+                  type: u8[0:1]
+                  consume: 1
+                  lookup: {0: "IDLE", 1: "TRIGGERED", 2: "DISABLED"}
+        - bit: 5
+          fields:
+            - name: hall_sensor_state
+              type: object
+              fields:
+                - name: value
+                  type: u8[0:1]
+                  consume: 1
+                  lookup: {0: "LOW", 1: "HIGH", 2: "DISABLED"}
+        - bit: 4
+          fields:
+            - name: input_clamp_state
+              type: object
+              fields:
+                - name: value
+                  type: u8[0:1]
+                  consume: 1
+                  lookup: {0: "LOW", 1: "HIGH", 2: "DISABLED"}
+
+  - tlv:
+      tag_size: 1
+      length_size: 0
+      unknown: skip
+      cases:
+        # COMMAND_ID_GET_STATUS_INTERVAL
+        0:
+          - name: status_report
+            type: object
+            fields:
+              - name: interval
+                type: object
+                fields:
+                  - name: value
+                    type: u8
+                    transform:
+                      - mult: 360
+                      - add: 30
+                    unit: "s"
+        # COMMAND_ID_GET_STATUS_PARAMETER_TX_ENABLE_REGISTER
+        2:
+          - name: radio_status_report
+            type: object
+            fields:
+              - name: parameter_tx_enable_reg
+                type: object
+                fields:
+                  - name: battery_voltage_enabled
+                    type: bool
+                    bit: 7
+                    sensor: none
+                  - name: sabotage_contact_states_enabled
+                    type: bool
+                    bit: 6
+                  # Spelling is the vendor's.
+                  - name: hall_sensore_states_enabled
+                    type: bool
+                    bit: 5
+                  - name: input_clamp_states_enabled
+                    type: bool
+                    bit: 4
+                    consume: 1
+        # COMMAND_ID_GET_BATTERY_VOLTAGE
+        5:
+          - name: battery_voltage
+            type: object
+            fields:
+              - name: value
+                type: u8
+                transform:
+                  - mult: 10
+                  - add: 1500
+                unit: "mV"
+                sensor: voltage
+                ipso: {object: 3316, instance: 0, resource: 5700}
+                semantic: "battery.voltage"
+        # COMMAND_ID_GET_SABOTAGE_CONTACT_STATE
+        6:
+          - name: sabotage_contact_state
+            type: object
+            fields:
+              - name: value
+                type: u8[0:1]
+                consume: 1
+                lookup: {0: "IDLE", 1: "TRIGGERED", 2: "DISABLED"}
+        # COMMAND_ID_GET_ERROR_CODE
+        7:
+          - name: error_code
+            type: object
+            fields:
+              - name: value
+                type: u8
+                lookup: {0: "DEVICE_READY"}
+        # COMMAND_ID_GET_DEVICE_TIME
+        8:
+          - name: device_time_local
+            type: object
+            fields:
+              - name: second
+                type: object
+                fields:
+                  # The vendor masks the seconds with 0x1F, so 32-59 cannot be
+                  # represented; reproduced as the vendor decodes it.
+                  - name: value
+                    type: u8[0:4]
+                    consume: 1
+                    unit: "s"
+              - name: minute
+                type: object
+                fields:
+                  - name: value
+                    type: u8[2:7]
+                    unit: "min"
+              - name: hour
+                type: object
+                fields:
+                  # Low two bits of byte 1 and top three of byte 2.
+                  - name: value
+                    type: u16[5:9]
+                    consume: 1
+                    unit: "h"
+              - name: day
+                type: object
+                fields:
+                  - name: value
+                    type: u8[0:4]
+                    consume: 1
+                    unit: "d"
+              - name: is_dst
+                type: object
+                fields:
+                  - name: value
+                    type: bool
+                    bit: 7
+              - name: weekday
+                type: object
+                fields:
+                  - name: value
+                    type: u8[4:6]
+                    lookup: &weekday
+                      0: "SUNDAY"
+                      1: "MONDAY"
+                      2: "TUESDAY"
+                      3: "WEDNESDAY"
+                      4: "THURSDAY"
+                      5: "FRIDAY"
+                      6: "SATURDAY"
+              - name: month
+                type: object
+                fields:
+                  - name: value
+                    type: u8[0:3]
+                    consume: 1
+                    lookup: &month
+                      0: "JANUARY"
+                      1: "FEBRUARY"
+                      2: "MARCH"
+                      3: "APRIL"
+                      4: "MAY"
+                      5: "JUNE"
+                      6: "JULY"
+                      7: "AUGUST"
+                      8: "SEPTEMBER"
+                      9: "OCTOBER"
+                      10: "NOVEMBER"
+                      11: "DECEMBER"
+              - name: year
+                type: object
+                fields:
+                  - name: value
+                    type: u8
+                    add: 2000
+                    unit: "a"
+              - name: utc_offset
+                type: object
+                fields:
+                  - name: value
+                    type: u8
+                    transform:
+                      - mult: 0.25
+                      - add: -12
+                    unit: "h"
+        # COMMAND_ID_GET_DEVICE_TIME_CONFIG
+        10:
+          - name: device_time_config
+            type: object
+            fields:
+              - name: auto_time_sync_en
+                type: object
+                fields:
+                  - name: value
+                    type: bool
+                    bit: 7
+              - name: utc_offset
+                type: object
+                fields:
+                  - name: value
+                    type: u8[0:6]
+                    consume: 1
+                    transform:
+                      - mult: 0.25
+                      - add: -12
+                    unit: "h"
+              - name: utc_dst_begin
+                type: object
+                fields:
+                  - name: week_of_month
+                    type: object
+                    fields:
+                      - name: value
+                        type: u8[4:7]
+                        lookup: &week_of_month
+                          1: "1st"
+                          2: "2nd"
+                          3: "3rd"
+                          4: "4th"
+                          5: "last"
+                  - name: month
+                    type: object
+                    fields:
+                      - name: value
+                        type: u8[0:3]
+                        consume: 1
+                        lookup: *month
+                  - name: weekday
+                    type: object
+                    fields:
+                      - name: value
+                        type: u8[5:7]
+                        lookup: *weekday
+                  - name: hour
+                    type: object
+                    fields:
+                      - name: value
+                        type: u8[0:3]
+                        consume: 1
+                        unit: "h"
+                  # The begin minute is the high nibble of the LAST byte of the
+                  # body, three bytes on; read it from here as bits 4-7 of a u32
+                  # without consuming anything.
+                  - name: minute
+                    type: object
+                    fields:
+                      - name: value
+                        type: u32[4:7]
+                        consume: 0
+                        mult: 5
+                        unit: "min"
+              - name: utc_dst_offset
+                type: object
+                fields:
+                  - name: value
+                    type: u8[0:6]
+                    consume: 1
+                    transform:
+                      - mult: 0.25
+                      - add: -12
+                    unit: "h"
+              - name: utc_dst_end
+                type: object
+                fields:
+                  - name: week_of_month
+                    type: object
+                    fields:
+                      - name: value
+                        type: u8[4:7]
+                        lookup: *week_of_month
+                  - name: month
+                    type: object
+                    fields:
+                      - name: value
+                        type: u8[0:3]
+                        consume: 1
+                        lookup: *month
+                  - name: weekday
+                    type: object
+                    fields:
+                      - name: value
+                        type: u8[5:7]
+                        lookup: *weekday
+                  - name: hour
+                    type: object
+                    fields:
+                      - name: value
+                        type: u8[0:3]
+                        consume: 1
+                        unit: "h"
+                  - name: minute
+                    type: object
+                    fields:
+                      - name: value
+                        type: u8[0:3]
+                        consume: 1
+                        mult: 5
+                        unit: "min"
+        # COMMAND_ID_GET_SABOTAGE_CONTACT_CONFIG
+        13:
+          - name: sabotage_contact_config
+            type: object
+            fields:
+              - name: value
+                type: bool
+                bit: 0
+                consume: 1
+        # COMMAND_ID_GET_HALL_SENSOR_STATE
+        14:
+          - name: hall_sensor_state
+            type: object
+            fields:
+              - name: value
+                type: u8[0:1]
+                consume: 1
+                lookup: {0: "LOW", 1: "HIGH", 2: "DISABLED"}
+        # COMMAND_ID_GET_HALL_SENSOR_CONFIG
+        16:
+          - name: hall_sensor_config
+            type: object
+            fields:
+              - name: value
+                type: bool
+                bit: 0
+                consume: 1
+        # COMMAND_ID_GET_INPUT_CLAMP_STATE
+        17:
+          - name: input_clamp_state
+            type: object
+            fields:
+              - name: value
+                type: u8[0:1]
+                consume: 1
+                lookup: {0: "LOW", 1: "HIGH", 2: "DISABLED"}
+        # COMMAND_ID_GET_INPUT_CLAMP_CONFIG
+        19:
+          - name: input_clamp_config
+            type: object
+            fields:
+              - name: value
+                type: bool
+                bit: 0
+                consume: 1
+        # COMMAND_ID_GET_INPUT_CLAMP_SENSOR_TYPE
+        21:
+          - name: input_clamp_sensor_type
+            type: object
+            fields:
+              - name: value
+                type: u8[0:1]
+                consume: 1
+                lookup: {0: "Magnetic contact", 1: "Glass break detector", 2: "Reserved"}
+        # COMMAND_ID_GET_INPUT_CLAMP_SENSOR_FILTER_TIME (22 in parser 2.1.1; 23 in 2.0.2)
+        22:
+          - name: input_clamp_filter_time
+            type: object
+            fields:
+              - name: value
+                type: u8
+                mult: 30
+                unit: "s"
+        # COMMAND_ID_COMMAND_FAILED
+        54:
+          # The count, as a variable. A byte_group is the one construct whose
+          # members the Python reference records as variables inside a tlv case.
+          - byte_group:
+              size: 1
+              fields:
+                - name: _failed_count
+                  type: u8[0:7]
+          - name: radio_failed_commands
+            type: object
+            fields:
+              - name: value
+                type: repeat
+                count: $_failed_count
+                fields:
+                  - name: command
+                    type: u8
+                    lookup: &command_id
+                      0: "COMMAND_ID_GET_STATUS_INTERVAL"
+                      1: "COMMAND_ID_SET_STATUS_INTERVAL"
+                      2: "COMMAND_ID_GET_STATUS_PARAMETER_TX_ENABLE_REGISTER"
+                      3: "COMMAND_ID_SET_STATUS_PARAMETER_TX_ENABLE_REGISTER"
+                      4: "COMMAND_ID_GET_STATUS"
+                      5: "COMMAND_ID_GET_BATTERY_VOLTAGE"
+                      6: "COMMAND_ID_GET_SABOTAGE_CONTACT_STATE"
+                      7: "COMMAND_ID_GET_ERROR_CODE"
+                      8: "COMMAND_ID_GET_DEVICE_TIME"
+                      9: "COMMAND_ID_SET_DEVICE_TIME"
+                      10: "COMMAND_ID_GET_DEVICE_TIME_CONFIG"
+                      11: "COMMAND_ID_SET_DEVICE_TIME_CONFIG"
+                      12: "COMMAND_ID_SET_SABOTAGE_CONTACT_CONFIG"
+                      13: "COMMAND_ID_GET_SABOTAGE_CONTACT_CONFIG"
+                      14: "COMMAND_ID_GET_HALL_SENSOR_STATE"
+                      15: "COMMAND_ID_SET_HALL_SENSOR_CONFIG"
+                      16: "COMMAND_ID_GET_HALL_SENSOR_CONFIG"
+                      17: "COMMAND_ID_GET_INPUT_CLAMP_STATE"
+                      18: "COMMAND_ID_SET_INPUT_CLAMP_CONFIG"
+                      19: "COMMAND_ID_GET_INPUT_CLAMP_CONFIG"
+                      20: "COMMAND_ID_SET_INPUT_CLAMP_SENSOR_TYPE"
+                      21: "COMMAND_ID_GET_INPUT_CLAMP_SENSOR_TYPE"
+                      22: "COMMAND_ID_GET_INPUT_CLAMP_SENSOR_FILTER_TIME"
+                      23: "COMMAND_ID_SET_INPUT_CLAMP_SENSOR_FILTER_TIME"
+                      54: "COMMAND_ID_COMMAND_FAILED"
+                      57: "COMMAND_ID_SET_HARDWARE_FACTORY_RESET_LOCK"
+                      58: "COMMAND_ID_GET_HARDWARE_FACTORY_RESET_LOCK"
+                      240: "COMMAND_ID_GET_AUTO_UPDATE_INSTALLATION"
+                      243: "COMMAND_ID_GET_PENDING_UPDATE_INFO"
+                      247: "COMMAND_ID_GET_REMAINING_TIME_UNTIL_REJOIN"
+                      248: "COMMAND_ID_GET_DATA_RATE"
+                      249: "COMMAND_ID_SET_DATA_RATE"
+                      250: "COMMAND_ID_GET_REJOIN_BEHAVIOR"
+                      251: "COMMAND_ID_SET_REJOIN_BEHAVIOR"
+                      252: "COMMAND_ID_GET_ALL_CONFIG"
+                      253: "COMMAND_ID_PERFORM_FACTORY_RESET"
+                      254: "COMMAND_ID_PERFORM_SOFTWARE_RESET"
+                      255: "COMMAND_ID_GET_VERSION"
+        # COMMAND_ID_GET_HARDWARE_FACTORY_RESET_LOCK (58 in parser 2.1.1; 57 in 2.0.2)
+        58:
+          - name: button_action
+            type: object
+            fields:
+              - name: hw_factory_reset_locked
+                type: object
+                fields:
+                  - name: value
+                    type: bool
+                    bit: 0
+                    consume: 1
+        # COMMAND_ID_GET_AUTO_UPDATE_INSTALLATION
+        240:
+          - name: update_info_auto_update_installation_en
+            type: object
+            fields:
+              # DEVIATION: the vendor tests the whole byte (!!b). No specified
+              # construct turns a byte into a boolean by truthiness - a boolean lookup
+              # label is outside what PS-106 lists and `bool` reads one bit - so bit 0 is
+              # read. The device sends 0 or 1; a byte of 2..255 would differ.
+              - name: value
+                type: bool
+                bit: 0
+                consume: 1
+        # COMMAND_ID_GET_PENDING_UPDATE_INFO
+        243:
+          - name: update_info_update_image
+            type: object
+            fields:
+              - name: type
+                type: object
+                fields:
+                  - name: value
+                    type: u8
+                    lookup:
+                      0: "UPDATE_IMAGE_NOT_VALID"
+                      1: "UPDATE_IMAGE_APPLICATION"
+                      2: "UPDATE_IMAGE_BOOTLOADER"
+                      3: "UPDATE_IMAGE_COPROCESSOR"
+              - name: version
+                type: object
+                fields:
+                  - name: value
+                    type: object
+                    fields:
+                      - {name: major, type: u8}
+                      - {name: minor, type: u8}
+                      - {name: patch, type: u8}
+        # COMMAND_ID_GET_REMAINING_TIME_UNTIL_REJOIN
+        247:
+          - name: radio_cyclic_rejoin_remaining_time_until_rejoin
+            type: object
+            fields:
+              - name: value
+                type: u24[0:20]
+                consume: 3
+                unit: "min"
+        # COMMAND_ID_GET_DATA_RATE
+        248:
+          - name: radio_data_rate
+            type: object
+            fields:
+              - name: value
+                type: u8[0:3]
+                consume: 1
+                lookup:
+                  0: "Adaptive Data Rate"
+                  1: "DR 0"
+                  2: "DR 1"
+                  3: "DR 2"
+                  4: "DR 3"
+                  5: "DR 4"
+                  6: "DR 5"
+        # COMMAND_ID_GET_REJOIN_BEHAVIOR
+        250:
+          - name: radio_cyclic_rejoin_conf
+            type: object
+            fields:
+              # REJOIN_BEHAVIOR[!(b >> 7)]: a set bit 7 is "Single Rejoin".
+              - name: value
+                type: u8[7:7]
+                lookup: {0: "Cyclic Rejoin", 1: "Single Rejoin"}
+          # formula: radio.cyclic_rejoin.interval = (x[0] & 0x7F) * 255 + x[1]  [h]
+          # Not emitted: a two-byte combination needs `compute`, which the Python
+          # reference does not evaluate inside a tlv case. The two bytes are consumed
+          # so that the commands after this one stay aligned.
+          - name: _cyclic_rejoin_interval
+            type: skip
+            length: 2
+        # COMMAND_ID_GET_VERSION
+        255:
+          - name: version
+            type: object
+            fields:
+              - name: hw_revision
+                type: object
+                fields:
+                  - name: value
+                    type: u8
+              - name: application
+                type: object
+                fields:
+                  - name: value
+                    type: object
+                    fields:
+                      - {name: major, type: u8}
+                      - {name: minor, type: u8}
+                      - {name: patch, type: u8}
+              - name: bootloader
+                type: object
+                fields:
+                  - name: value
+                    type: object
+                    fields:
+                      - {name: major, type: u8}
+                      - {name: minor, type: u8}
+                      - {name: patch, type: u8}
+              - name: lorawan_l2
+                type: object
+                fields:
+                  - name: value
+                    type: object
+                    fields:
+                      - {name: major, type: u8}
+                      - {name: minor, type: u8}
+                      - {name: patch, type: u8}
+        # Commands in the vendor's table that it has no decoder for: SET
+        # acknowledgements, GET_ALL_CONFIG, the resets. The vendor consumes the ID
+        # alone and carries on with the next command, and so does this.
+        1: []
+        3: []
+        9: []
+        11: []
+        12: []
+        15: []
+        18: []
+        20: []
+        23: []
+        57: []
+        249: []
+        251: []
+        252: []
+        253: []
+        254: []
+
+# Every expected value below is the output of the vendor's dnt-lw-wsci-2-1-1.js run
+# under node on the same payload (the first two are also TTN's declared examples),
+# carried over with only the deviations listed at the top of this file applied:
+# units dropped, toFixed() strings read as numbers, shared parents flattened,
+# failed_commands as a list, three-part versions as major/minor/patch,
+# payload_parser and cyclic_rejoin.interval removed.
+test_vectors:
+- name: "ttn_status_uplink"
+  description: "TTN declared example 'Status Uplink': mask 0xF0, all four status parameters"
+  payload: "04F090000000"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    battery_voltage:
+      value: 2940
+    sabotage_contact_state:
+      value: "IDLE"
+    hall_sensor_state:
+      value: "LOW"
+    input_clamp_state:
+      value: "LOW"
+- name: "ttn_window_state_change"
+  description: "TTN declared example 'Window state change': hall sensor HIGH"
+  payload: "0E01"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    hall_sensor_state:
+      value: "HIGH"
+- name: "status_battery_only"
+  description: "Status report with only the battery bit (7) set in the mask"
+  payload: "0480A0"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    battery_voltage:
+      value: 3100
+- name: "status_sabotage_only"
+  description: "Status report with only the sabotage-contact bit (6) set"
+  payload: "044001"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    sabotage_contact_state:
+      value: "TRIGGERED"
+- name: "status_hall_only"
+  description: "Status report with only the hall-sensor bit (5) set"
+  payload: "042002"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    hall_sensor_state:
+      value: "DISABLED"
+- name: "status_clamp_only"
+  description: "Status report with only the input-clamp bit (4) set"
+  payload: "041001"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    input_clamp_state:
+      value: "HIGH"
+- name: "status_empty_mask"
+  description: "Status report whose mask enables nothing; the vendor reports nothing"
+  payload: "0400"
+  fPort: 10
+  source: "vendor-codec"
+  expected: {}
+- name: "status_max"
+  description: "Status report, every byte 0xFF: battery 4050 mV, state index 3 has no label"
+  payload: "04FFFFFFFFFF"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    battery_voltage:
+      value: 4050
+    sabotage_contact_state: {}
+    hall_sensor_state: {}
+    input_clamp_state: {}
+- name: "status_then_hall"
+  description: "Status report followed by a hall-state command in the same uplink"
+  payload: "0480900E01"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    battery_voltage:
+      value: 2940
+    hall_sensor_state:
+      value: "HIGH"
+- name: "status_interval_zero"
+  description: "GET_STATUS_INTERVAL, raw 0 -> 30 s (all-zero payload)"
+  payload: "0000"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    status_report:
+      interval:
+        value: 30
+- name: "status_interval_max"
+  description: "GET_STATUS_INTERVAL, raw 255 -> 91830 s"
+  payload: "00FF"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    status_report:
+      interval:
+        value: 91830
+- name: "tx_enable_all"
+  description: "GET_STATUS_PARAMETER_TX_ENABLE_REGISTER, all four enabled"
+  payload: "02F0"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    radio_status_report:
+      parameter_tx_enable_reg:
+        battery_voltage_enabled: true
+        sabotage_contact_states_enabled: true
+        hall_sensore_states_enabled: true
+        input_clamp_states_enabled: true
+- name: "tx_enable_none"
+  description: "GET_STATUS_PARAMETER_TX_ENABLE_REGISTER, low nibble only, all four disabled"
+  payload: "020F"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    radio_status_report:
+      parameter_tx_enable_reg:
+        battery_voltage_enabled: false
+        sabotage_contact_states_enabled: false
+        hall_sensore_states_enabled: false
+        input_clamp_states_enabled: false
+- name: "battery_voltage_command"
+  description: "GET_BATTERY_VOLTAGE, raw 255 -> 4050 mV"
+  payload: "05FF"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    battery_voltage:
+      value: 4050
+- name: "sabotage_state_triggered"
+  description: "GET_SABOTAGE_CONTACT_STATE, TRIGGERED"
+  payload: "0601"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    sabotage_contact_state:
+      value: "TRIGGERED"
+- name: "error_code_ready"
+  description: "GET_ERROR_CODE, DEVICE_READY"
+  payload: "0700"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    error_code:
+      value: "DEVICE_READY"
+- name: "device_time_local"
+  description: "GET_DEVICE_TIME: 10:37:17, Tuesday 24 September 2024, DST, UTC+2"
+  payload: "08119558A81838"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    device_time_local:
+      second:
+        value: 17
+      minute:
+        value: 37
+      hour:
+        value: 10
+      day:
+        value: 24
+      weekday:
+        value: "TUESDAY"
+      month:
+        value: "SEPTEMBER"
+      year:
+        value: 2024
+      is_dst:
+        value: true
+      utc_offset:
+        value: 2
+- name: "device_time_config"
+  description: "GET_DEVICE_TIME_CONFIG: auto sync, UTC+1, DST +2 from last Sunday of March 02:00 to last Sunday of October 03:00"
+  payload: "0AB4520238590300"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    device_time_config:
+      auto_time_sync_en:
+        value: true
+      utc_offset:
+        value: 1
+      utc_dst_offset:
+        value: 2
+      utc_dst_begin:
+        week_of_month:
+          value: "last"
+        month:
+          value: "MARCH"
+        weekday:
+          value: "SUNDAY"
+        hour:
+          value: 2
+        minute:
+          value: 0
+      utc_dst_end:
+        week_of_month:
+          value: "last"
+        month:
+          value: "OCTOBER"
+        weekday:
+          value: "SUNDAY"
+        hour:
+          value: 3
+        minute:
+          value: 0
+- name: "device_time_config_minutes"
+  description: "GET_DEVICE_TIME_CONFIG with non-zero minutes and out-of-table week and weekday values"
+  payload: "0A41A34C31A4E165"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    device_time_config:
+      auto_time_sync_en:
+        value: false
+      utc_offset:
+        value: 4.25
+      utc_dst_offset:
+        value: 0.25
+      utc_dst_begin:
+        week_of_month: {}
+        month:
+          value: "APRIL"
+        weekday:
+          value: "TUESDAY"
+        hour:
+          value: 12
+        minute:
+          value: 30
+      utc_dst_end:
+        week_of_month: {}
+        month:
+          value: "MAY"
+        weekday: {}
+        hour:
+          value: 1
+        minute:
+          value: 25
+- name: "sabotage_config"
+  description: "GET_SABOTAGE_CONTACT_CONFIG, enabled"
+  payload: "0D01"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    sabotage_contact_config:
+      value: true
+- name: "hall_state_disabled"
+  description: "GET_HALL_SENSOR_STATE, DISABLED"
+  payload: "0E02"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    hall_sensor_state:
+      value: "DISABLED"
+- name: "hall_config"
+  description: "GET_HALL_SENSOR_CONFIG, disabled"
+  payload: "1000"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    hall_sensor_config:
+      value: false
+- name: "clamp_state_low"
+  description: "GET_INPUT_CLAMP_STATE, LOW"
+  payload: "1100"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    input_clamp_state:
+      value: "LOW"
+- name: "clamp_config"
+  description: "GET_INPUT_CLAMP_CONFIG, enabled"
+  payload: "1301"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    input_clamp_config:
+      value: true
+- name: "clamp_sensor_type"
+  description: "GET_INPUT_CLAMP_SENSOR_TYPE, glass break detector"
+  payload: "1501"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    input_clamp_sensor_type:
+      value: "Glass break detector"
+- name: "clamp_filter_time"
+  description: "GET_INPUT_CLAMP_SENSOR_FILTER_TIME, raw 4 -> 120 s"
+  payload: "1604"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    input_clamp_filter_time:
+      value: 120
+- name: "command_failed"
+  description: "COMMAND_FAILED listing GET_VERSION and GET_STATUS"
+  payload: "3602FF04"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    radio_failed_commands:
+      value:
+      - command: "COMMAND_ID_GET_VERSION"
+      - command: "COMMAND_ID_GET_STATUS"
+- name: "factory_reset_lock"
+  description: "GET_HARDWARE_FACTORY_RESET_LOCK, locked"
+  payload: "3A01"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    button_action:
+      hw_factory_reset_locked:
+        value: true
+- name: "auto_update_on"
+  description: "GET_AUTO_UPDATE_INSTALLATION, 01 -> true. The vendor's !!b also gives true for 02..FF, which this schema reads as bit 0 (see the case's DEVIATION note), so no vector asserts it."
+  payload: "F001"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    update_info_auto_update_installation_en:
+      value: true
+- name: "auto_update_off"
+  description: "GET_AUTO_UPDATE_INSTALLATION, zero -> false"
+  payload: "F000"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    update_info_auto_update_installation_en:
+      value: false
+- name: "pending_update"
+  description: "GET_PENDING_UPDATE_INFO: application image 1.5.255"
+  payload: "F3010105FF"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    update_info_update_image:
+      type:
+        value: "UPDATE_IMAGE_APPLICATION"
+      version:
+        value:
+          major: 1
+          minor: 5
+          patch: 255
+- name: "remaining_rejoin"
+  description: "GET_REMAINING_TIME_UNTIL_REJOIN, top three bits masked off -> 256 min"
+  payload: "F7E00100"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    radio_cyclic_rejoin_remaining_time_until_rejoin:
+      value: 256
+- name: "data_rate_adr"
+  description: "GET_DATA_RATE, adaptive data rate"
+  payload: "F800"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    radio_data_rate:
+      value: "Adaptive Data Rate"
+- name: "data_rate_dr5"
+  description: "GET_DATA_RATE, DR 5"
+  payload: "F806"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    radio_data_rate:
+      value: "DR 5"
+- name: "rejoin_behavior"
+  description: "GET_REJOIN_BEHAVIOR, single rejoin (interval not emitted)"
+  payload: "FA8102"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    radio_cyclic_rejoin_conf:
+      value: "Single Rejoin"
+- name: "version"
+  description: "GET_VERSION: hw 1, application 1.5.2, bootloader 1.2.3, LoRaWAN L2 1.0.3"
+  payload: "FF01010502010203010003"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    version:
+      hw_revision:
+        value: 1
+      application:
+        value:
+          major: 1
+          minor: 5
+          patch: 2
+      bootloader:
+        value:
+          major: 1
+          minor: 2
+          patch: 3
+      lorawan_l2:
+        value:
+          major: 1
+          minor: 0
+          patch: 3
+- name: "set_ack_then_hall"
+  description: "SET_STATUS_INTERVAL acknowledgement (no body) then a hall-state command"
+  payload: "010E01"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    hall_sensor_state:
+      value: "HIGH"
+- name: "factory_reset_ack"
+  description: "PERFORM_FACTORY_RESET: an ID with no body; the vendor reports nothing"
+  payload: "FD"
+  fPort: 10
+  source: "vendor-codec"
+  expected: {}
+- name: "config_bundle"
+  description: "Several configuration responses in one uplink"
+  payload: "00050D011001130115001604F800FA0030"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    status_report:
+      interval:
+        value: 1830
+    sabotage_contact_config:
+      value: true
+    hall_sensor_config:
+      value: true
+    input_clamp_config:
+      value: true
+    input_clamp_sensor_type:
+      value: "Magnetic contact"
+    input_clamp_filter_time:
+      value: 120
+    radio_data_rate:
+      value: "Adaptive Data Rate"
+    radio_cyclic_rejoin_conf:
+      value: "Cyclic Rejoin"
+- name: "time_and_radio"
+  description: "Both device_time commands and two radio commands in one uplink"
+  payload: "08119558A818380AB4520238590300F806F7000010"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    device_time_local:
+      second:
+        value: 17
+      minute:
+        value: 37
+      hour:
+        value: 10
+      day:
+        value: 24
+      weekday:
+        value: "TUESDAY"
+      month:
+        value: "SEPTEMBER"
+      year:
+        value: 2024
+      is_dst:
+        value: true
+      utc_offset:
+        value: 2
+    device_time_config:
+      auto_time_sync_en:
+        value: true
+      utc_offset:
+        value: 1
+      utc_dst_offset:
+        value: 2
+      utc_dst_begin:
+        week_of_month:
+          value: "last"
+        month:
+          value: "MARCH"
+        weekday:
+          value: "SUNDAY"
+        hour:
+          value: 2
+        minute:
+          value: 0
+      utc_dst_end:
+        week_of_month:
+          value: "last"
+        month:
+          value: "OCTOBER"
+        weekday:
+          value: "SUNDAY"
+        hour:
+          value: 3
+        minute:
+          value: 0
+    radio_data_rate:
+      value: "DR 5"
+    radio_cyclic_rejoin_remaining_time_until_rejoin:
+      value: 16

@@ -117,6 +117,11 @@ public class Field {
     public int getByteOffset() { return byteOffset; }
     public void setByteOffset(int byteOffset) { this.byteOffset = byteOffset; }
     
+    /** The `bit:` of a `bool` field, or -1 when the field does not declare one. */
+    private int boolBit = -1;
+    public int getBoolBit() { return boolBit; }
+    public void setBoolBit(int boolBit) { this.boolBit = boolBit; }
+
     public int getBitOffset() { return bitOffset; }
     public void setBitOffset(int bitOffset) { this.bitOffset = bitOffset; }
     

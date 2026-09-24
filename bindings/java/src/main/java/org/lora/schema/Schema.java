@@ -219,6 +219,9 @@ public class Schema {
         }
         f.setByteOffset(toInt(fm.get("byte_offset"), 0));
         f.setBitOffset(toInt(fm.get("bit_offset"), 0));
+        if (fm.get("bit") != null) {
+            f.setBoolBit(toInt(fm.get("bit"), 0));
+        }
         f.setBits(toInt(fm.get("bits"), 0));
         f.setConsume(toInt(fm.get("consume"), 0));
         f.setEndian((String) fm.get("endian"));
@@ -866,8 +869,17 @@ public class Schema {
             }
             
             case BOOL -> {
+                // PS-065/066: one bit of the current byte, the spec's `bit:` key naming
+                // it, and no advance unless `consume` says so. `bit:` was never read,
+                // so every bool decoded bit 0; and `consume` was ignored, so a group of
+                // flags ending in `consume: 1` left the cursor on the flag byte and the
+                // next field read it again (dnt/dnt-lw-wsci: 26 vectors).
                 byte[] data = ctx.peek(1, field.getByteOffset());
-                value = ctx.decodeBits(data[0] & 0xFF, field.getBitOffset(), 1) != 0;
+                int bit = field.getBoolBit() >= 0 ? field.getBoolBit() : field.getBitOffset();
+                value = ctx.decodeBits(data[0] & 0xFF, bit, 1) != 0;
+                if (field.getConsume() > 0) {
+                    ctx.read(field.getConsume());
+                }
             }
             
             case BITS -> {

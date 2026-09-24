@@ -1,0 +1,40 @@
+# An internal (`_`-prefixed) field that selects the layout of what follows.
+#
+# A vendor command byte is often not reported, yet decides how the rest reads. The
+# field is read, bound for `$` references, and left out of the output. Go, Java, C#
+# and the generated codec already did this; the Python reference read the byte and
+# discarded it, so `field: $_kind` found nothing and the decode failed with a message
+# naming the wrong key.
+#
+# PS-176 reserves `_` names for interpreter metadata, and the specification has no
+# other spelling for "decoded and referenced, not reported". This fixture records a
+# prototype convention pending a CR, not specified behaviour.
+#
+# Encoding has to reconstruct the byte from the case the data fits: the second vector
+# re-encodes to its payload only if it does, instead of writing a zero.
+name: probe_internal_discriminator
+endian: big
+fields:
+- name: _kind
+  type: u8
+- match:
+    field: $_kind
+    cases:
+      1:
+      - name: temperature
+        type: s16
+        div: 10
+      2:
+      - name: humidity
+        type: u8
+test_vectors:
+- name: kind_1_temperature
+  payload: '0100E7'
+  source: generated
+  expected:
+    temperature: 23.1
+- name: kind_2_humidity
+  payload: '0232'
+  source: generated
+  expected:
+    humidity: 50

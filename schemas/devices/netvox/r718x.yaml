@@ -1,0 +1,475 @@
+# Netvox R718X - Wireless Ultrasonic Distance Sensor (also covers R718PE)
+# Source: TheThingsNetwork/lorawan-devices vendor/netvox/payload/r718x.js
+# Device: vendor/netvox/r718x.yaml, examples: vendor/netvox/r718x-codec.yaml
+#
+# Output keys follow the vendor decoder exactly. Dispatch is by fPort, then by
+# the report-type byte (port 6) or command (port 7), then by the device type,
+# which moves FillLevel and gates Temp/AngleOfInclination/TempChange.
+#
+# Device and Cmd are read as a non-consuming bit range (u8[0:7]) so the label
+# can be reported, and the same byte is then read by a case-less inline match
+# purely to hold the raw id in a variable for the later dispatch. The obvious
+# spellings each fail in one implementation: a `_`-prefixed field's `var:` is
+# not stored by the Python interpreter at top level, Go applies no lookup to
+# the members of a grouped shared byte, and the TS013 generator drops string
+# case keys, so matching on the looked-up label is not portable either.
+#
+# DEVIATIONS from the vendor decoder:
+# - Low battery: when bit 7 of the battery byte is set the vendor reports Volt
+#   as a string, e.g. "3.2(low battery)". A field has one type here, so Volt is
+#   always the number (bits 0-6 / 10) and the flag is a separate LowBattery
+#   (0/1) field, which the vendor never emits.
+name: netvox_r718x
+version: 1
+endian: big
+
+ports:
+  6:
+    description: "Startup version report or periodic status report"
+    fields:
+      - name: _version
+        type: u8
+      - name: Device
+        type: u8[0:7]
+        lookup:
+          52: "R718X"
+          177: "R718PE"
+      - match:
+          length: 1
+          var: device_type
+          default: skip
+          cases: {}
+      - match:
+          length: 1
+          var: report_type
+          cases:
+            0:
+              - name: SWver
+                type: u8
+                div: 10
+              - name: HWver
+                type: u8
+              - name: Datecode
+                type: hex
+                length: 4
+          default:
+            - name: Volt
+              type: u8[0:6]
+              div: 10
+              unit: "V"
+              ipso: {object: 3316, instance: 0, resource: 5700}
+              senml: {name: "vbat", unit: "V"}
+              semantic: "battery.voltage"
+            - name: LowBattery
+              type: u8[7:7]
+              consume: 1
+            - name: Status
+              type: u8
+              lookup:
+                0: "OFF"
+                default: "ON"
+            - name: Distance
+              type: u16
+              unit: "mm"
+              # SenML's distance unit is m; the vendor reports mm, so no annotation.
+            - match:
+                field: $device_type
+                cases:
+                  52:  # R718X
+                    - name: Temp
+                      type: s16
+                      div: 10
+                      unit: "°C"
+                      ipso: {object: 3303, instance: 0, resource: 5700}
+                      senml: {name: "temperature", unit: "Cel"}
+                      semantic: "air.temperature"
+                    - name: FillLevel
+                      type: u8
+                      unit: "%"
+                      sensor: percentage
+                      ipso: {object: 3320, instance: 0, resource: 5700}
+                      senml: {name: "fill_level", unit: "%"}
+                      semantic: "fill.level"
+                    - name: AngleOfInclination
+                      type: u8
+                      unit: "°"
+                default:
+                  - name: FillLevel
+                    type: u8
+                    unit: "%"
+                    sensor: percentage
+                    ipso: {object: 3320, instance: 0, resource: 5700}
+                    senml: {name: "fill_level", unit: "%"}
+                    semantic: "fill.level"
+
+  7:
+    description: "Configuration command responses (and echoed requests)"
+    fields:
+      - name: Cmd
+        type: u8[0:7]
+        lookup:
+          1: "ConfigReportReq"
+          129: "ConfigReportRsp"
+          2: "ReadConfigReportReq"
+          130: "ReadConfigReportRsp"
+          3: "SetOnDistanceThresholdReq"
+          131: "SetOnDistanceThresholdRsp"
+          4: "GetOnDistanceThresholdReq"
+          132: "GetOnDistanceThresholdRsp"
+          5: "SetFillMaxDistanceReq"
+          133: "SetFillMaxDistanceRsp"
+          6: "GetFillMaxDistanceReq"
+          134: "GetFillMaxDistanceRsp"
+          11: "SetDeadZoneDistanceReq"
+          139: "SetDeadZoneDistanceRsp"
+          12: "GetDeadZoneDistanceReq"
+          140: "GetDeadZoneDistanceRsp"
+      - match:
+          length: 1
+          var: cmd
+          default: skip
+          cases: {}
+      - name: Device
+        type: u8[0:7]
+        lookup:
+          52: "R718X"
+          177: "R718PE"
+      - match:
+          length: 1
+          var: device_type
+          default: skip
+          cases: {}
+      - match:
+          field: $cmd
+          default: skip
+          cases:
+            129:  # ConfigReportRsp
+              - name: Status
+                type: u8
+                lookup:
+                  0: "Success"
+                  default: "Failure"
+            131:  # SetOnDistanceThresholdRsp
+              - name: Status
+                type: u8
+                lookup:
+                  0: "Success"
+                  default: "Failure"
+            133:  # SetFillMaxDistanceRsp
+              - name: Status
+                type: u8
+                lookup:
+                  0: "Success"
+                  default: "Failure"
+            139:  # SetDeadZoneDistanceRsp
+              - name: Status
+                type: u8
+                lookup:
+                  0: "Success"
+                  default: "Failure"
+            130:  # ReadConfigReportRsp
+              - name: MinTime
+                type: u16
+                unit: "s"
+                sensor: none
+              - name: MaxTime
+                type: u16
+                unit: "s"
+                sensor: none
+              - name: BatteryChange
+                type: u8
+                div: 10
+                unit: "V"
+                sensor: none
+              - name: DistanceChange
+                type: u16
+                unit: "mm"
+                sensor: none
+              - match:
+                  field: $device_type
+                  default: skip
+                  cases:
+                    52:  # R718X
+                      - name: TempChange
+                        type: u16
+                        div: 10
+                        unit: "°C"
+                        sensor: none
+            132:  # GetOnDistanceThresholdRsp
+              - name: OnDistanceThreshold
+                type: u16
+                unit: "mm"
+                sensor: none
+            134:  # GetFillMaxDistanceRsp
+              - name: FillMaxDistance
+                type: u16
+                unit: "mm"
+                sensor: none
+            140:  # GetDeadZoneDistanceRsp
+              - name: DeadZoneDistance
+                type: u16
+                unit: "mm"
+                sensor: none
+
+# Every expected value below is the vendor decoder's output (r718x.js under
+# node), or a TTN declared example in r718x-codec.yaml, never our own decode.
+test_vectors:
+  # --- TTN declared examples (r718x-codec.yaml) ---
+  - name: startup_version_report
+    description: "TTN declared example: startup version report"
+    fPort: 6
+    payload: "01 34 00 64 01 20 20 08 11 00 00"
+    source: vendor-codec
+    expected:
+      Device: "R718X"
+      SWver: 10
+      HWver: 1
+      Datecode: "20200811"
+  - name: status_report
+    description: "TTN declared example: status report"
+    fPort: 6
+    payload: "01 34 01 24 01 01 2C 01 07 32 0A"
+    source: vendor-codec
+    expected:
+      Device: "R718X"
+      Volt: 3.6
+      LowBattery: 0
+      Status: "ON"
+      Distance: 300
+      Temp: 26.3
+      FillLevel: 50
+      AngleOfInclination: 10
+  - name: config_report_response
+    description: "TTN declared example: configure report response"
+    fPort: 7
+    payload: "81 34 00 00 00 00 00 00 00 00 00"
+    source: vendor-codec
+    expected:
+      Cmd: "ConfigReportRsp"
+      Device: "R718X"
+      Status: "Success"
+  - name: read_config_report_response
+    description: "TTN declared example: read configure report response"
+    fPort: 7
+    payload: "82 34 03 84 07 08 01 00 64 00 05"
+    source: vendor-codec
+    expected:
+      Cmd: "ReadConfigReportRsp"
+      Device: "R718X"
+      MinTime: 900
+      MaxTime: 1800
+      BatteryChange: 0.1
+      DistanceChange: 100
+      TempChange: 0.5
+  - name: set_on_distance_threshold_response
+    description: "TTN declared example: set distance threshold response"
+    fPort: 7
+    payload: "83 34 00 00 00 00 00 00 00 00 00"
+    source: vendor-codec
+    expected:
+      Cmd: "SetOnDistanceThresholdRsp"
+      Device: "R718X"
+      Status: "Success"
+  - name: get_on_distance_threshold_response
+    description: "TTN declared example: get distance threshold response"
+    fPort: 7
+    payload: "84 34 00 32 00 00 00 00 00 00 00"
+    source: vendor-codec
+    expected:
+      Cmd: "GetOnDistanceThresholdRsp"
+      Device: "R718X"
+      OnDistanceThreshold: 50
+  - name: set_fill_max_distance_response
+    description: "TTN declared example: set fill max level response"
+    fPort: 7
+    payload: "85 34 00 00 00 00 00 00 00 00 00"
+    source: vendor-codec
+    expected:
+      Cmd: "SetFillMaxDistanceRsp"
+      Device: "R718X"
+      Status: "Success"
+  - name: get_fill_max_distance_response
+    description: "TTN declared example: get fill max level response"
+    fPort: 7
+    payload: "86 34 07 D0 00 00 00 00 00 00 00"
+    source: vendor-codec
+    expected:
+      Cmd: "GetFillMaxDistanceRsp"
+      Device: "R718X"
+      FillMaxDistance: 2000
+  - name: set_dead_zone_distance_response
+    description: "TTN declared example: set dead zone distance response"
+    fPort: 7
+    payload: "8B 34 00 00 00 00 00 00 00 00 00"
+    source: vendor-codec
+    expected:
+      Cmd: "SetDeadZoneDistanceRsp"
+      Device: "R718X"
+      Status: "Success"
+  - name: get_dead_zone_distance_response
+    description: "TTN declared example: get dead zone distance response"
+    fPort: 7
+    payload: "8C 34 01 F4 00 00 00 00 00 00 00"
+    source: vendor-codec
+    expected:
+      Cmd: "GetDeadZoneDistanceRsp"
+      Device: "R718X"
+      DeadZoneDistance: 500
+
+  # --- Payloads run through the vendor decoder (r718x.js under node) ---
+  - name: r718pe_version_report_min_length
+    description: "R718PE version report, 9 bytes (shortest the vendor reads); hex date digits are lowercase"
+    fPort: 6
+    payload: "01 B1 00 0A 03 20 21 0A 15"
+    source: vendor-codec
+    expected:
+      Device: "R718PE"
+      SWver: 1
+      HWver: 3
+      Datecode: "20210a15"
+  - name: r718pe_status_report_min_length
+    description: "R718PE status report, 8 bytes: FillLevel at byte 7, no Temp or angle"
+    fPort: 6
+    payload: "01 B1 01 24 01 0B B8 32"
+    source: vendor-codec
+    expected:
+      Device: "R718PE"
+      Volt: 3.6
+      Status: "ON"
+      Distance: 3000
+      FillLevel: 50
+  - name: negative_temperature
+    description: "Temp word 0xFF9C is -10.0 C; Status byte 0 is OFF"
+    fPort: 6
+    payload: "01 34 01 24 00 01 18 FF 9C 14 05"
+    source: vendor-codec
+    expected:
+      Device: "R718X"
+      Volt: 3.6
+      Status: "OFF"
+      Distance: 280
+      Temp: -10
+      FillLevel: 20
+      AngleOfInclination: 5
+  - name: all_zero_status
+    description: "Every measured byte zero"
+    fPort: 6
+    payload: "01 34 01 00 00 00 00 00 00 00 00"
+    source: vendor-codec
+    expected:
+      Device: "R718X"
+      Volt: 0
+      LowBattery: 0
+      Status: "OFF"
+      Distance: 0
+      Temp: 0
+      FillLevel: 0
+      AngleOfInclination: 0
+  - name: maximum_values
+    description: "Largest value of each field with the low-battery bit clear"
+    fPort: 6
+    payload: "01 34 01 7F FF FF FF 7F FF FF FF"
+    source: vendor-codec
+    expected:
+      Device: "R718X"
+      Volt: 12.7
+      LowBattery: 0
+      Status: "ON"
+      Distance: 65535
+      Temp: 3276.7
+      FillLevel: 255
+      AngleOfInclination: 255
+  - name: minimum_temperature
+    description: "Temp word 0x8000 is the most negative, -3276.8"
+    fPort: 6
+    payload: "01 34 01 00 00 00 00 80 00 00 00"
+    source: vendor-codec
+    expected:
+      Device: "R718X"
+      Volt: 0
+      Status: "OFF"
+      Distance: 0
+      Temp: -3276.8
+      FillLevel: 0
+      AngleOfInclination: 0
+  - name: low_battery_flag
+    description: >-
+      Battery byte 0xA0. The vendor emits Volt as the string "3.2(low battery)";
+      this schema reports its two parts, Volt 3.2 and LowBattery 1 (see header).
+      The other values are the vendor decoder's.
+    fPort: 6
+    payload: "01 34 01 A0 01 00 64 80 0A 32 19"
+    source: vendor-codec
+    expected:
+      Device: "R718X"
+      Volt: 3.2
+      LowBattery: 1
+      Status: "ON"
+      Distance: 100
+      Temp: -3275.8
+      FillLevel: 50
+      AngleOfInclination: 25
+  - name: config_report_failure
+    description: "Non-zero status byte on a Set response is Failure"
+    fPort: 7
+    payload: "81 34 01 00 00 00 00 00 00 00 00"
+    source: vendor-codec
+    expected:
+      Cmd: "ConfigReportRsp"
+      Device: "R718X"
+      Status: "Failure"
+  - name: r718pe_read_config_report_response
+    description: "R718PE has no TempChange; 9 bytes are enough"
+    fPort: 7
+    payload: "82 B1 00 3C 0E 10 02 00 0A"
+    source: vendor-codec
+    expected:
+      Cmd: "ReadConfigReportRsp"
+      Device: "R718PE"
+      MinTime: 60
+      MaxTime: 3600
+      BatteryChange: 0.2
+      DistanceChange: 10
+  - name: r718pe_set_dead_zone_distance_response
+    description: "Short Set response from an R718PE"
+    fPort: 7
+    payload: "8B B1 00 00"
+    source: vendor-codec
+    expected:
+      Cmd: "SetDeadZoneDistanceRsp"
+      Device: "R718PE"
+      Status: "Success"
+  - name: get_fill_max_distance_maximum
+    description: "Largest FillMaxDistance, 4-byte response"
+    fPort: 7
+    payload: "86 B1 FF FF"
+    source: vendor-codec
+    expected:
+      Cmd: "GetFillMaxDistanceRsp"
+      Device: "R718PE"
+      FillMaxDistance: 65535
+  - name: echoed_request_has_no_body
+    description: "A request id (ReadConfigReportReq) decodes to Cmd and Device only"
+    fPort: 7
+    payload: "02 34 00 00 00 00 00 00 00 00 00"
+    source: vendor-codec
+    expected:
+      Cmd: "ReadConfigReportReq"
+      Device: "R718X"
+  - name: unknown_device_type_status
+    description: "Device byte 0x99 has no name; vendor omits Device and reads FillLevel at byte 7"
+    fPort: 6
+    payload: "01 99 01 24 01 01 2C 00"
+    source: vendor-codec
+    expected:
+      Volt: 3.6
+      Status: "ON"
+      Distance: 300
+      FillLevel: 0
+  - name: unknown_command
+    description: "Command 0x99 has no name; vendor reports Device only"
+    fPort: 7
+    payload: "99 34 00 00 00 00 00 00 00 00 00"
+    source: vendor-codec
+    expected:
+      Device: "R718X"
