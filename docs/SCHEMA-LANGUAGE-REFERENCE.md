@@ -18,9 +18,9 @@ fields: [...]             # Field definitions (or use ports)
 ports:                    # Port-based routing (or use fields)
   1: { fields: [...] }
   2: { fields: [...] }
-definitions:              # Reusable field groups
-  common_header: [...]
-metadata:                 # Network metadata enrichment
+definitions:              # Reusable field groups, pulled in with $ref
+  common_header: { fields: [...] }
+metadata:                 # Network metadata enrichment (Python only)
   include: [...]
   timestamps: [...]
 test_vectors: [...]       # Test cases
@@ -56,24 +56,22 @@ downlink_commands: [...]  # Command definitions (for downlink)
 | Type | Description |
 |------|-------------|
 | `ascii` | ASCII string (requires `length:`) |
-| `hex` | Hex string output (requires `length:`) |
-| `bytes` | Raw bytes (requires `length:`) |
+| `hex` | Lowercase hex string (requires `length:`) |
+| `hex:upper` | Uppercase hex string (requires `length:`) |
+| `bytes` | Raw bytes, reported as a lowercase hex string (requires `length:`) |
 | `base64` | Base64 encoded output (requires `length:`) |
 
 A `bytes` or `hex` field reports a **lowercase** hex string (PS-074, PS-281), not an array
-of numbers.
+of numbers. Choose the output representation with the type, not with a key:
 
-Bytes format options:
 ```yaml
 - name: device_eui
-  type: bytes
+  type: hex:upper       # AB CD -> "ABCD"; type: hex -> "abcd"; type: base64 -> "q80="
   length: 8
-  format: hex           # "0011223344556677"
-  format: hex:upper     # "0011223344556677" uppercase
-  format: base64        # Base64 encoded
-  format: array         # [0, 17, 34, 51, ...]
-  separator: ":"        # "00:11:22:33:44:55"
 ```
+
+`format:` and `separator:` keys on a `bytes` field are read by Go, Java and C# but ignored
+by the Python reference interpreter, so neither is portable.
 
 #### `length: remaining`
 
@@ -100,8 +98,8 @@ Consumes every byte from the read position to the end of the payload (PS-013):
 | Type | Description |
 |------|-------------|
 | `bool` | Boolean (0=false, nonzero=true) |
-| `number` | Computed field (no wire bytes) |
-| `string` | Literal string constant |
+| `number` | Computed field, or a constant with `value:` (no wire bytes) |
+| `string` | Constant with `value:` (no wire bytes), or text read with `length:` |
 | `skip` | Skip bytes (padding) |
 | `enum` | Enumerated values |
 | `bitfield_string` | Bit flags as string |
@@ -123,22 +121,40 @@ from the same byte. Add `consume: 1` to advance after reading.
 ### Bitfields
 
 ```yaml
-type: u8[0:3]      # Bits 0-3 of byte (4 bits)
-type: u16[8:15]    # High byte of u16
+- name: low_nibble
+  type: u8[0:3]      # Bits 0-3 of the byte (4 bits), inclusive
+- name: high_nibble
+  type: u8[4:7]
+  consume: 1         # A bit range never advances by itself
 ```
 
-### Endian Prefix
+`uN[start:end]` (inclusive) is the only bitfield spelling; `u8:2`, `u8[3+:2]`,
+`bits<3,2>` and `bits:2@3` were withdrawn (CR-2026-006) and are rejected. A bit range
+reads its base value big-endian whatever the schema's `endian` (PS-059), and consumes
+nothing unless `consume: N` is given, so the last range over a byte needs `consume: 1`.
+
+### Byte Order
+
+`endian:` at schema level sets the default; a field's own `endian:` overrides it for that
+field:
 
 ```yaml
-type: le_u16       # Little-endian
-type: be_u32       # Big-endian (explicit)
+endian: big
+fields:
+  - name: counter
+    type: u16
+    endian: little   # 01 00 -> 1
 ```
+
+The override does not cascade into the members of a nested construct (`object`, `repeat`,
+`match` ...); set it on each member. `le_`/`be_` type prefixes (`le_u16`) are not part of
+the language — the Python and Java interpreters reject them as unknown types.
 
 ### Byte Group (multiple values from shared bytes)
 
 ```yaml
 - byte_group:
-    size: 3
+    size: 1
     fields:
       - name: value_a
         type: u8[0:3]
@@ -158,21 +174,32 @@ Shorthand (size inferred from field types):
 
 ## Arithmetic Modifiers
 
-Applied in YAML key order:
+Bare modifiers are applied in the canonical order **mult, then div, then add**, however
+the keys are written (PS-101/PS-102):
 
 ```yaml
 - name: temperature
   type: s16
-  div: 10           # Divide by 10
-  add: -40          # Then subtract 40
-  # Result: (raw / 10) - 40
+  add: -40          # Written first, applied last
+  div: 10
+  # Result: (raw / 10) - 40; raw 1280 -> 88
 ```
 
 | Modifier | Effect |
 |----------|--------|
-| `add: n` | Add offset |
-| `mult: n` | Multiply |
+| `mult: n` | Multiply (applied first) |
 | `div: n` | Divide |
+| `add: n` | Add offset (applied last; use a negative value to subtract) |
+
+For any other order, use a `transform` list, whose stages apply in list order:
+
+```yaml
+- name: soil_temperature
+  type: u16
+  transform:
+    - add: -400
+    - div: 10       # (raw - 400) / 10; raw 1280 -> 88
+```
 
 ## Lookup Tables
 
@@ -297,30 +324,45 @@ plausible byte. The same applies to an `enum` `default` (PS-068).
 
 ### Formula (Deprecated)
 
-Legacy formula syntax for simple expressions. **Use `compute` instead.**
+Legacy string-expression syntax. **Do not use it in new schemas; use `ref` + `transform`
+or `compute`.**
 
 ```yaml
 - name: temp_c
   type: number
-  formula: "($raw_temp - 4000) / 100"  # String expression
+  formula: "($raw_temp - 4000) / 100"  # raw_temp 5000 -> 10
 ```
 
-Note: `formula` is deprecated in favor of the more explicit `compute` syntax
-which provides better validation and error handling.
+`formula` is evaluated by the Python, Go and Java interpreters and the TS013 generator.
+C# parses the key but never evaluates it, and the C interpreter has no formula support,
+so a schema relying on it does not decode the same everywhere. The same result portably:
+
+```yaml
+- name: temp_c
+  type: number
+  ref: $raw_temp
+  transform:
+    - add: -4000
+    - div: 100
+```
 
 ## Transform Operations
 
+Stages apply in list order:
+
 ```yaml
 transform:
-  - sqrt: true        # √x
+  - mult: 2           # also div:, add: (there is no sub:; add a negative)
+  - sqrt: true        # √x (input clamped at 0)
   - abs: true         # |x|
   - pow: 2            # x²
-  - floor: 0          # Clamp lower bound
-  - ceiling: 100      # Clamp upper bound
-  - clamp: [0, 100]   # Both bounds
-  - log10: true       # Base-10 logarithm
-  - log: true         # Natural logarithm
+  - log10: true       # Base-10 logarithm (input clamped at 1e-10)
+  - log: true         # Natural logarithm (input clamped at 1e-10)
+  - {op: round, decimals: 2}   # Round half-to-even
 ```
+
+`floor:`, `ceiling:` and `clamp:` stages exist only in the Python interpreter and the TS013
+generator; Go, Java and C# ignore them, so avoid them where cross-language results matter.
 
 ## Conditional Parsing
 
@@ -374,21 +416,12 @@ transform:
 | `bcd` | Binary-coded decimal |
 | `gray` | Gray code |
 
-## Value-Range Matching
+**`encoding:` is implemented in the Python interpreter only.** Go, Java, C#, C and the
+TS013 generator ignore the key and report the raw value, so a schema using it decodes
+differently outside Python.
 
-For value-dependent transformations:
-
-```yaml
-- name: signed_value
-  type: u16
-  match_value:
-    - when: "< 32768"
-      # No transform (value as-is)
-    - when: ">= 32768"
-      add: -65536
-```
-
-Prefer `encoding:` for standard patterns; use `match_value` for custom ranges.
+`match_value` (value-range conditional transforms) appears in the specification's field
+table but is implemented in no interpreter; do not use it.
 
 ## Bitfield String
 
@@ -413,17 +446,24 @@ test_vectors:
   - name: basic_reading
     description: "Normal temperature reading"
     payload: "00 E7 32"        # Hex, spaces ignored
+    fPort: 1                   # Needed for a port-based schema (fport also accepted)
+    source: vendor-doc         # vendor-doc | vendor-codec | field-capture | spec-example | generated
     expected:
       temperature: 23.1
       humidity: 50
 
-  - name: encoding_test
-    direction: encode          # Test encoding (JSON → binary)
+  - name: encoding_test        # An encode vector: input + expected_payload
+    source: vendor-doc
     input:
       temperature: 23.1
       humidity: 50
     expected_payload: "00E732"
 ```
+
+A vector is either a decode vector (`payload` + `expected`) or an encode vector (`input` +
+`expected_payload`), never both (PS-297). Declare `source:` on every vector: expected
+values recorded from this repository's own decoder are `generated`, and a schema with no
+independently sourced vector is capped at Silver (PS-264).
 
 ## Enum Type
 
@@ -448,10 +488,12 @@ test_vectors:
     - name: value
       type: u16
 
-# Field-based count
+# Count taken from an earlier field (note the $)
+- name: num_readings
+  type: u8
 - name: readings
   type: repeat
-  count_field: num_readings
+  count: $num_readings
   fields:
     - name: value
       type: u16
@@ -571,10 +613,19 @@ For protocols with multi-field tag structures:
         type: u8
     tag_key: [channel, sensor_type]
     cases:
-      [1, 0x67]:          # Channel 1, temperature type
+      "[1, 103]":         # Exact: channel 1, type 0x67
         - name: ch1_temperature
           type: s16
+      "[2, !0]":          # Channel 2, any type except 0
+        - name: ch2_value
+          type: u8
+      "[3, *]":           # Channel 3, any type
+        - name: ch3_value
+          type: u8
 ```
+
+A composite key is a quoted string; a bare YAML list (`[1, 0x67]:`) is not a valid mapping
+key and the file fails to load. The corpus writes the components in decimal.
 
 ## Match Patterns
 
@@ -583,10 +634,13 @@ For protocols with multi-field tag structures:
     field: $msg_type
     cases:
       1: [...]                    # Exact match
-      2..5: [...]                 # Range (2,3,4,5)
-      0x10..0x1F: [...]           # Hex range
-      _: [...]                    # Default case
+      "2..5": [...]               # Inclusive range (2,3,4,5)
+      "16..31": [...]             # Range bounds are decimal
+      default: [...]              # Fallback case
 ```
+
+Range bounds must be decimal: `"0x10..0x1F"` matches nothing. The fallback key is
+`default`; `_` is not recognised. With no `default`, an unmatched value fails the decode.
 
 ## Skip (Padding)
 
@@ -600,52 +654,29 @@ For protocols with multi-field tag structures:
 
 ```yaml
 definitions:
-  header:
-    - name: version
-      type: u8
-    - name: flags
-      type: u8
+  common_header:
+    fields:
+      - name: version
+        type: u8
+      - name: flags
+        type: u8
 
 fields:
-  - use: header      # Include definition
+  - $ref: "#/definitions/common_header"   # Splices version and flags in here
   - name: payload
-    type: bytes
-    length: 10
+    type: hex
+    length: 2
 ```
 
-## Schema Composition
+A definition is an object with a `fields:` list, and `$ref` splices those fields into the
+list where it appears — schema-level `fields:` or a port's. `01 02 AB CD` decodes to
+`{version: 1, flags: 2, payload: "abcd"}`. The top-level `header:` block is gone; use a
+definition for a common header.
 
-### Cross-File References
-
-```yaml
-# Reference definitions from other files
-fields:
-  - use: common/headers.yaml#message_header
-  - use: ./local-defs.yaml#sensor_block
-  - name: data
-    type: u16
-```
-
-### Standard Library
-
-```yaml
-# Use standard sensor definitions
-fields:
-  - use: std/sensors/temperature
-    rename: ambient_temp
-  - use: std/sensors/humidity
-  - use: std/sensors/battery_percent
-```
-
-### Field Renaming
-
-```yaml
-- use: gps_position
-  rename: device_location    # Rename single field
-
-- use: sensor_block
-  prefix: indoor_           # Prefix all fields: indoor_temp, indoor_humidity
-```
+`use:`, `rename:` and `prefix:` (including cross-file `use: file.yaml#name` and
+`std/...` library paths) are resolved only by `tools/schema_preprocessor.py`, not by any
+interpreter — given to an interpreter directly, a `use:` entry is misread as an ordinary
+field. Their withdrawal is proposed in spec CR-2026-045; use `$ref`.
 
 ## Port-Based Routing
 
@@ -687,13 +718,26 @@ When encoding downlinks, arithmetic is reversed automatically:
 |-----------------|-------------------|
 | `mult: n` | `div: n` |
 | `div: n` | `mult: n` |
-| `add: n` | `sub: n` |
+| `add: n` | subtract `n` |
+
+The reversal runs in the opposite order to decoding: subtract `add`, multiply by `div`,
+divide by `mult`, then round to the wire integer.
 
 ### Command-Based Downlinks
 
+`downlink_commands` is handled by the Python interpreter (`encode_command()`,
+`decode_command()`) and the TS013 generator only; it is not in the specification, and
+Go, Java, C# and C ignore it. A schema must still declare `fields` or `ports` (PS-004),
+so commands sit beside a layout, as in the bidirectional example below.
+
 ```yaml
 name: device_commands
+version: 1
 direction: downlink
+
+fields:
+  - name: ack
+    type: u8
 
 downlink_commands:
   set_interval:
@@ -740,7 +784,11 @@ downlink_commands:
 
 ## Network Metadata Enrichment
 
-Include TS013 input fields in decoder output:
+Include TS013 input fields in decoder output. The `metadata` block is optional (PS-310)
+and **only the Python interpreter implements it** (`decode(payload, fPort=...,
+input_metadata={...})`); every other implementation decodes the payload and ignores the
+block. A decoded field wins a name collision, and a value that cannot be resolved omits
+its key with a warning.
 
 ```yaml
 metadata:
@@ -775,6 +823,11 @@ metadata:
       field: unix_timestamp
 ```
 
+`rx_time` copies `recvTime` as given. `subtract` and `unix_epoch` produce a UTC ISO 8601
+string with milliseconds: `seconds_ago: 60` with `recvTime: "2024-01-01T00:01:00Z"`
+gives `measurement_time: "2024-01-01T00:00:00.000Z"`, and `unix_timestamp: 1694498816`
+gives `device_time: "2023-09-12T06:06:56.000Z"`.
+
 ### Available TS013 Input Fields
 
 | Field | Description |
@@ -793,9 +846,16 @@ metadata:
   type: s16
   div: 10
   unit: "°C"
-  ipso: 3303          # IPSO Smart Object ID
-  senml_unit: "Cel"   # SenML unit
+  ipso: {object: 3303, instance: 0, resource: 5700}   # IPSO object/instance/resource
+  senml: {name: "temperature", unit: "Cel"}           # SenML record name and unit
+  semantic: "air.temperature"                          # Dotted semantic name
 ```
+
+All three are needed for the semantic points in `tools/score_schema.py`; see
+`schemas/devices/decentlab/dl-5tm.yaml` for the canonical form. A bare `ipso: 3303` is
+still read, but the older `senml_unit:` key is not, so it earns no SenML points.
+Annotate only where the value's unit matches the IPSO/SenML definition — a percentage is
+not IPSO 3316 (voltage), and a pressure in hPa is not SenML `Pa`.
 
 **Common IPSO Smart Objects:**
 
@@ -829,7 +889,8 @@ Fields for value quality tracking and IoT interoperability.
 
 ### Valid Range
 
-Declares expected output value bounds. Out-of-range values produce quality warnings but are not modified (unlike `clamp`).
+Declares expected output value bounds. Out-of-range values produce a quality flag and a
+warning but are not modified.
 
 ```yaml
 - name: temperature
@@ -839,22 +900,21 @@ Declares expected output value bounds. Out-of-range values produce quality warni
   valid_range: [-40, 85]    # Expected operating range
 ```
 
-**Interpreter Behavior:**
+**Interpreter Behavior** (Python, payload `0929` then `D8F1`):
 
 ```python
-# Normal reading
-{
-    "temperature": 23.45,
-    "_quality": {"temperature": "good"}
-}
+# Normal reading: result.data
+{"temperature": 23.45, "_quality": {"temperature": "good"}}
 
-# Out-of-range (e.g., sensor failure reads -999)
-{
-    "temperature": -999.0,
-    "_quality": {"temperature": "out_of_range"},
-    "_warnings": ["temperature: value -999.0 outside valid range [-40, 85]"]
-}
+# Out of range: result.data, and the message in result.warnings
+{"temperature": -99.99, "_quality": {"temperature": "out_of_range"}}
+# result.warnings == ["temperature: value -99.99 outside valid range [-40, 85]"]
 ```
+
+`_quality` is added to the output by the Python, Go and C# interpreters and the TS013
+codec, and only when a decoded field declares `valid_range`; Java does not emit it.
+Python reports the warning in `result.warnings`; Go, Java and C# put it in the output
+under `_warnings`.
 
 ### Resolution
 
@@ -868,7 +928,9 @@ Documents minimum detectable change. Useful for fixed-point scaling and code gen
   resolution: 0.01    # 0.01°C steps
 ```
 
-**Interpreter Behavior:** Included in metadata output. Optional rounding to resolution in strict mode.
+**Interpreter Behavior:** Documentation only; the decoded value is not rounded to it.
+The Python interpreter returns it from `get_field_metadata()` with `unit`, `valid_range`
+and `unece`.
 
 ### UNECE Unit Codes
 
@@ -909,27 +971,16 @@ Standard unit identifiers per UNECE Recommendation 20.
   valid_range: [-40, 85]
   resolution: 0.01
   unece: "CEL"
-  ipso: 3303
+  ipso: {object: 3303, instance: 0, resource: 5700}
+  senml: {name: "temperature", unit: "Cel"}
+  semantic: "air.temperature"
 ```
 
 ## Compact Format (Alternative Syntax)
 
-### Basic Compact
-
-```yaml
-# Verbose
-fields:
-  - name: temp
-    type: s16
-  - name: hum
-    type: u8
-
-# Compact equivalent
-format: ">hB"         # struct-like format string
-names: [temp, hum]
-```
-
-### Inline Field Names
+A struct-like string in place of the `fields:` list. **Python interpreter only** (Go has a
+separate `DecodeCompact()` function; Java, C# and C have none), and `validate_schema.py`
+rejects it (`'fields' must be an array`), so a repository schema cannot use it.
 
 ```yaml
 # Single-line format with names
@@ -937,7 +988,10 @@ fields: ">B:version H:length I:timestamp"
 
 # With padding (2x = skip 2 bytes)
 fields: ">B:type 2x H:value I:timestamp"
+# 01 FFFF 00E7 00000064 -> {type: 1, value: 231, timestamp: 100}
 ```
+
+There is no `format:` + `names:` form: a schema written that way decodes to `{}`.
 
 ### Format Characters
 
@@ -947,9 +1001,11 @@ fields: ">B:type 2x H:value I:timestamp"
 | `h/H` | s16/u16 | 2 |
 | `i/I` | s32/u32 | 4 |
 | `q/Q` | s64/u64 | 8 |
+| `e` | f16 | 2 |
 | `f` | f32 | 4 |
 | `d` | f64 | 8 |
-| `x` | skip | 1 |
+| `?` | bool | 1 |
+| `x` | skip (`Nx` skips N) | 1 |
 | `>` | big-endian | - |
 | `<` | little-endian | - |
 
@@ -989,37 +1045,41 @@ LW:1:DevEUI:AppEUI:AppKey:SCHEMA:Base64EncodedSchema
 ### Common Validations
 
 ```yaml
-# ERROR: Undefined variable reference
-- match:
-    field: $undefined_var    # Error: variable not defined
-
 # WARNING: Missing IPSO for known sensor type
-- name: temperature          # Warning: detected as temperature sensor
-  type: s16                  # but missing ipso: annotation
+- name: temperature          # "Consider adding ipso: 3303 for standard sensor type"
+  type: s16
   div: 10
-
-# INFO: Consider adding unit
-- name: voltage
-  type: u16
-  div: 1000                  # Info: consider adding unit: "V"
 ```
+
+Other messages include an ERROR for an unknown type, a withdrawn bitfield spelling or a
+top-level `header:`, a WARNING for no test vectors, and INFO suggestions for fewer than 3
+vectors or no zero/maximum vector. A reference to a variable nothing binds is **not**
+caught by the validator — `match: {field: $undefined_var}` validates and fails at decode
+("no earlier field or var: binds it"), which is one reason every branch needs a vector.
 
 ## Quality Scoring
 
-Schemas are scored for certification readiness:
+`tools/score_schema.py` scores a schema out of 100 and assigns the specification's
+Section 10 tier: **Platinum** 95-100%, **Gold** 85-94%, **Silver** 70-84%, **Bronze**
+60-69%, **Rejected** below 60%.
 
-| Tier | Requirements |
-|------|--------------|
-| Bronze | Valid schema, parses without error |
-| Silver | Test vectors present, all pass |
-| Gold | Full metadata (units, IPSO), edge cases tested |
-| Platinum | Bidirectional support, fuzz tested |
+| Points | Requirement |
+|---|---|
+| 12 | Passes structural validation |
+| 8 | Has usable `test_vectors` (payload *and* expected) |
+| 20 | Python interpreter decodes all vectors correctly |
+| 15 | Generated JS codec decodes all vectors correctly |
+| 12 | All `match`/`flagged`/port branches entered by a vector |
+| 8 | Edge cases covered (zero, max, negative, min payload) |
+| 5 | At least 5 vectors |
+| 20 | Correct IPSO (7) + SenML (7) + semantic (6) annotation of detectable sensor fields |
 
-### Test Coverage Requirements
-
-- Minimum 3 test vectors for basic coverage
-- Edge cases: min/max values, error conditions
-- All message types / ports exercised
+Gold and Platinum also have **gates** (PS-239, PS-264): a schema is capped at Silver,
+whatever it scores, unless it has at least 5 vectors, all vectors pass, every branch is
+covered, edge-case vectors are present, no annotation is incorrect, and at least one
+vector declares an independent `source:` (`vendor-doc`, `vendor-codec`, `field-capture`
+or `spec-example`; `generated` does not count). `--no-require-provenance` scores without
+the provenance gate. A schema with no test vectors cannot leave Rejected.
 
 ## TS013 Code Generation
 
@@ -1047,101 +1107,129 @@ function encodeDownlink(input) {
 
 ## Complete Example
 
+A fixed three-field uplink with canonical annotations. It validates, passes all five
+vectors in the Python interpreter and the generated JS codec, and scores 100%. Its
+vectors are marked `source: generated` because the device is invented, so
+`score_schema.py` caps it at **Silver** (PS-264); with
+`--no-require-provenance` it is **Platinum**. A real schema reaches Gold or Platinum
+by taking at least one vector from the vendor.
+
 ```yaml
 name: environment_sensor
 version: 1
 endian: big
-direction: bidirectional
-description: Temperature and humidity sensor with battery
+description: Temperature, humidity and battery voltage sensor
 
 fields:
   - name: temperature
     type: s16
     div: 10
     unit: "°C"
-    ipso: 3303
+    ipso: {object: 3303, instance: 0, resource: 5700}
+    senml: {name: "temperature", unit: "Cel"}
+    semantic: "air.temperature"
     valid_range: [-40, 85]
-    
+
   - name: humidity
     type: u8
     unit: "%"
-    ipso: 3304
+    ipso: {object: 3304, instance: 0, resource: 5700}
+    senml: {name: "humidity", unit: "%RH"}
+    semantic: "air.humidity"
     valid_range: [0, 100]
-    
-  - name: battery_mv
+
+  - name: battery_voltage
     type: u16
-    unit: "mV"
-    
-  - name: battery_percent
-    type: number
-    ref: $battery_mv
-    transform:
-      - add: -2000        # 2000mV = 0%
-      - div: 12           # 3200mV = 100%
-      - clamp: [0, 100]
-    unit: "%"
-    ipso: 3316
+    div: 1000
+    unit: "V"
+    ipso: {object: 3316, instance: 0, resource: 5700}
+    senml: {name: "vbat", unit: "V"}
+    semantic: "battery.voltage"
 
-downlink_commands:
-  set_interval:
-    command_id: 0x01
-    fields:
-      - name: interval_minutes
-        type: u16
-
-metadata:
-  include:
-    - name: rssi
-      source: $rxMetadata[0].rssi
-
+# Illustrative: this device is invented, so its vectors are computed by hand from
+# the layout above and declared `source: generated`. A real schema takes them from
+# the vendor's documentation or codec (PS-264).
 test_vectors:
   - name: normal
     payload: "00E7 32 0C80"
+    source: generated
     expected:
       temperature: 23.1
       humidity: 50
-      battery_mv: 3200
-      battery_percent: 100
-      
+      battery_voltage: 3.2
+
   - name: cold
     payload: "FF9C 5A 0BB8"
+    source: generated
     expected:
       temperature: -10.0
       humidity: 90
-      battery_mv: 3000
-      battery_percent: 83.3
+      battery_voltage: 3.0
+
+  - name: zero
+    payload: "0000 00 0000"
+    source: generated
+    expected:
+      temperature: 0.0
+      humidity: 0
+      battery_voltage: 0.0
+
+  - name: extremes
+    payload: "8000 FF FFFF"
+    source: generated
+    expected:
+      temperature: -3276.8
+      humidity: 255
+      battery_voltage: 65.535
+
+  - name: warm_dry
+    payload: "0190 0A 0E10"
+    source: generated
+    expected:
+      temperature: 40.0
+      humidity: 10
+      battery_voltage: 3.6
 ```
 
 ## Quick Reference Card
 
 ```
 TYPES:        u8 u16 u24 u32 u64 | s8 s16 s24 s32 s64 | f16 f32 f64 | bool
-              ascii hex bytes base64 | number string | skip enum
+              ascii hex hex:upper bytes base64 | number string | skip enum
               udec sdec | bitfield_string
               
 STRUCTURES:   object | repeat | byte_group | tlv
 
-MODIFIERS:    add mult div | lookup | polynomial | compute | guard | transform | match_value
+BITFIELDS:    uN[start:end] (inclusive; consume: N to advance) | bool + bit: N
+
+BYTE ORDER:   endian: big|little (schema level, or per field; no cascade)
+
+TAG KEYS:     "[1, 103]" exact | "[1, !0]" excluding | "[2, *]" any
+
+MODIFIERS:    mult div add (canonical order) | lookup | polynomial | compute | guard
+              | transform
 
 CONDITIONALS: match (value dispatch) | flagged (bitmask) | tlv (tag dispatch)
 
-TRANSFORMS:   sqrt abs pow floor ceiling clamp log10 log
+TRANSFORMS:   mult div add | sqrt abs pow log10 log | {op: round}
+              (floor ceiling clamp: Python and TS013 only)
 
 COMPUTE OPS:  add sub mul div mod idiv
 
 GUARD OPS:    gt gte lt lte eq ne
 
-ENCODINGS:    sign_magnitude bcd gray
+ENCODINGS:    sign_magnitude bcd gray (Python only)
 
-MATCH:        exact | range (n..m) | default (_)
+MATCH:        exact | range ("n..m", decimal) | default
 
-REFERENCES:   $field_name | use: definition_name | file: path.yaml#def
+REFERENCES:   $field_name | var: name | $ref: '#/definitions/name'
 
-SEMANTICS:    unit | ipso | senml_unit | valid_range | resolution | unece
+SEMANTICS:    unit | ipso {object, instance, resource} | senml {name, unit}
+              | semantic | valid_range | resolution | unece
 
 DIRECTIONS:   uplink | downlink | bidirectional
 
-METADATA:     include | timestamps (rx_time, subtract, unix_epoch)
+METADATA:     include | timestamps (rx_time, subtract, unix_epoch) (Python only)
 ```
 
 ## See Also

@@ -1,125 +1,68 @@
 # Session Notes
 
-## RESUME HERE - state at the end of 2026-08-26
+## RESUME HERE - state at the end of 2026-09-24
 
-**Everything is merged and pushed, in three repositories.** The prototype landed CRs as
-PRs #12-#38; `master` is the only remote branch there and the working tree is clean.
-`master` is branch-protected, so every change goes through `gh pr create --base master` -
-a direct push is refused with `GH013`.
+**PRs #43-#47 are merged to `master`** (`5fdd850`), which is branch-protected: every change
+goes through `gh pr create --base master`; a direct push is refused with `GH013`.
 
-The two specification repositories are on GitLab and matter now, because the prototype has
-started running ahead of them:
-
-| Repository | State |
+| PR | What landed |
 |---|---|
-| `la-payload-schema` | `main` @ `e8f8eda`; CR-2026-013/014/036 merged; only branch |
-| `la-integration-layer` | `master` @ `d6b0156`; 7 CRs implemented, 1 open; only branch |
+| #43 | PS-004/PS-018 port-structure checks in `validate_schema.py` (PS-018 reported, not enforced) |
+| #44 | field-level `endian:` in the reference and the TS013 generator; Java refuses an unknown `type:` |
+| #45 | netvox, arwin and dnt conversions, and seven defects they exposed |
+| #46 | literal types - `{type: string\|number, value:}` read no bytes, in all five |
+| #47 | Milesight and Decentlab schemas that mis-decoded the vendor's own payloads |
 
-**That GitLab server does not accept push options, and there is no `glab` or API token on
-this machine**, so every merge request has to be opened in a browser. `git push` prints the
-URL; that is the whole mechanism. A `GITLAB_TOKEN` in the environment would remove the
-manual step.
-
-Green as of the last run:
+Measured 2026-09-24:
 
 | | |
 |---|---|
-| Python | **2838** passed / 4 skipped |
-| Go | `go vet` + `go test -count=1` clean |
-| Java | BUILD SUCCESS, 46 tests |
-| C# | 92/92 |
-| `vector-verdicts.py` | **1253 vectors, interpreted 100%, generated 100%, 0 disagreements** |
-| `encode-round-trip.py` | 1166 of 1242, **0 unexplained** |
-| `make test-c` | 3 C test binaries pass; corpus harness **491 of 491 attempted, 0 differ** |
-| `make bench-c` | C 8.5M decodes/s against Python 40K on a 15-field `flagged` frame |
-| `make check-floors` | all **32** floors sit exactly at their own implementation's actual |
-| validate-devices / validate-examples / selftest / score-check / docs-index-check | pass |
+| `tools/vector-verdicts.py` | **1535 vectors in 200 schemas, interpreted 100%, generated 100%, 0 disagreements** |
+| `tools/encode-round-trip.py` | 1232 of 1524 re-encode, **0 unexplained** |
+| `make check-floors-python` | all 7 Python floors at their actual (encode total 1232) |
+| `make test-c` | 3 C test binaries pass; harness **487 of 487 attempted**, 1037 not attempted in 104 schemas |
+| `make bench-c` | C 7.9M decodes/s against Python 38K (208x), on a heavily loaded host |
+| `crossvalidate_ttn.py` milesight | 64 of 84 agree, 14 disagree, 6 have no vendor examples |
+| `crossvalidate_decentlab.py` | 58 of 58 agree |
 
-Corpus 1229 -> 1253. Decode floors 1193 -> 1242. Encode round-trip: reference 1131 ->
-1166, Go 1144 -> 1176, Java 1143 -> 1166, C# 1144 -> 1167.
+**The per-implementation feature matrix is `docs/SPEC-IMPLEMENTATION-STATUS.md`,
+re-measured from the code on 2026-09-24** with a one-construct probe per row in all six
+paths. It replaced a table that was wrong throughout; the ∅ (silently ignored) and ⚠
+cells there are the work list, and it should be re-probed rather than hand-edited.
 
-**All 32 floors are at their actuals, and `make check-floors` is how you know.** Reading
-them by hand is how they go wrong: they live in seven files across four languages in four
-syntaxes, and the mistake was made twice in one day - a claim that Go's TLV encode beat the
-reference, repeated across four pull requests, and later a claim that the `tlv` floor was
-loose at "900 against an actual of 910", which was Python's floor read next to Go's actual
-with both exactly at their own. The tool prints each floor beside the actual *its own
-implementation* reaches and differences nothing across them.
+**Where the work stands.** The specification side is ahead of the prototype: CR-2026-037
+to -055 sit in `la-payload-schema/change-requests/submitted/`. Corpus-wide analysis of
+third-party codecs is kept outside this repository and does not belong in it.
 
-Two exit behaviours, because the directions are not equivalent. A floor **above** its actual
-is a regression - the ratchet asserts something untrue - and always fails. A floor **below**
-its actual is a judgement, since headroom can be deliberate, so it is reported and `--loose`
-enforces it. `make check-floors-python` is instant; the full run drives four Docker
-toolchains and is deliberately not in `ci`.
+Open items:
 
-Go's tlv floor is 910, Python's and Java's are 900, C#'s is 901 - each at its own actual,
-because each harness buckets schemas its own way. **Those four numbers are not comparable,
-and treating them as one is the specific error the tool exists to prevent.**
-
-**The next work on C is the interpreter, and the two biggest items are `transform` (26
-schemas) and `bitfield_string` (24).** CR-2026-035 corrected this paragraph, which said the
-opposite: it called those two *harness* limits whose status was "unknown because the harness
-cannot build them". They are the interpreter's own gaps, and the status was never unknown -
-`grep -cw transform include/schema_interpreter.h` is 0, as are `polynomial`, `sqrt`, `pow`,
-`log`, `floor`, `clamp`, `compute` and `version_string`. The harness cannot build them
-because there is nothing in C to build them with.
-
-The misreading came from the skip reasons themselves, which said "not built by the struct
-API" - true, but it reads as a limit on the harness, and I took it that way and wrote it
-down. They now say "the interpreter has no transform pipeline". After `transform` and
-`bitfield_string`, `repeat` is the last construct with no field type at all (3 schemas).
-
-Whatever is done next: **do not add a construct to C without extending
-`tools/c-corpus-harness.py` in the same change**, or the new field type lands uncovered - and
-the harness's own bugs then read as interpreter defects, which happened four times across
-CR-2026-032 and -033.
-
-Everything else is a scoped decision rather than a defect hunt. Every construct is described
-in the meta-schema and validated; the five YAML-driven implementations agree on all 1250
-vectors; the encode residue is 76 vectors, every one classified as information the decode
-does not carry.
-
-- `definitions.field` stays permissive - accepts `s17`, a nameless field, `mult: "0.1"`.
-  Closing it is real rejection risk across 189 schemas for a payoff `validate_schema.py`
-  already delivers.
-- **The C interpreter is measured now and has `tlv` and `flagged`** (CR-2026-032, -033,
-  -034). It reaches 488 of 1239 vectors and decodes every one correctly. What blocks the
-  rest, with the side each limit sits on: a `transform` chain (26 schemas, harness),
-  `bitfield_string` (24, harness), more than `SCHEMA_MAX_CASES` cases (15, interpreter),
-  `repeat` (3, interpreter - no field type), `u32le16` (3, **harness only - the interpreter
-  decodes it**), an enum/lookup `default` the struct has no slot for (1, interpreter). It
-  also has no warning channel, so it cannot report what it could not read the way the other
-  five do.
-
-  That side-naming is load-bearing. `no constructor for type 'u32le16'` used to read as a C
-  gap when C decodes it perfectly well; CR-2026-034 corrected the message. In a report whose
-  purpose is telling C's gaps from the harness's, a reason that does not say which is worse
-  than no reason.
-
-  **A `flagged` mask field must declare `var_name`**, because this interpreter records a
-  variable only where a field declares one while a YAML `flagged` names a field. `var_has()`
-  exists so a missing reference is `SCHEMA_ERR_MATCH` rather than a mask of zero, which would
-  decode nothing and report success.
-
-  **The fixed-size limits are the boundary, not a to-do.** `sizeof(schema_t)` is 51 KB
-  because every `field_def` carries `cases[16]` and `lookup[16]` unconditionally; raising
-  `SCHEMA_MAX_FIELDS` to fit mla20's 67 fields would put it past 110 KB.
-
-  Still true and untouched: `bindings/c/schema_ffi.c`'s `schema_create_yaml()` is a stub
-  and its `result_to_json()` destroys precision with `%g`. And `src/test_comprehensive.c`
-  is out of `make test-c` - 22 of its 160 assertions are stale, not defects.
-- 11 corpus vectors are genuinely unreversible encodes (enum `default`, lookup `default`,
-  `sqrt`), tolerated by the Java and C# decode floors.
-- Go's plain `Encode` is 2 behind the reference on `ws515`/`wt101`, whose devices lay
-  channels out non-ascending. That is the documented limitation of that API;
-  `EncodeOrdered` handles them.
-
-**Read the "How the measurements went wrong" section below before trusting any figure in
-this file.** Every mistake of the day was in measurement rather than in a fix. One produced
-a plausible *success* story repeated across four PRs before anyone checked it; seven more
-were instrument bugs in the C harness that would have been reported as C defects had the
-harness not been built before the feature. The section deliberately carries no running
-total - keeping one correct is the same trap it describes.
+- **Python nested-dispatch parity.** A `$ref` inside a `match` case or an `object` decodes
+  as a `u8` named `unknown` in the reference, silently; Go errors, Java and the generator
+  drop it, C# handles only the `object` case.
+- **PS-320 timestamp offset.** Python's `metadata.timestamps` drops the `recvTime` offset.
+- **Generator local-name collisions.** A field named `d`, `w`, `pos` or `buf` overwrites the
+  generated codec's own variable - `w` replaces `warnings`, `d` the whole `data`.
+- **`floor`/`ceiling`/`clamp` are missing in Go, Java and C#**, and silently ignored there.
+- **Bit-range base byte order.** Go and the generated codec read the base in the schema's
+  byte order; PS-059, Python, Java and C# read it big-endian.
+- **`em320-tilt` encoder defect**: a peeked flag beside the word it overlaps is packed as
+  separate bytes, so its rewrite was not landed.
+- **The next work on C is the interpreter, and the two biggest items are `transform`
+  (26 schemas) and `bitfield_string`/`version_string` (23)**, then `repeat`, `object` and
+  `byte_group`. These are interpreter gaps, not harness limits - `grep -cw transform
+  include/schema_interpreter.h` is 0 - and anything added needs the corpus harness
+  extended in the same change.
+- **Defects the docs pass found**: `get_semantic_output(..., 'ipso')` crashes on the
+  canonical string `semantic:` and, like the other semantic views, skips fields nested in
+  ports, `flagged`, `match` or `tlv`; `get_field_metadata()` returns `{}` for `dl-5tm`;
+  `validate_schema.py` passes a `match` on an undefined `$var`; the generator reads `f16`
+  with its f64 reader, silently emits nothing for `hex:upper`, `base64`, `udec`,
+  `version_string` and a length-read `string`, and crashes on `!0`/`*` TLV keys;
+  `generate_firmware_codec.py` output for any `byte_group` does not compile.
+- **Per-schema classification of the encode round-trip residue**, beyond the per-vector
+  reasons the tool gives now.
+- **Invariant tests and a schema-mutation harness**, so a construct silently ignored by
+  one implementation fails a test instead of passing one.
 
 ## Session: Aug 26, 2026
 

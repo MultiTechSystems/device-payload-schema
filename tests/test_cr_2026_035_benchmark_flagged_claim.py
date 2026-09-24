@@ -47,19 +47,31 @@ NOTES = REPO_ROOT / "SESSION-NOTES.md"
 AGENTS = REPO_ROOT / "AGENTS.md"
 FRAME = REPO_ROOT / "schemas" / "devices" / "decentlab" / "dl-lid.yaml"
 
-C_COLUMN = 4  # | Feature | Python | Java | Go | C | JS |
-
-
 def doc_rows():
-    """{row label: [cells]} for every 6-column matrix row in the document."""
+    """{row label: {column: cell}} for every feature-matrix row in the document.
+
+    Columns are read from each table's own header, not from a fixed position: the
+    matrix was rebuilt with a C# column (2026-09-24), which moved C.
+    """
     rows = {}
+    header = None
     for line in DOC.read_text().splitlines():
         if not line.startswith("|"):
+            header = None
             continue
         cells = [c.strip() for c in line.split("|")[1:-1]]
-        if len(cells) == 6:
-            rows.setdefault(cells[0], cells)
+        if cells and cells[0] == "Feature":
+            header = cells
+            continue
+        if header is None or set("".join(cells)) <= set("-: "):
+            continue
+        if len(cells) == len(header):
+            rows.setdefault(cells[0], dict(zip(header, cells)))
     return rows
+
+
+def benchmark_section():
+    return DOC.read_text().split("## Performance Benchmarks")[1].split("## Known Gaps")[0]
 
 
 class TestTheStaleClaimIsGone:
@@ -70,7 +82,7 @@ class TestTheStaleClaimIsGone:
 
     def test_it_still_explains_why_dl_5tm_is_out_of_reach(self):
         """The frame is still simplified - for one reason now, not two."""
-        section = DOC.read_text().split("### C Interpreter")[1].split("### Java")[0]
+        section = benchmark_section()
         assert "transform" in section and "polynomial" in section
         assert "CR-2026-034" in section, "the reason it changed should be traceable"
 
@@ -145,35 +157,33 @@ class TestTheFrameActuallyExercisesFlagged:
         assert "transform:" not in text and "polynomial:" not in text
 
     def test_the_doc_names_this_frame(self):
-        section = DOC.read_text().split("### C Interpreter")[1].split("### Java")[0]
-        assert "dl-lid" in section
+        assert "dl-lid" in benchmark_section()
 
 
 class TestTheMatrixAgreesWithTheHeader:
     """Re-derived from the header, so a future capability change breaks this, not prose."""
 
-    #: (matrix row label, keyword whose presence in the header means C supports it)
+    #: (matrix row label, pattern whose presence in the header means C supports it).
+    #: A construct is supported where the decoder dispatches on it, not where the enum
+    #: names it: `FIELD_TYPE_OBJECT` is declared and even parsed from its name, but no
+    #: decode path tests for it, which a bare-keyword check credited as support.
     DERIVED = [
-        ("`polynomial`", "polynomial"),
-        ("`sqrt`", "sqrt"),
-        ("`abs`", "abs"),
-        ("`pow`", "pow"),
-        ("`clamp`", "clamp"),
-        ("`type: repeat` (count)", "FIELD_TYPE_REPEAT"),
-        ("`repeat` (count_field)", "FIELD_TYPE_REPEAT"),
-        ("`repeat` (until: end)", "FIELD_TYPE_REPEAT"),
-        ("`type: object`", "FIELD_TYPE_OBJECT"),
-        ("`flagged`", "FIELD_TYPE_FLAGGED"),
-        ("`tlv`", "FIELD_TYPE_TLV"),
+        ("`polynomial`", r"\bpolynomial\b"),
+        ("`sqrt` `abs` `pow` `log` `log10`", r"\bsqrt\b"),
+        ("`repeat` `count: $field`", r"type == FIELD_TYPE_REPEAT"),
+        ("`repeat` `byte_length`, `until: end`", r"type == FIELD_TYPE_REPEAT"),
+        ("`type: object`", r"type == FIELD_TYPE_OBJECT"),
+        ("`flagged`", r"type == FIELD_TYPE_FLAGGED"),
+        ("`tlv` (`tag_size`, `length_size`)", r"type == FIELD_TYPE_TLV"),
     ]
 
-    @pytest.mark.parametrize("label,keyword", DERIVED, ids=[d[0] for d in DERIVED])
-    def test_the_c_cell_matches_the_header(self, label, keyword):
+    @pytest.mark.parametrize("label,pattern", DERIVED, ids=[d[0] for d in DERIVED])
+    def test_the_c_cell_matches_the_header(self, label, pattern):
         rows = doc_rows()
         assert label in rows, f"no matrix row {label!r}; ids may have drifted"
-        supported = re.search(rf"\b{re.escape(keyword)}\b", HEADER.read_text()) is not None
-        cell = rows[label][C_COLUMN]
-        claims = cell == "✓"
+        supported = re.search(pattern, HEADER.read_text()) is not None
+        cell = rows[label]["C"]
+        claims = cell.startswith("✓")
         assert claims == supported, (
             f"{label}: doc says C={cell!r} but the header "
             f"{'has' if supported else 'does not have'} {keyword!r}"
@@ -182,12 +192,12 @@ class TestTheMatrixAgreesWithTheHeader:
     def test_variables_are_credited_now(self):
         """C has var_get/var_set/var_has, and `flagged` reads a mask through them."""
         assert "static inline bool var_has(" in HEADER.read_text()
-        assert doc_rows()["`var` (variables)"][C_COLUMN] == "✓"
+        assert doc_rows()["`var:`"]["C"].startswith("✓")
 
     def test_ports_are_not_credited(self):
         """The header says outright that it has no port selection."""
         assert "no port selection" in HEADER.read_text()
-        assert doc_rows()["`ports` (fPort routing)"][C_COLUMN] == "-"
+        assert doc_rows()["`ports` (fPort routing)"]["C"] == "✗"
 
 
 class TestTheSkipReasonsNameTheRightSide:

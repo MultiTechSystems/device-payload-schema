@@ -42,19 +42,27 @@ fields:
 
 test_vectors:
   - name: "normal_reading"
-    input: "09C44121"
-    output:
+    payload: "09C44121"
+    source: vendor-doc
+    expected:
       temperature: 25.0
       humidity: 65
       battery: 3.3
   
   - name: "cold_reading"
-    input: "FF38281E"
-    output:
+    payload: "FF38281E"
+    source: vendor-doc
+    expected:
       temperature: -2.0
       humidity: 40
       battery: 3.0
 ```
+
+**`source:` says where a vector's values came from**: `vendor-doc`, `vendor-codec`,
+`field-capture`, `spec-example`, or `generated` (recorded from this toolkit's own
+decoder). Take expected values from your datasheet or firmware, not from the
+decoder's output. A schema with no independently sourced vector is capped at Silver
+(PS-264), however well it scores otherwise.
 
 **Payload breakdown:**
 - `09C4` = 2500 → 2500/100 = 25.0°C
@@ -64,53 +72,61 @@ test_vectors:
 ### 2. Validate Your Schema
 
 ```bash
-python tools/validate_schema.py schemas/mycompany/temp-sensor.yaml -v
+python3 tools/validate_schema.py schemas/mycompany/temp-sensor.yaml -v
 ```
 
-Output:
+Output (abridged):
 ```
-✓ Schema valid
-✓ Test vector 'normal_reading' passed
-✓ Test vector 'cold_reading' passed
-All 2 test vectors passed
+Schema: VALID
+...
+Test Vectors: 2/2 passed
+--------------------------------------------------
+✓ normal_reading: PASS
+✓ cold_reading: PASS
+--------------------------------------------------
+PASSED: All 2 tests passed
 ```
 
 ### 3. Generate Codecs
 
 **JavaScript (for TTN/ChirpStack):**
 ```bash
-python tools/generate_ts013_codec.py schemas/mycompany/temp-sensor.yaml -o output/
+python3 tools/generate_ts013_codec.py schemas/mycompany/temp-sensor.yaml -o output/
 ```
 
 **C Header (for firmware):**
 ```bash
-python tools/generate-c.py schemas/mycompany/temp-sensor.yaml -o include/temp_sensor_codec.h
+python3 tools/generate_firmware_codec.py schemas/mycompany/temp-sensor.yaml -o include/temp_sensor_codec.h
 ```
 
 ### 4. Check Quality Score
 
 ```bash
-python tools/score_schema.py schemas/mycompany/temp-sensor.yaml
+python3 tools/score_schema.py schemas/mycompany/temp-sensor.yaml -v
 ```
 
-Output:
+Output for the schema above:
 ```
-Schema: mycompany_temp_sensor
-Score: 85/100 (Silver)
+Test vectors: 2
+Python tests: 2 passed, 0 failed
+JS tests: pass
+Branch coverage: 100%
+Edge cases: ['max', 'negative', 'min_payload'], missing: ['zero values']
+Semantic: 3 sensors detected, 0 IPSO mapped, 0 SenML mapped
+Provenance: independent ({'vendor-doc': 2})
 
-✓ Schema valid (12/12)
-✓ Has test vectors (8/8)
-✓ Python tests pass (20/20)
-✓ JS tests pass (15/15)
-△ Branch coverage: 80% (10/12)
-△ Edge cases: partial (4/8)
-✗ Semantic annotations missing (0/20)
-
+temp-sensor.yaml: SILVER (73.0%)
 Recommendations:
-- Add negative temperature test vector
-- Add minimum payload test
-- Add IPSO/SenML annotations for interoperability
+  - Add more test vectors (recommend at least 3)
+  - Add test vector for zero values
+  - Add IPSO object mappings for standard sensors (3 fields)
+  ...
 ```
+
+Tiers: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below
+60%. Test coverage alone reaches only Silver; Gold and Platinum also need the
+semantic annotations described below, at least five vectors including edge cases, and
+an independently sourced vector.
 
 ## Using the Sensor Library
 
@@ -133,11 +149,14 @@ fields:
 
 ```bash
 # Resolve library references
-python tools/schema_preprocessor.py schemas/mycompany/my_env_sensor.yaml -o schemas/mycompany/my_env_sensor_resolved.yaml
+python3 tools/schema_preprocessor.py schemas/mycompany/my_env_sensor.yaml -o schemas/mycompany/my_env_sensor_resolved.yaml
 
 # Validate the resolved schema
-python tools/validate_schema.py schemas/mycompany/my_env_sensor_resolved.yaml -v
+python3 tools/validate_schema.py schemas/mycompany/my_env_sensor_resolved.yaml -v
 ```
+
+The preprocessing step is required: the interpreters resolve only a local
+`$ref: '#/definitions/<name>'`, so they reject a `$ref` into another file.
 
 ### Available Sensor Types
 
@@ -162,16 +181,18 @@ python tools/validate_schema.py schemas/mycompany/my_env_sensor_resolved.yaml -v
 
 ### Multiple Sensors of Same Type
 
-Use `rename:` or `prefix:` when you have multiple sensors:
+Use `rename:` or `prefix:` when you have multiple sensors. Like cross-file `$ref`, these
+are resolved only by `tools/schema_preprocessor.py`; no interpreter reads them, so
+always decode the resolved file:
 
 ```yaml
 fields:
   # Two temperature sensors
-  - $ref: "schemas/library/sensors/environmental.yaml#/definitions/temperature_c"
+  - $ref: "schemas/library/sensors/environmental.yaml#/definitions/temperature_c_div10"
     rename:
       temperature: indoor_temp
       
-  - $ref: "schemas/library/sensors/environmental.yaml#/definitions/temperature_c"
+  - $ref: "schemas/library/sensors/environmental.yaml#/definitions/temperature_c_div10"
     rename:
       temperature: outdoor_temp
 
@@ -185,7 +206,8 @@ fields:
 
 ### Benefits of Using the Library
 
-1. **IPSO annotations included** - Automatic interoperability scoring boost
+1. **IPSO object numbers included** - as `semantic: {ipso: N}`; the scorer counts only the
+   canonical `ipso:`/`senml:`/`semantic:` form shown under "Adding Semantic Annotations"
 2. **Consistent scaling** - Standard units and precision across devices
 3. **Less typing** - Common patterns ready to use
 4. **SenML units** - RFC 8428 compliance built-in
@@ -226,12 +248,19 @@ See `schemas/library/README.md` for the complete library reference.
 ### Boolean Flags
 
 ```yaml
+# Two flags in one byte: bit 0 and bit 1
 - name: motion_detected
   type: bool
+  bit: 0
 
 - name: door_open
   type: bool
+  bit: 1
+  consume: 1    # last flag in the byte advances past it
 ```
+
+A `bool` with `bit:` reads one bit and outputs `true`/`false`; it does not move the read
+position, so the last flag of a byte needs `consume: 1`.
 
 ### Enumerations
 
@@ -244,6 +273,9 @@ See `schemas/library/README.md` for the complete library reference.
     2: "sensor_error"
     3: "tamper"
 ```
+
+A value with no entry (here, 4 and above) omits the field unless the lookup declares a
+`default:`.
 
 ### Optional Sensor Groups (Flagged)
 
@@ -283,10 +315,14 @@ When one value derives from others:
   type: number
   ref: $temp_raw
   transform:
-    - sub: 4000
+    - add: -4000     # there is no `sub:` stage; add a negative
     - div: 100
   unit: "°C"
 ```
+
+`transform` stages apply in list order: raw `1A0A` (6666) gives (6666 - 4000) / 100 =
+26.66. Bare `mult`/`div`/`add` keys always apply as mult, then div, then add, whatever
+order they are written in, so use `transform` when you need another order.
 
 ## Adding Semantic Annotations
 
@@ -298,8 +334,8 @@ For interoperability with IoT platforms, add standard annotations:
   div: 100
   unit: "°C"
   ipso: {object: 3303, instance: 0, resource: 5700}
-  senml: {name: "temp", unit: "Cel"}
-  semantic: "temperature.air"
+  senml: {name: "temperature", unit: "Cel"}
+  semantic: "air.temperature"
 ```
 
 This enables automatic conversion to IPSO Smart Objects, SenML (RFC 8428), and TTN normalized format.
@@ -317,20 +353,24 @@ Include test vectors for:
 ```yaml
 test_vectors:
   - name: "normal"
-    input: "09C44121"
-    output: {temperature: 25.0, humidity: 65, battery: 3.3}
+    payload: "09C44121"
+    source: vendor-doc
+    expected: {temperature: 25.0, humidity: 65, battery: 3.3}
   
   - name: "max_temp"
-    input: "7FFF6428"
-    output: {temperature: 327.67, humidity: 100, battery: 4.0}
+    payload: "7FFF6428"
+    source: vendor-doc
+    expected: {temperature: 327.67, humidity: 100, battery: 4.0}
   
   - name: "negative_temp"
-    input: "FF38281E"
-    output: {temperature: -2.0, humidity: 40, battery: 3.0}
+    payload: "FF38281E"
+    source: vendor-doc
+    expected: {temperature: -2.0, humidity: 40, battery: 3.0}
   
-  - name: "minimum_payload"
-    input: "000000"
-    output: {temperature: 0.0, humidity: 0, battery: 0.0}
+  - name: "zero_values"
+    payload: "00000000"
+    source: vendor-doc
+    expected: {temperature: 0.0, humidity: 0, battery: 0.0}
 ```
 
 ## Directory Structure
@@ -343,10 +383,7 @@ schemas/
     └── multi-sensor.yaml
 
 output/
-└── mycompany-temp-sensor/
-    ├── codec.js          # TS013 JavaScript codec
-    ├── output-schema.json # JSON Schema for decoded data
-    └── scoring.json      # Quality score report
+└── temp-sensor_codec.js  # generate_ts013_codec.py -o output/
 ```
 
 ## Next Steps
@@ -360,5 +397,5 @@ output/
 ## Getting Help
 
 - Check existing schemas in `schemas/` for examples
-- Run `python tools/validate_schema.py --help` for options
+- Run `python3 tools/validate_schema.py --help` for options
 - Quality scoring tool explains what's missing

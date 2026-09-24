@@ -9,7 +9,7 @@ Declarative payload schema definitions for IoT device codecs.
 This repository provides:
 
 - **YAML Schema Language**: Declarative payload definitions for binary-to-JSON decoding
-- **Reference Interpreters**: Python, JavaScript, Java, Go, C implementations
+- **Reference Interpreters**: Python, Go, Java, C# and C implementations
 - **Code Generators**: Generate TS013-compliant codec code from schemas
 - **Device Schemas**: Ready-to-use schemas for common devices (Decentlab, Milesight, etc.)
 
@@ -31,7 +31,7 @@ pip install -r requirements.txt
 
 ```bash
 # Using the Python interpreter
-python tools/schema_interpreter.py decode \
+python3 tools/schema_interpreter.py decode \
   schemas/devices/decentlab/dl-5tm.yaml \
   "02 1234 0003 01F4 0190 0C1C"
 ```
@@ -40,28 +40,31 @@ python tools/schema_interpreter.py decode \
 
 ```bash
 # Generate JavaScript decoder
-python tools/generate_ts013_codec.py schemas/decentlab/dl-5tm.yaml
+python3 tools/generate_ts013_codec.py schemas/devices/decentlab/dl-5tm.yaml -o dl_5tm_codec.js
 
 # Generate C header
-python tools/generate_firmware_codec.py schemas/decentlab/dl-5tm.yaml
+python3 tools/generate_firmware_codec.py schemas/devices/decentlab/dl-5tm.yaml -o dl_5tm_codec.h
 ```
 
 ### Run Tests
 
 ```bash
-pytest tests/ -v
+make pytest        # or: pytest tests/ -v
+make test-languages   # Python, C, Go, Java and C# (Go/Java/C# run in Docker)
 ```
 
 ### Score a Schema
 
 ```bash
 # Check schema quality and scoring tier
-python tools/score_schema.py schemas/devices/decentlab/dl-5tm.yaml --verbose
+python3 tools/score_schema.py schemas/devices/decentlab/dl-5tm.yaml --verbose
 
-# Output: PLATINUM (95.0%) with recommendations
+# Output: PLATINUM (100.0%) with recommendations
 ```
 
-Quality tiers: Bronze (50-69%), Silver (70-84%), Gold (85-94%), Platinum (95-100%)
+Quality tiers: Rejected (below 60%), Bronze (60-69%), Silver (70-84%), Gold (85-94%), Platinum (95-100%).
+A schema with no test vector declaring an independent `source:` (`vendor-doc`,
+`vendor-codec`, `field-capture`, `spec-example`) is capped at Silver (PS-264).
 
 Scoring includes: schema validity, test vectors, Python/JS cross-validation, branch coverage, edge cases, and semantic annotations (IPSO, SenML, TTN normalized).
 
@@ -87,6 +90,9 @@ payload-codec-proto/
 │
 ├── include/                     # C reference implementation
 │   └── schema_interpreter.h    # Header-only C decoder
+├── go/schema/                   # Go interpreter
+├── bindings/java/               # Java interpreter
+├── dotnet/                      # C# interpreter
 │
 ├── tests/                       # Test suite
 │   └── test_schema_interpreter.py
@@ -109,7 +115,7 @@ endian: big
 
 fields:
   - name: temperature
-    type: i16
+    type: s16
     div: 10
     unit: "°C"
     
@@ -120,16 +126,16 @@ fields:
 
 ### Features
 
-- **Field Types**: u8, u16, u32, i8, i16, i32, float32, bool, string, bytes
-- **Bit Fields**: `u8[0:3]` for bit extraction
+- **Field Types**: u8, u16, u24, u32, u64, s8, s16, s24, s32, s64, f16, f32, f64, bool, ascii, hex, bytes, base64
+- **Bit Fields**: `u8[0:3]` for bit extraction (inclusive range; add `consume: 1` on the last field of the byte)
 - **Arithmetic**: `add`, `mult`, `div` modifiers
 - **Polynomial**: Calibration curves with `polynomial: [a, b, c, d]`
 - **Computed Fields**: Cross-field arithmetic with `compute: {op: div, a: $x, b: $y}`
 - **Guards**: Conditional evaluation with `guard: {when: [...], else: 0}`
-- **Conditional Parsing**: `switch` and `flagged` for dynamic structures
-- **TLV/LTV**: Tag-Length-Value parsing
+- **Conditional Parsing**: `match` and `flagged` for dynamic structures
+- **TLV/LTV**: Tag-Length-Value parsing with `tlv`
 
-See the schema language documentation for complete reference.
+See [the schema language reference](docs/SCHEMA-LANGUAGE-REFERENCE.md) for the complete syntax.
 
 ## Performance & Security
 
@@ -137,40 +143,26 @@ See the schema language documentation for complete reference.
 
 Traditional LoRaWAN(R) codecs use JavaScript with `eval()` or `new Function()`, creating security risks on shared infrastructure. Declarative schemas eliminate this attack surface entirely.
 
-### Performance Comparison
+### Performance
 
-| Implementation | Throughput | Security | Use Case |
-|----------------|------------|----------|----------|
-| **C Interpreter** | 33M msg/s | ✅ No eval | High-performance backends |
-| **Java Schema** | 3.7M msg/s | ✅ No eval | JVM backends (best high-level perf) |
-| **Go Binary Schema** | 2.1M msg/s | ✅ No eval | Cloud platforms |
-| **Go YAML Schema** | 1.3M msg/s | ✅ No eval | Go backends |
-| **JS Schema (Node)** | 638K msg/s | ✅ No eval | Node.js backends |
-| **JS Traditional** | 22M msg/s | ⚠️ eval risk | Legacy compatibility |
-| **Python Schema** | 184K msg/s | ✅ No eval | Prototyping |
+Measured by `make bench-c` (`tools/benchmark-c-interpreter.py`) on one corpus frame
+(`decentlab/dl-lid`, 29 bytes, 15 fields), decode only, schema built once:
 
-### Backend Recommendations
+| Implementation | Throughput | Latency |
+|----------------|------------|---------|
+| C interpreter (`include/schema_interpreter.h`) | ~8.5M ops/s | 0.12 µs |
+| Python interpreter (`tools/schema_interpreter.py`) | ~40K ops/s | 25 µs |
 
-| Scenario | Recommended | Why |
-|----------|-------------|-----|
-| **Multi-tenant LNS** | C Interpreter | 33M msg/s, no code execution |
-| **JVM backend** | Java Schema | 3.7M msg/s, lowest overhead (3x) |
-| **Cloud platform (Go)** | Go Binary Schema | 2.1M msg/s, easy deployment |
-| **Edge gateway** | C or QuickJS | Embedded-friendly |
-| **Development** | Python/YAML | Human-readable, fast iteration |
-
-### Headroom
-
-Even Python (184K msg/s) handles 1,800x typical gateway traffic. Java at 3.7M msg/s has 370,000x headroom for single-gateway loads.
-
-See [benchmarks documentation](docs/BENCHMARKS.md) for detailed results.
+Figures depend on the machine; re-run the target rather than quoting these. See
+[SPEC-IMPLEMENTATION-STATUS.md](docs/SPEC-IMPLEMENTATION-STATUS.md) for how they were
+measured and for older per-language figures that are not comparable to these.
 
 ## Code Generation
 
 ### TS013-Compliant JavaScript
 
 ```bash
-python tools/generate_ts013_codec.py schemas/devices/decentlab/dl-5tm.yaml > dl_5tm_codec.js
+python3 tools/generate_ts013_codec.py schemas/devices/decentlab/dl-5tm.yaml -o dl_5tm_codec.js
 ```
 
 Generates decoders compatible with The Things Network, ChirpStack, and other
@@ -179,7 +171,7 @@ LoRaWAN network servers that support the TS013 Payload Codec API.
 ### Output JSON Schema
 
 ```bash
-python tools/generate_output_schema.py schemas/devices/decentlab/dl-5tm.yaml > dl_5tm_output.schema.json
+python3 tools/generate_output_schema.py schemas/devices/decentlab/dl-5tm.yaml -o dl_5tm_output.schema.json
 ```
 
 Generates a JSON Schema describing the decoded payload structure. This schema
@@ -188,7 +180,7 @@ enables validation of decoder output with standard JSON Schema tools.
 ### Embedded C
 
 ```bash
-python tools/generate_firmware_codec.py schemas/devices/decentlab/dl-5tm.yaml > dl_5tm_codec.h
+python3 tools/generate_firmware_codec.py schemas/devices/decentlab/dl-5tm.yaml -o dl_5tm_codec.h
 ```
 
 Generates header-only C decoders for embedded systems (Arduino, ESP32, STM32, etc.).
@@ -211,8 +203,11 @@ function decodeUplink(input) {
 
 ### TTN Device Repository
 
-Schemas can be converted to/from The Things Network device repository format.
-See `tools/convert_ttn.py` for conversion utilities.
+`tools/convert_milesight.py` and `tools/convert_decentlab.py` produce a first-pass
+schema from a vendor's JavaScript codec (a starting point, not a finished schema), and
+`tools/crossvalidate_ttn.py` compares a schema against the vendor decoder and declared
+examples in a TTN device repository checkout. See the
+[TTN codec conversion guide](docs/TTN-CODEC-CONVERSION-GUIDE.md).
 
 ## Contributing
 
@@ -220,7 +215,7 @@ Contributions welcome! Please:
 
 1. Add test vectors for new schemas
 2. Ensure `pytest` passes
-3. Run `python tools/validate_schema.py` on new schemas
+3. Run `python3 tools/validate_schema.py <schema> -v` and `python3 tools/score_schema.py <schema>` on new schemas
 
 ## License
 

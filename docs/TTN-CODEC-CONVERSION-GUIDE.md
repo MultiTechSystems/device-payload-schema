@@ -25,8 +25,8 @@ development with human verification.
 
 ```bash
 # Clone the repository
-git clone https://github.com/lorawan-schema/payload-codec.git
-cd payload-codec
+git clone https://github.com/MultiTechSystems/device-payload-schema.git
+cd device-payload-schema
 
 # Create Python virtual environment
 python3 -m venv .venv
@@ -35,18 +35,20 @@ source .venv/bin/activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Verify installation
-python tools/schema_interpreter.py --help
+# Verify installation (decodes a known payload and prints JSON)
+python3 tools/schema_interpreter.py decode \
+  schemas/devices/decentlab/dl-5tm.yaml "02 1234 0003 01F4 0190 0C1C"
 ```
 
 ### Required Tools
 
 | Tool | Purpose | Command |
 |------|---------|---------|
-| `schema_interpreter.py` | Decode payloads using schema | `python tools/schema_interpreter.py decode` |
-| `generate_ts013_codec.py` | Generate JS codec from schema | `python tools/generate_ts013_codec.py` |
-| `validate_schema.py` | Validate schema structure | `python tools/validate_schema.py -f` |
-| `score_schema.py` | Run quality scoring | `python tools/score_schema.py` |
+| `schema_interpreter.py` | Decode payloads using schema | `python3 tools/schema_interpreter.py decode <schema> <hex> [--fport N]` |
+| `generate_ts013_codec.py` | Generate JS codec from schema | `python3 tools/generate_ts013_codec.py <schema> -o <out>` |
+| `validate_schema.py` | Validate structure and run test vectors | `python3 tools/validate_schema.py <schema> -v` |
+| `score_schema.py` | Run quality scoring | `python3 tools/score_schema.py <schema> -v` |
+| `crossvalidate_ttn.py` | Compare against the vendor decoder | `python3 tools/crossvalidate_ttn.py --devices-repo ... --vendor ... --schema-dir ...` |
 
 ## Conversion Workflow
 
@@ -86,7 +88,8 @@ fields:
 # Test vectors for validation
 test_vectors:
   - name: test_name
-    payload: "01 02 03 04"
+    payload: "01 00"
+    source: vendor-codec   # where the expected values came from (see below)
     expected:
       field_name: 2.56
 ```
@@ -97,8 +100,8 @@ test_vectors:
 |------------|-------------|-------|
 | `bytes[i]` | `u8` | Unsigned byte |
 | `(bytes[i] << 8) \| bytes[i+1]` | `u16` | Big-endian 16-bit |
-| `bytes[i] \| (bytes[i+1] << 8)` | `u16` + `endian: little` | Little-endian |
-| `bytes.readInt16BE(i)` | `i16` | Signed 16-bit |
+| `bytes[i] \| (bytes[i+1] << 8)` | `u16` + `endian: little` | Little-endian (schema-level, or on the field) |
+| `bytes.readInt16BE(i)` | `s16` | Signed 16-bit |
 | `bytes[i] & 0x0F` | `u8[0:3]` | Lower nibble |
 | `(bytes[i] >> 4) & 0x0F` | `u8[4:7]` | Upper nibble |
 
@@ -109,23 +112,31 @@ test_vectors:
 | `raw / 100` | `div: 100` |
 | `raw * 0.01` | `mult: 0.01` |
 | `raw - 40` | `add: -40` |
-| `(raw - 400) / 10` | `add: -400` then `div: 10` |
+| `(raw / 10) - 40` | `div: 10`, `add: -40` |
+| `(raw - 400) / 10` | `transform: [{add: -400}, {div: 10}]` |
 
-**Important:** YAML key order determines modifier application order.
+**Important:** bare modifiers always apply in the canonical order **mult, then div,
+then add**, whatever order the keys are written in (PS-101). Any other order needs a
+`transform` list, whose stages apply in list order.
 
 ```yaml
-# Pattern: (raw - 400) / 10
+# Pattern: (raw - 400) / 10  -- add before div, so it must be a transform
 - name: temperature
   type: u16
-  add: -400
-  div: 10
+  transform:
+    - add: -400
+    - div: 10
 
-# Pattern: (raw / 10) - 40
+# Pattern: (raw / 10) - 40  -- the canonical order, so bare keys work
 - name: temperature
-  type: i16
+  type: s16
   div: 10
   add: -40
 ```
+
+Writing `add: -400` and `div: 10` as bare keys gives raw/10 - 400, not (raw - 400)/10:
+for raw 1280 that is -272 instead of 88. `validate_schema.py` warns whenever a field
+carries two or more bare modifiers.
 
 #### Conditional Parsing
 
@@ -142,7 +153,7 @@ fields:
         - bit: 0
           fields:
             - name: temperature
-              type: i16
+              type: s16
               div: 10
         - bit: 1
           fields:
@@ -167,6 +178,9 @@ fields:
           - name: config_data
             type: u8
 ```
+
+Case keys are decimal integers or ranges such as `"2..5"`; a `default:` beside `cases`
+handles anything else. With no `default`, an unmatched value fails the decode.
 
 #### Computed Fields
 
@@ -228,75 +242,68 @@ fields:
 #### Step 1: Schema Validation
 
 ```bash
-python tools/validate_schema.py -f schemas/vendor/device.yaml
+python3 tools/validate_schema.py schemas/devices/vendor/device.yaml -v
 ```
 
-Expected output:
+Expected output ends with:
 ```
-schemas/vendor/device.yaml: OK
+Schema: VALID
+...
+PASSED: All N tests passed
 ```
 
 #### Step 2: Test with Sample Payload
 
 ```bash
-python tools/schema_interpreter.py decode \
-  schemas/vendor/device.yaml \
-  "01 23 45 67 89"
+python3 tools/schema_interpreter.py decode \
+  schemas/devices/vendor/device.yaml \
+  "01 23 45 67 89" --fport 1
 ```
 
 #### Step 3: Run Quality Scoring
 
 ```bash
-python tools/score_schema.py schemas/vendor/device.yaml -v
+python3 tools/score_schema.py schemas/devices/vendor/device.yaml -v
 ```
 
-Target: **GOLD tier (85%+)** for production use.
+Target: **GOLD tier (85%+)** for production use. Gold needs at least one vector with
+an independent `source:` (PS-264).
 
 ### Phase 4: Generate Outputs
 
 #### Generate TS013 JavaScript Codec
 
 ```bash
-python tools/generate_ts013_codec.py schemas/vendor/device.yaml > codec.js
+python3 tools/generate_ts013_codec.py schemas/devices/vendor/device.yaml -o codec.js
 ```
 
 #### Generate JSON Schema for Output Validation
 
 ```bash
-python -c "
-import yaml, json, sys
-sys.path.insert(0, 'path/to/la-payload-schema/reference-impl/python')
-from payload_schema import generate_json_schema
-
-with open('schemas/vendor/device.yaml') as f:
-    schema = yaml.safe_load(f)
-print(json.dumps(generate_json_schema(schema), indent=2))
-" > output-schema.json
+python3 tools/generate_output_schema.py schemas/devices/vendor/device.yaml -o output-schema.json
 ```
 
 #### Generate C Firmware Codec
 
 ```bash
-python tools/generate_firmware_codec.py schemas/vendor/device.yaml > codec.h
+python3 tools/generate_firmware_codec.py schemas/devices/vendor/device.yaml -o codec.h
 ```
 
 ### Phase 5: Cross-Validate
 
-Compare generated JS output with original TTN codec:
+Compare the schema with the vendor's codec and declared examples in a checkout of the
+TTN device repository. The tool runs the vendor decoder under node:
 
 ```bash
-# Test with Node.js
-node -e "
-const orig = require('./original_codec.js');
-const gen = require('./generated_codec.js');
-
-const payload = Buffer.from('0123456789', 'hex');
-const input = { bytes: payload, fPort: 1 };
-
-console.log('Original:', JSON.stringify(orig.decodeUplink(input)));
-console.log('Generated:', JSON.stringify(gen.decodeUplink(input)));
-"
+python3 tools/crossvalidate_ttn.py --devices-repo ../lorawan-devices \
+    --vendor milesight-iot --schema-dir schemas/devices/milesight \
+    --schema ws301 --verbose
 ```
+
+Every payload the two agree on can become a test vector with `source: vendor-codec`. A
+disagreement is a finding to investigate, not a number to overwrite. To check that the
+generated TS013 codec emits the same JSON as the interpreter, run
+`tools/crossvalidate_js_json.py`.
 
 ## Test Vector Guidelines
 
@@ -307,7 +314,6 @@ console.log('Generated:', JSON.stringify(gen.decodeUplink(input)));
 | Normal operation | 2-3 | Typical sensor readings |
 | Edge cases | 2-3 | Zero, max, boundary values |
 | Branch coverage | 1 per branch | All conditional paths |
-| Error cases | 1-2 | Invalid/truncated payloads |
 
 ### Test Vector Format
 
@@ -316,6 +322,7 @@ test_vectors:
   - name: normal_reading
     description: "Typical temperature and humidity"
     payload: "01 00 E7 32"
+    source: vendor-codec
     expected:
       temperature: 23.1
       humidity: 50
@@ -323,6 +330,7 @@ test_vectors:
   - name: zero_values
     description: "All sensors at zero"
     payload: "01 00 00 00"
+    source: vendor-codec
     expected:
       temperature: 0.0
       humidity: 0
@@ -330,10 +338,19 @@ test_vectors:
   - name: max_values
     description: "Maximum sensor values"
     payload: "01 FF FF FF"
+    source: vendor-codec
     expected:
-      temperature: 655.35
+      temperature: 6553.5
       humidity: 255
 ```
+
+(For a schema of `u8` message type, `u16` temperature with `div: 10`, `u8` humidity.)
+
+`source:` is one of `vendor-doc`, `vendor-codec`, `field-capture`, `spec-example` or
+`generated`. Use `generated` only for values recorded from this toolkit's own decoder:
+those prove self-consistency, not correctness, and a schema with no independently
+sourced vector is capped at Silver (PS-264). No vector kind expects a decode failure,
+so invalid or truncated payloads cannot be recorded as vectors.
 
 ### Payload Format
 
@@ -348,18 +365,25 @@ test_vectors:
 | **Platinum** | 95-100% | Full coverage, cross-validation, all edge cases |
 | **Gold** | 85-94% | Strong coverage, cross-validation passing |
 | **Silver** | 70-84% | Good coverage, Python tests passing |
-| **Bronze** | 50-69% | Basic validation, some test vectors |
+| **Bronze** | 60-69% | Basic validation, some test vectors |
+| **Rejected** | below 60% | Insufficient for repository acceptance (any schema with no test vectors) |
+
+Gold and Platinum are also gated: a schema with fewer than 5 vectors, a failing vector,
+an uncovered branch, a missing edge case, an incorrect annotation, or no independently
+sourced vector is capped at Silver however high it scores.
 
 ### Scoring Components
 
-| Component | Weight | How to Improve |
+| Component | Points | How to Improve |
 |-----------|--------|----------------|
-| Schema Validation | 20% | Fix structural errors |
-| Test Vectors | 20% | Add more test cases |
-| Python Tests | 25% | Fix failing assertions |
-| JS Cross-Validation | 15% | Ensure JS codec matches |
-| Branch Coverage | 10% | Test all switch/flagged branches |
-| Edge Cases | 10% | Add zero/max/negative tests |
+| Schema Validation | 12 | Fix structural errors |
+| Has test vectors | 8 | Vectors with both `payload` and `expected` |
+| Python Tests | 20 | Fix failing assertions |
+| JS Codec Tests | 15 | Ensure the generated JS codec decodes every vector |
+| Branch Coverage | 12 | Enter every `match`/`flagged`/port branch |
+| Edge Cases | 8 | Add zero/max/negative/minimum-payload vectors |
+| Vector count | 5 | At least 5 vectors |
+| Semantic annotations | 20 | `ipso:` (7), `senml:` (7), `semantic:` (6) on detected sensor fields |
 
 ## Common Conversion Patterns
 
@@ -378,6 +402,7 @@ function decodeUplink(input) {
 **Schema YAML:**
 ```yaml
 name: simple_sensor
+version: 1
 endian: big
 fields:
   - name: temperature
@@ -401,7 +426,7 @@ data.temperature = raw / 10;
 **Schema YAML:**
 ```yaml
 - name: temperature
-  type: i16    # Signed type handles sign extension
+  type: s16    # Signed type handles sign extension
   div: 10
   unit: "°C"
 ```
@@ -418,13 +443,18 @@ data.tamper = (input.bytes[0] >> 5) & 1;
 **Schema YAML:**
 ```yaml
 - byte_group:
-    - name: battery_low
-      type: u8[7:7]
-    - name: motion
-      type: u8[6:6]
-    - name: tamper
-      type: u8[5:5]
+    size: 1          # the group consumes one byte after its members are read
+    fields:
+      - name: battery_low
+        type: u8[7:7]
+      - name: motion
+        type: u8[6:6]
+      - name: tamper
+        type: u8[5:5]
 ```
+
+Outside a `byte_group`, a bit range does not advance the read position; put
+`consume: 1` on the last field of the byte.
 
 ### Pattern 4: TLV (Tag-Length-Value)
 
@@ -442,19 +472,20 @@ while (i < input.bytes.length) {
 
 **Schema YAML:**
 ```yaml
-- name: records
-  type: tlv
-  tag_size: 1
-  length_size: 1
-  tags:
-    0x01:
-      name: temperature
-      type: i16
-      div: 10
-    0x02:
-      name: humidity
-      type: u8
+- tlv:
+    tag_size: 1
+    length_size: 1
+    cases:
+      1:
+        - name: temperature
+          type: s16
+          div: 10
+      2:
+        - name: humidity
+          type: u8
 ```
+
+`01 02 00E7 02 01 32` decodes to `{temperature: 23.1, humidity: 50}`.
 
 ### Pattern 5: Formula to Polynomial
 
@@ -494,7 +525,9 @@ Requirements:
 2. Include test_vectors section with at least 3 test cases
 3. Use declarative constructs (polynomial, compute, guard) instead of formulas
 4. Add unit annotations where known
-5. Handle all conditional branches (switch, flagged)
+5. Handle all conditional branches (match, flagged, tlv)
+6. Record each test vector's `source:`; take expected values from the vendor codec, never
+   from this toolkit's decoder
 
 Reference the schema language documentation for syntax.
 ```
@@ -503,10 +536,10 @@ Reference the schema language documentation for syntax.
 
 After AI generates a schema:
 
-- [ ] Schema validates: `python tools/validate_schema.py -f schema.yaml`
-- [ ] Test vectors pass: `python tools/score_schema.py schema.yaml`
+- [ ] Schema validates and its vectors pass: `python3 tools/validate_schema.py schema.yaml -v`
+- [ ] Tier recorded: `python3 tools/score_schema.py schema.yaml -v`
 - [ ] JS codec generates without errors
-- [ ] Cross-validation matches original codec output
+- [ ] Cross-validation matches original codec output (`crossvalidate_ttn.py`)
 - [ ] All conditional branches have test coverage
 - [ ] Edge cases (zero, max, negative) are tested
 
@@ -516,29 +549,22 @@ After AI generates a schema:
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| "Unknown type" | Invalid field type | Use standard types (u8, u16, i16, etc.) |
-| "Buffer underflow" | Payload too short | Check field positions and lengths |
-| "Variable not found" | Bad field reference | Ensure `$field` references exist earlier |
-| "Division by zero" | Compute without guard | Add `guard: {when: [...], else: 0}` |
+| "Unknown type: ..." | Invalid field type | Use standard types (u8, u16, s16, etc.) |
+| "Buffer too short: need N bytes at pos M" | Payload too short | Check field positions and lengths |
+| Computed field missing, no error | `$field` reference not decoded earlier, or a zero divisor | Check the reference; add `guard: {when: [...], else: 0}` for a divisor that can be 0 |
 
 ### Debugging Tips
 
 1. **Add intermediate fields** to see values at each step
-2. **Use verbose decode** to trace field extraction
+2. **Run `validate_schema.py -v`** to see expected and actual values per vector
 3. **Compare byte-by-byte** between original and generated codec
 4. **Check endianness** - LoRaWAN uses big-endian by default
 
 ## Output Directory Structure
 
-For each converted device, generate:
-
-```
-output/vendor-device/
-├── schema.yaml           # Source schema definition
-├── codec.js              # Generated TS013 JavaScript codec
-├── output-schema.json    # JSON Schema for decoded output
-└── scoring.json          # Quality scoring report
-```
+The schema is the only file committed per device, at
+`schemas/devices/<vendor>/<model>.yaml`. Everything else is generated from it on demand
+(Phase 4); change the schema or the generator, not the generated file.
 
 ## Resources
 
