@@ -204,7 +204,11 @@ public class Schema {
         
         f.setName((String) fm.get("name"));
         String rawType = (String) fm.get("type");
-        f.setType(FieldType.fromString(rawType));
+        // The bracket form must be recognised before FieldType.fromString, which cannot
+        // parse it and now rejects a spelling it does not know rather than returning U8.
+        Matcher bitRange = BIT_RANGE.matcher(rawType == null ? "" : rawType.trim());
+        boolean isBitRange = bitRange.matches();
+        f.setType(isBitRange ? FieldType.BITS : FieldType.fromString(rawType));
         // `length: remaining` (PS-014) is carried as a negative sentinel; toInt would
         // otherwise silently return the 0 default and the field would read one byte.
         Object lengthSpec = fm.get("length");
@@ -222,9 +226,10 @@ public class Schema {
         // A `u8[lo:hi]` range is a bit field. FieldType.fromString does not recognise
         // the bracket form and fell through to U8, so the whole byte was read instead
         // of the bits: a packed flag byte reported its raw value, which is why
-        // em310-tilt's threshold_x decoded as 17 rather than "trigger".
-        Matcher bitRange = BIT_RANGE.matcher(rawType == null ? "" : rawType.trim());
-        if (bitRange.matches()) {
+        // em310-tilt's threshold_x decoded as 17 rather than "trigger". The bit offset
+        // and width are applied here rather than above so they override any explicit
+        // `bit_offset:`/`bits:` keys parsed in between.
+        if (isBitRange) {
             int start = Integer.parseInt(bitRange.group(2));
             int end = Integer.parseInt(bitRange.group(3));
             f.setBitOffset(start);
