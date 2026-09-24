@@ -356,7 +356,15 @@ public static class SchemaDecoder
 
             case FieldType.String:
             {
-                if (length > 0)
+                // A literal reads no bytes. Only a declared length is a read: `length`
+                // here already carries a default inferred from the type, which made
+                // `{type: string, value: "ppm"}` a one-byte read that shifted
+                // everything after it.
+                if (field.Value != null && field.Length == 0)
+                {
+                    value = field.Value;
+                }
+                else if (length > 0)
                 {
                     var data = ctx.Read(length);
                     value = Encoding.ASCII.GetString(data).TrimEnd('\0');

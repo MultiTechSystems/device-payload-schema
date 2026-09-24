@@ -973,6 +973,12 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	if lookup, ok := fm["lookup"].([]any); ok {
 		f.LookupArray = lookup
 	}
+	// A literal's constant (spec "Literal Types"). The struct had the field and both
+	// literal branches read it, but this parser reads every key by hand and never read
+	// this one, so a `type: number` literal came back nil and was dropped silently.
+	if v, ok := fm["value"]; ok {
+		f.Value = v
+	}
 	if template, ok := fm["name_from"].(string); ok {
 		f.NameFrom = template
 	}
@@ -2038,8 +2044,12 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		value = decodeBits(data[0], field.BitOffset, bits)
 
 	case TypeString, TypeStringLower:
-		// If length is specified, read bytes; otherwise use static value
-		if length > 0 {
+		// A literal reads no bytes. Only a declared length is a read: `length` here
+		// already carries a default inferred from the type name, which made every
+		// literal a one-byte read.
+		if field.Value != nil && field.Length == 0 {
+			value = field.Value
+		} else if length > 0 {
 			data, err := ctx.Read(length)
 			if err != nil {
 				return nil, err
@@ -4325,6 +4335,11 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 	// switch matched only the capitalised constants, so those fields silently wrote no
 	// bytes. am102's 8-byte serial number emitted its tag and then nothing.
 	case TypeAscii, TypeAsciiLower, TypeString, TypeStringLower:
+		if (field.Type == TypeString || field.Type == TypeStringLower) &&
+			field.Value != nil && field.Length == 0 {
+			// A literal came from no bytes, so it writes none.
+			break
+		}
 		if strVal, ok := value.(string); ok {
 			if length <= 0 {
 				length = len(strVal)

@@ -1,0 +1,29 @@
+# Literal fields: constants in the output, read from no bytes (spec "Literal Types").
+#
+# Measured before this fixture: Python, Go and C# read the string literal as a
+# one-byte string, so `unit` reported "\x07" and the field after it ran off the
+# payload; the generated codec dropped it; Go dropped the number literal, because
+# its parser never read `value:`. Java alone decoded both, and its encoder wrote the
+# string's text back into the payload.
+#
+# The literal must consume nothing and write nothing: 07 decodes to both constants
+# plus v, and re-encodes to 07.
+name: probe_literal_types
+endian: big
+fields:
+- name: unit
+  type: string
+  value: ppm
+- name: scale
+  type: number
+  value: 3
+- name: v
+  type: u8
+test_vectors:
+- name: literals_read_no_bytes
+  payload: '07'
+  source: generated
+  expected:
+    unit: ppm
+    scale: 3
+    v: 7

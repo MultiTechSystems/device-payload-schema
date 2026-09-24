@@ -1045,6 +1045,11 @@ final class Encoder {
             return pad(raw, encodeLength(field, raw.length));
         }
 
+        if (type == FieldType.STRING && field.getValue() != null && field.getLength() == 0) {
+            // A literal came from no bytes, so it writes none. This wrote its text:
+            // `{type: string, value: "ppm"}` re-encoded 07 as 70706d07.
+            return new byte[0];
+        }
         if (type == FieldType.ASCII || type == FieldType.STRING) {
             byte[] raw = String.valueOf(value).getBytes(StandardCharsets.UTF_8);
             return pad(raw, encodeLength(field, raw.length));
