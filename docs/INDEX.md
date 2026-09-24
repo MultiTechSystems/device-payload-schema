@@ -115,8 +115,8 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Device schemas
 
-235 schemas under `schemas/devices/`.
-Mean quality score 69.2% (PLATINUM 30, GOLD 40, SILVER 101, BRONZE 18, REJECTED 46). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+240 schemas under `schemas/devices/`.
+Mean quality score 69.4% (PLATINUM 31, GOLD 40, SILVER 104, BRONZE 18, REJECTED 47). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
@@ -125,13 +125,16 @@ Mean quality score 69.2% (PLATINUM 30, GOLD 40, SILVER 101, BRONZE 18, REJECTED 
 | milesight | 84 | 948 | PLATINUM 18, GOLD 33, SILVER 22, REJECTED 11 |
 | decentlab | 58 | 136 | PLATINUM 12, GOLD 7, SILVER 1, BRONZE 14, REJECTED 24 |
 | _library-composed | 49 | 57 | SILVER 48, BRONZE 1 |
-| _language-conformance | 28 | 45 | SILVER 24, BRONZE 2, REJECTED 2 |
+| _language-conformance | 29 | 47 | SILVER 24, BRONZE 2, REJECTED 3 |
 | makerfabs | 6 | 0 | REJECTED 6 |
 | mclimate | 3 | 12 | SILVER 1, REJECTED 2 |
+| dnt | 2 | 79 | SILVER 2 |
+| arwin | 1 | 17 | PLATINUM 1 |
 | digital-matter | 1 | 7 | SILVER 1 |
 | dragino | 1 | 5 | SILVER 1 |
 | elsys | 1 | 2 | SILVER 1 |
 | hbi | 1 | 12 | SILVER 1 |
+| netvox | 1 | 24 | SILVER 1 |
 | radio-bridge | 1 | 29 | BRONZE 1 |
 | radionode | 1 | 0 | REJECTED 1 |
 | rakwireless | 1 | 1 | SILVER 1 |
@@ -147,6 +150,7 @@ Mean quality score 69.2% (PLATINUM 30, GOLD 40, SILVER 101, BRONZE 18, REJECTED 
 | `_language-conformance/encode-padding` | 3 | 1 | fields | 71% | SILVER |
 | `_language-conformance/enum-spec-default` | 2 | 1 | fields | 71% | SILVER |
 | `_language-conformance/field-endian` | 3 | 1 | fields | 71% | SILVER |
+| `_language-conformance/internal-discriminator` | 3 | 2 | fields | 57% | REJECTED |
 | `_language-conformance/lookup-default` | 1 | 1 | fields | 71% | SILVER |
 | `_language-conformance/match-case-range` | 3 | 3 | fields | 67% | BRONZE |
 | `_language-conformance/match-cases-default-key` | 3 | 2 | fields | 65% | BRONZE |
@@ -219,6 +223,7 @@ Mean quality score 69.2% (PLATINUM 30, GOLD 40, SILVER 101, BRONZE 18, REJECTED 
 | `_library-composed/utility_meter__reset_all_counters` | 3 | 1 | fields | 73% | SILVER |
 | `_library-composed/utility_meter__set_ct_100_1` | 3 | 1 | fields | 71% | SILVER |
 | `_library-composed/utility_meter__set_tariff` | 3 | 1 | fields | 73% | SILVER |
+| `arwin/lrs10701` | 37 | 17 | ports | 100% | PLATINUM |
 | `decentlab/dl-5tm` | 10 | 8 | fields | 100% | PLATINUM |
 | `decentlab/dl-alb` | 11 | 6 | fields | 100% | PLATINUM |
 | `decentlab/dl-atm22` | 15 | 6 | fields | 100% | PLATINUM |
@@ -278,6 +283,8 @@ Mean quality score 69.2% (PLATINUM 30, GOLD 40, SILVER 101, BRONZE 18, REJECTED 
 | `decentlab/dl-zn1` | 5 | 1 | fields | 63% | BRONZE |
 | `decentlab/dl-zn2` | 6 | 1 | fields | 63% | BRONZE |
 | `digital-matter/oyster` | 24 | 7 | ports | 100% | SILVER |
+| `dnt/dnt-lw-wsci-2-1-1` | 130 | 40 | fields | 81% | SILVER |
+| `dnt/dnt-lw-wsci` | 120 | 39 | fields | 81% | SILVER |
 | `dragino/laq4` | 14 | 5 | fields | 100% | SILVER |
 | `elsys/ers` | 32 | 2 | fields | 71% | SILVER |
 | `hbi/mla20` | 108 | 12 | fields | 80% | SILVER |
@@ -374,6 +381,7 @@ Mean quality score 69.2% (PLATINUM 30, GOLD 40, SILVER 101, BRONZE 18, REJECTED 
 | `milesight/wts305` | 13 | 15 | fields | 91% | GOLD |
 | `milesight/wts505` | 13 | 15 | fields | 91% | GOLD |
 | `milesight/wts506` | 13 | 15 | fields | 91% | GOLD |
+| `netvox/r718x` | 31 | 24 | ports | 70% | SILVER |
 | `radio-bridge/rbs30x` | 52 | 29 | fields | 68% | BRONZE |
 | `radionode/rn320bth` | 13 | 0 | fields | 14% | REJECTED |
 | `rakwireless/qingping` | 11 | 1 | fields | 81% | SILVER |

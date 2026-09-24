@@ -67,12 +67,16 @@ ENCODERS = {
 #: to the test being written, not just the ones being repaired.
 FLOORS = {
     REPO_ROOT / "go" / "schema" / "corpus_encode_test.go":
-        ("encodeFloorTotal", 1170, '"match":       44,'),
+        ("encodeFloorTotal", 1170, r'"match":\s*(\d+),'),
     REPO_ROOT / "bindings" / "java" / "src" / "test" / "java" / "org" / "lora" / "schema"
-    / "CorpusEncodeRoundTripTest.java": ("ENCODE_FLOOR_TOTAL", 1146, '"match", 44,'),
+    / "CorpusEncodeRoundTripTest.java": ("ENCODE_FLOOR_TOTAL", 1146, r'"match",\s*(\d+)'),
     REPO_ROOT / "dotnet" / "PayloadSchema.Tests" / "CorpusEncodeRoundTripTests.cs":
-        ("EncodeFloorTotal", 1147, '["match"] = 44,'),
+        ("EncodeFloorTotal", 1147, r'\["match"\]\s*=\s*(\d+),'),
 }
+
+#: The match bucket this CR reached. A bound, not the literal: the literal pinned it at
+#: exactly 44, and the netvox/arwin/dnt conversions raised it legitimately to 61.
+MATCH_FLOOR_REACHED = 44
 
 
 def schema():
@@ -165,7 +169,9 @@ class TestTheFloorsMovedWithTheFix:
     @pytest.mark.parametrize("path", sorted(FLOORS, key=str))
     def test_the_match_floor_is_raised(self, path):
         _, _, shape = FLOORS[path]
-        assert shape in path.read_text(), f"{path.name}: expected {shape}"
+        found = re.search(shape, path.read_text())
+        assert found, f"{path.name}: no match floor"
+        assert int(found.group(1)) >= MATCH_FLOOR_REACHED, (path.name, found.group(1))
 
     @pytest.mark.parametrize("path", sorted(FLOORS, key=str))
     def test_the_total_floor_is_at_least_what_this_cr_reached(self, path):

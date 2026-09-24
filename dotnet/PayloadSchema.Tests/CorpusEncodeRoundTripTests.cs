@@ -42,7 +42,7 @@ public class CorpusEncodeRoundTripTests
     // round-trips: `plain fixed` rises from 58 to 59 and the total to 1162.
     // CR-2026-031's name_from var-mismatch fixture round-trips here too, so
     // `plain fixed` rises from 59 to 61 and the total to 1164.
-    const int EncodeFloorTotal = 1168;
+    const int EncodeFloorTotal = 1189;
 
     /// <summary>
     /// Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -50,10 +50,10 @@ public class CorpusEncodeRoundTripTests
     /// </summary>
     static readonly Dictionary<string, int> EncodeFloorByShape = new()
     {
-        ["tlv"] = 901,
+        ["tlv"] = 905,
         ["flagged"] = 135,
         ["plain fixed"] = 65,
-        ["match"] = 44,
+        ["match"] = 61,
         ["byte_group"] = 17,
         ["repeat"] = 6,
     };
