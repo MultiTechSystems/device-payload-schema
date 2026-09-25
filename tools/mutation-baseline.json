@@ -1,0 +1,1526 @@
+{
+  "about": "Committed ratchet for tools/mutation-gate.py: each schema's tools/schema-mutation.py score may not fall. Regenerate only deliberately (--update) and say why in the commit message.",
+  "min_score_new": 0.8,
+  "include_library_composed": false,
+  "distribution": {
+    "100%": 69,
+    "95-99%": 21,
+    "90-94%": 25,
+    "80-89%": 27,
+    "70-79%": 6,
+    "<70%": 2,
+    "unscored": 1
+  },
+  "schemas": {
+    "_language-conformance/bitfield-string.yaml": {
+      "score": null,
+      "killed": 0,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 0,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/compute-negative-idiv-mod.yaml": {
+      "score": 1.0,
+      "killed": 5,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 9,
+      "vectors": 8,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/encode-padding.yaml": {
+      "score": 1.0,
+      "killed": 5,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 10,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/enum-spec-default.yaml": {
+      "score": 0.6667,
+      "killed": 4,
+      "survived": 2,
+      "unreached": 0,
+      "generated": 9,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/field-endian.yaml": {
+      "score": 1.0,
+      "killed": 12,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 17,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/internal-discriminator.yaml": {
+      "score": 1.0,
+      "killed": 13,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 17,
+      "vectors": 2,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/literal-types.yaml": {
+      "score": 1.0,
+      "killed": 2,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 5,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/lookup-default.yaml": {
+      "score": 0.75,
+      "killed": 3,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 5,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/match-case-range.yaml": {
+      "score": 1.0,
+      "killed": 9,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 13,
+      "vectors": 3,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/match-cases-default-key.yaml": {
+      "score": 1.0,
+      "killed": 8,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 12,
+      "vectors": 2,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/match-default-fields.yaml": {
+      "score": 1.0,
+      "killed": 7,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 11,
+      "vectors": 2,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/match-default-skip.yaml": {
+      "score": 1.0,
+      "killed": 5,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 8,
+      "vectors": 2,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/match-inline-discriminator.yaml": {
+      "score": 1.0,
+      "killed": 3,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 4,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/match-var.yaml": {
+      "score": 1.0,
+      "killed": 4,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 6,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/metadata-enrichment.yaml": {
+      "score": 1.0,
+      "killed": 11,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 13,
+      "vectors": 3,
+      "provenance": "unsourced",
+      "failing_original": 0
+    },
+    "_language-conformance/name-from-var.yaml": {
+      "score": 1.0,
+      "killed": 4,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 7,
+      "vectors": 2,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/name-from.yaml": {
+      "score": 1.0,
+      "killed": 4,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 7,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/ref-header.yaml": {
+      "score": 1.0,
+      "killed": 8,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 13,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/repeat-byte-length-span.yaml": {
+      "score": 1.0,
+      "killed": 7,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 11,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/repeat-byte-length.yaml": {
+      "score": 1.0,
+      "killed": 7,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 11,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/repeat-count.yaml": {
+      "score": 1.0,
+      "killed": 4,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 7,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/repeat-max-count.yaml": {
+      "score": 1.0,
+      "killed": 4,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 7,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/repeat-max.yaml": {
+      "score": 1.0,
+      "killed": 2,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 3,
+      "vectors": 2,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/round-half-to-even.yaml": {
+      "score": 0.9667,
+      "killed": 29,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 39,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/skip-type.yaml": {
+      "score": 1.0,
+      "killed": 4,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 8,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/tlv-nameless-case.yaml": {
+      "score": 1.0,
+      "killed": 5,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 6,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/transform-maths.yaml": {
+      "score": 0.8333,
+      "killed": 30,
+      "survived": 6,
+      "unreached": 0,
+      "generated": 47,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/unknown-tlv-tag-raw.yaml": {
+      "score": 1.0,
+      "killed": 5,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 6,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/unknown-tlv-tag-skip-delimited.yaml": {
+      "score": 1.0,
+      "killed": 11,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 13,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/unknown-tlv-tag-skip.yaml": {
+      "score": 1.0,
+      "killed": 11,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 13,
+      "vectors": 2,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "arwin/lrs10701.yaml": {
+      "score": 0.9437,
+      "killed": 151,
+      "survived": 9,
+      "unreached": 0,
+      "generated": 197,
+      "vectors": 17,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-5tm.yaml": {
+      "score": 1.0,
+      "killed": 38,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 46,
+      "vectors": 7,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-alb.yaml": {
+      "score": 1.0,
+      "killed": 37,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 45,
+      "vectors": 6,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-atm22.yaml": {
+      "score": 1.0,
+      "killed": 91,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 104,
+      "vectors": 6,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-atm41.yaml": {
+      "score": 0.9875,
+      "killed": 158,
+      "survived": 2,
+      "unreached": 0,
+      "generated": 182,
+      "vectors": 6,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-atm41g2.yaml": {
+      "score": 1.0,
+      "killed": 123,
+      "survived": 0,
+      "unreached": 8,
+      "generated": 168,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "decentlab/dl-blg.yaml": {
+      "score": 0.9667,
+      "killed": 29,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 42,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-ctd10.yaml": {
+      "score": 1.0,
+      "killed": 44,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 53,
+      "vectors": 6,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-dlr2-002.yaml": {
+      "score": 1.0,
+      "killed": 20,
+      "survived": 0,
+      "unreached": 8,
+      "generated": 39,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "decentlab/dl-dlr2-003.yaml": {
+      "score": 1.0,
+      "killed": 24,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 30,
+      "vectors": 5,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-dlr2-005.yaml": {
+      "score": 0.9375,
+      "killed": 15,
+      "survived": 1,
+      "unreached": 8,
+      "generated": 31,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "decentlab/dl-dlr2-006.yaml": {
+      "score": 0.9375,
+      "killed": 15,
+      "survived": 1,
+      "unreached": 8,
+      "generated": 31,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "decentlab/dl-dlr2-010.yaml": {
+      "score": 1.0,
+      "killed": 20,
+      "survived": 0,
+      "unreached": 21,
+      "generated": 54,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "decentlab/dl-dlr2-011.yaml": {
+      "score": 0.9667,
+      "killed": 29,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 36,
+      "vectors": 6,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-dlr2-012.yaml": {
+      "score": 1.0,
+      "killed": 16,
+      "survived": 0,
+      "unreached": 8,
+      "generated": 31,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "decentlab/dl-ds18.yaml": {
+      "score": 1.0,
+      "killed": 28,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 34,
+      "vectors": 6,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-gmm.yaml": {
+      "score": 0.9878,
+      "killed": 81,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 94,
+      "vectors": 6,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-iam.yaml": {
+      "score": 0.9783,
+      "killed": 90,
+      "survived": 2,
+      "unreached": 0,
+      "generated": 116,
+      "vectors": 10,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-ifd.yaml": {
+      "score": 1.0,
+      "killed": 26,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 32,
+      "vectors": 6,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-ilt.yaml": {
+      "score": 1.0,
+      "killed": 28,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 34,
+      "vectors": 6,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-isd.yaml": {
+      "score": 1.0,
+      "killed": 26,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 32,
+      "vectors": 6,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-isf.yaml": {
+      "score": 0.9655,
+      "killed": 112,
+      "survived": 4,
+      "unreached": 8,
+      "generated": 159,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "decentlab/dl-lid.yaml": {
+      "score": 1.0,
+      "killed": 76,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 92,
+      "vectors": 6,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-lpw.yaml": {
+      "score": 0.9375,
+      "killed": 15,
+      "survived": 1,
+      "unreached": 8,
+      "generated": 31,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "decentlab/dl-lws.yaml": {
+      "score": 0.9375,
+      "killed": 15,
+      "survived": 1,
+      "unreached": 8,
+      "generated": 31,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "decentlab/dl-mbx.yaml": {
+      "score": 1.0,
+      "killed": 29,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 36,
+      "vectors": 6,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-mes5.yaml": {
+      "score": 1.0,
+      "killed": 54,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 64,
+      "vectors": 6,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-ntu.yaml": {
+      "score": 1.0,
+      "killed": 54,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 64,
+      "vectors": 6,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-optod.yaml": {
+      "score": 1.0,
+      "killed": 60,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 70,
+      "vectors": 6,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-pheht.yaml": {
+      "score": 1.0,
+      "killed": 60,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 70,
+      "vectors": 6,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-rad.yaml": {
+      "score": 1.0,
+      "killed": 47,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 56,
+      "vectors": 6,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-rhc.yaml": {
+      "score": 1.0,
+      "killed": 26,
+      "survived": 0,
+      "unreached": 8,
+      "generated": 45,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "decentlab/dl-tbrg-01.yaml": {
+      "score": 1.0,
+      "killed": 24,
+      "survived": 0,
+      "unreached": 8,
+      "generated": 43,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "decentlab/dl-tp.yaml": {
+      "score": 1.0,
+      "killed": 163,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 184,
+      "vectors": 6,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-zn1.yaml": {
+      "score": 1.0,
+      "killed": 16,
+      "survived": 0,
+      "unreached": 8,
+      "generated": 31,
+      "vectors": 1,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "decentlab/dl-zn2.yaml": {
+      "score": 0.9655,
+      "killed": 28,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 39,
+      "vectors": 6,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "digital-matter/oyster.yaml": {
+      "score": 1.0,
+      "killed": 71,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 97,
+      "vectors": 7,
+      "provenance": "unsourced",
+      "failing_original": 0
+    },
+    "dnt/dnt-lw-wsci-2-1-1.yaml": {
+      "score": 0.7715,
+      "killed": 260,
+      "survived": 77,
+      "unreached": 13,
+      "generated": 409,
+      "vectors": 40,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "dnt/dnt-lw-wsci.yaml": {
+      "score": 0.7719,
+      "killed": 247,
+      "survived": 73,
+      "unreached": 11,
+      "generated": 384,
+      "vectors": 39,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "dragino/laq4.yaml": {
+      "score": 1.0,
+      "killed": 51,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 71,
+      "vectors": 5,
+      "provenance": "unsourced",
+      "failing_original": 0
+    },
+    "elsys/ers.yaml": {
+      "score": 1.0,
+      "killed": 25,
+      "survived": 0,
+      "unreached": 172,
+      "generated": 206,
+      "vectors": 2,
+      "provenance": "unsourced",
+      "failing_original": 0
+    },
+    "hbi/mla20.yaml": {
+      "score": 0.8625,
+      "killed": 232,
+      "survived": 37,
+      "unreached": 0,
+      "generated": 415,
+      "vectors": 12,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "mclimate/vicki.yaml": {
+      "score": 0.9701,
+      "killed": 65,
+      "survived": 2,
+      "unreached": 0,
+      "generated": 97,
+      "vectors": 11,
+      "provenance": "unsourced",
+      "failing_original": 0
+    },
+    "milesight/am102.yaml": {
+      "score": 0.9545,
+      "killed": 42,
+      "survived": 2,
+      "unreached": 25,
+      "generated": 76,
+      "vectors": 18,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/am102l.yaml": {
+      "score": 0.9545,
+      "killed": 42,
+      "survived": 2,
+      "unreached": 25,
+      "generated": 76,
+      "vectors": 17,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/am103.yaml": {
+      "score": 0.9,
+      "killed": 54,
+      "survived": 6,
+      "unreached": 0,
+      "generated": 74,
+      "vectors": 15,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/am103l.yaml": {
+      "score": 0.9,
+      "killed": 54,
+      "survived": 6,
+      "unreached": 0,
+      "generated": 74,
+      "vectors": 15,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/am104.yaml": {
+      "score": 1.0,
+      "killed": 42,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 51,
+      "vectors": 15,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/am107.yaml": {
+      "score": 1.0,
+      "killed": 60,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 74,
+      "vectors": 15,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/am307.yaml": {
+      "score": 0.9467,
+      "killed": 71,
+      "survived": 4,
+      "unreached": 12,
+      "generated": 99,
+      "vectors": 15,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/am307l.yaml": {
+      "score": 0.9467,
+      "killed": 71,
+      "survived": 4,
+      "unreached": 12,
+      "generated": 99,
+      "vectors": 15,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/am308.yaml": {
+      "score": 0.9733,
+      "killed": 73,
+      "survived": 2,
+      "unreached": 21,
+      "generated": 108,
+      "vectors": 15,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/am308l.yaml": {
+      "score": 0.9733,
+      "killed": 73,
+      "survived": 2,
+      "unreached": 21,
+      "generated": 108,
+      "vectors": 15,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/am319.yaml": {
+      "score": 0.9783,
+      "killed": 90,
+      "survived": 2,
+      "unreached": 21,
+      "generated": 125,
+      "vectors": 15,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/am319l.yaml": {
+      "score": 0.9783,
+      "killed": 90,
+      "survived": 2,
+      "unreached": 21,
+      "generated": 125,
+      "vectors": 15,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/at101-fh.yaml": {
+      "score": 0.9474,
+      "killed": 54,
+      "survived": 3,
+      "unreached": 70,
+      "generated": 147,
+      "vectors": 18,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/at101.yaml": {
+      "score": 0.8667,
+      "killed": 39,
+      "survived": 6,
+      "unreached": 27,
+      "generated": 78,
+      "vectors": 17,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/ct101.yaml": {
+      "score": 0.8468,
+      "killed": 94,
+      "survived": 17,
+      "unreached": 0,
+      "generated": 131,
+      "vectors": 21,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/ct103.yaml": {
+      "score": 0.8468,
+      "killed": 94,
+      "survived": 17,
+      "unreached": 0,
+      "generated": 131,
+      "vectors": 21,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/ct105.yaml": {
+      "score": 0.8468,
+      "killed": 94,
+      "survived": 17,
+      "unreached": 0,
+      "generated": 131,
+      "vectors": 21,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/ct303.yaml": {
+      "score": 0.8438,
+      "killed": 81,
+      "survived": 15,
+      "unreached": 135,
+      "generated": 260,
+      "vectors": 20,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/ct305.yaml": {
+      "score": 0.8438,
+      "killed": 81,
+      "survived": 15,
+      "unreached": 135,
+      "generated": 260,
+      "vectors": 20,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/ct310.yaml": {
+      "score": 0.8438,
+      "killed": 81,
+      "survived": 15,
+      "unreached": 135,
+      "generated": 260,
+      "vectors": 20,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/em300-di.yaml": {
+      "score": 0.9697,
+      "killed": 32,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 36,
+      "vectors": 15,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/em300-mcs.yaml": {
+      "score": 0.9388,
+      "killed": 46,
+      "survived": 3,
+      "unreached": 8,
+      "generated": 63,
+      "vectors": 17,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/em300-mld.yaml": {
+      "score": 1.0,
+      "killed": 12,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 16,
+      "vectors": 6,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/em300-sld.yaml": {
+      "score": 0.9643,
+      "killed": 27,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 32,
+      "vectors": 11,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/em300-th.yaml": {
+      "score": 1.0,
+      "killed": 22,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 25,
+      "vectors": 10,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/em300-zld.yaml": {
+      "score": 0.9643,
+      "killed": 27,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 32,
+      "vectors": 11,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/em310-tilt.yaml": {
+      "score": 0.8143,
+      "killed": 57,
+      "survived": 13,
+      "unreached": 0,
+      "generated": 83,
+      "vectors": 17,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/em310-udl.yaml": {
+      "score": 0.925,
+      "killed": 37,
+      "survived": 3,
+      "unreached": 8,
+      "generated": 54,
+      "vectors": 17,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/em320-th.yaml": {
+      "score": 1.0,
+      "killed": 22,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 25,
+      "vectors": 10,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/em400-mud.yaml": {
+      "score": 0.8958,
+      "killed": 43,
+      "survived": 5,
+      "unreached": 0,
+      "generated": 56,
+      "vectors": 13,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/em400-tld.yaml": {
+      "score": 0.8958,
+      "killed": 43,
+      "survived": 5,
+      "unreached": 0,
+      "generated": 56,
+      "vectors": 13,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/em400-udl.yaml": {
+      "score": 0.8958,
+      "killed": 43,
+      "survived": 5,
+      "unreached": 0,
+      "generated": 56,
+      "vectors": 13,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/em410-rdl.yaml": {
+      "score": 0.9474,
+      "killed": 54,
+      "survived": 3,
+      "unreached": 8,
+      "generated": 72,
+      "vectors": 17,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/em500-lgt.yaml": {
+      "score": 1.0,
+      "killed": 12,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 15,
+      "vectors": 7,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/em500-pp.yaml": {
+      "score": 1.0,
+      "killed": 13,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 16,
+      "vectors": 8,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/em500-pt100.yaml": {
+      "score": 1.0,
+      "killed": 15,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 18,
+      "vectors": 7,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/em500-smt.yaml": {
+      "score": 1.0,
+      "killed": 20,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 22,
+      "vectors": 9,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/em500-smtc.yaml": {
+      "score": 0.9714,
+      "killed": 34,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 38,
+      "vectors": 15,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/em500-swl.yaml": {
+      "score": 1.0,
+      "killed": 13,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 16,
+      "vectors": 7,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/gs101.yaml": {
+      "score": 0.6923,
+      "killed": 9,
+      "survived": 4,
+      "unreached": 26,
+      "generated": 42,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/gs301.yaml": {
+      "score": 0.8987,
+      "killed": 71,
+      "survived": 8,
+      "unreached": 4,
+      "generated": 93,
+      "vectors": 21,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/ts101.yaml": {
+      "score": 0.8846,
+      "killed": 46,
+      "survived": 6,
+      "unreached": 4,
+      "generated": 65,
+      "vectors": 10,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/ts201.yaml": {
+      "score": 0.8667,
+      "killed": 39,
+      "survived": 6,
+      "unreached": 6,
+      "generated": 56,
+      "vectors": 17,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/ts201v2.yaml": {
+      "score": 0.9318,
+      "killed": 41,
+      "survived": 3,
+      "unreached": 41,
+      "generated": 91,
+      "vectors": 17,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/ts30x.yaml": {
+      "score": 0.9362,
+      "killed": 44,
+      "survived": 3,
+      "unreached": 94,
+      "generated": 152,
+      "vectors": 17,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/uc100.yaml": {
+      "score": 0.9333,
+      "killed": 14,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 18,
+      "vectors": 10,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/uc300.yaml": {
+      "score": 0.8421,
+      "killed": 64,
+      "survived": 12,
+      "unreached": 36,
+      "generated": 125,
+      "vectors": 15,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/uc50x.yaml": {
+      "score": 0.8571,
+      "killed": 30,
+      "survived": 5,
+      "unreached": 0,
+      "generated": 40,
+      "vectors": 17,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/uc51x.yaml": {
+      "score": 0.9057,
+      "killed": 48,
+      "survived": 5,
+      "unreached": 49,
+      "generated": 111,
+      "vectors": 19,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/vs135.yaml": {
+      "score": 1.0,
+      "killed": 40,
+      "survived": 0,
+      "unreached": 4,
+      "generated": 51,
+      "vectors": 15,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/vs321.yaml": {
+      "score": 0.898,
+      "killed": 44,
+      "survived": 5,
+      "unreached": 54,
+      "generated": 113,
+      "vectors": 19,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/vs330.yaml": {
+      "score": 1.0,
+      "killed": 26,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 30,
+      "vectors": 9,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/vs340.yaml": {
+      "score": 1.0,
+      "killed": 12,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 16,
+      "vectors": 5,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/vs341.yaml": {
+      "score": 1.0,
+      "killed": 12,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 16,
+      "vectors": 5,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/vs350.yaml": {
+      "score": 0.8018,
+      "killed": 89,
+      "survived": 22,
+      "unreached": 8,
+      "generated": 143,
+      "vectors": 20,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/vs351.yaml": {
+      "score": 0.8393,
+      "killed": 94,
+      "survived": 18,
+      "unreached": 15,
+      "generated": 151,
+      "vectors": 20,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/vs360.yaml": {
+      "score": 0.9412,
+      "killed": 80,
+      "survived": 5,
+      "unreached": 8,
+      "generated": 115,
+      "vectors": 19,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/vs370.yaml": {
+      "score": 0.86,
+      "killed": 43,
+      "survived": 7,
+      "unreached": 0,
+      "generated": 56,
+      "vectors": 20,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/vs373.yaml": {
+      "score": 0.828,
+      "killed": 130,
+      "survived": 27,
+      "unreached": 0,
+      "generated": 197,
+      "vectors": 22,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/ws201.yaml": {
+      "score": 1.0,
+      "killed": 19,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 21,
+      "vectors": 10,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/ws202.yaml": {
+      "score": 0.9444,
+      "killed": 17,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 23,
+      "vectors": 6,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/ws203.yaml": {
+      "score": 0.878,
+      "killed": 36,
+      "survived": 5,
+      "unreached": 0,
+      "generated": 47,
+      "vectors": 12,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/ws301.yaml": {
+      "score": 0.9444,
+      "killed": 17,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 23,
+      "vectors": 6,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/ws302.yaml": {
+      "score": 0.86,
+      "killed": 43,
+      "survived": 7,
+      "unreached": 0,
+      "generated": 58,
+      "vectors": 6,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/ws303.yaml": {
+      "score": 1.0,
+      "killed": 12,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 16,
+      "vectors": 5,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/ws50x.yaml": {
+      "score": 0.7941,
+      "killed": 54,
+      "survived": 14,
+      "unreached": 0,
+      "generated": 78,
+      "vectors": 17,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/ws515.yaml": {
+      "score": 0.9429,
+      "killed": 66,
+      "survived": 4,
+      "unreached": 46,
+      "generated": 129,
+      "vectors": 19,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/ws52x.yaml": {
+      "score": 0.9245,
+      "killed": 49,
+      "survived": 4,
+      "unreached": 14,
+      "generated": 75,
+      "vectors": 17,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/ws558.yaml": {
+      "score": 0.9394,
+      "killed": 31,
+      "survived": 2,
+      "unreached": 0,
+      "generated": 37,
+      "vectors": 15,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/wt101.yaml": {
+      "score": 0.9405,
+      "killed": 79,
+      "survived": 5,
+      "unreached": 41,
+      "generated": 143,
+      "vectors": 19,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/wt201v1.yaml": {
+      "score": 0.7688,
+      "killed": 143,
+      "survived": 43,
+      "unreached": 49,
+      "generated": 263,
+      "vectors": 24,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/wt201v2.yaml": {
+      "score": 0.7653,
+      "killed": 150,
+      "survived": 46,
+      "unreached": 51,
+      "generated": 276,
+      "vectors": 24,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/wts305.yaml": {
+      "score": 0.9818,
+      "killed": 54,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 65,
+      "vectors": 15,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/wts505.yaml": {
+      "score": 0.9818,
+      "killed": 54,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 65,
+      "vectors": 15,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/wts506.yaml": {
+      "score": 1.0,
+      "killed": 55,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 65,
+      "vectors": 15,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "netvox/r718x.yaml": {
+      "score": 0.9187,
+      "killed": 113,
+      "survived": 10,
+      "unreached": 0,
+      "generated": 157,
+      "vectors": 24,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "radio-bridge/rbs30x.yaml": {
+      "score": 0.8095,
+      "killed": 170,
+      "survived": 40,
+      "unreached": 18,
+      "generated": 300,
+      "vectors": 29,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "rakwireless/qingping.yaml": {
+      "score": 0.8966,
+      "killed": 26,
+      "survived": 3,
+      "unreached": 0,
+      "generated": 46,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    }
+  }
+}
