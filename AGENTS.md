@@ -1119,6 +1119,27 @@ it adopted before the `_` fix; it can use `$_device_type` directly now.
   from our own decoder score as high as independent ones**, so a mutation score measures
   sensitivity, not correctness - the same warning as the quality score above.
 
+**CI gates (`.github/workflows/gates.yml`, `make gates`, `make gate-verdicts`).** Every
+schema bug fixed on 2026-09-24 had passed the existing checks, because those check a
+schema against its own vectors. Five gates close that, each a ratchet against a committed
+baseline - a regression fails, an improvement is reported and locked in with the gate's
+`--update`/`-update` target, deliberately, in its own commit:
+
+| Gate | Fails when | Baseline |
+|---|---|---|
+| `gate-validator-strict` | a YAML/JSON mapping has a duplicate key (a colliding case key used to vanish silently), or a key no implementation reads (`sub:` in a transform, `count_field`, `match_value`, ...) | vocabulary in `tools/schema_vocabulary.py` |
+| `gate-provenance` | a changed device schema has no independently sourced vector, or an added vector lacks `source:` | none: the diff against `BASE` |
+| `gate-crossval` | a schema stops agreeing with its vendor's own decoder (TTN declared examples + vendor JS, Decentlab decoders), or a new one does not agree | `tools/crossval-baseline.json`, oracle commits pinned |
+| `gate-mutation` | a schema's vectors notice fewer one-step mutations than before (score or killed count), or a new schema scores below 0.80 | `tools/mutation-baseline.json` |
+| `gate-verdicts` | a changed schema's vector fails in any of Python, Go, Java, C#, TS013, or a vector the reference passes fails elsewhere | `tools/verdicts-baseline.json` (empty: all five agree on 1524/1524) |
+
+The mutation gate ratchets the killed count as well as the score on purpose: deleting
+vectors makes the mutants only they reached "unreached", which *raises* the score.
+The crossval gate counts decode failures separately for the same kind of reason - one
+failed decode replaces a mismatch per key, so a broken schema could otherwise look
+improved. The Go, Java and C# corpus runners write per-vector reports only when
+`CORPUS_REPORT` is set; their default behaviour and floors are unchanged.
+
 ## Converting a vendor codec
 
 The converters in `tools/` (`convert_decentlab.py`, `convert_milesight.py`) do the

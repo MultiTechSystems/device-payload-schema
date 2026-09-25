@@ -1,0 +1,116 @@
+name: Gates
+
+# Quality gates that go beyond a schema agreeing with its own vectors. Each one is a
+# ratchet against a committed baseline: a regression fails, an improvement is reported
+# and locked in by refreshing the baseline deliberately.
+#
+#   provenance   a changed device schema carries an independently sourced vector
+#   validator    no duplicate keys, no keys that no implementation reads
+#   crossval     schemas agree with the vendors' own decoders (TTN, Decentlab)
+#   mutation     a schema's vectors notice small semantic changes to it
+#   verdicts     every vector decodes the same in Python, Go, Java, C# and TS013
+
+on:
+    push:
+        branches: [master, main]
+    pull_request:
+
+env:
+    # The oracles are pinned; the crossval gate refuses any other commit.
+    TTN_DEVICES_SHA: a49b17a13f611f294a87159e8f1f2772a5c23450
+    DECENTLAB_SHA: 045ec68ed7a9e5fcdcc6163b08c617d48fb8e56a
+
+jobs:
+    provenance-validator:
+        name: Provenance and validator
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+            - uses: actions/setup-python@v5
+              with:
+                  python-version: "3.11"
+            - name: Install dependencies
+              run: pip install -r requirements.txt
+            - name: Validator rejects duplicate and unread keys
+              run: make gate-validator-strict PYTHON=python
+            - name: Changed schemas carry an independent vector
+              if: github.event_name == 'pull_request'
+              run: make gate-provenance PYTHON=python BASE=origin/${{ github.base_ref }}
+
+    crossval-mutation:
+        name: Vendor cross-validation and mutation floors
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+            - uses: actions/setup-python@v5
+              with:
+                  python-version: "3.11"
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+            - name: Install dependencies
+              run: pip install -r requirements.txt
+            - name: Fetch the vendor oracles at their pinned commits
+              run: |
+                  fetch() {
+                      git init -q "$1"
+                      git -C "$1" remote add origin "$2"
+                      git -C "$1" fetch -q --depth 1 origin "$3"
+                      git -C "$1" checkout -q FETCH_HEAD
+                  }
+                  fetch "$RUNNER_TEMP/lorawan-devices" \
+                      https://github.com/TheThingsNetwork/lorawan-devices "$TTN_DEVICES_SHA"
+                  fetch "$RUNNER_TEMP/decentlab-decoders" \
+                      https://github.com/decentlab/decentlab-decoders "$DECENTLAB_SHA"
+                  echo "TTN_DEVICES_REPO=$RUNNER_TEMP/lorawan-devices" >> "$GITHUB_ENV"
+                  echo "DECENTLAB_DECODERS=$RUNNER_TEMP/decentlab-decoders" >> "$GITHUB_ENV"
+            - name: Schemas agree with the vendor decoders
+              run: make gate-crossval PYTHON=python
+            - name: Mutation scores hold
+              run: |
+                  args=""
+                  if [ "${{ github.event_name }}" = "pull_request" ]; then
+                      args="--changed-since origin/${{ github.base_ref }}"
+                  fi
+                  make gate-mutation PYTHON=python GATE_MUTATION_ARGS="$args"
+
+    verdicts:
+        name: Five-implementation verdicts
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+            - uses: actions/setup-python@v5
+              with:
+                  python-version: "3.11"
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+            - name: Install dependencies
+              run: pip install -r requirements.txt
+            - name: Cache language toolchains
+              uses: actions/cache@v4
+              with:
+                  path: |
+                      .cache/go
+                      .cache/m2
+                      .cache/nuget
+                  key: gates-${{ runner.os }}-${{ hashFiles('go/schema/go.sum', 'bindings/java/pom.xml', 'dotnet/**/*.csproj') }}
+            - name: Every vector decodes the same everywhere
+              run: |
+                  base="origin/master"
+                  if [ "${{ github.event_name }}" = "pull_request" ]; then
+                      base="origin/${{ github.base_ref }}"
+                  fi
+                  make gate-verdicts PYTHON=python VERDICTS_PYTHON=python BASE="$base"
+            - name: Keep the per-implementation reports
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: verdict-reports
+                  path: build/verdicts/

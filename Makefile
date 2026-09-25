@@ -437,3 +437,8 @@ help:
 	@echo "  make pytest-cov               # Python tests + coverage"
 	@echo "  make VARIANT=release          # Release build"
 	@echo "  make coverage-all             # Full coverage report"
+
+# CI quality gates, one fragment per gate (vendor cross-validation and mutation floors,
+# provenance and validator strictness, five-implementation verdicts). `make gates` runs
+# the ones that need no docker; `gate-verdicts` drives the Go, Java and C# containers.
+-include mk/*.mk
