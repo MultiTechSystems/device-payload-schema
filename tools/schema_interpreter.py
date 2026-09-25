@@ -1411,8 +1411,21 @@ class SchemaInterpreter:
             except (ValueError, IndexError):
                 return False
         
-        # Single value comparison
-        return value == pattern
+        # Single value comparison. A mapping key read from JSON is always a string,
+        # so the same schema as JSON carried "1" where the YAML carried 1, and an
+        # integer discriminator never equalled it: 19 corpus schemas decoded a
+        # different branch - netvox r718x its `default:` on every report, dnt and
+        # mla20 every tlv channel as unknown - and reported success.
+        if value == pattern:
+            return True
+        if isinstance(pattern, str) and not isinstance(value, str):
+            text = pattern.strip()
+            try:
+                number = int(text, 16) if text.lower().startswith('0x') else int(text)
+            except ValueError:
+                return False
+            return value == number
+        return False
     
     def _decode_flagged(self, flagged_def: Dict[str, Any], buf: bytes, pos: int) -> Tuple[Dict[str, Any], int]:
         """Decode flagged/bitmask field groups."""

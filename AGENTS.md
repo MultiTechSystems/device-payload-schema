@@ -1094,6 +1094,31 @@ it adopted before the `_` fix; it can use `$_device_type` directly now.
 - **Status codes inside a tlv case** (gs301 0xFFFE, ct 0xFFFD) need a `match` inside the
   case, which the Python interpreter cannot decode; they are hints in the schemas.
 
+**Two corpus-wide guards, added 2026-09-24, and what they found on their first run.**
+
+- **`tests/test_corpus_invariants.py`** holds every corpus vector to invariants no
+  expected-value block can state: a successful decode consumes its whole payload; output
+  is strict JSON with no stray `_` keys; integral values are integers; decoding is
+  deterministic; the schema decodes the same when authored as JSON; and every key a corpus
+  schema uses is read by some implementation. Violations sit in reasoned ratchet lists -
+  a new one fails, and so does a listed one that is fixed, so the lists only shrink.
+  **The JSON check found a real defect at once**: Python compared a match/tlv case key
+  with `==`, and a JSON key is always a string, so the same schema as JSON decoded a
+  different branch in 19 schemas - 116 vectors as *successful* decodes of the wrong data
+  (netvox r718x its `default:` on every report; dnt, mla20 and elsys every tlv channel as
+  unknown). `_match_case_pattern` now compares a numeric-string key as a number.
+  The unread-tail list names real schema gaps (arwin port 12, am307/am308's copied
+  example, ws50x's padded vectors, r718x's zero padding); fixing one means removing its
+  entry.
+- **`tools/schema-mutation.py`** mutates each schema one step at a time (byte order,
+  sign, width, scale, offset, bit range, lookup label, case key, flagged bit, dropped
+  field) and asks whether the schema's own vectors notice. The first run: 91.3% of
+  reachable mutants killed. The survivors are a list of missing vectors - byte order is
+  unchecked on many Milesight multi-byte fields, the ct/em400 temperature channel's only
+  vector is all zeros, and the 0xFFFF sensor-status path has no vector. **Vectors taken
+  from our own decoder score as high as independent ones**, so a mutation score measures
+  sensitivity, not correctness - the same warning as the quality score above.
+
 ## Converting a vendor codec
 
 The converters in `tools/` (`convert_decentlab.py`, `convert_milesight.py`) do the
