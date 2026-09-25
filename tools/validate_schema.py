@@ -26,6 +26,180 @@ from dataclasses import dataclass, field
 # Add tools to path
 sys.path.insert(0, str(Path(__file__).parent))
 from schema_interpreter import SchemaInterpreter, DecodeResult
+import schema_vocabulary
+
+
+# --------------------------------------------------------------------------------------
+# Loading: a duplicate mapping key is an error, not a silent overwrite
+# --------------------------------------------------------------------------------------
+
+
+class DuplicateKeyError(ValueError):
+    """A mapping declares the same key twice.
+
+    `yaml.safe_load` and `json.load` both keep the LAST value silently, which is how a
+    colliding match/tlv case key or lookup entry vanishes: the schema reads as if it
+    had both, and every implementation decodes only one.
+    """
+
+    def __init__(self, key: Any, path: str, line: Optional[int] = None,
+                 column: Optional[int] = None, first_line: Optional[int] = None):
+        self.key = key
+        self.path = path
+        self.line = line
+        self.column = column
+        self.first_line = first_line
+        where = path or "<root>"
+        if line is not None:
+            msg = "duplicate key %r at line %d, column %d in mapping %s" % (
+                key, line, column, where)
+            if first_line is not None:
+                msg += " (first declared at line %d)" % first_line
+        else:
+            msg = "duplicate key %r in mapping %s" % (key, where)
+        msg += "; the parser would silently keep only the last value"
+        super().__init__(msg)
+
+
+def _node_paths(root: Any) -> Dict[int, str]:
+    """id(mapping node) -> its path from the document root, first occurrence wins."""
+    paths: Dict[int, str] = {}
+    stack = [(root, "")]
+    while stack:
+        node, path = stack.pop()
+        if id(node) in paths:
+            continue
+        paths[id(node)] = path
+        if isinstance(node, yaml.MappingNode):
+            for key_node, value_node in node.value:
+                label = key_node.value if isinstance(key_node, yaml.ScalarNode) else "?"
+                stack.append((value_node, "%s.%s" % (path, label) if path else label))
+        elif isinstance(node, yaml.SequenceNode):
+            for i, item in enumerate(node.value):
+                stack.append((item, "%s[%d]" % (path, i)))
+    return paths
+
+
+def _key_identity(key: Any) -> Any:
+    """A key as the interpreters compare it. A numeric string names the same case as
+    the number (`_match_case_pattern`), and a JSON rendering turns every integer key
+    into a string, so `1` and `"1"` in one mapping are the same key."""
+    if isinstance(key, bool):
+        return ("bool", key)
+    if isinstance(key, int):
+        return ("num", key)
+    if isinstance(key, str):
+        text = key.strip()
+        try:
+            return ("num", int(text, 0))
+        except ValueError:
+            return ("str", key)
+    return ("other", key)
+
+
+class DuplicateKeyLoader(yaml.SafeLoader):
+    """A SafeLoader that raises DuplicateKeyError on a repeated mapping key, in every
+    mapping: schema keys, case maps, lookup tables, port maps, expected values."""
+
+    def construct_document(self, node):
+        self._dup_paths = _node_paths(node)
+        return super().construct_document(node)
+
+    def construct_mapping(self, node, deep=False):
+        if isinstance(node, yaml.MappingNode):
+            seen: Dict[Any, Any] = {}
+            for key_node, _ in node.value:
+                if key_node.tag == "tag:yaml.org,2002:merge":
+                    continue  # `<<:` merges are overridable by design
+                try:
+                    key = self.construct_object(key_node, deep=True)
+                    ident = _key_identity(key)
+                    hash(ident)
+                except (TypeError, yaml.YAMLError):
+                    continue
+                if ident in seen:
+                    first = seen[ident]
+                    raise DuplicateKeyError(
+                        key,
+                        getattr(self, "_dup_paths", {}).get(id(node), ""),
+                        key_node.start_mark.line + 1,
+                        key_node.start_mark.column + 1,
+                        first.start_mark.line + 1,
+                    )
+                seen[ident] = key_node
+        return super().construct_mapping(node, deep=deep)
+
+
+def _reject_duplicate_pairs(pairs: List[Tuple[str, Any]]) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    for key, value in pairs:
+        if key in out:
+            raise DuplicateKeyError(key, "")
+        out[key] = value
+    return out
+
+
+def load_schema_text(text: str, filename: str = "") -> Any:
+    """Parse a schema, rejecting duplicate mapping keys. JSON gets the same check
+    through `object_pairs_hook`; its line and path are then recovered by re-reading
+    the text as YAML, which a JSON document almost always is."""
+    if filename.lower().endswith(".json"):
+        try:
+            return json.loads(text, object_pairs_hook=_reject_duplicate_pairs)
+        except DuplicateKeyError as exc:
+            try:
+                yaml.load(text, Loader=DuplicateKeyLoader)  # noqa: S506 - SafeLoader
+            except DuplicateKeyError as located:
+                raise located from None
+            except yaml.YAMLError:
+                pass
+            raise exc
+    return yaml.load(text, Loader=DuplicateKeyLoader)  # noqa: S506 - SafeLoader
+
+
+def load_schema_file(path: str) -> Any:
+    with open(path, encoding="utf-8") as f:
+        return load_schema_text(f.read(), str(path))
+
+
+# --------------------------------------------------------------------------------------
+# Vocabulary: every key must be one something reads (tools/schema_vocabulary.py)
+# --------------------------------------------------------------------------------------
+
+_CONTEXT_LABELS = {
+    "schema": "schema",
+    "port": "port entry",
+    "definition": "definition",
+    "field": "field",
+    "match": "match block",
+    "tlv": "tlv block",
+    "flagged": "flagged block",
+    "flagged_group": "flagged group",
+    "byte_group": "byte_group",
+    "transform": "transform stage",
+    "compute": "compute block",
+    "guard": "guard block",
+    "guard_when": "guard condition",
+    "vector": "test vector",
+    "legacy_case": "match case",
+}
+
+
+def check_vocabulary(schema: Any) -> Tuple[List[str], List[str]]:
+    """(errors, warnings). An error for every key no implementation reads in its
+    context; a warning for every key some implementations read and others ignore."""
+    errors = []
+    for path, ctx, key, hint in schema_vocabulary.unknown_keys(schema):
+        label = _CONTEXT_LABELS.get(ctx, "mapping '%s'" % ctx)
+        msg = "Unknown key '%s' in %s at %s: nothing reads it" % (key, label, path)
+        if hint:
+            msg += " - " + hint
+        errors.append(msg)
+    warnings_ = [
+        "%s: '%s' decodes differently per implementation - %s" % (path, key, why)
+        for path, key, why in schema_vocabulary.divergent_keys(schema)
+    ]
+    return errors, warnings_
 
 
 @dataclass
@@ -1143,6 +1317,22 @@ def run_test_vector(interpreter: SchemaInterpreter, tv: Dict[str, Any]) -> TestR
     if not matched:
         result.errors.append(detail)
 
+    # `expected_quality` asserts the `_quality` flags valid_range produces. It is read
+    # here and by no corpus runner: `_quality` is not produced by every implementation,
+    # so the shared corpus must not assert it (AGENTS.md), and only examples do.
+    expected_quality = tv.get('expected_quality')
+    if expected_quality is not None:
+        quality = result.actual.get('_quality') or {}
+        if not isinstance(expected_quality, dict):
+            result.errors.append("expected_quality must be a mapping of field to flag")
+        else:
+            for field_name, flag in expected_quality.items():
+                if quality.get(field_name) != flag:
+                    result.errors.append(
+                        f"_quality.{field_name}: expected {flag!r}, "
+                        f"got {quality.get(field_name)!r}"
+                    )
+
     result.passed = len(result.errors) == 0
     return result
 
@@ -1290,13 +1480,22 @@ def check_best_practices(schema: Dict[str, Any], result: ValidationResult) -> No
         result.add_info("Consider adding a test vector for maximum/boundary values", "test_vectors")
 
 
-def validate_schema(schema: Dict[str, Any]) -> ValidationResult:
-    """Validate schema and run all test vectors."""
+def validate_schema(schema: Dict[str, Any], strict_keys: bool = True) -> ValidationResult:
+    """Validate schema and run all test vectors.
+
+    With `strict_keys` (the default) a key outside the language vocabulary is an
+    error; `strict_keys=False` reports it as a warning instead.
+    """
     result = ValidationResult(schema_valid=True)
     
     # Validate structure (errors only)
     structure_errors = validate_schema_structure(schema)
     structure_errors = structure_errors + check_remaining_length(schema)
+    key_errors, key_warnings = check_vocabulary(schema)
+    if strict_keys:
+        structure_errors = structure_errors + key_errors
+    else:
+        key_warnings = key_errors + key_warnings
     if structure_errors:
         result.schema_valid = False
         result.schema_errors = structure_errors
@@ -1305,6 +1504,9 @@ def validate_schema(schema: Dict[str, Any]) -> ValidationResult:
             result.messages.append(ValidationMessage(ValidationLevel.ERROR, err))
         return result
     
+    for warning in key_warnings:
+        result.add_warning(warning)
+
     # Check best practices (warnings and info)
     check_best_practices(schema, result)
     
@@ -1388,23 +1590,37 @@ def main():
     parser = argparse.ArgumentParser(
         description='Validate Payload Schema and run test vectors'
     )
-    parser.add_argument('schema', help='Path to schema YAML file')
+    parser.add_argument('schema', help='Path to schema YAML or JSON file')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='Show detailed output for all tests')
     parser.add_argument('--json', action='store_true',
                        help='Output results as JSON')
+    parser.add_argument('--allow-unknown-keys', action='store_true',
+                        help='Report keys outside the language vocabulary as '
+                             'warnings instead of errors')
     args = parser.parse_args()
     
-    # Load schema
+    # Load schema. A duplicate key is a schema error, reported like one, so a caller
+    # grepping for "Schema: INVALID" sees it.
     try:
-        with open(args.schema) as f:
-            schema = yaml.safe_load(f)
+        schema = load_schema_file(args.schema)
+    except DuplicateKeyError as e:
+        result = ValidationResult(schema_valid=False)
+        result.schema_errors.append(str(e))
+        result.messages.append(ValidationMessage(ValidationLevel.ERROR, str(e)))
+        if args.json:
+            print(json.dumps(result.to_dict(), indent=2))
+        else:
+            print(f"Validating: {args.schema}")
+            print("=" * 50)
+            print_results(result, args.verbose)
+        sys.exit(1)
     except Exception as e:
         print(f"Error loading schema: {e}", file=sys.stderr)
         sys.exit(1)
     
     # Validate
-    result = validate_schema(schema)
+    result = validate_schema(schema, strict_keys=not args.allow_unknown_keys)
     
     # Output
     if args.json:

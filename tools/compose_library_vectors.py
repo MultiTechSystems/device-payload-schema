@@ -18,6 +18,10 @@ Each vector names the definition it exercises one of three ways:
                                 match the vector's expected keys (lorawan_frames)
     hex: "02 1234 ..."          an alias for `payload:` (udp_packet_forwarder)
 
+An encode vector (`input:` + `expected_payload:`, PS-047) named `encode_<name>` is
+placed in the composed schema of decode vector `<name>`, after it, and verified by
+encoding rather than decoding.
+
 The definition's `fields:` list is spliced into the composed schema rather than
 nested under it. Nesting - which is what `$ref` inlining produces - leaves a
 container field with no `type: object`, so the interpreter never descends into it
@@ -129,6 +133,11 @@ def compose(source, document, vector, definitions):
         "fields": defn["fields"],
     }
     # Carried so a definition using a local `#/definitions/...` ref still resolves.
+    # The catalogue's other definitions come along too and affect no decode; the keys
+    # only they use are allowlisted in tools/schema_vocabulary.py (UNREAD_KEYS) for
+    # unreferenced definitions only. Carrying just the reached definitions would be
+    # cleaner, but it moves one schema's encode shape bucket (the Go/Java/C#
+    # harnesses scan the raw text for construct names) - see UNREAD_KEYS.
     if document.get("definitions"):
         composed["definitions"] = document["definitions"]
 
@@ -141,6 +150,38 @@ def compose(source, document, vector, definitions):
     tv["expected"] = expected
     composed["test_vectors"] = [tv]
     return composed, None
+
+
+def is_encode_vector(vector):
+    return (
+        isinstance(vector, dict)
+        and "input" in vector
+        and "expected_payload" in vector
+        and not (vector.get("payload") or vector.get("hex"))
+    )
+
+
+def encode_vector(vector):
+    """The composed form of a library encode vector: every key but `command`."""
+    return {k: v for k, v in vector.items() if k != "command"}
+
+
+def verify_encode(schema, vector):
+    """Encode one encode vector; None on success, else why."""
+    sys.path.insert(0, str(REPO_ROOT / "tools"))
+    from schema_interpreter import SchemaInterpreter  # noqa: E402
+
+    try:
+        want = bytes.fromhex(str(vector["expected_payload"]).replace(" ", ""))
+        result = SchemaInterpreter(schema).encode(vector.get("input") or {})
+    except Exception as exc:                                    # noqa: BLE001
+        return "encode raised: %s" % str(exc)[:80]
+    if not result.success:
+        return "encode errors: %s" % str(result.errors[0])[:80]
+    if bytes(result.payload) != want:
+        return "%s: encodes to %s, vector says %s" % (
+            vector["name"], bytes(result.payload).hex(), want.hex())
+    return None
 
 
 def verify(schema):
@@ -157,6 +198,11 @@ def verify(schema):
     # them about whether a vector passes.
     from validate_schema import values_match  # noqa: E402
 
+    for extra in schema["test_vectors"][1:]:
+        if is_encode_vector(extra):
+            why = verify_encode(schema, extra)
+            if why:
+                return why
     vector = schema["test_vectors"][0]
     try:
         payload = bytes.fromhex(str(vector["payload"]).replace(" ", ""))
@@ -191,8 +237,13 @@ def build():
         if not vectors:
             continue
         definitions = document.get("definitions") or {}
+        encoders = []
+        by_vector = {}
         for vector in vectors:
             if not isinstance(vector, dict) or not vector.get("name"):
+                continue
+            if is_encode_vector(vector):
+                encoders.append(vector)
                 continue
             if not definitions and document.get("fields"):
                 # Already a standalone schema; the runners still never see it.
@@ -206,6 +257,19 @@ def build():
                 skipped.append((source.name, vector["name"], why))
             else:
                 composed[schema["name"]] = schema
+                by_vector[vector["name"]] = (vector, schema)
+        for vector in encoders:
+            target = vector["name"][len("encode_"):]
+            partner = by_vector.get(target) if vector["name"].startswith("encode_") else None
+            if partner is None:
+                skipped.append((source.name, vector["name"],
+                                "encode vector with no composed `%s` to join" % target))
+            elif vector.get("command") and vector["command"] != partner[0].get("command"):
+                skipped.append((source.name, vector["name"],
+                                "names command %r, `%s` composes %r"
+                                % (vector["command"], target, partner[0].get("command"))))
+            else:
+                partner[1]["test_vectors"].append(encode_vector(vector))
     return composed, skipped
 
 

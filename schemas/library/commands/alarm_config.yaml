@@ -158,3 +158,33 @@ test_vectors:
       cid: 0
       field_id: 2
       delta: 10
+
+  # Encode vectors: the same bytes built from the values, verified against the
+  # interpreter's encoder and the composed schema's generated codec, which agree on
+  # them (PS-047). `tools/compose_library_vectors.py` places `encode_<name>` in the
+  # composed schema of vector `<name>`.
+
+  - name: encode_set_temp_alarm
+    command: set_alarm_req
+    description: "Encode the values decoded from set_temp_alarm"
+    direction: downlink
+    source: generated
+    input:
+      category: 3
+      cid: 1
+      field_id: 1
+      low_threshold: 0
+      high_threshold: 500
+    expected_payload: "030101000001f4"
+
+  - name: encode_set_delta_threshold
+    command: set_threshold_req
+    description: "Encode the values decoded from set_delta_threshold"
+    direction: downlink
+    source: generated
+    input:
+      category: 3
+      cid: 0
+      field_id: 2
+      delta: 10
+    expected_payload: "030002000a"
