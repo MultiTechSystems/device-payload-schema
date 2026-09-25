@@ -121,6 +121,9 @@ type corpusSchema struct {
 
 func TestCorpusConformance(t *testing.T) {
 	root := filepath.Join("..", "..", "schemas", "devices")
+	if override := os.Getenv("CORPUS_ROOT"); override != "" {
+		root = override // see corpus_report_test.go
+	}
 	var files []string
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -138,8 +141,14 @@ func TestCorpusConformance(t *testing.T) {
 
 	var passed, failed, total int
 	failures := map[string]int{}
+	report := newCorpusReport()
 
 	for _, file := range files {
+		rel, _ := filepath.Rel(root, file)
+		rel = corpusRelative(rel)
+		if !report.includes(rel) {
+			continue
+		}
 		data, err := os.ReadFile(file)
 		if err != nil {
 			t.Errorf("%s: %v", file, err)
@@ -157,20 +166,29 @@ func TestCorpusConformance(t *testing.T) {
 			failed += len(meta.TestVectors)
 			total += len(meta.TestVectors)
 			failures[fmt.Sprintf("%s: parse: %v", filepath.Base(file), err)]++
+			for index, vector := range meta.TestVectors {
+				if vector.Payload == "" {
+					report.add(rel, index, vector.Name, "skip", "no payload (encode vector)")
+				} else {
+					report.add(rel, index, vector.Name, "error", fmt.Sprintf("parse: %v", err))
+				}
+			}
 			continue
 		}
-		for _, vector := range meta.TestVectors {
+		for index, vector := range meta.TestVectors {
 			// An encode vector carries the values to encode and no payload to decode
 			// (PS-047). Counting it as a failed decode would be wrong twice: it was
 			// never decoded, and tools/vector-verdicts.py already runs it on both
 			// conformance paths.
 			if vector.Payload == "" {
+				report.add(rel, index, vector.Name, "skip", "no payload (encode vector)")
 				continue
 			}
 			total++
 			payload, err := hexToBytes(vector.Payload)
 			if err != nil {
 				failed++
+				report.add(rel, index, vector.Name, "error", fmt.Sprintf("payload: %v", err))
 				continue
 			}
 			// Recover per vector: a panic in the decoder is a defect to report, not
@@ -189,6 +207,7 @@ func TestCorpusConformance(t *testing.T) {
 			if err != nil {
 				failed++
 				failures[fmt.Sprintf("%s: decode: %v", filepath.Base(file), err)]++
+				report.add(rel, index, vector.Name, "error", fmt.Sprintf("decode: %v", err))
 				continue
 			}
 			mismatch := ""
@@ -211,9 +230,11 @@ func TestCorpusConformance(t *testing.T) {
 			}
 			if mismatch == "" {
 				passed++
+				report.add(rel, index, vector.Name, "pass", "")
 			} else {
 				failed++
 				failures[fmt.Sprintf("%s: %s", filepath.Base(file), mismatch)]++
+				report.add(rel, index, vector.Name, "fail", mismatch)
 			}
 		}
 	}
@@ -228,7 +249,10 @@ func TestCorpusConformance(t *testing.T) {
 		t.Logf("  %s", detail)
 		shown++
 	}
-	if passed < corpusFloor {
+	report.write(t)
+	if report.restricted() {
+		t.Logf("CORPUS_ONLY/CORPUS_ROOT is set: %d schema(s) selected, floor %d not applied", len(report.only), corpusFloor)
+	} else if passed < corpusFloor {
 		t.Errorf("only %d corpus vectors pass, floor is %d", passed, corpusFloor)
 	}
 }
