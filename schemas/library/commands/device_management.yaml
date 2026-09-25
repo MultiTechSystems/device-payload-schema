@@ -199,3 +199,41 @@ test_vectors:
       category: 18
       cid: 3
       delay_sec: 0
+
+  # Encode vectors: the same bytes built from the values, verified against the
+  # interpreter's encoder and the composed schema's generated codec, which agree on
+  # them (PS-047). `tools/compose_library_vectors.py` places `encode_<name>` in the
+  # composed schema of vector `<name>`.
+
+  - name: encode_factory_reset
+    command: factory_reset_req
+    description: "Encode the values decoded from factory_reset"
+    direction: downlink
+    source: generated
+    input:
+      category: 18
+      cid: 0
+      magic: 3735928559
+    expected_payload: "1200deadbeef"
+
+  - name: encode_identify_10sec
+    command: identify_req
+    description: "Encode the values decoded from identify_10sec"
+    direction: downlink
+    source: generated
+    input:
+      category: 18
+      cid: 2
+      duration_sec: 10
+    expected_payload: "12020a"
+
+  - name: encode_reboot_immediate
+    command: reboot_req
+    description: "Encode the values decoded from reboot_immediate"
+    direction: downlink
+    source: generated
+    input:
+      category: 18
+      cid: 3
+      delay_sec: 0
+    expected_payload: "120300"

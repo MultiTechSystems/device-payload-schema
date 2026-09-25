@@ -92,6 +92,8 @@ public class CorpusConformanceTests
 
     static string? FindCorpus()
     {
+        var rootOverride = Environment.GetEnvironmentVariable("CORPUS_ROOT"); // see CorpusReport
+        if (!string.IsNullOrEmpty(rootOverride)) return rootOverride;
         var dir = AppContext.BaseDirectory;
         for (int i = 0; i < 10 && dir != null; i++)
         {
@@ -110,10 +112,13 @@ public class CorpusConformanceTests
 
         int total = 0, passed = 0;
         var failures = new Dictionary<string, int>();
+        var report = new CorpusReport();
 
         foreach (var file in Directory.GetFiles(corpus, "*.yaml", SearchOption.AllDirectories)
                      .OrderBy(f => f))
         {
+            var rel = CorpusReport.Relative(Path.GetRelativePath(corpus, file));
+            if (!report.Includes(rel)) continue;
             var text = File.ReadAllText(file);
             PayloadSchemaDefinition schema;
             YamlMappingNode root;
@@ -127,6 +132,7 @@ public class CorpusConformanceTests
             catch (Exception e)
             {
                 Bump(failures, $"{Path.GetFileName(file)}: parse: {e.Message}");
+                report.SchemaFailed(rel, text, e.Message);
                 continue;
             }
             if (!root.Children.TryGetValue(new YamlScalarNode("test_vectors"), out var tvNode)
@@ -135,10 +141,11 @@ public class CorpusConformanceTests
                 continue;
             }
 
-            foreach (var tv in vectors.Children)
+            for (int index = 0; index < vectors.Children.Count; index++)
             {
-                if (tv is not YamlMappingNode vector) continue;
+                if (vectors.Children[index] is not YamlMappingNode vector) continue;
                 total++;
+                var vectorName = CorpusReport.Scalar(vector, "name");
                 try
                 {
                     // An encode vector carries the values to encode and no payload to decode
@@ -146,7 +153,10 @@ public class CorpusConformanceTests
             // on both conformance paths.
             var payloadHex = Text(vector, "payload").Replace(" ", "");
             if (payloadHex.Length == 0)
+            {
+                report.Add(rel, index, vectorName, "skip", "no payload (encode vector)");
                 continue;
+            }
                     var fportText = Text(vector, "fPort");
                     if (fportText.Length == 0) fportText = Text(vector, "fport");
                     var payload = Convert.FromHexString(payloadHex);
@@ -157,6 +167,7 @@ public class CorpusConformanceTests
                     if (!vector.Children.TryGetValue(new YamlScalarNode("expected"), out var expNode)
                         || expNode is not YamlMappingNode expected)
                     {
+                        report.Add(rel, index, vectorName, "skip", "no expected block");
                         continue;
                     }
                     string? mismatch = WarningsMismatch(vector, result);
@@ -175,12 +186,21 @@ public class CorpusConformanceTests
                             break;
                         }
                     }
-                    if (mismatch == null) passed++;
-                    else Bump(failures, $"{Path.GetFileName(file)}: {mismatch}");
+                    if (mismatch == null)
+                    {
+                        passed++;
+                        report.Add(rel, index, vectorName, "pass", "");
+                    }
+                    else
+                    {
+                        Bump(failures, $"{Path.GetFileName(file)}: {mismatch}");
+                        report.Add(rel, index, vectorName, "fail", mismatch);
+                    }
                 }
                 catch (Exception e)
                 {
                     Bump(failures, $"{Path.GetFileName(file)}: {e.GetType().Name}: {e.Message}");
+                    report.Add(rel, index, vectorName, "error", $"{e.GetType().Name}: {e.Message}");
                 }
             }
         }
@@ -190,6 +210,13 @@ public class CorpusConformanceTests
         if (failures.Count > 12)
             _output.WriteLine($"  ... and {failures.Count - 12} more distinct failures");
 
+        report.Write(_output.WriteLine);
+        if (report.Restricted)
+        {
+            _output.WriteLine(
+                $"CORPUS_ONLY/CORPUS_ROOT is set: {report.RestrictedCount} schema(s) selected, floor {CorpusFloor} not applied");
+            return;
+        }
         Assert.True(passed >= CorpusFloor,
             $"only {passed} corpus vectors pass, floor is {CorpusFloor}");
     }

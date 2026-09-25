@@ -1,0 +1,1717 @@
+{
+  "about": "Committed ratchet for tools/crossval-gate.py. Regenerate only deliberately (--update) and say why in the commit message. `exceptions` maps a schema key to the reason a NEW schema may disagree with its vendor oracle; it never excuses a regression.",
+  "oracles": {
+    "decentlab-decoders": {
+      "url": "https://github.com/decentlab/decentlab-decoders",
+      "commit": "045ec68ed7a9e5fcdcc6163b08c617d48fb8e56a"
+    },
+    "ttn": {
+      "url": "https://github.com/TheThingsNetwork/lorawan-devices",
+      "commit": "a49b17a13f611f294a87159e8f1f2772a5c23450"
+    }
+  },
+  "summary": {
+    "ttn": {
+      "arwin": {
+        "disagrees": 1
+      },
+      "decentlab": {
+        "disagrees": 57,
+        "no-vendor-codec": 1
+      },
+      "digital-matter": {
+        "disagrees": 1
+      },
+      "dnt": {
+        "disagrees": 2
+      },
+      "dragino": {
+        "disagrees": 1
+      },
+      "elsys": {
+        "agrees": 1
+      },
+      "hbi": {
+        "no-vendor-codec": 1
+      },
+      "makerfabs": {
+        "no-vendor-examples": 4,
+        "disagrees": 1,
+        "no-vendor-codec": 1
+      },
+      "mclimate": {
+        "disagrees": 2,
+        "agrees": 1
+      },
+      "milesight": {
+        "agrees": 64,
+        "no-vendor-examples": 6,
+        "disagrees": 14
+      },
+      "netvox": {
+        "agrees": 1
+      },
+      "radio-bridge": {
+        "no-vendor-codec": 1
+      },
+      "radionode": {
+        "disagrees": 1
+      },
+      "rakwireless": {
+        "no-vendor-codec": 1
+      }
+    },
+    "decentlab-decoders": {
+      "decentlab": {
+        "agrees": 58
+      }
+    }
+  },
+  "exceptions": {},
+  "schemas": {
+    "arwin/lrs10701.yaml": {
+      "ttn": {
+        "status": "disagrees",
+        "problems": 8,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-5tm.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 10,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-alb.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 10,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-atm22.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 20,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-atm41.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 38,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-atm41g2.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 36,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-blg.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 10,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-ctd10.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 12,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-cws.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 16,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-cws2.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 20,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-dlr2-002.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 8,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-dlr2-003.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 4,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-dlr2-004-10.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 6,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-dlr2-005.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 6,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-dlr2-006.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 6,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-dlr2-008-2000.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 6,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-dlr2-009-2000.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 8,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-dlr2-010.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 16,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-dlr2-011.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 8,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-dlr2-012.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 6,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-ds18.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 6,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-dws-232263168-0000302459-1370.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "no-vendor-codec",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-gmm.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 18,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-iam.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 44,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-ifd.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 6,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-ilt.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 6,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-isd.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 6,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-isf.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 34,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-itst.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 8,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-kl66-1538372-464859.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 16,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-lid.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 26,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-lp8p.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 38,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-lpw.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 6,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-lws.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 6,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-mbx.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 8,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-mes5.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 14,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-ntu.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 14,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-optod.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 14,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-par.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 6,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-pheht.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 14,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-pm.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 38,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-pr21-1-10.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 8,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-pr26-0-1.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 8,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-pr36-8192.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 8,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-pr36ctd-8192-1024.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 12,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-pyr.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 6,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-rad.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 12,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-rhc.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 8,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-sdd.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 40,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-sht35.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 8,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-smtp.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 36,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-tbrg-01.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 10,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-tp.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 36,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-trs11.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 8,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-trs12.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 12,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-trs21.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 8,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-wrm.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 12,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-zn1.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 6,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "decentlab/dl-zn2.yaml": {
+      "decentlab-decoders": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      },
+      "ttn": {
+        "status": "disagrees",
+        "problems": 6,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "digital-matter/oyster.yaml": {
+      "ttn": {
+        "status": "disagrees",
+        "problems": 30,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "dnt/dnt-lw-wsci-2-1-1.yaml": {
+      "ttn": {
+        "status": "disagrees",
+        "problems": 10,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "dnt/dnt-lw-wsci.yaml": {
+      "ttn": {
+        "status": "disagrees",
+        "problems": 10,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "dragino/laq4.yaml": {
+      "ttn": {
+        "status": "disagrees",
+        "problems": 14,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "elsys/ers.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "hbi/mla20.yaml": {
+      "ttn": {
+        "status": "no-vendor-codec",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "makerfabs/4-channel-adc.yaml": {
+      "ttn": {
+        "status": "no-vendor-examples",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "makerfabs/ath20.yaml": {
+      "ttn": {
+        "status": "disagrees",
+        "problems": 6,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "makerfabs/gps-tracker.yaml": {
+      "ttn": {
+        "status": "no-vendor-codec",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "makerfabs/leaf-moisture-sn-3001.yaml": {
+      "ttn": {
+        "status": "no-vendor-examples",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "makerfabs/pipe-pressure.yaml": {
+      "ttn": {
+        "status": "no-vendor-examples",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "makerfabs/soil-monitor.yaml": {
+      "ttn": {
+        "status": "no-vendor-examples",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "mclimate/flood-sensor.yaml": {
+      "ttn": {
+        "status": "disagrees",
+        "problems": 2,
+        "decode_failures": 2,
+        "notes": 0
+      }
+    },
+    "mclimate/t-valve.yaml": {
+      "ttn": {
+        "status": "disagrees",
+        "problems": 2,
+        "decode_failures": 2,
+        "notes": 0
+      }
+    },
+    "mclimate/vicki.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/am102.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/am102l.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/am103.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/am103l.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/am104.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/am107.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/am307.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/am307l.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/am308.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/am308l.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/am319.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/am319l.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/at101-fh.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/at101.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/ct101.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/ct103.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/ct105.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/ct303.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/ct305.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/ct310.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/em300-di.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/em300-mcs.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/em300-mld.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/em300-sld.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/em300-th.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/em300-zld.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/em310-tilt.yaml": {
+      "ttn": {
+        "status": "no-vendor-examples",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/em310-udl.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/em320-th.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/em320-tilt.yaml": {
+      "ttn": {
+        "status": "disagrees",
+        "problems": 2,
+        "decode_failures": 2,
+        "notes": 0
+      }
+    },
+    "milesight/em400-mud.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/em400-tld.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/em400-udl.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/em410-rdl.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/em500-co2.yaml": {
+      "ttn": {
+        "status": "no-vendor-examples",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/em500-lgt.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/em500-pp.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/em500-pt100.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/em500-smt.yaml": {
+      "ttn": {
+        "status": "no-vendor-examples",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/em500-smtc.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/em500-swl.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/em500-udl.yaml": {
+      "ttn": {
+        "status": "no-vendor-examples",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/gs101.yaml": {
+      "ttn": {
+        "status": "no-vendor-examples",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/gs301.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/ts101.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/ts201.yaml": {
+      "ttn": {
+        "status": "disagrees",
+        "problems": 4,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/ts201v2.yaml": {
+      "ttn": {
+        "status": "disagrees",
+        "problems": 4,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/ts30x.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/uc100.yaml": {
+      "ttn": {
+        "status": "disagrees",
+        "problems": 2,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/uc1114.yaml": {
+      "ttn": {
+        "status": "disagrees",
+        "problems": 4,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/uc1152.yaml": {
+      "ttn": {
+        "status": "disagrees",
+        "problems": 2,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/uc300.yaml": {
+      "ttn": {
+        "status": "disagrees",
+        "problems": 2,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/uc50x.yaml": {
+      "ttn": {
+        "status": "disagrees",
+        "problems": 4,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/uc51x.yaml": {
+      "ttn": {
+        "status": "disagrees",
+        "problems": 2,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/vs121.yaml": {
+      "ttn": {
+        "status": "disagrees",
+        "problems": 2,
+        "decode_failures": 2,
+        "notes": 0
+      }
+    },
+    "milesight/vs135.yaml": {
+      "ttn": {
+        "status": "disagrees",
+        "problems": 16,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/vs321.yaml": {
+      "ttn": {
+        "status": "disagrees",
+        "problems": 2,
+        "decode_failures": 2,
+        "notes": 0
+      }
+    },
+    "milesight/vs330.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/vs340.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/vs341.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/vs350.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/vs351.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/vs360.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/vs370.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/vs373.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/ws101.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/ws136.yaml": {
+      "ttn": {
+        "status": "disagrees",
+        "problems": 2,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/ws156.yaml": {
+      "ttn": {
+        "status": "disagrees",
+        "problems": 2,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/ws201.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/ws202.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/ws203.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/ws301.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/ws302.yaml": {
+      "ttn": {
+        "status": "no-vendor-examples",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/ws303.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/ws50x.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/ws515.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/ws52x.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/ws558.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/wt101.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/wt201v1.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/wt201v2.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/wts305.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/wts505.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "milesight/wts506.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "netvox/r718x.yaml": {
+      "ttn": {
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "radio-bridge/rbs30x.yaml": {
+      "ttn": {
+        "status": "no-vendor-codec",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "radionode/rn320bth.yaml": {
+      "ttn": {
+        "status": "disagrees",
+        "problems": 14,
+        "decode_failures": 2,
+        "notes": 0
+      }
+    },
+    "rakwireless/qingping.yaml": {
+      "ttn": {
+        "status": "no-vendor-codec",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    }
+  }
+}

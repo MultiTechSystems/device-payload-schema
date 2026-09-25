@@ -1,0 +1,4 @@
+{
+  "_comment": "Known cross-implementation divergences: corpus vectors the Python reference interpreter passes and another implementation does not. Written by tools/verdicts-gate.py --write-baseline; every entry needs a reason. A ratchet: a divergence not listed here fails the gate, and a listed one that no longer occurs fails it too, so remove it. See tools/verdicts-gate.py.",
+  "divergences": []
+}

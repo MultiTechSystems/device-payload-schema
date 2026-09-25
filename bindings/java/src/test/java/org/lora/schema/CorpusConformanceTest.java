@@ -44,11 +44,14 @@ class CorpusConformanceTest {
     @Test
     void corpusVectorsDecodeAsExpected() throws IOException {
         Path root = Path.of("..", "..", "schemas", "devices");
+        String rootOverride = System.getenv("CORPUS_ROOT"); // see CorpusReport
+        if (rootOverride != null && !rootOverride.isEmpty()) root = Path.of(rootOverride);
         if (!Files.isDirectory(root)) {
             return; // corpus unavailable
         }
         int total = 0, passed = 0;
         Map<String, Integer> failures = new LinkedHashMap<>();
+        CorpusReport report = new CorpusReport();
 
         List<Path> files;
         try (Stream<Path> walk = Files.walk(root)) {
@@ -56,6 +59,8 @@ class CorpusConformanceTest {
         }
 
         for (Path file : files) {
+            String rel = CorpusReport.relative(root.relativize(file).toString());
+            if (!report.includes(rel)) continue;
             String text = Files.readString(file);
             Map<String, Object> raw;
             try {
@@ -73,20 +78,34 @@ class CorpusConformanceTest {
             } catch (RuntimeException e) {
                 total += vectors.size();
                 failures.merge(file.getFileName() + ": parse: " + e.getMessage(), 1, Integer::sum);
+                for (int index = 0; index < vectors.size(); index++) {
+                    if (!(vectors.get(index) instanceof Map<?, ?> vector)) continue;
+                    if (vector.get("payload") == null) {
+                        report.add(rel, index, vector.get("name"), "skip", "no payload (encode vector)");
+                    } else {
+                        report.add(rel, index, vector.get("name"), "error", "parse: " + e.getMessage());
+                    }
+                }
                 continue;
             }
-            for (Object vectorRaw : vectors) {
+            for (int index = 0; index < vectors.size(); index++) {
+                Object vectorRaw = vectors.get(index);
                 total++;
                 if (!(vectorRaw instanceof Map<?, ?> vector)) continue;
+                Object vectorName = vector.get("name");
                 // An encode vector carries the values to encode and no payload to
                 // decode (PS-047); it is not a failed decode. tools/vector-verdicts.py
                 // runs those on both conformance paths.
                 if (vector.get("payload") == null) {
+                    report.add(rel, index, vectorName, "skip", "no payload (encode vector)");
                     continue;
                 }
                 String payloadHex = String.valueOf(vector.get("payload")).replace(" ", "");
                 Object expectedRaw = vector.get("expected");
-                if (!(expectedRaw instanceof Map<?, ?> expected)) continue;
+                if (!(expectedRaw instanceof Map<?, ?> expected)) {
+                    report.add(rel, index, vectorName, "skip", "no expected block");
+                    continue;
+                }
                 try {
                     byte[] payload = hexToBytes(payloadHex);
                     // Both spellings occur in the corpus. Reading only `fPort` meant
@@ -113,12 +132,16 @@ class CorpusConformanceTest {
                     }
                     if (mismatch == null) {
                         passed++;
+                        report.add(rel, index, vectorName, "pass", "");
                     } else {
                         failures.merge(file.getFileName() + ": " + mismatch, 1, Integer::sum);
+                        report.add(rel, index, vectorName, "fail", mismatch);
                     }
                 } catch (RuntimeException e) {
                     failures.merge(file.getFileName() + ": " + e.getClass().getSimpleName()
                             + ": " + e.getMessage(), 1, Integer::sum);
+                    report.add(rel, index, vectorName, "error",
+                            e.getClass().getSimpleName() + ": " + e.getMessage());
                 }
             }
         }
@@ -133,7 +156,11 @@ class CorpusConformanceTest {
             }
             System.out.println("  " + detail);
         }
-        if (passed < CORPUS_FLOOR) {
+        report.write();
+        if (report.restricted()) {
+            System.out.printf("CORPUS_ONLY/CORPUS_ROOT is set: %d schema(s) selected, floor %d not applied%n",
+                    report.restrictedCount(), CORPUS_FLOOR);
+        } else if (passed < CORPUS_FLOOR) {
             throw new AssertionError("only " + passed + " corpus vectors pass, floor is " + CORPUS_FLOOR);
         }
     }

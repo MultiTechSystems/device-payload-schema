@@ -88,6 +88,8 @@ Generated inventory of this repository: what lives where, what each document cov
 | `tools/compose_library_vectors.py` | Make the schema library's test vectors runnable. |
 | `tools/convert_decentlab.py` | Decentlab Protocol V2 Codec → Payload Schema Schema Converter |
 | `tools/convert_milesight.py` | Milesight IoT Codec → Payload Schema Schema Converter |
+| `tools/corpus-report.py` | Write a per-vector corpus report for the Python interpreter or the generated TS013 codec. |
+| `tools/crossval-gate.py` | CI gate: vendor cross-validation must not regress. |
 | `tools/crossvalidate_decentlab.py` | Check decentlab schemas against the vendor's decoders. |
 | `tools/crossvalidate_js_json.py` | diff interpreter JSON against the generated TS013 codec. |
 | `tools/crossvalidate_ttn.py` | Check schemas against The Things Network device repository. |
@@ -102,16 +104,20 @@ Generated inventory of this repository: what lives where, what each document cov
 | `tools/generate_jsonschema.py` | Generate JSON Schema for Payload Schema validation |
 | `tools/generate_output_schema.py` | Generate JSON Schema for device codec output. |
 | `tools/generate_ts013_codec.py` | Generate TS013-compliant JavaScript codec from Payload Schema YAML. |
+| `tools/mutation-gate.py` | CI gate: no schema's mutation score may fall. |
 | `tools/payload_size_calc.py` | Calculate payload sizes for all flag/port combinations. |
+| `tools/provenance-gate.py` | independent provenance for the device schemas a change touches. |
 | `tools/qr_schema.py` | QR Code Schema Embedding Utilities |
 | `tools/schema-mutation.py` | How well do a schema's test vectors constrain it? Mutate the schema and see. |
 | `tools/schema_base64.py` | Encode/decode Payload Schemas to/from base64 |
 | `tools/schema_binary.py` | Compact Binary Schema Encoder/Decoder |
 | `tools/schema_interpreter.py` | Runtime Schema Interpreter for Payload Decoding |
 | `tools/schema_preprocessor.py` | Schema Preprocessor - Resolves cross-file $ref references. |
+| `tools/schema_vocabulary.py` | The key vocabulary of the payload schema language, per context, backed by the code. |
 | `tools/score_schema.py` | Quality scoring tool for payload schemas. |
 | `tools/validate_schema.py` | Validate schema and run test vectors |
 | `tools/vector-verdicts.py` | Execute every corpus test vector through both conformance paths and record a verdict. |
+| `tools/verdicts-gate.py` | Five-implementation verdicts, vector by vector: the gate a pass count cannot be. |
 | `tools/verify_spec_completeness.py` | Requirements traceability and spec completeness verification. |
 
 ## Device schemas

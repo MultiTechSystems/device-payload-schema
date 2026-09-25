@@ -173,3 +173,43 @@ test_vectors:
       category: 17
       cid: 2
       confirm: 170
+
+  # Encode vectors: the same bytes built from the values, verified against the
+  # interpreter's encoder and the composed schema's generated codec, which agree on
+  # them (PS-047). `tools/compose_library_vectors.py` places `encode_<name>` in the
+  # composed schema of vector `<name>`.
+
+  - name: encode_enable_logging
+    command: set_config_req
+    description: "Encode the values decoded from enable_logging"
+    direction: downlink
+    source: generated
+    input:
+      category: 17
+      cid: 0
+      enable: 1
+      max_records: 256
+    expected_payload: "1100010100"
+
+  - name: encode_fetch_all
+    command: fetch_req
+    description: "Encode the values decoded from fetch_all"
+    direction: downlink
+    source: generated
+    input:
+      category: 17
+      cid: 1
+      start_time: 0
+      end_time: 0
+    expected_payload: "11010000000000000000"
+
+  - name: encode_clear_log
+    command: clear_req
+    description: "Encode the values decoded from clear_log"
+    direction: downlink
+    source: generated
+    input:
+      category: 17
+      cid: 2
+      confirm: 170
+    expected_payload: "1102aa"

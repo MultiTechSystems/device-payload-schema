@@ -28,6 +28,7 @@ import json
 import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
+from typing import Optional
 from pathlib import Path
 
 import yaml
@@ -182,7 +183,7 @@ class VectorVerdict:
     schema: str
     schema_file: str
     vector: str
-    fport: int | None
+    fport: Optional[int]
     interpreted: str
     generated: str
     detail: str = ""
