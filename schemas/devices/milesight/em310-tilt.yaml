@@ -233,3 +233,62 @@ test_vectors:
     source: vendor-codec
     expected:
       device_status: "on"
+  - name: reset_event_byte_one
+    description: "Reset-event frame with the byte 0x01, the index the vendor's own map labels 'reset'"
+    payload: "FFFE01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      reset_event: "reset"
+  - name: device_status_byte_one
+    description: "Device-status frame with the byte 0x01, the index the vendor's own map labels 'on'"
+    payload: "FF0B01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      device_status: "on"
+  - name: lorawan_class_b
+    description: "LoRaWAN class byte 0x01"
+    payload: "FF0F01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      lorawan_class: "Class B"
+  - name: lorawan_class_c
+    description: "LoRaWAN class byte 0x02"
+    payload: "FF0F02"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      lorawan_class: "Class C"
+  - name: lorawan_class_ctob
+    description: "LoRaWAN class byte 0x03"
+    payload: "FF0F03"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      lorawan_class: "Class CtoB"
+  - name: angles_threshold_y
+    description: "Angle words 0x1234/0xFEDC/0x0456 little-endian, threshold byte 0x02 sets Y alone"
+    payload: "03CF3412DCFE560402"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      angle_x: 46.6
+      angle_y: -2.92
+      angle_z: 11.1
+      threshold_x: "normal"
+      threshold_y: "trigger"
+      threshold_z: "normal"
+  - name: angles_threshold_z
+    description: "Angle words with threshold byte 0x04 setting Z alone"
+    payload: "03CF3412DCFE560404"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      angle_x: 46.6
+      angle_y: -2.92
+      angle_z: 11.1
+      threshold_x: "normal"
+      threshold_y: "normal"
+      threshold_z: "trigger"

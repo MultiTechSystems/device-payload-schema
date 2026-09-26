@@ -292,3 +292,151 @@ test_vectors:
       period_in: 1
       period_out: 2
       period_count_alarm: "unknown"
+  - name: ch255_type254_reset_event_reset
+    description: "Channel 255 type 254, chosen to pin reset_event; expected values from the vendor's own decoder"
+    payload: "FFFE01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      reset_event: "reset"
+  - name: ch255_type11_device_status_on
+    description: "Channel 255 type 11, chosen to pin device_status; expected values from the vendor's own decoder"
+    payload: "FF0B01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      device_status: "on"
+  - name: ch3_type103_temperature_byte_order
+    description: "Channel 3 type 103, chosen to pin temperature; expected values from the vendor's own decoder"
+    payload: "03671201"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 27.4
+  - name: ch4_type204_total_in_byte_order
+    description: "Channel 4 type 204, chosen to pin total_in, total_out; expected values from the vendor's own decoder"
+    payload: "04CC00120100"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      total_in: 4608
+      total_out: 1
+  - name: ch5_type204_period_in_byte_order
+    description: "Channel 5 type 204, chosen to pin period_in, period_out; expected values from the vendor's own decoder"
+    payload: "05CC00120100"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      period_in: 4608
+      period_out: 1
+  - name: ch10_type239_timestamp_byte_order
+    description: "Channel 10 type 239, chosen to pin timestamp; expected values from the vendor's own decoder"
+    payload: "0AEF12010000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      timestamp: 274
+  - name: ch131_type103_temperature_alarm_labels
+    description: "Channel 131 type 103, chosen to pin temperature_alarm; expected values from the vendor's own decoder"
+    payload: "8367120100"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 27.4
+      temperature_alarm: "threshold alarm release"
+  - name: ch131_type103_temperature_alarm_threshold_alarm
+    description: "Channel 131 type 103, chosen to pin temperature_alarm; expected values from the vendor's own decoder"
+    payload: "8367001201"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 460.8
+      temperature_alarm: "threshold alarm"
+  - name: ch131_type103_temperature_alarm_unmapped
+    description: "Channel 131 type 103, chosen to pin temperature_alarm; expected values from the vendor's own decoder"
+    payload: "8367003412"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 1331.2
+      temperature_alarm: "unknown"
+  - name: ch131_type103_temperature_alarm_high_temperature_alarm_release
+    description: "Channel 131 type 103, chosen to pin temperature_alarm; expected values from the vendor's own decoder"
+    payload: "8367000004"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 0
+      temperature_alarm: "high temperature alarm release"
+  - name: ch132_type204_total_count_alarm_threshold_alarm_release
+    description: "Channel 132 type 204, chosen to pin total_count_alarm; expected values from the vendor's own decoder"
+    payload: "84CC1201000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      total_in: 274
+      total_out: 0
+      total_count_alarm: "threshold alarm release"
+  - name: ch132_type204_total_count_alarm_unmapped
+    description: "Channel 132 type 204, chosen to pin total_count_alarm; expected values from the vendor's own decoder"
+    payload: "84CC0000003412"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      total_in: 0
+      total_out: 13312
+      total_count_alarm: "unknown"
+  - name: ch132_type204_total_count_alarm_high_temperature_alarm
+    description: "Channel 132 type 204, chosen to pin total_count_alarm; expected values from the vendor's own decoder"
+    payload: "84CC0000000003"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      total_in: 0
+      total_out: 0
+      total_count_alarm: "high temperature alarm"
+  - name: ch132_type204_total_count_alarm_high_temperature_alarm_release
+    description: "Channel 132 type 204, chosen to pin total_count_alarm; expected values from the vendor's own decoder"
+    payload: "84CC0000000004"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      total_in: 0
+      total_out: 0
+      total_count_alarm: "high temperature alarm release"
+  - name: ch133_type204_period_count_alarm_labels
+    description: "Channel 133 type 204, chosen to pin period_count_alarm; expected values from the vendor's own decoder"
+    payload: "85CC1201000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      period_in: 274
+      period_out: 0
+      period_count_alarm: "threshold alarm release"
+  - name: ch133_type204_period_count_alarm_threshold_alarm
+    description: "Channel 133 type 204, chosen to pin period_count_alarm; expected values from the vendor's own decoder"
+    payload: "85CC0000001201"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      period_in: 0
+      period_out: 4608
+      period_count_alarm: "threshold alarm"
+  - name: ch133_type204_period_count_alarm_high_temperature_alarm
+    description: "Channel 133 type 204, chosen to pin period_count_alarm; expected values from the vendor's own decoder"
+    payload: "85CC0000000003"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      period_in: 0
+      period_out: 0
+      period_count_alarm: "high temperature alarm"
+  - name: ch133_type204_period_count_alarm_high_temperature_alarm_release
+    description: "Channel 133 type 204, chosen to pin period_count_alarm; expected values from the vendor's own decoder"
+    payload: "85CC0000000004"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      period_in: 0
+      period_out: 0
+      period_count_alarm: "high temperature alarm release"

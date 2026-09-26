@@ -123,3 +123,10 @@ test_vectors:
     source: vendor-codec
     expected:
       power: "on"
+  - name: ch255_type11_power_on
+    description: "Channel 255 type 11, chosen to pin power; expected values from the vendor's own decoder"
+    payload: "FF0B01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      power: "on"

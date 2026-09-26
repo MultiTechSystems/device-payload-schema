@@ -117,3 +117,13 @@ test_vectors:
       dendrometer_a_position: 28228.752613067627
       dendrometer_b_position: -156.25
       battery_voltage: 3
+  - name: asymmetric_device_id
+    description: "Vendor example with device id 0x1234, so a byte-swapped id reads 0x3412"
+    source: vendor-codec
+    payload: "0212340003409a00863039003e0c54"
+    expected:
+      protocol_version: 2
+      device_id: 4660
+      dendrometer_a_position: 976.9296646118164
+      dendrometer_b_position: 11259.996891021729
+      battery_voltage: 3.156

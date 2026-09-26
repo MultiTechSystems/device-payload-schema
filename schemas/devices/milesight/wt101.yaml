@@ -312,3 +312,44 @@ test_vectors:
         start_day: 31
         end_month: 1
         end_day: 31
+  - name: ch255_type254_reset_event_reset
+    description: "Channel 255 type 254, chosen to pin reset_event; expected values from the vendor's own decoder"
+    payload: "FFFE01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      reset_event: "reset"
+  - name: ch255_type11_device_status_on
+    description: "Channel 255 type 11, chosen to pin device_status; expected values from the vendor's own decoder"
+    payload: "FF0B01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      device_status: "on"
+  - name: ch9_type144_motor_stroke_byte_order
+    description: "Channel 9 type 144, chosen to pin motor_stroke; expected values from the vendor's own decoder"
+    payload: "09901201"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      motor_stroke: 274
+  - name: ch11_type144_motor_position_byte_order
+    description: "Channel 11 type 144, chosen to pin motor_position; expected values from the vendor's own decoder"
+    payload: "0B901201"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      motor_position: 274
+  - name: ch249_type51_enable_disable
+    description: "Channel 249 type 51, chosen to pin enable; expected values from the vendor's own decoder"
+    payload: "F93300120100000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      heating_date:
+        enable: "disable"
+        report_interval: 274
+        start_month: 0
+        start_day: 0
+        end_month: 0
+        end_day: 0

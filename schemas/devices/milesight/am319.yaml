@@ -270,3 +270,17 @@ test_vectors:
     source: vendor-codec
     expected:
       temperature: -0.1
+  - name: tvoc_iaq_u16_byte_order
+    description: "TVOC (0xE6 type) word 0x0134 little-endian"
+    payload: "08E63401"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      tvoc: 308
+  - name: pir_idle
+    description: "PIR byte 0x00, the vendor's 'idle'"
+    payload: "050000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      pir: "idle"

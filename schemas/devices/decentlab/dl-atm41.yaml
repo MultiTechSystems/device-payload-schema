@@ -251,3 +251,28 @@ test_vectors:
       device_id: 4660
       protocol_version: 2
       battery_voltage: 3.061
+  - name: precipitation_exact_1mm
+    description: "Vendor example with precipitation word 0x83E8, which the decoder yields as exactly 1 mm"
+    source: vendor-codec
+    payload: "02035a0003800a83e8800080008009812b8014810880b4a57c820c810980027fe88056800880040bf5"
+    expected:
+      protocol_version: 2
+      device_id: 858
+      solar_radiation: 10
+      precipitation: 1
+      lightning_strike_count: 0
+      lightning_average_distance: 0
+      wind_speed: 0.09
+      wind_direction: 29.9
+      maximum_wind_speed: 0.2
+      air_temperature: 26.4
+      vapor_pressure: 1.8
+      atmospheric_pressure: 95.96
+      relative_humidity: 52.4
+      sensor_temperature_internal: 26.5
+      x_orientation_angle: 0.2
+      y_orientation_angle: -2.4
+      compass_heading: 86
+      north_wind_speed: 0.08
+      east_wind_speed: 0.04
+      battery_voltage: 3.061

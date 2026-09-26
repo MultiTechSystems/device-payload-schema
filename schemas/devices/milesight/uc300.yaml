@@ -190,3 +190,87 @@ test_vectors:
     source: vendor-codec
     expected:
       pt100_1: -0.1
+  - name: ch3_type0_digital_input_1_on
+    description: "Channel 3 type 0, chosen to pin digital_input_1; expected values from the vendor's own decoder"
+    payload: "030001"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      digital_input_1: "on"
+  - name: ch4_type0_digital_input_2_on
+    description: "Channel 4 type 0, chosen to pin digital_input_2; expected values from the vendor's own decoder"
+    payload: "040001"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      digital_input_2: "on"
+  - name: ch5_type0_digital_input_3_on
+    description: "Channel 5 type 0, chosen to pin digital_input_3; expected values from the vendor's own decoder"
+    payload: "050001"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      digital_input_3: "on"
+  - name: ch6_type0_digital_input_4_on
+    description: "Channel 6 type 0, chosen to pin digital_input_4; expected values from the vendor's own decoder"
+    payload: "060001"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      digital_input_4: "on"
+  - name: ch7_type1_digital_output_1_on
+    description: "Channel 7 type 1, chosen to pin digital_output_1; expected values from the vendor's own decoder"
+    payload: "070101"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      digital_output_1: "on"
+  - name: ch8_type1_digital_output_2_on
+    description: "Channel 8 type 1, chosen to pin digital_output_2; expected values from the vendor's own decoder"
+    payload: "080101"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      digital_output_2: "on"
+  - name: ch3_type200_pulse_count_1_byte_order
+    description: "Channel 3 type 200, chosen to pin pulse_count_1; expected values from the vendor's own decoder"
+    payload: "03C812010000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      pulse_count_1: 274
+  - name: ch4_type200_pulse_count_2_byte_order
+    description: "Channel 4 type 200, chosen to pin pulse_count_2; expected values from the vendor's own decoder"
+    payload: "04C812010000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      pulse_count_2: 274
+  - name: ch5_type200_pulse_count_3_byte_order
+    description: "Channel 5 type 200, chosen to pin pulse_count_3; expected values from the vendor's own decoder"
+    payload: "05C812010000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      pulse_count_3: 274
+  - name: ch6_type200_pulse_count_4_byte_order
+    description: "Channel 6 type 200, chosen to pin pulse_count_4; expected values from the vendor's own decoder"
+    payload: "06C812010000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      pulse_count_4: 274
+  - name: ch9_type103_pt100_1_byte_order
+    description: "Channel 9 type 103, chosen to pin pt100_1; expected values from the vendor's own decoder"
+    payload: "09671201"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      pt100_1: 27.4
+  - name: ch10_type103_pt100_2_byte_order
+    description: "Channel 10 type 103, chosen to pin pt100_2; expected values from the vendor's own decoder"
+    payload: "0A671201"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      pt100_2: 27.4
