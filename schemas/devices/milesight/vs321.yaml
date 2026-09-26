@@ -287,3 +287,38 @@ test_vectors:
     source: vendor-codec
     expected:
       detection_status: "unknown"
+  - name: ch255_type254_reset_event_reset
+    description: "Channel 255 type 254, chosen to pin reset_event; expected values from the vendor's own decoder"
+    payload: "FFFE01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      reset_event: "reset"
+  - name: ch255_type11_device_status_on
+    description: "Channel 255 type 11, chosen to pin device_status; expected values from the vendor's own decoder"
+    payload: "FF0B01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      device_status: "on"
+  - name: ch5_type253_people_total_counts_byte_order
+    description: "Channel 5 type 253, chosen to pin people_total_counts; expected values from the vendor's own decoder"
+    payload: "05FD1201"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      people_total_counts: 274
+  - name: ch8_type244_detection_status_normal
+    description: "Channel 8 type 244, chosen to pin detection_status; expected values from the vendor's own decoder"
+    payload: "08F40000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      detection_status: "normal"
+  - name: ch10_type239_timestamp_byte_order
+    description: "Channel 10 type 239, chosen to pin timestamp; expected values from the vendor's own decoder"
+    payload: "0AEF12010000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      timestamp: 274

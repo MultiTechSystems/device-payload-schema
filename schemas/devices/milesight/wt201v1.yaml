@@ -431,3 +431,203 @@ test_vectors:
         stage_1_cool: "enable"
         stage_2_cool: "disable"
       device_status: "on"
+  - name: ch255_type254_reset_event_reset
+    description: "Channel 255 type 254, chosen to pin reset_event; expected values from the vendor's own decoder"
+    payload: "FFFE01"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      reset_event: "reset"
+  - name: ch255_type11_device_status_on
+    description: "Channel 255 type 11, chosen to pin device_status; expected values from the vendor's own decoder"
+    payload: "FF0B01"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      device_status: "on"
+  - name: ch3_type103_temperature_byte_order
+    description: "Channel 3 type 103, chosen to pin temperature; expected values from the vendor's own decoder"
+    payload: "03671201"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      temperature: 27.4
+  - name: ch4_type103_target_temperature_byte_order
+    description: "Channel 4 type 103, chosen to pin target_temperature; expected values from the vendor's own decoder"
+    payload: "04671201"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      target_temperature: 27.4
+  - name: ch7_type188_plan_type_labels
+    description: "Channel 7 type 188, chosen to pin plan_type; expected values from the vendor's own decoder"
+    payload: "07BC00"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      plan_type: "not executed"
+  - name: ch7_type188_plan_type_wake
+    description: "Channel 7 type 188, chosen to pin plan_type; expected values from the vendor's own decoder"
+    payload: "07BC01"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      plan_type: "wake"
+  - name: ch7_type188_plan_type_home
+    description: "Channel 7 type 188, chosen to pin plan_type; expected values from the vendor's own decoder"
+    payload: "07BC03"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      plan_type: "home"
+  - name: ch7_type188_plan_type_sleep
+    description: "Channel 7 type 188, chosen to pin plan_type; expected values from the vendor's own decoder"
+    payload: "07BC04"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      plan_type: "sleep"
+  - name: ch10_type110_y1_off
+    description: "Channel 10 type 110, chosen to pin e, g, ob, w1, w2_aux, y1, y2_gl; expected values from the vendor's own decoder"
+    payload: "0A6E2A"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      wires_relay:
+        y1: "off"
+        y2_gl: "on"
+        w1: "off"
+        w2_aux: "on"
+        e: "off"
+        g: "on"
+        ob: "off"
+  - name: ch255_type203_heat_enable
+    description: "Channel 255 type 203, chosen to pin auto, aux_heat, cool, em_heat, heat, stage_1_heat, stage_2_cool, stage_2_heat, stage_3_heat, stage_4_heat; expected values from the vendor's own decoder"
+    payload: "FFCB55950D"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      temperature_control_support_mode:
+        heat: "enable"
+        em_heat: "disable"
+        cool: "enable"
+        auto: "disable"
+      temperature_control_support_status:
+        stage_1_heat: "enable"
+        stage_2_heat: "disable"
+        stage_3_heat: "enable"
+        stage_4_heat: "disable"
+        aux_heat: "enable"
+        stage_1_cool: "enable"
+        stage_2_cool: "disable"
+  - name: ch255_type203_stage_1_cool_disable
+    description: "Channel 255 type 203, chosen to pin stage_1_cool, stage_2_cool; expected values from the vendor's own decoder"
+    payload: "FFCB003412"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      temperature_control_support_mode:
+        heat: "disable"
+        em_heat: "disable"
+        cool: "disable"
+        auto: "disable"
+      temperature_control_support_status:
+        stage_1_heat: "disable"
+        stage_2_heat: "disable"
+        stage_3_heat: "enable"
+        stage_4_heat: "disable"
+        aux_heat: "enable"
+        stage_1_cool: "disable"
+        stage_2_cool: "enable"
+  - name: ch131_type103_temperature_alarm_labels
+    description: "Channel 131 type 103, chosen to pin temperature_alarm; expected values from the vendor's own decoder"
+    payload: "8367001201"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      temperature: 460.8
+      temperature_alarm: "emergency heating timeout alarm"
+  - name: ch131_type103_temperature_alarm_unmapped
+    description: "Channel 131 type 103, chosen to pin temperature_alarm; expected values from the vendor's own decoder"
+    payload: "8367120100"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      temperature: 27.4
+      temperature_alarm: "unknown"
+  - name: ch131_type103_temperature_alarm_auxiliary_heating_timeout_alarm
+    description: "Channel 131 type 103, chosen to pin temperature_alarm; expected values from the vendor's own decoder"
+    payload: "8367000002"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      temperature: 0
+      temperature_alarm: "auxiliary heating timeout alarm"
+  - name: ch131_type103_temperature_alarm_persistent_low_temperature_alarm_release
+    description: "Channel 131 type 103, chosen to pin temperature_alarm; expected values from the vendor's own decoder"
+    payload: "8367000004"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      temperature: 0
+      temperature_alarm: "persistent low temperature alarm release"
+  - name: ch131_type103_temperature_alarm_persistent_high_temperature_alarm
+    description: "Channel 131 type 103, chosen to pin temperature_alarm; expected values from the vendor's own decoder"
+    payload: "8367000005"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      temperature: 0
+      temperature_alarm: "persistent high temperature alarm"
+  - name: ch131_type103_temperature_alarm_freeze_protection_alarm
+    description: "Channel 131 type 103, chosen to pin temperature_alarm; expected values from the vendor's own decoder"
+    payload: "8367000007"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      temperature: 0
+      temperature_alarm: "freeze protection alarm"
+  - name: ch131_type103_temperature_alarm_freeze_protection_alarm_release
+    description: "Channel 131 type 103, chosen to pin temperature_alarm; expected values from the vendor's own decoder"
+    payload: "8367000008"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      temperature: 0
+      temperature_alarm: "freeze protection alarm release"
+  - name: ch131_type103_temperature_alarm_threshold_alarm_release
+    description: "Channel 131 type 103, chosen to pin temperature_alarm; expected values from the vendor's own decoder"
+    payload: "836700000A"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      temperature: 0
+      temperature_alarm: "threshold alarm release"
+  - name: ch179_type103_temperature_sensor_status_unmapped
+    description: "Channel 179 type 103, chosen to pin temperature_sensor_status; expected values from the vendor's own decoder"
+    payload: "B36700"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      temperature_sensor_status: "unknown"
+  - name: ch179_type103_temperature_sensor_status_out_of_range
+    description: "Channel 179 type 103, chosen to pin temperature_sensor_status; expected values from the vendor's own decoder"
+    payload: "B36702"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      temperature_sensor_status: "out of range"
+  - name: ch185_type104_humidity_sensor_status_labels
+    description: "Channel 185 type 104, chosen to pin humidity_sensor_status; expected values from the vendor's own decoder"
+    payload: "B96801"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      humidity_sensor_status: "read failed"
+  - name: ch185_type104_humidity_sensor_status_out_of_range
+    description: "Channel 185 type 104, chosen to pin humidity_sensor_status; expected values from the vendor's own decoder"
+    payload: "B96802"
+    fPort: 1
+    source: vendor-codec
+    expected:
+      humidity_sensor_status: "out of range"

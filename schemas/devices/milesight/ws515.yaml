@@ -300,3 +300,31 @@ test_vectors:
     source: vendor-codec
     expected:
       temperature: -1.6
+  - name: ch255_type254_reset_event_reset
+    description: "Channel 255 type 254, chosen to pin reset_event; expected values from the vendor's own decoder"
+    payload: "FFFE01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      reset_event: "reset"
+  - name: ch255_type11_device_status_on
+    description: "Channel 255 type 11, chosen to pin device_status; expected values from the vendor's own decoder"
+    payload: "FF0B01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      device_status: "on"
+  - name: ch8_type112_socket_status_off
+    description: "Channel 8 type 112, chosen to pin socket_status; expected values from the vendor's own decoder"
+    payload: "087000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      socket_status: "off"
+  - name: ch9_type103_temperature_sensor_status_read_failed
+    description: "Channel 9 type 103, chosen to pin temperature_sensor_status; expected values from the vendor's own decoder"
+    payload: "0967FFFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature_sensor_status: "read failed"

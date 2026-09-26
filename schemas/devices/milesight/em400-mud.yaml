@@ -158,3 +158,26 @@ test_vectors:
     source: vendor-codec
     expected:
       distance: 65535
+  - name: temperature_s16_byte_order
+    description: "Temperature word 0xFEF6 little-endian: -26.6 C, asymmetric bytes pin byte order and sign"
+    payload: "0367F6FE"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: -26.6
+  - name: temperature_alarm_negative
+    description: "Temperature alarm frame: word 0xFEF6 is -26.6 C"
+    payload: "8367F6FE01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: -26.6
+      temperature_abnormal: true
+  - name: distance_alarm_byte_order
+    description: "Distance alarm frame: word 0x0934 little-endian"
+    payload: "8482340901"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      distance: 2356
+      distance_alarming: true

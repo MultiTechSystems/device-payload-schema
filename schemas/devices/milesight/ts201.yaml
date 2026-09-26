@@ -219,3 +219,45 @@ test_vectors:
     source: vendor-codec
     expected:
       device_status: "on"
+  - name: ch255_type15_lorawan_class_class_b
+    description: "Channel 255 type 15, chosen to pin lorawan_class; expected values from the vendor's own decoder"
+    payload: "FF0F01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      lorawan_class: "Class B"
+  - name: ch255_type15_lorawan_class_class_c
+    description: "Channel 255 type 15, chosen to pin lorawan_class; expected values from the vendor's own decoder"
+    payload: "FF0F02"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      lorawan_class: "Class C"
+  - name: ch255_type15_lorawan_class_class_ctob
+    description: "Channel 255 type 15, chosen to pin lorawan_class; expected values from the vendor's own decoder"
+    payload: "FF0F03"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      lorawan_class: "Class CtoB"
+  - name: ch255_type254_reset_event_reset
+    description: "Channel 255 type 254, chosen to pin reset_event; expected values from the vendor's own decoder"
+    payload: "FFFE01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      reset_event: "reset"
+  - name: ch255_type11_device_status_on
+    description: "Channel 255 type 11, chosen to pin device_status; expected values from the vendor's own decoder"
+    payload: "FF0B01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      device_status: "on"
+  - name: ch3_type103_temperature_byte_order
+    description: "Channel 3 type 103, chosen to pin temperature; expected values from the vendor's own decoder"
+    payload: "03671201"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 27.4

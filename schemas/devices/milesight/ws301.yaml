@@ -75,3 +75,10 @@ test_vectors:
     source: vendor-codec
     expected:
       battery: 255
+  - name: ch4_type0_install_no
+    description: "Channel 4 type 0, chosen to pin install; expected values from the vendor's own decoder"
+    payload: "040001"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      install: "no"

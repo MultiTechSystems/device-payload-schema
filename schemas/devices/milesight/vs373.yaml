@@ -338,3 +338,203 @@ test_vectors:
     expected:
       respiratory_status: "unknown"
       respiratory_rate: 100
+  - name: ch255_type11_device_status_on
+    description: "Channel 255 type 11, chosen to pin device_status; expected values from the vendor's own decoder"
+    payload: "FF0B01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      device_status: "on"
+  - name: ch255_type15_lorawan_class_class_b
+    description: "Channel 255 type 15, chosen to pin lorawan_class; expected values from the vendor's own decoder"
+    payload: "FF0F01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      lorawan_class: "Class B"
+  - name: ch255_type15_lorawan_class_class_c
+    description: "Channel 255 type 15, chosen to pin lorawan_class; expected values from the vendor's own decoder"
+    payload: "FF0F02"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      lorawan_class: "Class C"
+  - name: ch255_type15_lorawan_class_class_ctob
+    description: "Channel 255 type 15, chosen to pin lorawan_class; expected values from the vendor's own decoder"
+    payload: "FF0F03"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      lorawan_class: "Class CtoB"
+  - name: ch3_type248_detection_status_in_bed
+    description: "Channel 3 type 248, chosen to pin detection_status; expected values from the vendor's own decoder"
+    payload: "03F8020000000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      detection_status: "in_bed"
+      target_status: "normal"
+      use_time_now: 0
+      use_time_today: 0
+  - name: ch3_type248_detection_status_out_of_bed
+    description: "Channel 3 type 248, chosen to pin detection_status; expected values from the vendor's own decoder"
+    payload: "03F8030000000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      detection_status: "out_of_bed"
+      target_status: "normal"
+      use_time_now: 0
+      use_time_today: 0
+  - name: ch3_type248_detection_status_fall
+    description: "Channel 3 type 248, chosen to pin detection_status; expected values from the vendor's own decoder"
+    payload: "03F8040000000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      detection_status: "fall"
+      target_status: "normal"
+      use_time_now: 0
+      use_time_today: 0
+  - name: ch3_type248_target_status_motionless
+    description: "Channel 3 type 248, chosen to pin target_status; expected values from the vendor's own decoder"
+    payload: "03F8000100000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      detection_status: "normal"
+      target_status: "motionless"
+      use_time_now: 0
+      use_time_today: 0
+  - name: ch3_type248_target_status_abnormal
+    description: "Channel 3 type 248, chosen to pin target_status; expected values from the vendor's own decoder"
+    payload: "03F8000200000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      detection_status: "normal"
+      target_status: "abnormal"
+      use_time_now: 0
+      use_time_today: 0
+  - name: ch3_type248_target_status_lying_down
+    description: "Channel 3 type 248, chosen to pin target_status; expected values from the vendor's own decoder"
+    payload: "03F8000300000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      detection_status: "normal"
+      target_status: "lying_down"
+      use_time_now: 0
+      use_time_today: 0
+  - name: ch7_type176_detection_status_normal
+    description: "Channel 7 type 176, chosen to pin detection_status, target_status; expected values from the vendor's own decoder"
+    payload: "07B00000120100000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      detection_status: "normal"
+      target_status: "normal"
+      use_time_now: 274
+      use_time_today: 0
+  - name: ch7_type176_detection_status_in_bed
+    description: "Channel 7 type 176, chosen to pin detection_status; expected values from the vendor's own decoder"
+    payload: "07B00200000000000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      detection_status: "in_bed"
+      target_status: "normal"
+      use_time_now: 0
+      use_time_today: 0
+  - name: ch7_type176_detection_status_out_of_bed
+    description: "Channel 7 type 176, chosen to pin detection_status; expected values from the vendor's own decoder"
+    payload: "07B00300000000000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      detection_status: "out_of_bed"
+      target_status: "normal"
+      use_time_now: 0
+      use_time_today: 0
+  - name: ch7_type176_detection_status_fall
+    description: "Channel 7 type 176, chosen to pin detection_status; expected values from the vendor's own decoder"
+    payload: "07B00400000000000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      detection_status: "fall"
+      target_status: "normal"
+      use_time_now: 0
+      use_time_today: 0
+  - name: ch7_type176_target_status_abnormal
+    description: "Channel 7 type 176, chosen to pin target_status; expected values from the vendor's own decoder"
+    payload: "07B00002000000000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      detection_status: "normal"
+      target_status: "abnormal"
+      use_time_now: 0
+      use_time_today: 0
+  - name: ch7_type176_target_status_lying_down
+    description: "Channel 7 type 176, chosen to pin target_status; expected values from the vendor's own decoder"
+    payload: "07B00003000000000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      detection_status: "normal"
+      target_status: "lying_down"
+      use_time_now: 0
+      use_time_today: 0
+  - name: ch4_type249_region_1_occupancy_unmapped
+    description: "Channel 4 type 249, chosen to pin region_1_occupancy, region_2_occupancy; expected values from the vendor's own decoder"
+    payload: "04F912010000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      region_1_occupancy: "occupied"
+      region_2_occupancy: "vacant"
+      region_3_occupancy: "occupied"
+      region_4_occupancy: "occupied"
+  - name: ch5_type250_region_1_out_of_bed_time_byte_order
+    description: "Channel 5 type 250, chosen to pin region_1_out_of_bed_time, region_2_out_of_bed_time, region_3_out_of_bed_time, region_4_out_of_bed_time; expected values from the vendor's own decoder"
+    payload: "05FAC395CE1545176B73"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      region_1_out_of_bed_time: 38339
+      region_2_out_of_bed_time: 5582
+      region_3_out_of_bed_time: 5957
+      region_4_out_of_bed_time: 29547
+  - name: ch8_type177_respiratory_status_no_data_input
+    description: "Channel 8 type 177, chosen to pin respiratory_status; expected values from the vendor's own decoder"
+    payload: "08B1010000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      respiratory_status: "no_data_input"
+      respiratory_rate: 0
+  - name: ch8_type177_respiratory_status_tachypnea
+    description: "Channel 8 type 177, chosen to pin respiratory_status; expected values from the vendor's own decoder"
+    payload: "08B1030000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      respiratory_status: "tachypnea"
+      respiratory_rate: 0
+  - name: ch8_type177_respiratory_status_bradypnea
+    description: "Channel 8 type 177, chosen to pin respiratory_status; expected values from the vendor's own decoder"
+    payload: "08B1040000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      respiratory_status: "bradypnea"
+      respiratory_rate: 0
+  - name: ch8_type177_respiratory_status_undetectable
+    description: "Channel 8 type 177, chosen to pin respiratory_status; expected values from the vendor's own decoder"
+    payload: "08B1050000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      respiratory_status: "undetectable"
+      respiratory_rate: 0

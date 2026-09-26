@@ -519,3 +519,458 @@ test_vectors:
       event_type: 250
       info_header: 0x23
       stored_downlink: ""
+
+  # --- One vector per lookup label the vendor emits. Expected values from the vendor
+  # decoder (radio_bridge_packet_decoder.js) under node, mapped from its nested keys
+  # (Reset.Device, Button.Event, ATH.Event, ...) to this schema's flat ones; the
+  # vendor reports event_type as a Type string, and the byte it switches on is given.
+  - name: "Reset - No-Probe Temperature Sensor"
+    description: "Reset packet, device type 0x04"
+    payload: "10 00 04 12 01 05"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 0
+      device_type: "No-Probe Temperature Sensor"
+
+  - name: "Reset - Dual Push Button"
+    description: "Reset packet, device type 0x07"
+    payload: "10 00 07 12 01 05"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 0
+      device_type: "Dual Push Button"
+
+  - name: "Reset - Water Sensor"
+    description: "Reset packet, device type 0x0A"
+    payload: "10 00 0A 12 01 05"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 0
+      device_type: "Water Sensor"
+
+  - name: "Reset - Ambient Light Sensor"
+    description: "Reset packet, device type 0x0D"
+    payload: "10 00 0D 12 01 05"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 0
+      device_type: "Ambient Light Sensor"
+
+  - name: "Reset - Ultrasonic Level Sensor"
+    description: "Reset packet, device type 0x10"
+    payload: "10 00 10 12 01 05"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 0
+      device_type: "Ultrasonic Level Sensor"
+
+  - name: "Reset - Thermocouple Temperature Sensor"
+    description: "Reset packet, device type 0x13"
+    payload: "10 00 13 12 01 05"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 0
+      device_type: "Thermocouple Temperature Sensor"
+
+  - name: "Reset - Vibration Sensor - High Frequency"
+    description: "Reset packet, device type 0x1A"
+    payload: "10 00 1A 12 01 05"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 0
+      device_type: "Vibration Sensor - High Frequency"
+
+  - name: "Button 2 released"
+    description: "Button id 0x02, state 1"
+    payload: "10 06 02 01"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 6
+      button_id: "Button 2"
+      button_state: "Released"
+
+  - name: "Single button pressed"
+    description: "Button id 0x03 (single-button device)"
+    payload: "10 06 03 00"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 6
+      button_id: "Button"
+      button_state: "Pressed"
+
+  - name: "Water not present, level=50"
+    description: "Water state 1"
+    payload: "30 08 01 32"
+    source: vendor-codec
+    expected:
+      protocol_version: 3
+      packet_counter: 0
+      event_type: 8
+      water_state: "Water Not Present"
+      water_relative: 50
+
+  - name: "External temp with negative raw measurement"
+    description: "Raw measurement byte 0xB4 is -76"
+    payload: "10 09 00 19 B4"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 9
+      temperature_event: 0
+      temperature: 25
+      raw_measurement: -76
+
+  - name: "Tilt to vertical 90deg"
+    description: "Tilt event 0"
+    payload: "10 0A 00 5A"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 10
+      tilt_event: "Transitioned to Vertical"
+      tilt_angle: 90
+
+  - name: "Tilt report-on-change toward vertical 30deg"
+    description: "Tilt event 2"
+    payload: "10 0A 02 1E"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 10
+      tilt_event: "Report-on-Change Toward Vertical"
+      tilt_angle: 30
+
+  - name: "Tilt report-on-change toward horizontal 60deg"
+    description: "Tilt event 3"
+    payload: "10 0A 03 3C"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 10
+      tilt_event: "Report-on-Change Toward Horizontal"
+      tilt_angle: 60
+
+  - name: "ATH event 1"
+    description: "ATH event code 1"
+    payload: "10 0D 01 16 30 2D 00"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 13
+      ath_event: "Temperature has Risen Above Upper Threshold"
+
+  - name: "ATH event 2"
+    description: "ATH event code 2"
+    payload: "10 0D 02 16 30 2D 00"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 13
+      ath_event: "Temperature has Fallen Below Lower Threshold"
+
+  - name: "ATH event 3"
+    description: "ATH event code 3"
+    payload: "10 0D 03 16 30 2D 00"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 13
+      ath_event: "Temperature Report-on-Change Increase"
+
+  - name: "ATH event 5"
+    description: "ATH event code 5"
+    payload: "10 0D 05 16 30 2D 00"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 13
+      ath_event: "Humidity has Risen Above Upper Threshold"
+
+  - name: "ATH event 6"
+    description: "ATH event code 6"
+    payload: "10 0D 06 16 30 2D 00"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 13
+      ath_event: "Humidity has Fallen Below Lower Threshold"
+
+  - name: "ATH event 7"
+    description: "ATH event code 7"
+    payload: "10 0D 07 16 30 2D 00"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 13
+      ath_event: "Humidity Report-on-Change Increase"
+
+  - name: "ATH event 8"
+    description: "ATH event code 8"
+    payload: "10 0D 08 16 30 2D 00"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 13
+      ath_event: "Humidity Report-on-Change Decrease"
+
+  - name: "Ultrasonic event 1"
+    description: "Ultrasonic event code 1"
+    payload: "10 10 01 04 D2"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 16
+      ultrasonic_event: "Distance has Risen Above Upper Threshold"
+      distance: 1234
+
+  - name: "Ultrasonic event 2"
+    description: "Ultrasonic event code 2"
+    payload: "10 10 02 04 D2"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 16
+      ultrasonic_event: "Distance has Fallen Below Lower Threshold"
+      distance: 1234
+
+  - name: "Ultrasonic event 3"
+    description: "Ultrasonic event code 3"
+    payload: "10 10 03 04 D2"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 16
+      ultrasonic_event: "Report-on-Change Increase"
+      distance: 1234
+
+  - name: "Ultrasonic event 4"
+    description: "Ultrasonic event code 4"
+    payload: "10 10 04 04 D2"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 16
+      ultrasonic_event: "Report-on-Change Decrease"
+      distance: 1234
+
+  - name: "4-20mA event 1"
+    description: "Current loop event code 1"
+    payload: "10 11 01 04 D2"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 17
+      current_event: "Analog Value has Risen Above Upper Threshold"
+      current_ma: 12.34
+
+  - name: "4-20mA event 2"
+    description: "Current loop event code 2"
+    payload: "10 11 02 04 D2"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 17
+      current_event: "Analog Value has Fallen Below Lower Threshold"
+      current_ma: 12.34
+
+  - name: "4-20mA event 3"
+    description: "Current loop event code 3"
+    payload: "10 11 03 04 D2"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 17
+      current_event: "Report on Change Increase"
+      current_ma: 12.34
+
+  - name: "4-20mA event 4"
+    description: "Current loop event code 4"
+    payload: "10 11 04 04 D2"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 17
+      current_event: "Report on Change Decrease"
+      current_ma: 12.34
+
+  - name: "Thermocouple event 1"
+    description: "Thermocouple event code 1"
+    payload: "10 13 01 07 01 00"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 19
+      thermocouple_event: "Analog Value has Risen Above Upper Threshold"
+      thermocouple_temperature: 112.0625
+
+  - name: "Thermocouple event 2"
+    description: "Thermocouple event code 2"
+    payload: "10 13 02 07 01 00"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 19
+      thermocouple_event: "Analog Value has Fallen Below Lower Threshold"
+      thermocouple_temperature: 112.0625
+
+  - name: "Thermocouple event 3"
+    description: "Thermocouple event code 3"
+    payload: "10 13 03 07 01 00"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 19
+      thermocouple_event: "Report on Change Increase"
+      thermocouple_temperature: 112.0625
+
+  - name: "Thermocouple event 4"
+    description: "Thermocouple event code 4"
+    payload: "10 13 04 07 01 00"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 19
+      thermocouple_event: "Report on Change Decrease"
+      thermocouple_temperature: 112.0625
+
+  - name: "Voltmeter event 1"
+    description: "Voltmeter event code 1"
+    payload: "10 14 01 04 D2"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 20
+      voltmeter_event: "Voltage has Risen Above Upper Threshold"
+      voltage: 12.34
+
+  - name: "Voltmeter event 2"
+    description: "Voltmeter event code 2"
+    payload: "10 14 02 04 D2"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 20
+      voltmeter_event: "Voltage has Fallen Below Lower Threshold"
+      voltage: 12.34
+
+  - name: "Voltmeter event 3"
+    description: "Voltmeter event code 3"
+    payload: "10 14 03 04 D2"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 20
+      voltmeter_event: "Report on Change Increase"
+      voltage: 12.34
+
+  - name: "Voltmeter event 4"
+    description: "Voltmeter event code 4"
+    payload: "10 14 04 04 D2"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 20
+      voltmeter_event: "Report on Change Decrease"
+      voltage: 12.34
+
+  # Positive temperature only: for a byte above 127 the vendor reads this
+  # temperature as sign-magnitude (0x85 -> -5) where this schema's s8 gives -123.
+  - name: "High-precision tilt away from vertical, 22C"
+    description: "TILT-HP event 2; the vendor's Angle 45.5 is whole byte 45 + frac nibble 5"
+    payload: "10 0F 02 2D 50 16"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 15
+      tilt_hp_event: "Transitioned Away From 0-Degree Vertical Orientation"
+      temperature: 22
+
+  - name: "High-precision tilt event 0, 25C"
+    description: "TILT-HP event 0; vendor Angle 10.1, Temperature 25"
+    payload: "10 0F 00 0A 10 19"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 15
+      tilt_hp_event: "Periodic Report"
+      temperature: 25
+
+  - name: "High-precision tilt event 1, 25C"
+    description: "TILT-HP event 1; vendor Angle 10.1, Temperature 25"
+    payload: "10 0F 01 0A 10 19"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 15
+      tilt_hp_event: "Transitioned Toward 0-Degree Vertical Orientation"
+      temperature: 25
+
+  - name: "High-precision tilt event 3, 25C"
+    description: "TILT-HP event 3; vendor Angle 10.1, Temperature 25"
+    payload: "10 0F 03 0A 10 19"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 15
+      tilt_hp_event: "Report-on-Change Toward 0-Degree Vertical Orientation"
+      temperature: 25
+
+  - name: "High-precision tilt event 4, 25C"
+    description: "TILT-HP event 4; vendor Angle 10.1, Temperature 25"
+    payload: "10 0F 04 0A 10 19"
+    source: vendor-codec
+    expected:
+      protocol_version: 1
+      packet_counter: 0
+      event_type: 15
+      tilt_hp_event: "Report-on-Change Away From 0-Degree Vertical Orientation"
+      temperature: 25

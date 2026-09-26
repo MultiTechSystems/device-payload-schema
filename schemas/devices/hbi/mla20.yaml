@@ -619,3 +619,170 @@ test_vectors:
       days_since_function_test: 0
       days_since_duration_test: 0
       latest_duration_test: 0
+
+  - name: status_distinct_bits
+    description: "status (0x20): status bits chosen so each flag differs from its neighbour, ldt 0x0102"
+    source: vendor-codec
+    payload: "0001020C200A514D200E10140501021E"
+    expected:
+      version_major: 0
+      version_minor: 1
+      version_patch: 2
+      charger_status: 1
+      device_status: 5
+      radar_switch: 1
+      daylight_switch: 0
+      emergency_switch: 1
+      intensity_switch: 1
+      l2: 1
+      l1: 0
+      led_intensity: 32
+      battery_voltage: 3600
+      board_temperature: 20
+      days_since_function_test: 5
+      days_since_duration_test: 258
+      latest_duration_test: 30
+
+  - name: test_start_distinct_bits
+    description: "test-start (0x21): status bits chosen so each flag differs from its neighbour, ldt 0x0102"
+    source: vendor-codec
+    payload: "0001020D210B514D200E10140501021E03"
+    expected:
+      version_major: 0
+      version_minor: 1
+      version_patch: 2
+      charger_status: 1
+      device_status: 5
+      radar_switch: 1
+      daylight_switch: 0
+      emergency_switch: 1
+      intensity_switch: 1
+      l2: 1
+      l1: 0
+      led_intensity: 32
+      battery_voltage: 3600
+      board_temperature: 20
+      days_since_function_test: 5
+      days_since_duration_test: 258
+      latest_duration_test: 30
+      test_type: 3
+
+  - name: test_finished_distinct_bits
+    description: "test-finished (0x22): status bits chosen so each flag differs from its neighbour, ldt 0x0102"
+    source: vendor-codec
+    payload: "0001020F220D514D200E10140501021E04003C"
+    expected:
+      version_major: 0
+      version_minor: 1
+      version_patch: 2
+      charger_status: 1
+      device_status: 5
+      radar_switch: 1
+      daylight_switch: 0
+      emergency_switch: 1
+      intensity_switch: 1
+      l2: 1
+      l1: 0
+      led_intensity: 32
+      battery_voltage: 3600
+      board_temperature: 20
+      days_since_function_test: 5
+      days_since_duration_test: 258
+      latest_duration_test: 30
+      test_type: 4
+      test_duration: 60
+
+  - name: mains_failure_distinct_bits
+    description: "mains-failure (0x23): status bits chosen so each flag differs from its neighbour, ldt 0x0102"
+    source: vendor-codec
+    payload: "0001020C230A514D200E10140501021E"
+    expected:
+      version_major: 0
+      version_minor: 1
+      version_patch: 2
+      charger_status: 1
+      device_status: 5
+      radar_switch: 1
+      daylight_switch: 0
+      emergency_switch: 1
+      intensity_switch: 1
+      l2: 1
+      l1: 0
+      led_intensity: 32
+      battery_voltage: 3600
+      board_temperature: 20
+      days_since_function_test: 5
+      days_since_duration_test: 258
+      latest_duration_test: 30
+
+  - name: mains_restored_distinct_bits
+    description: "mains-restored (0x24): status bits chosen so each flag differs from its neighbour, ldt 0x0102"
+    source: vendor-codec
+    payload: "0001020E240C514D200E10140501021E0203"
+    expected:
+      version_major: 0
+      version_minor: 1
+      version_patch: 2
+      charger_status: 1
+      device_status: 5
+      radar_switch: 1
+      daylight_switch: 0
+      emergency_switch: 1
+      intensity_switch: 1
+      l2: 1
+      l1: 0
+      led_intensity: 32
+      battery_voltage: 3600
+      board_temperature: 20
+      days_since_function_test: 5
+      days_since_duration_test: 258
+      latest_duration_test: 30
+      mains_outage_duration: 515
+
+  - name: battery_failure_distinct_bits
+    description: "battery-failure (0x25): status bits chosen so each flag differs from its neighbour, ldt 0x0102"
+    source: vendor-codec
+    payload: "00010210250E514D200E10140501021E00000840"
+    expected:
+      version_major: 0
+      version_minor: 1
+      version_patch: 2
+      charger_status: 1
+      device_status: 5
+      radar_switch: 1
+      daylight_switch: 0
+      emergency_switch: 1
+      intensity_switch: 1
+      l2: 1
+      l1: 0
+      led_intensity: 32
+      battery_voltage: 3600
+      board_temperature: 20
+      days_since_function_test: 5
+      days_since_duration_test: 258
+      latest_duration_test: 30
+      failure_flags: 2112
+
+  - name: hardware_failure_distinct_bits
+    description: "hardware-failure (0x26): status bits chosen so each flag differs from its neighbour, ldt 0x0102"
+    source: vendor-codec
+    payload: "00010210260E514D200E10140501021E00002000"
+    expected:
+      version_major: 0
+      version_minor: 1
+      version_patch: 2
+      charger_status: 1
+      device_status: 5
+      radar_switch: 1
+      daylight_switch: 0
+      emergency_switch: 1
+      intensity_switch: 1
+      l2: 1
+      l1: 0
+      led_intensity: 32
+      battery_voltage: 3600
+      board_temperature: 20
+      days_since_function_test: 5
+      days_since_duration_test: 258
+      latest_duration_test: 30
+      failure_flags: 8192

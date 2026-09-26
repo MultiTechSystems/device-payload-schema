@@ -55,3 +55,31 @@ test_vectors:
     source: vendor-codec
     expected:
       alarm: "power down"
+  - name: ch255_type63_alarm_power_on
+    description: "Channel 255 type 63, chosen to pin alarm; expected values from the vendor's own decoder"
+    payload: "FF3F01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      alarm: "power on"
+  - name: ch255_type63_alarm_sensor_failure
+    description: "Channel 255 type 63, chosen to pin alarm; expected values from the vendor's own decoder"
+    payload: "FF3F02"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      alarm: "sensor failure"
+  - name: ch255_type63_alarm_sensor_recover
+    description: "Channel 255 type 63, chosen to pin alarm; expected values from the vendor's own decoder"
+    payload: "FF3F03"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      alarm: "sensor recover"
+  - name: ch255_type63_alarm_sensor_about_to_fail
+    description: "Channel 255 type 63, chosen to pin alarm; expected values from the vendor's own decoder"
+    payload: "FF3F04"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      alarm: "sensor about to fail"

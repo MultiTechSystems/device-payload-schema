@@ -239,3 +239,45 @@ test_vectors:
     source: vendor-codec
     expected:
       device_status: "on"
+  - name: reset_event_byte_one
+    description: "Reset-event frame with the byte 0x01, the index the vendor's own map labels 'reset'"
+    payload: "FFFE01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      reset_event: "reset"
+  - name: device_status_byte_one
+    description: "Device-status frame with the byte 0x01, the index the vendor's own map labels 'on'"
+    payload: "FF0B01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      device_status: "on"
+  - name: lorawan_class_b
+    description: "LoRaWAN class byte 0x01"
+    payload: "FF0F01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      lorawan_class: "Class B"
+  - name: lorawan_class_c
+    description: "LoRaWAN class byte 0x02"
+    payload: "FF0F02"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      lorawan_class: "Class C"
+  - name: lorawan_class_ctob
+    description: "LoRaWAN class byte 0x03"
+    payload: "FF0F03"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      lorawan_class: "Class CtoB"
+  - name: temperature_s16_byte_order
+    description: "Temperature word 0xFEF6 little-endian: -26.6 C, asymmetric bytes pin byte order and sign"
+    payload: "0367F6FE"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: -26.6
