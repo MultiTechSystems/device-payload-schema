@@ -182,17 +182,17 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 1535 test vectors across the 200 schemas in `schemas/devices/` that carry any (of
-241 YAML files; measured 2026-09-24 with `tools/vector-verdicts.py`) are the shared
+The 1995 payload vectors in `schemas/devices/` (241 YAML files; measured 2026-09-26
+with `tools/check-floors.py`, after the mutation-survivor vectors) are the shared
 cross-language test set. Every implementation has a runner that reads the same YAML and
 the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1232 |
-| Go | `go/schema/corpus_conformance_test.go` | 1524 | 1245 (plain API 1232) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 1524 | 1231 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 1524 | 1230 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1575 |
+| Go | `go/schema/corpus_conformance_test.go` | 1995 | 1607 (plain API 1584) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 1995 | 1574 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 1995 | 1573 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 487 of 487 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -748,10 +748,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1232 |
-| Go | `go/schema/corpus_encode_test.go` | 1245 (plain 1232) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1230 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1231 |
+| Python | `tests/test_encode_round_trip.py` | 1575 |
+| Go | `go/schema/corpus_encode_test.go` | 1607 (plain 1584) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1573 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1574 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1119,6 +1119,36 @@ it adopted before the `_` fix; it can use `$_device_type` directly now.
   from our own decoder score as high as independent ones**, so a mutation score measures
   sensitivity, not correctness - the same warning as the quality score above.
 
+  **The survivors were turned into vendor vectors on 2026-09-26.** For each surviving
+  mutant a payload was crafted that separates it from the original schema, run through
+  the vendor's own decoder, and added as `source: vendor-codec` only where our schema
+  agreed with the vendor on every key. That added about 460 vectors and killed all but a
+  handful of the 742 survivors; 140 of the 151 scored schemas are now at 100%. What is left
+  cannot be killed by a vendor-codec vector:
+  - ws302's `time_weight` labels: the vendor decoder reports "impulse" for every byte;
+  - mutants that sit within the float tolerance (dl-gmm `div: 1`, vicki's battery `round`);
+  - fields the vendor never emits (mla20 case 0x27, rbs30x `sensor_state` and the raw
+    tilt bytes, qingping's frame header).
+
+  The disagreements this found were deliberately **not** recorded as vectors. They are
+  vicki's reason byte (the vendor reads hex digits as decimal), a 78.125 rounding tie
+  (the vendor uses `toFixed`, which rounds half up), rbs30x's high-precision tilt
+  temperature (the vendor uses sign-magnitude, we use `s8`), and qingping decoding frames
+  that the vendor rejects.
+
+  Three lessons for the next pass:
+  - **A tolerance survivor dies on an exact integer.** A +1 raw-unit mutant under a
+    fine scale moves the value by less than 0.001, so no float expectation can see it.
+    A payload whose vendor output is exactly 0 or 1 is compared exactly (PS-039) and
+    catches it.
+  - **A value inferred from the vendor code is not vendor output.** Values implied by the
+    checks a vendor decoder runs before decoding are not `vendor-codec`, even when they
+    are certain. The provenance gate flags changed expected values on an unchanged
+    payload for exactly this reason.
+  - `crossvalidate_ttn.py` reports `no-vendor-codec` for mla20, rbs30x and qingping,
+    all of which have decoders in the TTN repository - a gap in how the tool finds
+    them, not yet fixed.
+
 **CI gates (`.github/workflows/gates.yml`, `make gates`, `make gate-verdicts`).** Every
 schema bug fixed on 2026-09-24 had passed the existing checks, because those check a
 schema against its own vectors. Five gates close that, each a ratchet against a committed
@@ -1131,7 +1161,7 @@ baseline - a regression fails, an improvement is reported and locked in with the
 | `gate-provenance` | a changed device schema has no independently sourced vector, or an added vector lacks `source:` | none: the diff against `BASE` |
 | `gate-crossval` | a schema stops agreeing with its vendor's own decoder (TTN declared examples + vendor JS, Decentlab decoders), or a new one does not agree | `tools/crossval-baseline.json`, oracle commits pinned |
 | `gate-mutation` | a schema's vectors notice fewer one-step mutations than before (score or killed count), or a new schema scores below 0.80 | `tools/mutation-baseline.json` |
-| `gate-verdicts` | a changed schema's vector fails in any of Python, Go, Java, C#, TS013, or a vector the reference passes fails elsewhere | `tools/verdicts-baseline.json` (empty: all five agree on 1524/1524) |
+| `gate-verdicts` | a changed schema's vector fails in any of Python, Go, Java, C#, TS013, or a vector the reference passes fails elsewhere | `tools/verdicts-baseline.json` (empty: all five agree on 1995/1995) |
 
 The mutation gate ratchets the killed count as well as the score on purpose: deleting
 vectors makes the mutants only they reached "unreached", which *raises* the score.
