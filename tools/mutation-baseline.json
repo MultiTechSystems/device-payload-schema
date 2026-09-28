@@ -4,7 +4,7 @@
   "include_library_composed": false,
   "distribution": {
     "100%": 69,
-    "95-99%": 21,
+    "95-99%": 22,
     "90-94%": 25,
     "80-89%": 27,
     "70-79%": 6,
@@ -1519,6 +1519,16 @@
       "unreached": 0,
       "generated": 46,
       "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "volley-boast/vobo.yaml": {
+      "score": 0.9885,
+      "killed": 20024,
+      "survived": 232,
+      "unreached": 955,
+      "generated": 24943,
+      "vectors": 315,
       "provenance": "independent",
       "failing_original": 0
     }
