@@ -348,8 +348,10 @@ def run_generated(schema: dict, vectors: list) -> list:
         + "}\nconsole.log(JSON.stringify(_out));"
     )
     try:
+        # On stdin, not `node -e`: Linux caps one argument at 128 KiB (MAX_ARG_STRLEN),
+        # and a large schema's codec plus its vectors exceeds that.
         completed = subprocess.run(
-            ["node", "-e", driver], capture_output=True, text=True, timeout=120
+            ["node", "-"], input=driver, capture_output=True, text=True, timeout=120
         )
     except subprocess.TimeoutExpired:
         return [(FAIL, "codec timed out")] * len(vectors)
