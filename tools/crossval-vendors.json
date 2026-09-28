@@ -14,7 +14,8 @@
     "netvox": "netvox",
     "radio-bridge": "radio-bridge",
     "radionode": "radionode",
-    "rakwireless": "rakwireless"
+    "rakwireless": "rakwireless",
+    "volley-boast": "volley-boast"
   },
   "decentlab-decoders": [
     "decentlab"
