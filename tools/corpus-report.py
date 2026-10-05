@@ -38,7 +38,7 @@ sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 from schema_interpreter import SchemaInterpreter  # noqa: E402
 from score_schema import CONFORMANCE_TOLERANCE  # noqa: E402
-from validate_schema import is_encode_vector, values_match, warnings_match  # noqa: E402
+from validate_schema import expected_fields_match, is_encode_vector, warnings_match  # noqa: E402
 
 CORPUS = REPO_ROOT / "schemas" / "devices"
 DETAIL_LIMIT = 200
@@ -115,12 +115,11 @@ def python_verdict(schema: dict, vector: dict) -> Tuple[str, str]:
         return "error", "%s: %s" % (type(exc).__name__, exc)
     if not result.success:
         return "error", "; ".join(str(e) for e in result.errors[:2])
-    for key, want in (vector.get("expected") or {}).items():
-        if key not in result.data:
-            return "fail", "%s missing" % key
-        ok, message = values_match(want, result.data[key], CONFORMANCE_TOLERANCE)
-        if not ok:
-            return "fail", "%s: %s" % (key, message)
+    # PS-043/PS-044, with a null expectation asserting absence (CR-2026-075).
+    ok, message = expected_fields_match(
+        vector.get("expected") or {}, result.data, CONFORMANCE_TOLERANCE)
+    if not ok:
+        return "fail", message
     ok, message = warnings_match(vector.get("expected_warnings"), result.warnings)
     if not ok:
         return "fail", message
