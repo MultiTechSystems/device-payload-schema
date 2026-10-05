@@ -79,14 +79,16 @@ explicitly.
 
 ```
 TYPES:        u8 u16 u24 u32 u64 | s8 s16 s24 s32 s64 | f16 f32 f64 | bool
-              ascii hex hex:upper bytes base64 | number string | skip enum
-STRUCTURES:   object | repeat | byte_group | tlv
+              ascii hex bytes base64 | number integer string | skip enum | udec sdec
+              aliases uint8..uint64 int8..int64 i8..i64 - nothing else, case-sensitive
+BYTES FORMAT: hex hex:upper base64 array | separator (hex formats only)
+STRUCTURES:   type: object | repeat | byte_group | tlv
 NAMING:       name | name_from ("region_${region_id}_dwell")
 TAG KEYS:     "[1, 200]" exact | "[1, !0]" excluding | "[2, *]" any
 MODIFIERS:    add mult div | lookup (sequence or sparse mapping) | polynomial
               | compute | guard | transform
-CONDITIONALS: match (value) | flagged (bitmask) | tlv (tag dispatch)
-TRANSFORMS:   sqrt abs pow log10 log round (floor ceiling clamp: Python + TS013 only)
+CONDITIONALS: match (value; "[1, 2]" list keys; field XOR length) | flagged | tlv
+TRANSFORMS:   sqrt abs pow log10 log floor ceiling clamp | {op: round, ties: even|away}
 COMPUTE OPS:  add sub mul div mod idiv
 GUARD OPS:    gt gte lt lte eq ne
 ENCODINGS:    sign_magnitude bcd gray (Python only)
@@ -355,11 +357,12 @@ there is no original to recover, and every encoder reports that rather than gues
 
 **The unary maths transform stages — `sqrt`, `abs`, `pow`, `log10`, `log` — now
 exist in all four.** Python always had them; Go, Java and C# had none, which is what
-kept `decentlab/dl-blg` on an unconverted vendor formula. The domain clamps are part
-of the contract, not an implementation detail: `sqrt` clamps its input at 0 and the
-logs at 1e-10, because returning NaN instead poisons every later stage and every
-field computed from it. `_language-conformance/transform-maths.yaml` holds all four
-to it.
+kept `decentlab/dl-blg` on an unconverted vendor formula. The domain rules are part
+of the contract, not an implementation detail: `sqrt` clamps its input at 0 (PS-116),
+and the log of a non-positive number leaves the field **absent** (PS-117, CR-2026-057).
+The logs used to clamp at 1e-10, reporting log10(0) as -10; NaN is never reported
+(PS-282). `_language-conformance/transform-maths.yaml` and `log-of-non-positive.yaml`
+hold all five to it.
 
 Two things to know before adding another transform key:
 
@@ -1140,6 +1143,30 @@ failed decode replaces a mismatch per key, so a broken schema could otherwise lo
 improved. The Go, Java and C# corpus runners write per-vector reports only when
 `CORPUS_REPORT` is set; their default behaviour and floors are unchanged.
 
+### 0.5.2 (CR-2026-037 onward): where the new rules live
+
+- **A null expectation asserts absence** (PS-043, CR-2026-075). Every runner compares
+  through `validate_schema.expected_fields_match` (Python, vector-verdicts, the C harness,
+  schema-mutation, corpus-report) or its own copy of the rule (Go, Java, C#). An omitted
+  field - zero divisor, log of x <= 0, failed guard with no `else`, unmapped lookup - is
+  now assertable in the shared corpus; `value-absent.yaml` and `log-of-non-positive.yaml`
+  do. A runner that compares only the keys it lists blesses every wrongly reported field.
+- **Schema-validity rules are checked when the schema is loaded** in Go, Java and C#:
+  `go/schema/vocabulary.go` (`checkTypeVocabulary`, `checkFieldRules`), Java
+  `Schema.parseFields`, C# `SchemaParser.ParseFields`. Put a new "MUST be rejected" rule
+  there, on list members only - Java and C# also run `parseField` over construct bodies
+  (an inline `tlv:` block arrives as a synthetic field typed `tlv`), which carry no type.
+  Python rejects at decode time, which PS-328 permits; the validator and the TS013
+  generator reject too, so a schema fails the same way on every path.
+- **The type vocabulary is closed and case-sensitive** (CR-2026-037). Go canonicalises an
+  alias in `parseFieldMap`, so the rest of the package sees one spelling per type; its
+  capitalised `FieldType` constants remain only for the compact and binary formats.
+- **`type: object` is the nested-group spelling and the `object:` key is rejected**
+  (CR-2026-074, PS-466) - the corpus had 154 of the first and none of the second.
+- Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
+  `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
+  `float`/`double`; they are not conformance paths and were not brought along.
+
 ## Converting a vendor codec
 
 The converters in `tools/` (`convert_decentlab.py`, `convert_milesight.py`) do the
@@ -1424,8 +1451,9 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   the bug. `dl-iam`'s `max(max(a,b),0)` is built from `compute` and `guard` alone.
 - **`pow`, `sqrt`, `abs`, `log` and `log10` stages exist in all four YAML
   interpreters** (see "The unary maths transform stages" above), so a square can be a
-  `pow: 2` stage. `floor`, `ceiling` and `clamp` do not: Go, Java and C# never parse them
-  and treat them as no-ops, so use `compute`/`guard` for those until they are ported.
+  `pow: 2` stage. `floor`, `ceiling` and `clamp` are in all five since CR-2026-058; any
+  stage outside the PS-115 table - `{round: n}`, `{op: floor}`, `{sub: n}` - is rejected,
+  never skipped (PS-390).
 - **Two wrongly matched shapes that leave no hint.** Both were pattern-matched by
   the converter, so unlike an untranslatable expression nothing marked them
   unfinished — and a wrongly matched field is more dangerous than an unmatched one:
