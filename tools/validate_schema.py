@@ -765,6 +765,11 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                                         known_field_names)
                 continue
 
+            # PS-456: a `bytes` field declares how many bytes it reads.
+            if ftype == 'bytes' and 'length' not in fld:
+                errors.append(
+                    f"{path}[{i}] ({name}): a bytes field requires 'length' (PS-456)")
+
             # Bitfield string validation
             if ftype == 'bitfield_string':
                 if 'parts' not in fld:
@@ -1433,6 +1438,16 @@ def check_best_practices(schema: Dict[str, Any], result: ValidationResult) -> No
                     "mult, div, add regardless of key order. Write the intended "
                     "sequence as a transform array to make it explicit."
                     % ", ".join(bare_modifiers),
+                    f"{name}"
+                )
+
+            # PS-453: `consume: 0` advances nothing, which is the point on a bit range
+            # or a bool and a trap anywhere else - the next field reads the same bytes.
+            if (fld.get('consume') == 0 and isinstance(ftype, str)
+                    and '[' not in ftype and ftype != 'bool'):
+                result.add_warning(
+                    "consume: 0 on a %s field is NOT RECOMMENDED (PS-453): the next "
+                    "field reads the same bytes again" % ftype,
                     f"{name}"
                 )
 
