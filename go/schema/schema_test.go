@@ -1840,7 +1840,7 @@ fields:
     type: number
     ref: $raw_temp
     transform:
-      - sub: 400
+      - add: -400
       - div: 10
     guard:
       when:
@@ -1886,7 +1886,7 @@ fields:
     type: number
     ref: $raw_reading
     transform:
-      - sub: 500
+      - add: -500
       - div: 10
 `
 	schema, err := ParseSchema(schemaYAML)
@@ -7316,15 +7316,12 @@ fields:
 		payload[i] = byte(i % 256)
 	}
 
-	result, err := schema.Decode(payload)
-	if err != nil {
-		t.Fatalf("Decode() error = %v", err)
-	}
-
-	items := result["items"].([]any)
-	// Default max_iterations=1000 is a safety limit
-	if len(items) != 1000 {
-		t.Errorf("items count = %d, want 1000 (safety limit)", len(items))
+	// The default ceiling of 1000 (PS-089) still bounds the work, and exceeding it is an
+	// error naming the bytes left unparsed (PS-396) rather than a quiet stop at 1000.
+	_, err = schema.Decode(payload)
+	if err == nil || !strings.Contains(err.Error(), "max of 1000") ||
+		!strings.Contains(err.Error(), "9000 byte(s) at offset 1000") {
+		t.Errorf("Decode() error = %v, want the PS-396 limit error", err)
 	}
 }
 

@@ -113,17 +113,13 @@ class TestTheComparisonActuallyCompares:
 
 
 class TestMaxIsACeiling:
+    # Exceeding the ceiling was a silent truncation here until CR-2026-058 (PS-396) made
+    # it an error; tests/test_cr_2026_058_described_constructs.py holds that.
     @pytest.mark.parametrize("bound", [{"until": "end"}, {"count": 4}])
-    def test_it_caps_both_spellings(self, bound):
+    def test_exceeding_it_fails_both_spellings_on_both_paths(self, bound):
         schema = repeat_schema(max=2, **bound)
-        assert decode(schema, "0A141E28").data == {
-            "items": [{"v": 10}, {"v": 20}]}
-
-    @pytest.mark.parametrize("bound", [{"until": "end"}, {"count": 4}])
-    def test_the_generated_codec_caps_them_too(self, bound):
-        schema = repeat_schema(max=2, **bound)
-        assert decode_js(schema, "0A141E28")["data"] == {
-            "items": [{"v": 10}, {"v": 20}]}
+        assert any("PS-396" in e for e in decode(schema, "0A141E28").errors)
+        assert any("PS-396" in e for e in decode_js(schema, "0A141E28")["errors"])
 
     def test_a_payload_within_the_ceiling_is_untouched(self):
         schema = repeat_schema(until="end", max=2)

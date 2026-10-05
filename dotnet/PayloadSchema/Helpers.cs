@@ -209,6 +209,26 @@ public static class Helpers
     /// `version_string`, none of which is a type of the specification, while missing all
     /// ten PS-049 aliases, `base64`, `udec`, `sdec` and `integer`.
     /// </summary>
+    /// <summary>The values of a quoted list case key, "[1, 2, 0x10]" (PS-398), or null.</summary>
+    public static List<long>? ParseListCaseKey(string text)
+    {
+        text = text.Trim();
+        if (!text.StartsWith('[') || !text.EndsWith(']')) return null;
+        var values = new List<long>();
+        foreach (var raw in text[1..^1].Split(','))
+        {
+            var part = raw.Trim();
+            if (part.Length == 0) continue;
+            try
+            {
+                values.Add(part.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                    ? Convert.ToInt64(part[2..], 16) : long.Parse(part));
+            }
+            catch (FormatException) { return null; }
+        }
+        return values;
+    }
+
     public static FieldType ParseFieldType(string typeStr)
     {
         var baseType = typeStr.Contains('[') ? typeStr[..typeStr.IndexOf('[')] : typeStr;

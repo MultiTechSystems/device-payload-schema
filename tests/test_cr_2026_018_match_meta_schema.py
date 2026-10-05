@@ -228,6 +228,9 @@ class TestTheValidatorNowLooksInside:
         """Deliberate: the validator refuses what nothing honours, not what some do."""
         for key, value in (("var", "kept"), ("name", "kind_out"), ("length", 2)):
             match = working_match(**{key: value})
+            if key == "length":
+                # `length` replaces `field` rather than joining it: one source (PS-399).
+                match.pop("field", None)
             assert validate_schema_structure(match_schema(match)) == [], key
 
 

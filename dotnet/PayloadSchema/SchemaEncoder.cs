@@ -656,6 +656,8 @@ public static class SchemaEncoder
                 return string.Equals(discriminator?.ToString(), caseValue.ToString());
             long value = (long)Math.Round(numeric, MidpointRounding.ToEven);
 
+            if (caseValue is string text && Helpers.ParseListCaseKey(text) is { } listed)
+                return listed.Contains(value);
             if (caseValue is List<object?> list)
                 return list.Any(item =>
                 {
@@ -1285,7 +1287,12 @@ public static class SchemaEncoder
                 }).ToArray();
             // CR-2026-008/PS-281 makes the decoder report a byte sequence as a lowercase
             // hex string, so that is the form encoding has to accept for a round trip.
-            var text = (value?.ToString() ?? "").Replace(" ", "").Replace(":", "");
+            // The declared format and separator say how the value was rendered (PS-079,
+            // PS-391); only ':' was stripped, so "0a-0b" could not be read back.
+            if (field.Format == "base64")
+                return Convert.FromBase64String(value?.ToString() ?? "");
+            var text = (value?.ToString() ?? "").Replace(" ", "");
+            text = !string.IsNullOrEmpty(field.Separator) ? text.Replace(field.Separator, "") : text.Replace(":", "");
             if (text.Length % 2 != 0)
                 throw new InvalidOperationException($"field '{field.Name}': expected hex, got "
                     + $"'{value}' (odd number of digits)");

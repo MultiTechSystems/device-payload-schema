@@ -201,6 +201,142 @@ def normalize_output(value):
     return value
 
 
+#: The output formats of a `bytes` field (PS-079), and the two a `separator` applies to
+#: (PS-391).
+BYTES_FORMATS = ('hex', 'hex:upper', 'base64', 'array')
+SEPARATED_BYTES_FORMATS = ('hex', 'hex:upper')
+
+
+def check_bytes_format(field_def):
+    """Reject a `format` outside PS-079 and a `separator` beside a format it cannot apply to."""
+    fmt = field_def.get('format', 'hex')
+    if fmt not in BYTES_FORMATS:
+        raise ValueError(
+            f"Field '{field_def.get('name', '?')}': bytes format {fmt!r} is not one of "
+            f"{', '.join(BYTES_FORMATS)} (PS-079)")
+    if 'separator' in field_def and fmt not in SEPARATED_BYTES_FORMATS:
+        raise ValueError(
+            f"Field '{field_def.get('name', '?')}': `separator` applies only to the hex "
+            f"formats, not {fmt!r} (PS-391)")
+
+
+def format_bytes(field_def, data: bytes):
+    """A `bytes` field's value in its declared format (PS-079, PS-391).
+
+    Both keys were ignored here and by the generated codec, so `format: hex:upper` with
+    `separator: ":"` reported `aabbcc` where Go, Java and C# report `AA:BB:CC`.
+    """
+    check_bytes_format(field_def)
+    fmt = field_def.get('format', 'hex')
+    if fmt == 'base64':
+        import base64 as b64
+        return b64.b64encode(data).decode('ascii')
+    if fmt == 'array':
+        return list(data)
+    digits = '%02X' if fmt == 'hex:upper' else '%02x'
+    return str(field_def.get('separator', '')).join(digits % b for b in data)
+
+
+def repeat_limit_message(field_def, limit, mode, offset, end):
+    """The PS-396 error: the repeat, its limit, and the payload left unparsed."""
+    return (f"repeat '{field_def.get('name', '?')}' exceeds its max of {limit} element(s) "
+            f"({mode}); {end - offset} byte(s) at offset {offset} left unparsed (PS-396)")
+
+
+_BIT_RANGE = re.compile(r'^u(\d+)\[(\d+):(\d+)\]$')
+
+
+def byte_group_member_bits(member):
+    """The bits a byte_group member covers, counted from the group's first bit, or None.
+
+    A range's bits are numbered within its own base (PS-058: 0 is the least significant),
+    so they are mapped onto the group's bit string - most significant bit of the first
+    byte first - before members of different widths can be compared.
+    """
+    if not isinstance(member, dict):
+        return None
+    ftype = str(member.get('type', ''))
+    match = _BIT_RANGE.match(ftype)
+    if match:
+        width, start, end = (int(g) for g in match.groups())
+    elif ftype == 'bool':
+        width, start = 8, int(member.get('bit', 0))
+        end = start
+    else:
+        return None
+    return {width - 1 - bit for bit in range(start, end + 1)}
+
+
+def check_byte_group_overlap(members):
+    """PS-397: bit ranges within one byte_group must not overlap.
+
+    Overlapping members were accepted by all five implementations, each reporting both
+    from the same bits; encoding then OR-ed two values into them.
+    """
+    seen = []
+    for member in members or []:
+        bits = byte_group_member_bits(member)
+        if not bits:
+            continue
+        for name, other in seen:
+            if bits & other:
+                raise ValueError(
+                    f"byte_group members '{name}' and '{member.get('name', '?')}' "
+                    f"overlap (PS-397)")
+        seen.append((member.get('name', '?'), bits))
+
+
+def parse_list_case_key(text):
+    """The values of a quoted list case key, "[1, 2, 0x10]", or None if it is not one."""
+    text = str(text).strip()
+    if not (text.startswith('[') and text.endswith(']')):
+        return None
+    values = []
+    for part in text[1:-1].split(','):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            values.append(int(part, 16) if part.lower().startswith('0x') else int(part))
+        except ValueError:
+            return None
+    return values
+
+
+def enum_label(entry):
+    """What an enum value reports: its `name` where it is the description form (PS-394).
+
+    The `description` is metadata and never the value. This returned the whole mapping,
+    so a decoded enum reported {name: standby, description: ...} as its value.
+    """
+    if isinstance(entry, dict) and 'name' in entry:
+        return entry['name']
+    return entry
+
+
+def round_decimal(value, decimals=0, ties='even'):
+    """Round to `decimals` places on the value itself (PS-390).
+
+    `ties` is `even` (the default) or `away`, from zero. Decimal(float) is the exact
+    binary value, so a value stored just below a tie rounds down as it should, and an
+    exact tie such as 78.125 is recognised as one - rounding value * 10**d instead would
+    invent ties. `away` exists for vendor decoders that use JavaScript's toFixed.
+    """
+    from decimal import Decimal, ROUND_HALF_EVEN, ROUND_HALF_UP
+    if ties not in ('even', 'away'):
+        raise ValueError(f"round `ties` must be 'even' or 'away', got {ties!r} (PS-390)")
+    if isinstance(decimals, bool) or not isinstance(decimals, int) or decimals < 0:
+        raise ValueError(
+            f"round `decimals` must be a non-negative integer, got {decimals!r} (PS-390)")
+    if value is OMITTED or isinstance(value, bool):
+        return value
+    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+        return value
+    mode = ROUND_HALF_EVEN if ties == 'even' else ROUND_HALF_UP
+    rounded = float(Decimal(value).quantize(Decimal(1).scaleb(-decimals), rounding=mode))
+    return 0.0 if rounded == 0 else rounded
+
+
 class LookupIndexError(ValueError):
     """An out-of-bounds index into a sequence ``lookup`` (PS-105).
 
@@ -941,8 +1077,7 @@ class SchemaInterpreter:
             length = resolve_length(field_def, buf, pos)
             if pos + length > len(buf):
                 raise ValueError("Buffer too short for bytes")
-            value = buf[pos:pos + length]
-            return value, pos + length
+            return format_bytes(field_def, buf[pos:pos + length]), pos + length
         
         if field_type == 'string':
             if 'value' in field_def:
@@ -1035,7 +1170,7 @@ class SchemaInterpreter:
             # Convert string keys to int if needed
             values_map = {int(k) if isinstance(k, str) else k: v for k, v in values.items()}
             if raw_value in values_map:
-                return values_map[raw_value], new_pos
+                return enum_label(values_map[raw_value]), new_pos
             else:
                 # An unmapped value takes the declared `default` (PS-068). Only
                 # where none is declared does it fall back to the marker below,
@@ -1046,7 +1181,7 @@ class SchemaInterpreter:
                 return f"unknown({raw_value})", new_pos
         elif isinstance(values, list):
             if 0 <= raw_value < len(values):
-                return values[raw_value], new_pos
+                return enum_label(values[raw_value]), new_pos
             elif 'default' in field_def:
                 return field_def['default'], new_pos
             else:
@@ -1093,7 +1228,12 @@ class SchemaInterpreter:
             else:
                 count = int(count)
             
-            count = min(count, max_iterations)
+            # PS-396: more elements than `max` is an error, not a silent truncation. The
+            # count was clamped here, so every field after the repeat was read from
+            # inside an element the clamp had discarded.
+            if count > max_iterations:
+                raise ValueError(repeat_limit_message(
+                    field_def, max_iterations, f"count {count}", pos, len(buf)))
             
             for _ in range(count):
                 element = {}
@@ -1135,9 +1275,9 @@ class SchemaInterpreter:
                 # got 2" reads as a short payload even where the schema's own ceiling
                 # stopped the loop with bytes to spare (CR-2026-022).
                 if iterations >= max_iterations and pos < end_pos:
-                    raise ValueError(
-                        f"repeat stopped at its max of {max_iterations} iteration(s) with "
-                        f"{end_pos - pos} of {byte_length} byte(s) of the span unread")
+                    raise ValueError(repeat_limit_message(
+                        field_def, max_iterations, f"byte_length {byte_length}", pos,
+                        end_pos))
                 raise ValueError(
                     f"repeat byte_length mismatch: expected end at {end_pos}, got {pos}")
 
@@ -1158,6 +1298,11 @@ class SchemaInterpreter:
                     break
                 result.append(element)
                 iterations += 1
+            if iterations >= max_iterations and pos < len(buf):
+                # PS-396: stopping at the ceiling with payload left is an error, not a
+                # quiet end; the bytes after it were never decoded.
+                raise ValueError(repeat_limit_message(
+                    field_def, max_iterations, "until: end", pos, len(buf)))
         else:
             raise ValueError("repeat field must specify one of: count, byte_length, or until")
         
@@ -1289,6 +1434,11 @@ class SchemaInterpreter:
           cases: {value: [fields], ...}
         """
         result = {}
+        # PS-399: exactly one discriminator source. With both, `field` won and the
+        # `length` byte was left unread, so every later field came from the wrong offset.
+        if ('field' in match_def) == ('length' in match_def):
+            raise ValueError(
+                "a match must declare exactly one of 'field' and 'length' (PS-399)")
         field_ref = match_def.get('field')
         length = match_def.get('length')
         match_name = match_def.get('name')
@@ -1417,7 +1567,13 @@ class SchemaInterpreter:
         if value is None:
             return False
         
-        # List of values
+        # List of values. Written as a quoted flow sequence, "[1, 2, 3]" (PS-398): an
+        # unquoted [1, 2, 3] is a YAML sequence used as a mapping key, which PyYAML cannot
+        # load at all, and the quoted form was compared here as the literal text.
+        if isinstance(pattern, str) and pattern.strip().startswith('['):
+            pattern = parse_list_case_key(pattern)
+            if pattern is None:
+                return False
         if isinstance(pattern, list):
             return value in pattern
         
@@ -1879,24 +2035,26 @@ class SchemaInterpreter:
                 # and so that none of them is silently dropped, which an
                 # either/or chain here used to do.
                 value = apply_canonical_modifiers(value, op)
-            elif 'round' in op:
-                decimals = op['round']
-                if decimals is True or decimals == 0:
-                    value = round(value)
-                else:
-                    value = round(value, int(decimals))
             elif 'op' in op:
-                # Handle {op: 'round', decimals: N} syntax
-                if op['op'] == 'round':
-                    decimals = op.get('decimals', 0)
-                    if decimals == 0:
-                        value = round(value)
-                    else:
-                        value = round(value, int(decimals))
-                elif op['op'] == 'floor':
-                    value = math.floor(value)
-                elif op['op'] == 'ceiling' or op['op'] == 'ceil':
-                    value = math.ceil(value)
+                # PS-390: `round` is the one named operation. Anything else - `floor`
+                # and `ceiling` were read here as rounding down and up, which the
+                # specification never defined and which clash with the clamp stages
+                # of the same names - is rejected, not skipped.
+                if op['op'] != 'round':
+                    raise ValueError(
+                        f"transform stage names an unknown operation {op['op']!r} "
+                        f"(PS-390)")
+                value = round_decimal(value, op.get('decimals', 0), op.get('ties', 'even'))
+            elif 'round' in op:
+                # `{round: n}` was accepted here and by the generator, and ignored with
+                # success by Go, Java and C#. The specified spelling is the op: form.
+                raise ValueError(
+                    "`{round: n}` is not a transform stage; write "
+                    "{op: round, decimals: n} (PS-390)")
+            else:
+                raise ValueError(
+                    f"transform stage {op!r} names no operation of the PS-115 table "
+                    f"(PS-390)")
         
         return value
     
@@ -1937,6 +2095,7 @@ class SchemaInterpreter:
         
         if not group_fields:
             return pos
+        check_byte_group_overlap(group_fields)
         
         # Decode all fields from the same starting position
         for gf in group_fields:
@@ -2320,7 +2479,13 @@ class SchemaInterpreter:
             
             # Handle byte_group construct
             if 'byte_group' in field_def:
-                pos = self._decode_byte_group(field_def, payload, pos, result)
+                try:
+                    pos = self._decode_byte_group(field_def, payload, pos, result)
+                except Exception as e:
+                    # A schema error such as overlapping members (PS-397) fails the
+                    # decode like any other field's error, rather than raising out of it.
+                    result.errors.append(f"Error decoding byte_group: {e}")
+                    break
                 continue
             
             # Option B: match: as top-level key
@@ -2899,6 +3064,7 @@ class SchemaInterpreter:
         else:
             group_fields = byte_group or []
             size = int(field_def.get('size', 1))
+        check_byte_group_overlap(group_fields)
 
         packed = 0
         for gf in group_fields:
@@ -3564,8 +3730,14 @@ class SchemaInterpreter:
             # bytes object, so a hex string round-tripped to 00000000 silently.
             if isinstance(value, (bytes, bytearray)):
                 raw = bytes(value)
+            elif isinstance(value, str) and field_def.get('format') == 'base64':
+                import base64 as b64
+                raw = b64.b64decode(value)
             elif isinstance(value, str):
                 text = value.replace(' ', '')
+                separator = field_def.get('separator')
+                if separator:
+                    text = text.replace(str(separator), '')
                 try:
                     raw = bytes.fromhex(text)
                 except ValueError as exc:
@@ -3619,13 +3791,14 @@ class SchemaInterpreter:
         if isinstance(values, dict):
             # Reverse lookup: string -> int
             for k, v in values.items():
-                if v == value:
+                if enum_label(v) == value:
                     int_value = int(k) if isinstance(k, str) else k
                     break
         elif isinstance(values, list):
             # Find index of value
-            if value in values:
-                int_value = values.index(value)
+            labels = [enum_label(v) for v in values]
+            if value in labels:
+                int_value = labels.index(value)
         
         if int_value is None:
             # Try parsing as integer (e.g., "unknown(5)")

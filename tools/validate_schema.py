@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 
 # Add tools to path
 sys.path.insert(0, str(Path(__file__).parent))
-from schema_interpreter import SchemaInterpreter, DecodeResult
+from schema_interpreter import SchemaInterpreter, DecodeResult, check_byte_group_overlap
 import schema_vocabulary
 
 
@@ -579,6 +579,9 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                 errors.append(
                     f"{mpath}: needs 'field' (a discriminator already decoded) or "
                     "'length' (one read from the payload here)")
+            elif 'field' in match and 'length' in match:
+                errors.append(
+                    f"{mpath}: declares both 'field' and 'length'; exactly one (PS-399)")
             if 'field' in match and not isinstance(match['field'], str):
                 errors.append(f"{mpath}.field: must be a string")
             if 'length' in match:
@@ -646,6 +649,10 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
             if span is not None and (not isinstance(span, int)
                                      or isinstance(span, bool) or span < 1):
                 errors.append(f"{bgpath}: 'size' must be an integer of at least 1")
+            try:
+                check_byte_group_overlap(bg_fields)
+            except ValueError as exc:
+                errors.append(f"{bgpath}: {exc}")
             # PS-017: the construct sets `consume` itself, and a member that advances
             # the position defeats the sharing the construct exists for.
             for bi, bgf in enumerate(bg_fields):
@@ -765,10 +772,38 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                                         known_field_names)
                 continue
 
+            # PS-392: a skip declares how many bytes it passes over.
+            if ftype == 'skip' and 'length' not in fld:
+                errors.append(f"{path}[{i}] ({name}): a skip field requires 'length' (PS-392)")
+            # PS-393: an enum's base is an unsigned integer type.
+            if ftype == 'enum' and str(fld.get('base', 'u8')) not in (
+                    'u8', 'u16', 'u24', 'u32', 'u64',
+                    'uint8', 'uint16', 'uint24', 'uint32', 'uint64'):
+                errors.append(
+                    f"{path}[{i}] ({name}): an enum's base must be an unsigned integer "
+                    f"type, not {fld.get('base')!r} (PS-393)")
+            # PS-389: a bool names a bit of one byte.
+            if ftype == 'bool' and 'bit' in fld and (
+                    not isinstance(fld['bit'], int) or isinstance(fld['bit'], bool)
+                    or not 0 <= fld['bit'] <= 7):
+                errors.append(
+                    f"{path}[{i}] ({name}): a bool's bit must be an integer from 0 to 7 "
+                    f"(PS-389)")
             # PS-456: a `bytes` field declares how many bytes it reads.
             if ftype == 'bytes' and 'length' not in fld:
                 errors.append(
                     f"{path}[{i}] ({name}): a bytes field requires 'length' (PS-456)")
+            # PS-079, PS-391: four formats, and a separator only beside the hex two.
+            if ftype == 'bytes':
+                fmt = fld.get('format', 'hex')
+                if fmt not in ('hex', 'hex:upper', 'base64', 'array'):
+                    errors.append(
+                        f"{path}[{i}] ({name}): bytes format {fmt!r} is not one of hex, "
+                        f"hex:upper, base64, array (PS-079)")
+                elif 'separator' in fld and fmt not in ('hex', 'hex:upper'):
+                    errors.append(
+                        f"{path}[{i}] ({name}): 'separator' applies only to the hex "
+                        f"formats, not {fmt!r} (PS-391)")
 
             # Bitfield string validation
             if ftype == 'bitfield_string':

@@ -274,7 +274,11 @@ def test_lookup_and_case_keys_are_data_not_vocabulary():
     assert _errors(schema)[0]
 
 
-def test_divergent_key_is_a_warning_not_an_error():
+def test_divergent_key_is_a_warning_not_an_error(monkeypatch):
+    # The list is empty since every implementation reads bytes `format` and `separator`
+    # (CR-2026-058); the mechanism is held with an entry supplied here.
+    monkeypatch.setitem(schema_vocabulary.DIVERGENT_KEYS, ("field", "format"),
+                        "read by some implementations, ignored by Python")
     valid, errors, warnings = _errors(
         {
             "name": "p",

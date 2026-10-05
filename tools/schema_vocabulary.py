@@ -199,13 +199,14 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "abs": (_DECODERS, "stage"),
         "sqrt": (_DECODERS, "stage (input clamped at 0)"),
         "pow": (_DECODERS, "stage"),
-        "log": (_DECODERS, "stage (input clamped at 1e-10)"),
-        "log10": (_DECODERS, "stage (input clamped at 1e-10)"),
-        "floor": (("py", "ts013"), "stage: lower clamp - see DIVERGENT_KEYS"),
-        "ceiling": (("py", "ts013"), "stage: upper clamp - see DIVERGENT_KEYS"),
-        "clamp": (("py", "ts013"), "stage: [lo, hi] clamp - see DIVERGENT_KEYS"),
-        "op": (_DECODERS, "named stage, e.g. {op: round}"),
+        "log": (_DECODERS, "stage (absent where the input is <= 0, PS-117)"),
+        "log10": (_DECODERS, "stage (absent where the input is <= 0, PS-117)"),
+        "floor": (_DECODERS, "stage: lower clamp (PS-115)"),
+        "ceiling": (_DECODERS, "stage: upper clamp (PS-115)"),
+        "clamp": (_DECODERS, "stage: [lo, hi] clamp (PS-115)"),
+        "op": (_DECODERS, "named stage: {op: round} is the only one (PS-390)"),
         "decimals": (_DECODERS, "round's precision"),
+        "ties": (_DECODERS, "round's tie rule: even (default) or away (PS-390)"),
     },
     "compute": {
         "op": (_DECODERS, "add sub mul div mod idiv"),
@@ -310,33 +311,10 @@ UNREAD_KEYS: Dict[Tuple[str, str], str] = {}
 
 #: Keys some implementation reads but not all, so a schema using one decodes differently
 #: per language. Accepted, but the validator WARNS with the reason.
-DIVERGENT_KEYS: Dict[Tuple[str, str], str] = {
-    ("field", "format"): (
-        "`format` on a bytes field is read by Go, Java and C# (hex / hex:upper / base64 "
-        "/ array) and ignored by the Python reference interpreter and the TS013 "
-        "generator, so the decoded representation differs per language. Prefer the "
-        "type spelling (`hex`, `hex:upper`, `base64`), which every implementation reads"
-    ),
-    ("transform", "floor"): (
-        "the `floor` stage is applied by the Python interpreter and the TS013 generator "
-        "only; Go, Java and C# have no such stage and pass the value through unclamped"
-    ),
-    ("transform", "ceiling"): (
-        "the `ceiling` stage is applied by the Python interpreter and the TS013 "
-        "generator only; Go, Java and C# pass the value through unclamped"
-    ),
-    ("transform", "clamp"): (
-        "the `clamp` stage is applied by the Python interpreter and the TS013 generator "
-        "only; Go, Java and C# pass the value through unclamped"
-    ),
-    ("field", "separator"): (
-        "`separator` accompanies bytes `format`; the Python reference interpreter "
-        "ignores both"
-    ),
-}
+DIVERGENT_KEYS: Dict[Tuple[str, str], str] = {}
 
-VOCABULARY["field"]["format"] = (("go", "java", "cs"), "bytes rendering; see DIVERGENT")
-VOCABULARY["field"]["separator"] = (("go", "cs"), "bytes rendering; see DIVERGENT")
+VOCABULARY["field"]["format"] = (_DECODERS, "bytes rendering: hex, hex:upper, base64, array (PS-079)")
+VOCABULARY["field"]["separator"] = (_DECODERS, "between the bytes of a hex rendering (PS-391)")
 
 #: Known mistakes, with what to write instead. Checked before the difflib suggestion.
 HINTS: Dict[Tuple[str, str], str] = {

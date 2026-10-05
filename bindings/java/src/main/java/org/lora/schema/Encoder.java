@@ -579,6 +579,9 @@ final class Encoder {
         if (caseValue instanceof Number n) {
             return value == n.longValue();
         }
+        if (caseValue instanceof String text && Schema.parseListCaseKey(text) != null) {
+            return Schema.parseListCaseKey(text).contains(value);
+        }
         if (caseValue instanceof List<?> list) {
             for (Object item : list) {
                 if (item instanceof Number n && value == n.longValue()) return true;
@@ -1184,7 +1187,14 @@ final class Encoder {
         }
         // CR-2026-008/PS-281 makes the decoder report a byte sequence as a lowercase hex
         // string, so that is the form encoding has to accept for a round trip.
-        String text = String.valueOf(value).replace(" ", "").replace(":", "");
+        // The declared format and separator say how the value was rendered (PS-079,
+        // PS-391); only ':' was stripped, so "0a-0b" could not be read back.
+        if ("base64".equals(field.getFormat())) {
+            return Base64.getDecoder().decode(String.valueOf(value));
+        }
+        String text = String.valueOf(value).replace(" ", "");
+        String separator = field.getSeparator();
+        text = separator != null && !separator.isEmpty() ? text.replace(separator, "") : text.replace(":", "");
         if (text.length() % 2 != 0) {
             throw new SchemaException.EncodeException("field '" + field.getName()
                     + "': expected hex, got '" + value + "' (odd number of digits)");

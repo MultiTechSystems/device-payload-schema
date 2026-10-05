@@ -634,6 +634,38 @@ public static class SchemaDecoder
             : value;
     }
 
+    /// <summary>
+    /// Round with a tie going away from zero (PS-390 `ties: away`), on the stored value.
+    /// The long fixed expansion is exact, so a tie is recognised only where there is one:
+    /// 78.125 is a tie, while 2.355 is stored just below one.
+    /// </summary>
+    /// <summary>The PS-396 error: the repeat, its limit and the payload left unparsed.</summary>
+    static InvalidOperationException RepeatLimitError(SchemaField field, int limit, string mode, int offset, int end)
+        => new($"repeat '{field.Name}' exceeds its max of {limit} element(s) ({mode}); "
+            + $"{end - offset} byte(s) at offset {offset} left unparsed (PS-396)");
+
+    static double RoundHalfAwayDecimal(double value, int decimals)
+    {
+        if (double.IsNaN(value) || double.IsInfinity(value)) return value;
+        if (decimals < 0) decimals = 0;
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var abs = Math.Abs(value);
+        var longText = abs.ToString("F" + Math.Min(decimals + 40, 99), inv);
+        var frac = longText[(longText.IndexOf('.') + 1)..];
+        bool tie = frac[decimals] == '5' && frac[(decimals + 1)..].All(c => c == '0');
+        double rounded;
+        if (tie)
+        {
+            var scale = Math.Pow(10, decimals);
+            rounded = (Math.Floor(abs * scale) + 1) / scale;
+        }
+        else
+        {
+            rounded = double.Parse(abs.ToString("F" + decimals, inv), inv);
+        }
+        return value < 0 ? -rounded : rounded;
+    }
+
     static double ApplyTransformStages(double numVal, List<TransformStage> stages)
     {
         foreach (var stage in stages)
@@ -651,7 +683,16 @@ public static class SchemaDecoder
                 //
                 // Formatting to a fixed number of decimals is correctly rounded on the
                 // stored value and breaks ties to even, which is both jobs at once.
-                numVal = RoundHalfEvenDecimal(numVal, stage.Decimals);
+                numVal = stage.Ties == "away"
+                    ? RoundHalfAwayDecimal(numVal, stage.Decimals)
+                    : RoundHalfEvenDecimal(numVal, stage.Decimals);
+                continue;
+            }
+            if (stage.Floor.HasValue) { numVal = Math.Max(numVal, stage.Floor.Value); continue; }
+            if (stage.Ceiling.HasValue) { numVal = Math.Min(numVal, stage.Ceiling.Value); continue; }
+            if (stage.Clamp is { Length: 2 } bounds)
+            {
+                numVal = Math.Max(bounds[0], Math.Min(bounds[1], numVal));
                 continue;
             }
             // Unary maths stages, each exclusive of the others and of the arithmetic
@@ -915,6 +956,9 @@ public static class SchemaDecoder
                 return matchValue == iv;
             case double dv:
                 return matchValue == (int)dv;
+            case string text when Helpers.ParseListCaseKey(text) is { } listed:
+                // A quoted flow sequence, "[1, 2, 3]", matches any element (PS-398).
+                return listed.Contains(matchValue);
             case string text:
                 var separator = text.IndexOf("..", StringComparison.Ordinal);
                 if (separator > 0)
@@ -1243,7 +1287,11 @@ public static class SchemaDecoder
             }
             else count = 0;
 
-            if (count > maxIterations) count = maxIterations;
+            // PS-396: more elements than `max` is an error, not a silent truncation. The
+            // count was clamped here, so the next field read from inside an element the
+            // clamp had discarded.
+            if (count > maxIterations)
+                throw RepeatLimitError(field, maxIterations, $"count {count}", ctx.Offset, ctx.Data.Length);
             for (int i = 0; i < count; i++)
                 result.Add(DecodeFields(field.Fields, ctx, schema));
         }
@@ -1282,9 +1330,8 @@ public static class SchemaDecoder
             if (ctx.Offset != endOffset)
             {
                 if (iterations >= maxIterations && ctx.Offset < endOffset)
-                    throw new InvalidOperationException(
-                        $"Repeat stopped at its max of {maxIterations} iteration(s) with "
-                        + $"{endOffset - ctx.Offset} of {byteLength} byte(s) of the span unread");
+                    throw RepeatLimitError(field, maxIterations, $"byte_length {byteLength}",
+                        ctx.Offset, endOffset);
                 throw new InvalidOperationException(
                     $"Repeat byte_length mismatch: expected end at {endOffset}, got {ctx.Offset}");
             }
@@ -1297,6 +1344,8 @@ public static class SchemaDecoder
                 result.Add(DecodeFields(field.Fields, ctx, schema));
                 iterations++;
             }
+            if (iterations >= maxIterations && ctx.Remaining > 0)
+                throw RepeatLimitError(field, maxIterations, "until: end", ctx.Offset, ctx.Data.Length);
         }
         else
         {

@@ -52,6 +52,12 @@ public class TransformStage
     public bool Log10 { get; set; }
     public bool Log { get; set; }
     public double? Pow { get; set; }
+    /// <summary>`even` (the default) or `away` from zero, for {op: round} (PS-390).</summary>
+    public string? Ties { get; set; }
+    /// <summary>Bound stages (PS-115). C# had none and passed the value through.</summary>
+    public double? Floor { get; set; }
+    public double? Ceiling { get; set; }
+    public double[]? Clamp { get; set; }
 }
 
 public class MatchCase
@@ -82,7 +88,12 @@ public class GuardCondition
 public class GuardDef
 {
     public List<GuardCondition> When { get; set; } = new();
-    public double ElseValue { get; set; }
+    /// <summary>
+    /// The value when a condition fails. Without `else` the field is omitted (PS-400):
+    /// NaN, which ApplyPostRead turns into an omission. It defaulted to 0, so a guard
+    /// with no else reported a plausible 0 where it meant there is no reading.
+    /// </summary>
+    public double ElseValue { get; set; } = double.NaN;
 }
 
 public class FlaggedGroup

@@ -1,16 +1,13 @@
-# `max` on a repeat: the iteration ceiling, and the one repeat key the TS013 generator
-# never read.
+# `max` on a repeat with `until: end`: the ceiling, met exactly.
 #
-# The four interpreters cap a `count` at it and guard the byte_length and until-end loops
-# with it, so a payload holding more records than `max` allows yields exactly `max` of
-# them. The generator had only a no-progress guard - which stops a zero-width member but
-# is not a ceiling - so it iterated to the end of the payload and produced more records
-# than any interpreter would. CR-2026-019 described the key and recorded the gap;
-# CR-2026-021 closes it.
+# CR-2026-021 made `max` a ceiling in all five implementations, which stopped reading
+# at `max` records and left the rest of the payload unread without a word. CR-2026-058
+# (PS-396) made exceeding it an error naming the repeat, the limit and the bytes left
+# unparsed: the decoder no longer knows where the repeat ends, so nothing after it can be
+# trusted. That outcome is a failed decode, which no vector kind expresses, so it is held
+# by tests/test_cr_2026_058_described_constructs.py and each language's CR-058 tests.
 #
-# `min` cannot be pinned here: it fails the decode when too few records are produced, and
-# no vector kind expects a failure. It is covered by tests/test_cr_2026_021_repeat_limits.py
-# on the interpreted and generated paths alike.
+# What is pinned here is the case that must still succeed: exactly `max` records.
 name: probe_repeat_max
 endian: big
 fields:
@@ -22,17 +19,8 @@ fields:
       - name: v
         type: u8
 test_vectors:
-  - name: until_end_stops_at_the_ceiling
-    description: "Four records are present and `max: 2` allows two, so the last two bytes are left unread"
-    payload: "0A141E28"
-    source: generated
-    expected:
-      capped_to_end:
-        - v: 10
-        - v: 20
-    expected_warnings: []
-  - name: a_payload_within_the_ceiling_is_unaffected
-    description: "Two records, which is what the ceiling allows anyway"
+  - name: a_payload_at_the_ceiling_decodes
+    description: "Two records, which is exactly what the ceiling allows"
     payload: "0A14"
     source: generated
     expected:

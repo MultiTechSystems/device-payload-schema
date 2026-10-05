@@ -4288,10 +4288,11 @@ class TestRepeatType:
         }
         interp = SchemaInterpreter(schema)
         
-        # 5 items but max is 3 - should only get 3
+        # 5 items but max is 3: an error naming the repeat, the limit and the two
+        # bytes left unparsed (PS-396). It was a silent truncation to 3.
         result = interp.decode(bytes([0x01, 0x02, 0x03, 0x04, 0x05]))
-        assert result.success
-        assert len(result.data['items']) == 3
+        assert not result.success
+        assert any("max of 3" in e and "2 byte(s) at offset 3" in e for e in result.errors)
 
     def test_repeat_nested_objects(self):
         """Repeat with complex nested structure."""
@@ -4456,9 +4457,10 @@ class TestEdgeCasesAndSecurity:
         result = interp.decode(bytes([42] * 10000))
         elapsed = time.time() - start
         
-        assert result.success
-        # Default max_iterations=1000 is a safety limit
-        assert len(result.data['items']) == 1000
+        # The default ceiling of 1000 (PS-089) still bounds the work, and exceeding it
+        # is now an error rather than a quiet stop (PS-396).
+        assert not result.success
+        assert any("max of 1000" in e for e in result.errors)
         assert elapsed < 1.0  # Should complete quickly due to limit
 
     # --- Variable Reference Edge Cases ---

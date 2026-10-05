@@ -1,0 +1,30 @@
+# An enum value written as {name, description} reports its `name` (PS-394, CR-2026-058).
+#
+# The description is metadata and never the value. Measured before the CR: Java reported
+# the name, Python and the generated codec the whole mapping, Go 0 and C# a stringified
+# node - five implementations, four answers, and no tag to say which was right.
+name: probe_enum_description
+endian: big
+fields:
+- name: mode
+  type: enum
+  base: u8
+  values:
+    0:
+      name: idle
+      description: The device is waiting for its next interval
+    1:
+      name: standby
+      description: The radio is off between transmissions
+    2: running
+test_vectors:
+- name: the_name_is_reported
+  source: spec-example
+  payload: "01"
+  expected:
+    mode: standby
+- name: a_plain_label_beside_them
+  source: spec-example
+  payload: "02"
+  expected:
+    mode: running

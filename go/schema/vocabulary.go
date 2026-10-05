@@ -2,6 +2,7 @@ package schema
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -129,6 +130,9 @@ func checkTypeVocabulary(raw map[string]any) error {
 			case !hasType && !hasAnyKey(field, fieldConstructKeys):
 				return fmt.Errorf("%s: field declares no type", at)
 			}
+			if err := checkFieldRules(field, at); err != nil {
+				return err
+			}
 			if err := check(field["fields"], at+".fields"); err != nil {
 				return err
 			}
@@ -208,6 +212,133 @@ func asStringMap(v any) map[string]any {
 			out[fmt.Sprintf("%v", k)] = val
 		}
 		return out
+	}
+	return nil
+}
+
+// transformOperations are the stages PS-098 and the PS-115 table define, keyed by name.
+// `op` names an operation instead; `round` is the only one (PS-390).
+var transformOperations = []string{"add", "mult", "div", "sqrt", "abs", "pow", "log10", "log",
+	"floor", "ceiling", "clamp", "op"}
+
+// checkFieldRules holds the per-field rules a schema is rejected for at load, as the
+// specification requires of each.
+// byteGroupMemberBits is the set of bits a byte_group member covers, counted from the
+// group's first bit (most significant bit of its first byte), or nil for a member that
+// is not a bit range or a bool. A range's bits are numbered within its own base (PS-058),
+// so they are mapped onto the group's bit string before members of different widths
+// can be compared.
+func byteGroupMemberBits(member map[string]any) map[int]bool {
+	typ, _ := member["type"].(string)
+	width, start, end := 0, 0, 0
+	if m := bitRangePattern.FindStringSubmatch(typ); m != nil {
+		width, _ = strconv.Atoi(m[1][1:])
+		start, _ = strconv.Atoi(m[2])
+		end, _ = strconv.Atoi(m[3])
+	} else if typ == "bool" {
+		width = 8
+		start, _ = toInt(member["bit"])
+		end = start
+	} else {
+		return nil
+	}
+	bits := map[int]bool{}
+	for b := start; b <= end; b++ {
+		bits[width-1-b] = true
+	}
+	return bits
+}
+
+// checkByteGroupOverlap holds PS-397: bit ranges within one byte_group must not overlap.
+// Overlapping members were accepted, each reported from the same bits.
+func checkByteGroupOverlap(group any, at string) error {
+	members, ok := group.([]any)
+	if !ok {
+		members, _ = asStringMap(group)["fields"].([]any)
+	}
+	type seenMember struct {
+		name string
+		bits map[int]bool
+	}
+	var seen []seenMember
+	for _, raw := range members {
+		member := asStringMap(raw)
+		if member == nil {
+			continue
+		}
+		bits := byteGroupMemberBits(member)
+		if bits == nil {
+			continue
+		}
+		name, _ := member["name"].(string)
+		for _, other := range seen {
+			for b := range bits {
+				if other.bits[b] {
+					return fmt.Errorf("%s.byte_group: members '%s' and '%s' overlap (PS-397)", at, other.name, name)
+				}
+			}
+		}
+		seen = append(seen, seenMember{name, bits})
+	}
+	return nil
+}
+
+func checkFieldRules(field map[string]any, at string) error {
+	// PS-399: a match declares exactly one discriminator source. With both, `field` won
+	// and the `length` byte was left unread, misaligning every later field.
+	if match := asStringMap(field["match"]); match != nil {
+		_, hasField := match["field"]
+		_, hasLength := match["length"]
+		if hasField == hasLength {
+			return fmt.Errorf("%s.match: a match must declare exactly one of 'field' and 'length' (PS-399)", at)
+		}
+	}
+	if group, ok := field["byte_group"]; ok {
+		if err := checkByteGroupOverlap(group, at); err != nil {
+			return err
+		}
+	}
+	// PS-079, PS-391: a bytes format is one of four, and a separator applies to the two
+	// hex ones. `hex:lower` and any other spelling were read here as plain hex.
+	if field["type"] == "bytes" {
+		format, hasFormat := field["format"]
+		if !hasFormat {
+			format = "hex"
+		}
+		switch format {
+		case "hex", "hex:upper", "base64", "array":
+		default:
+			return fmt.Errorf("%s: bytes format %v is not one of hex, hex:upper, base64, array (PS-079)", at, format)
+		}
+		if _, ok := field["separator"]; ok && format != "hex" && format != "hex:upper" {
+			return fmt.Errorf("%s: `separator` applies only to the hex formats, not %v (PS-391)", at, format)
+		}
+	}
+	if stages, ok := field["transform"].([]any); ok {
+		for i, raw := range stages {
+			stage := asStringMap(raw)
+			where := fmt.Sprintf("%s.transform[%d]", at, i)
+			if stage == nil {
+				return fmt.Errorf("%s: a transform stage must be a mapping", where)
+			}
+			// PS-390: `{round: n}` is not a stage. Go accepted it and did nothing,
+			// reporting the unrounded value with success.
+			if _, ok := stage["round"]; ok {
+				return fmt.Errorf("%s: `{round: n}` is not a transform stage; write "+
+					"{op: round, decimals: n} (PS-390)", where)
+			}
+			if op, ok := stage["op"]; ok {
+				if op != "round" {
+					return fmt.Errorf("%s: transform stage names an unknown operation %v (PS-390)", where, op)
+				}
+				if ties, ok := stage["ties"]; ok && ties != "even" && ties != "away" {
+					return fmt.Errorf("%s: round `ties` must be even or away, got %v (PS-390)", where, ties)
+				}
+			}
+			if !hasAnyKey(stage, transformOperations) {
+				return fmt.Errorf("%s: transform stage names no operation of the PS-115 table (PS-390)", where)
+			}
+		}
 	}
 	return nil
 }
