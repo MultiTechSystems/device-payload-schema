@@ -210,3 +210,31 @@ test_vectors:
     source: vendor-codec
     expected:
       temperature: -0.1
+  - name: hcho_u16_byte_order
+    description: "HCHO word 0x0134 little-endian, /100"
+    payload: "0A7D3401"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      hcho: 3.08
+  - name: pm2_5_u16_byte_order
+    description: "PM2.5 word 0x0134 little-endian"
+    payload: "0B7D3401"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      pm2_5: 308
+  - name: pm10_u16_byte_order
+    description: "PM10 word 0x0134 little-endian"
+    payload: "0C7D3401"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      pm10: 308
+  - name: o3_u16_byte_order
+    description: "O3 word 0x0134 little-endian, /100"
+    payload: "0D7D3401"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      o3: 3.08

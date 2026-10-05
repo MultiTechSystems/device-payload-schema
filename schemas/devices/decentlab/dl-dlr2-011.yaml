@@ -89,3 +89,11 @@ test_vectors:
       device_id: 4660
       protocol_version: 2
       battery_voltage: 3.061
+  - name: ch0_input_only
+    description: "Flags 0x0001: channel 0 alone, which pins the group to bit 0"
+    source: vendor-codec
+    payload: "0212340001abcd"
+    expected:
+      protocol_version: 2
+      device_id: 4660
+      ch0_input: 43981

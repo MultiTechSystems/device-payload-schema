@@ -179,3 +179,11 @@ test_vectors:
     source: vendor-codec
     expected:
       temperature: -0.1
+  - name: ch8_type119_rainfall_total_byte_order
+    description: "Channel 8 type 119, chosen to pin rainfall_total; expected values from the vendor's own decoder"
+    payload: "0877120100"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      rainfall_total: 2.74
+      rainfall_counter: 0

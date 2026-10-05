@@ -140,3 +140,17 @@ test_vectors:
     source: vendor-codec
     expected:
       total_current: 65535
+  - name: ch4_type128_active_power_byte_order
+    description: "Channel 4 type 128, chosen to pin active_power; expected values from the vendor's own decoder"
+    payload: "048012010000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      active_power: 274
+  - name: ch7_type201_total_current_byte_order
+    description: "Channel 7 type 201, chosen to pin total_current; expected values from the vendor's own decoder"
+    payload: "07C91201"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      total_current: 274

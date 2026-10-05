@@ -100,3 +100,15 @@ test_vectors:
       device_id: 12485
       flags: 2
       battery_voltage: 3.168
+
+  - name: blg_hot_globe
+    description: "Vendor example with a ~12 kOhm thermistor (hot globe), where ln(R) is sensitive to one ohm"
+    source: vendor-codec
+    payload: "0230c50003d48700840c60"
+    expected:
+      protocol_version: 2
+      device_id: 12485
+      voltage_ratio: 0.018867909908294678
+      thermistor_resistance: 12000.041067632075
+      temperature: 77.10039641436532
+      battery_voltage: 3.168

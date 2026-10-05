@@ -405,3 +405,67 @@ test_vectors:
     source: vendor-codec
     expected:
       temperature: -1.6
+  - name: reset_event_byte_one
+    description: "Reset-event frame with the byte 0x01, the index the vendor's own map labels 'reset'"
+    payload: "FFFE01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      reset_event: "reset"
+  - name: device_status_byte_one
+    description: "Device-status frame with the byte 0x01, the index the vendor's own map labels 'on'"
+    payload: "FF0B01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      device_status: "on"
+  - name: lorawan_class_b
+    description: "LoRaWAN class byte 0x01"
+    payload: "FF0F01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      lorawan_class: "Class B"
+  - name: lorawan_class_c
+    description: "LoRaWAN class byte 0x02"
+    payload: "FF0F02"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      lorawan_class: "Class C"
+  - name: lorawan_class_ctob
+    description: "LoRaWAN class byte 0x03"
+    payload: "FF0F03"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      lorawan_class: "Class CtoB"
+  - name: temperature_read_failed
+    description: "Temperature word 0xFFFF is the vendor's read-failed status"
+    payload: "0967FFFF"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature_sensor_status: "read failed"
+  - name: current_alarm_release_bits
+    description: "Current alarm byte 0x0A: both release bits set alone, both alarm bits clear"
+    payload: "84991000200030000A"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      current_chn1_max: 1.6
+      current_chn1_min: 3.2
+      current_chn1: 4.8
+      current_chn1_alarm:
+        current_threshold_alarm: "no"
+        current_threshold_alarm_release: "yes"
+        current_over_range_alarm: "no"
+        current_over_range_alarm_release: "yes"
+  - name: temperature_alarm_negative
+    description: "Temperature alarm frame: word 0xFEF6 is -26.6 C, alarm byte 1"
+    payload: "8967F6FE01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: -26.6
+      temperature_alarm: "temperature threshold alarm"

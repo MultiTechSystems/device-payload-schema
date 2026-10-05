@@ -48,3 +48,12 @@ test_vectors:
       device_id: 12485
       flags: 1
       leaf_wetness_index: 1.4114376306533813
+  - name: leaf_wetness_index_exact_zero
+    description: "Words 0000 0080 (2^23, low word first), which the decoder yields as exactly 0"
+    source: vendor-codec
+    payload: "0211110003000000800c54"
+    expected:
+      protocol_version: 2
+      device_id: 4369
+      leaf_wetness_index: 0
+      battery_voltage: 3.156
