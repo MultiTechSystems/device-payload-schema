@@ -473,3 +473,90 @@ test_vectors:
     source: vendor-codec
     expected:
       Device: "R718X"
+  - name: echoed_config_report_request
+    description: "Echoed ConfigReportReq decodes to Cmd and Device only (two-byte frame)"
+    fPort: 7
+    payload: "01 34"
+    source: vendor-codec
+    expected:
+      Cmd: "ConfigReportReq"
+      Device: "R718X"
+  - name: echoed_set_on_distance_threshold_request
+    description: "Echoed SetOnDistanceThresholdReq decodes to Cmd and Device only (two-byte frame)"
+    fPort: 7
+    payload: "03 34"
+    source: vendor-codec
+    expected:
+      Cmd: "SetOnDistanceThresholdReq"
+      Device: "R718X"
+  - name: echoed_get_on_distance_threshold_request
+    description: "Echoed GetOnDistanceThresholdReq decodes to Cmd and Device only (two-byte frame)"
+    fPort: 7
+    payload: "04 34"
+    source: vendor-codec
+    expected:
+      Cmd: "GetOnDistanceThresholdReq"
+      Device: "R718X"
+  - name: config_report_success_short_frame
+    description: "Three-byte frame: Status is the single byte after Device"
+    fPort: 7
+    payload: "81 34 00"
+    source: vendor-codec
+    expected:
+      Cmd: "ConfigReportRsp"
+      Device: "R718X"
+      Status: "Success"
+  - name: set_on_distance_threshold_success_short_frame
+    description: "Three-byte frame: Status is the single byte after Device"
+    fPort: 7
+    payload: "83 34 00"
+    source: vendor-codec
+    expected:
+      Cmd: "SetOnDistanceThresholdRsp"
+      Device: "R718X"
+      Status: "Success"
+  - name: set_fill_max_distance_success_short_frame
+    description: "Three-byte frame: Status is the single byte after Device"
+    fPort: 7
+    payload: "85 34 00"
+    source: vendor-codec
+    expected:
+      Cmd: "SetFillMaxDistanceRsp"
+      Device: "R718X"
+      Status: "Success"
+  - name: set_dead_zone_distance_success_short_frame
+    description: "Three-byte frame: Status is the single byte after Device"
+    fPort: 7
+    payload: "8B 34 00"
+    source: vendor-codec
+    expected:
+      Cmd: "SetDeadZoneDistanceRsp"
+      Device: "R718X"
+      Status: "Success"
+  - name: set_on_distance_threshold_failure
+    description: "Any nonzero status byte is Failure"
+    fPort: 7
+    payload: "83 34 01"
+    source: vendor-codec
+    expected:
+      Cmd: "SetOnDistanceThresholdRsp"
+      Device: "R718X"
+      Status: "Failure"
+  - name: set_fill_max_distance_failure
+    description: "Any nonzero status byte is Failure"
+    fPort: 7
+    payload: "85 34 02"
+    source: vendor-codec
+    expected:
+      Cmd: "SetFillMaxDistanceRsp"
+      Device: "R718X"
+      Status: "Failure"
+  - name: set_dead_zone_distance_failure
+    description: "Any nonzero status byte is Failure"
+    fPort: 7
+    payload: "8B 34 FF"
+    source: vendor-codec
+    expected:
+      Cmd: "SetDeadZoneDistanceRsp"
+      Device: "R718X"
+      Status: "Failure"

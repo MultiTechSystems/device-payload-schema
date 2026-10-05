@@ -253,12 +253,21 @@ fields:
 
 test_vectors:
   # ============================================
-  # KEEPALIVE MESSAGES - Validated against interpreter output
+  # KEEPALIVE MESSAGES
   # ============================================
+  # Vectors marked `source: vendor-codec` were checked against the vendor's
+  # decoder, vendor/mclimate/vicki.js in the TTN device repository, run under
+  # node over the same payload. The vendor reports the flags as booleans; here
+  # they are 0/1. Two vectors are NOT vendor-confirmed and carry no source:
+  #   keepalive_extended - the vendor reports reason as Number(bytes[0]
+  #     .toString(16)), so 0x81 comes out as 81, not 129.
+  #   keepalive_valve_fully_open - the vendor's toFixed(2) rounds the tie
+  #     78.125 up to 78.13; this schema rounds half-to-even to 78.12.
   
   - name: keepalive_standard
     description: "Standard keepalive with reason=0x01"
     payload: "01 15 60 80 20 00 14 A4 90"
+    source: vendor-codec
     expected:
       reason: 1
       targetTemperature: 21
@@ -305,6 +314,7 @@ test_vectors:
   - name: keepalive_min_values
     description: "Keepalive with minimum values"
     payload: "01 00 00 00 00 00 00 00 00"
+    source: vendor-codec
     expected:
       reason: 1
       targetTemperature: 0
@@ -328,6 +338,7 @@ test_vectors:
   - name: keepalive_max_values
     description: "Keepalive with maximum values (0xFF)"
     payload: "01 FF FF FF FF FF FF FF FF"
+    source: vendor-codec
     expected:
       reason: 1
       targetTemperature: 255
@@ -351,6 +362,7 @@ test_vectors:
   - name: keepalive_motor_range_zero
     description: "Keepalive with motorRange=0 (valve openness edge case)"
     payload: "01 15 60 80 FF 00 F0 A4 90"
+    source: vendor-codec
     expected:
       reason: 1
       targetTemperature: 21
@@ -374,6 +386,7 @@ test_vectors:
   - name: keepalive_all_flags_set
     description: "Keepalive with all warning flags active"
     payload: "01 16 60 80 20 00 14 AF 98"
+    source: vendor-codec
     expected:
       reason: 1
       targetTemperature: 22
@@ -420,6 +433,7 @@ test_vectors:
   - name: keepalive_low_battery
     description: "Low battery condition (level=0)"
     payload: "01 14 60 80 20 00 14 04 90"
+    source: vendor-codec
     expected:
       reason: 1
       targetTemperature: 20
@@ -443,6 +457,7 @@ test_vectors:
   - name: keepalive_high_battery
     description: "Full battery condition (level=15)"
     payload: "01 14 60 80 20 00 14 F4 90"
+    source: vendor-codec
     expected:
       reason: 1
       targetTemperature: 20
@@ -466,6 +481,7 @@ test_vectors:
   - name: keepalive_negative_temp
     description: "Negative temperature reading"
     payload: "01 10 10 40 00 00 04 80 00"
+    source: vendor-codec
     expected:
       reason: 1
       targetTemperature: 16
@@ -489,6 +505,7 @@ test_vectors:
   - name: keepalive_calibration_failed
     description: "Calibration failure flag set"
     payload: "01 15 60 80 20 00 14 A4 50"
+    source: vendor-codec
     expected:
       reason: 1
       targetTemperature: 21
@@ -503,6 +520,30 @@ test_vectors:
       brokenSensor: 0
       childLock: 0
       calibrationFailed: 1
+      attachedBackplate: 0
+      perceiveAsOnline: 1
+      antiFreezeProtection: 0
+      valveOpenness: 72
+      targetTemperatureFloat: 21.0
+
+  - name: keepalive_broken_sensor_only
+    description: "brokenSensor (bit 0) set with lowMotorConsumption (bit 1) clear"
+    payload: "01 15 60 80 20 00 14 A5 90"
+    source: vendor-codec
+    expected:
+      reason: 1
+      targetTemperature: 21
+      sensorTemperature: 21.88
+      relativeHumidity: 50.0
+      motorRange: 1024.0
+      motorPosition: 288.0
+      batteryVoltage: 3.0
+      openWindow: 0
+      highMotorConsumption: 1
+      lowMotorConsumption: 0
+      brokenSensor: 1
+      childLock: 1
+      calibrationFailed: 0
       attachedBackplate: 0
       perceiveAsOnline: 1
       antiFreezeProtection: 0
