@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 
 # Add tools to path
 sys.path.insert(0, str(Path(__file__).parent))
-from schema_interpreter import SchemaInterpreter, DecodeResult
+from schema_interpreter import SchemaInterpreter, DecodeResult, check_byte_group_overlap
 import schema_vocabulary
 
 
@@ -372,6 +372,29 @@ def is_encode_vector(vector) -> bool:
     return "input" in vector or "expected_payload" in vector
 
 
+def expected_fields_match(expected: Dict[str, Any], actual: Dict[str, Any],
+                          tolerance: float = 0.001) -> Tuple[bool, str]:
+    """Compare an `expected` mapping against decoded output (PS-043, PS-044).
+
+    A key expected as null asserts the key is absent: the decoder must not report it,
+    with any value (CR-2026-075). Every other listed key must be present and match;
+    unlisted keys are not checked. Before CR-2026-075 there was no way to say "absent",
+    so an implementation that reported a field the specification omits - a zero
+    divisor, a failed guard with no else - passed every vector.
+    """
+    for key, want in (expected or {}).items():
+        if want is None:
+            if key in actual:
+                return False, f"{key}: reported {actual[key]!r}, expected absent (PS-043)"
+            continue
+        if key not in actual:
+            return False, f"missing key '{key}'"
+        match, msg = values_match(want, actual[key], tolerance)
+        if not match:
+            return False, f"{key}: {msg}"
+    return True, ""
+
+
 def values_match(expected: Any, actual: Any, tolerance: float = 0.001) -> Tuple[bool, str]:
     """Compare expected and actual values with tolerance for floats."""
     if expected is None and actual is None:
@@ -404,13 +427,7 @@ def values_match(expected: Any, actual: Any, tolerance: float = 0.001) -> Tuple[
         return True, ""
     
     if isinstance(expected, dict) and isinstance(actual, dict):
-        for key in expected:
-            if key not in actual:
-                return False, f"missing key '{key}'"
-            match, msg = values_match(expected[key], actual[key], tolerance)
-            if not match:
-                return False, f"{key}: {msg}"
-        return True, ""
+        return expected_fields_match(expected, actual, tolerance)
     
     # A `bytes` field decodes to a Python bytes object here and to a lowercase hex
     # string in Go, so a vector cannot be written to satisfy both by value. Hex is
@@ -499,13 +516,16 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
         's8', 's16', 's24', 's32', 's64',
         'i8', 'i16', 'i24', 'i32', 'i64',
         'int8', 'int16', 'int24', 'int32', 'int64',
-        'f16', 'f32', 'f64', 'float', 'double',
+        'f16', 'f32', 'f64',
         'bool', 'bytes', 'string', 'ascii', 'hex', 'base64',
         'object', 'match', 'enum', 'repeat', 'skip',
-        'bitfield_string', 'number', 'version_string',
+        'bitfield_string', 'number',
         # PS-283: a computed field declaring an integer result.
         'integer',
-        'udec', 'sdec', 'UDec', 'SDec',
+        # PS-329. `UDec`/`SDec` are not spellings of them (PS-331), and `float`,
+        # `double` and `version_string` are not types (PS-326, PS-401): the list is
+        # closed, and case-sensitive (PS-333).
+        'udec', 'sdec',
     }
     
     for i, fld in enumerate(fields):
@@ -576,6 +596,9 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                 errors.append(
                     f"{mpath}: needs 'field' (a discriminator already decoded) or "
                     "'length' (one read from the payload here)")
+            elif 'field' in match and 'length' in match:
+                errors.append(
+                    f"{mpath}: declares both 'field' and 'length'; exactly one (PS-399)")
             if 'field' in match and not isinstance(match['field'], str):
                 errors.append(f"{mpath}.field: must be a string")
             if 'length' in match:
@@ -643,6 +666,10 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
             if span is not None and (not isinstance(span, int)
                                      or isinstance(span, bool) or span < 1):
                 errors.append(f"{bgpath}: 'size' must be an integer of at least 1")
+            try:
+                check_byte_group_overlap(bg_fields)
+            except ValueError as exc:
+                errors.append(f"{bgpath}: {exc}")
             # PS-017: the construct sets `consume` itself, and a member that advances
             # the position defeats the sharing the construct exists for.
             for bi, bgf in enumerate(bg_fields):
@@ -664,12 +691,26 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
         # the message already listed it - harmless only because a flagged field also
         # carries a name and type.
         field_constructs = ('name', 'type', '$ref', 'flagged', 'tlv',
-                            'byte_group', 'object', 'match')
+                            'byte_group', 'match')
+        # PS-466 (CR-2026-074): the `object:` key is withdrawn; a nested group is
+        # `type: object`.
+        if 'object' in fld and not fld.get('type'):
+            errors.append(
+                f"{path}[{i}]: the `object:` key is withdrawn; write `type: object` with "
+                f"`name: {fld['object']}` and `fields` (PS-466)")
+            continue
         if not any(key in fld for key in field_constructs):
             errors.append(
                 f"{path}[{i}]: must have "
                 f"{', '.join(repr(k) for k in field_constructs[:-1])} or "
                 f"{field_constructs[-1]!r}")
+        elif not any(key in fld for key in field_constructs[1:]) or (
+                'type' in fld and not fld['type']):
+            # PS-334: a field carrying no construct needs a type, and none is
+            # supplied by default. Every implementation used to read it as a u8.
+            errors.append(
+                f"{path}[{i}]{f' ({name})' if name else ''}: declares no 'type' "
+                "(PS-334: a decoder must not supply a default type)")
 
         # A field-level `endian:` is honoured by all five implementations, so a value
         # outside the two it can take is a silent wrong byte order rather than a typo
@@ -754,6 +795,39 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                     validate_field_list(fld['fields'], f"{path}[{i}].fields", errors,
                                         known_field_names)
                 continue
+
+            # PS-392: a skip declares how many bytes it passes over.
+            if ftype == 'skip' and 'length' not in fld:
+                errors.append(f"{path}[{i}] ({name}): a skip field requires 'length' (PS-392)")
+            # PS-393: an enum's base is an unsigned integer type.
+            if ftype == 'enum' and str(fld.get('base', 'u8')) not in (
+                    'u8', 'u16', 'u24', 'u32', 'u64',
+                    'uint8', 'uint16', 'uint24', 'uint32', 'uint64'):
+                errors.append(
+                    f"{path}[{i}] ({name}): an enum's base must be an unsigned integer "
+                    f"type, not {fld.get('base')!r} (PS-393)")
+            # PS-389: a bool names a bit of one byte.
+            if ftype == 'bool' and 'bit' in fld and (
+                    not isinstance(fld['bit'], int) or isinstance(fld['bit'], bool)
+                    or not 0 <= fld['bit'] <= 7):
+                errors.append(
+                    f"{path}[{i}] ({name}): a bool's bit must be an integer from 0 to 7 "
+                    f"(PS-389)")
+            # PS-456: a `bytes` field declares how many bytes it reads.
+            if ftype == 'bytes' and 'length' not in fld:
+                errors.append(
+                    f"{path}[{i}] ({name}): a bytes field requires 'length' (PS-456)")
+            # PS-079, PS-391: four formats, and a separator only beside the hex two.
+            if ftype == 'bytes':
+                fmt = fld.get('format', 'hex')
+                if fmt not in ('hex', 'hex:upper', 'base64', 'array'):
+                    errors.append(
+                        f"{path}[{i}] ({name}): bytes format {fmt!r} is not one of hex, "
+                        f"hex:upper, base64, array (PS-079)")
+                elif 'separator' in fld and fmt not in ('hex', 'hex:upper'):
+                    errors.append(
+                        f"{path}[{i}] ({name}): 'separator' applies only to the hex "
+                        f"formats, not {fmt!r} (PS-391)")
 
             # Bitfield string validation
             if ftype == 'bitfield_string':
@@ -876,6 +950,11 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                         )
                 continue
 
+            if ftype in _COLON_STRING_TYPES:
+                errors.append(
+                    f"{path}[{i}] ({name}): unknown type '{ftype}' - it is a `bytes` "
+                    f"format (PS-079): type: bytes, format: {ftype}")
+                continue
             base_type = ftype.split('[')[0].split(':')[0].split('<')[0]
             if base_type not in KNOWN_TYPES and not base_type.startswith('be_') and not base_type.startswith('le_'):
                 if not re.match(r'(u|i|s)\d+\[', ftype):
@@ -1304,6 +1383,13 @@ def run_test_vector(interpreter: SchemaInterpreter, tv: Dict[str, Any]) -> TestR
     # Compare
     expected = tv.get('expected', {})
     for field_name, expected_value in expected.items():
+        if expected_value is None:
+            # PS-043 (CR-2026-075): null asserts the key is absent.
+            if field_name in result.actual:
+                result.errors.append(
+                    f"{field_name}: reported {result.actual[field_name]!r}, expected "
+                    f"absent (PS-043)")
+            continue
         if field_name not in result.actual:
             result.errors.append(f"Missing field in output: '{field_name}'")
             continue
@@ -1418,6 +1504,16 @@ def check_best_practices(schema: Dict[str, Any], result: ValidationResult) -> No
                     "mult, div, add regardless of key order. Write the intended "
                     "sequence as a transform array to make it explicit."
                     % ", ".join(bare_modifiers),
+                    f"{name}"
+                )
+
+            # PS-453: `consume: 0` advances nothing, which is the point on a bit range
+            # or a bool and a trap anywhere else - the next field reads the same bytes.
+            if (fld.get('consume') == 0 and isinstance(ftype, str)
+                    and '[' not in ftype and ftype != 'bool'):
+                result.add_warning(
+                    "consume: 0 on a %s field is NOT RECOMMENDED (PS-453): the next "
+                    "field reads the same bytes again" % ftype,
                     f"{name}"
                 )
 

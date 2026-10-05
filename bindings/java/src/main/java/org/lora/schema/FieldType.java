@@ -17,8 +17,10 @@ public enum FieldType {
     BYTES, SKIP,
     // Complex types
     OBJECT, MATCH, SWITCH, TLV, REPEAT,
-    // Computed
-    NUMBER,
+    // Nibble-decimal (PS-329)
+    UDEC, SDEC,
+    // Computed; INTEGER reports its result as an integer (PS-283)
+    NUMBER, INTEGER,
     // Enumeration
     ENUM,
     // Bitfield string
@@ -29,46 +31,46 @@ public enum FieldType {
     /**
      * The field type a schema's `type:` string names.
      *
-     * <p>An unrecognised spelling is a schema error, not a U8. This used to return U8 for
-     * anything it did not list, which made every typo and every unimplemented type a silent
-     * one-byte read that misaligned all following fields and still reported success - the
-     * u24 comment below records one instance that was found and fixed without fixing the
-     * cause. Go, C# and the Python interpreter all reject an unknown type; Java alone
-     * absorbed it.
+     * <p>The vocabulary is closed (CR-2026-037). A spelling outside clause 2 is a schema
+     * error naming the field and the spelling (PS-327, PS-328); the alias table is
+     * exhaustive (PS-326); and names are case-sensitive, never lowercased or rewritten
+     * (PS-333). This lowercased its input and turned {@code -} into {@code _}, so
+     * {@code U8}, {@code FLOAT32} and {@code Ctrl-Switch} all resolved here and nowhere
+     * else, and it accepted a private vocabulary ({@code byte}, {@code float16},
+     * {@code boolean}, {@code switch}, {@code uint}, {@code bits}) no other
+     * implementation reads, while missing seven of the ten PS-049 aliases.
      *
-     * <p>An absent or empty type is still U8: a field carrying a construct instead
-     * (`tlv:`, `match:`, `flagged:`, `byte_group:`, `$ref`) declares no `type:` at all, and
-     * the decoder dispatches on the construct before consulting this.
+     * <p>{@code null} is still U8: a field carrying a construct instead ({@code tlv:},
+     * {@code match:}, {@code flagged:}, {@code byte_group:}, {@code $ref}) declares no
+     * type, and {@link Schema} rejects a field that has neither (PS-334) before calling
+     * this. An empty string is a field that declares no type.
      *
-     * <p>A `u8[lo:hi]` bit range never reaches here - {@link Schema} matches the bracket
-     * form before calling this, because this method cannot recognise it.
+     * <p>A {@code u8[lo:hi]} bit range never reaches here - {@link Schema} matches the
+     * bracket form before calling this, because this method cannot recognise it.
      */
     public static FieldType fromString(String type) {
-        if (type == null || type.isEmpty()) {
+        if (type == null) {
             return U8;
         }
-        String normalized = type.toLowerCase().replace("-", "_");
-        
-        return switch (normalized) {
-            case "u8", "byte" -> U8;
+        return switch (type) {
+            case "u8", "uint8" -> U8;
             case "u16", "uint16" -> U16;
-            // 24-bit widths are used for scaled coordinates; without them a schema
-            // reading s24 fell through to U8 and every field after it was misaligned.
             case "u24", "uint24" -> U24;
-            case "u32" -> U32;
+            case "u32", "uint32" -> U32;
+            case "u64", "uint64" -> U64;
             case "u32le16" -> U32LE16;
             case "s32le16" -> S32LE16;
-            case "u64" -> U64;
-            case "i8", "s8" -> I8;
-            case "i16", "s16" -> I16;
-            case "i24", "s24", "int24" -> I24;
-            case "i32", "s32" -> I32;
-            case "i64", "s64" -> I64;
-            case "f16", "float16" -> F16;
-            case "f32", "float32" -> F32;
-            case "f64", "float64" -> F64;
-            case "bool", "boolean" -> BOOL;
-            case "bits" -> BITS;
+            case "s8", "i8", "int8" -> I8;
+            case "s16", "i16", "int16" -> I16;
+            case "s24", "i24", "int24" -> I24;
+            case "s32", "i32", "int32" -> I32;
+            case "s64", "i64", "int64" -> I64;
+            case "f16" -> F16;
+            case "f32" -> F32;
+            case "f64" -> F64;
+            case "udec" -> UDEC;
+            case "sdec" -> SDEC;
+            case "bool" -> BOOL;
             case "ascii" -> ASCII;
             case "hex" -> HEX;
             case "base64" -> BASE64;
@@ -76,15 +78,13 @@ public enum FieldType {
             case "bytes" -> BYTES;
             case "skip" -> SKIP;
             case "object" -> OBJECT;
-            case "match", "switch" -> MATCH;
-            case "tlv" -> TLV;
+            case "match" -> MATCH;
             case "repeat" -> REPEAT;
             case "number" -> NUMBER;
+            case "integer" -> INTEGER;
             case "enum" -> ENUM;
             case "bitfield_string" -> BITFIELD_STRING;
-            case "uint" -> UINT;
-            case "sint" -> SINT;
-            case "bint" -> BINT;
+            case "" -> throw new SchemaException("Field declares no type");
             default -> throw new SchemaException("Unknown field type: " + type);
         };
     }

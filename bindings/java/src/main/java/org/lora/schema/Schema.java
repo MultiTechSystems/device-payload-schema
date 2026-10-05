@@ -141,6 +141,28 @@ public class Schema {
         if (fieldsRaw == null) return fields;
 
         for (Map<String, Object> fm : fieldsRaw) {
+            // PS-466 (CR-2026-074): the `object:` key is withdrawn; a nested group is
+            // `type: object`.
+            if (fm.containsKey("object") && fm.get("type") == null) {
+                throw new SchemaException("the `object:` key is withdrawn; write `type: object` "
+                        + "with `name: " + fm.get("object") + "` and `fields` (PS-466)");
+            }
+            // PS-334: a field carrying no construct needs a type; none is supplied.
+            // Checked here, on list members, because parseField also parses construct
+            // bodies such as an inline `tlv:` block, which carry no type.
+            Object rawType = fm.get("type");
+            if ((rawType == null || String.valueOf(rawType).isBlank()) && !hasConstruct(fm)) {
+                throw new SchemaException("Field '" + fm.get("name") + "' declares no type");
+            }
+            checkBytesFormat(fm);
+            if (fm.containsKey("byte_group")) checkByteGroupOverlap(fm.get("byte_group"));
+            // PS-399: exactly one discriminator source. With both, `field` won and the
+            // `length` byte was left unread, misaligning every later field.
+            if (fm.get("match") instanceof Map<?, ?> match
+                    && match.containsKey("field") == match.containsKey("length")) {
+                throw new SchemaException("Field '" + fm.get("name")
+                        + "': a match must declare exactly one of 'field' and 'length' (PS-399)");
+            }
             fields.add(parseField(fm));
         }
         return fields;
@@ -198,6 +220,136 @@ public class Schema {
         return fields instanceof List ? (List<Map<String, Object>>) fields : null;
     }
 
+    /**
+     * PS-079, PS-391: a bytes format is one of four, and a separator applies to the two hex
+     * ones. Any other format fell through to lowercase hex.
+     */
+    private static void checkBytesFormat(Map<String, Object> fm) {
+        if (!"bytes".equals(fm.get("type"))) return;
+        Object format = fm.getOrDefault("format", "hex");
+        if (!List.of("hex", "hex:upper", "base64", "array").contains(format)) {
+            throw new SchemaException("Field '" + fm.get("name") + "': bytes format " + format
+                    + " is not one of hex, hex:upper, base64, array (PS-079)");
+        }
+        if (fm.containsKey("separator") && !"hex".equals(format) && !"hex:upper".equals(format)) {
+            throw new SchemaException("Field '" + fm.get("name")
+                    + "': `separator` applies only to the hex formats, not " + format + " (PS-391)");
+        }
+    }
+
+    /**
+     * The bits a byte_group member covers, counted from the group's first bit (most
+     * significant bit of its first byte), or null for a member that is neither a bit range
+     * nor a bool. Mapping onto the group lets members of different widths be compared.
+     */
+    private static Set<Integer> byteGroupMemberBits(Map<String, Object> member) {
+        Object type = member.get("type");
+        int width, start, end;
+        Matcher m = BIT_RANGE.matcher(type == null ? "" : type.toString());
+        if (m.matches()) {
+            width = Integer.parseInt(m.group(1));
+            start = Integer.parseInt(m.group(2));
+            end = Integer.parseInt(m.group(3));
+        } else if ("bool".equals(type)) {
+            width = 8;
+            start = toInt(member.get("bit"), 0);
+            end = start;
+        } else {
+            return null;
+        }
+        Set<Integer> bits = new HashSet<>();
+        for (int b = start; b <= end; b++) bits.add(width - 1 - b);
+        return bits;
+    }
+
+    /** PS-397: bit ranges within one byte_group must not overlap. They were accepted. */
+    @SuppressWarnings("unchecked")
+    private static void checkByteGroupOverlap(Object group) {
+        List<?> members = group instanceof List<?> list ? list
+                : group instanceof Map<?, ?> map && map.get("fields") instanceof List<?> fl ? fl
+                : List.of();
+        List<Map.Entry<Object, Set<Integer>>> seen = new ArrayList<>();
+        for (Object raw : members) {
+            if (!(raw instanceof Map)) continue;
+            Map<String, Object> member = (Map<String, Object>) raw;
+            Set<Integer> bits = byteGroupMemberBits(member);
+            if (bits == null) continue;
+            for (Map.Entry<Object, Set<Integer>> other : seen) {
+                if (!Collections.disjoint(other.getValue(), bits)) {
+                    throw new SchemaException("byte_group members '" + other.getKey() + "' and '"
+                            + member.get("name") + "' overlap (PS-397)");
+                }
+            }
+            seen.add(Map.entry(String.valueOf(member.get("name")), bits));
+        }
+    }
+
+    /** The values of a quoted list case key, "[1, 2, 0x10]" (PS-398), or null. */
+    static List<Long> parseListCaseKey(String text) {
+        text = text.trim();
+        if (!text.startsWith("[") || !text.endsWith("]")) return null;
+        List<Long> values = new ArrayList<>();
+        for (String raw : text.substring(1, text.length() - 1).split(",")) {
+            String part = raw.trim();
+            if (part.isEmpty()) continue;
+            try {
+                values.add(part.toLowerCase().startsWith("0x")
+                        ? Long.parseLong(part.substring(2), 16) : Long.parseLong(part));
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        return values;
+    }
+
+    /** The PS-396 error: the repeat, its limit and the payload left unparsed. */
+    private static SchemaException.DecodeException repeatLimitError(Field field, int limit,
+            String mode, int offset, int end) {
+        return new SchemaException.DecodeException(String.format(
+                "repeat '%s' exceeds its max of %d element(s) (%s); %d byte(s) at offset %d left unparsed (PS-396)",
+                field.getName(), limit, mode, end - offset, offset));
+    }
+
+    /** The stages PS-098 and the PS-115 table define, by name; {@code op} names one instead. */
+    private static final List<String> TRANSFORM_OPERATIONS = List.of("add", "mult", "div",
+            "sqrt", "abs", "pow", "log10", "log", "floor", "ceiling", "clamp", "op");
+
+    /**
+     * PS-390: a stage naming an operation outside the PS-115 table is rejected, not
+     * skipped. {@code {round: n}} was accepted and did nothing, so the field was reported
+     * unrounded with success; {@code round} is the {@code op:} form only.
+     */
+    private static void checkStage(Map<String, Object> stage, Object fieldName) {
+        String at = "Field '" + fieldName + "' transform stage " + stage + ": ";
+        if (stage.containsKey("round")) {
+            throw new SchemaException(at + "`{round: n}` is not a transform stage; write "
+                    + "{op: round, decimals: n} (PS-390)");
+        }
+        if (stage.containsKey("op")) {
+            if (!"round".equals(stage.get("op"))) {
+                throw new SchemaException(at + "names an unknown operation (PS-390)");
+            }
+            Object ties = stage.get("ties");
+            if (ties != null && !"even".equals(ties) && !"away".equals(ties)) {
+                throw new SchemaException(at + "round `ties` must be even or away (PS-390)");
+            }
+        }
+        if (TRANSFORM_OPERATIONS.stream().noneMatch(stage::containsKey)) {
+            throw new SchemaException(at + "names no operation of the PS-115 table (PS-390)");
+        }
+    }
+
+    /** The keys that make a field a construct, so it declares no type of its own. */
+    private static final List<String> CONSTRUCT_KEYS =
+            List.of("$ref", "flagged", "tlv", "byte_group", "match");
+
+    private static boolean hasConstruct(Map<String, Object> fm) {
+        for (String key : CONSTRUCT_KEYS) {
+            if (fm.containsKey(key)) return true;
+        }
+        return false;
+    }
+
     @SuppressWarnings("unchecked")
     private static Field parseField(Map<String, Object> fm) {
         Field f = new Field();
@@ -208,7 +360,17 @@ public class Schema {
         // parse it and now rejects a spelling it does not know rather than returning U8.
         Matcher bitRange = BIT_RANGE.matcher(rawType == null ? "" : rawType.trim());
         boolean isBitRange = bitRange.matches();
-        f.setType(isBitRange ? FieldType.BITS : FieldType.fromString(rawType));
+        try {
+            f.setType(isBitRange ? FieldType.BITS : FieldType.fromString(rawType));
+        } catch (SchemaException e) {
+            // PS-328: the rejection names the field as well as the spelling.
+            throw new SchemaException("Field '" + fm.get("name") + "': " + e.getMessage());
+        }
+        // `integer` is `number` declaring an integer result (PS-283).
+        if (f.getType() == FieldType.INTEGER) {
+            f.setType(FieldType.NUMBER);
+            f.setIntegerResult(true);
+        }
         // `length: remaining` (PS-014) is carried as a negative sentinel; toInt would
         // otherwise silently return the 0 default and the field would read one byte.
         Object lengthSpec = fm.get("length");
@@ -328,6 +490,13 @@ public class Schema {
                     if (tm.containsKey("log10")) t.setLog10(toBoolean(tm.get("log10")));
                     if (tm.containsKey("log")) t.setLog(toBoolean(tm.get("log")));
                     if (tm.containsKey("pow")) t.setPow(toDouble(tm.get("pow")));
+                    if (tm.containsKey("floor")) t.setFloor(toDouble(tm.get("floor")));
+                    if (tm.containsKey("ceiling")) t.setCeiling(toDouble(tm.get("ceiling")));
+                    if (tm.get("clamp") instanceof List<?> bounds && bounds.size() == 2) {
+                        t.setClamp(new double[] {toDouble(bounds.get(0)), toDouble(bounds.get(1))});
+                    }
+                    if (tm.containsKey("ties")) t.setTies(String.valueOf(tm.get("ties")));
+                    checkStage(tm, fm.get("name"));
                     transforms.add(t);
                 }
             }
@@ -868,6 +1037,15 @@ public class Schema {
                 value = ctx.decodeFloat(data, size, fieldEndian);
             }
             
+            case UDEC, SDEC -> {
+                // Nibble-decimal (PS-330): upper nibble the whole part, a 4-bit
+                // two's-complement value for sdec; lower nibble the tenths.
+                int b = ctx.read(1)[0] & 0xFF;
+                int whole = b >> 4;
+                if (field.getType() == FieldType.SDEC && whole >= 8) whole -= 16;
+                value = whole + (b & 0x0F) * 0.1;
+            }
+
             case BOOL -> {
                 // PS-065/066: one bit of the current byte, the spec's `bit:` key naming
                 // it, and no advance unless `consume` says so. `bit:` was never read,
@@ -912,6 +1090,12 @@ public class Schema {
                 byte[] data = ctx.read(length);
                 value = bytesToHex(data);
             }
+
+            case BASE64 -> {
+                // RFC 4648 base64 of the bytes read. The type parsed and had no decode
+                // case, so every `type: base64` field failed as an unknown type.
+                value = Base64.getEncoder().encodeToString(ctx.read(length));
+            }
             
             case SKIP -> {
                 ctx.read(length);
@@ -939,6 +1123,17 @@ public class Schema {
             
             case NUMBER -> {
                 value = decodeComputed(field, ctx);
+                if (field.isIntegerResult() && value instanceof Number n
+                        && !Double.isNaN(n.doubleValue()) && !Double.isInfinite(n.doubleValue())) {
+                    double d = n.doubleValue();
+                    // PS-388: a fractional part is an error, never truncated or rounded.
+                    if (d != Math.rint(d) || Double.isInfinite(d)) {
+                        throw new SchemaException.DecodeException(field.getName()
+                                + ": type integer but the computed value is " + d
+                                + "; add `idiv` to truncate or a {op: round} transform stage");
+                    }
+                    value = (long) d;
+                }
             }
 
             case ENUM -> {
@@ -993,6 +1188,13 @@ public class Schema {
             value = applyArithmetic(((Number) value).doubleValue(), field);
         }
         
+        // A value the arithmetic could not produce - a zero divisor (PS-100), the log of
+        // a non-positive number (PS-117) - is absent, and NaN is never reported (PS-282).
+        // Checked before the lookup, which would read NaN as index 0.
+        if (value instanceof Double d && (d.isNaN() || d.isInfinite())) {
+            return OMITTED;
+        }
+
         // Apply lookup. A mapping's keys need not start at zero or be contiguous
         // (PS-268); an unmatched value omits the field rather than reporting the raw
         // integer under a name that promises a label, unless a default is declared
@@ -1119,6 +1321,10 @@ public class Schema {
     private boolean matchesCase(int matchValue, Object caseVal) {
         if (caseVal instanceof Number number) {
             return matchValue == number.intValue();
+        }
+        if (caseVal instanceof String text && parseListCaseKey(text) != null) {
+            // A quoted flow sequence, "[1, 2, 3]", matches any element (PS-398).
+            return parseListCaseKey(text).contains((long) matchValue);
         }
         if (caseVal instanceof String text) {
             int separator = text.indexOf("..");
@@ -1445,7 +1651,13 @@ public class Schema {
                 throw new SchemaException.DecodeException("Invalid count type: " + field.getCount().getClass());
             }
             
-            count = Math.min(count, maxIterations);
+            // PS-396: more elements than `max` is an error, not a silent truncation. The
+            // count was clamped here, so the next field read from inside an element the
+            // clamp had discarded.
+            if (count > maxIterations) {
+                throw repeatLimitError(field, maxIterations, "count " + count,
+                        ctx.getOffset(), ctx.getData().length);
+            }
             
             for (int i = 0; i < count; i++) {
                 result.add(decodeFields(field.getFields(), ctx));
@@ -1479,9 +1691,8 @@ public class Schema {
                 // 2" reads as a short payload even where the schema's own ceiling stopped
                 // the loop with bytes to spare (CR-2026-022).
                 if (iterations >= maxIterations && ctx.getOffset() < endOffset) {
-                    throw new SchemaException.DecodeException(String.format(
-                        "Repeat stopped at its max of %d iteration(s) with %d of %d byte(s) of the span unread",
-                        maxIterations, endOffset - ctx.getOffset(), byteLen));
+                    throw repeatLimitError(field, maxIterations, "byte_length " + byteLen,
+                            ctx.getOffset(), endOffset);
                 }
                 throw new SchemaException.DecodeException(
                     String.format("Repeat byte_length mismatch: expected end at %d, got %d", endOffset, ctx.getOffset()));
@@ -1491,6 +1702,10 @@ public class Schema {
             while (ctx.remaining() > 0 && iterations < maxIterations) {
                 result.add(decodeFields(field.getFields(), ctx));
                 iterations++;
+            }
+            if (iterations >= maxIterations && ctx.remaining() > 0) {
+                throw repeatLimitError(field, maxIterations, "until: end",
+                        ctx.getOffset(), ctx.getData().length);
             }
         } else {
             throw new SchemaException.DecodeException("Repeat field must specify one of: count, byte_length, or until");
@@ -1774,7 +1989,12 @@ public class Schema {
      */
     private static double applyArithmetic(double value, Field field) {
         if (field.getMult() != null) value *= field.getMult();
-        if (field.getDiv() != null && field.getDiv() != 0) value /= field.getDiv();
+        if (field.getDiv() != null) {
+            // A zero divisor omits the field (PS-100): NaN, which the post-read step
+            // turns into an omission. Skipping the division reported the undivided value.
+            if (field.getDiv() == 0) return Double.NaN;
+            value /= field.getDiv();
+        }
         if (field.getAdd() != null) value += field.getAdd();
         return applyTransform(value, field.getTransform());
     }
@@ -1784,18 +2004,26 @@ public class Schema {
         for (Field.Transform stage : stages) {
             if ("round".equals(stage.getOp())) {
                 int decimals = stage.getDecimals() == null ? 0 : stage.getDecimals();
-                // Half-to-even, matching the interpreter's rounding. Half-up would
-                // disagree with it on exact halves, which test vectors do contain.
-                value = new java.math.BigDecimal(value)
-                        .setScale(decimals, java.math.RoundingMode.HALF_EVEN)
-                        .doubleValue();
+                // Half-to-even by default, matching the interpreter's rounding; `ties:
+                // away` rounds a tie away from zero (PS-390). BigDecimal(double) is the
+                // exact binary value, so a tie is recognised only where there is one.
+                if (Double.isNaN(value) || Double.isInfinite(value)) continue;
+                java.math.RoundingMode mode = "away".equals(stage.getTies())
+                        ? java.math.RoundingMode.HALF_UP : java.math.RoundingMode.HALF_EVEN;
+                value = new java.math.BigDecimal(value).setScale(decimals, mode).doubleValue();
+                continue;
+            }
+            if (stage.getFloor() != null) { value = Math.max(value, stage.getFloor()); continue; }
+            if (stage.getCeiling() != null) { value = Math.min(value, stage.getCeiling()); continue; }
+            if (stage.getClamp() != null) {
+                value = Math.max(stage.getClamp()[0], Math.min(stage.getClamp()[1], value));
                 continue;
             }
             // Unary maths stages, each exclusive of the others and of the arithmetic
-            // ops, in the order the Python interpreter checks them. The domain clamps
-            // match it exactly: sqrt of a negative and log of a non-positive would
-            // otherwise yield NaN and poison every later stage, where the interpreter
-            // yields 0 and log(1e-10).
+            // ops, in the order the Python interpreter checks them. sqrt clamps a
+            // negative input at 0 (PS-116). The log of a non-positive number has no
+            // value, so the field is absent (PS-117): NaN, which the post-read step
+            // omits. The logs clamped at 1e-10 before, reporting log10(0) as -10.
             if (Boolean.TRUE.equals(stage.getSqrt())) {
                 value = Math.sqrt(Math.max(0.0, value));
                 continue;
@@ -1809,15 +2037,20 @@ public class Schema {
                 continue;
             }
             if (Boolean.TRUE.equals(stage.getLog10())) {
-                value = Math.log10(Math.max(1e-10, value));
+                if (!(value > 0)) return Double.NaN;
+                value = Math.log10(value);
                 continue;
             }
             if (Boolean.TRUE.equals(stage.getLog())) {
-                value = Math.log(Math.max(1e-10, value));
+                if (!(value > 0)) return Double.NaN;
+                value = Math.log(value);
                 continue;
             }
             if (stage.getMult() != null) value *= stage.getMult();
-            if (stage.getDiv() != null && stage.getDiv() != 0) value /= stage.getDiv();
+            if (stage.getDiv() != null) {
+                if (stage.getDiv() == 0) return Double.NaN;   // PS-100: absent
+                value /= stage.getDiv();
+            }
             if (stage.getAdd() != null) value += stage.getAdd();
         }
         return value;

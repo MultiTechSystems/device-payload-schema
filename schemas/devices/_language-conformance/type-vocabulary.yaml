@@ -1,0 +1,97 @@
+# Every type spelling clause 2 defines that no device schema writes (CR-2026-037).
+#
+# PS-332 requires each canonical spelling and each alias to appear in at least one
+# conformance vector. Before this fixture none of the ten PS-049 aliases did, nor s64,
+# f16, udec, sdec, base64 or integer, so the conformance tables called PS-049 and PS-052
+# "test" while no test existed: Go lacked uint64 and int64, Java seven aliases, C# all
+# ten, and only Python and C read udec and sdec.
+#
+# The values are chosen to be exact in binary floating point (2.5, -1.5, 1.0), so every
+# implementation compares them exactly, and the payload round-trips: re-encoding the
+# decoded values writes these bytes back.
+#
+# sdec E5 is the upper nibble 0xE read as a 4-bit two's-complement -2, plus five tenths:
+# -1.5 (PS-330). The tenths are never negative, which is why the encoder floors.
+name: probe_type_vocabulary
+endian: big
+fields:
+- name: a_uint8
+  type: uint8
+- name: a_uint16
+  type: uint16
+- name: a_uint24
+  type: uint24
+- name: a_uint32
+  type: uint32
+- name: a_uint64
+  type: uint64
+- name: a_i8
+  type: i8
+- name: a_int8
+  type: int8
+- name: a_i16
+  type: i16
+- name: a_int16
+  type: int16
+- name: a_i24
+  type: i24
+- name: a_int24
+  type: int24
+- name: a_i32
+  type: i32
+- name: a_int32
+  type: int32
+- name: a_i64
+  type: i64
+- name: a_int64
+  type: int64
+- name: a_s64
+  type: s64
+- name: a_f16
+  type: f16
+- name: a_udec
+  type: udec
+- name: a_sdec
+  type: sdec
+- name: a_base64
+  type: base64
+  length: 3
+- name: a_integer
+  type: integer
+  compute:
+    op: add
+    a: $a_uint8
+    b: $a_uint8
+test_vectors:
+- name: every_spelling_once
+  source: spec-example
+  description: >-
+    One field per spelling. The integer fields count up from 1 and down from -1 so a
+    misread width shows as the wrong neighbour's value.
+  payload: >-
+    01 0203 040506 0708090A 0000000000000001
+    FF FE FFFD FFFC FFFFFB FFFFFA FFFFFFF9 FFFFFFF8
+    FFFFFFFFFFFFFFF7 FFFFFFFFFFFFFFF6 FFFFFFFFFFFFFFF5
+    3C00 25 E5 414243
+  expected:
+    a_uint8: 1
+    a_uint16: 515
+    a_uint24: 263430
+    a_uint32: 117967114
+    a_uint64: 1
+    a_i8: -1
+    a_int8: -2
+    a_i16: -3
+    a_int16: -4
+    a_i24: -5
+    a_int24: -6
+    a_i32: -7
+    a_int32: -8
+    a_i64: -9
+    a_int64: -10
+    a_s64: -11
+    a_f16: 1.0
+    a_udec: 2.5
+    a_sdec: -1.5
+    a_base64: QUJD
+    a_integer: 2

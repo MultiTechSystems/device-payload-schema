@@ -118,6 +118,11 @@ public class Field {
     public void setByteOffset(int byteOffset) { this.byteOffset = byteOffset; }
     
     /** The `bit:` of a `bool` field, or -1 when the field does not declare one. */
+    /** A computed field written {@code type: integer} (PS-283); its type is NUMBER. */
+    private boolean integerResult;
+    public boolean isIntegerResult() { return integerResult; }
+    public void setIntegerResult(boolean integerResult) { this.integerResult = integerResult; }
+
     private int boolBit = -1;
     public int getBoolBit() { return boolBit; }
     public void setBoolBit(int boolBit) { this.boolBit = boolBit; }
@@ -314,6 +319,21 @@ public class Field {
         private Boolean log10;
         private Boolean log;
         private Double pow;
+        /** {@code even} (the default) or {@code away} from zero, for {@code op: round} (PS-390). */
+        private String ties;
+        /** Bound stages (PS-115). This binding had none and passed the value through. */
+        private Double floor;
+        private Double ceiling;
+        private double[] clamp;
+
+        public String getTies() { return ties; }
+        public void setTies(String ties) { this.ties = ties; }
+        public Double getFloor() { return floor; }
+        public void setFloor(Double floor) { this.floor = floor; }
+        public Double getCeiling() { return ceiling; }
+        public void setCeiling(Double ceiling) { this.ceiling = ceiling; }
+        public double[] getClamp() { return clamp; }
+        public void setClamp(double[] clamp) { this.clamp = clamp; }
 
         public Boolean getSqrt() { return sqrt; }
         public void setSqrt(Boolean sqrt) { this.sqrt = sqrt; }

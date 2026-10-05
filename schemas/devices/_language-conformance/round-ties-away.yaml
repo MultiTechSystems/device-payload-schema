@@ -1,0 +1,50 @@
+# `ties: away` on a round stage rounds an exact tie away from zero (PS-390, CR-2026-058).
+#
+# It exists for vendor decoders that round with JavaScript's toFixed. MClimate's Vicki
+# reports humidity as Number(((bytes[3] * 100) / 256).toFixed(2)), and for 200 that is
+# exactly 78.125: toFixed gives 78.13, half-to-even 78.12. The default stays even, so
+# the same arithmetic without `ties` is here too.
+#
+# Only an exact tie moves. 2.355 is stored just below the half and rounds down under
+# either rule, which is why the rule has to be applied to the stored value rather than
+# to the value times 10^decimals - the multiply lands on exactly 235.5.
+name: probe_round_ties_away
+endian: big
+fields:
+- name: humidity_away
+  type: u8
+  transform:
+  - mult: 100
+  - div: 256
+  - op: round
+    decimals: 2
+    ties: away
+- name: humidity_even
+  type: u8
+  transform:
+  - mult: 100
+  - div: 256
+  - op: round
+    decimals: 2
+- name: below_half_away
+  type: u16
+  transform:
+  - div: 1000
+  - op: round
+    decimals: 2
+    ties: away
+- name: negative_tie_away
+  type: s8
+  transform:
+  - div: 2
+  - op: round
+    ties: away
+test_vectors:
+- name: vicki_tie_and_neighbours
+  source: spec-example
+  payload: "C8 C8 0933 FB"
+  expected:
+    humidity_away: 78.13
+    humidity_even: 78.12
+    below_half_away: 2.35
+    negative_tie_away: -3

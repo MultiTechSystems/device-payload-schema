@@ -132,11 +132,13 @@ func TestEncodeRejectsATypeItHasNoCaseFor(t *testing.T) {
 	// The general form of every defect in this file: a type spelling the switch did not
 	// list wrote no bytes and returned nil, so the caller got a payload with a hole in
 	// it and was told it had succeeded.
-	source := "name: t\nendian: big\nfields:\n  - name: thing\n    type: base64\n"
-
-	got, err := encodeHex(t, source, map[string]any{"thing": "AQID"})
+	//
+	// The probe used to be `type: base64`, which this encoder had no case for. It has one
+	// now, and a schema can no longer name a type outside the vocabulary (CR-2026-037), so
+	// the switch is driven directly with an internal type the compact format builds.
+	err := encodeField(Field{Name: "thing", Type: TypeBits}, 1, NewEncodeContext("big"))
 	if err == nil {
-		t.Fatalf("expected an error, got payload %q", got)
+		t.Fatal("expected an error for a type the encode switch does not list")
 	}
 	if !strings.Contains(err.Error(), "cannot encode type") {
 		t.Errorf("error does not name the type: %v", err)

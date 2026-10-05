@@ -97,8 +97,11 @@ class TestAnUnderrunIsRefused:
         """The conflict this CR was opened for: the old text blamed the payload."""
         for text in (decode(self.SCHEMA, "0A141E28FF").errors[0],
                      decode_js(self.SCHEMA, "0A141E28FF")["errors"][0]):
+            # Worded by CR-2026-058 (PS-396): the repeat, the limit, and the payload
+            # left unparsed, as offset and length.
             assert "max of 2" in text, text
-            assert "2 of 4 byte(s)" in text, text
+            assert "byte_length 4" in text, text
+            assert "2 byte(s) at offset 2 left unparsed" in text, text
 
     def test_the_two_paths_word_it_the_same(self):
         interpreted = decode(self.SCHEMA, "0A141E28FF").errors[0]

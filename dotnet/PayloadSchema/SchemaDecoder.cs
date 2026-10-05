@@ -457,6 +457,33 @@ public static class SchemaDecoder
             case FieldType.Number:
             {
                 value = DecodeNumber(field, ctx);
+                if (field.IntegerResult && value is double d && !double.IsNaN(d) && !double.IsInfinity(d))
+                {
+                    // PS-388: a fractional part is an error, never truncated or rounded.
+                    if (d != Math.Round(d) || double.IsInfinity(d))
+                        throw new InvalidOperationException(
+                            $"{field.Name}: type integer but the computed value is {d}; " +
+                            "add `idiv` to truncate or a {op: round} transform stage");
+                    value = (long)d;
+                }
+                break;
+            }
+
+            case FieldType.UDec:
+            case FieldType.SDec:
+            {
+                // Nibble-decimal (PS-330): upper nibble the whole part, a 4-bit
+                // two's-complement value for sdec; lower nibble the tenths.
+                int b = ctx.Read(1)[0];
+                int whole = b >> 4;
+                if (field.Type == FieldType.SDec && whole >= 8) whole -= 16;
+                value = whole + (b & 0x0F) * 0.1;
+                break;
+            }
+
+            case FieldType.Base64:
+            {
+                value = Convert.ToBase64String(ctx.Read(length));
                 break;
             }
 
@@ -518,6 +545,12 @@ public static class SchemaDecoder
                 value = numVal;
             }
         }
+
+        // A value the arithmetic could not produce - a zero divisor (PS-100), the log of
+        // a non-positive number (PS-117) - is absent, and NaN is never reported (PS-282).
+        // Checked before the lookup, which would read NaN as some index.
+        if (value is double nd && (double.IsNaN(nd) || double.IsInfinity(nd)))
+            return Omitted;
 
         // Apply lookup. A mapping is matched on its keys, which need not start at
         // zero or be contiguous (PS-268). An unmatched value omits the field rather
@@ -601,6 +634,38 @@ public static class SchemaDecoder
             : value;
     }
 
+    /// <summary>
+    /// Round with a tie going away from zero (PS-390 `ties: away`), on the stored value.
+    /// The long fixed expansion is exact, so a tie is recognised only where there is one:
+    /// 78.125 is a tie, while 2.355 is stored just below one.
+    /// </summary>
+    /// <summary>The PS-396 error: the repeat, its limit and the payload left unparsed.</summary>
+    static InvalidOperationException RepeatLimitError(SchemaField field, int limit, string mode, int offset, int end)
+        => new($"repeat '{field.Name}' exceeds its max of {limit} element(s) ({mode}); "
+            + $"{end - offset} byte(s) at offset {offset} left unparsed (PS-396)");
+
+    static double RoundHalfAwayDecimal(double value, int decimals)
+    {
+        if (double.IsNaN(value) || double.IsInfinity(value)) return value;
+        if (decimals < 0) decimals = 0;
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var abs = Math.Abs(value);
+        var longText = abs.ToString("F" + Math.Min(decimals + 40, 99), inv);
+        var frac = longText[(longText.IndexOf('.') + 1)..];
+        bool tie = frac[decimals] == '5' && frac[(decimals + 1)..].All(c => c == '0');
+        double rounded;
+        if (tie)
+        {
+            var scale = Math.Pow(10, decimals);
+            rounded = (Math.Floor(abs * scale) + 1) / scale;
+        }
+        else
+        {
+            rounded = double.Parse(abs.ToString("F" + decimals, inv), inv);
+        }
+        return value < 0 ? -rounded : rounded;
+    }
+
     static double ApplyTransformStages(double numVal, List<TransformStage> stages)
     {
         foreach (var stage in stages)
@@ -618,21 +683,34 @@ public static class SchemaDecoder
                 //
                 // Formatting to a fixed number of decimals is correctly rounded on the
                 // stored value and breaks ties to even, which is both jobs at once.
-                numVal = RoundHalfEvenDecimal(numVal, stage.Decimals);
+                numVal = stage.Ties == "away"
+                    ? RoundHalfAwayDecimal(numVal, stage.Decimals)
+                    : RoundHalfEvenDecimal(numVal, stage.Decimals);
+                continue;
+            }
+            if (stage.Floor.HasValue) { numVal = Math.Max(numVal, stage.Floor.Value); continue; }
+            if (stage.Ceiling.HasValue) { numVal = Math.Min(numVal, stage.Ceiling.Value); continue; }
+            if (stage.Clamp is { Length: 2 } bounds)
+            {
+                numVal = Math.Max(bounds[0], Math.Min(bounds[1], numVal));
                 continue;
             }
             // Unary maths stages, each exclusive of the others and of the arithmetic
-            // ops, in the order the Python interpreter checks them. The domain clamps
-            // match it exactly: sqrt of a negative and log of a non-positive would
-            // otherwise yield NaN and poison every later stage, where the interpreter
-            // yields 0 and log(1e-10).
+            // ops, in the order the Python interpreter checks them. sqrt clamps a
+            // negative input at 0 (PS-116). The log of a non-positive number has no
+            // value, so the field is absent (PS-117): NaN, which ApplyPostRead omits.
+            // The logs clamped at 1e-10 before, reporting log10(0) as -10.
             if (stage.Sqrt) { numVal = Math.Sqrt(Math.Max(0.0, numVal)); continue; }
             if (stage.Abs) { numVal = Math.Abs(numVal); continue; }
             if (stage.Pow.HasValue) { numVal = Math.Pow(numVal, stage.Pow.Value); continue; }
-            if (stage.Log10) { numVal = Math.Log10(Math.Max(1e-10, numVal)); continue; }
-            if (stage.Log) { numVal = Math.Log(Math.Max(1e-10, numVal)); continue; }
+            if (stage.Log10) { if (!(numVal > 0)) return double.NaN; numVal = Math.Log10(numVal); continue; }
+            if (stage.Log) { if (!(numVal > 0)) return double.NaN; numVal = Math.Log(numVal); continue; }
             if (stage.Mult.HasValue) numVal *= stage.Mult.Value;
-            if (stage.Div.HasValue && stage.Div.Value != 0) numVal /= stage.Div.Value;
+            if (stage.Div.HasValue)
+            {
+                if (stage.Div.Value == 0) return double.NaN;   // PS-100: the field is absent
+                numVal /= stage.Div.Value;
+            }
             if (stage.Sub.HasValue) numVal -= stage.Sub.Value;
             if (stage.Add.HasValue) numVal += stage.Add.Value;
         }
@@ -666,7 +744,13 @@ public static class SchemaDecoder
     static double ApplyModifiers(double numVal, SchemaField field)
     {
         if (field.Mult.HasValue) numVal *= field.Mult.Value;
-        if (field.Div.HasValue && field.Div.Value != 0) numVal /= field.Div.Value;
+        if (field.Div.HasValue)
+        {
+            // A zero divisor omits the field (PS-100): NaN, which ApplyPostRead turns
+            // into an omission. Skipping the division reported the undivided value.
+            if (field.Div.Value == 0) return double.NaN;
+            numVal /= field.Div.Value;
+        }
         if (field.Add.HasValue) numVal += field.Add.Value;
         return ApplyTransformStages(numVal, field.Transform);
     }
@@ -872,6 +956,9 @@ public static class SchemaDecoder
                 return matchValue == iv;
             case double dv:
                 return matchValue == (int)dv;
+            case string text when Helpers.ParseListCaseKey(text) is { } listed:
+                // A quoted flow sequence, "[1, 2, 3]", matches any element (PS-398).
+                return listed.Contains(matchValue);
             case string text:
                 var separator = text.IndexOf("..", StringComparison.Ordinal);
                 if (separator > 0)
@@ -1200,7 +1287,11 @@ public static class SchemaDecoder
             }
             else count = 0;
 
-            if (count > maxIterations) count = maxIterations;
+            // PS-396: more elements than `max` is an error, not a silent truncation. The
+            // count was clamped here, so the next field read from inside an element the
+            // clamp had discarded.
+            if (count > maxIterations)
+                throw RepeatLimitError(field, maxIterations, $"count {count}", ctx.Offset, ctx.Data.Length);
             for (int i = 0; i < count; i++)
                 result.Add(DecodeFields(field.Fields, ctx, schema));
         }
@@ -1239,9 +1330,8 @@ public static class SchemaDecoder
             if (ctx.Offset != endOffset)
             {
                 if (iterations >= maxIterations && ctx.Offset < endOffset)
-                    throw new InvalidOperationException(
-                        $"Repeat stopped at its max of {maxIterations} iteration(s) with "
-                        + $"{endOffset - ctx.Offset} of {byteLength} byte(s) of the span unread");
+                    throw RepeatLimitError(field, maxIterations, $"byte_length {byteLength}",
+                        ctx.Offset, endOffset);
                 throw new InvalidOperationException(
                     $"Repeat byte_length mismatch: expected end at {endOffset}, got {ctx.Offset}");
             }
@@ -1254,6 +1344,8 @@ public static class SchemaDecoder
                 result.Add(DecodeFields(field.Fields, ctx, schema));
                 iterations++;
             }
+            if (iterations >= maxIterations && ctx.Remaining > 0)
+                throw RepeatLimitError(field, maxIterations, "until: end", ctx.Offset, ctx.Data.Length);
         }
         else
         {

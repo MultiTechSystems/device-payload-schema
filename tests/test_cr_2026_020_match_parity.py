@@ -175,12 +175,15 @@ class TestARangeCaseKey:
         assert decode_js(schema, "097F")["data"] == {"kind": 9, "exact": 127}
 
     def test_a_key_no_value_can_satisfy_emits_no_branch(self):
-        """A `"[1, 2]"` key matches nothing anywhere, so it earns no test in the codec."""
-        schema = keyed_schema({"[1, 2]": [{"name": "never", "type": "u8"}]},
+        """A key that is no integer, range or list matches nothing, so it earns no test.
+
+        `"[1, 2]"` used to be the example; it is a list key now (PS-398, CR-2026-058).
+        """
+        schema = keyed_schema({"one..": [{"name": "unreachable_case", "type": "u8"}]},
                               default="skip")
         assert decode(schema, "017F").data == {"kind": 1}
         js = TS013Generator(schema).generate()
-        assert "[1, 2]" not in js
+        assert "unreachable_case" not in js
 
 
 class TestTheDefault:

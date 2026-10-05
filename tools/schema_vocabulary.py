@@ -199,13 +199,14 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "abs": (_DECODERS, "stage"),
         "sqrt": (_DECODERS, "stage (input clamped at 0)"),
         "pow": (_DECODERS, "stage"),
-        "log": (_DECODERS, "stage (input clamped at 1e-10)"),
-        "log10": (_DECODERS, "stage (input clamped at 1e-10)"),
-        "floor": (("py", "ts013"), "stage: lower clamp - see DIVERGENT_KEYS"),
-        "ceiling": (("py", "ts013"), "stage: upper clamp - see DIVERGENT_KEYS"),
-        "clamp": (("py", "ts013"), "stage: [lo, hi] clamp - see DIVERGENT_KEYS"),
-        "op": (_DECODERS, "named stage, e.g. {op: round}"),
+        "log": (_DECODERS, "stage (absent where the input is <= 0, PS-117)"),
+        "log10": (_DECODERS, "stage (absent where the input is <= 0, PS-117)"),
+        "floor": (_DECODERS, "stage: lower clamp (PS-115)"),
+        "ceiling": (_DECODERS, "stage: upper clamp (PS-115)"),
+        "clamp": (_DECODERS, "stage: [lo, hi] clamp (PS-115)"),
+        "op": (_DECODERS, "named stage: {op: round} is the only one (PS-390)"),
         "decimals": (_DECODERS, "round's precision"),
+        "ties": (_DECODERS, "round's tie rule: even (default) or away (PS-390)"),
     },
     "compute": {
         "op": (_DECODERS, "add sub mul div mod idiv"),
@@ -300,71 +301,20 @@ DOCUMENTATION_KEYS = frozenset(
 #: no field list references. `is_known` accepts them there and nowhere else, so the
 #: validator still rejects each of them in a field that is actually decoded.
 #:
-#: Carrying only the reached definitions removes every entry and changes no decode
-#: (measured: all 1524 decode outputs byte-identical, vector-verdicts unchanged). It
-#: was not done because it moves ts007_multi_package__package_version_req from the
-#: `repeat` to the `plain fixed` encode shape bucket in all four round-trip harnesses
-#: (they classify by construct names in the file, and the only `repeat` was in an
-#: unreferenced definition), which needs the per-shape floors moved in the language
-#: runners. That is a separate, deliberate change.
-UNREAD_KEYS: Dict[Tuple[str, str], str] = {
-    ("field", "conditional"): (
-        "a C-like expression (`status_and_id & 0x3C == 0`) in ts005/ts006 definitions. "
-        "Nothing evaluates it, so the field is always decoded - the one entry here that "
-        "would change a decode if its definition were ever referenced, which is why it "
-        "is accepted only in an unreferenced definition and is an error anywhere else"
-    ),
-    ("field", "optional"): (
-        "lorawan_frames / udp_packet_forwarder: implies the field may be absent; no "
-        "implementation honours it, so a short frame errors instead"
-    ),
-    ("field", "max_length"): "lorawan_frames `fopts`: a 15-byte cap nobody enforces",
-    ("field", "example"): "udp_packet_forwarder: documentation-style sample value",
-    ("field", "items"): (
-        "udp_packet_forwarder `type: array` + `items: {$ref}` - neither exists in the "
-        "language (`repeat` does). validate_schema.py walks `items` only as a list"
-    ),
-    (
-        "field",
-        "version",
-    ): "lorawan_frames: LoRaWAN version a field applies to ('1.1.0+')",
-    ("definition", "version"): "lorawan_frames / mac_commands: LoRaWAN version tag",
-    ("definition", "cid"): "command id of a library command definition; no reader",
-    ("definition", "direction"): (
-        "uplink/downlink of a library command definition. PS-021 reads `direction` on "
-        "the schema and on a port entry, never on a definition"
-    ),
-}
+#: Empty since compose_library_vectors.py carries only the definitions a composed
+#: schema reaches (0.5.2 wave 1). Every entry was in an unreferenced library
+#: definition, so none remains; decode outputs were unchanged, and
+#: ts007_multi_package__package_version_req moved from the `repeat` to the `plain fixed`
+#: encode shape bucket in all four round-trip harnesses, whose floors moved with it.
+#: The mechanism stays for the next library key nothing reads.
+UNREAD_KEYS: Dict[Tuple[str, str], str] = {}
 
 #: Keys some implementation reads but not all, so a schema using one decodes differently
 #: per language. Accepted, but the validator WARNS with the reason.
-DIVERGENT_KEYS: Dict[Tuple[str, str], str] = {
-    ("field", "format"): (
-        "`format` on a bytes field is read by Go, Java and C# (hex / hex:upper / base64 "
-        "/ array) and ignored by the Python reference interpreter and the TS013 "
-        "generator, so the decoded representation differs per language. Prefer the "
-        "type spelling (`hex`, `hex:upper`, `base64`), which every implementation reads"
-    ),
-    ("transform", "floor"): (
-        "the `floor` stage is applied by the Python interpreter and the TS013 generator "
-        "only; Go, Java and C# have no such stage and pass the value through unclamped"
-    ),
-    ("transform", "ceiling"): (
-        "the `ceiling` stage is applied by the Python interpreter and the TS013 "
-        "generator only; Go, Java and C# pass the value through unclamped"
-    ),
-    ("transform", "clamp"): (
-        "the `clamp` stage is applied by the Python interpreter and the TS013 generator "
-        "only; Go, Java and C# pass the value through unclamped"
-    ),
-    ("field", "separator"): (
-        "`separator` accompanies bytes `format`; the Python reference interpreter "
-        "ignores both"
-    ),
-}
+DIVERGENT_KEYS: Dict[Tuple[str, str], str] = {}
 
-VOCABULARY["field"]["format"] = (("go", "java", "cs"), "bytes rendering; see DIVERGENT")
-VOCABULARY["field"]["separator"] = (("go", "cs"), "bytes rendering; see DIVERGENT")
+VOCABULARY["field"]["format"] = (_DECODERS, "bytes rendering: hex, hex:upper, base64, array (PS-079)")
+VOCABULARY["field"]["separator"] = (_DECODERS, "between the bytes of a hex rendering (PS-391)")
 
 #: Known mistakes, with what to write instead. Checked before the difflib suggestion.
 HINTS: Dict[Tuple[str, str], str] = {

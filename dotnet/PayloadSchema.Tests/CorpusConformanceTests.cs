@@ -35,7 +35,7 @@ public class CorpusConformanceTests
     // fixtures pass everywhere and the full count is 1237.
     // CR-2026-031 added the name_from var-mismatch fixture, whose two vectors decode
     // everywhere, so the full count is 1239.
-    const int CorpusFloor = 1995;
+    const int CorpusFloor = 2008;
 
     readonly ITestOutputHelper _output;
 
@@ -175,6 +175,16 @@ public class CorpusConformanceTests
                     {
                         if (mismatch != null) break;
                         var key = ((YamlScalarNode)kv.Key).Value ?? "";
+                        if (IsNull(kv.Value))
+                        {
+                            // PS-043 (CR-2026-075): null asserts the key is absent.
+                            if (result.TryGetValue(key, out var reported))
+                            {
+                                mismatch = $"{key}: reported {reported}, expected absent";
+                                break;
+                            }
+                            continue;
+                        }
                         if (!result.TryGetValue(key, out var got))
                         {
                             mismatch = $"{key} missing";
@@ -240,6 +250,11 @@ public class CorpusConformanceTests
     /// System.Collections.Generic.List`1[System.Object]". A vector could not express a
     /// nested expectation at all.
     /// </summary>
+    /// <summary>A YAML null: `null`, `~`, or nothing, written plain.</summary>
+    static bool IsNull(YamlNode node) => node is YamlScalarNode scalar
+        && scalar.Style is YamlDotNet.Core.ScalarStyle.Plain or YamlDotNet.Core.ScalarStyle.Any
+        && scalar.Value is null or "" or "~" or "null" or "Null" or "NULL";
+
     static bool NodeMatches(YamlNode want, object? got)
     {
         switch (want)
@@ -258,6 +273,11 @@ public class CorpusConformanceTests
                 foreach (var entry in map.Children)
                 {
                     var mapKey = ((YamlScalarNode)entry.Key).Value ?? "";
+                    if (IsNull(entry.Value))
+                    {
+                        if (gotMap.Contains(mapKey)) return false;   // PS-043
+                        continue;
+                    }
                     if (!gotMap.Contains(mapKey)) return false;
                     if (!NodeMatches(entry.Value, gotMap[mapKey])) return false;
                 }

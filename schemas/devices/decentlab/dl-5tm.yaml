@@ -47,6 +47,28 @@ fields:
               semantic: "battery.voltage"
 
 test_vectors:
+  - name: ttn_declared_example_1
+    description: >-
+      Decentlab's declared example in lorawan-devices (dl-5tm-codec.yaml), the one
+      CR-2026-057 2.11 put into the specification: permittivity and soil temperature
+      as two words, water content the Topp polynomial of the permittivity.
+    payload: "02 023B 0003 0037 0271 0C60"
+    source: vendor-doc
+    expected:
+      protocol_version: 2
+      device_id: 571
+      dielectric_permittivity: 1.1
+      volumetric_water_content: -0.0215397767
+      soil_temperature: 22.5
+      battery_voltage: 3.168
+  - name: ttn_declared_example_2
+    description: "Decentlab's declared example 2: battery group only (flags = 2)"
+    payload: "02 023B 0002 0C60"
+    source: vendor-doc
+    expected:
+      protocol_version: 2
+      device_id: 571
+      battery_voltage: 3.168
   - name: typical_reading
     description: "Typical soil moisture and temperature reading"
     payload: "02 1234 0003 01F4 0226 0C5E"

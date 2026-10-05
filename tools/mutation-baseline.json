@@ -3,13 +3,13 @@
   "min_score_new": 0.8,
   "include_library_composed": false,
   "distribution": {
-    "100%": 140,
+    "100%": 145,
     "95-99%": 5,
     "90-94%": 1,
-    "80-89%": 2,
+    "80-89%": 3,
     "70-79%": 1,
     "<70%": 1,
-    "unscored": 1
+    "unscored": 2
   },
   "schemas": {
     "_language-conformance/bitfield-string.yaml": {
@@ -20,6 +20,16 @@
       "generated": 0,
       "vectors": 1,
       "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/bytes-format.yaml": {
+      "score": null,
+      "killed": 0,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 3,
+      "vectors": 1,
+      "provenance": "independent",
       "failing_original": 0
     },
     "_language-conformance/compute-negative-idiv-mod.yaml": {
@@ -40,6 +50,16 @@
       "generated": 10,
       "vectors": 1,
       "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/enum-description.yaml": {
+      "score": 1.0,
+      "killed": 3,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 4,
+      "vectors": 2,
+      "provenance": "independent",
       "failing_original": 0
     },
     "_language-conformance/enum-spec-default.yaml": {
@@ -80,6 +100,16 @@
       "generated": 5,
       "vectors": 1,
       "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/log-of-non-positive.yaml": {
+      "score": 1.0,
+      "killed": 9,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 13,
+      "vectors": 2,
+      "provenance": "independent",
       "failing_original": 0
     },
     "_language-conformance/lookup-default.yaml": {
@@ -140,6 +170,16 @@
       "generated": 4,
       "vectors": 1,
       "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/match-list-key.yaml": {
+      "score": 1.0,
+      "killed": 15,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 20,
+      "vectors": 3,
+      "provenance": "independent",
       "failing_original": 0
     },
     "_language-conformance/match-var.yaml": {
@@ -224,10 +264,10 @@
     },
     "_language-conformance/repeat-max-count.yaml": {
       "score": 1.0,
-      "killed": 4,
+      "killed": 6,
       "survived": 0,
       "unreached": 0,
-      "generated": 7,
+      "generated": 11,
       "vectors": 1,
       "provenance": "generated-only",
       "failing_original": 0
@@ -238,7 +278,7 @@
       "survived": 0,
       "unreached": 0,
       "generated": 3,
-      "vectors": 2,
+      "vectors": 1,
       "provenance": "generated-only",
       "failing_original": 0
     },
@@ -250,6 +290,16 @@
       "generated": 39,
       "vectors": 1,
       "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/round-ties-away.yaml": {
+      "score": 1.0,
+      "killed": 29,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 33,
+      "vectors": 1,
+      "provenance": "independent",
       "failing_original": 0
     },
     "_language-conformance/skip-type.yaml": {
@@ -282,6 +332,16 @@
       "provenance": "generated-only",
       "failing_original": 0
     },
+    "_language-conformance/type-vocabulary.yaml": {
+      "score": 1.0,
+      "killed": 62,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 87,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "_language-conformance/unknown-tlv-tag-raw.yaml": {
       "score": 1.0,
       "killed": 5,
@@ -312,6 +372,16 @@
       "provenance": "generated-only",
       "failing_original": 0
     },
+    "_language-conformance/value-absent.yaml": {
+      "score": 0.8333,
+      "killed": 10,
+      "survived": 2,
+      "unreached": 0,
+      "generated": 17,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "arwin/lrs10701.yaml": {
       "score": 1.0,
       "killed": 160,
@@ -328,7 +398,7 @@
       "survived": 0,
       "unreached": 0,
       "generated": 46,
-      "vectors": 7,
+      "vectors": 9,
       "provenance": "independent",
       "failing_original": 0
     },

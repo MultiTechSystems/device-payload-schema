@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"regexp"
 	"sort"
 	"strconv"
@@ -43,6 +44,8 @@ const (
 	TypeHexLower      FieldType = "hex"
 	TypeHexUpperLower FieldType = "hex:upper"
 	TypeBase64  FieldType = "Base64"
+	// The spelling a schema writes (CR-2026-037).
+	TypeBase64Lower FieldType = "base64"
 	TypeSkip    FieldType = "Skip"
 	TypeString  FieldType = "String"
 	TypeNumber  FieldType = "Number"
@@ -109,6 +112,9 @@ const (
 type Field struct {
 	Name        string         `json:"name,omitempty" yaml:"name,omitempty"`
 	Type        FieldType      `json:"type" yaml:"type"`
+	// IntegerResult marks a computed field written `type: integer` (PS-283); its Type
+	// is TypeNumber.
+	IntegerResult bool `json:"-" yaml:"-"`
 	Length      int            `json:"length,omitempty" yaml:"length,omitempty"`
 	ByteOffset  int            `json:"byte_offset,omitempty" yaml:"byte_offset,omitempty"`
 	BitOffset   int            `json:"bit_offset,omitempty" yaml:"bit_offset,omitempty"`
@@ -197,9 +203,16 @@ type Transform struct {
 	Sub  *float64 `json:"sub,omitempty" yaml:"sub,omitempty"`
 	Mult *float64 `json:"mult,omitempty" yaml:"mult,omitempty"`
 	Div  *float64 `json:"div,omitempty" yaml:"div,omitempty"`
-	// Named operation form, e.g. {op: round, decimals: 2}.
+	// Named operation form, e.g. {op: round, decimals: 2, ties: away}.
 	Op       string `json:"op,omitempty" yaml:"op,omitempty"`
 	Decimals int    `json:"decimals,omitempty" yaml:"decimals,omitempty"`
+	// Ties is "even" (the default) or "away" from zero (PS-390).
+	Ties string `json:"ties,omitempty" yaml:"ties,omitempty"`
+	// Bound stages (PS-115): floor is a lower clamp, ceiling an upper one, clamp both.
+	// Go had none of the three and passed the value through unclamped.
+	Floor   *float64   `json:"floor,omitempty" yaml:"floor,omitempty"`
+	Ceiling *float64   `json:"ceiling,omitempty" yaml:"ceiling,omitempty"`
+	Clamp   []float64  `json:"clamp,omitempty" yaml:"clamp,omitempty"`
 	// Unary maths stages. Sqrt, Abs, Log10 and Log are flags; Pow carries the
 	// exponent. Pointers so an absent key is distinguishable from `pow: 0`.
 	Sqrt  bool     `json:"sqrt,omitempty" yaml:"sqrt,omitempty"`
@@ -495,7 +508,13 @@ func applyCanonicalModifiers(value float64, field Field) float64 {
 	if field.Mult != nil {
 		value = value * *field.Mult
 	}
-	if field.Div != nil && *field.Div != 0 {
+	if field.Div != nil {
+		// A zero divisor omits the field (PS-100): NaN here, which the post-read
+		// pipeline turns into an omission. Skipping the division reported the
+		// undivided value.
+		if *field.Div == 0 {
+			return math.NaN()
+		}
 		value = value / *field.Div
 	}
 	if field.Add != nil {
@@ -520,6 +539,40 @@ func roundHalfEvenDecimal(value float64, decimals int) float64 {
 	return rounded
 }
 
+// roundHalfAwayDecimal rounds to `decimals` places with a tie going away from zero
+// (PS-390 `ties: away`), on the stored value. big.Float holds the binary value
+// exactly, so 78.125 is seen as the tie it is and 2.355 - stored just below - is not.
+func roundHalfAwayDecimal(value float64, decimals int) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return value
+	}
+	if decimals < 0 {
+		decimals = 0
+	}
+	exact := new(big.Float).SetPrec(2048).SetFloat64(math.Abs(value))
+	scaled := new(big.Float).SetPrec(2048).Mul(exact, new(big.Float).SetPrec(2048).SetFloat64(math.Pow(10, float64(decimals))))
+	floor, _ := scaled.Int(nil)
+	frac := new(big.Float).SetPrec(2048).Sub(scaled, new(big.Float).SetPrec(2048).SetInt(floor))
+	if frac.Cmp(big.NewFloat(0.5)) >= 0 {
+		floor.Add(floor, big.NewInt(1))
+	}
+	text := floor.String()
+	if decimals > 0 {
+		for len(text) <= decimals {
+			text = "0" + text
+		}
+		text = text[:len(text)-decimals] + "." + text[len(text)-decimals:]
+	}
+	out, err := strconv.ParseFloat(text, 64)
+	if err != nil {
+		return value
+	}
+	if value < 0 {
+		out = -out
+	}
+	return out
+}
+
 // applyTransformStages applies a transform array in list order. A stage normally
 // carries one arithmetic op; where it carries several they apply in the canonical
 // order mult, div, add, so a stage cannot mean different things in different
@@ -539,14 +592,31 @@ func applyTransformStages(value float64, stages []Transform) float64 {
 			// strconv.FormatFloat is correctly rounded on the stored value and breaks
 			// ties to even, so it does both jobs; verified against Python's round() on
 			// the exact-tie and representation-error cases.
-			value = roundHalfEvenDecimal(value, stage.Decimals)
+			if stage.Ties == "away" {
+				value = roundHalfAwayDecimal(value, stage.Decimals)
+			} else {
+				value = roundHalfEvenDecimal(value, stage.Decimals)
+			}
+			continue
+		}
+		if stage.Floor != nil {
+			value = math.Max(value, *stage.Floor)
+			continue
+		}
+		if stage.Ceiling != nil {
+			value = math.Min(value, *stage.Ceiling)
+			continue
+		}
+		if len(stage.Clamp) == 2 {
+			value = math.Max(stage.Clamp[0], math.Min(stage.Clamp[1], value))
 			continue
 		}
 		// Unary maths stages, each exclusive of the others and of the arithmetic
-		// ops, in the same order the Python interpreter checks them. The domain
-		// clamps match it exactly: sqrt of a negative and log of a non-positive
-		// would otherwise return NaN and poison every later stage, where the
-		// interpreter yields 0 and log(1e-10).
+		// ops, in the same order the Python interpreter checks them. sqrt clamps a
+		// negative input at 0 (PS-116). The log of a non-positive number has no
+		// value, so the field is absent (PS-117): NaN, which the post-read pipeline
+		// turns into an omission. The logs clamped at 1e-10 before, reporting
+		// log10(0) as -10.
 		if stage.Sqrt {
 			value = math.Sqrt(math.Max(0, value))
 			continue
@@ -560,17 +630,26 @@ func applyTransformStages(value float64, stages []Transform) float64 {
 			continue
 		}
 		if stage.Log10 {
-			value = math.Log10(math.Max(1e-10, value))
+			if value <= 0 {
+				return math.NaN()
+			}
+			value = math.Log10(value)
 			continue
 		}
 		if stage.Log {
-			value = math.Log(math.Max(1e-10, value))
+			if value <= 0 {
+				return math.NaN()
+			}
+			value = math.Log(value)
 			continue
 		}
 		if stage.Mult != nil {
 			value = value * *stage.Mult
 		}
-		if stage.Div != nil && *stage.Div != 0 {
+		if stage.Div != nil {
+			if *stage.Div == 0 {
+				return math.NaN() // PS-100: the field is absent
+			}
 			value = value / *stage.Div
 		}
 		if stage.Sub != nil {
@@ -683,6 +762,13 @@ func ParseSchema(data string) (*Schema, error) {
 	var rootNode yaml.Node
 	_ = yaml.Unmarshal([]byte(data), &rootNode)
 	fieldNodes := findFieldNodes(&rootNode, "fields")
+
+	// CR-2026-037: an unknown or absent type is a schema error, reported before
+	// anything is decoded (PS-327, PS-328, PS-334). The same walk holds the per-field
+	// rules of later CRs (checkFieldRules).
+	if err := checkTypeVocabulary(raw); err != nil {
+		return nil, err
+	}
 
 	schema := &Schema{}
 	
@@ -819,6 +905,21 @@ func parseFieldsRawWithNodes(fieldsRaw []any, nodes []*yaml.Node) []Field {
 	return fields
 }
 
+// enumLabel is what an enum value reports: the string itself, or the `name` of the
+// description form (PS-394). The description form was dropped here, so the value decoded
+// as its raw integer - 0 for a `standby` the schema had named.
+func enumLabel(v any) (string, bool) {
+	if str, ok := v.(string); ok {
+		return str, true
+	}
+	if entry := asStringMap(v); entry != nil {
+		if name, ok := entry["name"].(string); ok {
+			return name, true
+		}
+	}
+	return "", false
+}
+
 func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	f := Field{}
 	
@@ -826,7 +927,13 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 		f.Name = name
 	}
 	if typ, ok := fm["type"].(string); ok {
-		f.Type = FieldType(typ)
+		f.Type = canonicalFieldType(typ)
+		// `integer` is `number` declaring an integer result (PS-283), so it takes
+		// every computed-field path and is checked and converted at the end.
+		if f.Type == TypeInteger {
+			f.Type = TypeNumber
+			f.IntegerResult = true
+		}
 	}
 	if length, ok := fm["length"].(int); ok {
 		f.Length = length
@@ -902,6 +1009,22 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 					t.Decimals = decimals
 				} else if decimals, ok := tm["decimals"].(float64); ok {
 					t.Decimals = int(decimals)
+				}
+				if ties, ok := tm["ties"].(string); ok {
+					t.Ties = ties
+				}
+				if bound, ok := toFloat64(tm["floor"]); ok && tm["floor"] != nil {
+					t.Floor = &bound
+				}
+				if bound, ok := toFloat64(tm["ceiling"]); ok && tm["ceiling"] != nil {
+					t.Ceiling = &bound
+				}
+				if bounds, ok := tm["clamp"].([]any); ok && len(bounds) == 2 {
+					lo, okLo := toFloat64(bounds[0])
+					hi, okHi := toFloat64(bounds[1])
+					if okLo && okHi {
+						t.Clamp = []float64{lo, hi}
+					}
 				}
 				// Unary maths stages. Struct tags are not enough here: transform
 				// stages are built by hand from this map, so a field added to
@@ -1137,7 +1260,7 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 		f.Values = make(map[int]string)
 		for k, v := range valuesRaw {
 			if key, err := strconv.Atoi(k); err == nil {
-				if str, ok := v.(string); ok {
+				if str, ok := enumLabel(v); ok {
 					f.Values[key] = str
 				}
 			}
@@ -1155,7 +1278,7 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 			case string:
 				key, _ = strconv.Atoi(kv)
 			}
-			if str, ok := v.(string); ok {
+			if str, ok := enumLabel(v); ok {
 				f.Values[key] = str
 			}
 		}
@@ -1303,7 +1426,10 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 
 	// Phase 2: guard (conditional evaluation)
 	if guardRaw, ok := fm["guard"].(map[string]any); ok {
-		gd := &GuardDef{}
+		// No `else` means the field is omitted when a condition fails (PS-400): NaN,
+		// which the post-read pipeline turns into an omission. The zero value was
+		// reported instead - a plausible 0 where the guard said there is no reading.
+		gd := &GuardDef{Else: math.NaN()}
 		if elseVal, ok := guardRaw["else"].(float64); ok {
 			gd.Else = elseVal
 		} else if elseVal, ok := guardRaw["else"].(int); ok {
@@ -2020,6 +2146,19 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 			return nil, err
 		}
 
+	case TypeUDec, TypeSDec:
+		// Nibble-decimal (PS-330): the upper nibble is the whole part, a 4-bit
+		// two's-complement value for sdec, and the lower nibble is tenths.
+		data, err := ctx.Read(1)
+		if err != nil {
+			return nil, err
+		}
+		whole := int(data[0] >> 4)
+		if field.Type == TypeSDec && whole >= 8 {
+			whole -= 16
+		}
+		value = float64(whole) + float64(data[0]&0x0F)*0.1
+
 	case TypeBool, TypeBoolLower:
 		// Bool extracts a single bit from the current byte
 		data, err := ctx.Peek(1, 0)
@@ -2095,6 +2234,15 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		} else {
 			value = intVal
 		}
+
+	case TypeBase64Lower:
+		// RFC 4648 base64 of the bytes read (clause 2 string types). There was no case,
+		// so `type: base64` was an unknown type here alone.
+		data, err := ctx.Read(length)
+		if err != nil {
+			return nil, err
+		}
+		value = base64.StdEncoding.EncodeToString(data)
 
 	case TypeHex, TypeHexLower, TypeHexUpperLower:
 		data, err := ctx.Read(length)
@@ -2229,19 +2377,31 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 			}
 		}
 
+		if field.IntegerResult && value != omitted {
+			if numVal, ok := toFloat64(value); ok && !math.IsNaN(numVal) && !math.IsInf(numVal, 0) {
+				// PS-388: a fractional part is an error, never truncated or rounded.
+				if numVal != math.Trunc(numVal) {
+					return nil, fmt.Errorf("%s: type integer but the computed value is %v; "+
+						"add `idiv` to truncate or a {op: round} transform stage", field.Name, numVal)
+				}
+				value = int64(numVal)
+			}
+		}
+
 	case TypeObject, TypeObjectLower:
 		value, err = decodeFields(field.Fields, ctx)
 		if err != nil {
 			return nil, err
 		}
 
-	case TypeMatch, "CTRL-SWITCH", "Switch":
+	case TypeMatch, TypeMatchLower:
 		value, err = decodeMatch(field, ctx)
 		if err != nil {
 			return nil, err
 		}
 
-	case TypeTLV, "tlv":
+	case TypeTLV, TypeTLVLower:
+		// Set internally for a `tlv:` construct; no schema spells it as a type.
 		return decodeTLV(field, ctx)
 
 	default:
@@ -2317,6 +2477,12 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 			numVal = applyCanonicalModifiers(numVal, field)
 		}
 		value = numVal
+	}
+
+	// A value the arithmetic could not produce - a zero divisor (PS-100), the log of
+	// a non-positive number (PS-117) - is absent, and NaN is never reported (PS-282).
+	if f, ok := value.(float64); ok && (math.IsNaN(f) || math.IsInf(f, 0)) {
+		return omitted, nil
 	}
 
 	// Apply lookup. A mapping is matched on its keys, which need not start at
@@ -2431,6 +2597,16 @@ func matchCasePattern(value int, pattern any) bool {
 	case float64:
 		return value == int(v)
 	case string:
+		// A quoted flow sequence, "[1, 2, 3]", matches any element (PS-398). It was
+		// compared as text here and matched nothing.
+		if values, ok := parseListCaseKey(v); ok {
+			for _, item := range values {
+				if value == item {
+					return true
+				}
+			}
+			return false
+		}
 		lo, hi, ok := parseRangePattern(v)
 		if ok {
 			return value >= lo && value <= hi
@@ -2457,6 +2633,27 @@ func matchCasePattern(value int, pattern any) bool {
 		return value >= lo && value <= hi
 	}
 	return false
+}
+
+// parseListCaseKey reads a quoted list case key, "[1, 2, 0x10]" (PS-398).
+func parseListCaseKey(text string) ([]int, bool) {
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(text, "[") || !strings.HasSuffix(text, "]") {
+		return nil, false
+	}
+	var values []int
+	for _, part := range strings.Split(text[1:len(text)-1], ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		n, err := parseIntAny(part)
+		if err != nil {
+			return nil, false
+		}
+		values = append(values, int(n))
+	}
+	return values, true
 }
 
 // parseRangePattern reads the "2..5" spelling, inclusive at both ends (PS-270).
@@ -2960,6 +3157,13 @@ func formatBytes(data []byte, format, separator string) any {
 }
 
 // decodeRepeat decodes a repeat/array field.
+// repeatLimitError is the PS-396 error: the repeat, its limit and the payload left
+// unparsed. Worded as the Python reference and the generated codec word it.
+func repeatLimitError(field Field, limit int, mode string, offset, end int) error {
+	return fmt.Errorf("repeat '%s' exceeds its max of %d element(s) (%s); %d byte(s) at offset %d left unparsed (PS-396)",
+		field.Name, limit, mode, end-offset, offset)
+}
+
 func decodeRepeat(field Field, ctx *DecodeContext) ([]any, error) {
 	maxIterations := field.Max
 	if maxIterations == 0 {
@@ -2990,8 +3194,12 @@ func decodeRepeat(field Field, ctx *DecodeContext) ([]any, error) {
 			return nil, fmt.Errorf("invalid count type: %T", field.Count)
 		}
 
+		// PS-396: more elements than `max` is an error, not a silent truncation. The
+		// count was clamped here, so the next field read from inside an element the
+		// clamp had discarded.
 		if count > maxIterations {
-			count = maxIterations
+			return nil, repeatLimitError(field, maxIterations, fmt.Sprintf("count %d", count),
+				ctx.Offset, len(ctx.Data))
 		}
 
 		for i := 0; i < count; i++ {
@@ -3039,9 +3247,8 @@ func decodeRepeat(field Field, ctx *DecodeContext) ([]any, error) {
 			// a short payload even where the schema's own ceiling stopped the loop with
 			// bytes to spare (CR-2026-022).
 			if iterations >= maxIterations && ctx.Offset < endOffset {
-				return nil, fmt.Errorf(
-					"repeat stopped at its max of %d iteration(s) with %d of %d byte(s) of the span unread",
-					maxIterations, endOffset-ctx.Offset, byteLength)
+				return nil, repeatLimitError(field, maxIterations,
+					fmt.Sprintf("byte_length %d", byteLength), ctx.Offset, endOffset)
 			}
 			return nil, fmt.Errorf("repeat byte_length mismatch: expected end at %d, got %d",
 				endOffset, ctx.Offset)
@@ -3058,6 +3265,9 @@ func decodeRepeat(field Field, ctx *DecodeContext) ([]any, error) {
 			}
 			result = append(result, element)
 			iterations++
+		}
+		if iterations >= maxIterations && ctx.Remaining() > 0 {
+			return nil, repeatLimitError(field, maxIterations, "until: end", ctx.Offset, len(ctx.Data))
 		}
 
 	} else {
@@ -3320,6 +3530,14 @@ func caseMatchesValue(value int, c Case) bool {
 		}
 		return false
 	case string:
+		if values, ok := parseListCaseKey(v); ok {
+			for _, item := range values {
+				if item == value {
+					return true
+				}
+			}
+			return false
+		}
 		if strings.Contains(v, "..") {
 			parts := strings.SplitN(v, "..", 2)
 			lo, errLo := parseIntAny(parts[0])
@@ -4316,6 +4534,35 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 		// Rounded, not truncated, for the reason the unsigned case above gives.
 		ctx.Write(encodeSint(int64(math.RoundToEven(numVal)), length, endian))
 
+	case TypeF16:
+		// The encoder had no f16 case, so a schema that decoded one could not write it.
+		numVal, ok := toFloat64(value)
+		if !ok {
+			return notANumber(field, value)
+		}
+		ctx.Write(encodeUint(uint64(float16Bits(numVal)), 2, endian))
+
+	case TypeUDec, TypeSDec:
+		// The inverse of PS-330, as tools/schema_interpreter.py writes it: floor the
+		// whole part so the tenths stay non-negative (-1.5 is -2 + 0.5).
+		numVal, ok := toFloat64(value)
+		if !ok {
+			return notANumber(field, value)
+		}
+		whole := math.Floor(numVal)
+		tenths := math.RoundToEven((numVal - whole) * 10)
+		if tenths == 10 {
+			whole, tenths = whole+1, 0
+		}
+		low, high := 0.0, 15.0
+		if field.Type == TypeSDec {
+			low, high = -8, 7
+		}
+		if whole < low || whole > high {
+			return fmt.Errorf("field %q: %v does not fit %s", field.Name, numVal, field.Type)
+		}
+		ctx.Write([]byte{byte((int(whole)&0x0F)<<4) | byte(tenths)})
+
 	case TypeFloat32, TypeF32:
 		numVal, ok := toFloat64(value)
 		if !ok {
@@ -4347,6 +4594,20 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 			data := make([]byte, length)
 			copy(data, []byte(strVal))
 			ctx.Write(data)
+		}
+
+	case TypeBase64Lower:
+		if strVal, ok := value.(string); ok {
+			data, err := base64.StdEncoding.DecodeString(strVal)
+			if err != nil {
+				return fmt.Errorf("base64 field %q: %v", field.Name, err)
+			}
+			if length <= 0 {
+				length = len(data)
+			}
+			padded := make([]byte, length)
+			copy(padded, data)
+			ctx.Write(padded)
 		}
 
 	case TypeHex, TypeHexLower, TypeHexUpperLower:
@@ -4446,21 +4707,23 @@ func encodeBytes(field Field, value any, length int, ctx *EncodeContext) error {
 
 	switch v := value.(type) {
 	case string:
-		// Try to detect format
-		if strings.Contains(v, ":") || strings.Contains(v, "-") {
-			// Has separator - strip it
-			hexStr := strings.ReplaceAll(v, ":", "")
-			hexStr = strings.ReplaceAll(hexStr, "-", "")
-			data, _ = hex.DecodeString(hexStr)
-		} else if len(v)%4 == 0 && len(v) > 0 {
-			// Try base64
-			if decoded, err := base64.StdEncoding.DecodeString(v); err == nil && len(decoded) == length {
-				data = decoded
-			} else {
-				data, _ = hex.DecodeString(v)
-			}
+		// The declared format says how the value was rendered (PS-079, PS-391). This
+		// guessed instead - stripping ':' and '-' whatever the separator, and trying
+		// base64 on any string whose length was a multiple of four - and dropped a
+		// decode error, writing zeros where the value could not be read.
+		var err error
+		if field.Format == "base64" {
+			data, err = base64.StdEncoding.DecodeString(v)
 		} else {
-			data, _ = hex.DecodeString(v)
+			text := strings.ReplaceAll(v, " ", "")
+			if field.Separator != "" {
+				text = strings.ReplaceAll(text, field.Separator, "")
+			}
+			data, err = hex.DecodeString(text)
+		}
+		if err != nil {
+			return fmt.Errorf("bytes field %q: cannot read %q as %s: %v", field.Name, v,
+				map[bool]string{true: "base64", false: "hex"}[field.Format == "base64"], err)
 		}
 
 	case []any:
@@ -4520,6 +4783,44 @@ func encodeSint(val int64, length int, endian string) []byte {
 		val = (1 << (length * 8)) + val
 	}
 	return encodeUint(uint64(val), length, endian)
+}
+
+// float16Bits converts to IEEE 754 binary16, rounding to nearest with ties to even.
+func float16Bits(v float64) uint16 {
+	f := math.Float32bits(float32(v))
+	sign := uint16((f >> 16) & 0x8000)
+	rawExp := (f >> 23) & 0xFF
+	mant := f & 0x7FFFFF
+	if rawExp == 0xFF {
+		if mant != 0 {
+			return sign | 0x7E00
+		}
+		return sign | 0x7C00
+	}
+	exp := int(rawExp) - 127 + 15
+	if exp >= 31 {
+		return sign | 0x7C00
+	}
+	if exp <= 0 {
+		if exp < -10 {
+			return sign
+		}
+		mant |= 0x800000
+		shift := uint(14 - exp)
+		half := uint16(mant >> shift)
+		rem := mant & ((1 << shift) - 1)
+		halfway := uint32(1) << (shift - 1)
+		if rem > halfway || (rem == halfway && half&1 == 1) {
+			half++
+		}
+		return sign | half
+	}
+	half := sign | uint16(exp<<10) | uint16(mant>>13)
+	rem := mant & 0x1FFF
+	if rem > 0x1000 || (rem == 0x1000 && half&1 == 1) {
+		half++
+	}
+	return half
 }
 
 func encodeFloat32(val float32, endian string) []byte {

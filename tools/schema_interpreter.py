@@ -72,6 +72,11 @@ MESSAGE_DIRECTIONS = frozenset({'uplink', 'downlink'})
 #: schema carrying it surfaces rather than being read as `both`.
 DECLARED_DIRECTIONS = frozenset({'uplink', 'downlink', 'both'})
 
+#: The computed field types: they read no bytes and write none. `integer` is `number`
+#: declaring an integer result (PS-283); the encoder knew only `number`, so a schema
+#: using `integer` decoded and then failed with "Cannot encode type: integer".
+COMPUTED_TYPES = ('number', 'integer')
+
 
 #: Byte width and signedness of every integer type spelling, including aliases. Lifted
 #: out of _encode_field so the TLV case ranking can ask whether a value fits a field
@@ -196,6 +201,148 @@ def normalize_output(value):
     return value
 
 
+#: The output formats of a `bytes` field (PS-079), and the two a `separator` applies to
+#: (PS-391).
+BYTES_FORMATS = ('hex', 'hex:upper', 'base64', 'array')
+SEPARATED_BYTES_FORMATS = ('hex', 'hex:upper')
+
+
+def check_bytes_format(field_def):
+    """Reject a `format` outside PS-079 and a `separator` beside a format it cannot apply to."""
+    fmt = field_def.get('format', 'hex')
+    if fmt not in BYTES_FORMATS:
+        raise ValueError(
+            f"Field '{field_def.get('name', '?')}': bytes format {fmt!r} is not one of "
+            f"{', '.join(BYTES_FORMATS)} (PS-079)")
+    if 'separator' in field_def and fmt not in SEPARATED_BYTES_FORMATS:
+        raise ValueError(
+            f"Field '{field_def.get('name', '?')}': `separator` applies only to the hex "
+            f"formats, not {fmt!r} (PS-391)")
+
+
+def format_bytes(field_def, data: bytes):
+    """A `bytes` field's value in its declared format (PS-079, PS-391).
+
+    Both keys were ignored here and by the generated codec, so `format: hex:upper` with
+    `separator: ":"` reported `aabbcc` where Go, Java and C# report `AA:BB:CC`.
+    """
+    check_bytes_format(field_def)
+    fmt = field_def.get('format', 'hex')
+    if fmt == 'base64':
+        import base64 as b64
+        return b64.b64encode(data).decode('ascii')
+    if fmt == 'array':
+        return list(data)
+    digits = '%02X' if fmt == 'hex:upper' else '%02x'
+    return str(field_def.get('separator', '')).join(digits % b for b in data)
+
+
+def repeat_limit_message(field_def, limit, mode, offset, end):
+    """The PS-396 error: the repeat, its limit, and the payload left unparsed."""
+    return (f"repeat '{field_def.get('name', '?')}' exceeds its max of {limit} element(s) "
+            f"({mode}); {end - offset} byte(s) at offset {offset} left unparsed (PS-396)")
+
+
+_BIT_RANGE = re.compile(r'^u(\d+)\[(\d+):(\d+)\]$')
+
+
+def byte_group_member_bits(member):
+    """The bits a byte_group member covers, counted from the group's first bit, or None.
+
+    A range's bits are numbered within its own base (PS-058: 0 is the least significant),
+    so they are mapped onto the group's bit string - most significant bit of the first
+    byte first - before members of different widths can be compared.
+    """
+    if not isinstance(member, dict):
+        return None
+    ftype = str(member.get('type', ''))
+    match = _BIT_RANGE.match(ftype)
+    if match:
+        width, start, end = (int(g) for g in match.groups())
+    elif ftype == 'bool':
+        width, start = 8, int(member.get('bit', 0))
+        end = start
+    else:
+        return None
+    return {width - 1 - bit for bit in range(start, end + 1)}
+
+
+def check_byte_group_overlap(members):
+    """PS-397: bit ranges within one byte_group must not overlap.
+
+    Overlapping members were accepted by all five implementations, each reporting both
+    from the same bits; encoding then OR-ed two values into them.
+    """
+    seen = []
+    for member in members or []:
+        bits = byte_group_member_bits(member)
+        if not bits:
+            continue
+        for name, other in seen:
+            if bits & other:
+                raise ValueError(
+                    f"byte_group members '{name}' and '{member.get('name', '?')}' "
+                    f"overlap (PS-397)")
+        seen.append((member.get('name', '?'), bits))
+
+
+def parse_list_case_key(text):
+    """The values of a quoted list case key, "[1, 2, 0x10]", or None if it is not one."""
+    text = str(text).strip()
+    if not (text.startswith('[') and text.endswith(']')):
+        return None
+    values = []
+    for part in text[1:-1].split(','):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            values.append(int(part, 16) if part.lower().startswith('0x') else int(part))
+        except ValueError:
+            return None
+    return values
+
+
+def object_key_withdrawn(field_def):
+    """The PS-466 error for a field written with the withdrawn `object:` key."""
+    return (f"the `object:` key is withdrawn; write `type: object` with `name: "
+            f"{field_def.get('object')}` and `fields` (PS-466)")
+
+
+def enum_label(entry):
+    """What an enum value reports: its `name` where it is the description form (PS-394).
+
+    The `description` is metadata and never the value. This returned the whole mapping,
+    so a decoded enum reported {name: standby, description: ...} as its value.
+    """
+    if isinstance(entry, dict) and 'name' in entry:
+        return entry['name']
+    return entry
+
+
+def round_decimal(value, decimals=0, ties='even'):
+    """Round to `decimals` places on the value itself (PS-390).
+
+    `ties` is `even` (the default) or `away`, from zero. Decimal(float) is the exact
+    binary value, so a value stored just below a tie rounds down as it should, and an
+    exact tie such as 78.125 is recognised as one - rounding value * 10**d instead would
+    invent ties. `away` exists for vendor decoders that use JavaScript's toFixed.
+    """
+    from decimal import Decimal, ROUND_HALF_EVEN, ROUND_HALF_UP
+    if ties not in ('even', 'away'):
+        raise ValueError(f"round `ties` must be 'even' or 'away', got {ties!r} (PS-390)")
+    if isinstance(decimals, bool) or not isinstance(decimals, int) or decimals < 0:
+        raise ValueError(
+            f"round `decimals` must be a non-negative integer, got {decimals!r} (PS-390)")
+    if value is OMITTED or isinstance(value, bool):
+        return value
+    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+        return value
+    mode = ROUND_HALF_EVEN if ties == 'even' else ROUND_HALF_UP
+    rounded = float(Decimal(value).quantize(Decimal(1).scaleb(-decimals), rounding=mode))
+    return 0.0 if rounded == 0 else rounded
+
+
 class LookupIndexError(ValueError):
     """An out-of-bounds index into a sequence ``lookup`` (PS-105).
 
@@ -308,7 +455,13 @@ def apply_canonical_modifiers(value, field_def: Dict[str, Any]):
     C#, C), Protocol Buffers or the binary schema form cannot preserve -- and the
     implementations of this specification consequently disagreed with each other.
     An absent modifier is the identity operation.
+
+    A zero divisor returns OMITTED: the field is absent (PS-100, PS-278). This skipped
+    the division instead, so `div: 0` reported the undivided value as though it were
+    the scaled one.
     """
+    if value is OMITTED:
+        return OMITTED
     for key in CANONICAL_MODIFIER_ORDER:
         operand = field_def.get(key)
         if operand is None:
@@ -316,8 +469,9 @@ def apply_canonical_modifiers(value, field_def: Dict[str, Any]):
         if key == 'mult':
             value = value * operand
         elif key == 'div':
-            if operand != 0:
-                value = value / operand
+            if operand == 0:
+                return OMITTED
+            value = value / operand
         else:
             value = value + operand
     return value
@@ -813,7 +967,13 @@ class SchemaInterpreter:
     def _decode_field_inner(self, field_def: Dict[str, Any], buf: bytes,
                             pos: int) -> Tuple[Any, int]:
         """Decode a single field from buffer."""
-        field_type = field_def.get('type', 'u8')
+        field_type = field_def.get('type')
+        if not field_type:
+            # PS-334: no default type. This read a typeless field as a `u8`, so a
+            # missing key decoded one plausible byte and shifted every later field.
+            raise ValueError(
+                f"Field '{field_def.get('name', '?')}' declares no type"
+            )
         consume = field_def.get('consume', None)
         
         # Handle bitfields. `hex:upper` is a string type, not a bit range, so it
@@ -879,15 +1039,16 @@ class SchemaInterpreter:
                 value = self._decode_encoding(value, encoding, size)
             return value, new_pos
         
-        # Nibble-decimal types: upper nibble = whole, lower nibble = tenths
-        if field_type in ('udec', 'UDec'):
+        # Nibble-decimal types: upper nibble = whole, lower nibble = tenths (PS-330).
+        # `UDec`/`SDec` are not spellings of them (PS-331).
+        if field_type == 'udec':
             if pos >= len(buf):
                 raise ValueError("Buffer too short for udec")
             byte = buf[pos]
             value = (byte >> 4) + (byte & 0x0F) * 0.1
             return value, pos + 1
         
-        if field_type in ('sdec', 'SDec'):
+        if field_type == 'sdec':
             if pos >= len(buf):
                 raise ValueError("Buffer too short for sdec")
             byte = buf[pos]
@@ -902,10 +1063,10 @@ class SchemaInterpreter:
             # IEEE 754 half-precision (2 bytes)
             return self._read_float16(buf, pos)
         
-        if field_type in ('f32', 'float'):
+        if field_type == 'f32':
             return self._read_float(buf, pos, 4)
         
-        if field_type in ('f64', 'double'):
+        if field_type == 'f64':
             return self._read_float(buf, pos, 8)
         
         if field_type == 'bool':
@@ -922,8 +1083,7 @@ class SchemaInterpreter:
             length = resolve_length(field_def, buf, pos)
             if pos + length > len(buf):
                 raise ValueError("Buffer too short for bytes")
-            value = buf[pos:pos + length]
-            return value, pos + length
+            return format_bytes(field_def, buf[pos:pos + length]), pos + length
         
         if field_type == 'string':
             if 'value' in field_def:
@@ -945,17 +1105,17 @@ class SchemaInterpreter:
             value = buf[pos:pos + length].decode('ascii', errors='replace').rstrip('\x00')
             return value, pos + length
         
-        if field_type in ('hex', 'hex:upper'):
+        # `hex:upper` is a `bytes` format (PS-079), not a type (CR-2026-037), so it
+        # falls through to the unknown-type error below.
+        if field_type == 'hex':
             length = resolve_length(field_def, buf, pos)
             if pos + length > len(buf):
                 raise ValueError("Buffer too short for hex")
             # PS-074: `hex` output MUST be lowercase without separators. This
             # emitted uppercase, so it disagreed with the specification, with the
             # Go and Java interpreters, and with every vendor decoder. Uppercase
-            # is the separate `hex:upper` type.
-            raw = buf[pos:pos + length].hex()
-            value = raw.upper() if field_type == 'hex:upper' else raw
-            return value, pos + length
+            # is `type: bytes` with `format: hex:upper`.
+            return buf[pos:pos + length].hex(), pos + length
         
         if field_type == 'base64':
             import base64 as b64
@@ -969,10 +1129,6 @@ class SchemaInterpreter:
             # Padding/reserved bytes - advance position but don't output
             length = resolve_length(field_def, buf, pos)
             return None, pos + length
-        
-        if field_type == 'version_string':
-            # Phase 3: Assemble a version string from packed bytes
-            return self._decode_version_string(field_def, buf, pos)
         
         if field_type == 'object':
             # Nested object
@@ -997,7 +1153,12 @@ class SchemaInterpreter:
             # Conditional decoding
             return self._decode_match(field_def, buf, pos)
         
-        raise ValueError(f"Unknown type: {field_type}")
+        # PS-327/PS-328: reject, naming the field and the type. `float`, `double`,
+        # `UDec`, `SDec` and `version_string` were read here once; none is a type of
+        # the specification (PS-326, PS-331, PS-401).
+        raise ValueError(
+            f"Field '{field_def.get('name', '?')}': unknown type: {field_type}"
+        )
     
     def _decode_enum(self, field_def: Dict[str, Any], buf: bytes,
                      pos: int) -> Tuple[Any, int]:
@@ -1015,7 +1176,7 @@ class SchemaInterpreter:
             # Convert string keys to int if needed
             values_map = {int(k) if isinstance(k, str) else k: v for k, v in values.items()}
             if raw_value in values_map:
-                return values_map[raw_value], new_pos
+                return enum_label(values_map[raw_value]), new_pos
             else:
                 # An unmapped value takes the declared `default` (PS-068). Only
                 # where none is declared does it fall back to the marker below,
@@ -1026,7 +1187,7 @@ class SchemaInterpreter:
                 return f"unknown({raw_value})", new_pos
         elif isinstance(values, list):
             if 0 <= raw_value < len(values):
-                return values[raw_value], new_pos
+                return enum_label(values[raw_value]), new_pos
             elif 'default' in field_def:
                 return field_def['default'], new_pos
             else:
@@ -1073,7 +1234,12 @@ class SchemaInterpreter:
             else:
                 count = int(count)
             
-            count = min(count, max_iterations)
+            # PS-396: more elements than `max` is an error, not a silent truncation. The
+            # count was clamped here, so every field after the repeat was read from
+            # inside an element the clamp had discarded.
+            if count > max_iterations:
+                raise ValueError(repeat_limit_message(
+                    field_def, max_iterations, f"count {count}", pos, len(buf)))
             
             for _ in range(count):
                 element = {}
@@ -1115,9 +1281,9 @@ class SchemaInterpreter:
                 # got 2" reads as a short payload even where the schema's own ceiling
                 # stopped the loop with bytes to spare (CR-2026-022).
                 if iterations >= max_iterations and pos < end_pos:
-                    raise ValueError(
-                        f"repeat stopped at its max of {max_iterations} iteration(s) with "
-                        f"{end_pos - pos} of {byte_length} byte(s) of the span unread")
+                    raise ValueError(repeat_limit_message(
+                        field_def, max_iterations, f"byte_length {byte_length}", pos,
+                        end_pos))
                 raise ValueError(
                     f"repeat byte_length mismatch: expected end at {end_pos}, got {pos}")
 
@@ -1138,6 +1304,11 @@ class SchemaInterpreter:
                     break
                 result.append(element)
                 iterations += 1
+            if iterations >= max_iterations and pos < len(buf):
+                # PS-396: stopping at the ceiling with payload left is an error, not a
+                # quiet end; the bytes after it were never decoded.
+                raise ValueError(repeat_limit_message(
+                    field_def, max_iterations, "until: end", pos, len(buf)))
         else:
             raise ValueError("repeat field must specify one of: count, byte_length, or until")
         
@@ -1269,6 +1440,11 @@ class SchemaInterpreter:
           cases: {value: [fields], ...}
         """
         result = {}
+        # PS-399: exactly one discriminator source. With both, `field` won and the
+        # `length` byte was left unread, so every later field came from the wrong offset.
+        if ('field' in match_def) == ('length' in match_def):
+            raise ValueError(
+                "a match must declare exactly one of 'field' and 'length' (PS-399)")
         field_ref = match_def.get('field')
         length = match_def.get('length')
         match_name = match_def.get('name')
@@ -1357,14 +1533,8 @@ class SchemaInterpreter:
                     self._current_data.update(nested_result)
                 continue
             
-            # Option B: nested object: inside case
             if 'object' in cf and not cf.get('type'):
-                obj_name = cf['object']
-                sub_result, pos = self._decode_nested_object_b(cf, buf, pos)
-                result[obj_name] = sub_result
-                if hasattr(self, '_current_data'):
-                    self._current_data[obj_name] = sub_result
-                continue
+                raise ValueError(object_key_withdrawn(cf))
             
             name = cf.get('name', 'unknown')
             if name.startswith('_'):
@@ -1397,7 +1567,13 @@ class SchemaInterpreter:
         if value is None:
             return False
         
-        # List of values
+        # List of values. Written as a quoted flow sequence, "[1, 2, 3]" (PS-398): an
+        # unquoted [1, 2, 3] is a YAML sequence used as a mapping key, which PyYAML cannot
+        # load at all, and the quoted form was compared here as the literal text.
+        if isinstance(pattern, str) and pattern.strip().startswith('['):
+            pattern = parse_list_case_key(pattern)
+            if pattern is None:
+                return False
         if isinstance(pattern, list):
             return value in pattern
         
@@ -1452,7 +1628,7 @@ class SchemaInterpreter:
                     internal = gf_name.startswith('_')
 
                     # Handle computed fields (type: number)
-                    if gf_type == 'number':
+                    if gf_type in COMPUTED_TYPES:
                         value = self._decode_computed_field(gf)
                         if value is not None:
                             if not internal:
@@ -1552,33 +1728,6 @@ class SchemaInterpreter:
                 part_strs.append(str(raw))
         
         return prefix + delimiter.join(part_strs), pos
-    
-    def _decode_version_string(self, field_def: Dict[str, Any], buf: bytes,
-                                pos: int) -> Tuple[str, int]:
-        """
-        Phase 3: Decode version_string - assemble version from sequential bytes.
-        
-        version_string:
-          fields: [major, minor, patch]  # byte names (for docs)
-          length: 3                      # bytes to consume
-          delimiter: '.'
-          prefix: 'v'
-        
-        Reads N bytes and joins them as "prefix" + "byte1.byte2.byte3"
-        """
-        length = field_def.get('length', 3)
-        delimiter = field_def.get('delimiter', '.')
-        prefix = field_def.get('prefix', '')
-        
-        if pos + length > len(buf):
-            raise ValueError(f"Buffer too short for version_string at pos {pos}")
-        
-        parts = []
-        for i in range(length):
-            parts.append(str(buf[pos + i]))
-        pos += length
-        
-        return prefix + delimiter.join(parts), pos
     
     def _evaluate_encode_formula(self, formula: str, value: float) -> float:
         """
@@ -1850,10 +1999,17 @@ class SchemaInterpreter:
         
         Supported ops: sqrt, abs, pow, floor, ceiling, clamp, log10, log,
                        add, mult, div
+
+        Returns OMITTED where a stage has no value to give: a zero divisor (PS-100) or
+        the log of a non-positive number (PS-117). The log stages clamped their input at
+        1e-10 instead, so log10(0) was reported as -10 - a plausible number standing in
+        for no reading at all.
         """
         import math
         
         for op in transform_ops:
+            if value is OMITTED:
+                return OMITTED
             if 'sqrt' in op and op['sqrt']:
                 value = math.sqrt(max(0, value))  # Clamp to avoid domain error
             elif 'abs' in op and op['abs']:
@@ -1869,9 +2025,9 @@ class SchemaInterpreter:
                 if isinstance(bounds, list) and len(bounds) >= 2:
                     value = max(float(bounds[0]), min(float(bounds[1]), value))
             elif 'log10' in op and op['log10']:
-                value = math.log10(max(1e-10, value))  # Avoid domain error
+                value = math.log10(value) if value > 0 else OMITTED
             elif 'log' in op and op['log']:
-                value = math.log(max(1e-10, value))  # Natural log
+                value = math.log(value) if value > 0 else OMITTED
             elif any(key in op for key in CANONICAL_MODIFIER_ORDER):
                 # A stage normally carries one arithmetic op. Where it carries
                 # several, they are applied in the canonical order so that a
@@ -1879,24 +2035,26 @@ class SchemaInterpreter:
                 # and so that none of them is silently dropped, which an
                 # either/or chain here used to do.
                 value = apply_canonical_modifiers(value, op)
-            elif 'round' in op:
-                decimals = op['round']
-                if decimals is True or decimals == 0:
-                    value = round(value)
-                else:
-                    value = round(value, int(decimals))
             elif 'op' in op:
-                # Handle {op: 'round', decimals: N} syntax
-                if op['op'] == 'round':
-                    decimals = op.get('decimals', 0)
-                    if decimals == 0:
-                        value = round(value)
-                    else:
-                        value = round(value, int(decimals))
-                elif op['op'] == 'floor':
-                    value = math.floor(value)
-                elif op['op'] == 'ceiling' or op['op'] == 'ceil':
-                    value = math.ceil(value)
+                # PS-390: `round` is the one named operation. Anything else - `floor`
+                # and `ceiling` were read here as rounding down and up, which the
+                # specification never defined and which clash with the clamp stages
+                # of the same names - is rejected, not skipped.
+                if op['op'] != 'round':
+                    raise ValueError(
+                        f"transform stage names an unknown operation {op['op']!r} "
+                        f"(PS-390)")
+                value = round_decimal(value, op.get('decimals', 0), op.get('ties', 'even'))
+            elif 'round' in op:
+                # `{round: n}` was accepted here and by the generator, and ignored with
+                # success by Go, Java and C#. The specified spelling is the op: form.
+                raise ValueError(
+                    "`{round: n}` is not a transform stage; write "
+                    "{op: round, decimals: n} (PS-390)")
+            else:
+                raise ValueError(
+                    f"transform stage {op!r} names no operation of the PS-115 table "
+                    f"(PS-390)")
         
         return value
     
@@ -1937,6 +2095,7 @@ class SchemaInterpreter:
         
         if not group_fields:
             return pos
+        check_byte_group_overlap(group_fields)
         
         # Decode all fields from the same starting position
         for gf in group_fields:
@@ -1958,32 +2117,6 @@ class SchemaInterpreter:
         
         # Advance past the group
         return pos + group_size
-    
-    def _decode_nested_object_b(self, field_def: Dict[str, Any], buf: bytes,
-                                 pos: int) -> Tuple[Dict[str, Any], int]:
-        """Decode nested object using Option B syntax (object: key)."""
-        nested_fields = field_def.get('fields', [])
-        nested_result = {}
-        
-        for nf in nested_fields:
-            if 'match' in nf and not nf.get('type'):
-                match_result, pos = self._decode_match(nf, buf, pos)
-                nested_result.update(match_result)
-            elif 'object' in nf and not nf.get('type'):
-                sub_name = nf['object']
-                sub_result, pos = self._decode_nested_object_b(nf, buf, pos)
-                nested_result[sub_name] = sub_result
-            else:
-                nf_name = nf.get('name', 'unknown')
-                value, pos = self._decode_field(nf, buf, pos)
-                if value is not None:
-                    value = self._apply_modifiers(value, nf)
-                    if not nf_name.startswith('_'):
-                        nested_result[nf_name] = value
-                if nf.get('var'):
-                    self._variables[nf['var']] = value
-        
-        return nested_result, pos
     
     def _decode_tlv(self, field_def: Dict[str, Any], buf: bytes,
                     pos: int,
@@ -2255,7 +2388,7 @@ class SchemaInterpreter:
 
         # Apply transform array (new declarative constructs)
         transform = field_def.get('transform')
-        if transform and isinstance(transform, list):
+        if transform and isinstance(transform, list) and value is not OMITTED:
             value = self._apply_transform(float(value), transform)
         
         # Apply lookup table
@@ -2320,7 +2453,13 @@ class SchemaInterpreter:
             
             # Handle byte_group construct
             if 'byte_group' in field_def:
-                pos = self._decode_byte_group(field_def, payload, pos, result)
+                try:
+                    pos = self._decode_byte_group(field_def, payload, pos, result)
+                except Exception as e:
+                    # A schema error such as overlapping members (PS-397) fails the
+                    # decode like any other field's error, rather than raising out of it.
+                    result.errors.append(f"Error decoding byte_group: {e}")
+                    break
                 continue
             
             # Option B: match: as top-level key
@@ -2332,38 +2471,12 @@ class SchemaInterpreter:
                     result.errors.append(f"Error in match: {e}")
                 continue
             
-            # Option B: object: as top-level key
+            # The `object:` key is withdrawn (PS-466, CR-2026-074): a nested group is
+            # `type: object` with `name` and `fields`. This was the only implementation
+            # that read the key; Go, Java, C# and the generator never did.
             if 'object' in field_def and not field_def.get('type'):
-                try:
-                    obj_name = field_def['object']
-                    nested_fields = field_def.get('fields', [])
-                    nested_result = {}
-                    saved_data = self._current_data
-                    # nested object still adds vars to top-level scope
-                    for nf in nested_fields:
-                        # Recursively handle Option B constructs in nested fields
-                        if 'match' in nf and not nf.get('type'):
-                            match_result, pos = self._decode_match(nf, payload, pos)
-                            nested_result.update(match_result)
-                        elif 'object' in nf and not nf.get('type'):
-                            sub_name = nf['object']
-                            sub_result, pos = self._decode_nested_object_b(nf, payload, pos)
-                            nested_result[sub_name] = sub_result
-                        else:
-                            nf_name = nf.get('name', 'unknown')
-                            value, pos = self._decode_field(nf, payload, pos)
-                            if value is not None:
-                                value = self._apply_modifiers(value, nf)
-                                if not nf_name.startswith('_'):
-                                    nested_result[nf_name] = value
-                            # Store variable if var: specified
-                            if nf.get('var'):
-                                self._variables[nf['var']] = value
-                    self._current_data = saved_data
-                    result.data[obj_name] = nested_result
-                except Exception as e:
-                    result.errors.append(f"Error in object '{field_def.get('object')}': {e}")
-                continue
+                result.errors.append(object_key_withdrawn(field_def))
+                break
             
             # Option B: tlv: as top-level key
             if 'tlv' in field_def and not field_def.get('type'):
@@ -2413,7 +2526,7 @@ class SchemaInterpreter:
             # of its own: `idiv` truncates and {op: round} rounds, both already
             # available, and a type that also rounded would give two spellings for one
             # operation - the defect CR-2026-006 removed from bitfields.
-            if field_type in ('number', 'integer'):
+            if field_type in COMPUTED_TYPES:
                 try:
                     value = self._decode_computed_field(field_def)
                     if value is OMITTED:
@@ -2776,20 +2889,13 @@ class SchemaInterpreter:
             # own. This required the deprecated `formula` spelling, so a field using
             # `ref`, `compute`, `polynomial` or `guard` fell through to "Cannot encode
             # type: number" - every schema with a computed field failed to encode.
-            if field_type == 'number':
+            if field_type in COMPUTED_TYPES:
                 continue
             
             # Bitfield string encoding
             if field_type == 'bitfield_string':
                 value = data.get(name, '')
                 encoded = self._encode_bitfield_string(field_def, str(value))
-                output.extend(encoded)
-                continue
-            
-            # Version string encoding
-            if field_type == 'version_string':
-                value = data.get(name, '')
-                encoded = self._encode_version_string(field_def, str(value))
                 output.extend(encoded)
                 continue
             
@@ -2852,7 +2958,7 @@ class SchemaInterpreter:
                 gf_type = gf.get('type', 'u8')
                 if not gf_name or gf_name.startswith('_'):
                     continue
-                if gf_type == 'number':
+                if gf_type in COMPUTED_TYPES:
                     # A derived value: computed from other fields, so it has no bytes of
                     # its own. This skipped only the deprecated `formula` spelling, so a
                     # field using `ref`, `compute`, `polynomial` or `guard` was encoded
@@ -2890,25 +2996,6 @@ class SchemaInterpreter:
         
         return self._write_int(int_val, length, signed=False)
     
-    def _encode_version_string(self, field_def: Dict[str, Any], value: str) -> bytes:
-        """Phase 3: Encode version_string back to bytes."""
-        length = field_def.get('length', 3)
-        delimiter = field_def.get('delimiter', '.')
-        prefix = field_def.get('prefix', '')
-        
-        if prefix and value.startswith(prefix):
-            value = value[len(prefix):]
-        
-        segments = value.split(delimiter)
-        output = bytearray(length)
-        for i in range(min(length, len(segments))):
-            try:
-                output[i] = int(segments[i]) & 0xFF
-            except ValueError:
-                output[i] = 0
-        
-        return bytes(output)
-    
     def _encode_byte_group(self, field_def: Dict[str, Any], data: Dict[str, Any]) -> bytes:
         """Pack a ``byte_group``'s bit ranges back into their shared byte(s).
 
@@ -2925,6 +3012,7 @@ class SchemaInterpreter:
         else:
             group_fields = byte_group or []
             size = int(field_def.get('size', 1))
+        check_byte_group_overlap(group_fields)
 
         packed = 0
         for gf in group_fields:
@@ -2960,7 +3048,7 @@ class SchemaInterpreter:
         if not isinstance(field_def, dict) or 'byte_group' in field_def:
             return False
         ftype = str(field_def.get('type', ''))
-        if ftype in ('bitfield_string', 'version_string'):
+        if ftype == 'bitfield_string':
             return False
         return any(marker in ftype for marker in ('[', ':', '<'))
 
@@ -3087,7 +3175,7 @@ class SchemaInterpreter:
             names = [
                 f.get('name') for f in case_fields
                 if isinstance(f, dict) and f.get('name')
-                and not str(f['name']).startswith('_') and f.get('type') != 'number'
+                and not str(f['name']).startswith('_') and f.get('type') not in COMPUTED_TYPES
             ]
             hits = sum(1 for n in names if n in data)
             if hits > best_hits:
@@ -3264,7 +3352,7 @@ class SchemaInterpreter:
                 # them flattened, so they are looked up by their own names.
                 out.extend(self._encode_field_list(f.get('fields') or [], data))
                 continue
-            if ftype == 'number':
+            if ftype in COMPUTED_TYPES:
                 # Derived: computed from other fields, no bytes of its own.
                 continue
             if ftype == 'skip':
@@ -3274,9 +3362,6 @@ class SchemaInterpreter:
                 continue
             if ftype == 'bitfield_string':
                 out.extend(self._encode_bitfield_string(f, str(data.get(name, ''))))
-                continue
-            if ftype == 'version_string':
-                out.extend(self._encode_version_string(f, str(data.get(name, ''))))
                 continue
             if not name or name.startswith('_'):
                 value = f.get('default', 0)
@@ -3356,7 +3441,7 @@ class SchemaInterpreter:
                     out.extend(self._claimable_fields(group.get('fields') or []))
                 continue
             name = f.get('name')
-            if not name or str(name).startswith('_') or f.get('type') == 'number':
+            if not name or str(name).startswith('_') or f.get('type') in COMPUTED_TYPES:
                 continue
             out.append(f)
         return out
@@ -3487,7 +3572,7 @@ class SchemaInterpreter:
         
         # Float types should preserve fractional values
         field_type = field_def.get('type', 'u8')
-        if field_type in ('f16', 'f32', 'float', 'f64', 'double'):
+        if field_type in ('f16', 'f32', 'f64', 'udec', 'sdec'):
             return float(value)
         
         return int(round(value))
@@ -3518,7 +3603,11 @@ class SchemaInterpreter:
 
     def _encode_field_inner(self, field_def: Dict[str, Any], value: Any) -> bytes:
         """Encode a single field value."""
-        field_type = field_def.get('type', 'u8')
+        field_type = field_def.get('type')
+        if not field_type:
+            raise ValueError(
+                f"Field '{field_def.get('name', '?')}' declares no type"
+            )
         
         # Handle bitfields - simplified (just return byte with value)
         if any(c in str(field_type) for c in ['[', ':', '<']):
@@ -3546,15 +3635,30 @@ class SchemaInterpreter:
                 signed = False
             return self._write_int(int_val, size, signed)
         
+        if field_type in ('udec', 'sdec'):
+            # The inverse of PS-330: the whole part in the upper nibble (two's
+            # complement for sdec), tenths in the lower. Flooring keeps the tenths
+            # non-negative, which is how the decode reads them: -1.5 is -2 + 0.5.
+            whole = math.floor(float(value))
+            tenths = int(round((float(value) - whole) * 10))
+            if tenths == 10:
+                whole, tenths = whole + 1, 0
+            low, high = (-8, 7) if field_type == 'sdec' else (0, 15)
+            if not low <= whole <= high:
+                raise ValueError(
+                    f"Field '{field_def.get('name', '?')}': {value} does not fit {field_type}"
+                )
+            return bytes([((whole & 0x0F) << 4) | tenths])
+
         if field_type == 'f16':
             fmt = '<e' if self.endian == Endian.LITTLE else '>e'
             return struct.pack(fmt, float(value))
         
-        if field_type in ('f32', 'float'):
+        if field_type == 'f32':
             fmt = '<f' if self.endian == Endian.LITTLE else '>f'
             return struct.pack(fmt, float(value))
         
-        if field_type in ('f64', 'double'):
+        if field_type == 'f64':
             fmt = '<d' if self.endian == Endian.LITTLE else '>d'
             return struct.pack(fmt, float(value))
         
@@ -3574,8 +3678,14 @@ class SchemaInterpreter:
             # bytes object, so a hex string round-tripped to 00000000 silently.
             if isinstance(value, (bytes, bytearray)):
                 raw = bytes(value)
+            elif isinstance(value, str) and field_def.get('format') == 'base64':
+                import base64 as b64
+                raw = b64.b64decode(value)
             elif isinstance(value, str):
                 text = value.replace(' ', '')
+                separator = field_def.get('separator')
+                if separator:
+                    text = text.replace(str(separator), '')
                 try:
                     raw = bytes.fromhex(text)
                 except ValueError as exc:
@@ -3613,9 +3723,6 @@ class SchemaInterpreter:
                 return decoded[:length].ljust(length, b'\x00')
             return decoded
         
-        if field_type == 'version_string':
-            return self._encode_version_string(field_def, str(value))
-        
         if field_type == 'enum':
             return self._encode_enum(field_def, value)
         
@@ -3632,13 +3739,14 @@ class SchemaInterpreter:
         if isinstance(values, dict):
             # Reverse lookup: string -> int
             for k, v in values.items():
-                if v == value:
+                if enum_label(v) == value:
                     int_value = int(k) if isinstance(k, str) else k
                     break
         elif isinstance(values, list):
             # Find index of value
-            if value in values:
-                int_value = values.index(value)
+            labels = [enum_label(v) for v in values]
+            if value in labels:
+                int_value = labels.index(value)
         
         if int_value is None:
             # Try parsing as integer (e.g., "unknown(5)")

@@ -1,0 +1,43 @@
+# A case written as a quoted flow sequence matches any of its elements (PS-398).
+#
+# The specification's own spelling was an unquoted [4, 5]:, which is a YAML sequence
+# used as a mapping key: PyYAML cannot load it and Go cannot parse it. CR-2026-058 chose
+# the quoted form TLV composite keys already use. Before it, no implementation matched
+# the quoted form either - it was compared as text and matched nothing.
+name: probe_match_list_key
+endian: big
+fields:
+- name: kind
+  type: u8
+  var: kind
+- match:
+    field: $kind
+    cases:
+      "[1, 2, 3]":
+      - name: small
+        type: u8
+      "[0x10, 0x20]":
+      - name: large
+        type: u16
+      9:
+      - name: single
+        type: u8
+test_vectors:
+- name: a_listed_value_selects_the_case
+  source: spec-example
+  payload: "02 07"
+  expected:
+    kind: 2
+    small: 7
+- name: a_hex_element_selects_its_case
+  source: spec-example
+  payload: "20 0102"
+  expected:
+    kind: 32
+    large: 258
+- name: a_single_key_beside_them
+  source: spec-example
+  payload: "09 05"
+  expected:
+    kind: 9
+    single: 5

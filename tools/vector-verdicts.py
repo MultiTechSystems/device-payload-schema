@@ -38,7 +38,7 @@ sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 from generate_ts013_codec import TS013Generator  # noqa: E402
 from schema_interpreter import SchemaInterpreter  # noqa: E402
-from validate_schema import values_match, warnings_match  # noqa: E402
+from validate_schema import expected_fields_match, values_match, warnings_match  # noqa: E402
 
 PASS = "PASS"
 FAIL = "FAIL"
@@ -235,13 +235,8 @@ def matches(expected: dict, actual: dict) -> tuple[bool, str]:
     it read, and it is how `max` on a repeat stayed invisible - the generated codec
     produced four records where every interpreter produced two, and both paths passed.
     """
-    for name, want in (expected or {}).items():
-        if name not in actual:
-            return False, f"{name} missing"
-        ok, detail = values_match(want, actual[name])
-        if not ok:
-            return False, f"{name}: {detail}"
-    return True, ""
+    # PS-043/PS-044, with a null expectation asserting absence (CR-2026-075).
+    return expected_fields_match(expected or {}, actual)
 
 
 def is_encode_vector(vector: dict) -> bool:

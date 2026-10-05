@@ -49,6 +49,10 @@ The `inherent` reasons, each of which is a decision recorded elsewhere:
                     output. ws50x's `v11.1` leaves the low nibble undescribed.
   ambiguous-case    Several TLV or match cases carry the same field names, so the tag that
                     produced them is not recoverable from the names alone.
+  absent-value      A declared field was left out of the output because it had no value to
+                    report - a zero divisor (PS-100), the log of a non-positive number
+                    (PS-117), a failed guard with no `else` (PS-400), an unmapped lookup
+                    (PS-269). The bytes that produced the absence are not in the output.
 
 One reason is *not* inherent and is reported separately, because it is a gap rather than a
 loss:
@@ -76,6 +80,7 @@ from validate_schema import is_encode_vector  # noqa: E402
 CORPUS = REPO_ROOT / "schemas" / "devices"
 
 INHERENT = (
+    "absent-value",
     "undecoded-bytes",
     "internal-field",
     "skip-field",
@@ -167,7 +172,20 @@ def schema_traits(schema):
     return traits
 
 
-def classify(decoded, traits):
+def absent_fields(schema, data, port=None):
+    """Top-level fields of the decoded entry, declared by name, that the decode left out."""
+    fields = schema.get("fields") or []
+    ports = schema.get("ports") or {}
+    if ports:
+        entry = ports.get(port, ports.get(str(port), ports.get("default")))
+        fields = (entry or {}).get("fields") or [] if isinstance(entry, dict) else []
+    names = [f.get("name") for f in fields
+             if isinstance(f, dict) and f.get("name") and f.get("type") not in (None, "skip")
+             and not str(f["name"]).startswith("_") and "name_from" not in f]
+    return [n for n in names if n not in data]
+
+
+def classify(decoded, traits, schema=None, port=None):
     """Why this vector cannot round-trip, or None where nothing explains it."""
     if decoded.warnings:
         # CR-2026-013 and CR-2026-021 made the decode say what it could not read. That
@@ -178,6 +196,10 @@ def classify(decoded, traits):
     for trait in INHERENT + FIXABLE:
         if trait in traits:
             return trait
+    # Last, so a schema-level reason keeps its vectors: a declared field the decode left
+    # out had no value, and its bytes are not in the output to write back.
+    if schema is not None and absent_fields(schema, decoded.data, port):
+        return "absent-value"
     return None
 
 
@@ -232,7 +254,7 @@ def run():
             kind = ("error" if result.errors
                     else "length" if len(got) != len(want) else "bytes")
             counts[kind] += 1
-            reason = classify(decoded, traits) or "unexplained"
+            reason = classify(decoded, traits, schema, port) or "unexplained"
             counts[reason] += 1
             detail = (result.errors[0][:120] if result.errors
                       else f"want {want.hex()} got {got.hex()}")

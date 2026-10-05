@@ -82,13 +82,146 @@ public static class SchemaParser
         return schema;
     }
 
+    /// <summary>
+    /// PS-079, PS-391: a bytes format is one of four, and a separator applies to the two
+    /// hex ones. `hex:lower` and any other spelling fell through to lowercase hex.
+    /// </summary>
+    static void CheckBytesFormat(YamlMappingNode fm)
+    {
+        if (!fm.TryGetValue("type", out var t) || Scalar(t) != "bytes") return;
+        var format = fm.TryGetValue("format", out var f) ? Scalar(f) : "hex";
+        var name = fm.TryGetValue("name", out var n) ? Scalar(n) : "?";
+        if (format is not ("hex" or "hex:upper" or "base64" or "array"))
+            throw new InvalidOperationException(
+                $"Field '{name}': bytes format {format} is not one of hex, hex:upper, base64, array (PS-079)");
+        if (fm.Children.ContainsKey(new YamlScalarNode("separator")) && format is not ("hex" or "hex:upper"))
+            throw new InvalidOperationException(
+                $"Field '{name}': `separator` applies only to the hex formats, not {format} (PS-391)");
+    }
+
+    /// <summary>
+    /// The bits a byte_group member covers, counted from the group's first bit (most
+    /// significant bit of its first byte), or null for a member that is neither a bit range
+    /// nor a bool. Mapping onto the group lets members of different widths be compared.
+    /// </summary>
+    static HashSet<int>? ByteGroupMemberBits(YamlMappingNode member)
+    {
+        var type = member.TryGetValue("type", out var t) ? Scalar(t) : "";
+        int width, start, end;
+        var m = System.Text.RegularExpressions.Regex.Match(type, @"^u(\d+)\[(\d+):(\d+)\]$");
+        if (m.Success)
+        {
+            width = int.Parse(m.Groups[1].Value);
+            start = int.Parse(m.Groups[2].Value);
+            end = int.Parse(m.Groups[3].Value);
+        }
+        else if (type == "bool")
+        {
+            width = 8;
+            start = member.TryGetValue("bit", out var b) ? (int)Double(b) : 0;
+            end = start;
+        }
+        else return null;
+        var bits = new HashSet<int>();
+        for (int i = start; i <= end; i++) bits.Add(width - 1 - i);
+        return bits;
+    }
+
+    /// <summary>PS-397: bit ranges within one byte_group must not overlap. They were accepted.</summary>
+    static void CheckByteGroupOverlap(YamlNode group)
+    {
+        var members = group as YamlSequenceNode
+            ?? ((group as YamlMappingNode)?.TryGetValue("fields", out var f) == true ? f as YamlSequenceNode : null);
+        if (members == null) return;
+        var seen = new List<(string name, HashSet<int> bits)>();
+        foreach (var raw in members.Children)
+        {
+            if (raw is not YamlMappingNode member) continue;
+            var bits = ByteGroupMemberBits(member);
+            if (bits == null) continue;
+            var name = member.TryGetValue("name", out var n) ? Scalar(n) : "?";
+            foreach (var other in seen)
+                if (other.bits.Overlaps(bits))
+                    throw new InvalidOperationException(
+                        $"byte_group members '{other.name}' and '{name}' overlap (PS-397)");
+            seen.Add((name, bits));
+        }
+    }
+
+    /// <summary>The stages PS-098 and the PS-115 table define; `op` names one instead.</summary>
+    static readonly string[] TransformOperations =
+        { "add", "mult", "div", "sqrt", "abs", "pow", "log10", "log", "floor", "ceiling", "clamp", "op" };
+
+    /// <summary>
+    /// PS-390: a stage naming an operation outside the PS-115 table is rejected, not
+    /// skipped. `{round: n}` and `{sub: n}` were accepted - the first doing nothing, the
+    /// second read by C# alone - and `round` is the `op:` form only.
+    /// </summary>
+    static void CheckStage(YamlMappingNode stage, string fieldName)
+    {
+        var at = $"Field '{fieldName}' transform stage: ";
+        bool Has(string key) => stage.Children.ContainsKey(new YamlScalarNode(key));
+        if (Has("round"))
+            throw new InvalidOperationException(at + "`{round: n}` is not a transform stage; "
+                + "write {op: round, decimals: n} (PS-390)");
+        if (stage.TryGetValue("op", out var op))
+        {
+            if (Scalar(op) != "round")
+                throw new InvalidOperationException(at + $"names an unknown operation {Scalar(op)} (PS-390)");
+            if (stage.TryGetValue("ties", out var ties) && Scalar(ties) is not ("even" or "away"))
+                throw new InvalidOperationException(at + "round `ties` must be even or away (PS-390)");
+        }
+        if (!TransformOperations.Any(Has))
+            throw new InvalidOperationException(at + "names no operation of the PS-115 table (PS-390)");
+    }
+
+    /// <summary>The keys that make a field a construct, declaring no type of its own.</summary>
+    static readonly string[] ConstructKeys = { "$ref", "flagged", "tlv", "byte_group", "match" };
+
     static List<SchemaField> ParseFields(YamlSequenceNode seq)
     {
         var fields = new List<SchemaField>();
         foreach (var item in seq.Children)
         {
-            if (item is YamlMappingNode fieldMap)
-                fields.Add(ParseField(fieldMap));
+            if (item is not YamlMappingNode fieldMap)
+                continue;
+            // PS-466 (CR-2026-074): the `object:` key is withdrawn; a nested group is
+            // `type: object`.
+            if (fieldMap.TryGetValue("object", out var objectName) && !fieldMap.Children.ContainsKey(new YamlScalarNode("type")))
+                throw new InvalidOperationException("the `object:` key is withdrawn; write `type: object` "
+                    + $"with `name: {Scalar(objectName)}` and `fields` (PS-466)");
+            // PS-334: a field carrying no construct needs a type; none is supplied.
+            // Checked on list members, because ParseField also parses construct bodies.
+            var hasType = fieldMap.TryGetValue("type", out var typeNode)
+                && !string.IsNullOrWhiteSpace(Scalar(typeNode));
+            if (!hasType && !ConstructKeys.Any(key => fieldMap.Children.ContainsKey(new YamlScalarNode(key))))
+            {
+                var name = fieldMap.TryGetValue("name", out var n) ? Scalar(n) : "?";
+                throw new InvalidOperationException($"Field '{name}' declares no type");
+            }
+            // CR-2026-037: an unknown type is rejected when the schema is loaded, naming
+            // the field and the spelling (PS-327, PS-328).
+            if (hasType)
+            {
+                var spelling = Scalar(typeNode!);
+                if (Helpers.ParseBitRange(spelling) == null
+                    && Helpers.ParseFieldType(spelling) == FieldType.Unknown)
+                {
+                    var name = fieldMap.TryGetValue("name", out var n) ? Scalar(n) : "?";
+                    throw new InvalidOperationException($"Field '{name}': unknown type: {spelling}");
+                }
+            }
+            CheckBytesFormat(fieldMap);
+            if (fieldMap.TryGetValue("byte_group", out var group))
+                CheckByteGroupOverlap(group);
+            // PS-399: exactly one discriminator source. With both, `field` won and the
+            // `length` byte was left unread, misaligning every later field.
+            if (fieldMap.TryGetValue("match", out var matchNode) && matchNode is YamlMappingNode matchMap
+                && matchMap.Children.ContainsKey(new YamlScalarNode("field"))
+                    == matchMap.Children.ContainsKey(new YamlScalarNode("length")))
+                throw new InvalidOperationException(
+                    "a match must declare exactly one of 'field' and 'length' (PS-399)");
+            fields.Add(ParseField(fieldMap));
         }
         return fields;
     }
@@ -121,6 +254,16 @@ public static class SchemaParser
             }
 
             f.Type = Helpers.ParseFieldType(f.RawType);
+            // The inline `tlv:` block arrives here as a synthetic map typed `tlv`. No
+            // schema spells that as a type; ParseFields rejects it on a list member.
+            if (f.Type == FieldType.Unknown && f.RawType == "tlv")
+                f.Type = FieldType.TLV;
+            // `integer` is `number` declaring an integer result (PS-283).
+            if (f.Type == FieldType.Integer)
+            {
+                f.Type = FieldType.Number;
+                f.IntegerResult = true;
+            }
             if (bitRange != null)
             {
                 // ParseFieldType strips the range, so `u8[0:0]` resolved to U8 and the
@@ -172,6 +315,13 @@ public static class SchemaParser
                     if (tMap.TryGetValue("log10", out var tl10)) stage.Log10 = Flag(tl10);
                     if (tMap.TryGetValue("log", out var tlog)) stage.Log = Flag(tlog);
                     if (tMap.TryGetValue("pow", out var tpow)) stage.Pow = Double(tpow);
+                    if (tMap.TryGetValue("floor", out var tfl)) stage.Floor = Double(tfl);
+                    if (tMap.TryGetValue("ceiling", out var tce)) stage.Ceiling = Double(tce);
+                    if (tMap.TryGetValue("clamp", out var tcl) && tcl is YamlSequenceNode clampSeq
+                        && clampSeq.Children.Count == 2)
+                        stage.Clamp = new[] { Double(clampSeq.Children[0]), Double(clampSeq.Children[1]) };
+                    if (tMap.TryGetValue("ties", out var tties)) stage.Ties = Scalar(tties);
+                    CheckStage(tMap, f.Name);
                     f.Transform.Add(stage);
                 }
             }
@@ -318,7 +468,13 @@ public static class SchemaParser
             f.Values = new Dictionary<int, string>();
             foreach (var kv in valuesMap.Children)
             {
-                if (int.TryParse(Scalar(kv.Key), out int vk))
+                if (!int.TryParse(Scalar(kv.Key), out int vk))
+                    continue;
+                // The description form reports its `name` (PS-394). Scalar() of the
+                // mapping reported a stringified node as the value.
+                if (kv.Value is YamlMappingNode entry && entry.TryGetValue("name", out var entryName))
+                    f.Values[vk] = Scalar(entryName);
+                else
                     f.Values[vk] = Scalar(kv.Value);
             }
             // The value an unmapped enum reports (PS-068), read only alongside

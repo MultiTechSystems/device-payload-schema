@@ -79,14 +79,16 @@ explicitly.
 
 ```
 TYPES:        u8 u16 u24 u32 u64 | s8 s16 s24 s32 s64 | f16 f32 f64 | bool
-              ascii hex hex:upper bytes base64 | number string | skip enum
-STRUCTURES:   object | repeat | byte_group | tlv
+              ascii hex bytes base64 | number integer string | skip enum | udec sdec
+              aliases uint8..uint64 int8..int64 i8..i64 - nothing else, case-sensitive
+BYTES FORMAT: hex hex:upper base64 array | separator (hex formats only)
+STRUCTURES:   type: object | repeat | byte_group | tlv
 NAMING:       name | name_from ("region_${region_id}_dwell")
 TAG KEYS:     "[1, 200]" exact | "[1, !0]" excluding | "[2, *]" any
 MODIFIERS:    add mult div | lookup (sequence or sparse mapping) | polynomial
               | compute | guard | transform
-CONDITIONALS: match (value) | flagged (bitmask) | tlv (tag dispatch)
-TRANSFORMS:   sqrt abs pow log10 log round (floor ceiling clamp: Python + TS013 only)
+CONDITIONALS: match (value; "[1, 2]" list keys; field XOR length) | flagged | tlv
+TRANSFORMS:   sqrt abs pow log10 log floor ceiling clamp | {op: round, ties: even|away}
 COMPUTE OPS:  add sub mul div mod idiv
 GUARD OPS:    gt gte lt lte eq ne
 ENCODINGS:    sign_magnitude bcd gray (Python only)
@@ -182,17 +184,17 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 1995 payload vectors in `schemas/devices/` (241 YAML files; measured 2026-09-26
-with `tools/check-floors.py`, after the mutation-survivor vectors) are the shared
+The 2008 payload vectors in `schemas/devices/` (measured 2026-10-05 with
+`tools/check-floors.py`, after merging the mutation-survivor vectors into 0.5.2) are the shared
 cross-language test set. Every implementation has a runner that reads the same YAML and
 the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1575 |
-| Go | `go/schema/corpus_conformance_test.go` | 1995 | 1607 (plain API 1584) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 1995 | 1574 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 1995 | 1573 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1585 |
+| Go | `go/schema/corpus_conformance_test.go` | 2008 | 1618 (plain API 1595) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2008 | 1584 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2008 | 1583 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 487 of 487 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -355,11 +357,12 @@ there is no original to recover, and every encoder reports that rather than gues
 
 **The unary maths transform stages — `sqrt`, `abs`, `pow`, `log10`, `log` — now
 exist in all four.** Python always had them; Go, Java and C# had none, which is what
-kept `decentlab/dl-blg` on an unconverted vendor formula. The domain clamps are part
-of the contract, not an implementation detail: `sqrt` clamps its input at 0 and the
-logs at 1e-10, because returning NaN instead poisons every later stage and every
-field computed from it. `_language-conformance/transform-maths.yaml` holds all four
-to it.
+kept `decentlab/dl-blg` on an unconverted vendor formula. The domain rules are part
+of the contract, not an implementation detail: `sqrt` clamps its input at 0 (PS-116),
+and the log of a non-positive number leaves the field **absent** (PS-117, CR-2026-057).
+The logs used to clamp at 1e-10, reporting log10(0) as -10; NaN is never reported
+(PS-282). `_language-conformance/transform-maths.yaml` and `log-of-non-positive.yaml`
+hold all five to it.
 
 Two things to know before adding another transform key:
 
@@ -748,10 +751,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1575 |
-| Go | `go/schema/corpus_encode_test.go` | 1607 (plain 1584) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1573 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1574 |
+| Python | `tests/test_encode_round_trip.py` | 1585 |
+| Go | `go/schema/corpus_encode_test.go` | 1618 (plain 1595) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1583 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1584 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1161,7 +1164,7 @@ baseline - a regression fails, an improvement is reported and locked in with the
 | `gate-provenance` | a changed device schema has no independently sourced vector, or an added vector lacks `source:` | none: the diff against `BASE` |
 | `gate-crossval` | a schema stops agreeing with its vendor's own decoder (TTN declared examples + vendor JS, Decentlab decoders), or a new one does not agree | `tools/crossval-baseline.json`, oracle commits pinned |
 | `gate-mutation` | a schema's vectors notice fewer one-step mutations than before (score or killed count), or a new schema scores below 0.80 | `tools/mutation-baseline.json` |
-| `gate-verdicts` | a changed schema's vector fails in any of Python, Go, Java, C#, TS013, or a vector the reference passes fails elsewhere | `tools/verdicts-baseline.json` (empty: all five agree on 1995/1995) |
+| `gate-verdicts` | a changed schema's vector fails in any of Python, Go, Java, C#, TS013, or a vector the reference passes fails elsewhere | `tools/verdicts-baseline.json` (empty: all five agree on 2008/2008) |
 
 The mutation gate ratchets the killed count as well as the score on purpose: deleting
 vectors makes the mutants only they reached "unreached", which *raises* the score.
@@ -1169,6 +1172,30 @@ The crossval gate counts decode failures separately for the same kind of reason 
 failed decode replaces a mismatch per key, so a broken schema could otherwise look
 improved. The Go, Java and C# corpus runners write per-vector reports only when
 `CORPUS_REPORT` is set; their default behaviour and floors are unchanged.
+
+### 0.5.2 (CR-2026-037 onward): where the new rules live
+
+- **A null expectation asserts absence** (PS-043, CR-2026-075). Every runner compares
+  through `validate_schema.expected_fields_match` (Python, vector-verdicts, the C harness,
+  schema-mutation, corpus-report) or its own copy of the rule (Go, Java, C#). An omitted
+  field - zero divisor, log of x <= 0, failed guard with no `else`, unmapped lookup - is
+  now assertable in the shared corpus; `value-absent.yaml` and `log-of-non-positive.yaml`
+  do. A runner that compares only the keys it lists blesses every wrongly reported field.
+- **Schema-validity rules are checked when the schema is loaded** in Go, Java and C#:
+  `go/schema/vocabulary.go` (`checkTypeVocabulary`, `checkFieldRules`), Java
+  `Schema.parseFields`, C# `SchemaParser.ParseFields`. Put a new "MUST be rejected" rule
+  there, on list members only - Java and C# also run `parseField` over construct bodies
+  (an inline `tlv:` block arrives as a synthetic field typed `tlv`), which carry no type.
+  Python rejects at decode time, which PS-328 permits; the validator and the TS013
+  generator reject too, so a schema fails the same way on every path.
+- **The type vocabulary is closed and case-sensitive** (CR-2026-037). Go canonicalises an
+  alias in `parseFieldMap`, so the rest of the package sees one spelling per type; its
+  capitalised `FieldType` constants remain only for the compact and binary formats.
+- **`type: object` is the nested-group spelling and the `object:` key is rejected**
+  (CR-2026-074, PS-466) - the corpus had 154 of the first and none of the second.
+- Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
+  `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
+  `float`/`double`; they are not conformance paths and were not brought along.
 
 ## Converting a vendor codec
 
@@ -1454,8 +1481,9 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   the bug. `dl-iam`'s `max(max(a,b),0)` is built from `compute` and `guard` alone.
 - **`pow`, `sqrt`, `abs`, `log` and `log10` stages exist in all four YAML
   interpreters** (see "The unary maths transform stages" above), so a square can be a
-  `pow: 2` stage. `floor`, `ceiling` and `clamp` do not: Go, Java and C# never parse them
-  and treat them as no-ops, so use `compute`/`guard` for those until they are ported.
+  `pow: 2` stage. `floor`, `ceiling` and `clamp` are in all five since CR-2026-058; any
+  stage outside the PS-115 table - `{round: n}`, `{op: floor}`, `{sub: n}` - is rejected,
+  never skipped (PS-390).
 - **Two wrongly matched shapes that leave no hint.** Both were pattern-matched by
   the converter, so unlike an untranslatable expression nothing marked them
   unfinished — and a wrongly matched field is more dangerous than an unmatched one:

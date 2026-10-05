@@ -656,6 +656,8 @@ public static class SchemaEncoder
                 return string.Equals(discriminator?.ToString(), caseValue.ToString());
             long value = (long)Math.Round(numeric, MidpointRounding.ToEven);
 
+            if (caseValue is string text && Helpers.ParseListCaseKey(text) is { } listed)
+                return listed.Contains(value);
             if (caseValue is List<object?> list)
                 return list.Any(item =>
                 {
@@ -976,7 +978,8 @@ public static class SchemaEncoder
             double result = ReverseCanonicalModifiers(
                 ReverseTransformStages(numeric, field.Transform), field);
 
-            if (field.Type is FieldType.F16 or FieldType.F32 or FieldType.F64)
+            if (field.Type is FieldType.F16 or FieldType.F32 or FieldType.F64
+                or FieldType.UDec or FieldType.SDec)
                 return result;
             // Half-to-even, matching the reference interpreter's rounding.
             return Math.Round(result, MidpointRounding.ToEven);
@@ -1125,6 +1128,26 @@ public static class SchemaEncoder
                     if (!ok) throw NotANumber(field, value);
                     return Helpers.EncodeFloat64(numeric, endian);
                 }
+                case FieldType.UDec or FieldType.SDec:
+                {
+                    // The inverse of PS-330, as tools/schema_interpreter.py writes it:
+                    // floor the whole part so the tenths stay non-negative.
+                    var (ok, numeric) = Helpers.ToFloat64(value);
+                    if (!ok) throw NotANumber(field, value);
+                    long whole = (long)Math.Floor(numeric);
+                    long tenths = (long)Math.Round((numeric - whole) * 10, MidpointRounding.ToEven);
+                    if (tenths == 10) { whole += 1; tenths = 0; }
+                    var (low, high) = field.Type == FieldType.SDec ? (-8L, 7L) : (0L, 15L);
+                    if (whole < low || whole > high)
+                        throw new InvalidOperationException(
+                            $"field '{field.Name}': {numeric} does not fit {field.RawType}");
+                    return new[] { (byte)(((whole & 0x0F) << 4) | tenths) };
+                }
+                case FieldType.Base64:
+                {
+                    var raw = Convert.FromBase64String(value?.ToString() ?? "");
+                    return Pad(raw, field.Length > 0 ? field.Length : raw.Length);
+                }
                 case FieldType.Skip:
                     return new byte[field.Length > 0 ? field.Length : 0];
                 case FieldType.Bytes or FieldType.Hex:
@@ -1264,7 +1287,12 @@ public static class SchemaEncoder
                 }).ToArray();
             // CR-2026-008/PS-281 makes the decoder report a byte sequence as a lowercase
             // hex string, so that is the form encoding has to accept for a round trip.
-            var text = (value?.ToString() ?? "").Replace(" ", "").Replace(":", "");
+            // The declared format and separator say how the value was rendered (PS-079,
+            // PS-391); only ':' was stripped, so "0a-0b" could not be read back.
+            if (field.Format == "base64")
+                return Convert.FromBase64String(value?.ToString() ?? "");
+            var text = (value?.ToString() ?? "").Replace(" ", "");
+            text = !string.IsNullOrEmpty(field.Separator) ? text.Replace(field.Separator, "") : text.Replace(":", "");
             if (text.Length % 2 != 0)
                 throw new InvalidOperationException($"field '{field.Name}': expected hex, got "
                     + $"'{value}' (odd number of digits)");
