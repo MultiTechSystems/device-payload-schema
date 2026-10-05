@@ -54,5 +54,10 @@ public class Wave5Test {
             1e-6, "0.000001", 1.5e-7, "1.5e-7", 1e-8, "1e-8", 1e20, "100000000000000000000",
             1e21, "1e+21", 1.5e22, "1.5e+22");
         cases.forEach((v, want) -> assertEquals(want, Wave5.formatLookupValue(v), String.valueOf(v)));
+        // CR-2026-084's extremes: Double.toString writes the first as 4.9E-324.
+        assertEquals("5e-324", Wave5.formatLookupValue(Double.MIN_VALUE));
+        assertEquals("0.30000000000000004", Wave5.formatLookupValue(0.1 + 0.2));
+        assertEquals("2.2250738585072014e-308", Wave5.formatLookupValue(Double.MIN_NORMAL));
+        assertEquals("1.7976931348623157e+308", Wave5.formatLookupValue(Double.MAX_VALUE));
     }
 }
