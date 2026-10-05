@@ -218,3 +218,17 @@ test_vectors:
     source: vendor-codec
     expected:
       temperature: -0.1
+  - name: tvoc_iaq_u16_byte_order
+    description: "TVOC (0xE6 type) word 0x0134 little-endian"
+    payload: "08E63401"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      tvoc: 308
+  - name: hcho_u16_byte_order
+    description: "HCHO word 0x0134 little-endian, /100"
+    payload: "0A7D3401"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      hcho: 3.08

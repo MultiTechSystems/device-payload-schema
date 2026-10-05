@@ -54,16 +54,16 @@ from validate_schema import is_encode_vector  # noqa: E402
 DEVICES = REPO_ROOT / "schemas" / "devices"
 
 #: Exact round-trips required overall. Raise as encoding improves.
-FLOOR_TOTAL = 1242
+FLOOR_TOTAL = 1585
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
 FLOOR_BY_SHAPE = {
-    "tlv": 935,
-    "flagged": 147,
+    "tlv": 1213,
+    "flagged": 157,
     "plain fixed": 71,
-    "match": 66,
-    "byte_group": 17,
+    "match": 120,
+    "byte_group": 18,
     # 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now
     # carry only the definitions they reach, so one no longer has a `repeat` in an
     # unreferenced definition for the classifier to find.
