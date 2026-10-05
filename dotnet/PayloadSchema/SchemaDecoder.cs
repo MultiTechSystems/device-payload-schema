@@ -551,11 +551,19 @@ public static class SchemaDecoder
         // a default is declared (PS-269).
         if (field.Lookup != null)
         {
-            var (ok, intVal) = Helpers.ToInt(value);
+            var (ok, numVal) = Helpers.ToFloat64(value);
             if (ok)
             {
-                if (field.Lookup.TryGetValue(intVal, out var lookupStr))
+                // A value with a fraction matches no key: ToInt would truncate 2.5 to the
+                // key 2. An integral double such as 7.0 is the key 7.
+                int intVal = (int)numVal;
+                bool integral = numVal == Math.Round(numVal) && !double.IsInfinity(numVal);
+                var template = Wave5.Template(field);
+                if (integral && field.Lookup.TryGetValue(intVal, out var lookupStr))
                     value = lookupStr;
+                else if (template != null)
+                    // PS-406: the default names the value it could not map.
+                    value = template.Replace(Wave5.ValueToken, Wave5.FormatLookupValue(numVal));
                 else if (field.LookupDefault != null)
                     value = field.LookupDefault;
                 else if (field.LookupIsSequence)

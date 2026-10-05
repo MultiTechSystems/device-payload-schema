@@ -711,6 +711,14 @@ func reverseLookupLabel(field Field, value any) (any, error) {
 	if found {
 		return float64(matched), nil
 	}
+	// PS-409: a string matching the ${value} default carries the value it stands for.
+	if template := lookupTemplate(field); template != "" {
+		if recovered, ok := matchLookupTemplate(template, strVal); ok {
+			return recovered, nil
+		}
+		return nil, fmt.Errorf("%q is neither a label in the lookup for %q nor a match "+
+			"for its default %q (PS-409)", strVal, field.Name, template)
+	}
 	for i, entry := range field.LookupArray {
 		if label, ok := entry.(string); ok && label == strVal {
 			return float64(i), nil
@@ -2537,9 +2545,18 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 	// an out-of-bounds index is an error (PS-105), not the raw value, because the
 	// payload does not match the schema's shape at all.
 	if field.Lookup != nil {
-		if intVal, ok := toInt(value); ok {
-			if lookup, found := field.Lookup[intVal]; found {
+		if numVal, ok := toFloat64(value); ok {
+			// A value with a fraction matches no key: toInt would truncate 2.5 to the
+			// key 2. An integral float such as 7.0 is the key 7.
+			lookup, found := "", false
+			if numVal == math.Trunc(numVal) && !math.IsInf(numVal, 0) {
+				lookup, found = field.Lookup[int(numVal)]
+			}
+			if found {
 				value = lookup
+			} else if template := lookupTemplate(field); template != "" {
+				// PS-406: the default names the value it could not map.
+				value = strings.ReplaceAll(template, lookupValueToken, formatLookupValue(numVal))
 			} else if field.LookupDefault != nil {
 				value = *field.LookupDefault
 			} else {

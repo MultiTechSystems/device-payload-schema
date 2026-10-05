@@ -1,0 +1,46 @@
+# Timestamps counted from another epoch, and reported as calendar parts (PS-354 to
+# PS-356, PS-410 to PS-413; CR-2026-050, CR-2026-061).
+#
+# Both payload words count seconds to 2026-09-24T14:05:09Z, the instant the
+# specification's calendar example reports: 433260309 from 2013-01-01 (adeunis's epoch)
+# and 370188309 from 2015-01-01 (Laird's). With a declared epoch the fields stay the
+# device's own counts; the instant is derived beside them, never folded into them.
+#
+# Enrichment is OPTIONAL (PS-310), so this lists only the decoded fields: an
+# implementation that declines `metadata` must still decode the payload identically and
+# must not reject the schema for carrying the block, whatever keys it declares. What the
+# enrichment reports - 1790258709, "2026-09-24T14:05:09Z" and the calendar object - is
+# checked against the one implementation that has it, in
+# tests/test_cr_2026_050_061_timestamps.py.
+name: probe_metadata_epoch_calendar
+endian: big
+fields:
+- name: since_2013
+  type: u32
+- name: since_2015
+  type: u32
+metadata:
+  timestamps:
+  - name: sampled_unix
+    mode: unix_epoch
+    field: since_2013
+    epoch: "2013-01-01T00:00:00Z"
+  - name: sampled_iso
+    mode: iso8601
+    field: since_2013
+    epoch: "2013-01-01T00:00:00Z"
+  - name: timestamp
+    mode: calendar
+    field: since_2015
+    epoch: "2015-01-01T00:00:00Z"
+    month_labels: [January, February, March, April, May, June,
+                   July, August, September, October, November, December]
+    keys: {hour: hours, minute: minutes, second: seconds}
+test_vectors:
+- name: spec_example_instant
+  source: spec-example
+  payload: "19D30715 1610A015"
+  input_metadata: {}
+  expected:
+    since_2013: 433260309
+    since_2015: 370188309

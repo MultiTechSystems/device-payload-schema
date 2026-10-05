@@ -454,6 +454,14 @@ function seqLookup(table, index) {
   throw new Error("lookup index " + index + " out of bounds for " + table.length + " entries");
 }
 
+// --- Lookup default template ---
+// PS-406: a mapping default carrying ${value} names the value it could not map, written
+// in decimal. String() gives the shortest round-tripping decimal with no fraction where
+// the value is integral, which is what the reference interpreter writes too.
+function lookupTemplate(template, value) {
+  return template.split("${value}").join(String(value));
+}
+
 // --- Range quality (valid_range -> _quality) ---
 // PS-131/PS-182. Checked after all arithmetic, on the reported value, and the value
 // is passed through unchanged whatever the verdict (PS-132). Boundaries are `good`.
@@ -1574,7 +1582,13 @@ function writeS(buf, pos, size, value, endian) {
                     else:
                         table[key] = mapped
                 lk = json.dumps(table)
-                if has_default:
+                from schema_interpreter import lookup_template, lookup_template_errors
+                problems = lookup_template_errors(field)
+                if problems:
+                    raise ValueError(problems[0])      # PS-407
+                if lookup_template(lookup) is not None:
+                    fallback = f'lookupTemplate({json.dumps(default)}, {expr})'
+                elif has_default:
                     fallback = json.dumps(default)
                 else:
                     # PS-269: an unmatched mapping omits the field rather than reporting

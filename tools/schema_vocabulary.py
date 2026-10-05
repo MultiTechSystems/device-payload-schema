@@ -257,7 +257,12 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "name": (("py",), "output key"),
         "mode": (("py", "validate"), "e.g. elapsed_to_absolute"),
         "elapsed_field": (("py", "validate"), "field holding seconds ago"),
+        "offset_field": (("py", "validate"), "older spelling of elapsed_field (PS-318)"),
+        "field": (("py", "validate"), "seconds since the epoch (PS-354)"),
         "time_base": (("py",), "e.g. rx_time"),
+        "epoch": (("py",), "the instant a count starts from (PS-355)"),
+        "month_labels": (("py",), "calendar month names (PS-411)"),
+        "keys": (("py",), "calendar member renames (PS-412)"),
     },
     "vector": {
         "name": (("runners",), "vector identifier"),

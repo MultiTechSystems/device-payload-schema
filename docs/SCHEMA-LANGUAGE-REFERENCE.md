@@ -246,6 +246,24 @@ Declare a `default` to report something instead:
     default: unknown
 ```
 
+A default may name the value it could not map by carrying `${value}` (PS-406):
+
+```yaml
+- name: sensor
+  type: u8
+  lookup:
+    0: Battery Voltage
+    1: AIN1
+    default: "AnalogSensor${value}"     # 7 -> "AnalogSensor7"
+```
+
+The value is the one after arithmetic (PS-107), written in decimal with no fraction where
+it is integral - as JavaScript's `String()` writes it, so the interpreters and the generated
+codec agree. Such a lookup always reports a string, so its labels must be strings
+(PS-407). `${value}` means this only in a mapping's `default` (PS-408). An encoder given
+`AnalogSensor7` recovers the 7 (PS-409); a plain `default` label still cannot be encoded,
+because it stands for every unmapped value at once.
+
 Values may be numbers as well as strings (PS-106).
 
 **A `default` label cannot be encoded back.** It stands for every value the table does not
@@ -814,25 +832,58 @@ metadata:
 ```yaml
 metadata:
   timestamps:
-    # Mode 1: Use network receive time
+    # The network receive time
     - name: timestamp
       mode: rx_time
 
-    # Mode 2: Compute from offset field
+    # The receive time minus a field, in seconds
     - name: measurement_time
       mode: subtract
       offset_field: seconds_ago
 
-    # Mode 3: Convert Unix epoch from payload
+    # A device count of seconds since an epoch, as Unix seconds (a number)
     - name: device_time
       mode: unix_epoch
-      field: unix_timestamp
+      field: counter
+      epoch: "2013-01-01T00:00:00Z"     # optional; 1970 where absent (PS-354, PS-355)
+
+    # The same instant as an RFC 3339 UTC string
+    - name: device_time_iso
+      mode: iso8601
+      field: counter
+      epoch: "2013-01-01T00:00:00Z"
+
+    # The same instant as its UTC calendar parts (PS-410 to PS-413)
+    - name: stamp
+      mode: calendar
+      field: _since_2015                 # an internal field resolves (PS-435)
+      epoch: "2015-01-01T00:00:00Z"
+      month_labels: [January, February, March, April, May, June,
+                     July, August, September, October, November, December]
+      keys: {hour: hours, minute: minutes, second: seconds}
 ```
 
-`rx_time` copies `recvTime` as given. `subtract` and `unix_epoch` produce a UTC ISO 8601
-string with milliseconds: `seconds_ago: 60` with `recvTime: "2024-01-01T00:01:00Z"`
-gives `measurement_time: "2024-01-01T00:00:00.000Z"`, and `unix_timestamp: 1694498816`
-gives `device_time: "2023-09-12T06:06:56.000Z"`.
+`rx_time` copies `recvTime` as given, and `subtract` gives a UTC string with milliseconds:
+`seconds_ago: 60` with `recvTime: "2024-01-01T00:01:00Z"` gives
+`"2024-01-01T00:00:00.000Z"`.
+
+The three epoch modes read their field as seconds since `epoch` - an RFC 3339 UTC string
+with a `Z`, quoted, or YAML reads it as a date - and keep the field itself as the device's
+own count (PS-356). For 2026-09-24T14:05:09Z, 433260309 seconds after 2013:
+
+| Mode | Reports |
+|------|---------|
+| `unix_epoch` | `1790258709`, a number - whatever the declared epoch |
+| `iso8601` | `"2026-09-24T14:05:09Z"`, with a fraction only where the value has one |
+| `calendar` | `{year: 2026, month: September, day: 24, hours: 14, minutes: 5, seconds: 9}` with the labels and keys above; numbers and the six default names without them |
+
+Before 0.5.2 `unix_epoch` reported a string, and `iso8601` took a `format:` strftime
+pattern; that key is withdrawn and rejected. A device counting minutes converts with
+`mult: 60`. A GPS epoch is an approximation: GPS time does not insert leap seconds.
+
+Enrichment runs only when the decoder is given runtime input (PS-312), and only the Python
+reference implements it; the others may decline `metadata` (PS-310), but must decode the
+payload as though the block were absent.
 
 ### Available TS013 Input Fields
 
@@ -1239,7 +1290,8 @@ SEMANTICS:    unit | ipso {object, instance, resource} | senml {name, unit}
 
 DIRECTIONS:   uplink | downlink | bidirectional
 
-METADATA:     include | timestamps (rx_time, subtract, unix_epoch) (Python only)
+METADATA:     include | timestamps (rx_time, subtract, unix_epoch, iso8601, calendar,
+              elapsed_to_absolute; epoch) (Python only)
 ```
 
 ## See Also

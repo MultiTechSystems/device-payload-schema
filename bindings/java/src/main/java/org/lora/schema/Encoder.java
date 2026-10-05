@@ -902,6 +902,18 @@ final class Encoder {
     private Object reverseModifiers(Object value, Field field) {
         Object reversed = reverseLookup(value, field.getLookup());
 
+        // PS-409: a string matching the ${value} default carries the value it stands for.
+        String template = Wave5.template(field);
+        if (reversed instanceof String s && template != null) {
+            Double recovered = Wave5.matchTemplate(template, s);
+            if (recovered == null) {
+                throw new SchemaException.EncodeException("'" + s + "' is neither a label in "
+                        + "the lookup for '" + field.getName() + "' nor a match for its default '"
+                        + template + "' (PS-409)");
+            }
+            reversed = recovered;
+        }
+
         if (reversed instanceof String && field.getLookup() != null
                 && !field.getLookup().isEmpty()) {
             // The label is not in the table, so it came from the mapping's `default`,

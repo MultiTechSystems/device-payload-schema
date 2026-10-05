@@ -17,6 +17,10 @@ import re
 import sys
 import yaml
 from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from schema_interpreter import lookup_template, lookup_template_pattern  # noqa: E402
 
 
 def scalar_json_type(value: Any) -> str:
@@ -68,6 +72,14 @@ def lookup_json_schema(lookup: Any) -> Optional[Dict[str, Any]]:
     SESSION-NOTES.md records it.
     """
     if isinstance(lookup, dict):
+        template = lookup_template(lookup)
+        if template is not None:
+            # PS-406: a `${value}` default names every unmapped value, so the set is a
+            # pattern beside the labels rather than an enum - and always a string (PS-407).
+            labels = [v for k, v in lookup.items() if k != 'default']
+            return {"type": "string", "anyOf": [
+                {"enum": labels},
+                {"pattern": lookup_template_pattern(template)}]}
         values = list(lookup.values())      # a `default:` label is one of these
     elif isinstance(lookup, list):
         values = list(lookup)
@@ -293,6 +305,8 @@ def reference_labels(field_def: Optional[Dict[str, Any]]) -> Optional[List[str]]
         return None
     lookup = field_def.get('lookup')
     labels: List[str] = []
+    if lookup_template(lookup) is not None:
+        return None          # a `${value}` default names every unmapped value (PS-406)
     if isinstance(lookup, dict):
         for key, value in lookup.items():
             if key == 'default':
