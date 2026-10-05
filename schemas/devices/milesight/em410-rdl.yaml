@@ -231,3 +231,24 @@ test_vectors:
     source: vendor-codec
     expected:
       device_status: "on"
+  - name: reset_event_byte_one
+    description: "Reset-event frame with the byte 0x01, the index the vendor's own map labels 'reset'"
+    payload: "FFFE01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      reset_event: "reset"
+  - name: device_status_byte_one
+    description: "Device-status frame with the byte 0x01, the index the vendor's own map labels 'on'"
+    payload: "FF0B01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      device_status: "on"
+  - name: position_normal
+    description: "Position byte 0x00, the vendor's 'normal'"
+    payload: "050000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      position: "normal"

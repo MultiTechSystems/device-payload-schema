@@ -2,7 +2,7 @@
 # FPort 203
 # Package ID: 4, Version: 1
 
-fport: 203
+fPort: 203
 package_id: 4
 package_version: 1
 spec: TS006

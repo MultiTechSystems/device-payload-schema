@@ -179,9 +179,12 @@ public static class SchemaEncoder
                 case FieldType.Repeat:
                     return EncodeRepeat(field, data);
                 case FieldType.Object:
-                    // A nested object's fields are written in place; decoding reports them
-                    // flattened, so they are looked up by their own names.
-                    return EncodeFieldList(field.Fields, data);
+                    // A nested object is reported under its own name (PS-139), so its
+                    // members are read from that mapping. They were looked up in the
+                    // enclosing data, where they are not, and every member encoded as zero.
+                    return EncodeFieldList(field.Fields,
+                        data.TryGetValue(field.Name, out var nested) && nested is Dictionary<string, object?> members
+                            ? members : data);
                 case FieldType.Number:
                     // Derived from other fields: no bytes of its own.
                     return Array.Empty<byte>();
@@ -189,6 +192,14 @@ public static class SchemaEncoder
                     // `remaining` gives no count to pad on encode (PS-014).
                     return new byte[field.Length > 0 ? field.Length : 0];
             }
+
+            // PS-359: a literal writes no bytes and its key is not required of the input.
+            if (field.Type == FieldType.String && field.Value != null)
+                return Array.Empty<byte>();
+            // PS-360: `value` on a field that reads bytes is the constant to write,
+            // whatever the input supplies.
+            if (field.Value != null)
+                return EncodeField(field, field.Value);
 
             if (field.Type == FieldType.BitfieldString)
             {
@@ -371,7 +382,10 @@ public static class SchemaEncoder
                 ulong mask = bitLen >= 64 ? ulong.MaxValue : (1UL << bitLen) - 1;
                 packed |= ((ulong)raw & mask) << bitRange.start;
             }
-            return Helpers.EncodeUint(packed, Math.Max(1, size), _endian);
+            // The run's shared base is in its fields' effective byte order (PS-059): a
+            // field's own `endian` where one declares it, else the schema's.
+            var runEndian = run.Select(m => m.Endian).FirstOrDefault(e => !string.IsNullOrEmpty(e)) ?? _endian;
+            return Helpers.EncodeUint(packed, Math.Max(1, size), runEndian);
         }
 
         /// <summary>The number a bit range's enum label stands for.</summary>
@@ -449,6 +463,12 @@ public static class SchemaEncoder
                 object? value = string.IsNullOrEmpty(member.Name) || member.Name.StartsWith("_")
                     ? 0.0
                     : (data.TryGetValue(member.Name, out var v) ? v : 0.0);
+                if (member.Type == FieldType.Bool)
+                {
+                    // A bool member is one bit of the group's value (PS-364).
+                    if (value is true) packed |= 1UL << member.Bit;
+                    continue;
+                }
                 value = ReverseModifiers(value, member);
                 var (ok, numeric) = Helpers.ToFloat64(value);
                 if (!ok)
@@ -480,7 +500,7 @@ public static class SchemaEncoder
                     packed |= (ulong)raw;
                 }
             }
-            return Helpers.EncodeUint(packed, Math.Max(1, size), _endian);
+            return Helpers.EncodeUint(packed, Math.Max(1, size), group.GroupEndian ?? _endian);
         }
 
         /// <summary>
@@ -656,6 +676,8 @@ public static class SchemaEncoder
                 return string.Equals(discriminator?.ToString(), caseValue.ToString());
             long value = (long)Math.Round(numeric, MidpointRounding.ToEven);
 
+            if (caseValue is string text && Helpers.ParseListCaseKey(text) is { } listed)
+                return listed.Contains(value);
             if (caseValue is List<object?> list)
                 return list.Any(item =>
                 {
@@ -976,7 +998,9 @@ public static class SchemaEncoder
             double result = ReverseCanonicalModifiers(
                 ReverseTransformStages(numeric, field.Transform), field);
 
-            if (field.Type is FieldType.F16 or FieldType.F32 or FieldType.F64)
+            if (field.Type is FieldType.F16 or FieldType.F32 or FieldType.F64
+                or FieldType.UDec or FieldType.SDec or FieldType.F32LE16 or FieldType.F32BE16LE
+                or FieldType.UFlt16 or FieldType.SFlt16 or FieldType.SFlt24)
                 return result;
             // Half-to-even, matching the reference interpreter's rounding.
             return Math.Round(result, MidpointRounding.ToEven);
@@ -1080,6 +1104,19 @@ public static class SchemaEncoder
                 // Deliberately not passing `endian`, for the reason the decoder gives:
                 // honouring it would make u32le16 with endian little a second spelling of
                 // little-endian u32.
+                case FieldType.F32LE16 or FieldType.U32BE16LE or FieldType.S32BE16LE or FieldType.F32BE16LE:
+                {
+                    var (ok, numeric) = Helpers.ToFloat64(value);
+                    if (!ok) throw NotANumber(field, value);
+                    return Wave4.WriteWordOrdered(field.Type, numeric);
+                }
+                case FieldType.UFlt16 or FieldType.SFlt16 or FieldType.SFlt24:
+                {
+                    var (ok, numeric) = Helpers.ToFloat64(value);
+                    if (!ok) throw NotANumber(field, value);
+                    return Helpers.EncodeUint(Wave4.EncodeMinifloat(field.Type, numeric),
+                        Wave4.MinifloatSize(field.Type), endian);
+                }
                 case FieldType.U32LE16 or FieldType.S32LE16:
                 {
                     long raw = RequireNumber(field, value);
@@ -1094,6 +1131,13 @@ public static class SchemaEncoder
                         or FieldType.U64:
                 {
                     long raw = RequireNumber(field, value);
+                    if (field.Encoding != null)
+                    {
+                        // The inverse of the named code, after the modifiers are reversed (PS-463).
+                        int width = Helpers.InferLengthFromType(field.Type);
+                        return Helpers.EncodeUint(Wave4.EncodeEncoding(raw, field.Encoding, width, field.Name),
+                            width, endian);
+                    }
                     return WriteUint(raw, Helpers.InferLengthFromType(field.Type), endian);
                 }
                 case FieldType.S8 or FieldType.S16 or FieldType.S24 or FieldType.S32
@@ -1125,6 +1169,26 @@ public static class SchemaEncoder
                     if (!ok) throw NotANumber(field, value);
                     return Helpers.EncodeFloat64(numeric, endian);
                 }
+                case FieldType.UDec or FieldType.SDec:
+                {
+                    // The inverse of PS-330, as tools/schema_interpreter.py writes it:
+                    // floor the whole part so the tenths stay non-negative.
+                    var (ok, numeric) = Helpers.ToFloat64(value);
+                    if (!ok) throw NotANumber(field, value);
+                    long whole = (long)Math.Floor(numeric);
+                    long tenths = (long)Math.Round((numeric - whole) * 10, MidpointRounding.ToEven);
+                    if (tenths == 10) { whole += 1; tenths = 0; }
+                    var (low, high) = field.Type == FieldType.SDec ? (-8L, 7L) : (0L, 15L);
+                    if (whole < low || whole > high)
+                        throw new InvalidOperationException(
+                            $"field '{field.Name}': {numeric} does not fit {field.RawType}");
+                    return new[] { (byte)(((whole & 0x0F) << 4) | tenths) };
+                }
+                case FieldType.Base64:
+                {
+                    var raw = Convert.FromBase64String(value?.ToString() ?? "");
+                    return Pad(raw, field.Length > 0 ? field.Length : raw.Length);
+                }
                 case FieldType.Skip:
                     return new byte[field.Length > 0 ? field.Length : 0];
                 case FieldType.Bytes or FieldType.Hex:
@@ -1132,7 +1196,7 @@ public static class SchemaEncoder
                     var raw = ToBytes(field, value);
                     return Pad(raw, EncodeLength(field, raw.Length));
                 }
-                case FieldType.String when field.Value != null && field.Length == 0:
+                case FieldType.String when field.Value != null:
                     // A literal came from no bytes, so it writes none.
                     return Array.Empty<byte>();
                 case FieldType.Ascii or FieldType.String:
@@ -1194,7 +1258,8 @@ public static class SchemaEncoder
                 string format = part.Count >= 3 && part[2] is string f ? f : "decimal";
                 string segment = i < segments.Length ? segments[i].Trim() : "0";
                 ulong raw;
-                bool parsed = format == "hex"
+                // PS-431: a hex segment is read without regard to case.
+                bool parsed = format is "hex" or "hex:upper"
                     ? ulong.TryParse(segment, System.Globalization.NumberStyles.HexNumber,
                         System.Globalization.CultureInfo.InvariantCulture, out raw)
                     : ulong.TryParse(segment, out raw);
@@ -1264,7 +1329,12 @@ public static class SchemaEncoder
                 }).ToArray();
             // CR-2026-008/PS-281 makes the decoder report a byte sequence as a lowercase
             // hex string, so that is the form encoding has to accept for a round trip.
-            var text = (value?.ToString() ?? "").Replace(" ", "").Replace(":", "");
+            // The declared format and separator say how the value was rendered (PS-079,
+            // PS-391); only ':' was stripped, so "0a-0b" could not be read back.
+            if (field.Format == "base64")
+                return Convert.FromBase64String(value?.ToString() ?? "");
+            var text = (value?.ToString() ?? "").Replace(" ", "");
+            text = !string.IsNullOrEmpty(field.Separator) ? text.Replace(field.Separator, "") : text.Replace(":", "");
             if (text.Length % 2 != 0)
                 throw new InvalidOperationException($"field '{field.Name}': expected hex, got "
                     + $"'{value}' (odd number of digits)");

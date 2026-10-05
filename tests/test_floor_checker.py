@@ -45,8 +45,10 @@ class TestItFindsEveryDeclaredFloor:
             assert "shape tlv" in mod.read_floors(impl), impl
 
     def test_java_repeat_is_found_despite_the_closing_paren(self, mod):
-        """`Map.of(... "repeat", 6)` ends in ')' not ','; requiring a comma dropped it."""
-        assert mod.read_floors("java").get("shape repeat") == 6
+        """`Map.of(... "repeat", N)` ends in ')' not ','; requiring a comma dropped it.
+
+        Found, not pinned: the floor itself moves (6 -> 5 in 0.5.2 wave 1)."""
+        assert mod.read_floors("java").get("shape repeat") is not None
 
     def test_the_declared_values_differ_between_implementations(self, mod):
         """The premise of the whole tool: these are not one number.

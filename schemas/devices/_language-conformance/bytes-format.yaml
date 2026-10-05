@@ -1,0 +1,35 @@
+# A bytes field's `format` (PS-079) and `separator` (PS-391).
+#
+# Go, Java and C# honoured both; the Python reference interpreter and the generated codec
+# ignored both and reported lowercase hex whatever the schema asked for, so
+# `hex:upper` with ":" read AA:BB:CC in three languages and aabbcc in two.
+# A separator beside base64 or array is invalid and is held by the CR-058 tests.
+name: probe_bytes_format
+endian: big
+fields:
+- name: mac
+  type: bytes
+  length: 3
+  format: hex:upper
+  separator: ":"
+- name: dashed
+  type: bytes
+  length: 2
+  separator: "-"
+- name: blob
+  type: bytes
+  length: 3
+  format: base64
+- name: raw
+  type: bytes
+  length: 2
+  format: array
+test_vectors:
+- name: every_format
+  source: spec-example
+  payload: "AABBCC 0A0B 414243 0102"
+  expected:
+    mac: "AA:BB:CC"
+    dashed: "0a-0b"
+    blob: QUJD
+    raw: [1, 2]

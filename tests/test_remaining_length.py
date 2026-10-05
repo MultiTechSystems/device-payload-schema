@@ -57,7 +57,7 @@ class TestEvaluation:
 
     @pytest.mark.parametrize(
         "ftype,expected",
-        [("bytes", ""), ("hex", ""), ("ascii", ""), ("string", "")],
+        [("bytes", ""), ("hex", ""), ("ascii", "")],  # `string` reads no bytes (PS-361)
     )
     def test_empty_result_per_type(self, ftype, expected):
         assert decode("10", ftype=ftype)["tail"] == expected

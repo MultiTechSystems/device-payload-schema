@@ -1,8 +1,10 @@
-# The other half of `max`: it caps a declared `count` rather than only bounding a loop.
+# `max` beside a declared `count`, met exactly.
 #
-# The interpreters do this by clamping the count itself, so a `count` above `max` yields
-# `max` records and no error. Kept apart from repeat-max.yaml because the generator's fix
-# has to hold for both spellings, and a single fixture would let one pass on the other's
+# A `count` above `max` used to be clamped to it, yielding `max` records and no error,
+# with every field after the repeat read from inside the records the clamp discarded.
+# CR-2026-058 (PS-396) makes it an error, held by the CR-058 tests in each language since
+# no vector kind expects a failure. Kept apart from repeat-max.yaml because the check has
+# to hold for both spellings, and a single fixture would let one pass on the other's
 # behaviour.
 name: probe_repeat_max_count
 endian: big
@@ -17,14 +19,17 @@ fields:
     fields:
       - name: v
         type: u8
+  - name: after
+    type: u8
 test_vectors:
-  - name: a_count_above_the_ceiling_is_clamped
-    description: "The payload says four records; `max: 2` allows two"
-    payload: "040A141E28"
+  - name: a_count_at_the_ceiling_decodes
+    description: "The payload says two records and `max: 2` allows two; the field after reads its own byte"
+    payload: "020A1405"
     source: generated
     expected:
-      n: 4
+      n: 2
       capped_count:
         - v: 10
         - v: 20
+      after: 5
     expected_warnings: []

@@ -74,33 +74,6 @@ definitions:
         description: "Space-separated feature flags"
         example: "rmtsh gps prod"
 
-  feature_flags:
-    description: "Known feature flags in version message"
-    flags:
-      - name: rmtsh
-        description: "Remote shell enabled"
-      - name: gps
-        description: "GPS support"
-      - name: prod
-        description: "Production mode"
-      - name: "gps-ctrl"
-        description: "GPS control via router_config"
-      - name: dutyconf
-        description: "Duty cycle configuration"
-      - name: lbtconf
-        description: "Listen-before-talk configuration"
-      - name: "pdu-only"
-        description: "PDU-only mode supported"
-      - name: "updn-dr"
-        description: "Up/down data rate control"
-      - name: nsgw_dataplane
-        description: "NS-GW protobuf data plane"
-      - name: nsgw_telemetry
-        description: "NS-GW declarative telemetry"
-      - name: nsgw_dict_persist
-        description: "NS-GW dictionary persistence"
-      - name: protobuf
-        description: "Legacy protobuf encoding"
 
   # ===========================================================================
   # ROUTER_CONFIG (LNS → GW) - Configuration
@@ -653,3 +626,31 @@ test_vectors:
         "xtime": 1234567890123456,
         "rctx": 0
       }
+
+x-feature_flags:
+  description: "Known feature flags in version message"
+  flags:
+    - name: rmtsh
+      description: "Remote shell enabled"
+    - name: gps
+      description: "GPS support"
+    - name: prod
+      description: "Production mode"
+    - name: "gps-ctrl"
+      description: "GPS control via router_config"
+    - name: dutyconf
+      description: "Duty cycle configuration"
+    - name: lbtconf
+      description: "Listen-before-talk configuration"
+    - name: "pdu-only"
+      description: "PDU-only mode supported"
+    - name: "updn-dr"
+      description: "Up/down data rate control"
+    - name: nsgw_dataplane
+      description: "NS-GW protobuf data plane"
+    - name: nsgw_telemetry
+      description: "NS-GW declarative telemetry"
+    - name: nsgw_dict_persist
+      description: "NS-GW dictionary persistence"
+    - name: protobuf
+      description: "Legacy protobuf encoding"

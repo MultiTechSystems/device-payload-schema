@@ -34,20 +34,24 @@ def to_js_name(name: str) -> str:
     return re.sub(r'[^a-zA-Z0-9_]', '_', name)
 
 
+#: Byte width of every numeric type spelling clause 2 defines, canonical or alias
+#: (PS-049). The list is closed (PS-326) and case-sensitive (PS-333): this used to
+#: fall back to any `[usif]` followed by digits, so `float` read four bytes and `u17`
+#: two, where every interpreter rejects both.
+NUMERIC_TYPE_SIZES = {
+    'u8': 1, 'uint8': 1, 's8': 1, 'i8': 1, 'int8': 1,
+    'u16': 2, 'uint16': 2, 's16': 2, 'i16': 2, 'int16': 2,
+    'u24': 3, 'uint24': 3, 's24': 3, 'i24': 3, 'int24': 3,
+    'u32': 4, 'uint32': 4, 's32': 4, 'i32': 4, 'int32': 4,
+    'u32le16': 4, 's32le16': 4, 'f32le16': 4,
+    'u32be16le': 4, 's32be16le': 4, 'f32be16le': 4,
+    'u64': 8, 'uint64': 8, 's64': 8, 'i64': 8, 'int64': 8,
+    'f16': 2, 'f32': 4, 'f64': 8,
+}
+
+
 def type_size(t: str) -> Optional[int]:
-    m = re.match(r'^(?:be_|le_)?([usif])(\d+)$', t)
-    if m:
-        return int(m.group(2)) // 8
-    basic = {
-        'u8': 1, 's8': 1, 'i8': 1, 'uint8': 1, 'int8': 1,
-        'u16': 2, 's16': 2, 'i16': 2, 'uint16': 2, 'int16': 2,
-        'u24': 3, 's24': 3, 'i24': 3,
-        'u32': 4, 's32': 4, 'i32': 4, 'uint32': 4, 'int32': 4,
-        'u32le16': 4, 's32le16': 4,
-        'u64': 8, 's64': 8, 'i64': 8, 'uint64': 8, 'int64': 8,
-        'f16': 2, 'f32': 4, 'f64': 8,
-    }
-    return basic.get(t)
+    return NUMERIC_TYPE_SIZES.get(str(t))
 
 
 def parse_bit_slice_type(t: str) -> Optional[Tuple[str, int, int]]:
@@ -61,7 +65,7 @@ def parse_bit_slice_type(t: str) -> Optional[Tuple[str, int, int]]:
 
     Returns (base_type, bit_start, bit_width) or None.
     """
-    m = re.match(r'^((?:be_|le_)?[usif]\d+)\[(\d+):(\d+)\]$', t)
+    m = re.match(r'^([us]\d+)\[(\d+):(\d+)\]$', t)
     if m:
         base_t = m.group(1)
         lo = int(m.group(2))
@@ -73,19 +77,27 @@ def parse_bit_slice_type(t: str) -> Optional[Tuple[str, int, int]]:
     return None
 
 
+#: (unit order, kind) of each word-ordered type (PS-271, PS-362, PS-363).
+WORD_ORDERED = {
+    'u32le16': ('le16', 'u'), 's32le16': ('le16', 's'), 'f32le16': ('le16', 'f'),
+    'u32be16le': ('be16le', 'u'), 's32be16le': ('be16le', 's'), 'f32be16le': ('be16le', 'f'),
+}
+
+
 def is_word_ordered(t: str) -> bool:
-    """Whether the type carries its 32 bits as two 16-bit units, low unit first."""
-    return t in ('u32le16', 's32le16')
+    """Whether the type carries its 32 bits as two 16-bit units in an order it fixes."""
+    return t in WORD_ORDERED
 
 
 def is_signed(t: str) -> bool:
-    clean = re.sub(r'^(?:be_|le_)?', '', t)
+    clean = str(t)
     return clean.startswith('s') or clean.startswith('i')
 
 
 def is_float(t: str) -> bool:
-    clean = re.sub(r'^(?:be_|le_)?', '', t)
-    return clean.startswith('f')
+    # Exactly the three float spellings: a prefix test admitted `float` and `float16`,
+    # which are not types (CR-2026-037), and read them as four bytes.
+    return str(t) in ('f16', 'f32', 'f64')
 
 
 def field_endian_override(t: str, field: Optional[Dict[str, Any]] = None) -> Optional[str]:
@@ -93,18 +105,13 @@ def field_endian_override(t: str, field: Optional[Dict[str, Any]] = None) -> Opt
 
     A field's own `endian:` wins. The generator only ever derived byte order from a
     `le_`/`be_` type prefix, so a schema using the key generated a codec that read the
-    schema's order instead - the interpreter and the generated codec then disagreed on
-    the same schema, which is the one divergence `tools/crossvalidate_js_json.py` exists
-    to keep at zero.
+    schema's order instead. The prefixes are withdrawn (PS-053a, CR-2026-039): a type
+    carrying one is unknown and refused.
     """
     if field is not None:
         declared = field.get('endian')
         if declared in ('big', 'little'):
             return declared
-    if t.startswith('be_'):
-        return 'big'
-    if t.startswith('le_'):
-        return 'little'
     return None
 
 
@@ -238,8 +245,9 @@ def canonical_modifiers_to_js(field: Dict[str, Any], input_expr: str) -> str:
         if key == 'mult':
             expr = f'({expr} * {operand})'
         elif key == 'div':
-            if operand != 0:
-                expr = f'({expr} / {operand})'
+            # A zero divisor omits the field (PS-100): undefined, which the output
+            # pass drops. Skipping the division reported the undivided value.
+            expr = f'({expr} / {operand})' if operand != 0 else 'undefined'
         else:
             expr = f'({expr} + {operand})'
     return expr
@@ -264,37 +272,44 @@ def transform_to_js(transform_ops: List[Dict[str, Any]], input_expr: str) -> str
             if isinstance(bounds, list) and len(bounds) >= 2:
                 result = f'Math.max({bounds[0]}, Math.min({bounds[1]}, {result}))'
         elif 'log10' in op and op['log10']:
-            result = f'Math.log10(Math.max(1e-10, {result}))'
+            # A non-positive input has no logarithm: the field is absent (PS-117).
+            # Math.log10 gives -Infinity or NaN there, which the output pass drops.
+            result = f'Math.log10({result})'
         elif 'log' in op and op['log']:
-            result = f'Math.log(Math.max(1e-10, {result}))'
+            result = f'Math.log({result})'
         elif 'add' in op:
             result = f'({result} + {op["add"]})'
         elif 'mult' in op:
             result = f'({result} * {op["mult"]})'
-        elif 'div' in op and op['div'] != 0:
-            result = f'({result} / {op["div"]})'
-        elif 'round' in op:
-            decimals = op['round']
-            if decimals is True or decimals == 0:
-                result = f'roundHalfEven({result}, 0)'
-            else:
-                factor = 10 ** int(decimals)
-                result = f'roundHalfEven({result}, {int(decimals)})'
+        elif 'div' in op:
+            result = f'({result} / {op["div"]})' if op['div'] != 0 else 'undefined'
         elif 'op' in op:
-            # Handle {op: 'name', ...} syntax
-            op_name = op['op']
-            if op_name == 'round':
-                decimals = op.get('decimals', 0)
-                if decimals == 0:
-                    result = f'roundHalfEven({result}, 0)'
-                else:
-                    factor = 10 ** int(decimals)
-                    result = f'roundHalfEven({result}, {int(decimals)})'
-            elif op_name == 'floor':
-                result = f'Math.floor({result})'
-            elif op_name in ('ceiling', 'ceil'):
-                result = f'Math.ceil({result})'
+            # PS-390: `round` is the one named operation, with `ties` even (the default)
+            # or away from zero. `floor`/`ceil` here meant rounding down and up, which the
+            # specification never defined; an unknown operation is rejected, not skipped.
+            if op['op'] != 'round':
+                raise ValueError(
+                    f"transform stage names an unknown operation {op['op']!r} (PS-390)")
+            decimals = op.get('decimals', 0)
+            ties = op.get('ties', 'even')
+            if ties not in ('even', 'away'):
+                raise ValueError(f"round `ties` must be 'even' or 'away', got {ties!r} (PS-390)")
+            helper = 'roundHalfEven' if ties == 'even' else 'roundHalfAway'
+            result = f'{helper}({result}, {int(decimals)})'
+        elif 'round' in op:
+            raise ValueError(
+                "`{round: n}` is not a transform stage; write {op: round, decimals: n} (PS-390)")
+        else:
+            raise ValueError(
+                f"transform stage {op!r} names no operation of the PS-115 table (PS-390)")
     return result
+
+
+def enum_label(entry):
+    """What an enum value reports: its `name` where it is the description form (PS-394)."""
+    if isinstance(entry, dict) and 'name' in entry:
+        return entry['name']
+    return entry
 
 
 def is_remaining_length(declared):
@@ -381,6 +396,12 @@ def ref_to_js(ref: str) -> str:
 
 class TS013Generator:
     def __init__(self, schema: Dict[str, Any], source: str = ''):
+        # Every `$ref` is spliced up front, as the interpreter does (PS-346, PS-347), and
+        # a schema whose references are invalid is refused (PS-345, PS-348, PS-349).
+        from schema_interpreter import expand_refs
+        schema, ref_errors = expand_refs(schema)
+        if ref_errors:
+            raise ValueError(ref_errors[0])
         self.schema = schema
         self.source = source
         self.name = schema.get('name', 'unknown')
@@ -474,6 +495,33 @@ function tlvUnknownRaw(d, tag, buf, from, span) {
   d.unknown_tags.push({ tag: tag, raw: hex });
 }
 
+// --- Absent values ---
+// A field with no value to report is absent (PS-278, PS-100, PS-117), and NaN and the
+// infinities are not JSON values (PS-282). An omitted step yields undefined, which
+// later arithmetic turns into NaN, so both are dropped here, once, on the way out -
+// the generated codec reported null for log10(0) and the undivided value for div 0.
+// Mirrors normalize_output in the reference interpreter.
+function omitAbsent(v) {
+  if (typeof v === 'number') return isFinite(v) ? v : undefined;
+  if (Array.isArray(v)) {
+    var list = [];
+    for (var i = 0; i < v.length; i++) {
+      var item = omitAbsent(v[i]);
+      if (item !== undefined) list.push(item);
+    }
+    return list;
+  }
+  if (v === null || typeof v !== 'object') return v;
+  var out = {};
+  for (var k in v) {
+    if (Object.prototype.hasOwnProperty.call(v, k)) {
+      var x = omitAbsent(v[k]);
+      if (x !== undefined) out[k] = x;
+    }
+  }
+  return out;
+}
+
 // --- Rounding ---
 // Half-to-even (banker's rounding), matching the Python, Java and C# interpreters.
 //
@@ -488,6 +536,16 @@ function tlvUnknownRaw(d, tag, buf, from, span) {
 // correctly rounded on the exact stored value, so it is used for the ordinary case
 // and a genuine tie is detected from the long expansion.
 function roundHalfEven(v, decimals) {
+  return roundDecimal(v, decimals, false);
+}
+
+/* `ties: away` (PS-390): a tie rounds away from zero, as JavaScript's toFixed does in
+ * the vendor decoders this reproduces. Every other value rounds as roundHalfEven. */
+function roundHalfAway(v, decimals) {
+  return roundDecimal(v, decimals, true);
+}
+
+function roundDecimal(v, decimals, away) {
   if (typeof v !== 'number' || !isFinite(v)) return v;
   var d = Math.min(Math.max(decimals || 0, 0), 90);
   var neg = v < 0;
@@ -501,7 +559,7 @@ function roundHalfEven(v, decimals) {
   if (frac.charAt(d) === '5' && /^0*$/.test(frac.slice(d + 1))) {
     var f = Math.pow(10, d);
     var lower = Math.floor(a * f);
-    out = ((lower % 2 === 0) ? lower : lower + 1) / f;
+    out = ((!away && lower % 2 === 0) ? lower : lower + 1) / f;
   } else {
     out = Number(a.toFixed(d));
   }
@@ -603,6 +661,86 @@ function readS(buf, pos, size, endian) {
   return v;
 }
 
+/* PS-388: a computed `integer` with a fractional part is an error, never rounded. */
+function asInteger(v, name) {
+  if (typeof v === 'number' && isFinite(v) && v !== Math.floor(v)) {
+    throw new Error(name + ': type integer but the computed value is ' + v);
+  }
+  return v;
+}
+
+/* RFC 4648 base64 of a byte range. Written out because btoa is not available in every
+ * JavaScript runtime a TS013 codec runs under. */
+function toBase64(buf, pos, n) {
+  var A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  var out = '';
+  for (var i = 0; i < n; i += 3) {
+    var b0 = buf[pos + i], b1 = buf[pos + i + 1], b2 = buf[pos + i + 2];
+    var t = (b0 << 16) | ((i + 1 < n ? b1 : 0) << 8) | (i + 2 < n ? b2 : 0);
+    out += A.charAt((t >> 18) & 63) + A.charAt((t >> 12) & 63);
+    out += i + 1 < n ? A.charAt((t >> 6) & 63) : '=';
+    out += i + 2 < n ? A.charAt(t & 63) : '=';
+  }
+  return out;
+}
+
+/* The named encodings (PS-422 to PS-425), applied to the unsigned integer read and before
+ * the modifiers. A BCD group above 9 is an error, never a number (PS-424). */
+function decodeEncoding(v, enc, size) {
+  var bits = size * 8, i, out;
+  if (enc === 'sign_magnitude') {
+    var half = Math.pow(2, bits - 1);
+    if (v >= half) { out = -(v - half); return out === 0 ? 0 : out; }
+    return v;
+  }
+  if (enc === 'bcd') {
+    out = 0;
+    for (i = size * 2 - 1; i >= 0; i--) {
+      var digit = Math.floor(v / Math.pow(16, i)) % 16;
+      if (digit > 9) throw new Error("Invalid BCD digit: " + digit + " (PS-424)");
+      out = out * 10 + digit;
+    }
+    return out;
+  }
+  out = v;
+  for (var shift = 1; shift < bits; shift *= 2) out = out ^ Math.floor(out / Math.pow(2, shift));
+  return out >>> 0;
+}
+
+/* The MCCI minifloats (PS-417 to PS-419). Decoded by their formulas, never as IEEE half
+ * precision (PS-421); an sflt24 with exponent 127 has no value and is left undefined, which
+ * the output pass drops (PS-282). */
+function decodeMinifloat(type, w) {
+  var sign, e, f, v;
+  if (type === 'uflt16') {
+    e = Math.floor(w / 4096); f = w % 4096;
+    return f / 4096 * Math.pow(2, e - 15);
+  }
+  if (type === 'sflt16') {
+    sign = w >= 32768 ? -1 : 1; e = Math.floor(w / 2048) % 16; f = w % 2048;
+    v = sign * f / 2048 * Math.pow(2, e - 15);
+    return v === 0 ? 0 : v;
+  }
+  sign = w >= 8388608 ? -1 : 1; e = Math.floor(w / 65536) % 128; f = w % 65536;
+  if (e === 127) return undefined;
+  v = e === 0 ? sign * f / 65536 * Math.pow(2, -62) : sign * (1 + f / 65536) * Math.pow(2, e - 63);
+  return v === 0 ? 0 : v;
+}
+
+/* IEEE 754 binary16. Generated codecs read an f16 with readF64 before, so eight bytes
+ * were taken for a two-byte field. */
+function readF16(buf, pos, endian) {
+  var h = endian === 'little'
+    ? ((buf[pos + 1] || 0) << 8) | (buf[pos] || 0)
+    : ((buf[pos] || 0) << 8) | (buf[pos + 1] || 0);
+  var sign = (h & 0x8000) ? -1 : 1;
+  var exp = (h >> 10) & 0x1F;
+  var frac = h & 0x3FF;
+  if (exp === 0) return sign * Math.pow(2, -14) * (frac / 1024);
+  if (exp === 31) return frac ? NaN : sign * Infinity;
+  return sign * Math.pow(2, exp - 15) * (1 + frac / 1024);
+}
+
 function readF32(buf, pos, endian) {
   var b = buf.slice(pos, pos + 4);
   if (endian === 'little') b = [b[3], b[2], b[1], b[0]];
@@ -627,6 +765,45 @@ function writeU(buf, pos, size, value, endian) {
     for (var i = size - 1; i >= 0; i--) { buf[pos + i] = value & 0xFF; value = (value >>> 8); }
   } else {
     for (var i = 0; i < size; i++) { buf[pos + i] = value & 0xFF; value = (value >>> 8); }
+  }
+}
+
+/* The word-ordered 32-bit types (PS-271, PS-362, PS-363): `le16` is the low 16-bit unit
+ * first, each unit big-endian; `be16le` the high unit first, each unit little-endian.
+ * kind is u, s or f (an IEEE 754 binary32 of the assembled word). */
+function readWordOrdered(buf, pos, layout, kind) {
+  var b0 = buf[pos] || 0, b1 = buf[pos + 1] || 0, b2 = buf[pos + 2] || 0, b3 = buf[pos + 3] || 0;
+  var word = layout === 'le16'
+    ? ((b2 << 8) | b3) * 65536 + ((b0 << 8) | b1)
+    : ((b1 << 8) | b0) * 65536 + ((b3 << 8) | b2);
+  if (kind === 'f') {
+    var dv = new DataView(new ArrayBuffer(4));
+    dv.setUint32(0, word, false);
+    return dv.getFloat32(0, false);
+  }
+  if (kind === 's' && word >= 2147483648) return word - 4294967296;
+  return word;
+}
+
+function writeWordOrdered(buf, pos, value, layout, kind) {
+  var word;
+  if (kind === 'f') {
+    var dv = new DataView(new ArrayBuffer(4));
+    dv.setFloat32(0, value, false);
+    word = dv.getUint32(0, false);
+  } else {
+    word = Math.round(value);
+    if (word < 0) word += 4294967296;
+    word = word % 4294967296;
+  }
+  var high = Math.floor(word / 65536), low = word % 65536;
+  var first = layout === 'le16' ? low : high, second = layout === 'le16' ? high : low;
+  if (layout === 'le16') {
+    buf[pos] = (first >> 8) & 0xFF; buf[pos + 1] = first & 0xFF;
+    buf[pos + 2] = (second >> 8) & 0xFF; buf[pos + 3] = second & 0xFF;
+  } else {
+    buf[pos] = first & 0xFF; buf[pos + 1] = (first >> 8) & 0xFF;
+    buf[pos + 2] = second & 0xFF; buf[pos + 3] = (second >> 8) & 0xFF;
   }
 }
 
@@ -778,6 +955,11 @@ function writeS(buf, pos, size, value, endian) {
     def _gen_decode_field(self, field: Dict) -> List[str]:
         lines = []
         i = self._i()
+        # PS-422, PS-426: `encoding` only on uN and only a named code; no `match_value`.
+        from schema_interpreter import encoding_errors
+        problems = encoding_errors(field) if isinstance(field, dict) and 'type' in field else []
+        if problems:
+            raise ValueError(problems[0])
 
         # byte_group
         if 'byte_group' in field:
@@ -786,19 +968,26 @@ function writeS(buf, pos, size, value, endian) {
             bg_size = field.get('size', 1) if isinstance(bg, dict) else 1
             if isinstance(bg, dict):
                 bg_size = bg.get('size', 1)
+            # PS-397: overlapping members are a schema error; generating a codec that
+            # reported both from the same bits was the generator's version of accepting it.
+            from schema_interpreter import byte_group_endian, check_byte_group_overlap
+            check_byte_group_overlap(bg_fields)
+            byte_group_endian(field, None)        # PS-364: a member's endian is refused
+            group_endian = f'"{bg["endian"]}"' if isinstance(bg, dict) and bg.get('endian') else 'endian'
             lines.append(f'{i}  // byte_group')
             lines.append(f'{i}  var bgStart = pos;')
-            lines.append(f'{i}  var bgVal = readU(buf, pos, {bg_size}, endian);')
+            lines.append(f'{i}  var bgVal = readU(buf, pos, {bg_size}, {group_endian});')
             for bf in (bg_fields if isinstance(bg_fields, list) else []):
                 bname = bf.get('name', '_')
                 btype = bf.get('type', 'u8')
-                bit_m = re.match(r'u\d+\[(\d+):(\d+)\]', btype)
+                bit_m = re.match(r'([us])\d+\[(\d+):(\d+)\]', btype)
                 if bit_m:
-                    lo, hi = int(bit_m.group(1)), int(bit_m.group(2))
+                    lo, hi = int(bit_m.group(2)), int(bit_m.group(3))
                     width = hi - lo + 1
-                    mask = (1 << width) - 1
                     bjs = to_js_name(bname)
-                    lines.append(f'{i}  var {bjs} = (bgVal >> {lo}) & 0x{mask:X};')
+                    lines.append(f'{i}  var {bjs} = Math.floor(bgVal / {2 ** lo}) % {2 ** width};')
+                    if bit_m.group(1) == 's':
+                        lines.append(f'{i}  if ({bjs} >= {2 ** (width - 1)}) {bjs} -= {2 ** width};')
                     # `vars` records the post-modifier value - see _apply_modifiers_expr.
                     bval = self._apply_modifiers_expr(bjs, bf)
                     lines.append(f'{i}  var {bjs}_out = {bval};')
@@ -884,25 +1073,52 @@ function writeS(buf, pos, size, value, endian) {
             ceiling = field.get('max')
             ceiling = int(ceiling) if isinstance(ceiling, int) and ceiling > 0 else 1000
             lines.append(f'{i}  var {arr}_max = {ceiling};')
+            # PS-396: more elements than `max` is an error naming the repeat, the limit
+            # and the payload left unparsed - not a quiet truncation, after which the next
+            # field read from inside an element the ceiling had discarded.
+            rname = json.dumps(str(field.get('name', '?')))
+            limit_error = (f'throw new Error("repeat \'" + {rname} + "\' exceeds its max of " + '
+                           f'{arr}_max + " element(s) (" + MODE + "); " + (END - pos) + '
+                           f'" byte(s) at offset " + pos + " left unparsed (PS-396)");')
+            if count is not None:
+                mode = json.dumps('count ') + f' + {arr}_n'
+                lines.append(f'{i}  if ({arr}_n > {arr}_max) {{ '
+                             + limit_error.replace('MODE', mode).replace('END', 'buf.length')
+                             + ' }')
             condition = f'({condition}) && {arr}.length < {arr}_max'
 
             # A member set that consumes nothing would spin forever; bound the loop by
             # the payload as well and stop if the position does not advance.
             lines.append(f'{i}  while ({condition}) {{')
             lines.append(f'{i}    var {arr}_before = pos;')
+            # Each record decodes into a fresh `d` (see `object`): lifting members out of
+            # the enclosing one deleted any enclosing field sharing a member's name.
+            lines.append(f'{i}    var {arr}_outer = d; d = {{}};')
+            ragged = None
+            if until == 'end' and count is None and byte_length is None:
+                # PS-343 to PS-344a: a tail too short for a whole element is an error
+                # naming the repeat as a ragged tail. The readers here return 0 past the
+                # end of the buffer, so without this a short tail decoded as a final
+                # element of zeros and reported success.
+                from schema_interpreter import fixed_element_size
+                size = fixed_element_size(field['fields'])
+                ragged = ('throw new Error("repeat \'" + ' + rname + ' + "\' ends in a ragged tail: " + '
+                          f'(buf.length - {arr}_before) + " byte(s) at offset " + {arr}_before'
+                          + (f' + ", fewer than the {size} an element takes (PS-343)");' if size
+                             else ' + " (PS-343)");'))
+                if size:
+                    lines.append(f'{i}    if (buf.length - pos < {size}) {{ {ragged} }}')
             self.indent += 1
             for member in members:
                 lines.extend(self._gen_decode_field(member))
             self.indent -= 1
-            lines.append(f'{i}    var {arr}_rec = {{}};')
+            lines.append(f'{i}    var {arr}_rec = d; d = {arr}_outer;')
             for member in members:
-                mjs = to_js_name(member['name'])
                 if member['name'].startswith('_'):
-                    # Internal members stay out of the record but must not leak either.
-                    lines.append(f'{i}    delete d.{mjs};')
-                    continue
-                lines.append(f'{i}    if (d.{mjs} !== undefined) '
-                             f'{{ {arr}_rec.{mjs} = d.{mjs}; delete d.{mjs}; }}')
+                    # Internal members stay out of the record.
+                    lines.append(f'{i}    delete {arr}_rec.{to_js_name(member["name"])};')
+            if ragged:
+                lines.append(f'{i}    if (pos > buf.length) {{ {ragged} }}')
             lines.append(f'{i}    {arr}.push({arr}_rec);')
             lines.append(f'{i}    if (pos <= {arr}_before) break;')
             lines.append(f'{i}    if (pos >= buf.length && !({condition})) break;')
@@ -914,13 +1130,17 @@ function writeS(buf, pos, size, value, endian) {
             # the repeat then came from the wrong offset with nothing reported: a 2-byte
             # member over a 5-byte span produced a third record holding the following
             # field's byte, and the following field read past the payload (CR-2026-022).
+            if until == 'end' and count is None and byte_length is None:
+                lines.append(f'{i}  if ({arr}.length >= {arr}_max && pos < buf.length) {{ '
+                             + limit_error.replace('MODE', '"until: end"').replace('END', 'buf.length')
+                             + ' }')
             if byte_length is not None:
                 end = f'{arr}_start + {arr}_len'
                 lines.append(f'{i}  if (pos !== {end}) {{')
                 lines.append(f'{i}    if ({arr}.length >= {arr}_max && pos < {end}) {{')
-                lines.append(f'{i}      throw new Error("repeat stopped at its max of "'
-                             f' + {arr}_max + " iteration(s) with " + ({end} - pos)'
-                             f' + " of " + {arr}_len + " byte(s) of the span unread");')
+                lines.append(f'{i}      '
+                             + limit_error.replace('MODE', '"byte_length " + ' + f'{arr}_len')
+                             .replace('END', f'({end})'))
                 lines.append(f'{i}    }}')
                 # Parenthesised: `"..." + a + b` concatenates left to right, so the sum
                 # rendered as "05" rather than 5.
@@ -955,26 +1175,28 @@ function writeS(buf, pos, size, value, endian) {
         # without duplicating their generators.
         if field.get('type') == 'object' and field.get('fields'):
             obj_name = to_js_name(field.get('name', '_object'))
-            member_names = []
             lines.append(f'{i}  // object {field.get("name")}')
+            # The members decode into a fresh `d`, which then becomes the object. They
+            # used to decode into the enclosing `d` and be lifted out and deleted, which
+            # deleted an enclosing field of the same name: a top-level `value` vanished
+            # beside an object with a `value` member.
+            outer = f'{obj_name}_outer{id(field) % 100000}'
+            lines.append(f'{i}  var {outer} = d; d = {{}};')
             for member in field['fields']:
                 if not isinstance(member, dict) or not member.get('name'):
                     continue
                 lines.extend(self._gen_decode_field(member))
-                member_names.append(to_js_name(member['name']))
-            if member_names:
-                lines.append(f'{i}  d.{obj_name} = {{}};')
-                for member_name in member_names:
-                    lines.append(
-                        f'{i}  if (d.{member_name} !== undefined) '
-                        f'{{ d.{obj_name}.{member_name} = d.{member_name}; '
-                        f'delete d.{member_name}; }}'
-                    )
+            lines.append(f'{i}  {outer}.{obj_name} = d; d = {outer};')
             return lines
 
-        # type: number (computed, decode-only)
-        if field.get('type') == 'number':
+        # type: number or integer (computed, decode-only). `integer` reports its value
+        # as an integer and fails on a fractional one (PS-283, PS-388).
+        if field.get('type') in ('number', 'integer'):
             name = to_js_name(field['name'])
+            as_int = field.get('type') == 'integer'
+
+            def integral(expr):
+                return f'asInteger({expr}, {json.dumps(field["name"])})' if as_int else expr
             
             # Deprecated: formula field
             if 'formula' in field:
@@ -1001,6 +1223,7 @@ function writeS(buf, pos, size, value, endian) {
                 # Apply guard if present
                 if 'guard' in field:
                     value_expr = guard_to_js(field['guard'], value_expr)
+                value_expr = integral(value_expr)
                 
                 lines.append(f'{i}  d.{name} = {value_expr};')
                 lines.append(f'{i}  vars.{name} = {value_expr};')
@@ -1017,6 +1240,7 @@ function writeS(buf, pos, size, value, endian) {
                 # Apply guard if present
                 if 'guard' in field:
                     value_expr = guard_to_js(field['guard'], value_expr)
+                value_expr = integral(value_expr)
                 
                 lines.append(f'{i}  d.{name} = {value_expr};')
                 lines.append(f'{i}  vars.{name} = {value_expr};')
@@ -1040,12 +1264,18 @@ function writeS(buf, pos, size, value, endian) {
 
         # regular field
         name = field.get('name', '_unknown')
-        ftype = field.get('type', 'u8')
+        ftype = field.get('type')
         js_name = to_js_name(name)
+        if 'object' in field and not ftype:
+            raise ValueError("the `object:` key is withdrawn; write `type: object` with "
+                             f"`name: {field['object']}` and `fields` (PS-466)")
 
         # A string literal (spec "Literal Types"): a constant, read from no bytes.
         # `string` fell through to the integer path, which emitted a TODO and nothing,
         # so the key was silently missing from every generated codec.
+        if ftype == 'string' and 'value' not in field:
+            raise ValueError(f"Field '{name}': type string declares no value; a string read "
+                             f"from the payload is type ascii (PS-361)")
         if ftype == 'string' and 'value' in field and not field.get('length'):
             literal = json.dumps(field['value'])
             lines.append(f'{i}  vars.{js_name} = {literal};')
@@ -1077,8 +1307,14 @@ function writeS(buf, pos, size, value, endian) {
             # whatever followed. The interpreter has always defaulted to no advance.
             consume = field.get('consume', 0)
 
+            # The base is assembled in the field's effective byte order (PS-059). The
+            # extraction is arithmetic rather than `>>`, which converts to a signed 32-bit
+            # integer and corrupts a u32 base with its top bit set. An `sN` base is
+            # sign-extended from the range's width (PS-352, PS-353).
             lines.append(f'{i}  var {js_name}_raw = readU(buf, pos, {base_size}, {endian_arg});')
-            lines.append(f'{i}  var {js_name} = ({js_name}_raw >> {bit_start}) & 0x{mask:X};')
+            lines.append(f'{i}  var {js_name} = Math.floor({js_name}_raw / {2 ** bit_start}) % {2 ** bit_width};')
+            if base_type.startswith('s'):
+                lines.append(f'{i}  if ({js_name} >= {2 ** (bit_width - 1)}) {js_name} -= {2 ** bit_width};')
             if consume:
                 lines.append(f'{i}  pos += {int(consume)};')
 
@@ -1105,7 +1341,9 @@ function writeS(buf, pos, size, value, endian) {
             lines.append(f'{i}  var {js_name}_raw = {read_fn}(buf, pos, {sz}, endian);')
             lines.append(f'{i}  pos += {sz};')
             vals = field.get('values', {})
-            val_json = json.dumps({str(k): v for k, v in vals.items()})
+            # The description form reports its `name` (PS-394); the mapping was emitted
+            # whole and reported as the value.
+            val_json = json.dumps({str(k): enum_label(v) for k, v in vals.items()})
             default = field.get('default', None)
             default_js = json.dumps(default) if default else f'{js_name}_raw'
             lines.append(f'{i}  var {js_name}_map = {val_json};')
@@ -1124,7 +1362,7 @@ function writeS(buf, pos, size, value, endian) {
         # schema using the specified spelling had no generated path, and conversions
         # fell back to a bit range with a {0: false, 1: true} lookup - outside what
         # PS-106 lists (numbers or strings), and Go dropped it silently.
-        if ftype in ('bool', 'Bool'):
+        if ftype == 'bool':
             bit = int(field.get('bit', 0))
             consume = field.get('consume', 0)
             lines.append(f'{i}  if (pos >= buf.length) throw new Error("Buffer too short for bool");')
@@ -1147,6 +1385,23 @@ function writeS(buf, pos, size, value, endian) {
             lines.append(f'{i}  pos += {length};')
             return lines
 
+        # base64 (clause 2 string types): this had no case and fell through to the
+        # integer path, which then had no size for it.
+        if ftype == 'base64':
+            declared = field.get('length', 1)
+            bound = 'buf.length - pos' if is_remaining_length(declared) else str(declared)
+            lines.append(f'{i}  var {js_name}_n = {bound};')
+            lines.append(f'{i}  if (pos + {js_name}_n > buf.length) throw new Error("Buffer too short for base64");')
+            lines.append(f'{i}  var {js_name} = toBase64(buf, pos, {js_name}_n);')
+            lines.append(f'{i}  pos += {js_name}_n;')
+            if not name.startswith('_'):
+                guards, target = name_from_to_js(field, js_name)
+                for guard in guards:
+                    lines.append(f'{i}  {guard}')
+                lines.append(f'{i}  {target} = {js_name};')
+            lines.append(f'{i}  vars.{js_name} = {js_name};')
+            return lines
+
         # string types
         if ftype in ('ascii', 'hex', 'bytes'):
             declared = field.get('length', 1)
@@ -1160,13 +1415,31 @@ function writeS(buf, pos, size, value, endian) {
             if ftype == 'ascii':
                 lines.append(f'{i}  for (var _si = 0; _si < {js_name}_n && pos < buf.length; _si++)'
                              f' {{ {js_name} += String.fromCharCode(buf[pos++]); }}')
+            elif ftype == 'bytes' and field.get('format', 'hex') in ('base64', 'array'):
+                # PS-079: the declared format. Ignored before, so every bytes field was
+                # rendered as lowercase hex whatever the schema asked for.
+                if 'separator' in field:
+                    raise ValueError(f"Field '{name}': `separator` applies only to the hex "
+                                     f"formats (PS-391)")
+                if field['format'] == 'base64':
+                    lines.append(f'{i}  {js_name} = toBase64(buf, pos, Math.min({js_name}_n, buf.length - pos));')
+                    lines.append(f'{i}  pos += Math.min({js_name}_n, buf.length - pos);')
+                else:
+                    lines.append(f'{i}  {js_name} = [];')
+                    lines.append(f'{i}  for (var _si = 0; _si < {js_name}_n && pos < buf.length; _si++)'
+                                 f' {{ {js_name}.push(buf[pos++]); }}')
             else:
-                # PS-281: `bytes` and `hex` both report a lowercase hexadecimal string.
-                # `bytes` used to build an array of octet values, so it disagreed with
-                # every interpreter for any non-empty field - invisibly, because the
-                # JSON cross-check skipped arrays.
+                # PS-281: `bytes` and `hex` both report a lowercase hexadecimal string,
+                # unless a bytes field declares `hex:upper`, and a `separator` goes
+                # between the bytes (PS-079, PS-391).
+                fmt = field.get('format', 'hex') if ftype == 'bytes' else 'hex'
+                if fmt not in ('hex', 'hex:upper'):
+                    raise ValueError(f"Field '{name}': bytes format {fmt!r} is not one of "
+                                     f"hex, hex:upper, base64, array (PS-079)")
+                sep = json.dumps(str(field.get('separator', ''))) if ftype == 'bytes' else '""'
+                upper = '.toUpperCase()' if fmt == 'hex:upper' else ''
                 lines.append(f'{i}  for (var _si = 0; _si < {js_name}_n && pos < buf.length; _si++)'
-                             f' {{ {js_name} += ("0" + buf[pos++].toString(16)).slice(-2); }}')
+                             f' {{ {js_name} += (_si ? {sep} : "") + ("0" + buf[pos++].toString(16)).slice(-2){upper}; }}')
             if not name.startswith('_'):
                 guards, target = name_from_to_js(field, js_name)
                 for guard in guards:
@@ -1180,7 +1453,9 @@ function writeS(buf, pos, size, value, endian) {
             sz = type_size(ftype) or 4
             eo = field_endian_override(ftype, field)
             endian_arg = f'"{eo}"' if eo else 'endian'
-            if sz == 4:
+            if sz == 2:
+                lines.append(f'{i}  var {js_name} = readF16(buf, pos, {endian_arg});')
+            elif sz == 4:
                 lines.append(f'{i}  var {js_name} = readF32(buf, pos, {endian_arg});')
             else:
                 lines.append(f'{i}  var {js_name} = readF64(buf, pos, {endian_arg});')
@@ -1195,25 +1470,67 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append(f'{i}  {target} = {js_name}_out;')
             return lines
 
+        # The MCCI minifloats (CR-2026-063): a word in the field's effective byte order.
+        if ftype in ('uflt16', 'sflt16', 'sflt24'):
+            size = 3 if ftype == 'sflt24' else 2
+            eo = field_endian_override(ftype, field)
+            endian_arg = f'"{eo}"' if eo else 'endian'
+            lines.append(f'{i}  var {js_name} = decodeMinifloat("{ftype}", readU(buf, pos, {size}, {endian_arg}));')
+            lines.append(f'{i}  pos += {size};')
+            val_expr = self._apply_modifiers_expr(js_name, field)
+            lines.append(f'{i}  var {js_name}_out = {js_name} === undefined ? undefined : {val_expr};')
+            lines.append(f'{i}  vars.{js_name} = {js_name}_out;')
+            if not name.startswith('_'):
+                guards, target = name_from_to_js(field, js_name)
+                for guard in guards:
+                    lines.append(f'{i}  {guard}')
+                lines.append(f'{i}  {target} = {js_name}_out;')
+            return lines
+
+        # Nibble-decimal (PS-329, PS-330): upper nibble whole, lower nibble tenths, the
+        # upper nibble a 4-bit two's-complement value for sdec.
+        if ftype in ('udec', 'sdec'):
+            lines.append(f'{i}  if (pos >= buf.length) throw new Error("Buffer too short for {ftype}");')
+            if ftype == 'sdec':
+                lines.append(f'{i}  var {js_name}_w = buf[pos] >> 4; if ({js_name}_w >= 8) {js_name}_w -= 16;')
+            else:
+                lines.append(f'{i}  var {js_name}_w = buf[pos] >> 4;')
+            lines.append(f'{i}  var {js_name} = {js_name}_w + (buf[pos] & 0x0F) * 0.1;')
+            lines.append(f'{i}  pos += 1;')
+            val_expr = self._apply_modifiers_expr(js_name, field)
+            lines.append(f'{i}  var {js_name}_out = {val_expr};')
+            lines.append(f'{i}  vars.{js_name} = {js_name}_out;')
+            if not name.startswith('_'):
+                guards, target = name_from_to_js(field, js_name)
+                for guard in guards:
+                    lines.append(f'{i}  {guard}')
+                lines.append(f'{i}  {target} = {js_name}_out;')
+            return lines
+
         # integer
         sz = type_size(ftype)
         if sz is None:
-            lines.append(f'{i}  // TODO: unsupported type {ftype}')
-            return lines
+            # PS-327/PS-328. This emitted a TODO comment and no read, so the field
+            # vanished and every later field came from the wrong offset.
+            if not ftype:
+                raise ValueError(f"Field '{name}' declares no type")
+            raise ValueError(f"Field '{name}': unknown type: {ftype}")
 
         signed = is_signed(ftype)
         read_fn = 'readS' if signed else 'readU'
         eo = field_endian_override(ftype, field)
         endian_arg = f'"{eo}"' if eo else 'endian'
 
-        if ftype in ('u32le16', 's32le16'):
+        if is_word_ordered(ftype):
             # Its own reader: the layout is not a size-and-endianness pair (PS-271).
-            reader = 'readS32LE16' if ftype == 's32le16' else 'readU32LE16'
-            lines.append(f'{i}  var {js_name} = {reader}(buf, pos);')
+            layout, kind = WORD_ORDERED[ftype]
+            lines.append(f'{i}  var {js_name} = readWordOrdered(buf, pos, "{layout}", "{kind}");')
             lines.append(f'{i}  pos += 4;')
         else:
             lines.append(f'{i}  var {js_name} = {read_fn}(buf, pos, {sz}, {endian_arg});')
             lines.append(f'{i}  pos += {sz};')
+            if field.get('encoding'):
+                lines.append(f'{i}  {js_name} = decodeEncoding({js_name}, "{field["encoding"]}", {sz});')
 
         val_expr = self._apply_modifiers_expr(js_name, field)
         lines.append(f'{i}  var {js_name}_out = {val_expr};')
@@ -1305,10 +1622,16 @@ function writeS(buf, pos, size, value, endian) {
             fmt = part[2] if len(part) > 2 else 'decimal'
             mask = (1 << width) - 1
             extract = f'(({name}_raw >> {offset}) & 0x{mask:X})'
+            # PS-430: hex lower case, hex:upper upper case, anything else refused.
             if fmt == 'hex':
                 seg_exprs.append(f'{extract}.toString(16)')
-            else:
+            elif fmt == 'hex:upper':
+                seg_exprs.append(f'{extract}.toString(16).toUpperCase()')
+            elif fmt == 'decimal':
                 seg_exprs.append(f'{extract}.toString()')
+            else:
+                raise ValueError(f"bitfield_string part format {fmt!r} is not one of "
+                                 f"decimal, hex, hex:upper (PS-430)")
         joined = f' + "{delim}" + '.join(seg_exprs)
         if prefix:
             joined = f'"{prefix}" + {joined}'
@@ -1469,6 +1792,10 @@ function writeS(buf, pos, size, value, endian) {
         lines = []
         cases = match.get('cases', {}) or {}
         width = match.get('length')
+        # PS-399: exactly one discriminator source; a schema with both or neither is
+        # invalid. With neither, this read a one-byte discriminator nobody declared.
+        if ('field' in match) == ('length' in match):
+            raise ValueError("a match must declare exactly one of 'field' and 'length' (PS-399)")
 
         if match.get('field'):
             reference = match['field']
@@ -1533,11 +1860,10 @@ function writeS(buf, pos, size, value, endian) {
     def _match_condition(self, discriminator: str, case_key) -> Optional[str]:
         """The test for one case key, or None where no value could ever satisfy it.
 
-        Mirrors the interpreters' `_match_case_pattern`: an integer compares equal, and
-        `"2..5"` is an inclusive range. A key that is neither - `"[1, 2]"`, say, which YAML
-        cannot express as a list and no interpreter matches either - yields no branch at
-        all rather than an expression that is never true, so the generated codec does not
-        carry a test that cannot fire.
+        Mirrors the interpreters' `_match_case_pattern`: an integer compares equal,
+        `"2..5"` is an inclusive range, and `"[1, 2]"` matches any element (PS-398). A key
+        that is none of these yields no branch at all rather than an expression that is
+        never true, so the generated codec does not carry a test that cannot fire.
         """
         if isinstance(case_key, bool):
             return None
@@ -1545,6 +1871,12 @@ function writeS(buf, pos, size, value, endian) {
             return f'{discriminator} === {case_key}'
         if isinstance(case_key, str):
             text = case_key.strip()
+            if text.startswith('['):
+                from schema_interpreter import parse_list_case_key
+                values = parse_list_case_key(text)
+                if not values:
+                    return None
+                return '(' + ' || '.join(f'{discriminator} === {v}' for v in values) + ')'
             if '..' in text:
                 low, _, high = text.partition('..')
                 try:
@@ -1595,7 +1927,7 @@ function writeS(buf, pos, size, value, endian) {
         i = self._i()
 
         # skip computed fields (formula, ref, or compute)
-        if field.get('type') == 'number':
+        if field.get('type') in ('number', 'integer'):
             is_computed = any(k in field for k in ('formula', 'ref', 'compute'))
             if is_computed:
                 lines.append(f'{i}  // skip computed field {field.get("name", "")}')
@@ -1679,7 +2011,7 @@ function writeS(buf, pos, size, value, endian) {
             base = field.get('base', 'u8')
             sz = type_size(base) or 1
             vals = field.get('values', {})
-            rev = {str(v): k for k, v in vals.items()}
+            rev = {str(enum_label(v)): k for k, v in vals.items()}
             rev_json = json.dumps(rev)
             lines.append(f'{i}  var {js_name}_rev = {rev_json};')
             lines.append(f'{i}  var {js_name}_val = typeof d.{js_name} === "string" ? parseInt({js_name}_rev[d.{js_name}] || 0) : (d.{js_name} || 0);')
@@ -1710,7 +2042,8 @@ function writeS(buf, pos, size, value, endian) {
             else:
                 source = self._reverse_modifiers_expr(
                     f'(d.{js_name} !== undefined ? d.{js_name} : 0)', field)
-            lines.append(f'{i}  writeU32LE16(buf, pos, {source});')
+            layout, kind = WORD_ORDERED[ftype]
+            lines.append(f'{i}  writeWordOrdered(buf, pos, {source}, "{layout}", "{kind}");')
             lines.append(f'{i}  pos += 4;')
             return lines
 
@@ -1788,7 +2121,7 @@ function writeS(buf, pos, size, value, endian) {
             width = part[1]
             fmt = part[2] if len(part) > 2 else 'decimal'
             mask = (1 << width) - 1
-            radix = 16 if fmt == 'hex' else 10
+            radix = 16 if fmt in ('hex', 'hex:upper') else 10
             lines.append(f'{i}  if ({name}_segs[{idx}]) {name}_val |= (parseInt({name}_segs[{idx}], {radix}) & 0x{mask:X}) << {offset};')
         lines.append(f'{i}  writeU(buf, pos, {length}, {name}_val, endian);')
         lines.append(f'{i}  pos += {length};')
@@ -1940,19 +2273,27 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append(f'function {fn_name}(input) {{')
                 lines.append('  try {')
                 lines.append(f'    var endian = "{self.endian}";')
+                # PS-459, PS-460: with no FPort there is nothing to select by, and saying
+                # so is a different fault from an FPort the schema does not describe.
+                lines.append('    if (input.fPort === undefined || input.fPort === null) {')
+                lines.append('      return { data: {}, warnings: [], errors: ["no FPort was supplied, '
+                             'and this schema selects its fields by port (PS-459)"] };')
+                lines.append('    }')
                 for port_key in self.schema['ports']:
                     declared = self.schema['ports'][port_key].get(
                         'direction', DEFAULT_PORT_DIRECTION)
                     lines.append(f'    if (input.fPort === {port_key}) {{')
                     if declared in (direction, 'both'):
                         lines.append(f'      var r = decodePort{port_key}(input.bytes, endian);')
-                        lines.append(f'      return {{ data: r.data, warnings: r.warnings || [], errors: [] }};')
+                        lines.append(f'      return {{ data: omitAbsent(r.data), warnings: r.warnings || [], errors: [] }};')
                     else:
                         message = (f'fPort {port_key} is declared direction:{declared}; '
                                    f'message direction is {direction}')
                         lines.append(f'      return {{ data: {{}}, warnings: [], errors: ["{message}"] }};')
                     lines.append(f'    }}')
-                lines.append(f'    return {{ data: {{}}, warnings: ["Unknown fPort: " + input.fPort], errors: [] }};')
+                # PS-025: an FPort the schema does not describe is an error. It was a
+                # warning beside an empty result, which reads as a successful decode.
+                lines.append(f'    return {{ data: {{}}, warnings: [], errors: ["No port definition for fPort " + input.fPort] }};')
                 lines.append('  } catch (e) {')
                 lines.append('    return { data: {}, warnings: [], errors: [e.message] };')
                 lines.append('  }')
@@ -1980,7 +2321,7 @@ function writeS(buf, pos, size, value, endian) {
             lines.append('function decodeUplink(input) {')
             lines.append('  try {')
             lines.append(f'    var r = decodePayload(input.bytes, "{self.endian}");')
-            lines.append('    return { data: r.data, warnings: r.warnings || [], errors: [] };')
+            lines.append('    return { data: omitAbsent(r.data), warnings: r.warnings || [], errors: [] };')
             lines.append('  } catch (e) {')
             lines.append('    return { data: {}, warnings: [], errors: [e.message] };')
             lines.append('  }')
@@ -1992,7 +2333,7 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append('function decodeDownlink(input) {')
                 lines.append('  try {')
                 lines.append(f'    var r = decodeCommand(input.bytes, "{self.endian}");')
-                lines.append('    return { data: r.data, warnings: r.warnings || [], errors: [] };')
+                lines.append('    return { data: omitAbsent(r.data), warnings: r.warnings || [], errors: [] };')
                 lines.append('  } catch (e) {')
                 lines.append('    return { data: {}, warnings: [], errors: [e.message] };')
                 lines.append('  }')
@@ -2018,7 +2359,7 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append('  try {')
                 lines.append(f'    var endian = "{self.endian}";')
                 lines.append('    var r = decodePayload(input.bytes, endian);')
-                lines.append('    return { data: r.data, warnings: r.warnings || [], errors: [] };')
+                lines.append('    return { data: omitAbsent(r.data), warnings: r.warnings || [], errors: [] };')
                 lines.append('  } catch (e) {')
                 lines.append('    return { data: {}, warnings: [], errors: [e.message] };')
                 lines.append('  }')
@@ -2105,7 +2446,7 @@ function writeS(buf, pos, size, value, endian) {
             '',
         ])
         tail = code[entry:]
-        tail = tail.replace('data: r.data,', 'data: renameKeys(r.data, OUTPUT_KEYS),')
+        tail = tail.replace('data: omitAbsent(r.data),', 'data: renameKeys(r.data, OUTPUT_KEYS),')
         tail = tail.replace('(input.data, ', '(renameKeys(input.data, INPUT_KEYS), ')
         return code[:entry] + helper + tail
 

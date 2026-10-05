@@ -267,9 +267,10 @@ class TestGeneratedCodec:
 
     def test_an_undefined_port_is_still_an_unknown_fport(self):
         # The two faults stay distinguishable: this port is genuinely not in the schema.
+        # It is an error (PS-025) since 0.5.2 wave 2; it was a warning beside an empty
+        # result, which read as a successful decode.
         result = decode_js(PORTED, list(UPLINK_PAYLOAD), 9, "decodeUplink")
-        assert result["errors"] == []
-        assert result["warnings"] == ["Unknown fPort: 9"]
+        assert result["errors"] == ["No port definition for fPort 9"]
 
     def test_each_entry_point_still_decodes_its_own_direction(self):
         up = decode_js(PORTED, list(UPLINK_PAYLOAD), 1, "decodeUplink")

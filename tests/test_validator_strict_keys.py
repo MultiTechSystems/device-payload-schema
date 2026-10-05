@@ -215,7 +215,12 @@ def test_conditional_on_a_decoded_field_is_an_error():
     assert "always decodes" in errors[0]
 
 
-def test_unread_key_is_accepted_only_in_an_unreferenced_definition():
+def test_unread_key_is_accepted_only_in_an_unreferenced_definition(monkeypatch):
+    # The allowlist is empty since composed library schemas carry only the definitions
+    # they reach; the mechanism is held with two entries supplied here.
+    import schema_vocabulary
+    monkeypatch.setitem(schema_vocabulary.UNREAD_KEYS, ("definition", "cid"), "probe")
+    monkeypatch.setitem(schema_vocabulary.UNREAD_KEYS, ("field", "conditional"), "probe")
     inert = {
         "name": "probe",
         "fields": [{"name": "x", "type": "u8"}],
@@ -269,7 +274,11 @@ def test_lookup_and_case_keys_are_data_not_vocabulary():
     assert _errors(schema)[0]
 
 
-def test_divergent_key_is_a_warning_not_an_error():
+def test_divergent_key_is_a_warning_not_an_error(monkeypatch):
+    # The list is empty since every implementation reads bytes `format` and `separator`
+    # (CR-2026-058); the mechanism is held with an entry supplied here.
+    monkeypatch.setitem(schema_vocabulary.DIVERGENT_KEYS, ("field", "format"),
+                        "read by some implementations, ignored by Python")
     valid, errors, warnings = _errors(
         {
             "name": "p",

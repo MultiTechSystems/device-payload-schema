@@ -10,8 +10,18 @@ public enum FieldType
     // Two 16-bit big-endian units, least significant unit first (PS-271); not
     // expressible as U32 under either endianness.
     U32LE16, S32LE16,
+    // The word-ordered float (PS-362) and the fourth ordering (PS-363).
+    F32LE16, U32BE16LE, S32BE16LE, F32BE16LE,
+    // The MCCI minifloats (PS-417 to PS-419).
+    UFlt16, SFlt16, SFlt24,
     S8, S16, S24, S32, S64,
     F16, F32, F64,
+    // Nibble-decimal (PS-329)
+    UDec, SDec,
+    Base64,
+    // A computed field reporting an integer (PS-283). Parsed to Number with
+    // SchemaField.IntegerResult set, so it never reaches the decoder as itself.
+    Integer,
     Bool,
     Bits,
     Ascii,
@@ -46,6 +56,12 @@ public class TransformStage
     public bool Log10 { get; set; }
     public bool Log { get; set; }
     public double? Pow { get; set; }
+    /// <summary>`even` (the default) or `away` from zero, for {op: round} (PS-390).</summary>
+    public string? Ties { get; set; }
+    /// <summary>Bound stages (PS-115). C# had none and passed the value through.</summary>
+    public double? Floor { get; set; }
+    public double? Ceiling { get; set; }
+    public double[]? Clamp { get; set; }
 }
 
 public class MatchCase
@@ -76,7 +92,12 @@ public class GuardCondition
 public class GuardDef
 {
     public List<GuardCondition> When { get; set; } = new();
-    public double ElseValue { get; set; }
+    /// <summary>
+    /// The value when a condition fails. Without `else` the field is omitted (PS-400):
+    /// NaN, which ApplyPostRead turns into an omission. It defaulted to 0, so a guard
+    /// with no else reported a plausible 0 where it meant there is no reading.
+    /// </summary>
+    public double ElseValue { get; set; } = double.NaN;
 }
 
 public class FlaggedGroup
@@ -95,6 +116,14 @@ public class SchemaField
 {
     public string Name { get; set; } = "";
     public FieldType Type { get; set; }
+    /// <summary>An sN[start:end] range: sign-extended from the range's width (PS-352, PS-353).</summary>
+    public bool SignedBits { get; set; }
+    /// <summary>A byte_group's own byte order (PS-364), null for the context's.</summary>
+    public string? GroupEndian { get; set; }
+    /// <summary>A named code on an unsigned integer (PS-422).</summary>
+    public string? Encoding { get; set; }
+    /// <summary>A computed field written `type: integer` (PS-283); its Type is Number.</summary>
+    public bool IntegerResult { get; set; }
     public string RawType { get; set; } = "";
     public int Length { get; set; }
     public int ByteOffset { get; set; }

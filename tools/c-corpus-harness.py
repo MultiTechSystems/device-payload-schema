@@ -43,7 +43,8 @@ sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 import yaml  # noqa: E402
 
-from validate_schema import is_encode_vector, values_match  # noqa: E402
+from validate_schema import expected_fields_match, is_encode_vector  # noqa: E402
+from schema_interpreter import expand_refs  # noqa: E402
 
 CORPUS = REPO_ROOT / "schemas" / "devices"
 
@@ -73,7 +74,6 @@ UNREACHABLE_KEYS = {
     "match": "no inline match support in this harness",
     "byte_group": "no byte_group support in this harness",
     "object": "no nested object support in this harness",
-    "$ref": "no $ref splicing in this harness",
     "name_from": "no name template in C (fixed-size name buffers)",
     # These say "the interpreter has none" rather than "not built by the struct API",
     # which was the wording here and read as a limit on this harness. It is not: the
@@ -101,6 +101,11 @@ UNREACHABLE_KEYS = {
     # known representational gap as a C bug - which is what this harness did on its first
     # run, alongside three bugs of its own.
     "default": "no enum/lookup default in the struct API (a known C gap)",
+    # A bytes rendering other than lowercase hex. include/schema_interpreter.h has no
+    # `format` or `separator` (zero occurrences), so it is an interpreter gap, not this
+    # harness's: PS-079 and PS-391 are met by Python, Go, Java, C# and TS013.
+    "format": "the interpreter has no bytes format (PS-079)",
+    "separator": "the interpreter has no bytes separator (PS-391)",
 }
 
 BIT_RANGE = re.compile(r"^u(\d+)\[(\d+):(\d+)\]$")
@@ -164,6 +169,10 @@ def field_source(field, schema_endian):
             return None, "enum values are not a mapping"
         lines.append(f"    f = field_enum({c_string(name)}, 1);")
         for key, label in values.items():
+            # The description form reports its name (PS-394); the description is
+            # metadata the struct has no use for.
+            if isinstance(label, dict) and "name" in label:
+                label = label["name"]
             try:
                 number = int(str(key), 0)
             except ValueError:
@@ -559,6 +568,11 @@ def run():
             continue
         if not isinstance(schema, dict) or not schema.get("test_vectors"):
             continue
+        # References are spliced here, as every other implementation splices them before
+        # parsing (CR-2026-045); the struct API has no `$ref`, and needs none.
+        schema, ref_errors = expand_refs(schema)
+        if ref_errors:
+            continue
         vectors = [v for v in schema["test_vectors"]
                    if v.get("payload") and not is_encode_vector(v)]
         if not vectors:
@@ -604,15 +618,9 @@ def run():
             if rc != 0:
                 failures.append((key, f"decode returned {rc}"))
                 continue
-            problem = None
-            for name, want in (vector.get("expected") or {}).items():
-                if name not in fields:
-                    problem = f"{name} missing"
-                    break
-                ok, detail = values_match(want, fields[name])
-                if not ok:
-                    problem = f"{name}: {detail}"
-                    break
+            # PS-043/PS-044, with a null expectation asserting absence (CR-2026-075).
+            ok, detail = expected_fields_match(vector.get("expected") or {}, fields)
+            problem = None if ok else detail
             if problem:
                 failures.append((key, problem))
             else:

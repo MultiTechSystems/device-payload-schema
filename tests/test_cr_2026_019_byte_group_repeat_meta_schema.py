@@ -131,7 +131,8 @@ class TestByteGroupHasTwoSpellings:
         obj = next(b for b in BYTE_GROUP["oneOf"] if b.get("type") == "object")
         assert obj["required"] == ["fields"]
         assert obj["additionalProperties"] is False
-        assert set(obj["properties"]) == {"size", "fields"}
+        # `endian` joined in 0.5.2: the group declares its byte order (PS-364, CR-2026-052).
+        assert set(obj["properties"]) == {"size", "endian", "fields"}
 
     def test_the_object_form_defaults_size_to_one(self):
         obj = next(b for b in BYTE_GROUP["oneOf"] if b.get("type") == "object")
@@ -269,7 +270,7 @@ class TestTheCorpusConforms:
         for field, path in constructs("byte_group"):
             bg = field["byte_group"]
             if isinstance(bg, dict):
-                if set(bg) - {"size", "fields"}:
+                if set(bg) - {"size", "endian", "fields"}:
                     problems.append(f"{path.name}: {sorted(set(bg) - {'size', 'fields'})}")
                 if not bg.get("fields"):
                     problems.append(f"{path.name}: no fields")

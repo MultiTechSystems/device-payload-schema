@@ -106,9 +106,10 @@ public static class Helpers
 
     public static byte[] EncodeSint(long val, int length, string endian)
     {
-        if (val < 0)
-            val = (1L << (length * 8)) + val;
-        return EncodeUint((ulong)val, length, endian);
+        // Two's complement is the low `length` bytes of the value's own bit pattern.
+        // This added 1L << (length * 8), and C# takes a long shift count modulo 64, so
+        // for an 8-byte field it added 1: an s64 of -9 was written as -8.
+        return EncodeUint(unchecked((ulong)val), length, endian);
     }
 
     public static byte[] EncodeFloat32(float val, string endian)
@@ -152,7 +153,10 @@ public static class Helpers
         FieldType.U16 or FieldType.S16 or FieldType.F16 => 2,
         FieldType.U24 or FieldType.S24 => 3,
         FieldType.U32 or FieldType.S32 or FieldType.F32
-            or FieldType.U32LE16 or FieldType.S32LE16 => 4,
+            or FieldType.U32LE16 or FieldType.S32LE16 or FieldType.F32LE16
+            or FieldType.U32BE16LE or FieldType.S32BE16LE or FieldType.F32BE16LE => 4,
+        FieldType.UFlt16 or FieldType.SFlt16 => 2,
+        FieldType.SFlt24 => 3,
         FieldType.U64 or FieldType.S64 or FieldType.F64 => 8,
         _ => 1
     };
@@ -199,43 +203,79 @@ public static class Helpers
         };
     }
 
+    /// <summary>
+    /// The field type a schema's `type:` string names, or Unknown.
+    ///
+    /// The vocabulary is closed (CR-2026-037): the alias table is exhaustive (PS-326) and
+    /// names are case-sensitive (PS-333). This lowercased its input and accepted `byte`,
+    /// `uint`, `float16`-`float64`, `bits`, `switch`, `ctrl-switch`, `tlv` and
+    /// `version_string`, none of which is a type of the specification, while missing all
+    /// ten PS-049 aliases, `base64`, `udec`, `sdec` and `integer`.
+    /// </summary>
+    /// <summary>The values of a quoted list case key, "[1, 2, 0x10]" (PS-398), or null.</summary>
+    public static List<long>? ParseListCaseKey(string text)
+    {
+        text = text.Trim();
+        if (!text.StartsWith('[') || !text.EndsWith(']')) return null;
+        var values = new List<long>();
+        foreach (var raw in text[1..^1].Split(','))
+        {
+            var part = raw.Trim();
+            if (part.Length == 0) continue;
+            try
+            {
+                values.Add(part.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                    ? Convert.ToInt64(part[2..], 16) : long.Parse(part));
+            }
+            catch (FormatException) { return null; }
+        }
+        return values;
+    }
+
     public static FieldType ParseFieldType(string typeStr)
     {
         var baseType = typeStr.Contains('[') ? typeStr[..typeStr.IndexOf('[')] : typeStr;
-        if (baseType.StartsWith("le_") || baseType.StartsWith("be_"))
-            baseType = baseType[3..];
 
-        return baseType.ToLowerInvariant() switch
+        return baseType switch
         {
-            "u8" or "byte" or "uint" => FieldType.U8,
-            "u16" => FieldType.U16,
-            "u24" => FieldType.U24,
-            "u32" => FieldType.U32,
+            "u8" or "uint8" => FieldType.U8,
+            "u16" or "uint16" => FieldType.U16,
+            "u24" or "uint24" => FieldType.U24,
+            "u32" or "uint32" => FieldType.U32,
+            "u64" or "uint64" => FieldType.U64,
             "u32le16" => FieldType.U32LE16,
+            "f32le16" => FieldType.F32LE16,
+            "u32be16le" => FieldType.U32BE16LE,
+            "s32be16le" => FieldType.S32BE16LE,
+            "f32be16le" => FieldType.F32BE16LE,
+            "uflt16" => FieldType.UFlt16,
+            "sflt16" => FieldType.SFlt16,
+            "sflt24" => FieldType.SFlt24,
             "s32le16" => FieldType.S32LE16,
-            "u64" => FieldType.U64,
-            "s8" or "i8" => FieldType.S8,
-            "s16" or "i16" => FieldType.S16,
-            "s24" => FieldType.S24,
-            "s32" or "i32" => FieldType.S32,
-            "s64" or "i64" => FieldType.S64,
-            "f16" or "float16" => FieldType.F16,
-            "f32" or "float32" => FieldType.F32,
-            "f64" or "float64" => FieldType.F64,
+            "s8" or "i8" or "int8" => FieldType.S8,
+            "s16" or "i16" or "int16" => FieldType.S16,
+            "s24" or "i24" or "int24" => FieldType.S24,
+            "s32" or "i32" or "int32" => FieldType.S32,
+            "s64" or "i64" or "int64" => FieldType.S64,
+            "f16" => FieldType.F16,
+            "f32" => FieldType.F32,
+            "f64" => FieldType.F64,
+            "udec" => FieldType.UDec,
+            "sdec" => FieldType.SDec,
             "bool" => FieldType.Bool,
-            "bits" => FieldType.Bits,
             "ascii" => FieldType.Ascii,
             "hex" => FieldType.Hex,
+            "base64" => FieldType.Base64,
             "bytes" => FieldType.Bytes,
             "skip" => FieldType.Skip,
             "string" => FieldType.String,
             "number" => FieldType.Number,
+            "integer" => FieldType.Integer,
             "object" => FieldType.Object,
-            "match" or "ctrl-switch" or "switch" => FieldType.Match,
-            "tlv" => FieldType.TLV,
+            "match" => FieldType.Match,
             "repeat" => FieldType.Repeat,
             "enum" => FieldType.Enum,
-            "bitfield_string" or "version_string" => FieldType.BitfieldString,
+            "bitfield_string" => FieldType.BitfieldString,
             _ => FieldType.Unknown
         };
     }
@@ -252,15 +292,6 @@ public static class Helpers
     }
 
     /// <summary>Parse endian prefix from type like "le_u16" -> ("little", "u16")</summary>
-    public static (string? endian, string baseType) ParseEndianPrefix(string typeStr)
-    {
-        if (typeStr.StartsWith("le_"))
-            return ("little", typeStr[3..]);
-        if (typeStr.StartsWith("be_"))
-            return ("big", typeStr[3..]);
-        return (null, typeStr);
-    }
-
     public static double EvaluatePolynomial(double[] coeffs, double x)
     {
         if (coeffs.Length == 0) return 0;

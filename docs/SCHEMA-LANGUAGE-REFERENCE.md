@@ -57,21 +57,26 @@ downlink_commands: [...]  # Command definitions (for downlink)
 |------|-------------|
 | `ascii` | ASCII string (requires `length:`) |
 | `hex` | Lowercase hex string (requires `length:`) |
-| `hex:upper` | Uppercase hex string (requires `length:`) |
-| `bytes` | Raw bytes, reported as a lowercase hex string (requires `length:`) |
+| `bytes` | Raw bytes, reported as declared by `format:` (requires `length:`, PS-456) |
 | `base64` | Base64 encoded output (requires `length:`) |
 
-A `bytes` or `hex` field reports a **lowercase** hex string (PS-074, PS-281), not an array
-of numbers. Choose the output representation with the type, not with a key:
+A `bytes` field reports a **lowercase** hex string by default (PS-281). Its `format:` is
+one of `hex`, `hex:upper`, `base64` or `array` (PS-079), and a `separator:` goes between
+the bytes of either hex format (PS-391). `hex:upper` is a format, not a type: `type:
+hex:upper` is rejected (CR-2026-037).
 
 ```yaml
 - name: device_eui
-  type: hex:upper       # AB CD -> "ABCD"; type: hex -> "abcd"; type: base64 -> "q80="
+  type: bytes
   length: 8
+  format: hex:upper     # AB CD ... -> "ABCD..."
+  separator: ":"        # -> "AB:CD:..."
 ```
 
-`format:` and `separator:` keys on a `bytes` field are read by Go, Java and C# but ignored
-by the Python reference interpreter, so neither is portable.
+The type vocabulary is closed and case-sensitive (CR-2026-037): the aliases are exactly
+`uint8`-`uint64`, `int8`-`int64` and `i8`-`i64`, and anything else - `float`, `double`,
+`UDec`, `U8`, `version_string` - is rejected when the schema is loaded, naming the field.
+A field with no type and no construct is rejected too (PS-334).
 
 #### `length: remaining`
 
@@ -668,15 +673,16 @@ fields:
     length: 2
 ```
 
-A definition is an object with a `fields:` list, and `$ref` splices those fields into the
-list where it appears — schema-level `fields:` or a port's. `01 02 AB CD` decodes to
-`{version: 1, flags: 2, payload: "abcd"}`. The top-level `header:` block is gone; use a
-definition for a common header.
+A definition is an object with a `fields:` list (PS-345), and `$ref` splices those fields
+into the list where it appears - any field list: a port's, an object's, a repeat's, a
+case's (PS-347). `01 02 AB CD` decodes to `{version: 1, flags: 2, payload: "abcd"}`. The
+top-level `header:` block is gone; use a definition for a common header.
 
-`use:`, `rename:` and `prefix:` (including cross-file `use: file.yaml#name` and
-`std/...` library paths) are resolved only by `tools/schema_preprocessor.py`, not by any
-interpreter — given to an interpreter directly, a `use:` entry is misread as an ordinary
-field. Their withdrawal is proposed in spec CR-2026-045; use `$ref`.
+A reference that does not resolve, a cycle, or a pointer not of the form
+`#/definitions/<name>` makes the schema invalid. A reference into another file
+(`lib.yaml#/definitions/x`) is resolved only by `tools/schema_preprocessor.py`, which also
+applies `rename:` and `prefix:`; an interpreter given one rejects it (PS-462). The `use:`
+shorthand is withdrawn (CR-2026-045): write `$ref`.
 
 ## Port-Based Routing
 
@@ -1195,8 +1201,10 @@ test_vectors:
 
 ```
 TYPES:        u8 u16 u24 u32 u64 | s8 s16 s24 s32 s64 | f16 f32 f64 | bool
-              ascii hex hex:upper bytes base64 | number string | skip enum
-              udec sdec | bitfield_string
+              ascii hex bytes base64 | number integer string | skip enum
+              udec sdec | bitfield_string | object
+              aliases: uint8..uint64, int8..int64, i8..i64 (nothing else; case-sensitive)
+BYTES FORMAT: hex (default) hex:upper base64 array | separator: (hex formats only)
               
 STRUCTURES:   object | repeat | byte_group | tlv
 
@@ -1211,8 +1219,9 @@ MODIFIERS:    mult div add (canonical order) | lookup | polynomial | compute | g
 
 CONDITIONALS: match (value dispatch) | flagged (bitmask) | tlv (tag dispatch)
 
-TRANSFORMS:   mult div add | sqrt abs pow log10 log | {op: round}
-              (floor ceiling clamp: Python and TS013 only)
+TRANSFORMS:   mult div add | sqrt abs pow log10 log | floor ceiling clamp
+              | {op: round, decimals: n, ties: even|away} - nothing else (PS-390)
+              div 0 or log of x <= 0: the field is absent (PS-100, PS-117)
 
 COMPUTE OPS:  add sub mul div mod idiv
 
@@ -1220,7 +1229,8 @@ GUARD OPS:    gt gte lt lte eq ne
 
 ENCODINGS:    sign_magnitude bcd gray (Python only)
 
-MATCH:        exact | range ("n..m", decimal) | default
+MATCH:        exact | range ("n..m", decimal) | list ("[1, 2, 3]", quoted) | default
+              exactly one of field: or length: (PS-399)
 
 REFERENCES:   $field_name | var: name | $ref: '#/definitions/name'
 

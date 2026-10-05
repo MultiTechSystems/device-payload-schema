@@ -1139,3 +1139,498 @@ test_vectors:
   expected:
     input_clamp_state:
       value: "HIGH"
+# Mutation-survivor vectors: payloads chosen so each lookup label, bit position and
+# consume is observable; expected values from the vendor decoder as above.
+- name: "status_sabotage_disabled"
+  description: "Status report, sabotage-contact bit (6) only, state DISABLED"
+  payload: "044002"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    sabotage_contact_state:
+      value: "DISABLED"
+- name: "status_hall_high"
+  description: "Status report, hall-sensor bit (5) only, state HIGH"
+  payload: "042001"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    hall_sensor_state:
+      value: "HIGH"
+- name: "status_clamp_disabled"
+  description: "Status report, input-clamp bit (4) only, state DISABLED"
+  payload: "041002"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    input_clamp_state:
+      value: "DISABLED"
+- name: "reset_ack_then_hall"
+  description: "A command the vendor consumes alone (0xFD) followed by a hall-state report"
+  payload: "FD0E01"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    hall_sensor_state:
+      value: "HIGH"
+- name: "sabotage_idle_then_hall"
+  description: "GET_SABOTAGE_CONTACT_STATE IDLE followed by a hall-state report"
+  payload: "06000E01"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    sabotage_contact_state:
+      value: "IDLE"
+    hall_sensor_state:
+      value: "HIGH"
+- name: "sabotage_state_disabled"
+  description: "GET_SABOTAGE_CONTACT_STATE, DISABLED"
+  payload: "0602"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    sabotage_contact_state:
+      value: "DISABLED"
+- name: "device_time_local_monday_january"
+  description: "GET_DEVICE_TIME with weekday MONDAY and month JANUARY"
+  payload: "08119558901838"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    device_time_local:
+      second:
+        value: 17
+      minute:
+        value: 37
+      hour:
+        value: 10
+      day:
+        value: 24
+      weekday:
+        value: "MONDAY"
+      month:
+        value: "JANUARY"
+      year:
+        value: 2024
+      is_dst:
+        value: true
+      utc_offset:
+        value: 2.0
+- name: "device_time_local_wednesday_june"
+  description: "GET_DEVICE_TIME with weekday WEDNESDAY and month JUNE"
+  payload: "08119558B51838"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    device_time_local:
+      second:
+        value: 17
+      minute:
+        value: 37
+      hour:
+        value: 10
+      day:
+        value: 24
+      weekday:
+        value: "WEDNESDAY"
+      month:
+        value: "JUNE"
+      year:
+        value: 2024
+      is_dst:
+        value: true
+      utc_offset:
+        value: 2.0
+- name: "device_time_local_thursday_july"
+  description: "GET_DEVICE_TIME with weekday THURSDAY and month JULY"
+  payload: "08119558C61838"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    device_time_local:
+      second:
+        value: 17
+      minute:
+        value: 37
+      hour:
+        value: 10
+      day:
+        value: 24
+      weekday:
+        value: "THURSDAY"
+      month:
+        value: "JULY"
+      year:
+        value: 2024
+      is_dst:
+        value: true
+      utc_offset:
+        value: 2.0
+- name: "device_time_local_friday_december"
+  description: "GET_DEVICE_TIME with weekday FRIDAY and month DECEMBER"
+  payload: "08119558DB1838"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    device_time_local:
+      second:
+        value: 17
+      minute:
+        value: 37
+      hour:
+        value: 10
+      day:
+        value: 24
+      weekday:
+        value: "FRIDAY"
+      month:
+        value: "DECEMBER"
+      year:
+        value: 2024
+      is_dst:
+        value: true
+      utc_offset:
+        value: 2.0
+- name: "device_time_local_saturday_february"
+  description: "GET_DEVICE_TIME with weekday SATURDAY and month FEBRUARY"
+  payload: "08119558E11838"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    device_time_local:
+      second:
+        value: 17
+      minute:
+        value: 37
+      hour:
+        value: 10
+      day:
+        value: 24
+      weekday:
+        value: "SATURDAY"
+      month:
+        value: "FEBRUARY"
+      year:
+        value: 2024
+      is_dst:
+        value: true
+      utc_offset:
+        value: 2.0
+- name: "device_time_config_1_0_1__2_1_3"
+  description: "GET_DEVICE_TIME_CONFIG, DST begins week 1 JANUARY MONDAY, ends week 2 FEBRUARY WEDNESDAY"
+  payload: "0AB4102238216321"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    device_time_config:
+      auto_time_sync_en:
+        value: true
+      utc_offset:
+        value: 1.0
+      utc_dst_offset:
+        value: 2.0
+      utc_dst_begin:
+        week_of_month:
+          value: "1st"
+        month:
+          value: "JANUARY"
+        weekday:
+          value: "MONDAY"
+        hour:
+          value: 2
+        minute:
+          value: 10
+      utc_dst_end:
+        week_of_month:
+          value: "2nd"
+        month:
+          value: "FEBRUARY"
+        weekday:
+          value: "WEDNESDAY"
+        hour:
+          value: 3
+        minute:
+          value: 5
+- name: "device_time_config_2_5_3__1_6_1"
+  description: "GET_DEVICE_TIME_CONFIG, DST begins week 2 JUNE WEDNESDAY, ends week 1 JULY MONDAY"
+  payload: "0AB4256238162321"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    device_time_config:
+      auto_time_sync_en:
+        value: true
+      utc_offset:
+        value: 1.0
+      utc_dst_offset:
+        value: 2.0
+      utc_dst_begin:
+        week_of_month:
+          value: "2nd"
+        month:
+          value: "JUNE"
+        weekday:
+          value: "WEDNESDAY"
+        hour:
+          value: 2
+        minute:
+          value: 10
+      utc_dst_end:
+        week_of_month:
+          value: "1st"
+        month:
+          value: "JULY"
+        weekday:
+          value: "MONDAY"
+        hour:
+          value: 3
+        minute:
+          value: 5
+- name: "device_time_config_3_6_4__4_11_5"
+  description: "GET_DEVICE_TIME_CONFIG, DST begins week 3 JULY THURSDAY, ends week 4 DECEMBER FRIDAY"
+  payload: "0AB43682384BA321"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    device_time_config:
+      auto_time_sync_en:
+        value: true
+      utc_offset:
+        value: 1.0
+      utc_dst_offset:
+        value: 2.0
+      utc_dst_begin:
+        week_of_month:
+          value: "3rd"
+        month:
+          value: "JULY"
+        weekday:
+          value: "THURSDAY"
+        hour:
+          value: 2
+        minute:
+          value: 10
+      utc_dst_end:
+        week_of_month:
+          value: "4th"
+        month:
+          value: "DECEMBER"
+        weekday:
+          value: "FRIDAY"
+        hour:
+          value: 3
+        minute:
+          value: 5
+- name: "device_time_config_4_11_5__3_5_4"
+  description: "GET_DEVICE_TIME_CONFIG, DST begins week 4 DECEMBER FRIDAY, ends week 3 JUNE THURSDAY"
+  payload: "0AB44BA238358321"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    device_time_config:
+      auto_time_sync_en:
+        value: true
+      utc_offset:
+        value: 1.0
+      utc_dst_offset:
+        value: 2.0
+      utc_dst_begin:
+        week_of_month:
+          value: "4th"
+        month:
+          value: "DECEMBER"
+        weekday:
+          value: "FRIDAY"
+        hour:
+          value: 2
+        minute:
+          value: 10
+      utc_dst_end:
+        week_of_month:
+          value: "3rd"
+        month:
+          value: "JUNE"
+        weekday:
+          value: "THURSDAY"
+        hour:
+          value: 3
+        minute:
+          value: 5
+- name: "device_time_config_1_1_6__2_0_6"
+  description: "GET_DEVICE_TIME_CONFIG, DST begins week 1 FEBRUARY SATURDAY, ends week 2 JANUARY SATURDAY"
+  payload: "0AB411C23820C321"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    device_time_config:
+      auto_time_sync_en:
+        value: true
+      utc_offset:
+        value: 1.0
+      utc_dst_offset:
+        value: 2.0
+      utc_dst_begin:
+        week_of_month:
+          value: "1st"
+        month:
+          value: "FEBRUARY"
+        weekday:
+          value: "SATURDAY"
+        hour:
+          value: 2
+        minute:
+          value: 10
+      utc_dst_end:
+        week_of_month:
+          value: "2nd"
+        month:
+          value: "JANUARY"
+        weekday:
+          value: "SATURDAY"
+        hour:
+          value: 3
+        minute:
+          value: 5
+- name: "sabotage_config_then_hall_low"
+  description: "GET_SABOTAGE_CONTACT_CONFIG disabled followed by a hall-state report LOW"
+  payload: "0D000E00"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    sabotage_contact_config:
+      value: false
+    hall_sensor_state:
+      value: "LOW"
+- name: "clamp_state_high"
+  description: "GET_INPUT_CLAMP_STATE, HIGH"
+  payload: "1101"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    input_clamp_state:
+      value: "HIGH"
+- name: "clamp_state_disabled"
+  description: "GET_INPUT_CLAMP_STATE, DISABLED"
+  payload: "1102"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    input_clamp_state:
+      value: "DISABLED"
+- name: "clamp_config_then_hall"
+  description: "GET_INPUT_CLAMP_CONFIG disabled followed by a hall-state report"
+  payload: "13000E01"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    input_clamp_config:
+      value: false
+    hall_sensor_state:
+      value: "HIGH"
+- name: "clamp_sensor_type_reserved"
+  description: "GET_INPUT_CLAMP_SENSOR_TYPE, Reserved"
+  payload: "1502"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    input_clamp_sensor_type:
+      value: "Reserved"
+- name: "data_rate_dr0"
+  description: "GET_DATA_RATE, DR 0"
+  payload: "F801"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    radio_data_rate:
+      value: "DR 0"
+- name: "data_rate_dr1"
+  description: "GET_DATA_RATE, DR 1"
+  payload: "F802"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    radio_data_rate:
+      value: "DR 1"
+- name: "data_rate_dr2"
+  description: "GET_DATA_RATE, DR 2"
+  payload: "F803"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    radio_data_rate:
+      value: "DR 2"
+- name: "data_rate_dr3"
+  description: "GET_DATA_RATE, DR 3"
+  payload: "F804"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    radio_data_rate:
+      value: "DR 3"
+- name: "data_rate_dr4"
+  description: "GET_DATA_RATE, DR 4"
+  payload: "F805"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    radio_data_rate:
+      value: "DR 4"
+- name: "rejoin_behavior_then_hall"
+  description: "GET_REJOIN_BEHAVIOR followed by a hall-state report"
+  payload: "FA81020E01"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    radio_cyclic_rejoin_conf:
+      value: "Single Rejoin"
+    hall_sensor_state:
+      value: "HIGH"
+- name: "tx_enable_alternating_then_hall"
+  description: "GET_STATUS_PARAMETER_TX_ENABLE_REGISTER 0xA0 (battery and hall enabled, sabotage and clamp not), then a hall-state report"
+  payload: "02A00E01"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    radio_status_report:
+      parameter_tx_enable_reg:
+        battery_voltage_enabled: true
+        sabotage_contact_states_enabled: false
+        hall_sensore_states_enabled: true
+        input_clamp_states_enabled: false
+    hall_sensor_state:
+      value: "HIGH"
+- name: "failed_commands_eight"
+  description: "COMMAND_FAILED listing eight command IDs"
+  payload: "360800010A0F140539FA"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    radio_failed_commands:
+      value:
+        - command: "COMMAND_ID_GET_STATUS_INTERVAL"
+        - command: "COMMAND_ID_SET_STATUS_INTERVAL"
+        - command: "COMMAND_ID_GET_DEVICE_TIME_CONFIG"
+        - command: "COMMAND_ID_SET_HALL_SENSOR_CONFIG"
+        - command: "COMMAND_ID_SET_INPUT_CLAMP_SENSOR_TYPE"
+        - command: "COMMAND_ID_GET_BATTERY_VOLTAGE"
+        - command: "COMMAND_ID_GET_HARDWARE_FACTORY_RESET_LOCK"
+        - command: "COMMAND_ID_GET_REJOIN_BEHAVIOR"
+- name: "factory_reset_lock_then_hall"
+  description: "GET_HARDWARE_FACTORY_RESET_LOCK unlocked followed by a hall-state report"
+  payload: "39000E01"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    button_action:
+      hw_factory_reset_locked:
+        value: false
+    hall_sensor_state:
+      value: "HIGH"
+- name: "bodyless_commands_then_hall"
+  description: "Thirteen commands the vendor consumes as a lone ID, then a hall-state report"
+  payload: "03090B0C0F1214163AF9FBFCFE0E01"
+  fPort: 10
+  source: "vendor-codec"
+  expected:
+    hall_sensor_state:
+      value: "HIGH"

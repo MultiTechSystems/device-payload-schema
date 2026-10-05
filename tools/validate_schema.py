@@ -25,7 +25,11 @@ from dataclasses import dataclass, field
 
 # Add tools to path
 sys.path.insert(0, str(Path(__file__).parent))
-from schema_interpreter import SchemaInterpreter, DecodeResult
+from schema_interpreter import (SchemaInterpreter, DecodeResult, check_byte_group_overlap,
+                                byte_group_endian,
+                                encoding_errors, expand_refs, fport_declaration_errors,
+                                literal_errors,
+                                typed_field_dicts)
 import schema_vocabulary
 
 
@@ -372,6 +376,29 @@ def is_encode_vector(vector) -> bool:
     return "input" in vector or "expected_payload" in vector
 
 
+def expected_fields_match(expected: Dict[str, Any], actual: Dict[str, Any],
+                          tolerance: float = 0.001) -> Tuple[bool, str]:
+    """Compare an `expected` mapping against decoded output (PS-043, PS-044).
+
+    A key expected as null asserts the key is absent: the decoder must not report it,
+    with any value (CR-2026-075). Every other listed key must be present and match;
+    unlisted keys are not checked. Before CR-2026-075 there was no way to say "absent",
+    so an implementation that reported a field the specification omits - a zero
+    divisor, a failed guard with no else - passed every vector.
+    """
+    for key, want in (expected or {}).items():
+        if want is None:
+            if key in actual:
+                return False, f"{key}: reported {actual[key]!r}, expected absent (PS-043)"
+            continue
+        if key not in actual:
+            return False, f"missing key '{key}'"
+        match, msg = values_match(want, actual[key], tolerance)
+        if not match:
+            return False, f"{key}: {msg}"
+    return True, ""
+
+
 def values_match(expected: Any, actual: Any, tolerance: float = 0.001) -> Tuple[bool, str]:
     """Compare expected and actual values with tolerance for floats."""
     if expected is None and actual is None:
@@ -404,13 +431,7 @@ def values_match(expected: Any, actual: Any, tolerance: float = 0.001) -> Tuple[
         return True, ""
     
     if isinstance(expected, dict) and isinstance(actual, dict):
-        for key in expected:
-            if key not in actual:
-                return False, f"missing key '{key}'"
-            match, msg = values_match(expected[key], actual[key], tolerance)
-            if not match:
-                return False, f"{key}: {msg}"
-        return True, ""
+        return expected_fields_match(expected, actual, tolerance)
     
     # A `bytes` field decodes to a Python bytes object here and to a lowercase hex
     # string in Go, so a vector cannot be written to satisfy both by value. Hex is
@@ -494,18 +515,25 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
     KNOWN_TYPES = {
         'u8', 'u16', 'u24', 'u32', 'u64',
         # Two 16-bit big-endian units, low unit first (PS-271).
-        'u32le16', 's32le16',
+        'u32le16', 's32le16', 'f32le16',
+        # The fourth ordering (PS-363, CR-2026-047).
+        'u32be16le', 's32be16le', 'f32be16le',
+        # The MCCI minifloats (PS-417 to PS-419, CR-2026-063).
+        'uflt16', 'sflt16', 'sflt24',
         'uint8', 'uint16', 'uint24', 'uint32', 'uint64',
         's8', 's16', 's24', 's32', 's64',
         'i8', 'i16', 'i24', 'i32', 'i64',
         'int8', 'int16', 'int24', 'int32', 'int64',
-        'f16', 'f32', 'f64', 'float', 'double',
+        'f16', 'f32', 'f64',
         'bool', 'bytes', 'string', 'ascii', 'hex', 'base64',
         'object', 'match', 'enum', 'repeat', 'skip',
-        'bitfield_string', 'number', 'version_string',
+        'bitfield_string', 'number',
         # PS-283: a computed field declaring an integer result.
         'integer',
-        'udec', 'sdec', 'UDec', 'SDec',
+        # PS-329. `UDec`/`SDec` are not spellings of them (PS-331), and `float`,
+        # `double` and `version_string` are not types (PS-326, PS-401): the list is
+        # closed, and case-sensitive (PS-333).
+        'udec', 'sdec',
     }
     
     for i, fld in enumerate(fields):
@@ -576,6 +604,9 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                 errors.append(
                     f"{mpath}: needs 'field' (a discriminator already decoded) or "
                     "'length' (one read from the payload here)")
+            elif 'field' in match and 'length' in match:
+                errors.append(
+                    f"{mpath}: declares both 'field' and 'length'; exactly one (PS-399)")
             if 'field' in match and not isinstance(match['field'], str):
                 errors.append(f"{mpath}.field: must be a string")
             if 'length' in match:
@@ -643,6 +674,11 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
             if span is not None and (not isinstance(span, int)
                                      or isinstance(span, bool) or span < 1):
                 errors.append(f"{bgpath}: 'size' must be an integer of at least 1")
+            try:
+                check_byte_group_overlap(bg_fields)
+                byte_group_endian(fld, None)       # PS-364: no member endian
+            except ValueError as exc:
+                errors.append(f"{bgpath}: {exc}")
             # PS-017: the construct sets `consume` itself, and a member that advances
             # the position defeats the sharing the construct exists for.
             for bi, bgf in enumerate(bg_fields):
@@ -664,12 +700,26 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
         # the message already listed it - harmless only because a flagged field also
         # carries a name and type.
         field_constructs = ('name', 'type', '$ref', 'flagged', 'tlv',
-                            'byte_group', 'object', 'match')
+                            'byte_group', 'match')
+        # PS-466 (CR-2026-074): the `object:` key is withdrawn; a nested group is
+        # `type: object`.
+        if 'object' in fld and not fld.get('type'):
+            errors.append(
+                f"{path}[{i}]: the `object:` key is withdrawn; write `type: object` with "
+                f"`name: {fld['object']}` and `fields` (PS-466)")
+            continue
         if not any(key in fld for key in field_constructs):
             errors.append(
                 f"{path}[{i}]: must have "
                 f"{', '.join(repr(k) for k in field_constructs[:-1])} or "
                 f"{field_constructs[-1]!r}")
+        elif not any(key in fld for key in field_constructs[1:]) or (
+                'type' in fld and not fld['type']):
+            # PS-334: a field carrying no construct needs a type, and none is
+            # supplied by default. Every implementation used to read it as a u8.
+            errors.append(
+                f"{path}[{i}]{f' ({name})' if name else ''}: declares no 'type' "
+                "(PS-334: a decoder must not supply a default type)")
 
         # A field-level `endian:` is honoured by all five implementations, so a value
         # outside the two it can take is a silent wrong byte order rather than a typo
@@ -755,6 +805,39 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                                         known_field_names)
                 continue
 
+            # PS-392: a skip declares how many bytes it passes over.
+            if ftype == 'skip' and 'length' not in fld:
+                errors.append(f"{path}[{i}] ({name}): a skip field requires 'length' (PS-392)")
+            # PS-393: an enum's base is an unsigned integer type.
+            if ftype == 'enum' and str(fld.get('base', 'u8')) not in (
+                    'u8', 'u16', 'u24', 'u32', 'u64',
+                    'uint8', 'uint16', 'uint24', 'uint32', 'uint64'):
+                errors.append(
+                    f"{path}[{i}] ({name}): an enum's base must be an unsigned integer "
+                    f"type, not {fld.get('base')!r} (PS-393)")
+            # PS-389: a bool names a bit of one byte.
+            if ftype == 'bool' and 'bit' in fld and (
+                    not isinstance(fld['bit'], int) or isinstance(fld['bit'], bool)
+                    or not 0 <= fld['bit'] <= 7):
+                errors.append(
+                    f"{path}[{i}] ({name}): a bool's bit must be an integer from 0 to 7 "
+                    f"(PS-389)")
+            # PS-456: a `bytes` field declares how many bytes it reads.
+            if ftype == 'bytes' and 'length' not in fld:
+                errors.append(
+                    f"{path}[{i}] ({name}): a bytes field requires 'length' (PS-456)")
+            # PS-079, PS-391: four formats, and a separator only beside the hex two.
+            if ftype == 'bytes':
+                fmt = fld.get('format', 'hex')
+                if fmt not in ('hex', 'hex:upper', 'base64', 'array'):
+                    errors.append(
+                        f"{path}[{i}] ({name}): bytes format {fmt!r} is not one of hex, "
+                        f"hex:upper, base64, array (PS-079)")
+                elif 'separator' in fld and fmt not in ('hex', 'hex:upper'):
+                    errors.append(
+                        f"{path}[{i}] ({name}): 'separator' applies only to the hex "
+                        f"formats, not {fmt!r} (PS-391)")
+
             # Bitfield string validation
             if ftype == 'bitfield_string':
                 if 'parts' not in fld:
@@ -765,8 +848,9 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                     for pi, part in enumerate(fld['parts']):
                         if not isinstance(part, list) or len(part) < 2:
                             errors.append(f"{path}[{i}].parts[{pi}]: must be [bitOffset, bitLength] or [bitOffset, bitLength, format]")
-                        elif len(part) > 2 and part[2] not in ('hex', 'decimal'):
-                            errors.append(f"{path}[{i}].parts[{pi}]: format must be 'hex' or 'decimal'")
+                        elif len(part) > 2 and part[2] not in ('hex', 'hex:upper', 'decimal'):
+                            errors.append(f"{path}[{i}].parts[{pi}]: format must be "
+                                          f"'decimal', 'hex' or 'hex:upper' (PS-430)")
                 if 'length' not in fld:
                     errors.append(f"{path}[{i}] ({name}): bitfield_string should have explicit 'length'")
                 continue
@@ -852,7 +936,7 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
             # type of `u8`, which is known, so it would otherwise validate cleanly
             # and then fail to decode in every implementation.
             if _looks_like_bitfield(ftype):
-                bitfield = re.match(r'^u(\d+)\[(\d+):(\d+)\]$', ftype)
+                bitfield = re.match(r'^[us](\d+)\[(\d+):(\d+)\]$', ftype)
                 if not bitfield:
                     errors.append(
                         f"{path}[{i}] ({name}): '{ftype}' is not a valid bitfield type; "
@@ -876,8 +960,19 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                         )
                 continue
 
+            if ftype in _COLON_STRING_TYPES:
+                errors.append(
+                    f"{path}[{i}] ({name}): unknown type '{ftype}' - it is a `bytes` "
+                    f"format (PS-079): type: bytes, format: {ftype}")
+                continue
+            if ftype.startswith(('le_', 'be_')):
+                errors.append(
+                    f"{path}[{i}] ({name}): '{ftype}' carries byte order in the type name; "
+                    f"the le_/be_ prefixes are withdrawn - write type: {ftype[3:]} with "
+                    f"endian: {'little' if ftype.startswith('le_') else 'big'} (PS-053a)")
+                continue
             base_type = ftype.split('[')[0].split(':')[0].split('<')[0]
-            if base_type not in KNOWN_TYPES and not base_type.startswith('be_') and not base_type.startswith('le_'):
+            if base_type not in KNOWN_TYPES:
                 if not re.match(r'(u|i|s)\d+\[', ftype):
                     errors.append(f"{path}[{i}] ({name}): unknown type '{ftype}'")
         
@@ -1052,7 +1147,13 @@ def check_remaining_length(schema: Dict[str, Any]) -> List[str]:
 
 def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
     """Validate schema structure and return list of errors."""
-    errors = []
+    # PS-345, PS-348, PS-349, PS-461, PS-462: definitions and references, checked here
+    # rather than at decode (PS-348). PS-358: malformed literals.
+    errors = list(expand_refs(schema)[1]) if isinstance(schema, dict) else []
+    if isinstance(schema, dict):
+        for field_def in typed_field_dicts(schema):
+            errors.extend(literal_errors(field_def))
+            errors.extend(encoding_errors(field_def))
     has_fields = False
     has_ports = False
     
@@ -1094,18 +1195,16 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
                 if pk != 'default':
                     try:
                         port_num = int(pk)
-                        # An FPort is one octet, so only 0-255 can name one at all. The
-                        # narrower PS-018 range, 1-223, is reported as a warning by
-                        # check_best_practices rather than rejected here: TS001 assigns
-                        # 0 to MAC commands and 224 to the certification test protocol,
-                        # and a schema may legitimately describe either. Erroring on
-                        # them would make this tool refuse payloads that exist.
-                        if port_num < 0 or port_num > 255:
+                        # PS-018 (CR-2026-041): 1 to 255. The Alliance-allocated ports
+                        # (224 and up) are application ports a schema may describe. 0 is
+                        # not: its payload is MAC commands under NwkSKey, so a decoder of
+                        # application payloads is never handed it.
+                        if port_num < 1 or port_num > 255:
                             errors.append(
-                                f"ports.{pk}: port number must be 0-255; an FPort is one octet")
+                                f"ports.{pk}: port number must be 1-255 (PS-018)")
                     except ValueError:
                         errors.append(
-                            f"ports.{pk}: key must be an integer (0-255) or 'default'")
+                            f"ports.{pk}: key must be an integer (1-255) or 'default'")
                 
                 if not isinstance(port_def, dict):
                     errors.append(f"ports.{pk}: must be an object")
@@ -1119,11 +1218,15 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
                     known_names = []
                     validate_field_list(port_def['fields'], f"ports.{pk}.fields", errors, known_names)
     
+    # PS-335, PS-337: a top-level fPort, checked as the interpreter checks it.
+    errors.extend(fport_declaration_errors(schema))
+
     if has_fields and has_ports:
         # Carrying both is not additive: the interpreter resolves the port entry and
         # decodes its fields alone, so the top-level ones are dropped without a word.
         errors.append("Schema must have 'fields' or 'ports', not both (PS-004)")
-    elif not has_fields and not has_ports:
+    elif not has_fields and not has_ports and not schema.get('definitions'):
+        # PS-339: a document of `definitions` alone is a library, not a schema.
         errors.append("Schema must have either 'fields' or 'ports' (PS-004)")
     
     # Validate top-level fields
@@ -1304,6 +1407,13 @@ def run_test_vector(interpreter: SchemaInterpreter, tv: Dict[str, Any]) -> TestR
     # Compare
     expected = tv.get('expected', {})
     for field_name, expected_value in expected.items():
+        if expected_value is None:
+            # PS-043 (CR-2026-075): null asserts the key is absent.
+            if field_name in result.actual:
+                result.errors.append(
+                    f"{field_name}: reported {result.actual[field_name]!r}, expected "
+                    f"absent (PS-043)")
+            continue
         if field_name not in result.actual:
             result.errors.append(f"Missing field in output: '{field_name}'")
             continue
@@ -1340,33 +1450,20 @@ def run_test_vector(interpreter: SchemaInterpreter, tv: Dict[str, Any]) -> TestR
 def check_best_practices(schema: Dict[str, Any], result: ValidationResult) -> None:
     """Check for best practices and add warnings/info to result."""
 
-    # PS-018 confines a port to 1-223, the LoRaWAN application range. The other octet
-    # values are assigned rather than invalid - TS001 gives 0 to MAC commands, 224 to
-    # the MAC-layer certification test protocol, and reserves 225-255 for future
-    # standardised applications - so a schema describing one of those is out of scope
-    # for PS-018 but not malformed. Warn, so the departure is visible and deliberate,
-    # and leave the schema usable.
-    RESERVED_PORT_USE = {
-        0: "MAC commands (TS001)",
-        224: "the MAC-layer certification test protocol (TS009)",
-    }
-    ports = schema.get('ports')
-    if isinstance(ports, dict):
-        for port_key in ports:
-            pk = str(port_key)
-            if pk == 'default':
-                continue
-            try:
-                port_num = int(pk)
-            except ValueError:
-                continue
-            if 1 <= port_num <= 223:
-                continue
-            use = RESERVED_PORT_USE.get(port_num, "reserved for future standardised applications")
-            result.add_warning(
-                f"port {port_num} is outside the PS-018 application range 1-223; "
-                f"that port is {use}",
-                f"ports.{pk}")
+    # PS-361: `string` is a literal; a field that reads text from the payload is `ascii`.
+    for field_def in typed_field_dicts(schema):
+        if field_def.get('type') == 'string' and 'value' not in field_def:
+            result.add_warning("type string declares no value, so a decoder reports an "
+                               "error; a string read from the payload is type ascii (PS-361)",
+                               str(field_def.get('name', '?')))
+
+    # PS-338: `fport` is accepted and never written.
+    if 'fport' in schema and 'fPort' not in schema:
+        result.add_warning("write the top-level key as `fPort`; `fport` is accepted "
+                           "but writers must not emit it (PS-338)", "fport")
+    # PS-337: beside `ports`, a top-level fPort says nothing the keys do not.
+    if ('fPort' in schema or 'fport' in schema) and schema.get('ports'):
+        result.add_warning("top-level fPort is redundant beside ports (PS-337)", "fPort")
     
     # Standard sensor field names that should have IPSO/unit annotations
     SENSOR_KEYWORDS = {
@@ -1418,6 +1515,16 @@ def check_best_practices(schema: Dict[str, Any], result: ValidationResult) -> No
                     "mult, div, add regardless of key order. Write the intended "
                     "sequence as a transform array to make it explicit."
                     % ", ".join(bare_modifiers),
+                    f"{name}"
+                )
+
+            # PS-453: `consume: 0` advances nothing, which is the point on a bit range
+            # or a bool and a trap anywhere else - the next field reads the same bytes.
+            if (fld.get('consume') == 0 and isinstance(ftype, str)
+                    and '[' not in ftype and ftype != 'bool'):
+                result.add_warning(
+                    "consume: 0 on a %s field is NOT RECOMMENDED (PS-453): the next "
+                    "field reads the same bytes again" % ftype,
                     f"{name}"
                 )
 

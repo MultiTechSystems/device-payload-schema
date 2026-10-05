@@ -134,12 +134,19 @@ def yaml_type_to_json_schema(field_type: str, field_def: Dict[str, Any]) -> Dict
     if base_type in ('ascii', 'string', 'base64', 'hex:upper'):
         return {"type": "string"}
     
-    # Bytes type. PS-281 fixes this as a lowercase hex string, so the `format: array`
-    # branch this used to offer would describe output no interpreter produces. It is
-    # used by no schema in the repository; a schema that wants an octet array should
-    # say `type: repeat` over `u8` and mean it.
+    # Bytes type: a lowercase hex string by default (PS-281), or as its `format` says
+    # (PS-079) - every implementation honours the format since CR-2026-058, so the
+    # declared shape follows it. A separator sits between the hex pairs (PS-391).
     if base_type == 'bytes':
-        return {"type": "string", "pattern": "^[0-9a-f]*$"}
+        fmt = field_def.get('format', 'hex')
+        if fmt == 'array':
+            return {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 255}}
+        if fmt == 'base64':
+            return {"type": "string"}
+        digits = '0-9A-F' if fmt == 'hex:upper' else '0-9a-f'
+        if field_def.get('separator'):
+            return {"type": "string"}
+        return {"type": "string", "pattern": f"^[{digits}]*$"}
     
     # bitfield_string and version_string report a formatted string, not a number.
     # These fell through to the default below, so every version field in the corpus -

@@ -21,6 +21,18 @@ public class Field {
      * to 1, which is what every `u8[lo:hi]` range needs.
      */
     private int bitBaseBytes = 1;
+    /** An sN[start:end] range: sign-extended from the range's width (PS-352, PS-353). */
+    private boolean signedBits;
+    public boolean isSignedBits() { return signedBits; }
+    public void setSignedBits(boolean signedBits) { this.signedBits = signedBits; }
+    /** A byte_group's own byte order (PS-364), null for the context's. */
+    private String groupEndian;
+    public String getGroupEndian() { return groupEndian; }
+    public void setGroupEndian(String groupEndian) { this.groupEndian = groupEndian; }
+    /** A named code on an unsigned integer (PS-422). */
+    private String encoding;
+    public String getEncoding() { return encoding; }
+    public void setEncoding(String encoding) { this.encoding = encoding; }
     private String endian;
     private Double add;
     private Double mult;
@@ -118,6 +130,11 @@ public class Field {
     public void setByteOffset(int byteOffset) { this.byteOffset = byteOffset; }
     
     /** The `bit:` of a `bool` field, or -1 when the field does not declare one. */
+    /** A computed field written {@code type: integer} (PS-283); its type is NUMBER. */
+    private boolean integerResult;
+    public boolean isIntegerResult() { return integerResult; }
+    public void setIntegerResult(boolean integerResult) { this.integerResult = integerResult; }
+
     private int boolBit = -1;
     public int getBoolBit() { return boolBit; }
     public void setBoolBit(int boolBit) { this.boolBit = boolBit; }
@@ -314,6 +331,21 @@ public class Field {
         private Boolean log10;
         private Boolean log;
         private Double pow;
+        /** {@code even} (the default) or {@code away} from zero, for {@code op: round} (PS-390). */
+        private String ties;
+        /** Bound stages (PS-115). This binding had none and passed the value through. */
+        private Double floor;
+        private Double ceiling;
+        private double[] clamp;
+
+        public String getTies() { return ties; }
+        public void setTies(String ties) { this.ties = ties; }
+        public Double getFloor() { return floor; }
+        public void setFloor(Double floor) { this.floor = floor; }
+        public Double getCeiling() { return ceiling; }
+        public void setCeiling(Double ceiling) { this.ceiling = ceiling; }
+        public double[] getClamp() { return clamp; }
+        public void setClamp(double[] clamp) { this.clamp = clamp; }
 
         public Boolean getSqrt() { return sqrt; }
         public void setSqrt(Boolean sqrt) { this.sqrt = sqrt; }

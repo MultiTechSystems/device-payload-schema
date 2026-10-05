@@ -1,0 +1,47 @@
+# A field with no value to report is absent, and the fields after it decode as usual.
+#
+# Two of the ways a value can be absent, each asserted with a null expectation
+# (PS-043, CR-2026-075):
+#
+# - A zero divisor in a stage (PS-100, CR-2026-057). Every implementation skipped the
+#   division and reported the undivided value.
+# - A failed guard with no `else` (PS-400, CR-2026-058). Go and C# reported 0 and the
+#   generated codec null.
+#
+# The guard's passing case is the second vector, so the same field is shown present.
+name: probe_value_absent
+endian: big
+fields:
+- name: divided_by_zero
+  type: u8
+  transform:
+  - div: 0
+- name: raw
+  type: u8
+- name: guarded
+  type: number
+  ref: $raw
+  mult: 2
+  guard:
+    when:
+    - field: $raw
+      lt: 100
+- name: after
+  type: u8
+test_vectors:
+- name: both_absent
+  source: spec-example
+  payload: "07 C8 05"
+  expected:
+    divided_by_zero: null
+    raw: 200
+    guarded: null
+    after: 5
+- name: the_guard_passes
+  source: spec-example
+  payload: "07 32 05"
+  expected:
+    divided_by_zero: null
+    raw: 50
+    guarded: 100
+    after: 5

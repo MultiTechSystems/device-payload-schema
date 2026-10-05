@@ -38,7 +38,7 @@ import (
 // pass everywhere and the full count is 1237.
 // CR-2026-031 added the name_from var-mismatch fixture, whose two vectors decode
 // everywhere, so the full count is 1239.
-const corpusFloor = 1839
+const corpusFloor = 2330
 
 type corpusVector struct {
 	Name    string `yaml:"name"`
@@ -219,6 +219,14 @@ func TestCorpusConformance(t *testing.T) {
 					break
 				}
 				got, present := out[key]
+				if want == nil {
+					// PS-043 (CR-2026-075): a null expectation asserts the key is absent.
+					if present {
+						mismatch = fmt.Sprintf("%s: reported %v, expected absent", key, got)
+						break
+					}
+					continue
+				}
 				if !present {
 					mismatch = fmt.Sprintf("%s missing", key)
 					break

@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -178,14 +179,11 @@ func TestSchemaBasic(t *testing.T) {
 name: test_sensor
 fields:
   - name: version
-    type: UInt
-    length: 1
+    type: u8
   - name: temperature
-    type: SInt
-    length: 2
+    type: s16
   - name: humidity
-    type: UInt
-    length: 1
+    type: u8
 `
 
 	schema, err := ParseSchema(schemaYAML)
@@ -220,12 +218,10 @@ func TestSchemaWithModifiers(t *testing.T) {
 name: scaled_sensor
 fields:
   - name: temperature
-    type: SInt
-    length: 2
+    type: s16
     mult: 0.1
   - name: offset_value
-    type: UInt
-    length: 1
+    type: u8
     add: -40
 `
 
@@ -254,8 +250,7 @@ func TestSchemaWithLookup(t *testing.T) {
 name: status_sensor
 fields:
   - name: status
-    type: UInt
-    length: 1
+    type: u8
     lookup:
       0: "Off"
       1: "On"
@@ -283,14 +278,12 @@ func TestSchemaWithNestedObject(t *testing.T) {
 name: nested_sensor
 fields:
   - name: sensor
-    type: Object
+    type: object
     fields:
       - name: temp
-        type: SInt
-        length: 2
+        type: s16
       - name: humid
-        type: UInt
-        length: 1
+        type: u8
 `
 
 	schema, err := ParseSchema(schemaYAML)
@@ -321,19 +314,17 @@ func TestSchemaWithMatch(t *testing.T) {
 name: conditional
 fields:
   - name: msg
-    type: Match
+    type: match
     length: 1
     cases:
       - case: 1
         fields:
           - name: temp
-            type: SInt
-            length: 2
+            type: s16
       - case: 2
         fields:
           - name: count
-            type: UInt
-            length: 4
+            type: u32
 `
 
 	schema, err := ParseSchema(schemaYAML)
@@ -377,26 +368,22 @@ func TestSchemaWithVariable(t *testing.T) {
 name: variable_match
 fields:
   - name: type
-    type: UInt
-    length: 1
+    type: u8
     var: msg_type
   - name: len
-    type: UInt
-    length: 1
+    type: u8
   - name: data
-    type: Match
+    type: match
     on: $msg_type
     cases:
       - case: 1
         fields:
           - name: temp
-            type: SInt
-            length: 2
+            type: s16
       - case: 2
         fields:
           - name: count
-            type: UInt
-            length: 4
+            type: u32
 `
 
 	schema, err := ParseSchema(schemaYAML)
@@ -441,8 +428,7 @@ func TestBufferUnderflow(t *testing.T) {
 name: test
 fields:
   - name: value
-    type: UInt
-    length: 4
+    type: u32
 `
 
 	schema, err := ParseSchema(schemaYAML)
@@ -463,18 +449,16 @@ func TestTLVSimple(t *testing.T) {
 name: elsys_sensor
 endian: big
 fields:
-  - type: TLV
-    tag_size: 1
-    cases:
-      "1":
-        - name: temperature
-          type: SInt
-          length: 2
-          mult: 0.1
-      "2":
-        - name: humidity
-          type: UInt
-          length: 1
+  - tlv:
+      tag_size: 1
+      cases:
+        "1":
+          - name: temperature
+            type: s16
+            mult: 0.1
+        "2":
+          - name: humidity
+            type: u8
 `
 
 	schema, err := ParseSchema(schemaYAML)
@@ -506,32 +490,27 @@ func TestTLVCompositeTag(t *testing.T) {
 name: milesight_am307
 endian: little
 fields:
-  - type: TLV
-    tag_fields:
-      - name: channel_id
-        type: UInt
-        length: 1
-      - name: channel_type
-        type: UInt
-        length: 1
-    tag_key:
-      - channel_id
-      - channel_type
-    cases:
-      "[1,117]":
-        - name: battery
-          type: UInt
-          length: 1
-      "[3,103]":
-        - name: temperature
-          type: SInt
-          length: 2
-          mult: 0.1
-      "[4,104]":
-        - name: humidity
-          type: UInt
-          length: 1
-          mult: 0.5
+  - tlv:
+      tag_fields:
+        - name: channel_id
+          type: u8
+        - name: channel_type
+          type: u8
+      tag_key:
+        - channel_id
+        - channel_type
+      cases:
+        "[1,117]":
+          - name: battery
+            type: u8
+        "[3,103]":
+          - name: temperature
+            type: s16
+            mult: 0.1
+        "[4,104]":
+          - name: humidity
+            type: u8
+            mult: 0.5
 `
 
 	schema, err := ParseSchema(schemaYAML)
@@ -575,7 +554,7 @@ func TestBytesHex(t *testing.T) {
 name: bytes_test
 fields:
   - name: device_eui
-    type: Bytes
+    type: bytes
     length: 8
     format: hex
 `
@@ -1861,7 +1840,7 @@ fields:
     type: number
     ref: $raw_temp
     transform:
-      - sub: 400
+      - add: -400
       - div: 10
     guard:
       when:
@@ -1907,7 +1886,7 @@ fields:
     type: number
     ref: $raw_reading
     transform:
-      - sub: 500
+      - add: -500
       - div: 10
 `
 	schema, err := ParseSchema(schemaYAML)
@@ -2001,7 +1980,7 @@ func TestStringType(t *testing.T) {
 name: string_test
 fields:
   - name: device_name
-    type: string
+    type: ascii
     length: 8
 `
 	schema, err := ParseSchema(schemaYAML)
@@ -2925,13 +2904,9 @@ fields:
     type: u8
     var: flags
   - name: bit_low
-    type: bits
-    bit_offset: 0
-    bits: 4
+    type: u8[0:3]
   - name: bit_high
-    type: bits
-    bit_offset: 4
-    bits: 4
+    type: u8[4:7]
     consume: 1
 `
 	schema, err := ParseSchema(schemaYAML)
@@ -2955,7 +2930,7 @@ func TestNestedObjectDecoding(t *testing.T) {
 name: nested_test
 fields:
   - name: header
-    type: Object
+    type: object
     fields:
       - name: version
         type: u8
@@ -3058,7 +3033,7 @@ fields:
     type: u8
     var: type
   - name: data
-    type: Match
+    type: match
     on: $type
     cases:
       - case: 1
@@ -3116,7 +3091,7 @@ func TestStringWithNullTerminator(t *testing.T) {
 name: string_null_test
 fields:
   - name: name
-    type: string
+    type: ascii
     length: 10
 `
 	schema, err := ParseSchema(schemaYAML)
@@ -3463,7 +3438,7 @@ func TestEncodeObject(t *testing.T) {
 name: encode_object_test
 fields:
   - name: header
-    type: Object
+    type: object
     fields:
       - name: version
         type: u8
@@ -3532,7 +3507,7 @@ func TestEncodeAscii(t *testing.T) {
 name: encode_ascii_test
 fields:
   - name: text
-    type: Ascii
+    type: ascii
     length: 8
 `
 	schema, err := ParseSchema(schemaYAML)
@@ -3558,7 +3533,7 @@ func TestEncodeHex(t *testing.T) {
 name: encode_hex_test
 fields:
   - name: data
-    type: Hex
+    type: hex
     length: 4
 `
 	schema, err := ParseSchema(schemaYAML)
@@ -3982,14 +3957,11 @@ fields:
   - name: value
     type: unknown_type
 `
-	schema, err := ParseSchema(schemaYAML)
-	if err != nil {
-		t.Fatalf("ParseSchema() error = %v", err)
-	}
-
-	_, err = schema.Decode([]byte{0x00})
-	if err == nil {
-		t.Error("expected unknown type error")
+	// CR-2026-037: rejected when the schema is loaded, naming the field and the
+	// type (PS-327, PS-328), rather than at the first decode.
+	_, err := ParseSchema(schemaYAML)
+	if err == nil || !strings.Contains(err.Error(), "unknown_type") {
+		t.Fatalf("ParseSchema() error = %v, want an unknown-type error naming unknown_type", err)
 	}
 }
 
@@ -4078,7 +4050,7 @@ func TestMatchVariableNotFound(t *testing.T) {
 name: match_var_not_found_test
 fields:
   - name: data
-    type: Match
+    type: match
     on: $nonexistent
     cases:
       - case: 1
@@ -4162,22 +4134,16 @@ fields:
 		t.Fatalf("ParseSchema() error = %v", err)
 	}
 
-	// Infinity: 0x7C00
-	decoded, err := schema.Decode([]byte{0x7C, 0x00})
-	if err != nil {
-		t.Fatalf("Decode() error = %v", err)
-	}
-	if !math.IsInf(mustNum(decoded["value"]), 1) {
-		t.Errorf("value = %v, want +Inf", decoded["value"])
-	}
-
-	// NaN: 0x7C01
-	decoded2, err := schema.Decode([]byte{0x7C, 0x01})
-	if err != nil {
-		t.Fatalf("Decode() error = %v", err)
-	}
-	if !math.IsNaN(mustNum(decoded2["value"])) {
-		t.Errorf("value = %v, want NaN", decoded2["value"])
+	// Infinity (0x7C00) and NaN (0x7C01) are not JSON values, so the field is absent
+	// (PS-282), as it is in Python, Java and C#. This reported both.
+	for _, raw := range [][]byte{{0x7C, 0x00}, {0x7C, 0x01}} {
+		decoded, err := schema.Decode(raw)
+		if err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		if v, present := decoded["value"]; present {
+			t.Errorf("% x: value = %v, want absent", raw, v)
+		}
 	}
 }
 
@@ -4316,7 +4282,7 @@ fields:
     type: u8
     var: v
   - name: category
-    type: Match
+    type: match
     on: $v
     cases:
       - case:
@@ -4366,7 +4332,7 @@ fields:
     type: u8
     var: c
   - name: result
-    type: Match
+    type: match
     on: $c
     cases:
       - case: [1, 2, 3]
@@ -4628,49 +4594,9 @@ fields:
 // TLV DECODING TESTS
 // =============================================================================
 
-func TestTLVBasic(t *testing.T) {
-	schemaYAML := `
-name: tlv_test
-fields:
-  - name: tag
-    type: u8
-    var: tag
-  - name: len
-    type: u8
-    var: len
-  - name: data
-    type: TLV
-    type_var: $tag
-    length_var: $len
-    cases:
-      - case: 1
-        fields:
-          - name: temp
-            type: s16
-            mult: 0.1
-      - case: 2
-        fields:
-          - name: humidity
-            type: u8
-`
-	schema, err := ParseSchema(schemaYAML)
-	if err != nil {
-		t.Fatalf("ParseSchema() error = %v", err)
-	}
-
-	// Tag=1, Len=2, Value=0x00E7 (231 = 23.1°C)
-	decoded, err := schema.Decode([]byte{0x01, 0x02, 0x00, 0xE7})
-	if err != nil {
-		t.Fatalf("Decode() error = %v", err)
-	}
-
-	if mustNum(decoded["tag"]) != float64(1) {
-		t.Errorf("tag = %v, want 1", decoded["tag"])
-	}
-	if mustNum(decoded["len"]) != float64(2) {
-		t.Errorf("len = %v, want 2", decoded["len"])
-	}
-}
+// TestTLVBasic exercised a Go-only `type: TLV` with `type_var`/`length_var`, which the
+// specification never defined; CR-2026-037 rejects the spelling. The `tlv:` construct
+// is covered by TestTLVSimple and TestTLVCompositeTag.
 
 // =============================================================================
 // COMPUTE OPERATION TESTS
@@ -5735,7 +5661,7 @@ fields:
     type: u8
     var: t1
   - name: outer
-    type: Match
+    type: match
     on: $t1
     cases:
       - case: 1
@@ -5744,7 +5670,7 @@ fields:
             type: u8
             var: t2
           - name: inner
-            type: Match
+            type: match
             on: $t2
             cases:
               - case: 1
@@ -6027,7 +5953,7 @@ fields:
     type: bytes
     length: 4
   - name: f
-    type: Hex
+    type: hex
     length: 4
 `
 	schema, err := ParseSchema(schemaYAML)
@@ -6403,7 +6329,7 @@ func TestSchemaWithNestedObjects(t *testing.T) {
 name: nested_objects_test
 fields:
   - name: header
-    type: Object
+    type: object
     fields:
       - name: version
         type: u8
@@ -6524,7 +6450,7 @@ fields:
     type: u8
     var: t
   - name: data
-    type: Match
+    type: match
     on: $t
     cases:
       - case: 1
@@ -6583,7 +6509,7 @@ func TestEncodeObjectMissingField(t *testing.T) {
 name: encode_missing_test
 fields:
   - name: header
-    type: Object
+    type: object
     fields:
       - name: version
         type: u8
@@ -6963,7 +6889,7 @@ fields:
     type: u8
     var: t
   - name: data
-    type: Match
+    type: match
     on: $t
     cases:
       - case: 1
@@ -7054,7 +6980,7 @@ fields:
     type: u8
     var: h
   - name: payload_type
-    type: Match
+    type: match
     on: $h
     cases:
       - case: 1
@@ -7268,14 +7194,11 @@ fields:
   - name: x
     type: unknown_type_xyz
 `
-	schema, err := ParseSchema(schemaYAML)
-	if err != nil {
-		t.Fatalf("ParseSchema() error = %v", err)
-	}
-
-	_, err = schema.Decode([]byte{42})
-	if err == nil {
-		t.Error("expected unknown type error")
+	// CR-2026-037: rejected when the schema is loaded, naming the field and the
+	// type (PS-327, PS-328), rather than at the first decode.
+	_, err := ParseSchema(schemaYAML)
+	if err == nil || !strings.Contains(err.Error(), "unknown_type_xyz") {
+		t.Fatalf("ParseSchema() error = %v, want an unknown-type error naming unknown_type_xyz", err)
 	}
 }
 
@@ -7327,17 +7250,14 @@ func TestEdgeCaseTLVLengthOverrun(t *testing.T) {
 	schemaYAML := `
 name: test
 fields:
-  - name: data
-    type: tlv
-    tag:
-      type: u8
-    length:
-      type: u8
-    cases:
-      1:
-        - name: val
-          type: bytes
-          length: $length
+  - tlv:
+      tag_size: 1
+      length_size: 1
+      cases:
+        "1":
+          - name: val
+            type: bytes
+            length: 255
 `
 	schema, err := ParseSchema(schemaYAML)
 	if err != nil {
@@ -7396,15 +7316,12 @@ fields:
 		payload[i] = byte(i % 256)
 	}
 
-	result, err := schema.Decode(payload)
-	if err != nil {
-		t.Fatalf("Decode() error = %v", err)
-	}
-
-	items := result["items"].([]any)
-	// Default max_iterations=1000 is a safety limit
-	if len(items) != 1000 {
-		t.Errorf("items count = %d, want 1000 (safety limit)", len(items))
+	// The default ceiling of 1000 (PS-089) still bounds the work, and exceeding it is an
+	// error naming the bytes left unparsed (PS-396) rather than a quiet stop at 1000.
+	_, err = schema.Decode(payload)
+	if err == nil || !strings.Contains(err.Error(), "max of 1000") ||
+		!strings.Contains(err.Error(), "9000 byte(s) at offset 1000") {
+		t.Errorf("Decode() error = %v, want the PS-396 limit error", err)
 	}
 }
 

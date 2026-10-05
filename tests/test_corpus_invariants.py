@@ -163,15 +163,6 @@ INTENTIONAL_UNCONSUMED: Dict[str, Tuple[int, str]] = {
         "`default: skip` with no case for 9: the construct's byte 7F is deliberately "
         "not read and decoding carries on",
     ),
-    "_language-conformance/repeat-max-count.yaml::a_count_above_the_ceiling_is_clamped": (
-        2,
-        "count 4 clamped to `max: 2`; the two records beyond the ceiling stay unread",
-    ),
-    "_language-conformance/repeat-max.yaml::until_end_stops_at_the_ceiling": (
-        2,
-        "`until: end` with `max: 2` over four records; the description says the last "
-        "two bytes are left unread",
-    ),
     "_language-conformance/unknown-tlv-tag-skip.yaml::undescribed_tag_stops_the_decode": (
         2,
         "undescribed tag 0x09 with no length_size: `unknown: skip` abandons the rest "
@@ -501,4 +492,6 @@ def test_the_key_walk_finds_the_whole_grammar(corpus):
     contexts = {ctx for ctx, _ in used}
     for ctx in ("schema", "field", "vector", "match", "tlv", "flagged", "transform"):
         assert ctx in contexts, ctx
-    assert len(used) > 120, len(used)
+    # 129 -> 119 when composed library schemas stopped carrying unreferenced
+    # definitions, whose keys nothing read.
+    assert len(used) > 100, len(used)

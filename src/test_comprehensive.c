@@ -841,9 +841,9 @@ void test_type_parsing(void) {
     
     TCHECK(parse_type_string("f16", &bs, &bw) == FIELD_TYPE_F16, "parse f16");
     TCHECK(parse_type_string("f32", &bs, &bw) == FIELD_TYPE_F32, "parse f32");
-    TCHECK(parse_type_string("float", &bs, &bw) == FIELD_TYPE_F32, "parse float");
+    TCHECK(parse_type_string("float", &bs, &bw) == FIELD_TYPE_UNKNOWN, "float is not a type (CR-2026-037)");
     TCHECK(parse_type_string("f64", &bs, &bw) == FIELD_TYPE_F64, "parse f64");
-    TCHECK(parse_type_string("double", &bs, &bw) == FIELD_TYPE_F64, "parse double");
+    TCHECK(parse_type_string("double", &bs, &bw) == FIELD_TYPE_UNKNOWN, "double is not a type (CR-2026-037)");
     
     TCHECK(parse_type_string("bool", &bs, &bw) == FIELD_TYPE_BOOL, "parse bool");
     TCHECK(parse_type_string("skip", &bs, &bw) == FIELD_TYPE_SKIP, "parse skip");

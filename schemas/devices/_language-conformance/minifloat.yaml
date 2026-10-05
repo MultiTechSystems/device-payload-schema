@@ -1,0 +1,42 @@
+# The MCCI minifloats (PS-417 to PS-421, CR-2026-063).
+#
+# Each is a word decoded by its own formula: uflt16 f/4096 x 2^(e-15) with no implicit
+# bit, sflt16 the same with a sign and an 11-bit fraction, sflt24 an IEEE-like value with
+# a 7-bit exponent and an implicit bit. None is IEEE half precision (PS-421), which is why
+# F800 here is 0.5 and not -32768.
+#
+# 0x8000 is a negative zero and is reported as 0 (PS-418). An sflt24 whose exponent is
+# 127 has no value JSON can carry, and the field is absent (PS-419), asserted by null.
+# The word is read in the field's effective byte order (PS-420): the last uflt16 is
+# little-endian. Every value is exact. The vector cannot round-trip: the negative zero
+# re-encodes as 0000 and the absent field as zeros.
+name: probe_minifloat
+endian: big
+fields:
+- name: u_half
+  type: uflt16
+- name: s_negative_zero
+  type: sflt16
+- name: s_max
+  type: sflt16
+- name: s24_one
+  type: sflt24
+- name: s24_minus_two
+  type: sflt24
+- name: u_little
+  type: uflt16
+  endian: little
+- name: s24_no_value
+  type: sflt24
+test_vectors:
+- name: each_type
+  source: spec-example
+  payload: "F800 8000 7FFF 3F0000 C00000 00F8 7F0000"
+  expected:
+    u_half: 0.5
+    s_negative_zero: 0
+    s_max: 0.99951171875
+    s24_one: 1.0
+    s24_minus_two: -2.0
+    u_little: 0.5
+    s24_no_value: null

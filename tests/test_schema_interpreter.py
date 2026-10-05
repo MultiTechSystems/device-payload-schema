@@ -381,7 +381,7 @@ class TestBytesAndStrings:
     def test_decode_string(self):
         """Test string type decode."""
         schema = {'fields': [
-            {'name': 'name', 'type': 'string', 'length': 5}
+            {'name': 'name', 'type': 'ascii', 'length': 5}
         ]}
         interpreter = SchemaInterpreter(schema)
         
@@ -391,7 +391,7 @@ class TestBytesAndStrings:
     def test_decode_string_with_null(self):
         """Test string strips null padding."""
         schema = {'fields': [
-            {'name': 'name', 'type': 'string', 'length': 8}
+            {'name': 'name', 'type': 'ascii', 'length': 8}
         ]}
         interpreter = SchemaInterpreter(schema)
         
@@ -970,12 +970,12 @@ class TestNewTypes:
         assert result.success
         assert result.data['mac'] == 'deadbeef'
 
-    def test_hex_upper_type(self):
-        """Uppercase is the separate `hex:upper` type, not the default."""
+    def test_hex_upper_is_not_a_type(self):
+        """`hex:upper` is a `bytes` format (PS-079), not a type (CR-2026-037)."""
         schema = {'fields': [{'name': 'mac', 'type': 'hex:upper', 'length': 4}]}
         result = SchemaInterpreter(schema).decode(bytes([0xDE, 0xAD, 0xBE, 0xEF]))
-        assert result.success
-        assert result.data['mac'] == 'DEADBEEF'
+        assert not result.success
+        assert any("unknown type: hex:upper" in e for e in result.errors)
 
     def test_base64_type(self):
         """Test base64 string output."""
@@ -1033,7 +1033,7 @@ class TestDefinitionsAndRef:
         
         result = interpreter.decode(bytes([0x01]))
         assert not result.success
-        assert 'not found' in result.errors[0].lower()
+        assert 'does not resolve' in result.errors[0] and 'PS-348' in result.errors[0]
 
 
 class TestEdgeCases:
@@ -1273,89 +1273,8 @@ class TestOptionBMatchSyntax:
         assert result.data['door_config'] == 512
 
 
-class TestOptionBObjectSyntax:
-    """Tests for Option B object: syntax."""
-
-    def test_object_basic(self):
-        """Test basic object: syntax."""
-        schema = {
-            'endian': 'big',
-            'fields': [
-                {'name': 'header', 'type': 'u8'},
-                {
-                    'object': 'sensor',
-                    'fields': [
-                        {'name': 'temp', 'type': 'u16'},
-                        {'name': 'hum', 'type': 'u8'},
-                    ]
-                },
-            ]
-        }
-        interpreter = SchemaInterpreter(schema)
-
-        result = interpreter.decode(bytes([0x01, 0x00, 0x64, 0x32]))
-        assert result.success
-        assert result.data['header'] == 1
-        assert result.data['sensor']['temp'] == 100
-        assert result.data['sensor']['hum'] == 50
-
-    def test_object_with_var(self):
-        """Test object fields can store variables for later match."""
-        schema = {
-            'endian': 'big',
-            'fields': [
-                {
-                    'object': 'header',
-                    'fields': [
-                        {'name': 'version', 'type': 'u8'},
-                        {'name': 'msg_type', 'type': 'u8', 'var': 'msg_type'},
-                    ]
-                },
-                {
-                    'match': {
-                        'field': '$msg_type',
-                        'cases': {
-                            1: [{'name': 'temp', 'type': 'u16'}],
-                            2: [{'name': 'hum', 'type': 'u8'}],
-                        }
-                    }
-                }
-            ]
-        }
-        interpreter = SchemaInterpreter(schema)
-
-        result = interpreter.decode(bytes([0x01, 0x02, 0x50]))
-        assert result.success
-        assert result.data['header']['version'] == 1
-        assert result.data['header']['msg_type'] == 2
-        assert result.data['hum'] == 80
-
-    def test_nested_objects(self):
-        """Test nested object: inside object:."""
-        schema = {
-            'endian': 'big',
-            'fields': [
-                {
-                    'object': 'outer',
-                    'fields': [
-                        {'name': 'a', 'type': 'u8'},
-                        {
-                            'object': 'inner',
-                            'fields': [
-                                {'name': 'b', 'type': 'u8'},
-                            ]
-                        }
-                    ]
-                }
-            ]
-        }
-        interpreter = SchemaInterpreter(schema)
-
-        result = interpreter.decode(bytes([0x01, 0x02]))
-        assert result.success
-        assert result.data['outer']['a'] == 1
-        assert result.data['outer']['inner']['b'] == 2
-
+# TestOptionBObjectSyntax exercised the `object:` key, withdrawn by CR-2026-074 (PS-466);
+# tests/test_cr_2026_074_075.py holds its rejection and the `type: object` spelling.
 
 class TestOptionBTlvSyntax:
     """Tests for Option B tlv: syntax."""
@@ -2399,75 +2318,8 @@ class TestPhase3TimestampFormatting:
         assert result.data['sample_time'] == '2026-02-16T11:58:00.000Z'
 
 
-class TestPhase3VersionString:
-    """Tests for version_string type.
-    
-    Spec Requirements:
-    - M077-M082: Bitfield string (parts processed in order, prefix prepended)
-    """
-    
-    def test_version_string_decode(self):
-        """Test decoding version_string from 3 bytes."""
-        schema = {
-            'fields': [{
-                'name': 'firmware',
-                'type': 'version_string',
-                'length': 3,
-                'delimiter': '.',
-                'prefix': 'v'
-            }]
-        }
-        interpreter = SchemaInterpreter(schema)
-        result = interpreter.decode(bytes([0x02, 0x03, 0x0A]))
-        assert result.success
-        assert result.data['firmware'] == 'v2.3.10'
-    
-    def test_version_string_no_prefix(self):
-        """Test version_string without prefix."""
-        schema = {
-            'fields': [{
-                'name': 'version',
-                'type': 'version_string',
-                'length': 2,
-                'delimiter': '.'
-            }]
-        }
-        interpreter = SchemaInterpreter(schema)
-        result = interpreter.decode(bytes([0x01, 0x05]))
-        assert result.success
-        assert result.data['version'] == '1.5'
-    
-    def test_version_string_encode(self):
-        """Test encoding version_string back to bytes."""
-        schema = {
-            'fields': [{
-                'name': 'firmware',
-                'type': 'version_string',
-                'length': 3,
-                'delimiter': '.',
-                'prefix': 'v'
-            }]
-        }
-        interpreter = SchemaInterpreter(schema)
-        result = interpreter.encode({'firmware': 'v2.3.10'})
-        assert result.success
-        assert result.payload == bytes([0x02, 0x03, 0x0A])
-    
-    def test_version_string_roundtrip(self):
-        """Test version_string encode/decode roundtrip."""
-        schema = {
-            'fields': [{
-                'name': 'fw',
-                'type': 'version_string',
-                'length': 3,
-                'delimiter': '.',
-                'prefix': 'v'
-            }]
-        }
-        interpreter = SchemaInterpreter(schema)
-        encoded = interpreter.encode({'fw': 'v1.0.255'})
-        decoded = interpreter.decode(encoded.payload)
-        assert decoded.data['fw'] == 'v1.0.255'
+# version_string was removed by CR-2026-058 (PS-401); its rejection is held by
+# tests/test_cr_2026_058_described_constructs.py.
 
 
 class TestPhase3EncodeFormula:
@@ -3494,7 +3346,7 @@ class TestEncodeRoundtripAllTypes:
         assert dec.data['v'] == 'deadbeef'  # PS-281: reported as lowercase hex
 
     def test_string_roundtrip(self):
-        schema = {'fields': [{'name': 'v', 'type': 'string', 'length': 8}]}
+        schema = {'fields': [{'name': 'v', 'type': 'ascii', 'length': 8}]}
         interp = SchemaInterpreter(schema)
         enc = interp.encode({'v': 'hello'})
         dec = interp.decode(enc.payload)
@@ -3623,7 +3475,7 @@ class TestStringType:
 
     def test_string_type(self):
         """M061: String type with length."""
-        schema = {'fields': [{'name': 'msg', 'type': 'string', 'length': 5}]}
+        schema = {'fields': [{'name': 'msg', 'type': 'ascii', 'length': 5}]}
         interp = SchemaInterpreter(schema)
         result = interp.decode(b'Hello')
         assert result.success
@@ -3639,7 +3491,7 @@ class TestStringType:
 
     def test_string_with_null(self):
         """String with null terminator."""
-        schema = {'fields': [{'name': 's', 'type': 'string', 'length': 8}]}
+        schema = {'fields': [{'name': 's', 'type': 'ascii', 'length': 8}]}
         interp = SchemaInterpreter(schema)
         result = interp.decode(b'Hi\x00\x00\x00\x00\x00\x00')
         assert result.success
@@ -4355,10 +4207,11 @@ class TestRepeatType:
         }
         interp = SchemaInterpreter(schema)
         
-        # 5 items but max is 3 - should only get 3
+        # 5 items but max is 3: an error naming the repeat, the limit and the two
+        # bytes left unparsed (PS-396). It was a silent truncation to 3.
         result = interp.decode(bytes([0x01, 0x02, 0x03, 0x04, 0x05]))
-        assert result.success
-        assert len(result.data['items']) == 3
+        assert not result.success
+        assert any("max of 3" in e and "2 byte(s) at offset 3" in e for e in result.errors)
 
     def test_repeat_nested_objects(self):
         """Repeat with complex nested structure."""
@@ -4523,9 +4376,10 @@ class TestEdgeCasesAndSecurity:
         result = interp.decode(bytes([42] * 10000))
         elapsed = time.time() - start
         
-        assert result.success
-        # Default max_iterations=1000 is a safety limit
-        assert len(result.data['items']) == 1000
+        # The default ceiling of 1000 (PS-089) still bounds the work, and exceeding it
+        # is now an error rather than a quiet stop (PS-396).
+        assert not result.success
+        assert any("max of 1000" in e for e in result.errors)
         assert elapsed < 1.0  # Should complete quickly due to limit
 
     # --- Variable Reference Edge Cases ---

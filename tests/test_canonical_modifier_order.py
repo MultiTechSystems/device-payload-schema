@@ -22,6 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 from schema_interpreter import (  # noqa: E402
+    OMITTED,
     CANONICAL_MODIFIER_ORDER,
     SchemaInterpreter,
     apply_canonical_modifiers,
@@ -106,8 +107,10 @@ def test_encode_inverts_the_canonical_order(field_yaml):
     assert encoded.payload == original
 
 
-def test_helper_ignores_zero_divisor():
-    assert apply_canonical_modifiers(10.0, {"div": 0}) == pytest.approx(10.0)
+def test_helper_omits_on_a_zero_divisor():
+    # PS-100 (CR-2026-057): the field is absent. This skipped the division and
+    # reported the undivided value.
+    assert apply_canonical_modifiers(10.0, {"div": 0}) is OMITTED
 
 
 def test_helper_applies_only_the_modifiers_present():

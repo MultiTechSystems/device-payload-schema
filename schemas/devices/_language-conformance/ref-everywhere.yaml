@@ -1,0 +1,56 @@
+# A reference resolves wherever a field list appears (PS-347, CR-2026-045).
+#
+# A definition is a field group with `fields` (PS-345), and a reference substitutes those
+# fields in place (PS-346). Only the top-level field list was resolved in the Python
+# reference, and only the schema's and the ports' own lists in Java; a reference inside a
+# nested group, a counted list or a case was never spliced. Each such list here holds
+# one, and the decode must equal the same fields written inline.
+name: probe_ref_everywhere
+endian: big
+definitions:
+  reading:
+    fields:
+    - name: value
+      type: u8
+  closing:
+    fields:
+    - name: last
+      type: u8
+  pair:
+    fields:
+    - $ref: '#/definitions/reading'
+    - name: scale
+      type: u8
+fields:
+- $ref: '#/definitions/pair'
+- name: nested
+  type: object
+  fields:
+  - $ref: '#/definitions/reading'
+- name: kind
+  type: u8
+  var: kind
+- name: samples
+  type: repeat
+  count: 2
+  fields:
+  - $ref: '#/definitions/reading'
+- match:
+    field: $kind
+    cases:
+      1:
+      - $ref: '#/definitions/closing'
+test_vectors:
+- name: every_list_resolves
+  source: spec-example
+  payload: "0A 02 0B 01 0C 0D 0E"
+  expected:
+    value: 10
+    scale: 2
+    nested:
+      value: 11
+    kind: 1
+    samples:
+    - value: 12
+    - value: 13
+    last: 14
