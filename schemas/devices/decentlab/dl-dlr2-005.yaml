@@ -49,3 +49,12 @@ test_vectors:
       device_id: 12485
       flags: 1
       voltage: 4.234312891960144
+  - name: voltage_exact_zero
+    description: "Words 0000 0080 (2^23, low word first), which the decoder yields as exactly 0 V"
+    source: vendor-codec
+    payload: "02113a0003000000800c6d"
+    expected:
+      protocol_version: 2
+      device_id: 4410
+      voltage: 0
+      battery_voltage: 3.181

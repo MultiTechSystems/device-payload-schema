@@ -113,3 +113,28 @@ test_vectors:
     source: vendor-codec
     expected:
       class_type: "class-c"
+  - name: ch5_type91_time_weight_bit_position
+    description: "Channel 5 type 91, chosen to pin time_weight; expected values from the vendor's own decoder"
+    payload: "055B12010000000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      freq_weight: "C"
+      time_weight: "impulse"
+      la: 0.1
+      laeq: 0
+      lamax: 0
+  - name: ch255_type15_class_type_labels
+    description: "Channel 255 type 15, chosen to pin class_type; expected values from the vendor's own decoder"
+    payload: "FF0F00"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      class_type: "class-a"
+  - name: ch255_type15_class_type_class_b
+    description: "Channel 255 type 15, chosen to pin class_type; expected values from the vendor's own decoder"
+    payload: "FF0F01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      class_type: "class-b"

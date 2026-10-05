@@ -271,3 +271,24 @@ test_vectors:
     source: vendor-codec
     expected:
       device_status: "on"
+  - name: ch255_type254_reset_event_reset
+    description: "Channel 255 type 254, chosen to pin reset_event; expected values from the vendor's own decoder"
+    payload: "FFFE01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      reset_event: "reset"
+  - name: ch255_type11_device_status_on
+    description: "Channel 255 type 11, chosen to pin device_status; expected values from the vendor's own decoder"
+    payload: "FF0B01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      device_status: "on"
+  - name: ch4_type103_temperature_chn2_byte_order
+    description: "Channel 4 type 103, chosen to pin temperature_chn2; expected values from the vendor's own decoder"
+    payload: "04671201"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature_chn2: 27.4

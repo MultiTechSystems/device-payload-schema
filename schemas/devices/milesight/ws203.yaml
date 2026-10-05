@@ -150,3 +150,18 @@ test_vectors:
     source: vendor-codec
     expected:
       humidity: 127.5
+  - name: ch5_type0_occupancy_occupied
+    description: "Channel 5 type 0, chosen to pin occupancy; expected values from the vendor's own decoder"
+    payload: "050001"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      occupancy: "occupied"
+  - name: ch131_type103_temperature_byte_order
+    description: "Channel 131 type 103, chosen to pin temperature, temperature_abnormal; expected values from the vendor's own decoder"
+    payload: "8367001201"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 460.8
+      temperature_abnormal: "abnormal"

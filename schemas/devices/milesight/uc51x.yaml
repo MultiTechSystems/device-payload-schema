@@ -275,3 +275,38 @@ test_vectors:
     source: vendor-codec
     expected:
       pressure_sensor_status: "unknown"
+  - name: ch255_type254_reset_event_reset
+    description: "Channel 255 type 254, chosen to pin reset_event; expected values from the vendor's own decoder"
+    payload: "FFFE01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      reset_event: "reset"
+  - name: ch255_type11_device_status_on
+    description: "Channel 255 type 11, chosen to pin device_status; expected values from the vendor's own decoder"
+    payload: "FF0B01"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      device_status: "on"
+  - name: ch4_type200_valve_1_pulse_byte_order
+    description: "Channel 4 type 200, chosen to pin valve_1_pulse; expected values from the vendor's own decoder"
+    payload: "04C812010000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      valve_1_pulse: 274
+  - name: ch6_type200_valve_2_pulse_byte_order
+    description: "Channel 6 type 200, chosen to pin valve_2_pulse; expected values from the vendor's own decoder"
+    payload: "06C812010000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      valve_2_pulse: 274
+  - name: ch9_type123_pressure_byte_order
+    description: "Channel 9 type 123, chosen to pin pressure; expected values from the vendor's own decoder"
+    payload: "097B1201"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      pressure: 274
