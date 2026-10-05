@@ -1163,6 +1163,15 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   capitalised `FieldType` constants remain only for the compact and binary formats.
 - **`type: object` is the nested-group spelling and the `object:` key is rejected**
   (CR-2026-074, PS-466) - the corpus had 154 of the first and none of the second.
+- **FPort (CR-2026-038/041/042).** A `ports` schema decoded with no FPort is an error in
+  all five and never falls back to `default` (PS-459); `Decode()`/`decode()` without a
+  port on a ports schema used to return `{}` with success in Go, Java and C#. Port keys are
+  1-255 (PS-018). A top-level `fPort` states the port a document is about, is checked, and
+  is never consulted when decoding (PS-335 to PS-338); the library command documents use it.
+- **Byte order is never in a type name** (CR-2026-039, PS-053a): `le_`/`be_` are
+  rejected everywhere; C# and the TS013 generator read them until 0.5.2.
+- **`_meta` is not produced by any implementation**, so CR-2026-043 (`_meta.fPort`) and
+  the `_meta` parts of CR-2026-054 wait for their own change (decided 2026-10-05).
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.

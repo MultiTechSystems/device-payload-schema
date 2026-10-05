@@ -122,8 +122,8 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Device schemas
 
-248 schemas under `schemas/devices/`.
-Mean quality score 70.1% (PLATINUM 33, GOLD 40, SILVER 110, BRONZE 19, REJECTED 46). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+249 schemas under `schemas/devices/`.
+Mean quality score 70.1% (PLATINUM 33, GOLD 40, SILVER 111, BRONZE 19, REJECTED 46). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
@@ -132,7 +132,7 @@ Mean quality score 70.1% (PLATINUM 33, GOLD 40, SILVER 110, BRONZE 19, REJECTED 
 | milesight | 84 | 1091 | PLATINUM 20, GOLD 33, SILVER 22, REJECTED 9 |
 | decentlab | 58 | 153 | PLATINUM 12, GOLD 7, SILVER 3, BRONZE 13, REJECTED 23 |
 | _library-composed | 49 | 57 | SILVER 48, BRONZE 1 |
-| _language-conformance | 37 | 59 | SILVER 28, BRONZE 4, REJECTED 5 |
+| _language-conformance | 38 | 60 | SILVER 29, BRONZE 4, REJECTED 5 |
 | makerfabs | 6 | 0 | REJECTED 6 |
 | mclimate | 3 | 12 | SILVER 1, REJECTED 2 |
 | dnt | 2 | 79 | SILVER 2 |
@@ -159,6 +159,7 @@ Mean quality score 70.1% (PLATINUM 33, GOLD 40, SILVER 110, BRONZE 19, REJECTED 
 | `_language-conformance/enum-description` | 3 | 2 | fields | 71% | SILVER |
 | `_language-conformance/enum-spec-default` | 2 | 1 | fields | 71% | SILVER |
 | `_language-conformance/field-endian` | 3 | 1 | fields | 71% | SILVER |
+| `_language-conformance/float-endian` | 4 | 1 | fields | 71% | SILVER |
 | `_language-conformance/internal-discriminator` | 3 | 2 | fields | 57% | REJECTED |
 | `_language-conformance/literal-types` | 3 | 1 | fields | 69% | BRONZE |
 | `_language-conformance/log-of-non-positive` | 3 | 2 | fields | 36% | REJECTED |
