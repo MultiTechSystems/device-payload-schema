@@ -1170,6 +1170,13 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   is never consulted when decoding (PS-335 to PS-338); the library command documents use it.
 - **Byte order is never in a type name** (CR-2026-039, PS-053a): `le_`/`be_` are
   rejected everywhere; C# and the TS013 generator read them until 0.5.2.
+- **References are spliced before parsing, everywhere** (CR-2026-045): Python
+  `expand_refs`, Go `go/schema/refs.go`, Java `Schema.expandRawRefs`, C#
+  `SchemaParser.ExpandRefs` - one pass over the raw document, so the typed parsers never
+  see a `$ref`. A definition is `{fields: [...]}`; the library was migrated to that shape,
+  and `use:` is withdrawn. The generator, validator and C harness call `expand_refs`.
+- **`string` is only a literal** (CR-2026-051, PS-361): text read from the payload is
+  `ascii`. `value` on a byte-reading field is the constant the encoder writes (PS-360).
 - **`_meta` is not produced by any implementation**, so CR-2026-043 (`_meta.fPort`) and
   the `_meta` parts of CR-2026-054 wait for their own change (decided 2026-10-05).
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
