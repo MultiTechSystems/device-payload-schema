@@ -3,15 +3,35 @@
   "min_score_new": 0.8,
   "include_library_composed": false,
   "distribution": {
-    "100%": 145,
+    "100%": 148,
     "95-99%": 5,
     "90-94%": 1,
-    "80-89%": 3,
+    "80-89%": 4,
     "70-79%": 1,
     "<70%": 1,
-    "unscored": 2
+    "unscored": 5
   },
   "schemas": {
+    "_language-conformance/bit-range-order.yaml": {
+      "score": 0.875,
+      "killed": 7,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 13,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/bitfield-string-hex-case.yaml": {
+      "score": null,
+      "killed": 0,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 1,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "_language-conformance/bitfield-string.yaml": {
       "score": null,
       "killed": 0,
@@ -52,6 +72,16 @@
       "provenance": "generated-only",
       "failing_original": 0
     },
+    "_language-conformance/encoding.yaml": {
+      "score": 1.0,
+      "killed": 12,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 14,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "_language-conformance/enum-description.yaml": {
       "score": 1.0,
       "killed": 3,
@@ -80,6 +110,16 @@
       "generated": 17,
       "vectors": 1,
       "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/float-endian.yaml": {
+      "score": 1.0,
+      "killed": 8,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 11,
+      "vectors": 1,
+      "provenance": "independent",
       "failing_original": 0
     },
     "_language-conformance/internal-discriminator.yaml": {
@@ -202,6 +242,16 @@
       "provenance": "unsourced",
       "failing_original": 0
     },
+    "_language-conformance/minifloat.yaml": {
+      "score": null,
+      "killed": 0,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 6,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "_language-conformance/name-from-var.yaml": {
       "score": 1.0,
       "killed": 4,
@@ -220,6 +270,16 @@
       "generated": 7,
       "vectors": 1,
       "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/ref-everywhere.yaml": {
+      "score": 1.0,
+      "killed": 9,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 18,
+      "vectors": 1,
+      "provenance": "independent",
       "failing_original": 0
     },
     "_language-conformance/ref-header.yaml": {
@@ -379,6 +439,16 @@
       "unreached": 0,
       "generated": 17,
       "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/word-ordered.yaml": {
+      "score": null,
+      "killed": 0,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 3,
+      "vectors": 1,
       "provenance": "independent",
       "failing_original": 0
     },

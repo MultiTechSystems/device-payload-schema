@@ -25,7 +25,7 @@ public class Schema {
      * {@code bits<3,2>}, {@code bits:2@3} and {@code u8:2} were withdrawn, so there is
      * nothing left for this binding to be missing.
      */
-    private static final Pattern BIT_RANGE = Pattern.compile("u(\\d+)\\[(\\d+):(\\d+)\\]");
+    private static final Pattern BIT_RANGE = Pattern.compile("([us])(\\d+)\\[(\\d+):(\\d+)\\]");
 
     private String name;
     private int version;
@@ -79,6 +79,8 @@ public class Schema {
 
     @SuppressWarnings("unchecked")
     private static Schema parseRaw(Map<String, Object> raw) {
+        // CR-2026-045: splice every $ref first, rejecting what cannot be (PS-345 to PS-349).
+        raw = expandRawRefs(raw);
         Schema schema = new Schema();
         
         schema.name = (String) raw.getOrDefault("name", "unnamed");
@@ -86,12 +88,12 @@ public class Schema {
         schema.description = (String) raw.get("description");
         schema.endian = (String) raw.getOrDefault("endian", "big");
         schema.direction = (String) raw.get("direction");
+        checkPortDeclarations(raw);
         
         // Parse fields, splicing any `$ref` into the list first.
         Object fieldsRaw = raw.get("fields");
         if (fieldsRaw instanceof List) {
-            schema.fields = parseFields(
-                    expandRefs((List<Map<String, Object>>) fieldsRaw, raw, 0));
+            schema.fields = parseFields((List<Map<String, Object>>) fieldsRaw);
         }
         
         // No `header:` block. It was never in the specification, and honouring it
@@ -126,10 +128,7 @@ public class Schema {
 
         Object fieldsRaw = raw.get("fields");
         if (fieldsRaw instanceof List) {
-            // A port's field list may carry a `$ref` too - `definitions` are
-            // schema-level, so they resolve against the document root.
-            pd.setFields(parseFields(
-                    expandRefs((List<Map<String, Object>>) fieldsRaw, root, 0)));
+            pd.setFields(parseFields((List<Map<String, Object>>) fieldsRaw));
         }
 
         return pd;
@@ -156,6 +155,8 @@ public class Schema {
             }
             checkBytesFormat(fm);
             if (fm.containsKey("byte_group")) checkByteGroupOverlap(fm.get("byte_group"));
+            checkLiteral(fm);
+            checkWave4(fm);
             // PS-399: exactly one discriminator source. With both, `field` won and the
             // `length` byte was left unread, misaligning every later field.
             if (fm.get("match") instanceof Map<?, ?> match
@@ -168,56 +169,86 @@ public class Schema {
         return fields;
     }
 
+    private static final String REF_PREFIX = "#/definitions/";
+
     /**
-     * Splice `$ref: '#/definitions/name'` entries into the field list they appear in.
-     *
-     * <p>Resolved at parse time, and the referenced definition's {@code fields:} are
-     * spliced rather than nested: a nested container with no {@code type: object} is
-     * never descended into, so every field inside it would report as missing.
-     *
-     * <p>Only local {@code #/definitions/...} references resolve here, matching the
-     * other implementations. Cross-file references are a pre-step
-     * (tools/schema_preprocessor.py) so the interpreters need no loader.
-     *
-     * <p>This binding had no {@code $ref} support at all until the `header:` block was
-     * removed and a conformance fixture pointed the replacement at it.
+     * CR-2026-045: splice every {@code {$ref: '#/definitions/<name>'}} into the field list
+     * it sits in, before anything is parsed, so a reference works in any field list - a
+     * port entry, an object, a repeat, a case (PS-346, PS-347). This resolved only the
+     * schema's and the ports' own lists, and an unresolvable reference was kept and
+     * produced nothing. Rejected at load: a definition that is not a field group
+     * (PS-345), a reference that does not resolve (PS-348) or names another document
+     * (PS-462, optional and not supported here), a pointer of another form (PS-461), a
+     * cycle (PS-349). Mirrors expand_refs in tools/schema_interpreter.py.
      */
     @SuppressWarnings("unchecked")
-    private static List<Map<String, Object>> expandRefs(
-            List<Map<String, Object>> fieldsRaw, Map<String, Object> root, int depth) {
-        if (fieldsRaw == null) return null;
-        List<Map<String, Object>> out = new ArrayList<>();
-        // Guard against a definition that refers to itself, directly or in a cycle.
-        if (depth > 16) return fieldsRaw;
-
-        for (Map<String, Object> fm : fieldsRaw) {
-            Object refRaw = fm.get("$ref");
-            if (!(refRaw instanceof String ref)) {
-                out.add(fm);
-                continue;
+    private static Map<String, Object> expandRawRefs(Map<String, Object> raw) {
+        Object defsRaw = raw.get("definitions");
+        if (defsRaw != null && !(defsRaw instanceof Map)) {
+            throw new SchemaException("'definitions' must map names to field groups (PS-345)");
+        }
+        Map<String, Object> definitions = defsRaw == null ? Map.of() : (Map<String, Object>) defsRaw;
+        for (Map.Entry<String, Object> e : definitions.entrySet()) {
+            if (!(e.getValue() instanceof Map<?, ?> group) || !(group.get("fields") instanceof List)) {
+                throw new SchemaException("definition '" + e.getKey()
+                        + "' is not a field group with a `fields` array (PS-345)");
             }
-            List<Map<String, Object>> target = definitionFields(ref, root);
-            if (target == null) {
-                // Unresolvable: keep the entry so the field simply produces nothing,
-                // rather than dropping it and shifting every later offset.
-                out.add(fm);
-                continue;
-            }
-            out.addAll(expandRefs(target, root, depth + 1));
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> e : raw.entrySet()) {
+            boolean carried = e.getKey().equals("definitions") || e.getKey().equals("test_vectors");
+            out.put(e.getKey(), carried ? e.getValue() : expandNode(e.getValue(), definitions, new ArrayList<>()));
+        }
+        for (Map.Entry<String, Object> e : definitions.entrySet()) {
+            List<String> stack = new ArrayList<>(List.of(e.getKey()));
+            expandNode(((Map<String, Object>) e.getValue()).get("fields"), definitions, stack);
         }
         return out;
     }
 
     @SuppressWarnings("unchecked")
-    private static List<Map<String, Object>> definitionFields(String ref, Map<String, Object> root) {
-        String prefix = "#/definitions/";
-        if (!ref.startsWith(prefix)) return null;
-        Object defsRaw = root.get("definitions");
-        if (!(defsRaw instanceof Map)) return null;
-        Object def = ((Map<String, Object>) defsRaw).get(ref.substring(prefix.length()));
-        if (!(def instanceof Map)) return null;
-        Object fields = ((Map<String, Object>) def).get("fields");
-        return fields instanceof List ? (List<Map<String, Object>>) fields : null;
+    private static Object expandNode(Object node, Map<String, Object> definitions, List<String> stack) {
+        if (node instanceof Map<?, ?> map) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                out.put(String.valueOf(e.getKey()), expandNode(e.getValue(), definitions, stack));
+            }
+            return out;
+        }
+        if (node instanceof List<?> list) {
+            List<Object> out = new ArrayList<>();
+            for (Object item : list) {
+                if (item instanceof Map<?, ?> m && m.containsKey("$ref")) {
+                    out.addAll(resolveRef(m.get("$ref"), definitions, stack));
+                } else {
+                    out.add(expandNode(item, definitions, stack));
+                }
+            }
+            return out;
+        }
+        return node;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Object> resolveRef(Object ref, Map<String, Object> definitions, List<String> stack) {
+        if (!(ref instanceof String text) || !text.startsWith(REF_PREFIX)) {
+            if (ref instanceof String text && text.contains("#") && !text.startsWith("#")) {
+                throw new SchemaException("$ref " + text + " names another document; this implementation "
+                        + "resolves only #/definitions/<name> (PS-462)");
+            }
+            throw new SchemaException("$ref " + ref + " is not of the form #/definitions/<name> (PS-461)");
+        }
+        String name = text.substring(REF_PREFIX.length());
+        if (stack.contains(name)) {
+            throw new SchemaException("$ref cycle: " + String.join(" -> ", stack) + " -> " + name + " (PS-349)");
+        }
+        Object group = definitions.get(name);
+        if (!(group instanceof Map<?, ?> g) || !(g.get("fields") instanceof List<?> fields)) {
+            throw new SchemaException("$ref " + text + " does not resolve to a field group (PS-348)");
+        }
+        List<String> deeper = new ArrayList<>(stack);
+        deeper.add(name);
+        return (List<Object>) expandNode(fields, definitions, deeper);
     }
 
     /**
@@ -247,9 +278,9 @@ public class Schema {
         int width, start, end;
         Matcher m = BIT_RANGE.matcher(type == null ? "" : type.toString());
         if (m.matches()) {
-            width = Integer.parseInt(m.group(1));
-            start = Integer.parseInt(m.group(2));
-            end = Integer.parseInt(m.group(3));
+            width = Integer.parseInt(m.group(2));
+            start = Integer.parseInt(m.group(3));
+            end = Integer.parseInt(m.group(4));
         } else if ("bool".equals(type)) {
             width = 8;
             start = toInt(member.get("bit"), 0);
@@ -284,6 +315,46 @@ public class Schema {
         }
     }
 
+    /**
+     * PS-018: a port key is 1 to 255 (CR-2026-041). PS-335, PS-337: a top-level fPort is
+     * such a port, and beside `ports` every key equals it (CR-2026-042). The top-level key
+     * selects nothing (PS-336) and is not read again.
+     */
+    private static void checkPortDeclarations(Map<String, Object> raw) {
+        Map<?, ?> ports = raw.get("ports") instanceof Map<?, ?> m ? m : Map.of();
+        for (Object key : ports.keySet()) {
+            String k = String.valueOf(key);
+            if (k.equals("default")) continue;
+            int n;
+            try { n = Integer.parseInt(k); } catch (NumberFormatException e) { n = -1; }
+            if (n < 1 || n > 255) {
+                throw new SchemaException("ports." + k
+                        + ": a port key must be an integer from 1 to 255 or default (PS-018)");
+            }
+        }
+        String name = raw.containsKey("fPort") ? "fPort" : "fport";
+        if (!raw.containsKey(name)) return;
+        Object declared = raw.get(name);
+        if (!(declared instanceof Integer port) || port < 1 || port > 255) {
+            throw new SchemaException("top-level " + name
+                    + " must be an integer from 1 to 255, got " + declared + " (PS-335)");
+        }
+        for (Object key : ports.keySet()) {
+            if (!String.valueOf(key).equals(String.valueOf(port))) {
+                throw new SchemaException("top-level " + name + " is " + port + " but ports also declares "
+                        + key + "; every ports key must equal it (PS-337)");
+            }
+        }
+    }
+
+    /** Bits of a base value, sign-extended from the range's width for an sN base (PS-353). */
+    static long extractRange(long base, boolean signed, int start, int bits) {
+        long mask = bits >= 64 ? -1L : (1L << bits) - 1;
+        long value = (base >>> start) & mask;
+        if (signed && bits < 64 && value >= (1L << (bits - 1))) value -= 1L << bits;
+        return value;
+    }
+
     /** The values of a quoted list case key, "[1, 2, 0x10]" (PS-398), or null. */
     static List<Long> parseListCaseKey(String text) {
         text = text.trim();
@@ -300,6 +371,103 @@ public class Schema {
             }
         }
         return values;
+    }
+
+    /** The bytes one element always takes, or 0 where it varies (PS-344a). */
+    private static int fixedElementSize(List<Field> fields) {
+        int total = 0;
+        for (Field f : fields) {
+            FieldType t = f.getType();
+            if (t == FieldType.NUMBER || (t == FieldType.STRING && f.getValue() != null)) continue;
+            if (t == FieldType.BITS || t == FieldType.BOOL) { total += f.getConsume(); continue; }
+            if (t == FieldType.BYTES || t == FieldType.ASCII || t == FieldType.HEX
+                    || t == FieldType.BASE64 || t == FieldType.SKIP) {
+                if (f.getLength() <= 0) return 0;
+                total += f.getLength();
+                continue;
+            }
+            if (t.isInteger() || t.isFloat() || t == FieldType.UDEC || t == FieldType.SDEC) {
+                total += t == FieldType.UDEC || t == FieldType.SDEC ? 1
+                        : t.isFloat() ? (t == FieldType.F16 ? 2 : t == FieldType.F32 ? 4 : 8)
+                        : t.defaultLength();
+                continue;
+            }
+            return 0;
+        }
+        return total;
+    }
+
+    /** The PS-344 error: the repeat, reported as a ragged tail. */
+    private static SchemaException.DecodeException raggedTailError(Field field, int remaining,
+            int elementSize, int offset) {
+        String need = elementSize > 0 ? ", fewer than the " + elementSize + " an element takes" : "";
+        return new SchemaException.DecodeException("repeat '" + field.getName() + "' ends in a ragged tail: "
+                + remaining + " byte(s) at offset " + offset + need + " (PS-343)");
+    }
+
+    private static final List<String> UNSIGNED_TYPES = List.of("u8", "u16", "u24", "u32", "u64",
+            "uint8", "uint16", "uint24", "uint32", "uint64");
+
+    /**
+     * PS-426: match_value is withdrawn. PS-422: `encoding` is a named code on a uN.
+     * PS-430: a bitfield_string part is decimal, hex or hex:upper. PS-364: a byte_group
+     * member declares no endian.
+     */
+    @SuppressWarnings("unchecked")
+    private static void checkWave4(Map<String, Object> fm) {
+        String at = "Field '" + fm.get("name") + "': ";
+        if (fm.containsKey("match_value")) {
+            throw new SchemaException(at + "match_value is withdrawn; write a signed type (sN), a "
+                    + "signed bit range (sN[start:end]), encoding, match or guard instead (PS-426)");
+        }
+        if (fm.containsKey("encoding")) {
+            Object encoding = fm.get("encoding");
+            if (!List.of("sign_magnitude", "bcd", "gray").contains(encoding)) {
+                throw new SchemaException(at + "encoding " + encoding
+                        + " is not one of sign_magnitude, bcd, gray (PS-422)");
+            }
+            if (!UNSIGNED_TYPES.contains(fm.get("type"))) {
+                throw new SchemaException(at + "encoding applies only to an unsigned integer type uN, not "
+                        + fm.get("type") + " (PS-422)");
+            }
+        }
+        if ("bitfield_string".equals(fm.get("type")) && fm.get("parts") instanceof List<?> parts) {
+            for (Object raw : parts) {
+                if (raw instanceof List<?> part && part.size() > 2
+                        && !List.of("decimal", "hex", "hex:upper").contains(part.get(2))) {
+                    throw new SchemaException(at + "bitfield_string part format " + part.get(2)
+                            + " is not one of decimal, hex, hex:upper (PS-430)");
+                }
+            }
+        }
+        Object group = fm.get("byte_group");
+        List<?> members = group instanceof List<?> l ? l
+                : group instanceof Map<?, ?> m && m.get("fields") instanceof List<?> fl ? fl : List.of();
+        for (Object member : members) {
+            if (member instanceof Map<?, ?> mm && mm.containsKey("endian")) {
+                throw new SchemaException("byte_group member '" + mm.get("name")
+                        + "' declares endian; the group's byte order is declared on the group (PS-364)");
+            }
+        }
+    }
+
+    /** PS-358: a literal's value matches its type, and it carries no arithmetic. */
+    private static void checkLiteral(Map<String, Object> fm) {
+        Object type = fm.get("type");
+        if (!fm.containsKey("value") || !("string".equals(type) || "number".equals(type))) return;
+        Object value = fm.get("value");
+        String at = "Field '" + fm.get("name") + "': ";
+        if ("string".equals(type) && !(value instanceof String)) {
+            throw new SchemaException(at + "a string literal's value must be a string (PS-358)");
+        }
+        if ("number".equals(type) && !(value instanceof Number)) {
+            throw new SchemaException(at + "a number literal's value must be a number (PS-358)");
+        }
+        for (String key : List.of("ref", "polynomial", "compute", "lookup", "transform", "mult", "div", "add")) {
+            if (fm.containsKey(key)) {
+                throw new SchemaException(at + "a literal must not declare " + key + " (PS-358)");
+            }
+        }
     }
 
     /** The PS-396 error: the repeat, its limit and the payload left unparsed. */
@@ -395,13 +563,14 @@ public class Schema {
         // and width are applied here rather than above so they override any explicit
         // `bit_offset:`/`bits:` keys parsed in between.
         if (isBitRange) {
-            int start = Integer.parseInt(bitRange.group(2));
-            int end = Integer.parseInt(bitRange.group(3));
+            int start = Integer.parseInt(bitRange.group(3));
+            int end = Integer.parseInt(bitRange.group(4));
+            f.setSignedBits("s".equals(bitRange.group(1)));
             f.setBitOffset(start);
             f.setBits(end - start + 1);
             // The base width is part of the type: u24[4:23] takes bits 4-23 of a
             // 24-bit big-endian value, so all three bytes are read before masking.
-            f.setBitBaseBytes(Math.max(1, Integer.parseInt(bitRange.group(1)) / 8));
+            f.setBitBaseBytes(Math.max(1, Integer.parseInt(bitRange.group(2)) / 8));
             f.setType(FieldType.BITS);
         }
         
@@ -624,6 +793,8 @@ public class Schema {
             f.setParts(parts);
         }
         
+        if (fm.get("encoding") instanceof String encoding) f.setEncoding(encoding);
+
         // byte_group: fields packed into shared bytes. Written either as a list of
         // fields with a sibling `size`, or as {size: N, fields: [...]}.
         Object byteGroupRaw = fm.get("byte_group");
@@ -632,6 +803,7 @@ public class Schema {
                 f.setByteGroup(parseFields((List<Map<String, Object>>) groupFields));
             }
             f.setByteGroupSize(toInt(groupMap.get("size"), 1));
+            if (groupMap.get("endian") instanceof String groupEndian) f.setGroupEndian(groupEndian);
         } else if (byteGroupRaw instanceof List<?> groupFields) {
             f.setByteGroup(parseFields((List<Map<String, Object>>) groupFields));
             f.setByteGroupSize(toInt(fm.get("size"), 1));
@@ -718,6 +890,12 @@ public class Schema {
 
     // Decode methods
     public Map<String, Object> decode(byte[] data) {
+        // PS-459, PS-460: a ports schema decoded with no FPort selects nothing. This
+        // decoded the empty top-level field list and returned {} with success.
+        if (ports != null && !ports.isEmpty()) {
+            throw new SchemaException.DecodeException("no FPort was supplied, and schema '"
+                    + name + "' selects its fields by port (PS-459)");
+        }
         DecodeContext ctx = new DecodeContext(data, endian);
         Map<String, Object> result = new LinkedHashMap<>();
 
@@ -991,20 +1169,25 @@ public class Schema {
             // The type fixes both orders, so fieldEndian is deliberately not consulted
             // (PS-272): honouring it would make u32le16 with endian little a second
             // spelling of little-endian u32.
-            case U32LE16, S32LE16 -> {
-                byte[] data = ctx.read(4);
-                long low = ((data[0] & 0xFFL) << 8) | (data[1] & 0xFFL);
-                long high = ((data[2] & 0xFFL) << 8) | (data[3] & 0xFFL);
-                long combined = low | (high << 16);
-                value = field.getType() == FieldType.S32LE16 && combined >= 0x80000000L
-                        ? combined - 0x100000000L
-                        : combined;
+            case U32LE16, S32LE16, F32LE16, U32BE16LE, S32BE16LE, F32BE16LE -> {
+                value = Wave4.readWordOrdered(field.getType(), ctx.read(4));
+            }
+
+            case UFLT16, SFLT16, SFLT24 -> {
+                // The MCCI minifloats (CR-2026-063): a word in the field's byte order.
+                byte[] data = ctx.read(Wave4.minifloatSize(field.getType()));
+                Double decoded = Wave4.decodeMinifloat(field.getType(), ctx.decodeUnsigned(data, fieldEndian));
+                if (decoded == null) return OMITTED;     // no value JSON can carry (PS-419)
+                value = decoded;
             }
 
             case U8, U16, U24, U32, U64, BYTE, UINT -> {
                 byte[] data = ctx.read(length);
                 long raw = ctx.decodeUnsigned(data, fieldEndian);
-                if (length >= 8 && raw < 0) {
+                if (field.getEncoding() != null) {
+                    // Applied to the integer read, before the modifiers (PS-422).
+                    value = Wave4.decodeEncoding(raw, field.getEncoding(), length, field.getName());
+                } else if (length >= 8 && raw < 0) {
                     // A u64 at or above 2^63 does not fit a Java long: the bit pattern
                     // reads as a negative number, and this decoder reported -1 for
                     // 18446744073709551615. PS-295 forbids a sign-changed value and
@@ -1066,13 +1249,11 @@ public class Schema {
                 // byte zero alone and reported a value with no error.
                 int baseBytes = Math.max(1, field.getBitBaseBytes());
                 byte[] data = ctx.peek(baseBytes, field.getByteOffset());
-                long base = 0;
-                for (byte b : data) {
-                    base = (base << 8) | (b & 0xFF);
-                }
+                // PS-059 (CR-2026-052): assembled in the field's effective byte order,
+                // which was big-endian whatever the schema said.
+                long base = ctx.decodeUnsigned(data, fieldEndian);
                 int numBits = field.getBits() > 0 ? field.getBits() : 1;
-                long mask = numBits >= 64 ? -1L : (1L << numBits) - 1;
-                value = (base >>> field.getBitOffset()) & mask;
+                value = extractRange(base, field.isSignedBits(), field.getBitOffset(), numBits);
                 // An explicit range does not advance the cursor by itself: several
                 // fields share one byte and the last of them declares `consume`.
                 if (field.getConsume() > 0) {
@@ -1118,6 +1299,14 @@ public class Schema {
             }
             
             case STRING -> {
+                // A literal reads no bytes (PS-357), and `string` is only ever a literal: a
+                // string read from the payload is `ascii` (PS-361). A string with no value
+                // reported null.
+                if (field.getValue() == null) {
+                    throw new SchemaException.DecodeException("field '" + field.getName()
+                            + "': type string declares no value; a string read from the payload "
+                            + "is type ascii (PS-361)");
+                }
                 value = field.getValue();
             }
             
@@ -1171,6 +1360,15 @@ public class Schema {
             default -> throw new SchemaException.DecodeException("Unknown field type: " + field.getType());
         }
         
+        return applyGroupMember(value, field, ctx);
+    }
+
+    /**
+     * What happens to a value once it is read: formula or modifiers, lookup, and the
+     * field's variable. Split out so a byte_group member, whose value comes from the
+     * group's assembled bytes (PS-364), runs the same pipeline.
+     */
+    private Object applyGroupMember(Object value, Field field, DecodeContext ctx) {
         // Apply formula if present (takes precedence). A computed field has already
         // had its own arithmetic applied by decodeComputed, in the order the
         // interpreter uses: polynomial, then modifiers, then transform. Running the
@@ -1699,8 +1897,22 @@ public class Schema {
             }
         } else if ("end".equals(field.getUntil())) {
             int iterations = 0;
+            // PS-343 to PS-344a: a tail too short for a whole element is an error naming
+            // the repeat as a ragged tail, tested before the element begins where its
+            // size is fixed. This began the element and failed part-way with the
+            // underflow of whichever member ran out.
+            int elementSize = fixedElementSize(field.getFields());
             while (ctx.remaining() > 0 && iterations < maxIterations) {
-                result.add(decodeFields(field.getFields(), ctx));
+                int start = ctx.getOffset();
+                if (elementSize > 0 && ctx.remaining() < elementSize) {
+                    throw raggedTailError(field, ctx.remaining(), elementSize, start);
+                }
+                try {
+                    result.add(decodeFields(field.getFields(), ctx));
+                } catch (SchemaException.DecodeException e) {
+                    if (e.getMessage() == null || !e.getMessage().contains("Buffer underflow")) throw e;
+                    throw raggedTailError(field, ctx.getData().length - start, 0, start);
+                }
                 iterations++;
             }
             if (iterations >= maxIterations && ctx.remaining() > 0) {
@@ -1735,10 +1947,12 @@ public class Schema {
                 long mask = (1L << bitLen) - 1;
                 long raw = (intVal >> bitOff) & mask;
                 
+                // PS-430: hex lower case, hex:upper upper case; any other format is
+                // refused when the schema is loaded.
                 if ("hex".equals(format)) {
-                    // Lowercase (PS-074), matching the vendor codecs and the
-                    // generated JS.
                     partStrs.add(Long.toHexString(raw));
+                } else if ("hex:upper".equals(format)) {
+                    partStrs.add(Long.toHexString(raw).toUpperCase());
                 } else {
                     partStrs.add(String.valueOf(raw));
                 }
@@ -1807,13 +2021,28 @@ public class Schema {
     private Map<String, Object> decodeByteGroup(Field group, DecodeContext ctx) {
         Map<String, Object> result = new LinkedHashMap<>();
         int start = ctx.getOffset();
+        // PS-364: the group's bytes are one value in its effective byte order, and a
+        // member's bit positions refer to that value. Each member read its own base from
+        // the group's start, big-endian, which agrees only for a big-endian group whose
+        // members are as wide as it is.
+        String endian = group.getGroupEndian() != null ? group.getGroupEndian() : this.endian;
+        long groupValue = ctx.decodeUnsigned(ctx.peek(group.getByteGroupSize(), 0), endian);
 
         for (Field member : group.getByteGroup()) {
             ctx.setOffset(start);
             String name = member.getName();
             if (name == null || name.isEmpty()) continue;
             try {
-                Object value = decodeField(member, ctx);
+                Object value;
+                if (member.getType() == FieldType.BITS) {
+                    value = applyGroupMember(extractRange(groupValue, member.isSignedBits(),
+                            member.getBitOffset(), member.getBits()), member, ctx);
+                } else if (member.getType() == FieldType.BOOL) {
+                    int bit = Math.max(0, member.getBoolBit());
+                    value = ((groupValue >>> bit) & 1) == 1;
+                } else {
+                    value = decodeField(member, ctx);
+                }
                 if (value == OMITTED || value == null) continue;
                 ctx.setVariable(name, value);
                 if (!name.startsWith("_")) {

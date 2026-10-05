@@ -1,0 +1,31 @@
+# The word-ordered 32-bit types: two 16-bit units in an order the type fixes, which no
+# `endian` setting varies (PS-272).
+#
+# `f32le16` (PS-362, CR-2026-046) is `u32le16`'s layout read as an IEEE 754 binary32:
+# the low unit first, each unit big-endian. The fourth ordering (PS-363, CR-2026-047),
+# `u32be16le`/`s32be16le`/`f32be16le`, is the high unit first with each unit
+# little-endian. 0x4048F5C3 is 3.14 as a binary32; written low unit first it is
+# F5C3 4048, and high unit first with the bytes of each unit swapped it is 4840 C3F5.
+#
+# The schema is little-endian on purpose: a type that consulted `endian` would read
+# every field here differently.
+name: probe_word_ordered
+endian: little
+fields:
+- name: f_le16
+  type: f32le16
+- name: f_be16le
+  type: f32be16le
+- name: u_be16le
+  type: u32be16le
+- name: s_be16le
+  type: s32be16le
+test_vectors:
+- name: each_type_once
+  source: spec-example
+  payload: "F5C34048 4840C3F5 34127856 FFFFFEFF"
+  expected:
+    f_le16: 3.14
+    f_be16le: 3.14
+    u_be16le: 305419896
+    s_be16le: -2

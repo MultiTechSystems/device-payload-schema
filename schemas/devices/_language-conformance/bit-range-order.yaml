@@ -1,0 +1,51 @@
+# Bit ranges: their base read in the field's effective byte order, and signed bases.
+#
+# PS-059 (CR-2026-052): a range's base is assembled from N/8 bytes in the field's
+# effective byte order. Python, Go, Java and C# read it big-endian whatever the schema or
+# field said, while the generated codec used the schema's order - so a 16-bit range under
+# little-endian disagreed between the two paths. A byte_group declares its byte order on
+# the group, and its members' bits refer to the group's value (PS-364).
+#
+# PS-352, PS-353 (CR-2026-049): `sN[start:end]` is two's complement over the range's own
+# width, not the base's - F at bits 12..15 is -1, not 15.
+#
+# 34 F2 read least significant byte first is 0xF234: bits 0..11 are 0x234 = 564 and bits
+# 12..15 are 0xF = -1. 0F's low nibble is -1. The group reads 34 F2 the same way: its low
+# byte 0x34 is 52 and its high byte 0xF2 is -14. The last range is big-endian, the
+# schema's order: 02 30 is 0x0230, bits 4..11 are 0x23 = 35. Its other bits are zero so
+# the vector round-trips: bits no member describes are written as zero.
+name: probe_bit_range_order
+endian: big
+fields:
+- name: low12
+  type: u16[0:11]
+  endian: little
+- name: top4
+  type: s16[12:15]
+  endian: little
+  consume: 2
+- name: nibble
+  type: s8[0:3]
+  consume: 1
+- byte_group:
+    size: 2
+    endian: little
+    fields:
+    - name: group_low
+      type: u16[0:7]
+    - name: group_high
+      type: s16[8:15]
+- name: middle
+  type: u16[4:11]
+  consume: 2
+test_vectors:
+- name: each_order_and_sign
+  source: spec-example
+  payload: "34F2 0F 34F2 0230"
+  expected:
+    low12: 564
+    top4: -1
+    nibble: -1
+    group_low: 52
+    group_high: -14
+    middle: 35

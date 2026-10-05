@@ -44,6 +44,7 @@ sys.path.insert(0, str(REPO_ROOT / "tools"))
 import yaml  # noqa: E402
 
 from validate_schema import expected_fields_match, is_encode_vector  # noqa: E402
+from schema_interpreter import expand_refs  # noqa: E402
 
 CORPUS = REPO_ROOT / "schemas" / "devices"
 
@@ -73,7 +74,6 @@ UNREACHABLE_KEYS = {
     "match": "no inline match support in this harness",
     "byte_group": "no byte_group support in this harness",
     "object": "no nested object support in this harness",
-    "$ref": "no $ref splicing in this harness",
     "name_from": "no name template in C (fixed-size name buffers)",
     # These say "the interpreter has none" rather than "not built by the struct API",
     # which was the wording here and read as a limit on this harness. It is not: the
@@ -567,6 +567,11 @@ def run():
         except yaml.YAMLError:
             continue
         if not isinstance(schema, dict) or not schema.get("test_vectors"):
+            continue
+        # References are spliced here, as every other implementation splices them before
+        # parsing (CR-2026-045); the struct API has no `$ref`, and needs none.
+        schema, ref_errors = expand_refs(schema)
+        if ref_errors:
             continue
         vectors = [v for v in schema["test_vectors"]
                    if v.get("payload") and not is_encode_vector(v)]

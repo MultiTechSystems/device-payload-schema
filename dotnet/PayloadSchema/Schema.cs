@@ -10,6 +10,10 @@ public enum FieldType
     // Two 16-bit big-endian units, least significant unit first (PS-271); not
     // expressible as U32 under either endianness.
     U32LE16, S32LE16,
+    // The word-ordered float (PS-362) and the fourth ordering (PS-363).
+    F32LE16, U32BE16LE, S32BE16LE, F32BE16LE,
+    // The MCCI minifloats (PS-417 to PS-419).
+    UFlt16, SFlt16, SFlt24,
     S8, S16, S24, S32, S64,
     F16, F32, F64,
     // Nibble-decimal (PS-329)
@@ -112,6 +116,12 @@ public class SchemaField
 {
     public string Name { get; set; } = "";
     public FieldType Type { get; set; }
+    /// <summary>An sN[start:end] range: sign-extended from the range's width (PS-352, PS-353).</summary>
+    public bool SignedBits { get; set; }
+    /// <summary>A byte_group's own byte order (PS-364), null for the context's.</summary>
+    public string? GroupEndian { get; set; }
+    /// <summary>A named code on an unsigned integer (PS-422).</summary>
+    public string? Encoding { get; set; }
     /// <summary>A computed field written `type: integer` (PS-283); its Type is Number.</summary>
     public bool IntegerResult { get; set; }
     public string RawType { get; set; } = "";

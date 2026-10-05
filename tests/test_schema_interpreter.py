@@ -381,7 +381,7 @@ class TestBytesAndStrings:
     def test_decode_string(self):
         """Test string type decode."""
         schema = {'fields': [
-            {'name': 'name', 'type': 'string', 'length': 5}
+            {'name': 'name', 'type': 'ascii', 'length': 5}
         ]}
         interpreter = SchemaInterpreter(schema)
         
@@ -391,7 +391,7 @@ class TestBytesAndStrings:
     def test_decode_string_with_null(self):
         """Test string strips null padding."""
         schema = {'fields': [
-            {'name': 'name', 'type': 'string', 'length': 8}
+            {'name': 'name', 'type': 'ascii', 'length': 8}
         ]}
         interpreter = SchemaInterpreter(schema)
         
@@ -1033,7 +1033,7 @@ class TestDefinitionsAndRef:
         
         result = interpreter.decode(bytes([0x01]))
         assert not result.success
-        assert 'not found' in result.errors[0].lower()
+        assert 'does not resolve' in result.errors[0] and 'PS-348' in result.errors[0]
 
 
 class TestEdgeCases:
@@ -3346,7 +3346,7 @@ class TestEncodeRoundtripAllTypes:
         assert dec.data['v'] == 'deadbeef'  # PS-281: reported as lowercase hex
 
     def test_string_roundtrip(self):
-        schema = {'fields': [{'name': 'v', 'type': 'string', 'length': 8}]}
+        schema = {'fields': [{'name': 'v', 'type': 'ascii', 'length': 8}]}
         interp = SchemaInterpreter(schema)
         enc = interp.encode({'v': 'hello'})
         dec = interp.decode(enc.payload)
@@ -3475,7 +3475,7 @@ class TestStringType:
 
     def test_string_type(self):
         """M061: String type with length."""
-        schema = {'fields': [{'name': 'msg', 'type': 'string', 'length': 5}]}
+        schema = {'fields': [{'name': 'msg', 'type': 'ascii', 'length': 5}]}
         interp = SchemaInterpreter(schema)
         result = interp.decode(b'Hello')
         assert result.success
@@ -3491,7 +3491,7 @@ class TestStringType:
 
     def test_string_with_null(self):
         """String with null terminator."""
-        schema = {'fields': [{'name': 's', 'type': 'string', 'length': 8}]}
+        schema = {'fields': [{'name': 's', 'type': 'ascii', 'length': 8}]}
         interp = SchemaInterpreter(schema)
         result = interp.decode(b'Hi\x00\x00\x00\x00\x00\x00')
         assert result.success

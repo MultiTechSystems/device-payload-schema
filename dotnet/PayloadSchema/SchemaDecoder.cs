@@ -10,6 +10,11 @@ public static class SchemaDecoder
 {
     public static Dictionary<string, object?> Decode(PayloadSchemaDefinition schema, byte[] data)
     {
+        // PS-459, PS-460: a ports schema decoded with no FPort selects nothing. This
+        // decoded the empty top-level field list and returned {} with success.
+        if (schema.Ports is { Count: > 0 })
+            throw new InvalidOperationException(
+                $"no FPort was supplied, and schema '{schema.Name}' selects its fields by port (PS-459)");
         var ctx = new DecodeContext(data, schema.Endian);
         var result = new Dictionary<string, object?>();
 
@@ -192,38 +197,23 @@ public static class SchemaDecoder
         var data = ctx.Read(size);
         var result = new Dictionary<string, object?>();
 
-        // The group's bytes are assembled in the schema's byte order - big-endian
-        // unless the document says otherwise. Assembling little-endian
-        // unconditionally was invisible while every multi-byte group happened to
-        // carry no bit range: rakwireless/qingping packs a 12-bit temperature as
-        // u24[12:23], and bytes 2D F1 C4 became 0xC4F12D rather than 0x2DF1C4.
-        ulong rawVal = 0;
-        if (ctx.Endian == "little")
-        {
-            for (int i = data.Length - 1; i >= 0; i--)
-                rawVal = (rawVal << 8) | data[i];
-        }
-        else
-        {
-            foreach (var b in data)
-                rawVal = (rawVal << 8) | b;
-        }
+        // PS-364: the group's bytes are one value in its effective byte order - its own
+        // `endian` where declared - and a member's bit positions refer to that value. A
+        // bool member is one bit of it.
+        var groupEndian = field.GroupEndian ?? ctx.Endian;
+        ulong rawVal = Helpers.DecodeUint(data, groupEndian);
 
         foreach (var subfield in field.ByteGroup)
         {
-            int bitStart = subfield.BitOffset;
-            int bitLen = subfield.BitCount > 0 ? subfield.BitCount : 8;
-
-            // Parse from type if not set
+            object raw;
             var bitRange = Helpers.ParseBitRange(subfield.RawType);
             if (bitRange != null)
-            {
-                bitStart = bitRange.Value.start;
-                bitLen = bitRange.Value.end - bitRange.Value.start + 1;
-            }
-
-            ulong mask = ((1UL << bitLen) - 1);
-            double raw = (double)((rawVal >> bitStart) & mask);
+                raw = ExtractRange(rawVal, subfield.SignedBits, bitRange.Value.start,
+                    bitRange.Value.end - bitRange.Value.start + 1);
+            else if (subfield.Type == FieldType.Bool)
+                raw = ((rawVal >> subfield.Bit) & 1) == 1;
+            else
+                raw = (double)rawVal;
 
             var value = ApplyPostRead(raw, subfield, ctx);
             if (ReferenceEquals(value, Omitted) || string.IsNullOrEmpty(subfield.Name))
@@ -274,16 +264,20 @@ public static class SchemaDecoder
             // converts only where a modifier makes the field a `number` (PS-293, PS-294).
             // The type fixes the unit order and the byte order within a unit, so the
             // endian setting is deliberately not consulted (PS-272).
-            case FieldType.U32LE16:
-            case FieldType.S32LE16:
+            case FieldType.U32LE16 or FieldType.S32LE16 or FieldType.F32LE16
+                or FieldType.U32BE16LE or FieldType.S32BE16LE or FieldType.F32BE16LE:
             {
-                var data = ctx.Read(4);
-                ulong low = Helpers.DecodeUint(data[..2], "big");
-                ulong high = Helpers.DecodeUint(data[2..], "big");
-                ulong combined = low | (high << 16);
-                value = field.Type == FieldType.S32LE16 && combined >= 0x80000000UL
-                    ? (long)combined - 0x100000000L
-                    : combined;
+                value = Wave4.ReadWordOrdered(field.Type, ctx.Read(4));
+                break;
+            }
+
+            case FieldType.UFlt16 or FieldType.SFlt16 or FieldType.SFlt24:
+            {
+                // The MCCI minifloats (CR-2026-063): a word in the field's byte order.
+                var decoded = Wave4.DecodeMinifloat(field.Type,
+                    Helpers.DecodeUint(ctx.Read(Wave4.MinifloatSize(field.Type)), endian));
+                if (decoded == null) return Omitted;    // no value JSON can carry (PS-419)
+                value = decoded.Value;
                 break;
             }
 
@@ -294,7 +288,10 @@ public static class SchemaDecoder
             case FieldType.U64:
             {
                 var data = ctx.Read(length);
-                value = Helpers.DecodeUint(data, endian);
+                value = field.Encoding != null
+                    // Applied to the integer read, before the modifiers (PS-422).
+                    ? Wave4.DecodeEncoding(Helpers.DecodeUint(data, endian), field.Encoding, length, field.Name)
+                    : Helpers.DecodeUint(data, endian);
                 break;
             }
 
@@ -341,12 +338,11 @@ public static class SchemaDecoder
                 // byte zero alone and reported a value with no error.
                 int baseBytes = field.BitBaseBytes > 0 ? field.BitBaseBytes : 1;
                 var data = ctx.Peek(baseBytes, field.ByteOffset);
-                long baseValue = 0;
-                foreach (var bt in data)
-                    baseValue = (baseValue << 8) | bt;
+                // PS-059 (CR-2026-052): assembled in the field's effective byte order,
+                // which was big-endian whatever the schema said.
+                ulong baseValue = Helpers.DecodeUint(data, endian);
                 int bits = field.BitCount > 0 ? field.BitCount : 1;
-                long mask = bits >= 63 ? long.MaxValue : (1L << bits) - 1;
-                value = (double)((baseValue >> field.BitOffset) & mask);
+                value = ExtractRange(baseValue, field.SignedBits, field.BitOffset, bits);
                 // An explicit range does not advance the cursor by itself: several
                 // fields share one byte and the last of them declares `consume`.
                 if (field.Consume > 0)
@@ -360,19 +356,12 @@ public static class SchemaDecoder
                 // here already carries a default inferred from the type, which made
                 // `{type: string, value: "ppm"}` a one-byte read that shifted
                 // everything after it.
-                if (field.Value != null && field.Length == 0)
-                {
-                    value = field.Value;
-                }
-                else if (length > 0)
-                {
-                    var data = ctx.Read(length);
-                    value = Encoding.ASCII.GetString(data).TrimEnd('\0');
-                }
-                else
-                {
-                    value = field.Value;
-                }
+                // `string` is only ever a literal: a string read from the payload is
+                // `ascii` (PS-361), and a literal reads no bytes (PS-357).
+                if (field.Value == null)
+                    throw new InvalidOperationException($"field '{field.Name}': type string declares "
+                        + "no value; a string read from the payload is type ascii (PS-361)");
+                value = field.Value;
                 break;
             }
 
@@ -445,10 +434,14 @@ public static class SchemaDecoder
                     string format = part.Count >= 3 && part[2] is string f ? f : "decimal";
                     ulong mask = (1UL << bitLen) - 1;
                     ulong raw = (intVal >> bitOff) & mask;
-                    // Lowercase (PS-074), matching the vendor codecs and the generated JS.
-                    partStrs.Add(format == "hex"
-                        ? raw.ToString("x")
-                        : raw.ToString());
+                    // PS-430: hex lower case, hex:upper upper case; any other format is
+                    // refused when the schema is loaded.
+                    partStrs.Add(format switch
+                    {
+                        "hex" => raw.ToString("x"),
+                        "hex:upper" => raw.ToString("X"),
+                        _ => raw.ToString(),
+                    });
                 }
                 value = prefix + string.Join(delimiter, partStrs);
                 break;
@@ -639,10 +632,59 @@ public static class SchemaDecoder
     /// The long fixed expansion is exact, so a tie is recognised only where there is one:
     /// 78.125 is a tie, while 2.355 is stored just below one.
     /// </summary>
+    /// <summary>The bytes one element always takes, or 0 where it varies (PS-344a).</summary>
+    static int FixedElementSize(List<SchemaField> fields)
+    {
+        int total = 0;
+        foreach (var f in fields)
+        {
+            switch (f.Type)
+            {
+                case FieldType.Number:
+                    continue;
+                case FieldType.String when f.Value != null:
+                    continue;
+                case FieldType.Bits or FieldType.Bool:
+                    total += f.Consume;
+                    continue;
+                case FieldType.Bytes or FieldType.Ascii or FieldType.Hex or FieldType.Base64 or FieldType.Skip:
+                    if (f.Length <= 0) return 0;
+                    total += f.Length;
+                    continue;
+                case FieldType.UDec or FieldType.SDec:
+                    total += 1;
+                    continue;
+                case FieldType.U8 or FieldType.U16 or FieldType.U24 or FieldType.U32 or FieldType.U64
+                    or FieldType.S8 or FieldType.S16 or FieldType.S24 or FieldType.S32 or FieldType.S64
+                    or FieldType.U32LE16 or FieldType.S32LE16 or FieldType.F16 or FieldType.F32 or FieldType.F64:
+                    total += Helpers.InferLengthFromType(f.Type);
+                    continue;
+                default:
+                    return 0;
+            }
+        }
+        return total;
+    }
+
+    /// <summary>The PS-344 error: the repeat, reported as a ragged tail.</summary>
+    static InvalidOperationException RaggedTailError(SchemaField field, int remaining, int elementSize, int offset)
+        => new($"repeat '{field.Name}' ends in a ragged tail: {remaining} byte(s) at offset {offset}"
+            + (elementSize > 0 ? $", fewer than the {elementSize} an element takes" : "") + " (PS-343)");
+
     /// <summary>The PS-396 error: the repeat, its limit and the payload left unparsed.</summary>
     static InvalidOperationException RepeatLimitError(SchemaField field, int limit, string mode, int offset, int end)
         => new($"repeat '{field.Name}' exceeds its max of {limit} element(s) ({mode}); "
             + $"{end - offset} byte(s) at offset {offset} left unparsed (PS-396)");
+
+    /// <summary>Bits of a base value, sign-extended from the range's width for an sN base (PS-353).</summary>
+    static double ExtractRange(ulong baseValue, bool signed, int start, int bits)
+    {
+        ulong mask = bits >= 64 ? ulong.MaxValue : (1UL << bits) - 1;
+        ulong v = (baseValue >> start) & mask;
+        if (signed && bits < 64 && v >= (1UL << (bits - 1)))
+            return (double)((long)v - (1L << bits));
+        return v;
+    }
 
     static double RoundHalfAwayDecimal(double value, int decimals)
     {
@@ -1339,9 +1381,24 @@ public static class SchemaDecoder
         else if (field.Until == "end")
         {
             int iterations = 0;
+            // PS-343 to PS-344a: a tail too short for a whole element is an error naming
+            // the repeat as a ragged tail, tested before the element begins where its
+            // size is fixed. This began the element and failed part-way with the
+            // underflow of whichever member ran out.
+            var elementSize = FixedElementSize(field.Fields);
             while (ctx.Remaining > 0 && iterations < maxIterations)
             {
-                result.Add(DecodeFields(field.Fields, ctx, schema));
+                var start = ctx.Offset;
+                if (elementSize > 0 && ctx.Remaining < elementSize)
+                    throw RaggedTailError(field, ctx.Remaining, elementSize, start);
+                try
+                {
+                    result.Add(DecodeFields(field.Fields, ctx, schema));
+                }
+                catch (InvalidOperationException e) when (e.Message.Contains("Buffer underflow"))
+                {
+                    throw RaggedTailError(field, ctx.Data.Length - start, 0, start);
+                }
                 iterations++;
             }
             if (iterations >= maxIterations && ctx.Remaining > 0)

@@ -184,17 +184,17 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2008 payload vectors in `schemas/devices/` (measured 2026-10-05 with
+The 2015 payload vectors in `schemas/devices/` (measured 2026-10-05 with
 `tools/check-floors.py`, after merging the mutation-survivor vectors into 0.5.2) are the shared
 cross-language test set. Every implementation has a runner that reads the same YAML and
 the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1585 |
-| Go | `go/schema/corpus_conformance_test.go` | 2008 | 1618 (plain API 1595) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2008 | 1584 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2008 | 1583 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1608 |
+| Go | `go/schema/corpus_conformance_test.go` | 2015 | 1624 (plain API 1601) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2015 | 1607 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2015 | 1606 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 487 of 487 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -751,10 +751,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1585 |
-| Go | `go/schema/corpus_encode_test.go` | 1618 (plain 1595) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1583 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1584 |
+| Python | `tests/test_encode_round_trip.py` | 1608 |
+| Go | `go/schema/corpus_encode_test.go` | 1624 (plain 1601) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1606 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1607 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1164,7 +1164,7 @@ baseline - a regression fails, an improvement is reported and locked in with the
 | `gate-provenance` | a changed device schema has no independently sourced vector, or an added vector lacks `source:` | none: the diff against `BASE` |
 | `gate-crossval` | a schema stops agreeing with its vendor's own decoder (TTN declared examples + vendor JS, Decentlab decoders), or a new one does not agree | `tools/crossval-baseline.json`, oracle commits pinned |
 | `gate-mutation` | a schema's vectors notice fewer one-step mutations than before (score or killed count), or a new schema scores below 0.80 | `tools/mutation-baseline.json` |
-| `gate-verdicts` | a changed schema's vector fails in any of Python, Go, Java, C#, TS013, or a vector the reference passes fails elsewhere | `tools/verdicts-baseline.json` (empty: all five agree on 2008/2008) |
+| `gate-verdicts` | a changed schema's vector fails in any of Python, Go, Java, C#, TS013, or a vector the reference passes fails elsewhere | `tools/verdicts-baseline.json` (empty: all five agree on 2015/2015) |
 
 The mutation gate ratchets the killed count as well as the score on purpose: deleting
 vectors makes the mutants only they reached "unreached", which *raises* the score.
@@ -1193,6 +1193,28 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   capitalised `FieldType` constants remain only for the compact and binary formats.
 - **`type: object` is the nested-group spelling and the `object:` key is rejected**
   (CR-2026-074, PS-466) - the corpus had 154 of the first and none of the second.
+- **FPort (CR-2026-038/041/042).** A `ports` schema decoded with no FPort is an error in
+  all five and never falls back to `default` (PS-459); `Decode()`/`decode()` without a
+  port on a ports schema used to return `{}` with success in Go, Java and C#. Port keys are
+  1-255 (PS-018). A top-level `fPort` states the port a document is about, is checked, and
+  is never consulted when decoding (PS-335 to PS-338); the library command documents use it.
+- **Byte order is never in a type name** (CR-2026-039, PS-053a): `le_`/`be_` are
+  rejected everywhere; C# and the TS013 generator read them until 0.5.2.
+- **References are spliced before parsing, everywhere** (CR-2026-045): Python
+  `expand_refs`, Go `go/schema/refs.go`, Java `Schema.expandRawRefs`, C#
+  `SchemaParser.ExpandRefs` - one pass over the raw document, so the typed parsers never
+  see a `$ref`. A definition is `{fields: [...]}`; the library was migrated to that shape,
+  and `use:` is withdrawn. The generator, validator and C harness call `expand_refs`.
+- **`string` is only a literal** (CR-2026-051, PS-361): text read from the payload is
+  `ascii`. `value` on a byte-reading field is the constant the encoder writes (PS-360).
+- **Wave 4 types** live in one helper per language (`go/schema/wave4.go`, Java `Wave4`,
+  C# `Wave4`, module functions in `schema_interpreter.py`): the word-ordered
+  `f32le16`/`u32be16le`/`s32be16le`/`f32be16le`, the MCCI minifloats, and the encodings,
+  which were Python-only before 0.5.2. A bit range's base is read in the field's effective
+  byte order (PS-059) and `sN[...]` sign-extends from the range's width; a byte_group's
+  bits refer to the group's assembled value, in the group's own `endian` (PS-364).
+- **`_meta` is not produced by any implementation**, so CR-2026-043 (`_meta.fPort`) and
+  the `_meta` parts of CR-2026-054 wait for their own change (decided 2026-10-05).
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.

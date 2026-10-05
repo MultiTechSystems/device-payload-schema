@@ -100,17 +100,22 @@ def warnings_for(*keys):
     return [w for w in result.schema_warnings if "PS-018" in w]
 
 
-class TestAnFPortMustFitInAnOctet:
-    """Structural: only 0-255 can name an FPort at all. Everything else is an error."""
+class TestAPortIsOneTo255:
+    """PS-018 as amended by CR-2026-041: 1 to 255, the Alliance-allocated ports included.
 
-    @pytest.mark.parametrize("port", [0, 1, 100, 223, 224, 255])
-    def test_any_octet_value_is_structurally_valid(self, port):
+    0 is not a port a `ports` map can name: its payload is MAC commands under NwkSKey, so
+    a decoder of application payloads is never handed it. The 1-223 warning this file
+    used to hold described the range before the Alliance ports were admitted.
+    """
+
+    @pytest.mark.parametrize("port", [1, 100, 223, 224, 225, 255])
+    def test_every_port_from_1_to_255_is_valid(self, port):
         assert validate_schema_structure(port_schema(port)) == []
 
-    @pytest.mark.parametrize("port", [256, -1, 1000])
-    def test_a_value_outside_the_octet_is_rejected(self, port):
+    @pytest.mark.parametrize("port", [0, 256, -1, 1000])
+    def test_anything_else_is_rejected(self, port):
         errors = validate_schema_structure(port_schema(port))
-        assert any("0-255" in e for e in errors), (port, errors)
+        assert any("1-255" in e for e in errors), (port, errors)
 
     def test_default_is_a_reserved_key_not_a_port_number(self):
         assert validate_schema_structure(port_schema("default")) == []
@@ -123,36 +128,9 @@ class TestAnFPortMustFitInAnOctet:
         # JSON object keys are always strings, so "12" and 12 are the same port.
         assert validate_schema_structure(port_schema("12")) == []
 
-
-class TestPS018IsReportedNotEnforced:
-    """PS-018: 1-223 is the application range. Outside it is a warning, not a rejection."""
-
-    @pytest.mark.parametrize("port", [1, 2, 100, 222, 223])
-    def test_a_port_in_the_application_range_warns_about_nothing(self, port):
+    @pytest.mark.parametrize("port", [1, 224, 255])
+    def test_a_valid_port_draws_no_range_warning(self, port):
         assert warnings_for(port) == []
-
-    @pytest.mark.parametrize("port", [0, 224, 225, 250, 255])
-    def test_a_port_outside_it_warns_but_still_validates(self, port):
-        # Both halves matter: the departure is reported, and the schema stays usable.
-        assert validate_schema_structure(port_schema(port)) == []
-        assert any("PS-018" in w for w in warnings_for(port)), port
-
-    def test_a_reserved_port_is_usable_because_it_is_assigned_not_invalid(self):
-        # The point of the whole change: an application on the certification test port
-        # or on the MAC port has a real payload, and this tool must not refuse it.
-        for port in (0, 224):
-            assert validate_schema_structure(port_schema(port)) == []
-
-    def test_the_warning_names_what_the_port_is_for(self):
-        assert any("MAC commands" in w for w in warnings_for(0))
-        assert any("certification" in w for w in warnings_for(224))
-        assert any("future standardised" in w for w in warnings_for(240))
-
-    def test_default_is_not_warned_about(self):
-        assert warnings_for("default") == []
-
-    def test_a_string_port_out_of_range_warns_the_same_as_an_int(self):
-        assert any("PS-018" in w for w in warnings_for("250"))
 
 
 class TestTheCorpusIsUnaffected:

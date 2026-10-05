@@ -89,6 +89,8 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "manufacturer": (("doc:metaschema",), "identity; documentation only"),
         "device": (("doc:metaschema",), "identity; documentation only"),
         "direction": (("py",), "uplink | downlink | bidirectional (PS-021)"),
+        "fPort": (("py", "go", "java", "cs", "validate"), "the port a document is about; checked, never consulted (PS-458)"),
+        "fport": (("py", "go", "java", "cs", "validate"), "accepted spelling of fPort; never written (PS-338)"),
     },
     "port": {
         "description": (("py", "outschema"), "documentation"),
@@ -146,6 +148,7 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "prefix": (_DECODERS, "bitfield_string prefix"),
         "formula": (("py",), "legacy formula expression (Python only)"),
         "encode_formula": (("py",), "inverse of `formula` for encoding"),
+        "encoding": (_DECODERS, "sign_magnitude | bcd | gray on a uN (PS-422)"),
         "on": (("py",), "legacy `type: match` discriminator (`on: $var`)"),
         "cases": (("py",), "legacy `type: match` case list"),
         "valid_range": (("py", "go", "cs", "outschema"), "quality flag (_quality)"),
@@ -183,6 +186,7 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "fields": (_DECODERS, "group members"),
     },
     "byte_group": {
+        "endian": (_DECODERS, "the group's byte order; members declare none (PS-364)"),
         "fields": (_DECODERS, "members"),
         "size": (_DECODERS, "shared byte count"),
     },

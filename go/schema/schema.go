@@ -112,6 +112,10 @@ const (
 type Field struct {
 	Name        string         `json:"name,omitempty" yaml:"name,omitempty"`
 	Type        FieldType      `json:"type" yaml:"type"`
+	// Encoding is a named code on an unsigned integer (PS-422): sign_magnitude, bcd, gray.
+	Encoding string `json:"encoding,omitempty" yaml:"encoding,omitempty"`
+	// GroupEndian is a byte_group's own byte order (PS-364), empty for the context's.
+	GroupEndian string `json:"-" yaml:"-"`
 	// IntegerResult marks a computed field written `type: integer` (PS-283); its Type
 	// is TypeNumber.
 	IntegerResult bool `json:"-" yaml:"-"`
@@ -376,7 +380,8 @@ func inferLengthFromType(t FieldType) int {
 		return 2
 	case TypeU24, TypeS24:
 		return 3
-	case TypeU32, TypeS32, TypeI32, TypeF32, TypeU32LE16, TypeS32LE16:
+	case TypeU32, TypeS32, TypeI32, TypeF32, TypeU32LE16, TypeS32LE16,
+		TypeF32LE16, TypeU32BE16LE, TypeS32BE16LE, TypeF32BE16LE:
 		return 4
 	case TypeU64, TypeS64, TypeI64, TypeF64:
 		return 8
@@ -478,7 +483,7 @@ func isIntegerTyped(field Field) bool {
 	case TypeByte, TypeUInt, TypeU8, TypeU16, TypeU24, TypeU32, TypeU64,
 		TypeSInt, TypeS8, TypeS16, TypeS24, TypeS32, TypeS64,
 		TypeI8, TypeI16, TypeI32, TypeI64, TypeBInt,
-		TypeU32LE16, TypeS32LE16:
+		TypeU32LE16, TypeS32LE16, TypeU32BE16LE, TypeS32BE16LE:
 		return true
 	}
 	return false
@@ -763,6 +768,13 @@ func ParseSchema(data string) (*Schema, error) {
 	_ = yaml.Unmarshal([]byte(data), &rootNode)
 	fieldNodes := findFieldNodes(&rootNode, "fields")
 
+	// CR-2026-045: splice every $ref first, rejecting what cannot be (PS-345 to PS-349).
+	expanded, err := expandRawRefs(raw)
+	if err != nil {
+		return nil, err
+	}
+	raw = expanded
+
 	// CR-2026-037: an unknown or absent type is a schema error, reported before
 	// anything is decoded (PS-327, PS-328, PS-334). The same walk holds the per-field
 	// rules of later CRs (checkFieldRules).
@@ -925,6 +937,9 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	
 	if name, ok := fm["name"].(string); ok {
 		f.Name = name
+	}
+	if encoding, ok := fm["encoding"].(string); ok {
+		f.Encoding = encoding
 	}
 	if typ, ok := fm["type"].(string); ok {
 		f.Type = canonicalFieldType(typ)
@@ -1294,6 +1309,10 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 			f.Size = bgSize
 		} else if bgSize, ok := bgMap["size"].(float64); ok {
 			f.Size = int(bgSize)
+		}
+		// The group's byte order (PS-364); its members declare none.
+		if bgEndian, ok := bgMap["endian"].(string); ok {
+			f.GroupEndian = bgEndian
 		}
 		if bgFields, ok := bgMap["fields"].([]any); ok {
 			f.ByteGroup = parseFieldsRaw(bgFields)
@@ -1751,6 +1770,11 @@ func (s *Schema) DecodeWithPortDirection(data []byte, fPort int, direction strin
 
 // Decode decodes binary data using the schema.
 func (s *Schema) Decode(data []byte) (map[string]any, error) {
+	// PS-459, PS-460: a ports schema decoded with no FPort selects nothing. This decoded
+	// the empty top-level field list and returned {} with success.
+	if len(s.Ports) > 0 {
+		return nil, fmt.Errorf("no FPort was supplied, and schema '%s' selects its fields by port (PS-459)", s.Name)
+	}
 	ctx := NewDecodeContext(data, s.Endian)
 	result := make(map[string]any)
 
@@ -1943,41 +1967,35 @@ func decodeByteGroup(field Field, ctx *DecodeContext) (map[string]any, error) {
 	
 	result := make(map[string]any)
 	
-	// Parse each subfield from the shared bytes
+	// The group's bytes are one value in its effective byte order, and a member's bit
+	// positions refer to that value (PS-364). The order was the schema's alone, and a
+	// member that was not a bit range read bits 0..7 whatever it said.
+	endian := field.GroupEndian
+	if endian == "" {
+		endian = ctx.Endian
+	}
+	var rawVal uint64
+	if endian == "little" {
+		for i := len(data) - 1; i >= 0; i-- {
+			rawVal = rawVal<<8 | uint64(data[i])
+		}
+	} else {
+		for _, b := range data {
+			rawVal = rawVal<<8 | uint64(b)
+		}
+	}
+
 	for _, subfield := range field.ByteGroup {
-		// Parse bit range from type like "u8[4:7]"
-		typeStr := string(subfield.Type)
-		bitStart, bitEnd := 0, 7
-		
-		if idx := strings.Index(typeStr, "["); idx >= 0 {
-			rangeStr := typeStr[idx+1 : len(typeStr)-1]
-			parts := strings.Split(rangeStr, ":")
-			if len(parts) == 2 {
-				bitStart, _ = strconv.Atoi(parts[0])
-				bitEnd, _ = strconv.Atoi(parts[1])
-			}
-		}
-		
-		// Extract bits from the data. The group's bytes are assembled in the
-		// schema's byte order - big-endian unless the document says otherwise.
-		// Assembling little-endian unconditionally was invisible while every
-		// multi-byte group happened to carry no bit range: rakwireless/qingping
-		// packs a 12-bit temperature as u24[12:23], and bytes 2D F1 C4 became
-		// 0xC4F12D rather than 0x2DF1C4, reporting 265.1 C for 23.5 C.
-		var rawVal uint64
-		if ctx.Endian == "little" {
-			for i := len(data) - 1; i >= 0; i-- {
-				rawVal = rawVal<<8 | uint64(data[i])
-			}
+		var raw any
+		if m := bitRangePattern.FindStringSubmatch(string(subfield.Type)); m != nil {
+			start, _ := strconv.Atoi(m[2])
+			end, _ := strconv.Atoi(m[3])
+			raw = extractRange(rawVal, m[1][0] == 's', start, end-start+1)
+		} else if subfield.Type == TypeBoolLower || subfield.Type == TypeBool {
+			raw = (rawVal>>uint(subfield.Bit))&1 == 1
 		} else {
-			for _, b := range data {
-				rawVal = rawVal<<8 | uint64(b)
-			}
+			raw = float64(rawVal)
 		}
-		
-		bitLen := bitEnd - bitStart + 1
-		mask := uint64((1 << bitLen) - 1)
-		raw := float64((rawVal >> bitStart) & mask)
 
 		// A member is an ordinary field that happens to share its bytes, so its
 		// modifiers and lookup apply as anywhere else. They were skipped here: arwin
@@ -2027,7 +2045,7 @@ func decodeFlagged(fd *FlaggedDef, ctx *DecodeContext) (map[string]any, error) {
 }
 
 // bitRangePattern matches a bit-range type such as u8[0:0] or u16[4:11].
-var bitRangePattern = regexp.MustCompile(`^([usf]\d+)\[(\d+):(\d+)\]$`)
+var bitRangePattern = regexp.MustCompile(`^([us](?:8|16|24|32|64))\[(\d+):(\d+)\]$`)
 
 // decodeBitRange extracts a contiguous bit range from an unsigned base value.
 //
@@ -2036,7 +2054,8 @@ var bitRangePattern = regexp.MustCompile(`^([usf]\d+)\[(\d+):(\d+)\]$`)
 // how every flag byte in the corpus is written). Without this, a `u8[0:0]` field was
 // reported as an unknown type and the whole schema failed to decode.
 func decodeBitRange(field Field, ctx *DecodeContext, match []string) (any, int, error) {
-	width := map[string]int{"u8": 1, "s8": 1, "u16": 2, "s16": 2, "u24": 3, "u32": 4, "s32": 4}[match[1]]
+	bitsWide, _ := strconv.Atoi(match[1][1:])
+	width := bitsWide / 8
 	if width == 0 {
 		width = 1
 	}
@@ -2044,8 +2063,14 @@ func decodeBitRange(field Field, ctx *DecodeContext, match []string) (any, int, 
 	if err != nil {
 		return nil, 0, err
 	}
+	// PS-059 (CR-2026-052): the base is assembled in the field's effective byte order -
+	// its own `endian` where it declares one. This consulted only the schema's.
+	endian := field.Endian
+	if endian == "" {
+		endian = ctx.Endian
+	}
 	base := uint64(0)
-	if ctx.Endian == "little" {
+	if endian == "little" {
 		for i := width - 1; i >= 0; i-- {
 			base = base<<8 | uint64(data[i])
 		}
@@ -2060,9 +2085,18 @@ func decodeBitRange(field Field, ctx *DecodeContext, match []string) (any, int, 
 	if high < low {
 		low, high = high, low
 	}
-	bits := high - low + 1
-	mask := uint64(1)<<bits - 1
-	return float64((base >> uint(low)) & mask), field.Consume, nil
+	return extractRange(base, match[1][0] == 's', low, high-low+1), field.Consume, nil
+}
+
+// extractRange takes `bits` bits from `start` of a base value, sign-extended from the
+// range's own width for an sN base (PS-352, PS-353).
+func extractRange(base uint64, signed bool, start, bits int) any {
+	mask := uint64(1)<<uint(bits) - 1
+	value := (base >> uint(start)) & mask
+	if signed && value >= uint64(1)<<uint(bits-1) {
+		return float64(int64(value) - int64(uint64(1)<<uint(bits)))
+	}
+	return float64(value)
 }
 
 func decodeField(field Field, ctx *DecodeContext) (any, error) {
@@ -2098,18 +2132,24 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 	// The type fixes both the unit order and the byte order within a unit, so the
 	// endian setting is deliberately not consulted (PS-272): honouring it would make
 	// u32le16 with endian little a second spelling of little-endian u32.
-	case TypeU32LE16, TypeS32LE16:
+	case TypeU32LE16, TypeS32LE16, TypeF32LE16, TypeU32BE16LE, TypeS32BE16LE, TypeF32BE16LE:
 		data, err := ctx.Read(4)
 		if err != nil {
 			return nil, err
 		}
-		combined := uint64(decodeUint(data[0:2], "big")) |
-			uint64(decodeUint(data[2:4], "big"))<<16
-		if field.Type == TypeS32LE16 && combined >= 0x80000000 {
-			value = int64(combined) - 0x100000000
-		} else {
-			value = combined
+		value = readWordOrdered(field.Type, data)
+
+	case TypeUFlt16, TypeSFlt16, TypeSFlt24:
+		// The MCCI minifloats (CR-2026-063): a word in the field's effective byte order.
+		data, err := ctx.Read(minifloatSizes[field.Type])
+		if err != nil {
+			return nil, err
 		}
+		v, ok := decodeMinifloat(field.Type, decodeUint(data, endian))
+		if !ok {
+			return omitted, nil // no value JSON can carry (PS-419)
+		}
+		value = v
 
 	case TypeByte, TypeUInt, TypeU8, TypeU16, TypeU32, TypeU64, TypeU24:
 		data, err := ctx.Read(length)
@@ -2117,6 +2157,14 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 			return nil, err
 		}
 		value = decodeUint(data, endian)
+		if field.Encoding != "" {
+			// Applied to the integer read, before the modifiers (PS-422).
+			decoded, err := decodeEncoding(decodeUint(data, endian), field.Encoding, length)
+			if err != nil {
+				return nil, fmt.Errorf("field %q: %v", field.Name, err)
+			}
+			value = decoded
+		}
 
 	case TypeSInt, TypeS8, TypeS16, TypeS32, TypeS64, TypeI8, TypeI16, TypeI32, TypeI64, TypeS24:
 		data, err := ctx.Read(length)
@@ -2183,20 +2231,13 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		value = decodeBits(data[0], field.BitOffset, bits)
 
 	case TypeString, TypeStringLower:
-		// A literal reads no bytes. Only a declared length is a read: `length` here
-		// already carries a default inferred from the type name, which made every
-		// literal a one-byte read.
-		if field.Value != nil && field.Length == 0 {
-			value = field.Value
-		} else if length > 0 {
-			data, err := ctx.Read(length)
-			if err != nil {
-				return nil, err
-			}
-			value = strings.TrimRight(string(data), "\x00")
-		} else {
-			value = field.Value
+		// A literal reads no bytes (PS-357), and `string` is only ever a literal: a
+		// string read from the payload is `ascii` (PS-361). This read the bytes where a
+		// length was declared and reported nil where none was.
+		if field.Value == nil {
+			return nil, fmt.Errorf("field '%s': type string declares no value; a string read from the payload is type ascii (PS-361)", field.Name)
 		}
+		value = field.Value
 
 	case TypeAscii, TypeAsciiLower:
 		data, err := ctx.Read(length)
@@ -2302,10 +2343,14 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 			}
 			mask := (uint64(1) << bitLen) - 1
 			raw := (intVal >> bitOff) & mask
-			if format == "hex" {
-				// Lowercase (PS-074), matching the vendor codecs and the generated JS.
+			// PS-430: hex lower case, hex:upper upper case; the load check refuses
+			// any other part format.
+			switch format {
+			case "hex":
 				partStrs = append(partStrs, strconv.FormatUint(raw, 16))
-			} else {
+			case "hex:upper":
+				partStrs = append(partStrs, strings.ToUpper(strconv.FormatUint(raw, 16)))
+			default:
 				partStrs = append(partStrs, strconv.FormatUint(raw, 10))
 			}
 		}
@@ -3157,6 +3202,47 @@ func formatBytes(data []byte, format, separator string) any {
 }
 
 // decodeRepeat decodes a repeat/array field.
+// fixedElementSize is the bytes one element of these fields always takes, or 0 where it
+// varies (PS-344a can only be tested before an element of known size).
+func fixedElementSize(fields []Field) int {
+	total := 0
+	for _, f := range fields {
+		switch {
+		case f.Type == TypeNumber || f.IntegerResult:
+			continue
+		case (f.Type == TypeString || f.Type == TypeStringLower) && f.Value != nil:
+			continue
+		case bitRangePattern.MatchString(string(f.Type)) || f.Type == TypeBoolLower:
+			total += f.Consume
+		case f.Type == TypeBytesLower || f.Type == TypeAsciiLower || f.Type == TypeHexLower ||
+			f.Type == TypeBase64Lower || f.Type == TypeSkipLower:
+			if f.Length <= 0 {
+				return 0
+			}
+			total += f.Length
+		default:
+			size := inferLengthFromType(f.Type)
+			if _, known := canonicalTypes[string(f.Type)]; !known || f.Type == TypeObjectLower ||
+				f.Type == TypeRepeatLower || f.Type == TypeEnumLower || f.Type == TypeMatchLower ||
+				f.Type == TypeBitfieldString || f.Type == "" {
+				return 0
+			}
+			total += size
+		}
+	}
+	return total
+}
+
+// raggedTailError is the PS-344 error: the repeat, reported as a ragged tail.
+func raggedTailError(field Field, remaining, elementSize, offset int) error {
+	need := ""
+	if elementSize > 0 {
+		need = fmt.Sprintf(", fewer than the %d an element takes", elementSize)
+	}
+	return fmt.Errorf("repeat '%s' ends in a ragged tail: %d byte(s) at offset %d%s (PS-343)",
+		field.Name, remaining, offset, need)
+}
+
 // repeatLimitError is the PS-396 error: the repeat, its limit and the payload left
 // unparsed. Worded as the Python reference and the generated codec word it.
 func repeatLimitError(field Field, limit int, mode string, offset, end int) error {
@@ -3258,9 +3344,21 @@ func decodeRepeat(field Field, ctx *DecodeContext) ([]any, error) {
 		// Until-end: repeat until payload exhausted
 		iterations := 0
 
+		// PS-343 to PS-344a: a tail too short for a whole element is an error naming the
+		// repeat as a ragged tail, tested before the element begins where its size is
+		// fixed. This began the element and failed part-way with the read error of
+		// whichever member ran out.
+		elementSize := fixedElementSize(field.Fields)
 		for ctx.Remaining() > 0 && iterations < maxIterations {
+			start := ctx.Offset
+			if elementSize > 0 && ctx.Remaining() < elementSize {
+				return nil, raggedTailError(field, ctx.Remaining(), elementSize, start)
+			}
 			element, err := decodeFields(field.Fields, ctx)
 			if err != nil {
+				if strings.Contains(err.Error(), "buffer underflow") {
+					return nil, raggedTailError(field, len(ctx.Data)-start, 0, start)
+				}
 				return nil, err
 			}
 			result = append(result, element)
@@ -3942,6 +4040,13 @@ func encodeByteGroup(field Field, data map[string]any, ctx *EncodeContext) error
 				value = v
 			}
 		}
+		if gf.Type == TypeBoolLower || gf.Type == TypeBool {
+			// A bool member is one bit of the group's value (PS-364).
+			if flag, ok := value.(bool); ok && flag {
+				packed |= 1 << uint(gf.Bit)
+			}
+			continue
+		}
 		raw, ok := rawForField(gf, value)
 		if !ok {
 			continue
@@ -3960,7 +4065,11 @@ func encodeByteGroup(field Field, data map[string]any, ctx *EncodeContext) error
 			packed |= num
 		}
 	}
-	ctx.Write(encodeUint(packed, size, ctx.Endian))
+	endian := field.GroupEndian
+	if endian == "" {
+		endian = ctx.Endian
+	}
+	ctx.Write(encodeUint(packed, size, endian))
 	return nil
 }
 
@@ -4078,7 +4187,16 @@ func encodeBitfieldRun(run []Field, data map[string]any, ctx *EncodeContext) err
 		width := uint(end - start + 1)
 		packed |= (num & ((1 << width) - 1)) << uint(start)
 	}
-	ctx.Write(encodeUint(packed, size, ctx.Endian))
+	// The run's shared base is assembled in its fields' effective byte order (PS-059):
+	// a field's own `endian` where one declares it, else the schema's.
+	endian := ctx.Endian
+	for _, gf := range run {
+		if gf.Endian != "" {
+			endian = gf.Endian
+			break
+		}
+	}
+	ctx.Write(encodeUint(packed, size, endian))
 	return nil
 }
 
@@ -4209,6 +4327,20 @@ func encodeFields(fields []Field, data map[string]any, ctx *EncodeContext) error
 				length = 1
 			}
 			ctx.Write(make([]byte, length))
+			continue
+		}
+
+		// PS-359: a literal writes no bytes and its key is not required of the input.
+		if field.Value != nil && (field.Type == TypeString || field.Type == TypeStringLower ||
+			field.Type == TypeNumber || field.Type == "number") {
+			continue
+		}
+		// PS-360: `value` on a field that reads bytes is the constant to write, whatever
+		// the input supplies.
+		if field.Value != nil {
+			if err := encodeField(field, field.Value, ctx); err != nil {
+				return err
+			}
 			continue
 		}
 
@@ -4392,7 +4524,8 @@ func encodeBitfieldString(field Field, strVal string, ctx *EncodeContext) error 
 			seg = segments[i]
 		}
 		var val uint64
-		if format == "hex" {
+		if format == "hex" || format == "hex:upper" {
+			// Case does not matter on the way back in (PS-431).
 			v, _ := strconv.ParseUint(seg, 16, 64)
 			val = v
 		} else {
@@ -4510,6 +4643,26 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 		ctx.Write(encodeUint(unsigned&0xFFFF, 2, "big"))
 		ctx.Write(encodeUint(unsigned>>16, 2, "big"))
 
+	// The word-ordered float and the fourth ordering (CR-2026-046, -047). Like the case
+	// above, no `endian` setting reaches them (PS-272).
+	case TypeF32LE16, TypeU32BE16LE, TypeS32BE16LE, TypeF32BE16LE:
+		numVal, ok := toFloat64(value)
+		if !ok {
+			return notANumber(field, value)
+		}
+		ctx.Write(writeWordOrdered(field.Type, numVal))
+
+	case TypeUFlt16, TypeSFlt16, TypeSFlt24:
+		numVal, ok := toFloat64(value)
+		if !ok {
+			return notANumber(field, value)
+		}
+		word, err := encodeMinifloat(field.Type, numVal)
+		if err != nil {
+			return fmt.Errorf("field %q: %v", field.Name, err)
+		}
+		ctx.Write(encodeUint(word, minifloatSizes[field.Type], endian))
+
 	// The 24-bit spellings are in decodeField's two integer cases and were in neither of
 	// these, so a u24 or an s24 wrote nothing at all: oyster's port 4 re-encoded its
 	// latitude and longitude as no bytes and kept the three fields after them.
@@ -4523,6 +4676,15 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 		// and a conversion that truncates writes 4999. The reference interpreter rounds
 		// here (`int(round(value))`), and half-to-even is the repo's convention, so
 		// RoundToEven rather than Round (CR-2026-026).
+		if field.Encoding != "" {
+			// The inverse of the named code, after the modifiers are reversed (PS-463).
+			coded, err := encodeEncoding(int64(math.RoundToEven(numVal)), field.Encoding, length)
+			if err != nil {
+				return fmt.Errorf("field %q: %v", field.Name, err)
+			}
+			ctx.Write(encodeUint(coded, length, endian))
+			break
+		}
 		ctx.Write(encodeUint(uint64(math.RoundToEven(numVal)), length, endian))
 
 	case TypeSInt, TypeS8, TypeS16, TypeS24, TypeS32, TypeS64, TypeI8, TypeI16, TypeI32,
@@ -4582,9 +4744,8 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 	// switch matched only the capitalised constants, so those fields silently wrote no
 	// bytes. am102's 8-byte serial number emitted its tag and then nothing.
 	case TypeAscii, TypeAsciiLower, TypeString, TypeStringLower:
-		if (field.Type == TypeString || field.Type == TypeStringLower) &&
-			field.Value != nil && field.Length == 0 {
-			// A literal came from no bytes, so it writes none.
+		if (field.Type == TypeString || field.Type == TypeStringLower) && field.Value != nil {
+			// A literal came from no bytes, so it writes none (PS-359).
 			break
 		}
 		if strVal, ok := value.(string); ok {

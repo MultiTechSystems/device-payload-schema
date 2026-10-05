@@ -35,7 +35,9 @@ var typeAliases = map[string]FieldType{
 var canonicalTypes = map[string]bool{
 	"u8": true, "u16": true, "u24": true, "u32": true, "u64": true,
 	"s8": true, "s16": true, "s24": true, "s32": true, "s64": true,
-	"u32le16": true, "s32le16": true,
+	"u32le16": true, "s32le16": true, "f32le16": true,
+	"u32be16le": true, "s32be16le": true, "f32be16le": true,
+	"uflt16": true, "sflt16": true, "sflt24": true,
 	"f16": true, "f32": true, "f64": true,
 	"udec": true, "sdec": true,
 	"bool": true, "bytes": true, "string": true, "ascii": true,
@@ -178,6 +180,9 @@ func checkTypeVocabulary(raw map[string]any) error {
 		return nil
 	}
 
+	if err := checkPortDeclarations(raw); err != nil {
+		return err
+	}
 	if err := check(raw["fields"], "fields"); err != nil {
 		return err
 	}
@@ -289,7 +294,53 @@ func checkByteGroupOverlap(group any, at string) error {
 	return nil
 }
 
+// literalForbidden are the keys a literal must not carry (PS-358).
+var literalForbidden = []string{"ref", "polynomial", "compute", "lookup", "transform", "mult", "div", "add"}
+
+// unsignedTypes are the types an `encoding` may sit on (PS-422).
+var unsignedTypes = map[string]bool{"u8": true, "u16": true, "u24": true, "u32": true, "u64": true,
+	"uint8": true, "uint16": true, "uint24": true, "uint32": true, "uint64": true}
+
 func checkFieldRules(field map[string]any, at string) error {
+	// PS-426: match_value is withdrawn. PS-422: `encoding` is a named code on a uN.
+	if _, ok := field["match_value"]; ok {
+		return fmt.Errorf("%s: match_value is withdrawn; write a signed type (sN), a signed bit range (sN[start:end]), encoding, match or guard instead (PS-426)", at)
+	}
+	if encoding, ok := field["encoding"]; ok {
+		if encoding != "sign_magnitude" && encoding != "bcd" && encoding != "gray" {
+			return fmt.Errorf("%s: encoding %v is not one of sign_magnitude, bcd, gray (PS-422)", at, encoding)
+		}
+		if typ, _ := field["type"].(string); !unsignedTypes[typ] {
+			return fmt.Errorf("%s: encoding applies only to an unsigned integer type uN, not %v (PS-422)", at, field["type"])
+		}
+	}
+	// PS-430: a bitfield_string part is decimal, hex or hex:upper.
+	if parts, ok := field["parts"].([]any); ok && field["type"] == "bitfield_string" {
+		for _, raw := range parts {
+			if part, ok := raw.([]any); ok && len(part) > 2 {
+				if format := part[2]; format != "decimal" && format != "hex" && format != "hex:upper" {
+					return fmt.Errorf("%s: bitfield_string part format %v is not one of decimal, hex, hex:upper (PS-430)", at, format)
+				}
+			}
+		}
+	}
+	// PS-358: a literal's value matches its type, and it carries no arithmetic.
+	if value, ok := field["value"]; ok && (field["type"] == "string" || field["type"] == "number") {
+		_, isString := value.(string)
+		_, isBool := value.(bool)
+		_, isNumber := toFloat64(value)
+		if field["type"] == "string" && !isString {
+			return fmt.Errorf("%s: a string literal's value must be a string (PS-358)", at)
+		}
+		if field["type"] == "number" && (isBool || !isNumber || isString) {
+			return fmt.Errorf("%s: a number literal's value must be a number (PS-358)", at)
+		}
+		for _, key := range literalForbidden {
+			if _, has := field[key]; has {
+				return fmt.Errorf("%s: a literal must not declare %s (PS-358)", at, key)
+			}
+		}
+	}
 	// PS-399: a match declares exactly one discriminator source. With both, `field` won
 	// and the `length` byte was left unread, misaligning every later field.
 	if match := asStringMap(field["match"]); match != nil {
@@ -302,6 +353,15 @@ func checkFieldRules(field map[string]any, at string) error {
 	if group, ok := field["byte_group"]; ok {
 		if err := checkByteGroupOverlap(group, at); err != nil {
 			return err
+		}
+		members, isList := group.([]any)
+		if !isList {
+			members, _ = asStringMap(group)["fields"].([]any)
+		}
+		for _, member := range members {
+			if _, has := asStringMap(member)["endian"]; has {
+				return fmt.Errorf("%s.byte_group: a member declares endian; the group's byte order is declared on the group (PS-364)", at)
+			}
 		}
 	}
 	// PS-079, PS-391: a bytes format is one of four, and a separator applies to the two
@@ -344,6 +404,40 @@ func checkFieldRules(field map[string]any, at string) error {
 			if !hasAnyKey(stage, transformOperations) {
 				return fmt.Errorf("%s: transform stage names no operation of the PS-115 table (PS-390)", where)
 			}
+		}
+	}
+	return nil
+}
+
+// checkPortDeclarations holds PS-018 (a port key is 1 to 255, CR-2026-041) and PS-335 and
+// PS-337 (a top-level fPort is such a port, and beside `ports` every key equals it,
+// CR-2026-042). The top-level key selects nothing (PS-336) and is never read again.
+func checkPortDeclarations(raw map[string]any) error {
+	ports := asStringMap(raw["ports"])
+	for key := range ports {
+		if key == "default" {
+			continue
+		}
+		if n, err := strconv.Atoi(key); err != nil || n < 1 || n > 255 {
+			return fmt.Errorf("ports.%s: a port key must be an integer from 1 to 255 or default (PS-018)", key)
+		}
+	}
+	name := "fPort"
+	declared, ok := raw["fPort"]
+	if !ok {
+		name = "fport"
+		declared, ok = raw["fport"]
+	}
+	if !ok {
+		return nil
+	}
+	port, isInt := declared.(int)
+	if !isInt || port < 1 || port > 255 {
+		return fmt.Errorf("top-level %s must be an integer from 1 to 255, got %v (PS-335)", name, declared)
+	}
+	for key := range ports {
+		if key != strconv.Itoa(port) {
+			return fmt.Errorf("top-level %s is %d but ports also declares %s; every ports key must equal it (PS-337)", name, port, key)
 		}
 	}
 	return nil
