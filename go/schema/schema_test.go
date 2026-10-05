@@ -1980,7 +1980,7 @@ func TestStringType(t *testing.T) {
 name: string_test
 fields:
   - name: device_name
-    type: string
+    type: ascii
     length: 8
 `
 	schema, err := ParseSchema(schemaYAML)
@@ -3091,7 +3091,7 @@ func TestStringWithNullTerminator(t *testing.T) {
 name: string_null_test
 fields:
   - name: name
-    type: string
+    type: ascii
     length: 10
 `
 	schema, err := ParseSchema(schemaYAML)

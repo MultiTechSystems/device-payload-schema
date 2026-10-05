@@ -763,6 +763,13 @@ func ParseSchema(data string) (*Schema, error) {
 	_ = yaml.Unmarshal([]byte(data), &rootNode)
 	fieldNodes := findFieldNodes(&rootNode, "fields")
 
+	// CR-2026-045: splice every $ref first, rejecting what cannot be (PS-345 to PS-349).
+	expanded, err := expandRawRefs(raw)
+	if err != nil {
+		return nil, err
+	}
+	raw = expanded
+
 	// CR-2026-037: an unknown or absent type is a schema error, reported before
 	// anything is decoded (PS-327, PS-328, PS-334). The same walk holds the per-field
 	// rules of later CRs (checkFieldRules).
@@ -2188,20 +2195,13 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		value = decodeBits(data[0], field.BitOffset, bits)
 
 	case TypeString, TypeStringLower:
-		// A literal reads no bytes. Only a declared length is a read: `length` here
-		// already carries a default inferred from the type name, which made every
-		// literal a one-byte read.
-		if field.Value != nil && field.Length == 0 {
-			value = field.Value
-		} else if length > 0 {
-			data, err := ctx.Read(length)
-			if err != nil {
-				return nil, err
-			}
-			value = strings.TrimRight(string(data), "\x00")
-		} else {
-			value = field.Value
+		// A literal reads no bytes (PS-357), and `string` is only ever a literal: a
+		// string read from the payload is `ascii` (PS-361). This read the bytes where a
+		// length was declared and reported nil where none was.
+		if field.Value == nil {
+			return nil, fmt.Errorf("field '%s': type string declares no value; a string read from the payload is type ascii (PS-361)", field.Name)
 		}
+		value = field.Value
 
 	case TypeAscii, TypeAsciiLower:
 		data, err := ctx.Read(length)
@@ -3162,6 +3162,47 @@ func formatBytes(data []byte, format, separator string) any {
 }
 
 // decodeRepeat decodes a repeat/array field.
+// fixedElementSize is the bytes one element of these fields always takes, or 0 where it
+// varies (PS-344a can only be tested before an element of known size).
+func fixedElementSize(fields []Field) int {
+	total := 0
+	for _, f := range fields {
+		switch {
+		case f.Type == TypeNumber || f.IntegerResult:
+			continue
+		case (f.Type == TypeString || f.Type == TypeStringLower) && f.Value != nil:
+			continue
+		case bitRangePattern.MatchString(string(f.Type)) || f.Type == TypeBoolLower:
+			total += f.Consume
+		case f.Type == TypeBytesLower || f.Type == TypeAsciiLower || f.Type == TypeHexLower ||
+			f.Type == TypeBase64Lower || f.Type == TypeSkipLower:
+			if f.Length <= 0 {
+				return 0
+			}
+			total += f.Length
+		default:
+			size := inferLengthFromType(f.Type)
+			if _, known := canonicalTypes[string(f.Type)]; !known || f.Type == TypeObjectLower ||
+				f.Type == TypeRepeatLower || f.Type == TypeEnumLower || f.Type == TypeMatchLower ||
+				f.Type == TypeBitfieldString || f.Type == "" {
+				return 0
+			}
+			total += size
+		}
+	}
+	return total
+}
+
+// raggedTailError is the PS-344 error: the repeat, reported as a ragged tail.
+func raggedTailError(field Field, remaining, elementSize, offset int) error {
+	need := ""
+	if elementSize > 0 {
+		need = fmt.Sprintf(", fewer than the %d an element takes", elementSize)
+	}
+	return fmt.Errorf("repeat '%s' ends in a ragged tail: %d byte(s) at offset %d%s (PS-343)",
+		field.Name, remaining, offset, need)
+}
+
 // repeatLimitError is the PS-396 error: the repeat, its limit and the payload left
 // unparsed. Worded as the Python reference and the generated codec word it.
 func repeatLimitError(field Field, limit int, mode string, offset, end int) error {
@@ -3263,9 +3304,21 @@ func decodeRepeat(field Field, ctx *DecodeContext) ([]any, error) {
 		// Until-end: repeat until payload exhausted
 		iterations := 0
 
+		// PS-343 to PS-344a: a tail too short for a whole element is an error naming the
+		// repeat as a ragged tail, tested before the element begins where its size is
+		// fixed. This began the element and failed part-way with the read error of
+		// whichever member ran out.
+		elementSize := fixedElementSize(field.Fields)
 		for ctx.Remaining() > 0 && iterations < maxIterations {
+			start := ctx.Offset
+			if elementSize > 0 && ctx.Remaining() < elementSize {
+				return nil, raggedTailError(field, ctx.Remaining(), elementSize, start)
+			}
 			element, err := decodeFields(field.Fields, ctx)
 			if err != nil {
+				if strings.Contains(err.Error(), "buffer underflow") {
+					return nil, raggedTailError(field, len(ctx.Data)-start, 0, start)
+				}
 				return nil, err
 			}
 			result = append(result, element)
@@ -4217,6 +4270,20 @@ func encodeFields(fields []Field, data map[string]any, ctx *EncodeContext) error
 			continue
 		}
 
+		// PS-359: a literal writes no bytes and its key is not required of the input.
+		if field.Value != nil && (field.Type == TypeString || field.Type == TypeStringLower ||
+			field.Type == TypeNumber || field.Type == "number") {
+			continue
+		}
+		// PS-360: `value` on a field that reads bytes is the constant to write, whatever
+		// the input supplies.
+		if field.Value != nil {
+			if err := encodeField(field, field.Value, ctx); err != nil {
+				return err
+			}
+			continue
+		}
+
 		// A field with no name, or an `_`-prefixed intermediate, carries no value
 		// for the caller to supply — but it still occupies its bytes on the wire.
 		// Returning early wrote none of them, so a top-level `skip` or a
@@ -4587,9 +4654,8 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 	// switch matched only the capitalised constants, so those fields silently wrote no
 	// bytes. am102's 8-byte serial number emitted its tag and then nothing.
 	case TypeAscii, TypeAsciiLower, TypeString, TypeStringLower:
-		if (field.Type == TypeString || field.Type == TypeStringLower) &&
-			field.Value != nil && field.Length == 0 {
-			// A literal came from no bytes, so it writes none.
+		if (field.Type == TypeString || field.Type == TypeStringLower) && field.Value != nil {
+			// A literal came from no bytes, so it writes none (PS-359).
 			break
 		}
 		if strVal, ok := value.(string); ok {

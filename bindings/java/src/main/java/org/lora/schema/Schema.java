@@ -79,6 +79,8 @@ public class Schema {
 
     @SuppressWarnings("unchecked")
     private static Schema parseRaw(Map<String, Object> raw) {
+        // CR-2026-045: splice every $ref first, rejecting what cannot be (PS-345 to PS-349).
+        raw = expandRawRefs(raw);
         Schema schema = new Schema();
         
         schema.name = (String) raw.getOrDefault("name", "unnamed");
@@ -91,8 +93,7 @@ public class Schema {
         // Parse fields, splicing any `$ref` into the list first.
         Object fieldsRaw = raw.get("fields");
         if (fieldsRaw instanceof List) {
-            schema.fields = parseFields(
-                    expandRefs((List<Map<String, Object>>) fieldsRaw, raw, 0));
+            schema.fields = parseFields((List<Map<String, Object>>) fieldsRaw);
         }
         
         // No `header:` block. It was never in the specification, and honouring it
@@ -127,10 +128,7 @@ public class Schema {
 
         Object fieldsRaw = raw.get("fields");
         if (fieldsRaw instanceof List) {
-            // A port's field list may carry a `$ref` too - `definitions` are
-            // schema-level, so they resolve against the document root.
-            pd.setFields(parseFields(
-                    expandRefs((List<Map<String, Object>>) fieldsRaw, root, 0)));
+            pd.setFields(parseFields((List<Map<String, Object>>) fieldsRaw));
         }
 
         return pd;
@@ -157,6 +155,7 @@ public class Schema {
             }
             checkBytesFormat(fm);
             if (fm.containsKey("byte_group")) checkByteGroupOverlap(fm.get("byte_group"));
+            checkLiteral(fm);
             // PS-399: exactly one discriminator source. With both, `field` won and the
             // `length` byte was left unread, misaligning every later field.
             if (fm.get("match") instanceof Map<?, ?> match
@@ -169,56 +168,86 @@ public class Schema {
         return fields;
     }
 
+    private static final String REF_PREFIX = "#/definitions/";
+
     /**
-     * Splice `$ref: '#/definitions/name'` entries into the field list they appear in.
-     *
-     * <p>Resolved at parse time, and the referenced definition's {@code fields:} are
-     * spliced rather than nested: a nested container with no {@code type: object} is
-     * never descended into, so every field inside it would report as missing.
-     *
-     * <p>Only local {@code #/definitions/...} references resolve here, matching the
-     * other implementations. Cross-file references are a pre-step
-     * (tools/schema_preprocessor.py) so the interpreters need no loader.
-     *
-     * <p>This binding had no {@code $ref} support at all until the `header:` block was
-     * removed and a conformance fixture pointed the replacement at it.
+     * CR-2026-045: splice every {@code {$ref: '#/definitions/<name>'}} into the field list
+     * it sits in, before anything is parsed, so a reference works in any field list - a
+     * port entry, an object, a repeat, a case (PS-346, PS-347). This resolved only the
+     * schema's and the ports' own lists, and an unresolvable reference was kept and
+     * produced nothing. Rejected at load: a definition that is not a field group
+     * (PS-345), a reference that does not resolve (PS-348) or names another document
+     * (PS-462, optional and not supported here), a pointer of another form (PS-461), a
+     * cycle (PS-349). Mirrors expand_refs in tools/schema_interpreter.py.
      */
     @SuppressWarnings("unchecked")
-    private static List<Map<String, Object>> expandRefs(
-            List<Map<String, Object>> fieldsRaw, Map<String, Object> root, int depth) {
-        if (fieldsRaw == null) return null;
-        List<Map<String, Object>> out = new ArrayList<>();
-        // Guard against a definition that refers to itself, directly or in a cycle.
-        if (depth > 16) return fieldsRaw;
-
-        for (Map<String, Object> fm : fieldsRaw) {
-            Object refRaw = fm.get("$ref");
-            if (!(refRaw instanceof String ref)) {
-                out.add(fm);
-                continue;
+    private static Map<String, Object> expandRawRefs(Map<String, Object> raw) {
+        Object defsRaw = raw.get("definitions");
+        if (defsRaw != null && !(defsRaw instanceof Map)) {
+            throw new SchemaException("'definitions' must map names to field groups (PS-345)");
+        }
+        Map<String, Object> definitions = defsRaw == null ? Map.of() : (Map<String, Object>) defsRaw;
+        for (Map.Entry<String, Object> e : definitions.entrySet()) {
+            if (!(e.getValue() instanceof Map<?, ?> group) || !(group.get("fields") instanceof List)) {
+                throw new SchemaException("definition '" + e.getKey()
+                        + "' is not a field group with a `fields` array (PS-345)");
             }
-            List<Map<String, Object>> target = definitionFields(ref, root);
-            if (target == null) {
-                // Unresolvable: keep the entry so the field simply produces nothing,
-                // rather than dropping it and shifting every later offset.
-                out.add(fm);
-                continue;
-            }
-            out.addAll(expandRefs(target, root, depth + 1));
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> e : raw.entrySet()) {
+            boolean carried = e.getKey().equals("definitions") || e.getKey().equals("test_vectors");
+            out.put(e.getKey(), carried ? e.getValue() : expandNode(e.getValue(), definitions, new ArrayList<>()));
+        }
+        for (Map.Entry<String, Object> e : definitions.entrySet()) {
+            List<String> stack = new ArrayList<>(List.of(e.getKey()));
+            expandNode(((Map<String, Object>) e.getValue()).get("fields"), definitions, stack);
         }
         return out;
     }
 
     @SuppressWarnings("unchecked")
-    private static List<Map<String, Object>> definitionFields(String ref, Map<String, Object> root) {
-        String prefix = "#/definitions/";
-        if (!ref.startsWith(prefix)) return null;
-        Object defsRaw = root.get("definitions");
-        if (!(defsRaw instanceof Map)) return null;
-        Object def = ((Map<String, Object>) defsRaw).get(ref.substring(prefix.length()));
-        if (!(def instanceof Map)) return null;
-        Object fields = ((Map<String, Object>) def).get("fields");
-        return fields instanceof List ? (List<Map<String, Object>>) fields : null;
+    private static Object expandNode(Object node, Map<String, Object> definitions, List<String> stack) {
+        if (node instanceof Map<?, ?> map) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                out.put(String.valueOf(e.getKey()), expandNode(e.getValue(), definitions, stack));
+            }
+            return out;
+        }
+        if (node instanceof List<?> list) {
+            List<Object> out = new ArrayList<>();
+            for (Object item : list) {
+                if (item instanceof Map<?, ?> m && m.containsKey("$ref")) {
+                    out.addAll(resolveRef(m.get("$ref"), definitions, stack));
+                } else {
+                    out.add(expandNode(item, definitions, stack));
+                }
+            }
+            return out;
+        }
+        return node;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Object> resolveRef(Object ref, Map<String, Object> definitions, List<String> stack) {
+        if (!(ref instanceof String text) || !text.startsWith(REF_PREFIX)) {
+            if (ref instanceof String text && text.contains("#") && !text.startsWith("#")) {
+                throw new SchemaException("$ref " + text + " names another document; this implementation "
+                        + "resolves only #/definitions/<name> (PS-462)");
+            }
+            throw new SchemaException("$ref " + ref + " is not of the form #/definitions/<name> (PS-461)");
+        }
+        String name = text.substring(REF_PREFIX.length());
+        if (stack.contains(name)) {
+            throw new SchemaException("$ref cycle: " + String.join(" -> ", stack) + " -> " + name + " (PS-349)");
+        }
+        Object group = definitions.get(name);
+        if (!(group instanceof Map<?, ?> g) || !(g.get("fields") instanceof List<?> fields)) {
+            throw new SchemaException("$ref " + text + " does not resolve to a field group (PS-348)");
+        }
+        List<String> deeper = new ArrayList<>(stack);
+        deeper.add(name);
+        return (List<Object>) expandNode(fields, definitions, deeper);
     }
 
     /**
@@ -333,6 +362,57 @@ public class Schema {
             }
         }
         return values;
+    }
+
+    /** The bytes one element always takes, or 0 where it varies (PS-344a). */
+    private static int fixedElementSize(List<Field> fields) {
+        int total = 0;
+        for (Field f : fields) {
+            FieldType t = f.getType();
+            if (t == FieldType.NUMBER || (t == FieldType.STRING && f.getValue() != null)) continue;
+            if (t == FieldType.BITS || t == FieldType.BOOL) { total += f.getConsume(); continue; }
+            if (t == FieldType.BYTES || t == FieldType.ASCII || t == FieldType.HEX
+                    || t == FieldType.BASE64 || t == FieldType.SKIP) {
+                if (f.getLength() <= 0) return 0;
+                total += f.getLength();
+                continue;
+            }
+            if (t.isInteger() || t.isFloat() || t == FieldType.UDEC || t == FieldType.SDEC) {
+                total += t == FieldType.UDEC || t == FieldType.SDEC ? 1
+                        : t.isFloat() ? (t == FieldType.F16 ? 2 : t == FieldType.F32 ? 4 : 8)
+                        : t.defaultLength();
+                continue;
+            }
+            return 0;
+        }
+        return total;
+    }
+
+    /** The PS-344 error: the repeat, reported as a ragged tail. */
+    private static SchemaException.DecodeException raggedTailError(Field field, int remaining,
+            int elementSize, int offset) {
+        String need = elementSize > 0 ? ", fewer than the " + elementSize + " an element takes" : "";
+        return new SchemaException.DecodeException("repeat '" + field.getName() + "' ends in a ragged tail: "
+                + remaining + " byte(s) at offset " + offset + need + " (PS-343)");
+    }
+
+    /** PS-358: a literal's value matches its type, and it carries no arithmetic. */
+    private static void checkLiteral(Map<String, Object> fm) {
+        Object type = fm.get("type");
+        if (!fm.containsKey("value") || !("string".equals(type) || "number".equals(type))) return;
+        Object value = fm.get("value");
+        String at = "Field '" + fm.get("name") + "': ";
+        if ("string".equals(type) && !(value instanceof String)) {
+            throw new SchemaException(at + "a string literal's value must be a string (PS-358)");
+        }
+        if ("number".equals(type) && !(value instanceof Number)) {
+            throw new SchemaException(at + "a number literal's value must be a number (PS-358)");
+        }
+        for (String key : List.of("ref", "polynomial", "compute", "lookup", "transform", "mult", "div", "add")) {
+            if (fm.containsKey(key)) {
+                throw new SchemaException(at + "a literal must not declare " + key + " (PS-358)");
+            }
+        }
     }
 
     /** The PS-396 error: the repeat, its limit and the payload left unparsed. */
@@ -1157,6 +1237,14 @@ public class Schema {
             }
             
             case STRING -> {
+                // A literal reads no bytes (PS-357), and `string` is only ever a literal: a
+                // string read from the payload is `ascii` (PS-361). A string with no value
+                // reported null.
+                if (field.getValue() == null) {
+                    throw new SchemaException.DecodeException("field '" + field.getName()
+                            + "': type string declares no value; a string read from the payload "
+                            + "is type ascii (PS-361)");
+                }
                 value = field.getValue();
             }
             
@@ -1738,8 +1826,22 @@ public class Schema {
             }
         } else if ("end".equals(field.getUntil())) {
             int iterations = 0;
+            // PS-343 to PS-344a: a tail too short for a whole element is an error naming
+            // the repeat as a ragged tail, tested before the element begins where its
+            // size is fixed. This began the element and failed part-way with the
+            // underflow of whichever member ran out.
+            int elementSize = fixedElementSize(field.getFields());
             while (ctx.remaining() > 0 && iterations < maxIterations) {
-                result.add(decodeFields(field.getFields(), ctx));
+                int start = ctx.getOffset();
+                if (elementSize > 0 && ctx.remaining() < elementSize) {
+                    throw raggedTailError(field, ctx.remaining(), elementSize, start);
+                }
+                try {
+                    result.add(decodeFields(field.getFields(), ctx));
+                } catch (SchemaException.DecodeException e) {
+                    if (e.getMessage() == null || !e.getMessage().contains("Buffer underflow")) throw e;
+                    throw raggedTailError(field, ctx.getData().length - start, 0, start);
+                }
                 iterations++;
             }
             if (iterations >= maxIterations && ctx.remaining() > 0) {

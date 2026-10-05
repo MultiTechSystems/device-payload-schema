@@ -127,9 +127,13 @@ final class Encoder {
             return encodeRepeat(field, data);
         }
         if (type == FieldType.OBJECT) {
-            // A nested object's fields are written in place; decoding reports them
-            // flattened, so they are looked up by their own names.
-            return encodeFieldList(field.getFields(), data);
+            // A nested object is reported under its own name (PS-139), so its members
+            // are read from that mapping. They were looked up in the enclosing data,
+            // where they are not, and every member encoded as a zero.
+            Object nested = field.getName() == null ? null : data.get(field.getName());
+            @SuppressWarnings("unchecked")
+            Map<String, Object> members = nested instanceof Map<?, ?> m ? (Map<String, Object>) m : data;
+            return encodeFieldList(field.getFields(), members);
         }
         if (type == FieldType.NUMBER) {
             // Derived from other fields: no bytes of its own.
@@ -139,6 +143,16 @@ final class Encoder {
             // `remaining` gives no count to pad on encode (PS-014).
             int length = field.getLength() > 0 ? field.getLength() : 0;
             return new byte[length];
+        }
+
+        // PS-359: a literal writes no bytes and its key is not required of the input.
+        if (type == FieldType.STRING && field.getValue() != null) {
+            return EMPTY;
+        }
+        // PS-360: `value` on a field that reads bytes is the constant to write, whatever
+        // the input supplies.
+        if (field.getValue() != null) {
+            return encodeField(field, field.getValue());
         }
 
         String name = field.getName();
@@ -1069,7 +1083,7 @@ final class Encoder {
             return pad(raw, encodeLength(field, raw.length));
         }
 
-        if (type == FieldType.STRING && field.getValue() != null && field.getLength() == 0) {
+        if (type == FieldType.STRING && field.getValue() != null) {
             // A literal came from no bytes, so it writes none. This wrote its text:
             // `{type: string, value: "ppm"}` re-encoded 07 as 70706d07.
             return new byte[0];

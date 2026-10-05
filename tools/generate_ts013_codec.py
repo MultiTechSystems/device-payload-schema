@@ -388,6 +388,12 @@ def ref_to_js(ref: str) -> str:
 
 class TS013Generator:
     def __init__(self, schema: Dict[str, Any], source: str = ''):
+        # Every `$ref` is spliced up front, as the interpreter does (PS-346, PS-347), and
+        # a schema whose references are invalid is refused (PS-345, PS-348, PS-349).
+        from schema_interpreter import expand_refs
+        schema, ref_errors = expand_refs(schema)
+        if ref_errors:
+            raise ValueError(ref_errors[0])
         self.schema = schema
         self.source = source
         self.name = schema.get('name', 'unknown')
@@ -987,19 +993,34 @@ function writeS(buf, pos, size, value, endian) {
             # the payload as well and stop if the position does not advance.
             lines.append(f'{i}  while ({condition}) {{')
             lines.append(f'{i}    var {arr}_before = pos;')
+            # Each record decodes into a fresh `d` (see `object`): lifting members out of
+            # the enclosing one deleted any enclosing field sharing a member's name.
+            lines.append(f'{i}    var {arr}_outer = d; d = {{}};')
+            ragged = None
+            if until == 'end' and count is None and byte_length is None:
+                # PS-343 to PS-344a: a tail too short for a whole element is an error
+                # naming the repeat as a ragged tail. The readers here return 0 past the
+                # end of the buffer, so without this a short tail decoded as a final
+                # element of zeros and reported success.
+                from schema_interpreter import fixed_element_size
+                size = fixed_element_size(field['fields'])
+                ragged = ('throw new Error("repeat \'" + ' + rname + ' + "\' ends in a ragged tail: " + '
+                          f'(buf.length - {arr}_before) + " byte(s) at offset " + {arr}_before'
+                          + (f' + ", fewer than the {size} an element takes (PS-343)");' if size
+                             else ' + " (PS-343)");'))
+                if size:
+                    lines.append(f'{i}    if (buf.length - pos < {size}) {{ {ragged} }}')
             self.indent += 1
             for member in members:
                 lines.extend(self._gen_decode_field(member))
             self.indent -= 1
-            lines.append(f'{i}    var {arr}_rec = {{}};')
+            lines.append(f'{i}    var {arr}_rec = d; d = {arr}_outer;')
             for member in members:
-                mjs = to_js_name(member['name'])
                 if member['name'].startswith('_'):
-                    # Internal members stay out of the record but must not leak either.
-                    lines.append(f'{i}    delete d.{mjs};')
-                    continue
-                lines.append(f'{i}    if (d.{mjs} !== undefined) '
-                             f'{{ {arr}_rec.{mjs} = d.{mjs}; delete d.{mjs}; }}')
+                    # Internal members stay out of the record.
+                    lines.append(f'{i}    delete {arr}_rec.{to_js_name(member["name"])};')
+            if ragged:
+                lines.append(f'{i}    if (pos > buf.length) {{ {ragged} }}')
             lines.append(f'{i}    {arr}.push({arr}_rec);')
             lines.append(f'{i}    if (pos <= {arr}_before) break;')
             lines.append(f'{i}    if (pos >= buf.length && !({condition})) break;')
@@ -1056,21 +1077,18 @@ function writeS(buf, pos, size, value, endian) {
         # without duplicating their generators.
         if field.get('type') == 'object' and field.get('fields'):
             obj_name = to_js_name(field.get('name', '_object'))
-            member_names = []
             lines.append(f'{i}  // object {field.get("name")}')
+            # The members decode into a fresh `d`, which then becomes the object. They
+            # used to decode into the enclosing `d` and be lifted out and deleted, which
+            # deleted an enclosing field of the same name: a top-level `value` vanished
+            # beside an object with a `value` member.
+            outer = f'{obj_name}_outer{id(field) % 100000}'
+            lines.append(f'{i}  var {outer} = d; d = {{}};')
             for member in field['fields']:
                 if not isinstance(member, dict) or not member.get('name'):
                     continue
                 lines.extend(self._gen_decode_field(member))
-                member_names.append(to_js_name(member['name']))
-            if member_names:
-                lines.append(f'{i}  d.{obj_name} = {{}};')
-                for member_name in member_names:
-                    lines.append(
-                        f'{i}  if (d.{member_name} !== undefined) '
-                        f'{{ d.{obj_name}.{member_name} = d.{member_name}; '
-                        f'delete d.{member_name}; }}'
-                    )
+            lines.append(f'{i}  {outer}.{obj_name} = d; d = {outer};')
             return lines
 
         # type: number or integer (computed, decode-only). `integer` reports its value
@@ -1157,6 +1175,9 @@ function writeS(buf, pos, size, value, endian) {
         # A string literal (spec "Literal Types"): a constant, read from no bytes.
         # `string` fell through to the integer path, which emitted a TODO and nothing,
         # so the key was silently missing from every generated codec.
+        if ftype == 'string' and 'value' not in field:
+            raise ValueError(f"Field '{name}': type string declares no value; a string read "
+                             f"from the payload is type ascii (PS-361)")
         if ftype == 'string' and 'value' in field and not field.get('length'):
             literal = json.dumps(field['value'])
             lines.append(f'{i}  vars.{js_name} = {literal};')

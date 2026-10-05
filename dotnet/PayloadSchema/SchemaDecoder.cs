@@ -365,19 +365,12 @@ public static class SchemaDecoder
                 // here already carries a default inferred from the type, which made
                 // `{type: string, value: "ppm"}` a one-byte read that shifted
                 // everything after it.
-                if (field.Value != null && field.Length == 0)
-                {
-                    value = field.Value;
-                }
-                else if (length > 0)
-                {
-                    var data = ctx.Read(length);
-                    value = Encoding.ASCII.GetString(data).TrimEnd('\0');
-                }
-                else
-                {
-                    value = field.Value;
-                }
+                // `string` is only ever a literal: a string read from the payload is
+                // `ascii` (PS-361), and a literal reads no bytes (PS-357).
+                if (field.Value == null)
+                    throw new InvalidOperationException($"field '{field.Name}': type string declares "
+                        + "no value; a string read from the payload is type ascii (PS-361)");
+                value = field.Value;
                 break;
             }
 
@@ -644,6 +637,45 @@ public static class SchemaDecoder
     /// The long fixed expansion is exact, so a tie is recognised only where there is one:
     /// 78.125 is a tie, while 2.355 is stored just below one.
     /// </summary>
+    /// <summary>The bytes one element always takes, or 0 where it varies (PS-344a).</summary>
+    static int FixedElementSize(List<SchemaField> fields)
+    {
+        int total = 0;
+        foreach (var f in fields)
+        {
+            switch (f.Type)
+            {
+                case FieldType.Number:
+                    continue;
+                case FieldType.String when f.Value != null:
+                    continue;
+                case FieldType.Bits or FieldType.Bool:
+                    total += f.Consume;
+                    continue;
+                case FieldType.Bytes or FieldType.Ascii or FieldType.Hex or FieldType.Base64 or FieldType.Skip:
+                    if (f.Length <= 0) return 0;
+                    total += f.Length;
+                    continue;
+                case FieldType.UDec or FieldType.SDec:
+                    total += 1;
+                    continue;
+                case FieldType.U8 or FieldType.U16 or FieldType.U24 or FieldType.U32 or FieldType.U64
+                    or FieldType.S8 or FieldType.S16 or FieldType.S24 or FieldType.S32 or FieldType.S64
+                    or FieldType.U32LE16 or FieldType.S32LE16 or FieldType.F16 or FieldType.F32 or FieldType.F64:
+                    total += Helpers.InferLengthFromType(f.Type);
+                    continue;
+                default:
+                    return 0;
+            }
+        }
+        return total;
+    }
+
+    /// <summary>The PS-344 error: the repeat, reported as a ragged tail.</summary>
+    static InvalidOperationException RaggedTailError(SchemaField field, int remaining, int elementSize, int offset)
+        => new($"repeat '{field.Name}' ends in a ragged tail: {remaining} byte(s) at offset {offset}"
+            + (elementSize > 0 ? $", fewer than the {elementSize} an element takes" : "") + " (PS-343)");
+
     /// <summary>The PS-396 error: the repeat, its limit and the payload left unparsed.</summary>
     static InvalidOperationException RepeatLimitError(SchemaField field, int limit, string mode, int offset, int end)
         => new($"repeat '{field.Name}' exceeds its max of {limit} element(s) ({mode}); "
@@ -1344,9 +1376,24 @@ public static class SchemaDecoder
         else if (field.Until == "end")
         {
             int iterations = 0;
+            // PS-343 to PS-344a: a tail too short for a whole element is an error naming
+            // the repeat as a ragged tail, tested before the element begins where its
+            // size is fixed. This began the element and failed part-way with the
+            // underflow of whichever member ran out.
+            var elementSize = FixedElementSize(field.Fields);
             while (ctx.Remaining > 0 && iterations < maxIterations)
             {
-                result.Add(DecodeFields(field.Fields, ctx, schema));
+                var start = ctx.Offset;
+                if (elementSize > 0 && ctx.Remaining < elementSize)
+                    throw RaggedTailError(field, ctx.Remaining, elementSize, start);
+                try
+                {
+                    result.Add(DecodeFields(field.Fields, ctx, schema));
+                }
+                catch (InvalidOperationException e) when (e.Message.Contains("Buffer underflow"))
+                {
+                    throw RaggedTailError(field, ctx.Data.Length - start, 0, start);
+                }
                 iterations++;
             }
             if (iterations >= maxIterations && ctx.Remaining > 0)

@@ -179,9 +179,12 @@ public static class SchemaEncoder
                 case FieldType.Repeat:
                     return EncodeRepeat(field, data);
                 case FieldType.Object:
-                    // A nested object's fields are written in place; decoding reports them
-                    // flattened, so they are looked up by their own names.
-                    return EncodeFieldList(field.Fields, data);
+                    // A nested object is reported under its own name (PS-139), so its
+                    // members are read from that mapping. They were looked up in the
+                    // enclosing data, where they are not, and every member encoded as zero.
+                    return EncodeFieldList(field.Fields,
+                        data.TryGetValue(field.Name, out var nested) && nested is Dictionary<string, object?> members
+                            ? members : data);
                 case FieldType.Number:
                     // Derived from other fields: no bytes of its own.
                     return Array.Empty<byte>();
@@ -189,6 +192,14 @@ public static class SchemaEncoder
                     // `remaining` gives no count to pad on encode (PS-014).
                     return new byte[field.Length > 0 ? field.Length : 0];
             }
+
+            // PS-359: a literal writes no bytes and its key is not required of the input.
+            if (field.Type == FieldType.String && field.Value != null)
+                return Array.Empty<byte>();
+            // PS-360: `value` on a field that reads bytes is the constant to write,
+            // whatever the input supplies.
+            if (field.Value != null)
+                return EncodeField(field, field.Value);
 
             if (field.Type == FieldType.BitfieldString)
             {
@@ -1155,7 +1166,7 @@ public static class SchemaEncoder
                     var raw = ToBytes(field, value);
                     return Pad(raw, EncodeLength(field, raw.Length));
                 }
-                case FieldType.String when field.Value != null && field.Length == 0:
+                case FieldType.String when field.Value != null:
                     // A literal came from no bytes, so it writes none.
                     return Array.Empty<byte>();
                 case FieldType.Ascii or FieldType.String:

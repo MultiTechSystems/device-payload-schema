@@ -26,7 +26,8 @@ from dataclasses import dataclass, field
 # Add tools to path
 sys.path.insert(0, str(Path(__file__).parent))
 from schema_interpreter import (SchemaInterpreter, DecodeResult, check_byte_group_overlap,
-                                fport_declaration_errors)
+                                expand_refs, fport_declaration_errors, literal_errors,
+                                typed_field_dicts)
 import schema_vocabulary
 
 
@@ -1138,7 +1139,12 @@ def check_remaining_length(schema: Dict[str, Any]) -> List[str]:
 
 def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
     """Validate schema structure and return list of errors."""
-    errors = []
+    # PS-345, PS-348, PS-349, PS-461, PS-462: definitions and references, checked here
+    # rather than at decode (PS-348). PS-358: malformed literals.
+    errors = list(expand_refs(schema)[1]) if isinstance(schema, dict) else []
+    if isinstance(schema, dict):
+        for field_def in typed_field_dicts(schema):
+            errors.extend(literal_errors(field_def))
     has_fields = False
     has_ports = False
     
@@ -1434,6 +1440,13 @@ def run_test_vector(interpreter: SchemaInterpreter, tv: Dict[str, Any]) -> TestR
 
 def check_best_practices(schema: Dict[str, Any], result: ValidationResult) -> None:
     """Check for best practices and add warnings/info to result."""
+
+    # PS-361: `string` is a literal; a field that reads text from the payload is `ascii`.
+    for field_def in typed_field_dicts(schema):
+        if field_def.get('type') == 'string' and 'value' not in field_def:
+            result.add_warning("type string declares no value, so a decoder reports an "
+                               "error; a string read from the payload is type ascii (PS-361)",
+                               str(field_def.get('name', '?')))
 
     # PS-338: `fport` is accepted and never written.
     if 'fport' in schema and 'fPort' not in schema:

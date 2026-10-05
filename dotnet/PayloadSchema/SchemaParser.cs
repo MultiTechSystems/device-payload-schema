@@ -13,7 +13,92 @@ public static class SchemaParser
         var yaml = new YamlStream();
         yaml.Load(new StringReader(yamlOrJson));
         var root = (YamlMappingNode)yaml.Documents[0].RootNode;
-        return ParseRoot(root);
+        // CR-2026-045: splice every $ref first, rejecting what cannot be (PS-345 to PS-349).
+        return ParseRoot(ExpandRefs(root));
+    }
+
+    const string RefPrefix = "#/definitions/";
+
+    /// <summary>
+    /// Splice every `{$ref: '#/definitions/name'}` into the field list it sits in, before
+    /// anything is parsed, so a reference works in any field list - a port entry, an
+    /// object, a repeat, a case (PS-346, PS-347). Rejected at load: a definition that is
+    /// not a field group (PS-345), a reference that does not resolve (PS-348) or names
+    /// another document (PS-462, optional and not supported here), a pointer of another
+    /// form (PS-461), a cycle (PS-349). Mirrors expand_refs in tools/schema_interpreter.py.
+    /// </summary>
+    static YamlMappingNode ExpandRefs(YamlMappingNode root)
+    {
+        var definitions = new Dictionary<string, YamlSequenceNode>();
+        if (root.TryGetValue("definitions", out var defsNode))
+        {
+            if (defsNode is not YamlMappingNode defsMap)
+                throw new InvalidOperationException("'definitions' must map names to field groups (PS-345)");
+            foreach (var kv in defsMap.Children)
+            {
+                var name = Scalar(kv.Key);
+                if (kv.Value is not YamlMappingNode group || !group.TryGetValue("fields", out var f)
+                    || f is not YamlSequenceNode fields)
+                    throw new InvalidOperationException(
+                        $"definition '{name}' is not a field group with a `fields` array (PS-345)");
+                definitions[name] = fields;
+            }
+        }
+
+        YamlNode Expand(YamlNode node, List<string> stack)
+        {
+            switch (node)
+            {
+                case YamlMappingNode map:
+                {
+                    var outMap = new YamlMappingNode();
+                    foreach (var kv in map.Children) outMap.Add(kv.Key, Expand(kv.Value, stack));
+                    return outMap;
+                }
+                case YamlSequenceNode seq:
+                {
+                    var outSeq = new YamlSequenceNode();
+                    foreach (var item in seq.Children)
+                    {
+                        if (item is YamlMappingNode m && m.TryGetValue("$ref", out var refNode))
+                            foreach (var spliced in Resolve(refNode, stack)) outSeq.Add(spliced);
+                        else
+                            outSeq.Add(Expand(item, stack));
+                    }
+                    return outSeq;
+                }
+                default:
+                    return node;
+            }
+        }
+
+        IEnumerable<YamlNode> Resolve(YamlNode refNode, List<string> stack)
+        {
+            var text = refNode is YamlScalarNode sc ? sc.Value ?? "" : "";
+            if (!text.StartsWith(RefPrefix, StringComparison.Ordinal))
+            {
+                if (text.Contains('#') && !text.StartsWith('#'))
+                    throw new InvalidOperationException($"$ref {text} names another document; this "
+                        + "implementation resolves only #/definitions/<name> (PS-462)");
+                throw new InvalidOperationException($"$ref {text} is not of the form #/definitions/<name> (PS-461)");
+            }
+            var name = text[RefPrefix.Length..];
+            if (stack.Contains(name))
+                throw new InvalidOperationException($"$ref cycle: {string.Join(" -> ", stack)} -> {name} (PS-349)");
+            if (!definitions.TryGetValue(name, out var fields))
+                throw new InvalidOperationException($"$ref {text} does not resolve to a field group (PS-348)");
+            return ((YamlSequenceNode)Expand(fields, new List<string>(stack) { name })).Children;
+        }
+
+        var outRoot = new YamlMappingNode();
+        foreach (var kv in root.Children)
+        {
+            var key = Scalar(kv.Key);
+            outRoot.Add(kv.Key, key is "definitions" or "test_vectors" ? kv.Value : Expand(kv.Value, new List<string>()));
+        }
+        foreach (var (name, fields) in definitions)
+            Expand(fields, new List<string> { name });
+        return outRoot;
     }
 
     static PayloadSchemaDefinition ParseRoot(YamlMappingNode root)
@@ -177,6 +262,25 @@ public static class SchemaParser
                     $"top-level {name} is {port} but ports also declares {key}; every ports key must equal it (PS-337)");
     }
 
+    /// <summary>PS-358: a literal's value matches its type, and it carries no arithmetic.</summary>
+    static void CheckLiteral(YamlMappingNode fm)
+    {
+        if (!fm.TryGetValue("value", out var valueNode) || !fm.TryGetValue("type", out var t)) return;
+        var type = Scalar(t);
+        if (type is not ("string" or "number")) return;
+        var name = fm.TryGetValue("name", out var n) ? Scalar(n) : "?";
+        var scalar = valueNode as YamlScalarNode;
+        var quoted = scalar?.Style is YamlDotNet.Core.ScalarStyle.SingleQuoted or YamlDotNet.Core.ScalarStyle.DoubleQuoted;
+        var numeric = scalar != null && !quoted && double.TryParse(scalar.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out _);
+        if (type == "string" && (scalar == null || (numeric && !quoted) || scalar.Value is "true" or "false"))
+            throw new InvalidOperationException($"Field '{name}': a string literal's value must be a string (PS-358)");
+        if (type == "number" && !numeric)
+            throw new InvalidOperationException($"Field '{name}': a number literal's value must be a number (PS-358)");
+        foreach (var key in new[] { "ref", "polynomial", "compute", "lookup", "transform", "mult", "div", "add" })
+            if (fm.Children.ContainsKey(new YamlScalarNode(key)))
+                throw new InvalidOperationException($"Field '{name}': a literal must not declare {key} (PS-358)");
+    }
+
     /// <summary>The stages PS-098 and the PS-115 table define; `op` names one instead.</summary>
     static readonly string[] TransformOperations =
         { "add", "mult", "div", "sqrt", "abs", "pow", "log10", "log", "floor", "ceiling", "clamp", "op" };
@@ -242,6 +346,7 @@ public static class SchemaParser
                 }
             }
             CheckBytesFormat(fieldMap);
+            CheckLiteral(fieldMap);
             if (fieldMap.TryGetValue("byte_group", out var group))
                 CheckByteGroupOverlap(group);
             // PS-399: exactly one discriminator source. With both, `field` won and the

@@ -3,7 +3,7 @@
   "min_score_new": 0.8,
   "include_library_composed": false,
   "distribution": {
-    "100%": 75,
+    "100%": 76,
     "95-99%": 21,
     "90-94%": 26,
     "80-89%": 27,
@@ -230,6 +230,16 @@
       "generated": 7,
       "vectors": 1,
       "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/ref-everywhere.yaml": {
+      "score": 1.0,
+      "killed": 9,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 18,
+      "vectors": 1,
+      "provenance": "independent",
       "failing_original": 0
     },
     "_language-conformance/ref-header.yaml": {

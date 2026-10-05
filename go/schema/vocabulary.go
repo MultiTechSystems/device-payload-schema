@@ -292,7 +292,27 @@ func checkByteGroupOverlap(group any, at string) error {
 	return nil
 }
 
+// literalForbidden are the keys a literal must not carry (PS-358).
+var literalForbidden = []string{"ref", "polynomial", "compute", "lookup", "transform", "mult", "div", "add"}
+
 func checkFieldRules(field map[string]any, at string) error {
+	// PS-358: a literal's value matches its type, and it carries no arithmetic.
+	if value, ok := field["value"]; ok && (field["type"] == "string" || field["type"] == "number") {
+		_, isString := value.(string)
+		_, isBool := value.(bool)
+		_, isNumber := toFloat64(value)
+		if field["type"] == "string" && !isString {
+			return fmt.Errorf("%s: a string literal's value must be a string (PS-358)", at)
+		}
+		if field["type"] == "number" && (isBool || !isNumber || isString) {
+			return fmt.Errorf("%s: a number literal's value must be a number (PS-358)", at)
+		}
+		for _, key := range literalForbidden {
+			if _, has := field[key]; has {
+				return fmt.Errorf("%s: a literal must not declare %s (PS-358)", at, key)
+			}
+		}
+	}
 	// PS-399: a match declares exactly one discriminator source. With both, `field` won
 	// and the `length` byte was left unread, misaligning every later field.
 	if match := asStringMap(field["match"]); match != nil {

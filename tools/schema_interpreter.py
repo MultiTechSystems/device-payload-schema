@@ -237,6 +237,50 @@ def format_bytes(field_def, data: bytes):
     return str(field_def.get('separator', '')).join(digits % b for b in data)
 
 
+_FIXED_TYPE_SIZES = {
+    'u8': 1, 'u16': 2, 'u24': 3, 'u32': 4, 'u64': 8,
+    's8': 1, 's16': 2, 's24': 3, 's32': 4, 's64': 8,
+    'u32le16': 4, 's32le16': 4, 'f16': 2, 'f32': 4, 'f64': 8, 'udec': 1, 'sdec': 1,
+}
+
+
+def fixed_element_size(fields):
+    """The bytes one element of these fields always takes, or None if it varies.
+
+    PS-344a asks that a whole element be known to remain before one is begun; that can be
+    known only where the size is fixed. A bit range or bool advances by its `consume`,
+    a computed or literal field by nothing.
+    """
+    total = 0
+    for field in fields or []:
+        if not isinstance(field, dict):
+            return None
+        ftype = str(field.get('type', ''))
+        base = INTEGER_TYPE_INFO.get(ftype)
+        if ftype in _FIXED_TYPE_SIZES or base:
+            total += _FIXED_TYPE_SIZES.get(ftype) or base[0]
+        elif ftype in COMPUTED_TYPES or (ftype == 'string' and 'value' in field):
+            continue
+        elif '[' in ftype or ftype == 'bool':
+            consume = field.get('consume', 0)
+            if not isinstance(consume, int):
+                return None
+            total += consume
+        elif ftype in ('bytes', 'ascii', 'hex', 'base64', 'skip') and isinstance(
+                field.get('length'), int):
+            total += field['length']
+        else:
+            return None
+    return total or None
+
+
+def ragged_tail_message(field_def, remaining, element_size, offset):
+    """The PS-344 error: the repeat, and the tail as a ragged tail, not an underrun."""
+    need = f", fewer than the {element_size} an element takes" if element_size else ""
+    return (f"repeat '{field_def.get('name', '?')}' ends in a ragged tail: {remaining} "
+            f"byte(s) at offset {offset}{need} (PS-343)")
+
+
 def repeat_limit_message(field_def, limit, mode, offset, end):
     """The PS-396 error: the repeat, its limit, and the payload left unparsed."""
     return (f"repeat '{field_def.get('name', '?')}' exceeds its max of {limit} element(s) "
@@ -309,6 +353,82 @@ def object_key_withdrawn(field_def):
             f"{field_def.get('object')}` and `fields` (PS-466)")
 
 
+REF_PREFIX = '#/definitions/'
+
+
+def expand_refs(schema):
+    """Splice every `{$ref: '#/definitions/name'}` into the field list it sits in.
+
+    Returns (expanded schema, errors). The errors are the reasons the schema is invalid
+    and must be rejected rather than decoded:
+
+    - a definition that is not a field group `{fields: [...]}` (PS-345);
+    - a reference that does not resolve (PS-348), or names a file (PS-462: support is
+      optional, and this implementation rejects it rather than guess);
+    - a pointer not of the form `#/definitions/<name>` (PS-461);
+    - a cycle, direct or transitive (PS-349).
+
+    `definitions` and `test_vectors` are carried over as they are.
+    """
+    if not isinstance(schema, dict):
+        return schema, []
+    definitions = schema.get('definitions') or {}
+    errors = []
+    if not isinstance(definitions, dict):
+        return schema, ["'definitions' must map names to field groups (PS-345)"]
+    for name, group in definitions.items():
+        if not (isinstance(group, dict) and isinstance(group.get('fields'), list)):
+            errors.append(
+                f"definition '{name}' is not a field group with a `fields` array (PS-345)")
+
+    def resolve(ref, stack):
+        if not isinstance(ref, str) or not ref.startswith(REF_PREFIX):
+            if isinstance(ref, str) and '#' in ref and not ref.startswith('#'):
+                raise ValueError(f"$ref {ref!r} names another document; this implementation "
+                                 f"resolves only #/definitions/<name> (PS-462)")
+            raise ValueError(f"$ref {ref!r} is not of the form #/definitions/<name> (PS-461)")
+        name = ref[len(REF_PREFIX):]
+        if name in stack:
+            raise ValueError(f"$ref cycle: {' -> '.join(stack + [name])} (PS-349)")
+        group = definitions.get(name)
+        if not (isinstance(group, dict) and isinstance(group.get('fields'), list)):
+            raise ValueError(f"$ref {ref!r} does not resolve to a field group (PS-348)")
+        return expand(group['fields'], stack + [name])
+
+    def expand(node, stack):
+        if isinstance(node, dict):
+            return {k: expand(v, stack) for k, v in node.items()}
+        if isinstance(node, list):
+            out = []
+            for item in node:
+                if isinstance(item, dict) and '$ref' in item:
+                    out.extend(resolve(item['$ref'], stack))
+                else:
+                    out.append(expand(item, stack))
+            return out
+        return node
+
+    expanded = {}
+    for key, value in schema.items():
+        if key in ('definitions', 'test_vectors'):
+            expanded[key] = value
+            continue
+        try:
+            expanded[key] = expand(value, [])
+        except ValueError as exc:
+            errors.append(str(exc))
+            expanded[key] = value
+    # A definition no field list reaches is still checked for cycles and dangling refs.
+    for name, group in definitions.items():
+        if isinstance(group, dict) and isinstance(group.get('fields'), list):
+            try:
+                expand(group['fields'], [name])
+            except ValueError as exc:
+                if str(exc) not in errors:
+                    errors.append(str(exc))
+    return expanded, errors
+
+
 def fport_declaration_errors(schema):
     """PS-335 and PS-337: what is wrong with a document's top-level `fPort`, if anything.
 
@@ -330,6 +450,45 @@ def fport_declaration_errors(schema):
         return [f"top-level {key} is {declared} but ports also declares "
                 f"{', '.join(str(k) for k in others)}; every ports key must equal it (PS-337)"]
     return []
+
+
+def typed_field_dicts(node, _top=True):
+    """Every mapping carrying a `type` in a schema's field lists (not its vectors)."""
+    if isinstance(node, dict):
+        if not _top and 'type' in node:
+            yield node
+        for key, value in node.items():
+            if _top and key in ('test_vectors', 'definitions'):
+                continue
+            yield from typed_field_dicts(value, False)
+    elif isinstance(node, list):
+        for item in node:
+            yield from typed_field_dicts(item, False)
+
+
+def is_literal(field_def):
+    """A `string` or `number` field declaring `value`: a constant read from no bytes (PS-357)."""
+    return (isinstance(field_def, dict) and field_def.get('type') in ('string', 'number')
+            and 'value' in field_def)
+
+
+LITERAL_FORBIDDEN = ('ref', 'polynomial', 'compute', 'lookup', 'transform', 'mult', 'div', 'add')
+
+
+def literal_errors(field_def):
+    """PS-358: a literal's value matches its type, and it carries no arithmetic."""
+    if not is_literal(field_def):
+        return []
+    name, value, ftype = field_def.get('name', '?'), field_def['value'], field_def['type']
+    errors = []
+    if ftype == 'string' and not isinstance(value, str):
+        errors.append(f"Field '{name}': a string literal's value must be a string (PS-358)")
+    if ftype == 'number' and (isinstance(value, bool) or not isinstance(value, (int, float))):
+        errors.append(f"Field '{name}': a number literal's value must be a number (PS-358)")
+    extra = [k for k in LITERAL_FORBIDDEN if k in field_def]
+    if extra:
+        errors.append(f"Field '{name}': a literal must not declare {', '.join(extra)} (PS-358)")
+    return errors
 
 
 def enum_label(entry):
@@ -582,6 +741,15 @@ class SchemaInterpreter:
     """
     
     def __init__(self, schema: Dict[str, Any]):
+        # Every `$ref` is spliced before anything reads the schema (PS-346, PS-347), so
+        # a reference works in any field list - a port entry, an object, a repeat, a
+        # case - and not only at the top level, which was all this handled. Problems
+        # with the references are reported by decode and encode (PS-348).
+        self.source_schema = schema
+        schema, self._load_errors = expand_refs(schema)
+        # PS-358: a malformed literal is a schema error, reported as the references are.
+        for field_def in typed_field_dicts(schema):
+            self._load_errors.extend(literal_errors(field_def))
         self.schema = schema
         self.endian = Endian(schema.get('endian', 'big'))
         self.name = schema.get('name', 'unknown')
@@ -1124,11 +1292,11 @@ class SchemaInterpreter:
                 # `{type: string, value: "ppm"}` reported "\x07" and shifted every
                 # field after it.
                 return field_def['value'], pos
-            length = resolve_length(field_def, buf, pos)
-            if pos + length > len(buf):
-                raise ValueError("Buffer too short for string")
-            value = buf[pos:pos + length].decode('utf-8', errors='replace').rstrip('\x00')
-            return value, pos + length
+            # PS-361: `string` is a literal or nothing; a string read from the payload
+            # is `ascii`. This read the bytes as UTF-8.
+            raise ValueError(
+                f"Field '{field_def.get('name', '?')}': type string declares no value; a "
+                f"string read from the payload is type ascii (PS-361)")
         
         if field_type == 'ascii':
             length = resolve_length(field_def, buf, pos)
@@ -1321,13 +1489,27 @@ class SchemaInterpreter:
 
 
         elif until == 'end':
-            # Until-end: repeat until payload exhausted
+            # Until-end: repeat until payload exhausted. PS-343 to PS-344a: a tail too
+            # short for a whole element is an error naming the repeat as a ragged tail,
+            # tested before the element begins where the element's size is fixed. This
+            # began the element and failed part-way with "Buffer too short", which read
+            # as an underrun of whatever member happened to run out.
+            element_size = fixed_element_size(nested_fields)
             while pos < len(buf) and iterations < max_iterations:
+                if element_size is not None and len(buf) - pos < element_size:
+                    raise ValueError(ragged_tail_message(
+                        field_def, len(buf) - pos, element_size, pos))
                 element = {}
                 start_pos = pos
                 for nested_field in nested_fields:
                     name = nested_field.get('name', 'unknown')
-                    value, pos = self._decode_field(nested_field, buf, pos)
+                    try:
+                        value, pos = self._decode_field(nested_field, buf, pos)
+                    except ValueError as exc:
+                        if 'too short' not in str(exc).lower():
+                            raise
+                        raise ValueError(ragged_tail_message(
+                            field_def, len(buf) - start_pos, None, start_pos)) from exc
                     value = self._apply_modifiers(value, nested_field)
                     if value is not None:
                         element[name] = value
@@ -2446,6 +2628,9 @@ class SchemaInterpreter:
             DecodeResult with decoded data
         """
         result = DecodeResult(data={}, bytes_consumed=0)
+        if self._load_errors:
+            result.errors.extend(self._load_errors)
+            return result
 
         # PS-335, PS-337: a top-level fPort is a statement about the document, checked
         # here and never consulted to select fields (PS-336).
@@ -2823,6 +3008,9 @@ class SchemaInterpreter:
             EncodeResult with encoded payload
         """
         result = EncodeResult(payload=b'')
+        if self._load_errors:
+            result.errors.extend(self._load_errors)
+            return result
 
         # PS-292, the mirror of the decode check: encoding for an entry that disclaims
         # this direction produces bytes the far end will read against different field
@@ -2911,6 +3099,18 @@ class SchemaInterpreter:
                     result.errors.append(
                         f"Error encoding repeat {field_def.get('name')!r}: {e}")
                 continue
+
+            if field_def.get('type') == 'object':
+                # Encoding had no top-level object case: "Cannot encode type: object".
+                nested = data.get(field_def.get('name'))
+                try:
+                    output.extend(self._encode_field_list(
+                        field_def.get('fields') or [],
+                        nested if isinstance(nested, dict) else {}))
+                except Exception as e:
+                    result.errors.append(
+                        f"Error encoding object {field_def.get('name')!r}: {e}")
+                continue
             
             if 'flagged' in field_def:
                 try:
@@ -2946,6 +3146,19 @@ class SchemaInterpreter:
                 output.extend(bytes(length))
                 continue
             
+            # PS-359: a literal came from no bytes and writes none, and its key is not
+            # required of the input. This warned "Missing field" for it.
+            if is_literal(field_def):
+                continue
+            # PS-360: `value` on a field that reads bytes is the constant to write,
+            # whatever the input supplies. The input's value was written instead.
+            if 'value' in field_def:
+                try:
+                    output.extend(self._encode_field(field_def, field_def['value']))
+                except Exception as e:
+                    result.errors.append(f"Error encoding {name}: {e}")
+                continue
+
             # Internal fields: the value a later match needs, else default or 0
             if name.startswith('_'):
                 if name in internal_patches:
@@ -3387,9 +3600,12 @@ class SchemaInterpreter:
                 out.extend(self._encode_repeat(f, data))
                 continue
             if ftype == 'object':
-                # A nested object's fields are written in place; the interpreter reports
-                # them flattened, so they are looked up by their own names.
-                out.extend(self._encode_field_list(f.get('fields') or [], data))
+                # A nested object is reported under its own name (PS-139), so its members
+                # are read from that mapping. They were looked up in the enclosing data,
+                # where they are not, and every member encoded as a zero.
+                nested = data.get(name)
+                out.extend(self._encode_field_list(
+                    f.get('fields') or [], nested if isinstance(nested, dict) else data))
                 continue
             if ftype in COMPUTED_TYPES:
                 # Derived: computed from other fields, no bytes of its own.
@@ -3401,6 +3617,12 @@ class SchemaInterpreter:
                 continue
             if ftype == 'bitfield_string':
                 out.extend(self._encode_bitfield_string(f, str(data.get(name, ''))))
+                continue
+            if is_literal(f):
+                continue            # PS-359: a literal writes no bytes
+            if 'value' in f:
+                # PS-360: the constant is written whatever the input says.
+                out.extend(self._encode_field(f, f['value']))
                 continue
             if not name or name.startswith('_'):
                 value = f.get('default', 0)
