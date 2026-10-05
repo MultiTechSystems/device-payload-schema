@@ -673,15 +673,16 @@ fields:
     length: 2
 ```
 
-A definition is an object with a `fields:` list, and `$ref` splices those fields into the
-list where it appears — schema-level `fields:` or a port's. `01 02 AB CD` decodes to
-`{version: 1, flags: 2, payload: "abcd"}`. The top-level `header:` block is gone; use a
-definition for a common header.
+A definition is an object with a `fields:` list (PS-345), and `$ref` splices those fields
+into the list where it appears - any field list: a port's, an object's, a repeat's, a
+case's (PS-347). `01 02 AB CD` decodes to `{version: 1, flags: 2, payload: "abcd"}`. The
+top-level `header:` block is gone; use a definition for a common header.
 
-`use:`, `rename:` and `prefix:` (including cross-file `use: file.yaml#name` and
-`std/...` library paths) are resolved only by `tools/schema_preprocessor.py`, not by any
-interpreter — given to an interpreter directly, a `use:` entry is misread as an ordinary
-field. Their withdrawal is proposed in spec CR-2026-045; use `$ref`.
+A reference that does not resolve, a cycle, or a pointer not of the form
+`#/definitions/<name>` makes the schema invalid. A reference into another file
+(`lib.yaml#/definitions/x`) is resolved only by `tools/schema_preprocessor.py`, which also
+applies `rename:` and `prefix:`; an interpreter given one rejects it (PS-462). The `use:`
+shorthand is withdrawn (CR-2026-045): write `$ref`.
 
 ## Port-Based Routing
 
