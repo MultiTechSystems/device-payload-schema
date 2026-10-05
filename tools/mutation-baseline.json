@@ -3,15 +3,35 @@
   "min_score_new": 0.8,
   "include_library_composed": false,
   "distribution": {
-    "100%": 76,
-    "95-99%": 21,
-    "90-94%": 26,
-    "80-89%": 27,
+    "100%": 77,
+    "95-99%": 22,
+    "90-94%": 25,
+    "80-89%": 28,
     "70-79%": 6,
     "<70%": 2,
-    "unscored": 2
+    "unscored": 5
   },
   "schemas": {
+    "_language-conformance/bit-range-order.yaml": {
+      "score": 0.875,
+      "killed": 7,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 13,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/bitfield-string-hex-case.yaml": {
+      "score": null,
+      "killed": 0,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 1,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "_language-conformance/bitfield-string.yaml": {
       "score": null,
       "killed": 0,
@@ -50,6 +70,16 @@
       "generated": 10,
       "vectors": 1,
       "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/encoding.yaml": {
+      "score": 1.0,
+      "killed": 12,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 14,
+      "vectors": 1,
+      "provenance": "independent",
       "failing_original": 0
     },
     "_language-conformance/enum-description.yaml": {
@@ -210,6 +240,16 @@
       "generated": 13,
       "vectors": 3,
       "provenance": "unsourced",
+      "failing_original": 0
+    },
+    "_language-conformance/minifloat.yaml": {
+      "score": null,
+      "killed": 0,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 6,
+      "vectors": 1,
+      "provenance": "independent",
       "failing_original": 0
     },
     "_language-conformance/name-from-var.yaml": {
@@ -399,6 +439,16 @@
       "unreached": 0,
       "generated": 17,
       "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/word-ordered.yaml": {
+      "score": null,
+      "killed": 0,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 3,
+      "vectors": 1,
       "provenance": "independent",
       "failing_original": 0
     },
@@ -813,10 +863,10 @@
       "failing_original": 0
     },
     "hbi/mla20.yaml": {
-      "score": 0.9257,
+      "score": 0.9651,
       "killed": 249,
-      "survived": 20,
-      "unreached": 0,
+      "survived": 9,
+      "unreached": 11,
       "generated": 415,
       "vectors": 12,
       "provenance": "independent",

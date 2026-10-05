@@ -5,6 +5,10 @@ public enum FieldType {
     U8, U16, U24, U32, U64,
     /** Two 16-bit big-endian units, least significant unit first (PS-271). */
     U32LE16, S32LE16,
+    /** The word-ordered float (PS-362) and the fourth ordering (PS-363). */
+    F32LE16, U32BE16LE, S32BE16LE, F32BE16LE,
+    /** The MCCI minifloats (PS-417 to PS-419). */
+    UFLT16, SFLT16, SFLT24,
     // Signed integers
     I8, I16, I24, I32, I64, S8, S16, S24, S32, S64,
     // Floating point
@@ -59,6 +63,13 @@ public enum FieldType {
             case "u32", "uint32" -> U32;
             case "u64", "uint64" -> U64;
             case "u32le16" -> U32LE16;
+            case "f32le16" -> F32LE16;
+            case "u32be16le" -> U32BE16LE;
+            case "s32be16le" -> S32BE16LE;
+            case "f32be16le" -> F32BE16LE;
+            case "uflt16" -> UFLT16;
+            case "sflt16" -> SFLT16;
+            case "sflt24" -> SFLT24;
             case "s32le16" -> S32LE16;
             case "s8", "i8", "int8" -> I8;
             case "s16", "i16", "int16" -> I16;
@@ -94,7 +105,8 @@ public enum FieldType {
             case U8, I8, S8, BOOL, BYTE -> 1;
             case U16, I16, S16, F16 -> 2;
             case U24, I24, S24 -> 3;
-            case U32, I32, S32, F32, UINT, SINT, BINT, U32LE16, S32LE16 -> 4;
+            case U32, I32, S32, F32, UINT, SINT, BINT, U32LE16, S32LE16,
+                 F32LE16, U32BE16LE, S32BE16LE, F32BE16LE -> 4;
             case U64, I64, S64, F64 -> 8;
             default -> 1;
         };
@@ -103,14 +115,14 @@ public enum FieldType {
     public boolean isInteger() {
         return switch (this) {
             case U8, U16, U24, U32, U64, I8, I16, I24, I32, I64, S8, S16, S24, S32, S64,
-                 BYTE, UINT, SINT, BINT, BITS, U32LE16, S32LE16 -> true;
+                 BYTE, UINT, SINT, BINT, BITS, U32LE16, S32LE16, U32BE16LE, S32BE16LE -> true;
             default -> false;
         };
     }
 
     public boolean isSigned() {
         return switch (this) {
-            case I8, I16, I24, I32, I64, S8, S16, S24, S32, S64, SINT, S32LE16 -> true;
+            case I8, I16, I24, I32, I64, S8, S16, S24, S32, S64, SINT, S32LE16, S32BE16LE -> true;
             default -> false;
         };
     }

@@ -26,7 +26,9 @@ from dataclasses import dataclass, field
 # Add tools to path
 sys.path.insert(0, str(Path(__file__).parent))
 from schema_interpreter import (SchemaInterpreter, DecodeResult, check_byte_group_overlap,
-                                expand_refs, fport_declaration_errors, literal_errors,
+                                byte_group_endian,
+                                encoding_errors, expand_refs, fport_declaration_errors,
+                                literal_errors,
                                 typed_field_dicts)
 import schema_vocabulary
 
@@ -513,7 +515,11 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
     KNOWN_TYPES = {
         'u8', 'u16', 'u24', 'u32', 'u64',
         # Two 16-bit big-endian units, low unit first (PS-271).
-        'u32le16', 's32le16',
+        'u32le16', 's32le16', 'f32le16',
+        # The fourth ordering (PS-363, CR-2026-047).
+        'u32be16le', 's32be16le', 'f32be16le',
+        # The MCCI minifloats (PS-417 to PS-419, CR-2026-063).
+        'uflt16', 'sflt16', 'sflt24',
         'uint8', 'uint16', 'uint24', 'uint32', 'uint64',
         's8', 's16', 's24', 's32', 's64',
         'i8', 'i16', 'i24', 'i32', 'i64',
@@ -670,6 +676,7 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                 errors.append(f"{bgpath}: 'size' must be an integer of at least 1")
             try:
                 check_byte_group_overlap(bg_fields)
+                byte_group_endian(fld, None)       # PS-364: no member endian
             except ValueError as exc:
                 errors.append(f"{bgpath}: {exc}")
             # PS-017: the construct sets `consume` itself, and a member that advances
@@ -841,8 +848,9 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                     for pi, part in enumerate(fld['parts']):
                         if not isinstance(part, list) or len(part) < 2:
                             errors.append(f"{path}[{i}].parts[{pi}]: must be [bitOffset, bitLength] or [bitOffset, bitLength, format]")
-                        elif len(part) > 2 and part[2] not in ('hex', 'decimal'):
-                            errors.append(f"{path}[{i}].parts[{pi}]: format must be 'hex' or 'decimal'")
+                        elif len(part) > 2 and part[2] not in ('hex', 'hex:upper', 'decimal'):
+                            errors.append(f"{path}[{i}].parts[{pi}]: format must be "
+                                          f"'decimal', 'hex' or 'hex:upper' (PS-430)")
                 if 'length' not in fld:
                     errors.append(f"{path}[{i}] ({name}): bitfield_string should have explicit 'length'")
                 continue
@@ -928,7 +936,7 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
             # type of `u8`, which is known, so it would otherwise validate cleanly
             # and then fail to decode in every implementation.
             if _looks_like_bitfield(ftype):
-                bitfield = re.match(r'^u(\d+)\[(\d+):(\d+)\]$', ftype)
+                bitfield = re.match(r'^[us](\d+)\[(\d+):(\d+)\]$', ftype)
                 if not bitfield:
                     errors.append(
                         f"{path}[{i}] ({name}): '{ftype}' is not a valid bitfield type; "
@@ -1145,6 +1153,7 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
     if isinstance(schema, dict):
         for field_def in typed_field_dicts(schema):
             errors.extend(literal_errors(field_def))
+            errors.extend(encoding_errors(field_def))
     has_fields = False
     has_ports = False
     

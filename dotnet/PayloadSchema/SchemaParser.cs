@@ -262,6 +262,46 @@ public static class SchemaParser
                     $"top-level {name} is {port} but ports also declares {key}; every ports key must equal it (PS-337)");
     }
 
+    static readonly string[] UnsignedTypes =
+        { "u8", "u16", "u24", "u32", "u64", "uint8", "uint16", "uint24", "uint32", "uint64" };
+
+    /// <summary>
+    /// PS-426: match_value is withdrawn. PS-422: `encoding` is a named code on a uN. PS-430:
+    /// a bitfield_string part is decimal, hex or hex:upper. PS-364: a byte_group member
+    /// declares no endian.
+    /// </summary>
+    static void CheckWave4(YamlMappingNode fm)
+    {
+        var name = fm.TryGetValue("name", out var n) ? Scalar(n) : "?";
+        var type = fm.TryGetValue("type", out var t) ? Scalar(t) : "";
+        if (fm.Children.ContainsKey(new YamlScalarNode("match_value")))
+            throw new InvalidOperationException($"Field '{name}': match_value is withdrawn; write a signed "
+                + "type (sN), a signed bit range (sN[start:end]), encoding, match or guard instead (PS-426)");
+        if (fm.TryGetValue("encoding", out var enc))
+        {
+            if (Scalar(enc) is not ("sign_magnitude" or "bcd" or "gray"))
+                throw new InvalidOperationException($"Field '{name}': encoding {Scalar(enc)} is not one of "
+                    + "sign_magnitude, bcd, gray (PS-422)");
+            if (!UnsignedTypes.Contains(type))
+                throw new InvalidOperationException($"Field '{name}': encoding applies only to an unsigned "
+                    + $"integer type uN, not {type} (PS-422)");
+        }
+        if (type == "bitfield_string" && fm.TryGetValue("parts", out var partsNode) && partsNode is YamlSequenceNode parts)
+            foreach (var part in parts.Children.OfType<YamlSequenceNode>())
+                if (part.Children.Count > 2 && Scalar(part.Children[2]) is not ("decimal" or "hex" or "hex:upper"))
+                    throw new InvalidOperationException($"Field '{name}': bitfield_string part format "
+                        + $"{Scalar(part.Children[2])} is not one of decimal, hex, hex:upper (PS-430)");
+        if (fm.TryGetValue("byte_group", out var group))
+        {
+            var members = group as YamlSequenceNode
+                ?? ((group as YamlMappingNode)?.TryGetValue("fields", out var f) == true ? f as YamlSequenceNode : null);
+            foreach (var member in members?.Children.OfType<YamlMappingNode>() ?? Enumerable.Empty<YamlMappingNode>())
+                if (member.Children.ContainsKey(new YamlScalarNode("endian")))
+                    throw new InvalidOperationException("byte_group member declares endian; the group's byte "
+                        + "order is declared on the group (PS-364)");
+        }
+    }
+
     /// <summary>PS-358: a literal's value matches its type, and it carries no arithmetic.</summary>
     static void CheckLiteral(YamlMappingNode fm)
     {
@@ -338,7 +378,7 @@ public static class SchemaParser
             {
                 var spelling = Scalar(typeNode!);
                 // A bit range is uN[start:end]; its base carries no prefix (PS-053a).
-                var isBitRange = System.Text.RegularExpressions.Regex.IsMatch(spelling, @"^u\d+\[\d+:\d+\]$");
+                var isBitRange = System.Text.RegularExpressions.Regex.IsMatch(spelling, @"^[us]\d+\[\d+:\d+\]$");
                 if (!isBitRange && Helpers.ParseFieldType(spelling) == FieldType.Unknown)
                 {
                     var name = fieldMap.TryGetValue("name", out var n) ? Scalar(n) : "?";
@@ -347,6 +387,7 @@ public static class SchemaParser
             }
             CheckBytesFormat(fieldMap);
             CheckLiteral(fieldMap);
+            CheckWave4(fieldMap);
             if (fieldMap.TryGetValue("byte_group", out var group))
                 CheckByteGroupOverlap(group);
             // PS-399: exactly one discriminator source. With both, `field` won and the
@@ -406,6 +447,7 @@ public static class SchemaParser
                 // whole byte was read instead of the bits - a packed flag byte decoded
                 // as its raw value. A range makes this a bit field.
                 f.Type = FieldType.Bits;
+                f.SignedBits = f.RawType.StartsWith('s');
             }
         }
 
@@ -620,6 +662,7 @@ public static class SchemaParser
         }
 
         // Byte group
+        if (fm.TryGetValue("encoding", out var encodingNode)) f.Encoding = Scalar(encodingNode);
         if (fm.TryGetValue("byte_group", out var bgNode))
         {
             if (bgNode is YamlSequenceNode bgSeq)
@@ -629,6 +672,7 @@ public static class SchemaParser
             else if (bgNode is YamlMappingNode bgMap)
             {
                 if (bgMap.TryGetValue("size", out var bgSize)) f.Size = Int(bgSize);
+                if (bgMap.TryGetValue("endian", out var bgEndian)) f.GroupEndian = Scalar(bgEndian);
                 if (bgMap.TryGetValue("fields", out var bgf) && bgf is YamlSequenceNode bgfSeq)
                     f.ByteGroup = ParseFields(bgfSeq);
             }

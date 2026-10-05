@@ -370,7 +370,10 @@ final class Encoder {
             long mask = member.getBits() >= 64 ? -1L : (1L << member.getBits()) - 1;
             packed |= (raw & mask) << member.getBitOffset();
         }
-        return writeInt(packed, size, false);
+        // The run's shared base is in its fields' effective byte order (PS-059): a field's
+        // own `endian` where one declares it, else the schema's.
+        String declared = run.stream().map(Field::getEndian).filter(e -> e != null).findFirst().orElse(null);
+        return writeInt(packed, size, false, declared != null ? "little".equals(declared) : little);
     }
 
     /** The number a bit range's {@code enum} or {@code values} label stands for. */
@@ -404,6 +407,11 @@ final class Encoder {
             Object value = (name == null || name.isEmpty() || name.startsWith("_"))
                     ? Long.valueOf(0)
                     : data.getOrDefault(name, Long.valueOf(0));
+            if (member.getType() == FieldType.BOOL) {
+                // A bool member is one bit of the group's value (PS-364).
+                if (Boolean.TRUE.equals(value)) packed |= 1L << Math.max(0, member.getBoolBit());
+                continue;
+            }
             value = reverseModifiers(value, member);
             Long raw = asLong(value);
             if (raw == null) continue;
@@ -418,7 +426,8 @@ final class Encoder {
                 packed |= raw;
             }
         }
-        return writeInt(packed, size, false);
+        String groupEndian = group.getGroupEndian();
+        return writeInt(packed, size, false, groupEndian != null ? "little".equals(groupEndian) : little);
     }
 
     /**
@@ -913,6 +922,11 @@ final class Encoder {
                 reverseTransformStages(numeric, field.getTransform()), field);
 
         // The nibble-decimals carry tenths, so they keep their fraction too.
+        FieldType ft = field.getType();
+        if (ft == FieldType.F32LE16 || ft == FieldType.F32BE16LE || ft == FieldType.UFLT16
+                || ft == FieldType.SFLT16 || ft == FieldType.SFLT24) {
+            return result;   // these carry fractions too
+        }
         if (field.getType().isFloat() || field.getType() == FieldType.UDEC
                 || field.getType() == FieldType.SDEC) {
             return result;
@@ -1030,11 +1044,33 @@ final class Encoder {
             return wordOrdered.toArray();
         }
 
+        if (Wave4.isWordOrdered(type) && type != FieldType.U32LE16 && type != FieldType.S32LE16) {
+            Double raw = asDouble(value);
+            if (raw == null) {
+                throw new SchemaException.EncodeException("field '" + field.getName()
+                        + "': expected a number, got " + describeValue(value));
+            }
+            return Wave4.writeWordOrdered(type, raw);
+        }
+        if (type == FieldType.UFLT16 || type == FieldType.SFLT16 || type == FieldType.SFLT24) {
+            Double raw = asDouble(value);
+            if (raw == null) {
+                throw new SchemaException.EncodeException("field '" + field.getName()
+                        + "': expected a number, got " + describeValue(value));
+            }
+            boolean useLittle = "little".equalsIgnoreCase(field.getEffectiveEndian(schema.getEndian()));
+            return writeInt(Wave4.encodeMinifloat(type, raw), Wave4.minifloatSize(type), false, useLittle);
+        }
+
         if (type.isInteger()) {
             Long raw = asLong(value);
             if (raw == null) {
                 throw new SchemaException.EncodeException("field '" + field.getName()
                         + "': expected a number, got " + describeValue(value));
+            }
+            if (field.getEncoding() != null) {
+                // The inverse of the named code, after the modifiers are reversed (PS-463).
+                raw = Wave4.encodeEncoding(raw, field.getEncoding(), type.defaultLength(), field.getName());
             }
             // BINT is big-endian whatever the schema says, matching the decoder.
             boolean bigEndianOverride = type == FieldType.BINT;
@@ -1155,7 +1191,8 @@ final class Encoder {
                 String segment = i < segments.length ? segments[i].trim() : "0";
                 long raw;
                 try {
-                    raw = "hex".equals(format) ? Long.parseLong(segment, 16)
+                    // PS-431: a hex segment is read without regard to case.
+                    raw = "hex".equals(format) || "hex:upper".equals(format) ? Long.parseLong(segment, 16)
                             : Long.parseLong(segment);
                 } catch (NumberFormatException e) {
                     throw new SchemaException.EncodeException("bitfield_string field '"

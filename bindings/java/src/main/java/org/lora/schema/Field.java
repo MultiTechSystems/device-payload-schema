@@ -21,6 +21,18 @@ public class Field {
      * to 1, which is what every `u8[lo:hi]` range needs.
      */
     private int bitBaseBytes = 1;
+    /** An sN[start:end] range: sign-extended from the range's width (PS-352, PS-353). */
+    private boolean signedBits;
+    public boolean isSignedBits() { return signedBits; }
+    public void setSignedBits(boolean signedBits) { this.signedBits = signedBits; }
+    /** A byte_group's own byte order (PS-364), null for the context's. */
+    private String groupEndian;
+    public String getGroupEndian() { return groupEndian; }
+    public void setGroupEndian(String groupEndian) { this.groupEndian = groupEndian; }
+    /** A named code on an unsigned integer (PS-422). */
+    private String encoding;
+    public String getEncoding() { return encoding; }
+    public void setEncoding(String encoding) { this.encoding = encoding; }
     private String endian;
     private Double add;
     private Double mult;

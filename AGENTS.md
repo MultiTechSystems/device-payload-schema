@@ -1177,6 +1177,12 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   and `use:` is withdrawn. The generator, validator and C harness call `expand_refs`.
 - **`string` is only a literal** (CR-2026-051, PS-361): text read from the payload is
   `ascii`. `value` on a byte-reading field is the constant the encoder writes (PS-360).
+- **Wave 4 types** live in one helper per language (`go/schema/wave4.go`, Java `Wave4`,
+  C# `Wave4`, module functions in `schema_interpreter.py`): the word-ordered
+  `f32le16`/`u32be16le`/`s32be16le`/`f32be16le`, the MCCI minifloats, and the encodings,
+  which were Python-only before 0.5.2. A bit range's base is read in the field's effective
+  byte order (PS-059) and `sN[...]` sign-extends from the range's width; a byte_group's
+  bits refer to the group's assembled value, in the group's own `endian` (PS-364).
 - **`_meta` is not produced by any implementation**, so CR-2026-043 (`_meta.fPort`) and
   the `_meta` parts of CR-2026-054 wait for their own change (decided 2026-10-05).
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,

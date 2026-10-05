@@ -1,0 +1,31 @@
+# The named encodings on an unsigned integer (PS-422 to PS-425, CR-2026-064).
+#
+# The code is applied to the integer read, before the modifiers: the gray field's 0x0F is
+# the Gray code of 10, then `mult: 2` makes it 20. sign_magnitude keeps the top bit as a
+# sign, so 0x8005 is -5 rather than two's complement's -32763. bcd reads each nibble as a
+# decimal digit, so 0x1234 is 1234.
+#
+# Only Python had any of the three before 0.5.2, and on any integer type; an encoding on
+# a signed or non-integer type is now rejected, as is the withdrawn `match_value`
+# (PS-426). The vector round-trips: the encoders apply each code's inverse (PS-463).
+name: probe_encoding
+endian: big
+fields:
+- name: signed_magnitude
+  type: u16
+  encoding: sign_magnitude
+- name: decimal_digits
+  type: u16
+  encoding: bcd
+- name: gray_scaled
+  type: u8
+  encoding: gray
+  mult: 2
+test_vectors:
+- name: each_code
+  source: spec-example
+  payload: "8005 1234 0F"
+  expected:
+    signed_magnitude: -5
+    decimal_digits: 1234
+    gray_scaled: 20

@@ -25,7 +25,7 @@ public class Schema {
      * {@code bits<3,2>}, {@code bits:2@3} and {@code u8:2} were withdrawn, so there is
      * nothing left for this binding to be missing.
      */
-    private static final Pattern BIT_RANGE = Pattern.compile("u(\\d+)\\[(\\d+):(\\d+)\\]");
+    private static final Pattern BIT_RANGE = Pattern.compile("([us])(\\d+)\\[(\\d+):(\\d+)\\]");
 
     private String name;
     private int version;
@@ -156,6 +156,7 @@ public class Schema {
             checkBytesFormat(fm);
             if (fm.containsKey("byte_group")) checkByteGroupOverlap(fm.get("byte_group"));
             checkLiteral(fm);
+            checkWave4(fm);
             // PS-399: exactly one discriminator source. With both, `field` won and the
             // `length` byte was left unread, misaligning every later field.
             if (fm.get("match") instanceof Map<?, ?> match
@@ -277,9 +278,9 @@ public class Schema {
         int width, start, end;
         Matcher m = BIT_RANGE.matcher(type == null ? "" : type.toString());
         if (m.matches()) {
-            width = Integer.parseInt(m.group(1));
-            start = Integer.parseInt(m.group(2));
-            end = Integer.parseInt(m.group(3));
+            width = Integer.parseInt(m.group(2));
+            start = Integer.parseInt(m.group(3));
+            end = Integer.parseInt(m.group(4));
         } else if ("bool".equals(type)) {
             width = 8;
             start = toInt(member.get("bit"), 0);
@@ -346,6 +347,14 @@ public class Schema {
         }
     }
 
+    /** Bits of a base value, sign-extended from the range's width for an sN base (PS-353). */
+    static long extractRange(long base, boolean signed, int start, int bits) {
+        long mask = bits >= 64 ? -1L : (1L << bits) - 1;
+        long value = (base >>> start) & mask;
+        if (signed && bits < 64 && value >= (1L << (bits - 1))) value -= 1L << bits;
+        return value;
+    }
+
     /** The values of a quoted list case key, "[1, 2, 0x10]" (PS-398), or null. */
     static List<Long> parseListCaseKey(String text) {
         text = text.trim();
@@ -394,6 +403,52 @@ public class Schema {
         String need = elementSize > 0 ? ", fewer than the " + elementSize + " an element takes" : "";
         return new SchemaException.DecodeException("repeat '" + field.getName() + "' ends in a ragged tail: "
                 + remaining + " byte(s) at offset " + offset + need + " (PS-343)");
+    }
+
+    private static final List<String> UNSIGNED_TYPES = List.of("u8", "u16", "u24", "u32", "u64",
+            "uint8", "uint16", "uint24", "uint32", "uint64");
+
+    /**
+     * PS-426: match_value is withdrawn. PS-422: `encoding` is a named code on a uN.
+     * PS-430: a bitfield_string part is decimal, hex or hex:upper. PS-364: a byte_group
+     * member declares no endian.
+     */
+    @SuppressWarnings("unchecked")
+    private static void checkWave4(Map<String, Object> fm) {
+        String at = "Field '" + fm.get("name") + "': ";
+        if (fm.containsKey("match_value")) {
+            throw new SchemaException(at + "match_value is withdrawn; write a signed type (sN), a "
+                    + "signed bit range (sN[start:end]), encoding, match or guard instead (PS-426)");
+        }
+        if (fm.containsKey("encoding")) {
+            Object encoding = fm.get("encoding");
+            if (!List.of("sign_magnitude", "bcd", "gray").contains(encoding)) {
+                throw new SchemaException(at + "encoding " + encoding
+                        + " is not one of sign_magnitude, bcd, gray (PS-422)");
+            }
+            if (!UNSIGNED_TYPES.contains(fm.get("type"))) {
+                throw new SchemaException(at + "encoding applies only to an unsigned integer type uN, not "
+                        + fm.get("type") + " (PS-422)");
+            }
+        }
+        if ("bitfield_string".equals(fm.get("type")) && fm.get("parts") instanceof List<?> parts) {
+            for (Object raw : parts) {
+                if (raw instanceof List<?> part && part.size() > 2
+                        && !List.of("decimal", "hex", "hex:upper").contains(part.get(2))) {
+                    throw new SchemaException(at + "bitfield_string part format " + part.get(2)
+                            + " is not one of decimal, hex, hex:upper (PS-430)");
+                }
+            }
+        }
+        Object group = fm.get("byte_group");
+        List<?> members = group instanceof List<?> l ? l
+                : group instanceof Map<?, ?> m && m.get("fields") instanceof List<?> fl ? fl : List.of();
+        for (Object member : members) {
+            if (member instanceof Map<?, ?> mm && mm.containsKey("endian")) {
+                throw new SchemaException("byte_group member '" + mm.get("name")
+                        + "' declares endian; the group's byte order is declared on the group (PS-364)");
+            }
+        }
     }
 
     /** PS-358: a literal's value matches its type, and it carries no arithmetic. */
@@ -508,13 +563,14 @@ public class Schema {
         // and width are applied here rather than above so they override any explicit
         // `bit_offset:`/`bits:` keys parsed in between.
         if (isBitRange) {
-            int start = Integer.parseInt(bitRange.group(2));
-            int end = Integer.parseInt(bitRange.group(3));
+            int start = Integer.parseInt(bitRange.group(3));
+            int end = Integer.parseInt(bitRange.group(4));
+            f.setSignedBits("s".equals(bitRange.group(1)));
             f.setBitOffset(start);
             f.setBits(end - start + 1);
             // The base width is part of the type: u24[4:23] takes bits 4-23 of a
             // 24-bit big-endian value, so all three bytes are read before masking.
-            f.setBitBaseBytes(Math.max(1, Integer.parseInt(bitRange.group(1)) / 8));
+            f.setBitBaseBytes(Math.max(1, Integer.parseInt(bitRange.group(2)) / 8));
             f.setType(FieldType.BITS);
         }
         
@@ -737,6 +793,8 @@ public class Schema {
             f.setParts(parts);
         }
         
+        if (fm.get("encoding") instanceof String encoding) f.setEncoding(encoding);
+
         // byte_group: fields packed into shared bytes. Written either as a list of
         // fields with a sibling `size`, or as {size: N, fields: [...]}.
         Object byteGroupRaw = fm.get("byte_group");
@@ -745,6 +803,7 @@ public class Schema {
                 f.setByteGroup(parseFields((List<Map<String, Object>>) groupFields));
             }
             f.setByteGroupSize(toInt(groupMap.get("size"), 1));
+            if (groupMap.get("endian") instanceof String groupEndian) f.setGroupEndian(groupEndian);
         } else if (byteGroupRaw instanceof List<?> groupFields) {
             f.setByteGroup(parseFields((List<Map<String, Object>>) groupFields));
             f.setByteGroupSize(toInt(fm.get("size"), 1));
@@ -1110,20 +1169,25 @@ public class Schema {
             // The type fixes both orders, so fieldEndian is deliberately not consulted
             // (PS-272): honouring it would make u32le16 with endian little a second
             // spelling of little-endian u32.
-            case U32LE16, S32LE16 -> {
-                byte[] data = ctx.read(4);
-                long low = ((data[0] & 0xFFL) << 8) | (data[1] & 0xFFL);
-                long high = ((data[2] & 0xFFL) << 8) | (data[3] & 0xFFL);
-                long combined = low | (high << 16);
-                value = field.getType() == FieldType.S32LE16 && combined >= 0x80000000L
-                        ? combined - 0x100000000L
-                        : combined;
+            case U32LE16, S32LE16, F32LE16, U32BE16LE, S32BE16LE, F32BE16LE -> {
+                value = Wave4.readWordOrdered(field.getType(), ctx.read(4));
+            }
+
+            case UFLT16, SFLT16, SFLT24 -> {
+                // The MCCI minifloats (CR-2026-063): a word in the field's byte order.
+                byte[] data = ctx.read(Wave4.minifloatSize(field.getType()));
+                Double decoded = Wave4.decodeMinifloat(field.getType(), ctx.decodeUnsigned(data, fieldEndian));
+                if (decoded == null) return OMITTED;     // no value JSON can carry (PS-419)
+                value = decoded;
             }
 
             case U8, U16, U24, U32, U64, BYTE, UINT -> {
                 byte[] data = ctx.read(length);
                 long raw = ctx.decodeUnsigned(data, fieldEndian);
-                if (length >= 8 && raw < 0) {
+                if (field.getEncoding() != null) {
+                    // Applied to the integer read, before the modifiers (PS-422).
+                    value = Wave4.decodeEncoding(raw, field.getEncoding(), length, field.getName());
+                } else if (length >= 8 && raw < 0) {
                     // A u64 at or above 2^63 does not fit a Java long: the bit pattern
                     // reads as a negative number, and this decoder reported -1 for
                     // 18446744073709551615. PS-295 forbids a sign-changed value and
@@ -1185,13 +1249,11 @@ public class Schema {
                 // byte zero alone and reported a value with no error.
                 int baseBytes = Math.max(1, field.getBitBaseBytes());
                 byte[] data = ctx.peek(baseBytes, field.getByteOffset());
-                long base = 0;
-                for (byte b : data) {
-                    base = (base << 8) | (b & 0xFF);
-                }
+                // PS-059 (CR-2026-052): assembled in the field's effective byte order,
+                // which was big-endian whatever the schema said.
+                long base = ctx.decodeUnsigned(data, fieldEndian);
                 int numBits = field.getBits() > 0 ? field.getBits() : 1;
-                long mask = numBits >= 64 ? -1L : (1L << numBits) - 1;
-                value = (base >>> field.getBitOffset()) & mask;
+                value = extractRange(base, field.isSignedBits(), field.getBitOffset(), numBits);
                 // An explicit range does not advance the cursor by itself: several
                 // fields share one byte and the last of them declares `consume`.
                 if (field.getConsume() > 0) {
@@ -1298,6 +1360,15 @@ public class Schema {
             default -> throw new SchemaException.DecodeException("Unknown field type: " + field.getType());
         }
         
+        return applyGroupMember(value, field, ctx);
+    }
+
+    /**
+     * What happens to a value once it is read: formula or modifiers, lookup, and the
+     * field's variable. Split out so a byte_group member, whose value comes from the
+     * group's assembled bytes (PS-364), runs the same pipeline.
+     */
+    private Object applyGroupMember(Object value, Field field, DecodeContext ctx) {
         // Apply formula if present (takes precedence). A computed field has already
         // had its own arithmetic applied by decodeComputed, in the order the
         // interpreter uses: polynomial, then modifiers, then transform. Running the
@@ -1876,10 +1947,12 @@ public class Schema {
                 long mask = (1L << bitLen) - 1;
                 long raw = (intVal >> bitOff) & mask;
                 
+                // PS-430: hex lower case, hex:upper upper case; any other format is
+                // refused when the schema is loaded.
                 if ("hex".equals(format)) {
-                    // Lowercase (PS-074), matching the vendor codecs and the
-                    // generated JS.
                     partStrs.add(Long.toHexString(raw));
+                } else if ("hex:upper".equals(format)) {
+                    partStrs.add(Long.toHexString(raw).toUpperCase());
                 } else {
                     partStrs.add(String.valueOf(raw));
                 }
@@ -1948,13 +2021,28 @@ public class Schema {
     private Map<String, Object> decodeByteGroup(Field group, DecodeContext ctx) {
         Map<String, Object> result = new LinkedHashMap<>();
         int start = ctx.getOffset();
+        // PS-364: the group's bytes are one value in its effective byte order, and a
+        // member's bit positions refer to that value. Each member read its own base from
+        // the group's start, big-endian, which agrees only for a big-endian group whose
+        // members are as wide as it is.
+        String endian = group.getGroupEndian() != null ? group.getGroupEndian() : this.endian;
+        long groupValue = ctx.decodeUnsigned(ctx.peek(group.getByteGroupSize(), 0), endian);
 
         for (Field member : group.getByteGroup()) {
             ctx.setOffset(start);
             String name = member.getName();
             if (name == null || name.isEmpty()) continue;
             try {
-                Object value = decodeField(member, ctx);
+                Object value;
+                if (member.getType() == FieldType.BITS) {
+                    value = applyGroupMember(extractRange(groupValue, member.isSignedBits(),
+                            member.getBitOffset(), member.getBits()), member, ctx);
+                } else if (member.getType() == FieldType.BOOL) {
+                    int bit = Math.max(0, member.getBoolBit());
+                    value = ((groupValue >>> bit) & 1) == 1;
+                } else {
+                    value = decodeField(member, ctx);
+                }
                 if (value == OMITTED || value == null) continue;
                 ctx.setVariable(name, value);
                 if (!name.startsWith("_")) {

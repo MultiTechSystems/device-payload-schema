@@ -175,6 +175,10 @@
                   "default": 1,
                   "description": "Width of the shared span in bytes."
                 },
+                "endian": {
+                  "enum": ["big", "little"],
+                  "description": "The byte order the span is assembled in, its members' bit positions referring to that value (PS-364). Members declare none."
+                },
                 "fields": {
                   "type": "array",
                   "items": {

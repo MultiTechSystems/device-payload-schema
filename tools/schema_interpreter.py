@@ -90,12 +90,128 @@ INTEGER_TYPE_INFO: Dict[str, Tuple[int, bool]] = {
     # Word-ordered 32-bit (PS-271): four bytes wide, and the bytes are laid out by the
     # encoder rather than by the width alone.
     'u32le16': (4, False), 's32le16': (4, True),
+    'u32be16le': (4, False), 's32be16le': (4, True),
     's8': (1, True), 'i8': (1, True), 'int8': (1, True),
     's16': (2, True), 'i16': (2, True), 'int16': (2, True),
     's24': (3, True), 'i24': (3, True), 'int24': (3, True),
     's32': (4, True), 'i32': (4, True), 'int32': (4, True),
     's64': (8, True), 'i64': (8, True), 'int64': (8, True),
 }
+
+
+#: The word-ordered 32-bit types: two 16-bit units, in an order the type fixes and no
+#: `endian` setting varies (PS-272). `le16` is the low unit first, each unit big-endian
+#: (PS-271, PS-362); `be16le` the high unit first, each unit little-endian (PS-363, the
+#: fourth ordering, CR-2026-047).
+WORD_ORDERED_TYPES = {
+    'u32le16': ('le16', 'u'), 's32le16': ('le16', 's'), 'f32le16': ('le16', 'f'),
+    'u32be16le': ('be16le', 'u'), 's32be16le': ('be16le', 's'), 'f32be16le': ('be16le', 'f'),
+}
+
+
+def read_word_ordered(field_type, data):
+    """The value of a word-ordered type over four bytes (PS-271, PS-362, PS-363)."""
+    layout, kind = WORD_ORDERED_TYPES[field_type]
+    if layout == 'le16':
+        word = int.from_bytes(data[0:2], 'big') | (int.from_bytes(data[2:4], 'big') << 16)
+    else:
+        word = (int.from_bytes(data[0:2], 'little') << 16) | int.from_bytes(data[2:4], 'little')
+    if kind == 'f':
+        return struct.unpack('>f', word.to_bytes(4, 'big'))[0]
+    if kind == 's' and word >= 0x80000000:
+        word -= 0x100000000
+    return word
+
+
+def write_word_ordered(field_type, value):
+    """The inverse of read_word_ordered."""
+    layout, kind = WORD_ORDERED_TYPES[field_type]
+    if kind == 'f':
+        word = int.from_bytes(struct.pack('>f', float(value)), 'big')
+    else:
+        word = int(value)
+        if word < 0:
+            word += 0x100000000
+        word &= 0xFFFFFFFF
+    high, low = word >> 16, word & 0xFFFF
+    if layout == 'le16':
+        return low.to_bytes(2, 'big') + high.to_bytes(2, 'big')
+    return high.to_bytes(2, 'little') + low.to_bytes(2, 'little')
+
+
+#: The MCCI minifloats (CR-2026-063): width in bytes. Each is a word read in the field's
+#: effective byte order (PS-420) and decoded by its formula, never as IEEE half precision
+#: (PS-421).
+MINIFLOAT_SIZES = {'uflt16': 2, 'sflt16': 2, 'sflt24': 3}
+
+
+def decode_minifloat(field_type, word):
+    """The value of a minifloat word (PS-417 to PS-419); None where it has none (e = 127)."""
+    if field_type == 'uflt16':
+        e, f = word >> 12, word & 0x0FFF
+        return f / 4096 * 2.0 ** (e - 15)
+    if field_type == 'sflt16':
+        sign = -1 if word & 0x8000 else 1
+        e, f = (word >> 11) & 0x0F, word & 0x07FF
+        value = sign * f / 2048 * 2.0 ** (e - 15)
+        return 0 if value == 0 else value          # 0x8000 is -0, reported as 0
+    sign = -1 if word & 0x800000 else 1
+    e, f = (word >> 16) & 0x7F, word & 0xFFFF
+    if e == 127:
+        return None
+    if e == 0:
+        value = sign * f / 65536 * 2.0 ** -62
+    else:
+        value = sign * (1 + f / 65536) * 2.0 ** (e - 63)
+    return 0 if value == 0 else value
+
+
+def _round_half_even(fraction):
+    from fractions import Fraction
+    floor = fraction.numerator // fraction.denominator
+    rest = fraction - floor
+    if rest > Fraction(1, 2) or (rest == Fraction(1, 2) and floor % 2):
+        floor += 1
+    return floor
+
+
+def encode_minifloat(field_type, value):
+    """The word for a value: the smallest exponent whose fraction fits, ties to even (PS-420).
+
+    A value outside the type's range is an error, not a saturation.
+    """
+    from fractions import Fraction
+    exact = Fraction(float(value))
+    if field_type in ('uflt16', 'sflt16'):
+        signed = field_type == 'sflt16'
+        if exact < 0 and not signed:
+            raise ValueError(f"{value} is negative; uflt16 holds [0, 1) (PS-420)")
+        magnitude = abs(exact)
+        bits = 11 if signed else 12
+        for e in range(16):
+            f = _round_half_even(magnitude * (1 << bits) * Fraction(2) ** (15 - e))
+            if f < 1 << bits:
+                word = (e << bits) | f
+                return word | (0x8000 if signed and exact < 0 else 0)
+        raise ValueError(f"{value} is outside the range of {field_type} (PS-420)")
+    magnitude = abs(exact)
+    sign = 0x800000 if exact < 0 else 0
+    if magnitude == 0:
+        return sign
+    for e in range(1, 127):
+        if magnitude < Fraction(2) ** (e - 62):
+            f = _round_half_even((magnitude / Fraction(2) ** (e - 63) - 1) * 65536)
+            if f == 65536:
+                continue
+            if f < 0:
+                break
+            return sign | (e << 16) | f
+    else:
+        raise ValueError(f"{value} is outside the range of sflt24 (PS-420)")
+    f = _round_half_even(magnitude * 65536 * Fraction(2) ** 62)
+    if f >= 65536:
+        return sign | (1 << 16)
+    return sign | f
 
 
 def integer_range(field_type: str):
@@ -240,7 +356,9 @@ def format_bytes(field_def, data: bytes):
 _FIXED_TYPE_SIZES = {
     'u8': 1, 'u16': 2, 'u24': 3, 'u32': 4, 'u64': 8,
     's8': 1, 's16': 2, 's24': 3, 's32': 4, 's64': 8,
-    'u32le16': 4, 's32le16': 4, 'f16': 2, 'f32': 4, 'f64': 8, 'udec': 1, 'sdec': 1,
+    'u32le16': 4, 's32le16': 4, 'f32le16': 4,
+    'u32be16le': 4, 's32be16le': 4, 'f32be16le': 4, 'f16': 2,
+    'uflt16': 2, 'sflt16': 2, 'sflt24': 3, 'f32': 4, 'f64': 8, 'udec': 1, 'sdec': 1,
 }
 
 
@@ -287,7 +405,7 @@ def repeat_limit_message(field_def, limit, mode, offset, end):
             f"({mode}); {end - offset} byte(s) at offset {offset} left unparsed (PS-396)")
 
 
-_BIT_RANGE = re.compile(r'^u(\d+)\[(\d+):(\d+)\]$')
+_BIT_RANGE = re.compile(r'^[us](\d+)\[(\d+):(\d+)\]$')
 
 
 def byte_group_member_bits(member):
@@ -309,6 +427,24 @@ def byte_group_member_bits(member):
     else:
         return None
     return {width - 1 - bit for bit in range(start, end + 1)}
+
+
+def byte_group_endian(field_def, context_endian):
+    """A byte_group's effective byte order (PS-364), rejecting an `endian` on a member.
+
+    The group assembles its bytes into one value, so the order is the group's: declared
+    in the mapping form, else the context's. A member's own `endian` would split the
+    group into values read two ways, and is rejected.
+    """
+    group = field_def.get('byte_group')
+    members = group.get('fields', []) if isinstance(group, dict) else group
+    for member in members if isinstance(members, list) else []:
+        if isinstance(member, dict) and 'endian' in member:
+            raise ValueError(
+                f"byte_group member '{member.get('name', '?')}' declares endian; the "
+                f"group's byte order is declared on the group (PS-364)")
+    declared = group.get('endian') if isinstance(group, dict) else None
+    return Endian(declared) if declared else context_endian
 
 
 def check_byte_group_overlap(members):
@@ -488,6 +624,31 @@ def literal_errors(field_def):
     extra = [k for k in LITERAL_FORBIDDEN if k in field_def]
     if extra:
         errors.append(f"Field '{name}': a literal must not declare {', '.join(extra)} (PS-358)")
+    return errors
+
+
+ENCODINGS = ('sign_magnitude', 'bcd', 'gray')
+_UNSIGNED_INTEGER_TYPES = ('u8', 'u16', 'u24', 'u32', 'u64',
+                           'uint8', 'uint16', 'uint24', 'uint32', 'uint64')
+
+
+def encoding_errors(field_def):
+    """PS-422 and PS-426: `encoding` only on uN and only a named code; no `match_value`."""
+    errors = []
+    name = field_def.get('name', '?') if isinstance(field_def, dict) else '?'
+    if not isinstance(field_def, dict):
+        return errors
+    if 'match_value' in field_def:
+        errors.append(
+            f"Field '{name}': match_value is withdrawn; write a signed type (sN), a signed "
+            f"bit range (sN[start:end]), encoding, match or guard instead (PS-426)")
+    if 'encoding' in field_def:
+        if field_def['encoding'] not in ENCODINGS:
+            errors.append(f"Field '{name}': encoding {field_def['encoding']!r} is not one of "
+                          f"{', '.join(ENCODINGS)} (PS-422)")
+        elif field_def.get('type') not in _UNSIGNED_INTEGER_TYPES:
+            errors.append(f"Field '{name}': encoding applies only to an unsigned integer "
+                          f"type uN, not {field_def.get('type')!r} (PS-422)")
     return errors
 
 
@@ -747,9 +908,11 @@ class SchemaInterpreter:
         # with the references are reported by decode and encode (PS-348).
         self.source_schema = schema
         schema, self._load_errors = expand_refs(schema)
-        # PS-358: a malformed literal is a schema error, reported as the references are.
+        # PS-358: a malformed literal is a schema error, reported as the references are;
+        # so are an `encoding` off an unsigned integer and `match_value` (PS-422, PS-426).
         for field_def in typed_field_dicts(schema):
             self._load_errors.extend(literal_errors(field_def))
+            self._load_errors.extend(encoding_errors(field_def))
         self.schema = schema
         self.endian = Endian(schema.get('endian', 'big'))
         self.name = schema.get('name', 'unknown')
@@ -1052,13 +1215,18 @@ class SchemaInterpreter:
         
         Reverse of _decode_encoding for encoding payloads.
         """
+        # PS-463: a value the code cannot represent is rejected, not truncated.
         if encoding == 'sign_magnitude':
             sign_bit = 1 << (size * 8 - 1)
+            if abs(value) > sign_bit - 1:
+                raise ValueError(f"{value} has no {size * 8}-bit sign-magnitude form (PS-463)")
             if value < 0:
                 return sign_bit | abs(value)
             return value
         
         elif encoding == 'bcd':
+            if value < 0 or value > 10 ** (size * 2) - 1:
+                raise ValueError(f"{value} has no {size * 8}-bit BCD form (PS-463)")
             # Binary to BCD
             result = 0
             shift = 0
@@ -1087,7 +1255,9 @@ class SchemaInterpreter:
         # the @ notation `bits:2@3` and the sequential `u8:2` were withdrawn by
         # CR-2026-006, so a schema still using one must fail loudly rather than be
         # accepted by an interpreter no other language agrees with.
-        match = re.match(r'u(\d+)\[(\d+):(\d+)\]$', type_str)
+        # `sN[start:end]` is a signed range (PS-352): sign-extended from the range's own
+        # width (PS-353), which the decode applies.
+        match = re.match(r'[us](\d+)\[(\d+):(\d+)\]$', type_str)
         if match:
             base_size = int(match.group(1)) // 8
             start = int(match.group(2))
@@ -1097,7 +1267,7 @@ class SchemaInterpreter:
 
         raise ValueError(
             f"Unknown bitfield format: {type_str} - the only bitfield spelling is "
-            f"uN[start:end], e.g. u8[3:4]. uN[base+:width], bits<offset,width>, "
+            f"uN[start:end] or sN[start:end], e.g. u8[3:4]. uN[base+:width], bits<offset,width>, "
             f"bits:width@offset and uN:width were withdrawn by CR-2026-006"
         )
     
@@ -1120,7 +1290,12 @@ class SchemaInterpreter:
             raise ValueError(
                 "Buffer too short for %d-bit bitfield at pos %d" % (base_size * 8, pos)
             )
-        raw = int.from_bytes(buf[pos:pos + base_size], 'big')
+        # PS-059 (CR-2026-052): the base is assembled in the field's effective byte
+        # order, which `self.endian` carries here. This read it big-endian whatever the
+        # schema said, while the encoder packed it in the schema's order - so a range
+        # wider than a byte under a little-endian schema did not round-trip.
+        raw = int.from_bytes(buf[pos:pos + base_size],
+                             'little' if self.endian == Endian.LITTLE else 'big')
         mask = (1 << bit_width) - 1
         value = (raw >> bit_offset) & mask
 
@@ -1185,6 +1360,9 @@ class SchemaInterpreter:
             value, new_pos, auto_consumed = self._extract_bits(
                 buf, pos, bit_offset, bit_width, base_size
             )
+            if str(field_type).startswith('s') and value >= 1 << (bit_width - 1):
+                # PS-353: two's complement over the range's own width.
+                value -= 1 << bit_width
             
             # Determine position advancement
             if consume is not None:
@@ -1217,15 +1395,10 @@ class SchemaInterpreter:
         # `endian` setting reaches this: the type fixes both orders, and honouring
         # `endian` would make `u32le16` with `endian: little` a second spelling of plain
         # little-endian u32 (PS-272).
-        if field_type in ('u32le16', 's32le16'):
+        if field_type in WORD_ORDERED_TYPES:
             if pos + 4 > len(buf):
                 raise ValueError(f"Buffer too short: need 4 bytes at pos {pos}")
-            low = int.from_bytes(buf[pos:pos + 2], 'big')
-            high = int.from_bytes(buf[pos + 2:pos + 4], 'big')
-            value = low + (high << 16)
-            if field_type == 's32le16' and value >= 0x80000000:
-                value -= 0x100000000
-            return value, pos + 4
+            return read_word_ordered(field_type, buf[pos:pos + 4]), pos + 4
 
         if field_type in type_info:
             size, signed = type_info[field_type]
@@ -1259,6 +1432,12 @@ class SchemaInterpreter:
             value = whole + (byte & 0x0F) * 0.1
             return value, pos + 1
         
+        if field_type in MINIFLOAT_SIZES:
+            size = MINIFLOAT_SIZES[field_type]
+            word, new_pos = self._read_int(buf, pos, size, False)
+            value = decode_minifloat(field_type, word)
+            return (OMITTED if value is None else value), new_pos
+
         if field_type == 'f16':
             # IEEE 754 half-precision (2 bytes)
             return self._read_float16(buf, pos)
@@ -1933,13 +2112,17 @@ class SchemaInterpreter:
             fmt = part[2] if len(part) >= 3 else 'decimal'
             mask = (1 << bit_len) - 1
             raw = (int_val >> bit_off) & mask
+            # PS-430 (CR-2026-066): `hex` lower case, `hex:upper` upper case, `decimal`
+            # the default; any other part format is rejected rather than read as decimal.
             if fmt == 'hex':
-                # Lowercase, as PS-074 requires of the `hex` type and as every vendor
-                # codec renders it - JavaScript's toString(16) is lowercase, and the
-                # generated TS013 codec was the only implementation getting this right.
                 part_strs.append(format(raw, 'x'))
-            else:
+            elif fmt == 'hex:upper':
+                part_strs.append(format(raw, 'X'))
+            elif fmt == 'decimal':
                 part_strs.append(str(raw))
+            else:
+                raise ValueError(f"bitfield_string part format {fmt!r} is not one of "
+                                 f"decimal, hex, hex:upper (PS-430)")
         
         return prefix + delimiter.join(part_strs), pos
     
@@ -2310,8 +2493,27 @@ class SchemaInterpreter:
         if not group_fields:
             return pos
         check_byte_group_overlap(group_fields)
+        group_endian = byte_group_endian(field_def, self.endian)
+        saved_endian, self.endian = self.endian, group_endian
         
-        # Decode all fields from the same starting position
+        # Decode all fields from the same starting position, the group's bytes assembled
+        # in its effective byte order (PS-364).
+        try:
+            self._decode_byte_group_members(group_fields, buf, pos, result, int(group_size))
+        finally:
+            self.endian = saved_endian
+        
+        # Advance past the group
+        return pos + group_size
+
+    def _decode_byte_group_members(self, group_fields, buf, pos, result, group_size=1):
+        # PS-364: the group's bytes are one value, and a member's bit positions refer to
+        # that value. Each member used to read its own base from the group's start, which
+        # agrees only where every member is as wide as the group.
+        if pos + group_size > len(buf):
+            raise ValueError(f"Buffer too short for a {group_size}-byte byte_group at pos {pos}")
+        group_value = int.from_bytes(buf[pos:pos + group_size],
+                                     'little' if self.endian == Endian.LITTLE else 'big')
         for gf in group_fields:
             name = gf.get('name', 'unknown')
             
@@ -2320,7 +2522,17 @@ class SchemaInterpreter:
             gf_copy['consume'] = 0
             
             try:
-                value, _ = self._decode_field(gf_copy, buf, pos)
+                match = _BIT_RANGE.match(str(gf.get('type', '')))
+                if match:
+                    start, end = int(match.group(2)), int(match.group(3))
+                    width = end - start + 1
+                    value = (group_value >> start) & ((1 << width) - 1)
+                    if str(gf['type']).startswith('s') and value >= 1 << (width - 1):
+                        value -= 1 << width
+                elif gf.get('type') == 'bool':
+                    value = bool((group_value >> int(gf.get('bit', 0))) & 1)
+                else:
+                    value, _ = self._decode_field(gf_copy, buf, pos)
                 value = self._apply_modifiers(value, gf)
                 if not name.startswith('_'):
                     result.data[name] = value
@@ -2328,9 +2540,6 @@ class SchemaInterpreter:
                 self._variables[name] = value
             except Exception as e:
                 result.errors.append(f"Error in byte_group field {name}: {e}")
-        
-        # Advance past the group
-        return pos + group_size
     
     def _decode_tlv(self, field_def: Dict[str, Any], buf: bytes,
                     pos: int,
@@ -3242,7 +3451,8 @@ class SchemaInterpreter:
             bit_len = int(part[1])
             fmt = part[2] if len(part) > 2 else 'decimal'
             seg = segments[i] if i < len(segments) else '0'
-            val = int(seg, 16) if fmt == 'hex' else int(seg)
+            # PS-431: a hex segment is read without regard to case.
+            val = int(seg, 16) if fmt in ('hex', 'hex:upper') else int(seg)
             mask = (1 << bit_len) - 1
             int_val |= (val & mask) << bit_off
         
@@ -3287,7 +3497,8 @@ class SchemaInterpreter:
             else:
                 # A full-width member: it owns the group's bytes outright.
                 packed |= value
-        byteorder = 'little' if self.endian == Endian.LITTLE else 'big'
+        group_endian = byte_group_endian(field_def, self.endian)
+        byteorder = 'little' if group_endian == Endian.LITTLE else 'big'
         return int(packed).to_bytes(max(1, size), byteorder)
 
     @staticmethod
@@ -3386,7 +3597,11 @@ class SchemaInterpreter:
             base_size, start, width = self._parse_bitfield_type(ftype)
             size = max(size, base_size, int(field_def.get('consume', 0) or 0))
             packed |= (value & ((1 << width) - 1)) << start
-        byteorder = 'little' if self.endian == Endian.LITTLE else 'big'
+        # The run shares one base, assembled in its fields' effective byte order (PS-059):
+        # a field's own `endian` where one declares it, else the schema's.
+        declared = next((f.get('endian') for f in run if f.get('endian')), None)
+        endian = Endian(declared) if declared else self.endian
+        byteorder = 'little' if endian == Endian.LITTLE else 'big'
         return int(packed).to_bytes(max(1, size), byteorder)
 
     def _field_declaring_var(self, var_name: str) -> Optional[Dict[str, Any]]:
@@ -3833,7 +4048,8 @@ class SchemaInterpreter:
         
         # Float types should preserve fractional values
         field_type = field_def.get('type', 'u8')
-        if field_type in ('f16', 'f32', 'f64', 'udec', 'sdec'):
+        if field_type in ('f16', 'f32', 'f64', 'udec', 'sdec', 'f32le16', 'f32be16le',
+                          'uflt16', 'sflt16', 'sflt24'):
             return float(value)
         
         return int(round(value))
@@ -3878,12 +4094,8 @@ class SchemaInterpreter:
 
         # The inverse of the word-ordered read (PS-271): least significant 16-bit unit
         # first, each unit big-endian, and `endian` plays no part (PS-272).
-        if field_type in ('u32le16', 's32le16'):
-            int_val = int(value)
-            if int_val < 0:
-                int_val += 0x100000000
-            int_val &= 0xFFFFFFFF
-            return (int_val & 0xFFFF).to_bytes(2, 'big') + (int_val >> 16).to_bytes(2, 'big')
+        if field_type in WORD_ORDERED_TYPES:
+            return write_word_ordered(field_type, value)
 
         if field_type in type_info:
             size, signed = type_info[field_type]
@@ -3896,6 +4108,10 @@ class SchemaInterpreter:
                 signed = False
             return self._write_int(int_val, size, signed)
         
+        if field_type in MINIFLOAT_SIZES:
+            return self._write_int(encode_minifloat(field_type, value),
+                                   MINIFLOAT_SIZES[field_type], False)
+
         if field_type in ('udec', 'sdec'):
             # The inverse of PS-330: the whole part in the upper nibble (two's
             # complement for sdec), tenths in the lower. Flooring keeps the tenths

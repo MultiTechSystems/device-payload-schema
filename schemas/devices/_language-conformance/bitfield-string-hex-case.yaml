@@ -1,0 +1,29 @@
+# bitfield_string part formats: `hex` is lower case, `hex:upper` upper case, and any other
+# format is rejected (PS-430, CR-2026-066). Encoding reads a hex segment whatever its case
+# (PS-431), so the vector round-trips.
+#
+# 0xAB12: the high byte as hex is "ab", as hex:upper "AB"; the low nibble 2 is decimal.
+name: probe_bitfield_string_hex_case
+endian: big
+fields:
+- name: lower
+  type: bitfield_string
+  length: 2
+  parts:
+  - [8, 8, hex]
+  - [0, 8, decimal]
+  delimiter: "-"
+- name: upper
+  type: bitfield_string
+  length: 2
+  parts:
+  - [8, 8, hex:upper]
+  - [0, 8, decimal]
+  delimiter: "-"
+test_vectors:
+- name: both_cases
+  source: spec-example
+  payload: "AB12 AB12"
+  expected:
+    lower: ab-18
+    upper: AB-18

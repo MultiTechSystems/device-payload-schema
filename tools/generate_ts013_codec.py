@@ -43,7 +43,8 @@ NUMERIC_TYPE_SIZES = {
     'u16': 2, 'uint16': 2, 's16': 2, 'i16': 2, 'int16': 2,
     'u24': 3, 'uint24': 3, 's24': 3, 'i24': 3, 'int24': 3,
     'u32': 4, 'uint32': 4, 's32': 4, 'i32': 4, 'int32': 4,
-    'u32le16': 4, 's32le16': 4,
+    'u32le16': 4, 's32le16': 4, 'f32le16': 4,
+    'u32be16le': 4, 's32be16le': 4, 'f32be16le': 4,
     'u64': 8, 'uint64': 8, 's64': 8, 'i64': 8, 'int64': 8,
     'f16': 2, 'f32': 4, 'f64': 8,
 }
@@ -64,7 +65,7 @@ def parse_bit_slice_type(t: str) -> Optional[Tuple[str, int, int]]:
 
     Returns (base_type, bit_start, bit_width) or None.
     """
-    m = re.match(r'^([usif]\d+)\[(\d+):(\d+)\]$', t)
+    m = re.match(r'^([us]\d+)\[(\d+):(\d+)\]$', t)
     if m:
         base_t = m.group(1)
         lo = int(m.group(2))
@@ -76,9 +77,16 @@ def parse_bit_slice_type(t: str) -> Optional[Tuple[str, int, int]]:
     return None
 
 
+#: (unit order, kind) of each word-ordered type (PS-271, PS-362, PS-363).
+WORD_ORDERED = {
+    'u32le16': ('le16', 'u'), 's32le16': ('le16', 's'), 'f32le16': ('le16', 'f'),
+    'u32be16le': ('be16le', 'u'), 's32be16le': ('be16le', 's'), 'f32be16le': ('be16le', 'f'),
+}
+
+
 def is_word_ordered(t: str) -> bool:
-    """Whether the type carries its 32 bits as two 16-bit units, low unit first."""
-    return t in ('u32le16', 's32le16')
+    """Whether the type carries its 32 bits as two 16-bit units in an order it fixes."""
+    return t in WORD_ORDERED
 
 
 def is_signed(t: str) -> bool:
@@ -676,6 +684,49 @@ function toBase64(buf, pos, n) {
   return out;
 }
 
+/* The named encodings (PS-422 to PS-425), applied to the unsigned integer read and before
+ * the modifiers. A BCD group above 9 is an error, never a number (PS-424). */
+function decodeEncoding(v, enc, size) {
+  var bits = size * 8, i, out;
+  if (enc === 'sign_magnitude') {
+    var half = Math.pow(2, bits - 1);
+    if (v >= half) { out = -(v - half); return out === 0 ? 0 : out; }
+    return v;
+  }
+  if (enc === 'bcd') {
+    out = 0;
+    for (i = size * 2 - 1; i >= 0; i--) {
+      var digit = Math.floor(v / Math.pow(16, i)) % 16;
+      if (digit > 9) throw new Error("Invalid BCD digit: " + digit + " (PS-424)");
+      out = out * 10 + digit;
+    }
+    return out;
+  }
+  out = v;
+  for (var shift = 1; shift < bits; shift *= 2) out = out ^ Math.floor(out / Math.pow(2, shift));
+  return out >>> 0;
+}
+
+/* The MCCI minifloats (PS-417 to PS-419). Decoded by their formulas, never as IEEE half
+ * precision (PS-421); an sflt24 with exponent 127 has no value and is left undefined, which
+ * the output pass drops (PS-282). */
+function decodeMinifloat(type, w) {
+  var sign, e, f, v;
+  if (type === 'uflt16') {
+    e = Math.floor(w / 4096); f = w % 4096;
+    return f / 4096 * Math.pow(2, e - 15);
+  }
+  if (type === 'sflt16') {
+    sign = w >= 32768 ? -1 : 1; e = Math.floor(w / 2048) % 16; f = w % 2048;
+    v = sign * f / 2048 * Math.pow(2, e - 15);
+    return v === 0 ? 0 : v;
+  }
+  sign = w >= 8388608 ? -1 : 1; e = Math.floor(w / 65536) % 128; f = w % 65536;
+  if (e === 127) return undefined;
+  v = e === 0 ? sign * f / 65536 * Math.pow(2, -62) : sign * (1 + f / 65536) * Math.pow(2, e - 63);
+  return v === 0 ? 0 : v;
+}
+
 /* IEEE 754 binary16. Generated codecs read an f16 with readF64 before, so eight bytes
  * were taken for a two-byte field. */
 function readF16(buf, pos, endian) {
@@ -714,6 +765,45 @@ function writeU(buf, pos, size, value, endian) {
     for (var i = size - 1; i >= 0; i--) { buf[pos + i] = value & 0xFF; value = (value >>> 8); }
   } else {
     for (var i = 0; i < size; i++) { buf[pos + i] = value & 0xFF; value = (value >>> 8); }
+  }
+}
+
+/* The word-ordered 32-bit types (PS-271, PS-362, PS-363): `le16` is the low 16-bit unit
+ * first, each unit big-endian; `be16le` the high unit first, each unit little-endian.
+ * kind is u, s or f (an IEEE 754 binary32 of the assembled word). */
+function readWordOrdered(buf, pos, layout, kind) {
+  var b0 = buf[pos] || 0, b1 = buf[pos + 1] || 0, b2 = buf[pos + 2] || 0, b3 = buf[pos + 3] || 0;
+  var word = layout === 'le16'
+    ? ((b2 << 8) | b3) * 65536 + ((b0 << 8) | b1)
+    : ((b1 << 8) | b0) * 65536 + ((b3 << 8) | b2);
+  if (kind === 'f') {
+    var dv = new DataView(new ArrayBuffer(4));
+    dv.setUint32(0, word, false);
+    return dv.getFloat32(0, false);
+  }
+  if (kind === 's' && word >= 2147483648) return word - 4294967296;
+  return word;
+}
+
+function writeWordOrdered(buf, pos, value, layout, kind) {
+  var word;
+  if (kind === 'f') {
+    var dv = new DataView(new ArrayBuffer(4));
+    dv.setFloat32(0, value, false);
+    word = dv.getUint32(0, false);
+  } else {
+    word = Math.round(value);
+    if (word < 0) word += 4294967296;
+    word = word % 4294967296;
+  }
+  var high = Math.floor(word / 65536), low = word % 65536;
+  var first = layout === 'le16' ? low : high, second = layout === 'le16' ? high : low;
+  if (layout === 'le16') {
+    buf[pos] = (first >> 8) & 0xFF; buf[pos + 1] = first & 0xFF;
+    buf[pos + 2] = (second >> 8) & 0xFF; buf[pos + 3] = second & 0xFF;
+  } else {
+    buf[pos] = first & 0xFF; buf[pos + 1] = (first >> 8) & 0xFF;
+    buf[pos + 2] = second & 0xFF; buf[pos + 3] = (second >> 8) & 0xFF;
   }
 }
 
@@ -865,6 +955,11 @@ function writeS(buf, pos, size, value, endian) {
     def _gen_decode_field(self, field: Dict) -> List[str]:
         lines = []
         i = self._i()
+        # PS-422, PS-426: `encoding` only on uN and only a named code; no `match_value`.
+        from schema_interpreter import encoding_errors
+        problems = encoding_errors(field) if isinstance(field, dict) and 'type' in field else []
+        if problems:
+            raise ValueError(problems[0])
 
         # byte_group
         if 'byte_group' in field:
@@ -875,21 +970,24 @@ function writeS(buf, pos, size, value, endian) {
                 bg_size = bg.get('size', 1)
             # PS-397: overlapping members are a schema error; generating a codec that
             # reported both from the same bits was the generator's version of accepting it.
-            from schema_interpreter import check_byte_group_overlap
+            from schema_interpreter import byte_group_endian, check_byte_group_overlap
             check_byte_group_overlap(bg_fields)
+            byte_group_endian(field, None)        # PS-364: a member's endian is refused
+            group_endian = f'"{bg["endian"]}"' if isinstance(bg, dict) and bg.get('endian') else 'endian'
             lines.append(f'{i}  // byte_group')
             lines.append(f'{i}  var bgStart = pos;')
-            lines.append(f'{i}  var bgVal = readU(buf, pos, {bg_size}, endian);')
+            lines.append(f'{i}  var bgVal = readU(buf, pos, {bg_size}, {group_endian});')
             for bf in (bg_fields if isinstance(bg_fields, list) else []):
                 bname = bf.get('name', '_')
                 btype = bf.get('type', 'u8')
-                bit_m = re.match(r'u\d+\[(\d+):(\d+)\]', btype)
+                bit_m = re.match(r'([us])\d+\[(\d+):(\d+)\]', btype)
                 if bit_m:
-                    lo, hi = int(bit_m.group(1)), int(bit_m.group(2))
+                    lo, hi = int(bit_m.group(2)), int(bit_m.group(3))
                     width = hi - lo + 1
-                    mask = (1 << width) - 1
                     bjs = to_js_name(bname)
-                    lines.append(f'{i}  var {bjs} = (bgVal >> {lo}) & 0x{mask:X};')
+                    lines.append(f'{i}  var {bjs} = Math.floor(bgVal / {2 ** lo}) % {2 ** width};')
+                    if bit_m.group(1) == 's':
+                        lines.append(f'{i}  if ({bjs} >= {2 ** (width - 1)}) {bjs} -= {2 ** width};')
                     # `vars` records the post-modifier value - see _apply_modifiers_expr.
                     bval = self._apply_modifiers_expr(bjs, bf)
                     lines.append(f'{i}  var {bjs}_out = {bval};')
@@ -1209,8 +1307,14 @@ function writeS(buf, pos, size, value, endian) {
             # whatever followed. The interpreter has always defaulted to no advance.
             consume = field.get('consume', 0)
 
+            # The base is assembled in the field's effective byte order (PS-059). The
+            # extraction is arithmetic rather than `>>`, which converts to a signed 32-bit
+            # integer and corrupts a u32 base with its top bit set. An `sN` base is
+            # sign-extended from the range's width (PS-352, PS-353).
             lines.append(f'{i}  var {js_name}_raw = readU(buf, pos, {base_size}, {endian_arg});')
-            lines.append(f'{i}  var {js_name} = ({js_name}_raw >> {bit_start}) & 0x{mask:X};')
+            lines.append(f'{i}  var {js_name} = Math.floor({js_name}_raw / {2 ** bit_start}) % {2 ** bit_width};')
+            if base_type.startswith('s'):
+                lines.append(f'{i}  if ({js_name} >= {2 ** (bit_width - 1)}) {js_name} -= {2 ** bit_width};')
             if consume:
                 lines.append(f'{i}  pos += {int(consume)};')
 
@@ -1366,6 +1470,23 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append(f'{i}  {target} = {js_name}_out;')
             return lines
 
+        # The MCCI minifloats (CR-2026-063): a word in the field's effective byte order.
+        if ftype in ('uflt16', 'sflt16', 'sflt24'):
+            size = 3 if ftype == 'sflt24' else 2
+            eo = field_endian_override(ftype, field)
+            endian_arg = f'"{eo}"' if eo else 'endian'
+            lines.append(f'{i}  var {js_name} = decodeMinifloat("{ftype}", readU(buf, pos, {size}, {endian_arg}));')
+            lines.append(f'{i}  pos += {size};')
+            val_expr = self._apply_modifiers_expr(js_name, field)
+            lines.append(f'{i}  var {js_name}_out = {js_name} === undefined ? undefined : {val_expr};')
+            lines.append(f'{i}  vars.{js_name} = {js_name}_out;')
+            if not name.startswith('_'):
+                guards, target = name_from_to_js(field, js_name)
+                for guard in guards:
+                    lines.append(f'{i}  {guard}')
+                lines.append(f'{i}  {target} = {js_name}_out;')
+            return lines
+
         # Nibble-decimal (PS-329, PS-330): upper nibble whole, lower nibble tenths, the
         # upper nibble a 4-bit two's-complement value for sdec.
         if ftype in ('udec', 'sdec'):
@@ -1400,14 +1521,16 @@ function writeS(buf, pos, size, value, endian) {
         eo = field_endian_override(ftype, field)
         endian_arg = f'"{eo}"' if eo else 'endian'
 
-        if ftype in ('u32le16', 's32le16'):
+        if is_word_ordered(ftype):
             # Its own reader: the layout is not a size-and-endianness pair (PS-271).
-            reader = 'readS32LE16' if ftype == 's32le16' else 'readU32LE16'
-            lines.append(f'{i}  var {js_name} = {reader}(buf, pos);')
+            layout, kind = WORD_ORDERED[ftype]
+            lines.append(f'{i}  var {js_name} = readWordOrdered(buf, pos, "{layout}", "{kind}");')
             lines.append(f'{i}  pos += 4;')
         else:
             lines.append(f'{i}  var {js_name} = {read_fn}(buf, pos, {sz}, {endian_arg});')
             lines.append(f'{i}  pos += {sz};')
+            if field.get('encoding'):
+                lines.append(f'{i}  {js_name} = decodeEncoding({js_name}, "{field["encoding"]}", {sz});')
 
         val_expr = self._apply_modifiers_expr(js_name, field)
         lines.append(f'{i}  var {js_name}_out = {val_expr};')
@@ -1499,10 +1622,16 @@ function writeS(buf, pos, size, value, endian) {
             fmt = part[2] if len(part) > 2 else 'decimal'
             mask = (1 << width) - 1
             extract = f'(({name}_raw >> {offset}) & 0x{mask:X})'
+            # PS-430: hex lower case, hex:upper upper case, anything else refused.
             if fmt == 'hex':
                 seg_exprs.append(f'{extract}.toString(16)')
-            else:
+            elif fmt == 'hex:upper':
+                seg_exprs.append(f'{extract}.toString(16).toUpperCase()')
+            elif fmt == 'decimal':
                 seg_exprs.append(f'{extract}.toString()')
+            else:
+                raise ValueError(f"bitfield_string part format {fmt!r} is not one of "
+                                 f"decimal, hex, hex:upper (PS-430)")
         joined = f' + "{delim}" + '.join(seg_exprs)
         if prefix:
             joined = f'"{prefix}" + {joined}'
@@ -1913,7 +2042,8 @@ function writeS(buf, pos, size, value, endian) {
             else:
                 source = self._reverse_modifiers_expr(
                     f'(d.{js_name} !== undefined ? d.{js_name} : 0)', field)
-            lines.append(f'{i}  writeU32LE16(buf, pos, {source});')
+            layout, kind = WORD_ORDERED[ftype]
+            lines.append(f'{i}  writeWordOrdered(buf, pos, {source}, "{layout}", "{kind}");')
             lines.append(f'{i}  pos += 4;')
             return lines
 
@@ -1991,7 +2121,7 @@ function writeS(buf, pos, size, value, endian) {
             width = part[1]
             fmt = part[2] if len(part) > 2 else 'decimal'
             mask = (1 << width) - 1
-            radix = 16 if fmt == 'hex' else 10
+            radix = 16 if fmt in ('hex', 'hex:upper') else 10
             lines.append(f'{i}  if ({name}_segs[{idx}]) {name}_val |= (parseInt({name}_segs[{idx}], {radix}) & 0x{mask:X}) << {offset};')
         lines.append(f'{i}  writeU(buf, pos, {length}, {name}_val, endian);')
         lines.append(f'{i}  pos += {length};')
