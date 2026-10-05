@@ -122,8 +122,8 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Device schemas
 
-257 schemas under `schemas/devices/`.
-Mean quality score 70.2% (PLATINUM 35, GOLD 40, SILVER 122, BRONZE 13, REJECTED 47). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+258 schemas under `schemas/devices/`.
+Mean quality score 70.3% (PLATINUM 35, GOLD 40, SILVER 123, BRONZE 13, REJECTED 47). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
@@ -145,6 +145,7 @@ Mean quality score 70.2% (PLATINUM 35, GOLD 40, SILVER 122, BRONZE 13, REJECTED 
 | radio-bridge | 1 | 71 | BRONZE 1 |
 | radionode | 1 | 0 | REJECTED 1 |
 | rakwireless | 1 | 1 | SILVER 1 |
+| volley-boast | 1 | 315 | SILVER 1 |
 
 ### By device
 
@@ -409,6 +410,7 @@ Mean quality score 70.2% (PLATINUM 35, GOLD 40, SILVER 122, BRONZE 13, REJECTED 
 | `radio-bridge/rbs30x` | 52 | 71 | fields | 68% | BRONZE |
 | `radionode/rn320bth` | 13 | 0 | fields | 14% | REJECTED |
 | `rakwireless/qingping` | 11 | 1 | fields | 81% | SILVER |
+| `volley-boast/vobo` | 5066 | 315 | ports, tlv, match | 92% | SILVER |
 
 ## Other schema files
 

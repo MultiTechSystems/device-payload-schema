@@ -367,8 +367,10 @@ console.log(JSON.stringify({{ passed, failed, errors }}));
     
     # Run with Node.js
     try:
+        # On stdin, not `node -e`: Linux caps one argument at 128 KiB (MAX_ARG_STRLEN).
         result = subprocess.run(
-            ['node', '-e', js_test],
+            ['node', '-'],
+            input=js_test,
             capture_output=True,
             text=True,
             timeout=10

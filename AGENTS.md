@@ -185,17 +185,17 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2020 payload vectors in `schemas/devices/` (measured 2026-10-05 with
+The 2335 payload vectors in `schemas/devices/` (measured 2026-10-05 with
 `tools/check-floors.py`, after merging the mutation-survivor vectors into 0.5.2) are the shared
 cross-language test set. Every implementation has a runner that reads the same YAML and
 the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1613 |
-| Go | `go/schema/corpus_conformance_test.go` | 2020 | 1629 (plain API 1606) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2020 | 1612 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2020 | 1611 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1664 |
+| Go | `go/schema/corpus_conformance_test.go` | 2335 | 1680 (plain API 1657) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2335 | 1662 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2335 | 1662 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 487 of 487 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -752,10 +752,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1613 |
-| Go | `go/schema/corpus_encode_test.go` | 1629 (plain 1606) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1611 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1612 |
+| Python | `tests/test_encode_round_trip.py` | 1664 |
+| Go | `go/schema/corpus_encode_test.go` | 1680 (plain 1657) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1662 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1662 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1165,7 +1165,7 @@ baseline - a regression fails, an improvement is reported and locked in with the
 | `gate-provenance` | a changed device schema has no independently sourced vector, or an added vector lacks `source:` | none: the diff against `BASE` |
 | `gate-crossval` | a schema stops agreeing with its vendor's own decoder (TTN declared examples + vendor JS, Decentlab decoders), or a new one does not agree | `tools/crossval-baseline.json`, oracle commits pinned |
 | `gate-mutation` | a schema's vectors notice fewer one-step mutations than before (score or killed count), or a new schema scores below 0.80 | `tools/mutation-baseline.json` |
-| `gate-verdicts` | a changed schema's vector fails in any of Python, Go, Java, C#, TS013, or a vector the reference passes fails elsewhere | `tools/verdicts-baseline.json` (empty: all five agree on 2020/2020) |
+| `gate-verdicts` | a changed schema's vector fails in any of Python, Go, Java, C#, TS013, or a vector the reference passes fails elsewhere | `tools/verdicts-baseline.json` (empty: all five agree on 2335/2335) |
 
 The mutation gate ratchets the killed count as well as the score on purpose: deleting
 vectors makes the mutants only they reached "unreached", which *raises* the score.

@@ -201,9 +201,13 @@ class TestWhatThisCrDoesNotClaim:
                         walk(item)
 
             walk(schema)
-        assert not found, (
+        # volley-boast/vobo.yaml's digital-input groups hold non-consuming bit ranges,
+        # but every encode harness files that schema under `tlv` (it also has a tlv
+        # block), so the `flagged` shape floors still did not move when it arrived.
+        known = {"vobo.yaml"}
+        assert set(found) <= known, (
             "a flagged group now holds a bit range, so the flagged floors can rise: "
-            + ", ".join(sorted(set(found)))
+            + ", ".join(sorted(set(found) - known))
         )
 
     def test_the_run_packing_is_wired_through_the_flagged_path_anyway(self):

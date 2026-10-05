@@ -59,6 +59,9 @@
       },
       "rakwireless": {
         "no-vendor-codec": 1
+      },
+      "volley-boast": {
+        "no-vendor-examples": 1
       }
     },
     "decentlab-decoders": {
@@ -1708,6 +1711,14 @@
     "rakwireless/qingping.yaml": {
       "ttn": {
         "status": "no-vendor-codec",
+        "problems": 0,
+        "decode_failures": 0,
+        "notes": 0
+      }
+    },
+    "volley-boast/vobo.yaml": {
+      "ttn": {
+        "status": "no-vendor-examples",
         "problems": 0,
         "decode_failures": 0,
         "notes": 0
