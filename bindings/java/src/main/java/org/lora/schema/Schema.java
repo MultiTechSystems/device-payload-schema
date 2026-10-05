@@ -86,6 +86,7 @@ public class Schema {
         schema.description = (String) raw.get("description");
         schema.endian = (String) raw.getOrDefault("endian", "big");
         schema.direction = (String) raw.get("direction");
+        checkPortDeclarations(raw);
         
         // Parse fields, splicing any `$ref` into the list first.
         Object fieldsRaw = raw.get("fields");
@@ -281,6 +282,38 @@ public class Schema {
                 }
             }
             seen.add(Map.entry(String.valueOf(member.get("name")), bits));
+        }
+    }
+
+    /**
+     * PS-018: a port key is 1 to 255 (CR-2026-041). PS-335, PS-337: a top-level fPort is
+     * such a port, and beside `ports` every key equals it (CR-2026-042). The top-level key
+     * selects nothing (PS-336) and is not read again.
+     */
+    private static void checkPortDeclarations(Map<String, Object> raw) {
+        Map<?, ?> ports = raw.get("ports") instanceof Map<?, ?> m ? m : Map.of();
+        for (Object key : ports.keySet()) {
+            String k = String.valueOf(key);
+            if (k.equals("default")) continue;
+            int n;
+            try { n = Integer.parseInt(k); } catch (NumberFormatException e) { n = -1; }
+            if (n < 1 || n > 255) {
+                throw new SchemaException("ports." + k
+                        + ": a port key must be an integer from 1 to 255 or default (PS-018)");
+            }
+        }
+        String name = raw.containsKey("fPort") ? "fPort" : "fport";
+        if (!raw.containsKey(name)) return;
+        Object declared = raw.get(name);
+        if (!(declared instanceof Integer port) || port < 1 || port > 255) {
+            throw new SchemaException("top-level " + name
+                    + " must be an integer from 1 to 255, got " + declared + " (PS-335)");
+        }
+        for (Object key : ports.keySet()) {
+            if (!String.valueOf(key).equals(String.valueOf(port))) {
+                throw new SchemaException("top-level " + name + " is " + port + " but ports also declares "
+                        + key + "; every ports key must equal it (PS-337)");
+            }
         }
     }
 
@@ -718,6 +751,12 @@ public class Schema {
 
     // Decode methods
     public Map<String, Object> decode(byte[] data) {
+        // PS-459, PS-460: a ports schema decoded with no FPort selects nothing. This
+        // decoded the empty top-level field list and returned {} with success.
+        if (ports != null && !ports.isEmpty()) {
+            throw new SchemaException.DecodeException("no FPort was supplied, and schema '"
+                    + name + "' selects its fields by port (PS-459)");
+        }
         DecodeContext ctx = new DecodeContext(data, endian);
         Map<String, Object> result = new LinkedHashMap<>();
 

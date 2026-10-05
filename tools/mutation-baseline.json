@@ -3,7 +3,7 @@
   "min_score_new": 0.8,
   "include_library_composed": false,
   "distribution": {
-    "100%": 74,
+    "100%": 75,
     "95-99%": 21,
     "90-94%": 26,
     "80-89%": 27,
@@ -80,6 +80,16 @@
       "generated": 17,
       "vectors": 1,
       "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/float-endian.yaml": {
+      "score": 1.0,
+      "killed": 8,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 11,
+      "vectors": 1,
+      "provenance": "independent",
       "failing_original": 0
     },
     "_language-conformance/internal-discriminator.yaml": {

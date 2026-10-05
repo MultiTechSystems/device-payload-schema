@@ -10,7 +10,9 @@
 #
 # Reference: TS001 LoRaWAN L2 Specification
 
-fport: 0
+# No `fPort`: 0 is not a port a document can declare (PS-018, PS-335 in 0.5.2). Its
+# payload is MAC commands under NwkSKey, which a decoder of application payloads is
+# never handed; these definitions describe that payload for tooling, not for ports.
 spec: TS001
 
 # TS001: "all multi-octet fields are transmitted with the least significant octet

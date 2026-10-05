@@ -89,6 +89,8 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "manufacturer": (("doc:metaschema",), "identity; documentation only"),
         "device": (("doc:metaschema",), "identity; documentation only"),
         "direction": (("py",), "uplink | downlink | bidirectional (PS-021)"),
+        "fPort": (("py", "go", "java", "cs", "validate"), "the port a document is about; checked, never consulted (PS-458)"),
+        "fport": (("py", "go", "java", "cs", "validate"), "accepted spelling of fPort; never written (PS-338)"),
     },
     "port": {
         "description": (("py", "outschema"), "documentation"),

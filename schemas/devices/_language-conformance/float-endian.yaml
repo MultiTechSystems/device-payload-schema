@@ -1,0 +1,33 @@
+# The byte-order rules reach the floating-point types (PS-055a, CR-2026-039).
+#
+# A field's own `endian` overrides the document's for f16, f32 and f64 exactly as for
+# an integer (PS-050a). Every value is exact in binary floating point, so all five
+# implementations compare it exactly, and the payload round-trips, which holds the
+# encode direction to the same rule.
+#
+# Byte order is declared with the key and never in the type name: `le_f32` and `be_f32`
+# are withdrawn and rejected (PS-053a). No schema in the corpus used them.
+name: probe_float_endian
+endian: big
+fields:
+- name: f32_document_order
+  type: f32
+- name: f32_little
+  type: f32
+  endian: little
+- name: f16_little
+  type: f16
+  endian: little
+- name: f64_little
+  type: f64
+  endian: little
+test_vectors:
+- name: each_width_in_each_order
+  source: spec-example
+  description: "3.0 big-endian, then 1.5, 0.5 and -2.25 least significant byte first"
+  payload: "40400000 0000C03F 0038 00000000000002C0"
+  expected:
+    f32_document_order: 3.0
+    f32_little: 1.5
+    f16_little: 0.5
+    f64_little: -2.25

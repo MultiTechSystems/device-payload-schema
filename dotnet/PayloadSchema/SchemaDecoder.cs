@@ -10,6 +10,11 @@ public static class SchemaDecoder
 {
     public static Dictionary<string, object?> Decode(PayloadSchemaDefinition schema, byte[] data)
     {
+        // PS-459, PS-460: a ports schema decoded with no FPort selects nothing. This
+        // decoded the empty top-level field list and returned {} with success.
+        if (schema.Ports is { Count: > 0 })
+            throw new InvalidOperationException(
+                $"no FPort was supplied, and schema '{schema.Name}' selects its fields by port (PS-459)");
         var ctx = new DecodeContext(data, schema.Endian);
         var result = new Dictionary<string, object?>();
 

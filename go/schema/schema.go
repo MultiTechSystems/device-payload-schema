@@ -1751,6 +1751,11 @@ func (s *Schema) DecodeWithPortDirection(data []byte, fPort int, direction strin
 
 // Decode decodes binary data using the schema.
 func (s *Schema) Decode(data []byte) (map[string]any, error) {
+	// PS-459, PS-460: a ports schema decoded with no FPort selects nothing. This decoded
+	// the empty top-level field list and returned {} with success.
+	if len(s.Ports) > 0 {
+		return nil, fmt.Errorf("no FPort was supplied, and schema '%s' selects its fields by port (PS-459)", s.Name)
+	}
 	ctx := NewDecodeContext(data, s.Endian)
 	result := make(map[string]any)
 

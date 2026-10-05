@@ -309,6 +309,29 @@ def object_key_withdrawn(field_def):
             f"{field_def.get('object')}` and `fields` (PS-466)")
 
 
+def fport_declaration_errors(schema):
+    """PS-335 and PS-337: what is wrong with a document's top-level `fPort`, if anything.
+
+    The key states which port a document is about (PS-458). It is an integer in the range
+    a port key may take (PS-018: 1 to 255), and beside `ports` every key must equal it.
+    `fport` is accepted as the same key (PS-338). It selects nothing (PS-336).
+    """
+    if not isinstance(schema, dict):
+        return []
+    key = 'fPort' if 'fPort' in schema else 'fport' if 'fport' in schema else None
+    if key is None:
+        return []
+    declared = schema[key]
+    if isinstance(declared, bool) or not isinstance(declared, int) or not 1 <= declared <= 255:
+        return [f"top-level {key} must be an integer from 1 to 255, got {declared!r} (PS-335)"]
+    ports = schema.get('ports') or {}
+    others = [k for k in ports if str(k) != str(declared)]
+    if others:
+        return [f"top-level {key} is {declared} but ports also declares "
+                f"{', '.join(str(k) for k in others)}; every ports key must equal it (PS-337)"]
+    return []
+
+
 def enum_label(entry):
     """What an enum value reports: its `name` where it is the description form (PS-394).
 
@@ -659,13 +682,22 @@ class SchemaInterpreter:
         if not ports:
             return None, f"schema '{self.name}'"
 
-        if fPort is not None:
-            port_key = str(fPort)
-            if port_key in ports:
-                return ports[port_key], f'fPort {fPort}'
-            # Try int key (YAML may parse as int)
-            if fPort in ports:
-                return ports[fPort], f'fPort {fPort}'
+        if fPort is None:
+            # PS-459, PS-460: with no FPort there is nothing to select by, and the
+            # `default` entry is not a stand-in for "unknown". This used it, so a
+            # caller that forgot the port decoded the payload as whatever the default
+            # describes; and with no default the error said "fPort None", which reads
+            # as the unmatched-port fault of PS-025.
+            raise ValueError(
+                f"no FPort was supplied, and schema '{self.name}' selects its fields "
+                f"by port (PS-459)")
+
+        port_key = str(fPort)
+        if port_key in ports:
+            return ports[port_key], f'fPort {fPort}'
+        # Try int key (YAML may parse as int)
+        if fPort in ports:
+            return ports[fPort], f'fPort {fPort}'
 
         if 'default' in ports:
             return ports['default'], 'the default port entry'
@@ -2414,6 +2446,13 @@ class SchemaInterpreter:
             DecodeResult with decoded data
         """
         result = DecodeResult(data={}, bytes_consumed=0)
+
+        # PS-335, PS-337: a top-level fPort is a statement about the document, checked
+        # here and never consulted to select fields (PS-336).
+        document_problems = fport_declaration_errors(self.schema)
+        if document_problems:
+            result.errors.extend(document_problems)
+            return result
 
         # PS-021: a message travelling the way the selected entry says it does not is
         # not decoded at all. Uplink bytes read through downlink field definitions

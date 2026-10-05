@@ -50,7 +50,7 @@ NUMERIC_TYPE_SIZES = {
 
 
 def type_size(t: str) -> Optional[int]:
-    return NUMERIC_TYPE_SIZES.get(re.sub(r'^(?:be_|le_)', '', str(t)))
+    return NUMERIC_TYPE_SIZES.get(str(t))
 
 
 def parse_bit_slice_type(t: str) -> Optional[Tuple[str, int, int]]:
@@ -64,7 +64,7 @@ def parse_bit_slice_type(t: str) -> Optional[Tuple[str, int, int]]:
 
     Returns (base_type, bit_start, bit_width) or None.
     """
-    m = re.match(r'^((?:be_|le_)?[usif]\d+)\[(\d+):(\d+)\]$', t)
+    m = re.match(r'^([usif]\d+)\[(\d+):(\d+)\]$', t)
     if m:
         base_t = m.group(1)
         lo = int(m.group(2))
@@ -82,14 +82,14 @@ def is_word_ordered(t: str) -> bool:
 
 
 def is_signed(t: str) -> bool:
-    clean = re.sub(r'^(?:be_|le_)?', '', t)
+    clean = str(t)
     return clean.startswith('s') or clean.startswith('i')
 
 
 def is_float(t: str) -> bool:
     # Exactly the three float spellings: a prefix test admitted `float` and `float16`,
     # which are not types (CR-2026-037), and read them as four bytes.
-    return re.sub(r'^(?:be_|le_)?', '', str(t)) in ('f16', 'f32', 'f64')
+    return str(t) in ('f16', 'f32', 'f64')
 
 
 def field_endian_override(t: str, field: Optional[Dict[str, Any]] = None) -> Optional[str]:
@@ -97,18 +97,13 @@ def field_endian_override(t: str, field: Optional[Dict[str, Any]] = None) -> Opt
 
     A field's own `endian:` wins. The generator only ever derived byte order from a
     `le_`/`be_` type prefix, so a schema using the key generated a codec that read the
-    schema's order instead - the interpreter and the generated codec then disagreed on
-    the same schema, which is the one divergence `tools/crossvalidate_js_json.py` exists
-    to keep at zero.
+    schema's order instead. The prefixes are withdrawn (PS-053a, CR-2026-039): a type
+    carrying one is unknown and refused.
     """
     if field is not None:
         declared = field.get('endian')
         if declared in ('big', 'little'):
             return declared
-    if t.startswith('be_'):
-        return 'big'
-    if t.startswith('le_'):
-        return 'little'
     return None
 
 
@@ -2127,6 +2122,12 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append(f'function {fn_name}(input) {{')
                 lines.append('  try {')
                 lines.append(f'    var endian = "{self.endian}";')
+                # PS-459, PS-460: with no FPort there is nothing to select by, and saying
+                # so is a different fault from an FPort the schema does not describe.
+                lines.append('    if (input.fPort === undefined || input.fPort === null) {')
+                lines.append('      return { data: {}, warnings: [], errors: ["no FPort was supplied, '
+                             'and this schema selects its fields by port (PS-459)"] };')
+                lines.append('    }')
                 for port_key in self.schema['ports']:
                     declared = self.schema['ports'][port_key].get(
                         'direction', DEFAULT_PORT_DIRECTION)
@@ -2139,7 +2140,9 @@ function writeS(buf, pos, size, value, endian) {
                                    f'message direction is {direction}')
                         lines.append(f'      return {{ data: {{}}, warnings: [], errors: ["{message}"] }};')
                     lines.append(f'    }}')
-                lines.append(f'    return {{ data: {{}}, warnings: ["Unknown fPort: " + input.fPort], errors: [] }};')
+                # PS-025: an FPort the schema does not describe is an error. It was a
+                # warning beside an empty result, which reads as a successful decode.
+                lines.append(f'    return {{ data: {{}}, warnings: [], errors: ["No port definition for fPort " + input.fPort] }};')
                 lines.append('  } catch (e) {')
                 lines.append('    return { data: {}, warnings: [], errors: [e.message] };')
                 lines.append('  }')

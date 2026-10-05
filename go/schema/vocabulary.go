@@ -178,6 +178,9 @@ func checkTypeVocabulary(raw map[string]any) error {
 		return nil
 	}
 
+	if err := checkPortDeclarations(raw); err != nil {
+		return err
+	}
 	if err := check(raw["fields"], "fields"); err != nil {
 		return err
 	}
@@ -344,6 +347,40 @@ func checkFieldRules(field map[string]any, at string) error {
 			if !hasAnyKey(stage, transformOperations) {
 				return fmt.Errorf("%s: transform stage names no operation of the PS-115 table (PS-390)", where)
 			}
+		}
+	}
+	return nil
+}
+
+// checkPortDeclarations holds PS-018 (a port key is 1 to 255, CR-2026-041) and PS-335 and
+// PS-337 (a top-level fPort is such a port, and beside `ports` every key equals it,
+// CR-2026-042). The top-level key selects nothing (PS-336) and is never read again.
+func checkPortDeclarations(raw map[string]any) error {
+	ports := asStringMap(raw["ports"])
+	for key := range ports {
+		if key == "default" {
+			continue
+		}
+		if n, err := strconv.Atoi(key); err != nil || n < 1 || n > 255 {
+			return fmt.Errorf("ports.%s: a port key must be an integer from 1 to 255 or default (PS-018)", key)
+		}
+	}
+	name := "fPort"
+	declared, ok := raw["fPort"]
+	if !ok {
+		name = "fport"
+		declared, ok = raw["fport"]
+	}
+	if !ok {
+		return nil
+	}
+	port, isInt := declared.(int)
+	if !isInt || port < 1 || port > 255 {
+		return fmt.Errorf("top-level %s must be an integer from 1 to 255, got %v (PS-335)", name, declared)
+	}
+	for key := range ports {
+		if key != strconv.Itoa(port) {
+			return fmt.Errorf("top-level %s is %d but ports also declares %s; every ports key must equal it (PS-337)", name, port, key)
 		}
 	}
 	return nil

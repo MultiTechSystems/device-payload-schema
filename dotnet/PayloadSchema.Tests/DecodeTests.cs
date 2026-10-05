@@ -213,16 +213,19 @@ fields:
     }
 
     [Fact]
-    public void DecodeEndianPrefix()
+    public void DecodeFieldEndian()
     {
+        // The le_/be_ prefixes this test used are withdrawn (PS-053a, CR-2026-039); the
+        // byte order is the field's `endian` key.
         var schema = SchemaParser.Parse(@"
 name: test
 endian: big
 fields:
   - name: le_val
-    type: le_u16
+    type: u16
+    endian: little
   - name: be_val
-    type: be_u16
+    type: u16
 ");
         var result = SchemaDecoder.Decode(schema, new byte[] { 0xF4, 0x01, 0x01, 0xF4 });
         Assert.Equal(500.0, Decoded.Num(result["le_val"]));

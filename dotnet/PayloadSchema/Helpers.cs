@@ -232,8 +232,6 @@ public static class Helpers
     public static FieldType ParseFieldType(string typeStr)
     {
         var baseType = typeStr.Contains('[') ? typeStr[..typeStr.IndexOf('[')] : typeStr;
-        if (baseType.StartsWith("le_") || baseType.StartsWith("be_"))
-            baseType = baseType[3..];
 
         return baseType switch
         {
@@ -284,15 +282,6 @@ public static class Helpers
     }
 
     /// <summary>Parse endian prefix from type like "le_u16" -> ("little", "u16")</summary>
-    public static (string? endian, string baseType) ParseEndianPrefix(string typeStr)
-    {
-        if (typeStr.StartsWith("le_"))
-            return ("little", typeStr[3..]);
-        if (typeStr.StartsWith("be_"))
-            return ("big", typeStr[3..]);
-        return (null, typeStr);
-    }
-
     public static double EvaluatePolynomial(double[] coeffs, double x)
     {
         if (coeffs.Length == 0) return 0;

@@ -32,6 +32,7 @@ public static class SchemaParser
             schema.Endian = "big";
         if (root.TryGetValue("direction", out var direction))
             schema.Direction = Scalar(direction);
+        CheckPortDeclarations(root);
 
         // No `header:` block. It was never in the specification, and honouring it
         // here while Python and Go ignored it meant the same schema decoded
@@ -148,6 +149,34 @@ public static class SchemaParser
         }
     }
 
+    /// <summary>
+    /// PS-018: a port key is 1 to 255 (CR-2026-041). PS-335, PS-337: a top-level fPort is
+    /// such a port, and beside `ports` every key equals it (CR-2026-042). The top-level key
+    /// selects nothing (PS-336) and is not read again.
+    /// </summary>
+    static void CheckPortDeclarations(YamlMappingNode root)
+    {
+        var portKeys = root.TryGetValue("ports", out var portsNode) && portsNode is YamlMappingNode portsMap
+            ? portsMap.Children.Keys.Select(Scalar).ToList() : new List<string>();
+        foreach (var key in portKeys)
+        {
+            if (key == "default") continue;
+            if (!int.TryParse(key, out var n) || n < 1 || n > 255)
+                throw new InvalidOperationException(
+                    $"ports.{key}: a port key must be an integer from 1 to 255 or default (PS-018)");
+        }
+        var name = root.Children.ContainsKey(new YamlScalarNode("fPort")) ? "fPort" : "fport";
+        if (!root.TryGetValue(name, out var declaredNode)) return;
+        var declared = Scalar(declaredNode);
+        if (!int.TryParse(declared, out var port) || port < 1 || port > 255)
+            throw new InvalidOperationException(
+                $"top-level {name} must be an integer from 1 to 255, got {declared} (PS-335)");
+        foreach (var key in portKeys)
+            if (key != port.ToString())
+                throw new InvalidOperationException(
+                    $"top-level {name} is {port} but ports also declares {key}; every ports key must equal it (PS-337)");
+    }
+
     /// <summary>The stages PS-098 and the PS-115 table define; `op` names one instead.</summary>
     static readonly string[] TransformOperations =
         { "add", "mult", "div", "sqrt", "abs", "pow", "log10", "log", "floor", "ceiling", "clamp", "op" };
@@ -204,8 +233,9 @@ public static class SchemaParser
             if (hasType)
             {
                 var spelling = Scalar(typeNode!);
-                if (Helpers.ParseBitRange(spelling) == null
-                    && Helpers.ParseFieldType(spelling) == FieldType.Unknown)
+                // A bit range is uN[start:end]; its base carries no prefix (PS-053a).
+                var isBitRange = System.Text.RegularExpressions.Regex.IsMatch(spelling, @"^u\d+\[\d+:\d+\]$");
+                if (!isBitRange && Helpers.ParseFieldType(spelling) == FieldType.Unknown)
                 {
                     var name = fieldMap.TryGetValue("name", out var n) ? Scalar(n) : "?";
                     throw new InvalidOperationException($"Field '{name}': unknown type: {spelling}");
@@ -236,9 +266,10 @@ public static class SchemaParser
         if (fm.TryGetValue("type", out var typeNode))
         {
             f.RawType = Scalar(typeNode);
-            var (endianPrefix, baseType) = Helpers.ParseEndianPrefix(f.RawType);
-            if (endianPrefix != null)
-                f.Endian = endianPrefix;
+            // Byte order is declared with `endian`, never in the type name: the le_/be_
+            // prefixes are withdrawn and rejected (PS-053a) by ParseFieldType returning
+            // Unknown for them.
+            var baseType = f.RawType;
 
             var bitRange = Helpers.ParseBitRange(f.RawType);
             if (bitRange != null)

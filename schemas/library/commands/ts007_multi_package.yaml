@@ -2,7 +2,7 @@
 # FPort 225
 # Package ID: 0, Version: 1
 
-fport: 225
+fPort: 225
 package_id: 0
 package_version: 1
 spec: TS007
