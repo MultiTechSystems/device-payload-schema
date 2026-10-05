@@ -141,6 +141,12 @@ public class Schema {
         if (fieldsRaw == null) return fields;
 
         for (Map<String, Object> fm : fieldsRaw) {
+            // PS-466 (CR-2026-074): the `object:` key is withdrawn; a nested group is
+            // `type: object`.
+            if (fm.containsKey("object") && fm.get("type") == null) {
+                throw new SchemaException("the `object:` key is withdrawn; write `type: object` "
+                        + "with `name: " + fm.get("object") + "` and `fields` (PS-466)");
+            }
             // PS-334: a field carrying no construct needs a type; none is supplied.
             // Checked here, on list members, because parseField also parses construct
             // bodies such as an inline `tlv:` block, which carry no type.
@@ -335,7 +341,7 @@ public class Schema {
 
     /** The keys that make a field a construct, so it declares no type of its own. */
     private static final List<String> CONSTRUCT_KEYS =
-            List.of("$ref", "flagged", "tlv", "byte_group", "object", "match");
+            List.of("$ref", "flagged", "tlv", "byte_group", "match");
 
     private static boolean hasConstruct(Map<String, Object> fm) {
         for (String key : CONSTRUCT_KEYS) {

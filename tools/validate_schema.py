@@ -372,6 +372,29 @@ def is_encode_vector(vector) -> bool:
     return "input" in vector or "expected_payload" in vector
 
 
+def expected_fields_match(expected: Dict[str, Any], actual: Dict[str, Any],
+                          tolerance: float = 0.001) -> Tuple[bool, str]:
+    """Compare an `expected` mapping against decoded output (PS-043, PS-044).
+
+    A key expected as null asserts the key is absent: the decoder must not report it,
+    with any value (CR-2026-075). Every other listed key must be present and match;
+    unlisted keys are not checked. Before CR-2026-075 there was no way to say "absent",
+    so an implementation that reported a field the specification omits - a zero
+    divisor, a failed guard with no else - passed every vector.
+    """
+    for key, want in (expected or {}).items():
+        if want is None:
+            if key in actual:
+                return False, f"{key}: reported {actual[key]!r}, expected absent (PS-043)"
+            continue
+        if key not in actual:
+            return False, f"missing key '{key}'"
+        match, msg = values_match(want, actual[key], tolerance)
+        if not match:
+            return False, f"{key}: {msg}"
+    return True, ""
+
+
 def values_match(expected: Any, actual: Any, tolerance: float = 0.001) -> Tuple[bool, str]:
     """Compare expected and actual values with tolerance for floats."""
     if expected is None and actual is None:
@@ -404,13 +427,7 @@ def values_match(expected: Any, actual: Any, tolerance: float = 0.001) -> Tuple[
         return True, ""
     
     if isinstance(expected, dict) and isinstance(actual, dict):
-        for key in expected:
-            if key not in actual:
-                return False, f"missing key '{key}'"
-            match, msg = values_match(expected[key], actual[key], tolerance)
-            if not match:
-                return False, f"{key}: {msg}"
-        return True, ""
+        return expected_fields_match(expected, actual, tolerance)
     
     # A `bytes` field decodes to a Python bytes object here and to a lowercase hex
     # string in Go, so a vector cannot be written to satisfy both by value. Hex is
@@ -674,7 +691,14 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
         # the message already listed it - harmless only because a flagged field also
         # carries a name and type.
         field_constructs = ('name', 'type', '$ref', 'flagged', 'tlv',
-                            'byte_group', 'object', 'match')
+                            'byte_group', 'match')
+        # PS-466 (CR-2026-074): the `object:` key is withdrawn; a nested group is
+        # `type: object`.
+        if 'object' in fld and not fld.get('type'):
+            errors.append(
+                f"{path}[{i}]: the `object:` key is withdrawn; write `type: object` with "
+                f"`name: {fld['object']}` and `fields` (PS-466)")
+            continue
         if not any(key in fld for key in field_constructs):
             errors.append(
                 f"{path}[{i}]: must have "
@@ -1359,6 +1383,13 @@ def run_test_vector(interpreter: SchemaInterpreter, tv: Dict[str, Any]) -> TestR
     # Compare
     expected = tv.get('expected', {})
     for field_name, expected_value in expected.items():
+        if expected_value is None:
+            # PS-043 (CR-2026-075): null asserts the key is absent.
+            if field_name in result.actual:
+                result.errors.append(
+                    f"{field_name}: reported {result.actual[field_name]!r}, expected "
+                    f"absent (PS-043)")
+            continue
         if field_name not in result.actual:
             result.errors.append(f"Missing field in output: '{field_name}'")
             continue

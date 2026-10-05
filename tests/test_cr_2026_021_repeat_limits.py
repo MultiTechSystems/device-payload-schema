@@ -95,7 +95,10 @@ class TestTheComparisonActuallyCompares:
         assert "if not values_match(" not in source, (
             "vector-verdicts.py is testing the tuple again, so no value is compared"
         )
-        assert "ok, detail = values_match(" in source
+        # Since CR-2026-075 the tool delegates to expected_fields_match, which unpacks
+        # the pair itself; either form is a comparison that compares.
+        assert ("ok, detail = values_match(" in source
+                or "return expected_fields_match(" in source)
 
     def test_the_verdicts_tool_reports_a_real_mismatch(self):
         """End to end: a schema whose paths differ must be counted as a disagreement."""

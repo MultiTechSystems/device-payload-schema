@@ -43,7 +43,7 @@ sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 import yaml  # noqa: E402
 
-from validate_schema import is_encode_vector, values_match  # noqa: E402
+from validate_schema import expected_fields_match, is_encode_vector  # noqa: E402
 
 CORPUS = REPO_ROOT / "schemas" / "devices"
 
@@ -613,15 +613,9 @@ def run():
             if rc != 0:
                 failures.append((key, f"decode returned {rc}"))
                 continue
-            problem = None
-            for name, want in (vector.get("expected") or {}).items():
-                if name not in fields:
-                    problem = f"{name} missing"
-                    break
-                ok, detail = values_match(want, fields[name])
-                if not ok:
-                    problem = f"{name}: {detail}"
-                    break
+            # PS-043/PS-044, with a null expectation asserting absence (CR-2026-075).
+            ok, detail = expected_fields_match(vector.get("expected") or {}, fields)
+            problem = None if ok else detail
             if problem:
                 failures.append((key, problem))
             else:

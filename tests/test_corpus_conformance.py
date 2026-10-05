@@ -28,8 +28,8 @@ sys.path.insert(0, str(REPO_ROOT / "tools"))
 from schema_interpreter import SchemaInterpreter  # noqa: E402
 from score_schema import CONFORMANCE_TOLERANCE  # noqa: E402
 from validate_schema import (  # noqa: E402
+    expected_fields_match,
     is_encode_vector,
-    values_match,
     warnings_match,
 )
 
@@ -73,10 +73,9 @@ def test_corpus_vector(path, schema, vector):
     result = SchemaInterpreter(schema).decode(bytes.fromhex(payload), fPort=fport)
     assert result.success, "%s: %s" % (path.name, result.errors[:2])
 
-    for key, want in expected.items():
-        assert key in result.data, "%s: %s missing from output" % (path.name, key)
-        match, message = values_match(want, result.data[key], CONFORMANCE_TOLERANCE)
-        assert match, "%s: %s: %s" % (path.name, key, message)
+    # PS-043/PS-044: a null expectation asserts the key is absent (CR-2026-075).
+    match, message = expected_fields_match(expected, result.data, CONFORMANCE_TOLERANCE)
+    assert match, "%s: %s" % (path.name, message)
 
     # PS-305 to PS-308. A vector may pin what the decode said as well as what it read;
     # a vector without the key asserts nothing, which is most of the corpus.

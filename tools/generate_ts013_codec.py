@@ -1155,6 +1155,9 @@ function writeS(buf, pos, size, value, endian) {
         name = field.get('name', '_unknown')
         ftype = field.get('type')
         js_name = to_js_name(name)
+        if 'object' in field and not ftype:
+            raise ValueError("the `object:` key is withdrawn; write `type: object` with "
+                             f"`name: {field['object']}` and `fields` (PS-466)")
 
         # A string literal (spec "Literal Types"): a constant, read from no bytes.
         # `string` fell through to the integer path, which emitted a TODO and nothing,

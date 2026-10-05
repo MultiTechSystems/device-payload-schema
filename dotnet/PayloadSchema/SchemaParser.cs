@@ -176,7 +176,7 @@ public static class SchemaParser
     }
 
     /// <summary>The keys that make a field a construct, declaring no type of its own.</summary>
-    static readonly string[] ConstructKeys = { "$ref", "flagged", "tlv", "byte_group", "object", "match" };
+    static readonly string[] ConstructKeys = { "$ref", "flagged", "tlv", "byte_group", "match" };
 
     static List<SchemaField> ParseFields(YamlSequenceNode seq)
     {
@@ -185,6 +185,11 @@ public static class SchemaParser
         {
             if (item is not YamlMappingNode fieldMap)
                 continue;
+            // PS-466 (CR-2026-074): the `object:` key is withdrawn; a nested group is
+            // `type: object`.
+            if (fieldMap.TryGetValue("object", out var objectName) && !fieldMap.Children.ContainsKey(new YamlScalarNode("type")))
+                throw new InvalidOperationException("the `object:` key is withdrawn; write `type: object` "
+                    + $"with `name: {Scalar(objectName)}` and `fields` (PS-466)");
             // PS-334: a field carrying no construct needs a type; none is supplied.
             // Checked on list members, because ParseField also parses construct bodies.
             var hasType = fieldMap.TryGetValue("type", out var typeNode)

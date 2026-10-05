@@ -106,7 +106,7 @@ from schema_interpreter import SchemaInterpreter  # noqa: E402
 from score_schema import CONFORMANCE_TOLERANCE  # noqa: E402
 from validate_schema import (  # noqa: E402
     is_encode_vector,
-    values_match,
+    expected_fields_match,
     warnings_match,
 )
 
@@ -859,14 +859,9 @@ def run_vector(interp: SchemaInterpreter, vector: Dict[str, Any]) -> Outcome:
     )
     passed = result.success
     if passed:
-        for key, want in (vector.get("expected") or {}).items():
-            if key not in result.data:
-                passed = False
-                break
-            ok, _detail = values_match(want, result.data[key], CONFORMANCE_TOLERANCE)
-            if not ok:
-                passed = False
-                break
+        # PS-043/PS-044, with a null expectation asserting absence (CR-2026-075).
+        passed, _detail = expected_fields_match(
+            vector.get("expected") or {}, result.data, CONFORMANCE_TOLERANCE)
     if passed:
         ok, _detail = warnings_match(vector.get("expected_warnings"), result.warnings)
         passed = ok

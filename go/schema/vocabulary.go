@@ -75,7 +75,7 @@ func isKnownTypeSpelling(spelling string) bool {
 
 // fieldConstructKeys are the keys that make a field a construct rather than a typed
 // read, so it carries no `type` of its own.
-var fieldConstructKeys = []string{"$ref", "flagged", "tlv", "byte_group", "object", "match"}
+var fieldConstructKeys = []string{"$ref", "flagged", "tlv", "byte_group", "match"}
 
 // checkTypeVocabulary walks every field list of a raw schema and reports the first
 // field whose type is unknown (PS-327) or absent with no construct to stand in for
@@ -122,6 +122,12 @@ func checkTypeVocabulary(raw map[string]any) error {
 			}
 			typ, hasType := field["type"]
 			spelling, isString := typ.(string)
+			// PS-466 (CR-2026-074): the `object:` key is withdrawn; a nested group is
+			// `type: object`. This parser never read the key, so such a field failed
+			// later as a typeless one.
+			if objectName, ok := field["object"]; ok && !hasType {
+				return fmt.Errorf("%s: the `object:` key is withdrawn; write `type: object` with `name: %v` and `fields` (PS-466)", at, objectName)
+			}
 			switch {
 			case hasType && (!isString || strings.TrimSpace(spelling) == ""):
 				return fmt.Errorf("%s: field declares no type", at)

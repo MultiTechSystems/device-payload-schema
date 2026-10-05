@@ -9,6 +9,9 @@
 # The first vector round-trips: both absent fields are re-encoded as zero, which is
 # what the payload holds. The second cannot, since the -1 that made the field absent
 # is not in the output to write back.
+#
+# A null expectation asserts the key is absent (PS-043, CR-2026-075). Before that the
+# vector could only show that `after` still decoded, not that the absent fields were.
 name: probe_log_of_non_positive
 endian: big
 fields:
@@ -27,9 +30,13 @@ test_vectors:
   source: spec-example
   payload: "00 00 05"
   expected:
+    log10_of_zero: null
+    log_of_input: null
     after: 5
 - name: negative_is_absent
   source: spec-example
   payload: "00 FF 05"
   expected:
+    log10_of_zero: null
+    log_of_input: null
     after: 5

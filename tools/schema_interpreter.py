@@ -303,6 +303,12 @@ def parse_list_case_key(text):
     return values
 
 
+def object_key_withdrawn(field_def):
+    """The PS-466 error for a field written with the withdrawn `object:` key."""
+    return (f"the `object:` key is withdrawn; write `type: object` with `name: "
+            f"{field_def.get('object')}` and `fields` (PS-466)")
+
+
 def enum_label(entry):
     """What an enum value reports: its `name` where it is the description form (PS-394).
 
@@ -1527,14 +1533,8 @@ class SchemaInterpreter:
                     self._current_data.update(nested_result)
                 continue
             
-            # Option B: nested object: inside case
             if 'object' in cf and not cf.get('type'):
-                obj_name = cf['object']
-                sub_result, pos = self._decode_nested_object_b(cf, buf, pos)
-                result[obj_name] = sub_result
-                if hasattr(self, '_current_data'):
-                    self._current_data[obj_name] = sub_result
-                continue
+                raise ValueError(object_key_withdrawn(cf))
             
             name = cf.get('name', 'unknown')
             if name.startswith('_'):
@@ -2118,32 +2118,6 @@ class SchemaInterpreter:
         # Advance past the group
         return pos + group_size
     
-    def _decode_nested_object_b(self, field_def: Dict[str, Any], buf: bytes,
-                                 pos: int) -> Tuple[Dict[str, Any], int]:
-        """Decode nested object using Option B syntax (object: key)."""
-        nested_fields = field_def.get('fields', [])
-        nested_result = {}
-        
-        for nf in nested_fields:
-            if 'match' in nf and not nf.get('type'):
-                match_result, pos = self._decode_match(nf, buf, pos)
-                nested_result.update(match_result)
-            elif 'object' in nf and not nf.get('type'):
-                sub_name = nf['object']
-                sub_result, pos = self._decode_nested_object_b(nf, buf, pos)
-                nested_result[sub_name] = sub_result
-            else:
-                nf_name = nf.get('name', 'unknown')
-                value, pos = self._decode_field(nf, buf, pos)
-                if value is not None:
-                    value = self._apply_modifiers(value, nf)
-                    if not nf_name.startswith('_'):
-                        nested_result[nf_name] = value
-                if nf.get('var'):
-                    self._variables[nf['var']] = value
-        
-        return nested_result, pos
-    
     def _decode_tlv(self, field_def: Dict[str, Any], buf: bytes,
                     pos: int,
                     outer: Optional[DecodeResult] = None,
@@ -2497,38 +2471,12 @@ class SchemaInterpreter:
                     result.errors.append(f"Error in match: {e}")
                 continue
             
-            # Option B: object: as top-level key
+            # The `object:` key is withdrawn (PS-466, CR-2026-074): a nested group is
+            # `type: object` with `name` and `fields`. This was the only implementation
+            # that read the key; Go, Java, C# and the generator never did.
             if 'object' in field_def and not field_def.get('type'):
-                try:
-                    obj_name = field_def['object']
-                    nested_fields = field_def.get('fields', [])
-                    nested_result = {}
-                    saved_data = self._current_data
-                    # nested object still adds vars to top-level scope
-                    for nf in nested_fields:
-                        # Recursively handle Option B constructs in nested fields
-                        if 'match' in nf and not nf.get('type'):
-                            match_result, pos = self._decode_match(nf, payload, pos)
-                            nested_result.update(match_result)
-                        elif 'object' in nf and not nf.get('type'):
-                            sub_name = nf['object']
-                            sub_result, pos = self._decode_nested_object_b(nf, payload, pos)
-                            nested_result[sub_name] = sub_result
-                        else:
-                            nf_name = nf.get('name', 'unknown')
-                            value, pos = self._decode_field(nf, payload, pos)
-                            if value is not None:
-                                value = self._apply_modifiers(value, nf)
-                                if not nf_name.startswith('_'):
-                                    nested_result[nf_name] = value
-                            # Store variable if var: specified
-                            if nf.get('var'):
-                                self._variables[nf['var']] = value
-                    self._current_data = saved_data
-                    result.data[obj_name] = nested_result
-                except Exception as e:
-                    result.errors.append(f"Error in object '{field_def.get('object')}': {e}")
-                continue
+                result.errors.append(object_key_withdrawn(field_def))
+                break
             
             # Option B: tlv: as top-level key
             if 'tlv' in field_def and not field_def.get('type'):
