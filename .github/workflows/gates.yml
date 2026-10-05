@@ -20,6 +20,13 @@ env:
     TTN_DEVICES_SHA: a49b17a13f611f294a87159e8f1f2772a5c23450
     DECENTLAB_SHA: 045ec68ed7a9e5fcdcc6163b08c617d48fb8e56a
 
+# A new push to a pull request supersedes its earlier runs, which are cancelled
+# rather than left queued for runners. Any other run (a push to master, the
+# schedule) gets a group of its own, so it is never cancelled or replaced.
+concurrency:
+    group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
     provenance-validator:
         name: Provenance and validator
