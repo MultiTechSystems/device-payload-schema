@@ -457,6 +457,33 @@ public static class SchemaDecoder
             case FieldType.Number:
             {
                 value = DecodeNumber(field, ctx);
+                if (field.IntegerResult && value is double d)
+                {
+                    // PS-388: a fractional part is an error, never truncated or rounded.
+                    if (d != Math.Round(d) || double.IsInfinity(d))
+                        throw new InvalidOperationException(
+                            $"{field.Name}: type integer but the computed value is {d}; " +
+                            "add `idiv` to truncate or a {op: round} transform stage");
+                    value = (long)d;
+                }
+                break;
+            }
+
+            case FieldType.UDec:
+            case FieldType.SDec:
+            {
+                // Nibble-decimal (PS-330): upper nibble the whole part, a 4-bit
+                // two's-complement value for sdec; lower nibble the tenths.
+                int b = ctx.Read(1)[0];
+                int whole = b >> 4;
+                if (field.Type == FieldType.SDec && whole >= 8) whole -= 16;
+                value = whole + (b & 0x0F) * 0.1;
+                break;
+            }
+
+            case FieldType.Base64:
+            {
+                value = Convert.ToBase64String(ctx.Read(length));
                 break;
             }
 

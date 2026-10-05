@@ -43,6 +43,8 @@ const (
 	TypeHexLower      FieldType = "hex"
 	TypeHexUpperLower FieldType = "hex:upper"
 	TypeBase64  FieldType = "Base64"
+	// The spelling a schema writes (CR-2026-037).
+	TypeBase64Lower FieldType = "base64"
 	TypeSkip    FieldType = "Skip"
 	TypeString  FieldType = "String"
 	TypeNumber  FieldType = "Number"
@@ -109,6 +111,9 @@ const (
 type Field struct {
 	Name        string         `json:"name,omitempty" yaml:"name,omitempty"`
 	Type        FieldType      `json:"type" yaml:"type"`
+	// IntegerResult marks a computed field written `type: integer` (PS-283); its Type
+	// is TypeNumber.
+	IntegerResult bool `json:"-" yaml:"-"`
 	Length      int            `json:"length,omitempty" yaml:"length,omitempty"`
 	ByteOffset  int            `json:"byte_offset,omitempty" yaml:"byte_offset,omitempty"`
 	BitOffset   int            `json:"bit_offset,omitempty" yaml:"bit_offset,omitempty"`
@@ -684,6 +689,12 @@ func ParseSchema(data string) (*Schema, error) {
 	_ = yaml.Unmarshal([]byte(data), &rootNode)
 	fieldNodes := findFieldNodes(&rootNode, "fields")
 
+	// CR-2026-037: an unknown or absent type is a schema error, reported before
+	// anything is decoded (PS-327, PS-328, PS-334).
+	if err := checkTypeVocabulary(raw); err != nil {
+		return nil, err
+	}
+
 	schema := &Schema{}
 	
 	if name, ok := raw["name"].(string); ok {
@@ -826,7 +837,13 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 		f.Name = name
 	}
 	if typ, ok := fm["type"].(string); ok {
-		f.Type = FieldType(typ)
+		f.Type = canonicalFieldType(typ)
+		// `integer` is `number` declaring an integer result (PS-283), so it takes
+		// every computed-field path and is checked and converted at the end.
+		if f.Type == TypeInteger {
+			f.Type = TypeNumber
+			f.IntegerResult = true
+		}
 	}
 	if length, ok := fm["length"].(int); ok {
 		f.Length = length
@@ -2020,6 +2037,19 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 			return nil, err
 		}
 
+	case TypeUDec, TypeSDec:
+		// Nibble-decimal (PS-330): the upper nibble is the whole part, a 4-bit
+		// two's-complement value for sdec, and the lower nibble is tenths.
+		data, err := ctx.Read(1)
+		if err != nil {
+			return nil, err
+		}
+		whole := int(data[0] >> 4)
+		if field.Type == TypeSDec && whole >= 8 {
+			whole -= 16
+		}
+		value = float64(whole) + float64(data[0]&0x0F)*0.1
+
 	case TypeBool, TypeBoolLower:
 		// Bool extracts a single bit from the current byte
 		data, err := ctx.Peek(1, 0)
@@ -2095,6 +2125,15 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		} else {
 			value = intVal
 		}
+
+	case TypeBase64Lower:
+		// RFC 4648 base64 of the bytes read (clause 2 string types). There was no case,
+		// so `type: base64` was an unknown type here alone.
+		data, err := ctx.Read(length)
+		if err != nil {
+			return nil, err
+		}
+		value = base64.StdEncoding.EncodeToString(data)
 
 	case TypeHex, TypeHexLower, TypeHexUpperLower:
 		data, err := ctx.Read(length)
@@ -2229,19 +2268,31 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 			}
 		}
 
+		if field.IntegerResult && value != omitted {
+			if numVal, ok := toFloat64(value); ok {
+				// PS-388: a fractional part is an error, never truncated or rounded.
+				if numVal != math.Trunc(numVal) {
+					return nil, fmt.Errorf("%s: type integer but the computed value is %v; "+
+						"add `idiv` to truncate or a {op: round} transform stage", field.Name, numVal)
+				}
+				value = int64(numVal)
+			}
+		}
+
 	case TypeObject, TypeObjectLower:
 		value, err = decodeFields(field.Fields, ctx)
 		if err != nil {
 			return nil, err
 		}
 
-	case TypeMatch, "CTRL-SWITCH", "Switch":
+	case TypeMatch, TypeMatchLower:
 		value, err = decodeMatch(field, ctx)
 		if err != nil {
 			return nil, err
 		}
 
-	case TypeTLV, "tlv":
+	case TypeTLV, TypeTLVLower:
+		// Set internally for a `tlv:` construct; no schema spells it as a type.
 		return decodeTLV(field, ctx)
 
 	default:
@@ -4316,6 +4367,35 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 		// Rounded, not truncated, for the reason the unsigned case above gives.
 		ctx.Write(encodeSint(int64(math.RoundToEven(numVal)), length, endian))
 
+	case TypeF16:
+		// The encoder had no f16 case, so a schema that decoded one could not write it.
+		numVal, ok := toFloat64(value)
+		if !ok {
+			return notANumber(field, value)
+		}
+		ctx.Write(encodeUint(uint64(float16Bits(numVal)), 2, endian))
+
+	case TypeUDec, TypeSDec:
+		// The inverse of PS-330, as tools/schema_interpreter.py writes it: floor the
+		// whole part so the tenths stay non-negative (-1.5 is -2 + 0.5).
+		numVal, ok := toFloat64(value)
+		if !ok {
+			return notANumber(field, value)
+		}
+		whole := math.Floor(numVal)
+		tenths := math.RoundToEven((numVal - whole) * 10)
+		if tenths == 10 {
+			whole, tenths = whole+1, 0
+		}
+		low, high := 0.0, 15.0
+		if field.Type == TypeSDec {
+			low, high = -8, 7
+		}
+		if whole < low || whole > high {
+			return fmt.Errorf("field %q: %v does not fit %s", field.Name, numVal, field.Type)
+		}
+		ctx.Write([]byte{byte((int(whole)&0x0F)<<4) | byte(tenths)})
+
 	case TypeFloat32, TypeF32:
 		numVal, ok := toFloat64(value)
 		if !ok {
@@ -4347,6 +4427,20 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 			data := make([]byte, length)
 			copy(data, []byte(strVal))
 			ctx.Write(data)
+		}
+
+	case TypeBase64Lower:
+		if strVal, ok := value.(string); ok {
+			data, err := base64.StdEncoding.DecodeString(strVal)
+			if err != nil {
+				return fmt.Errorf("base64 field %q: %v", field.Name, err)
+			}
+			if length <= 0 {
+				length = len(data)
+			}
+			padded := make([]byte, length)
+			copy(padded, data)
+			ctx.Write(padded)
 		}
 
 	case TypeHex, TypeHexLower, TypeHexUpperLower:
@@ -4520,6 +4614,44 @@ func encodeSint(val int64, length int, endian string) []byte {
 		val = (1 << (length * 8)) + val
 	}
 	return encodeUint(uint64(val), length, endian)
+}
+
+// float16Bits converts to IEEE 754 binary16, rounding to nearest with ties to even.
+func float16Bits(v float64) uint16 {
+	f := math.Float32bits(float32(v))
+	sign := uint16((f >> 16) & 0x8000)
+	rawExp := (f >> 23) & 0xFF
+	mant := f & 0x7FFFFF
+	if rawExp == 0xFF {
+		if mant != 0 {
+			return sign | 0x7E00
+		}
+		return sign | 0x7C00
+	}
+	exp := int(rawExp) - 127 + 15
+	if exp >= 31 {
+		return sign | 0x7C00
+	}
+	if exp <= 0 {
+		if exp < -10 {
+			return sign
+		}
+		mant |= 0x800000
+		shift := uint(14 - exp)
+		half := uint16(mant >> shift)
+		rem := mant & ((1 << shift) - 1)
+		halfway := uint32(1) << (shift - 1)
+		if rem > halfway || (rem == halfway && half&1 == 1) {
+			half++
+		}
+		return sign | half
+	}
+	half := sign | uint16(exp<<10) | uint16(mant>>13)
+	rem := mant & 0x1FFF
+	if rem > 0x1000 || (rem == 0x1000 && half&1 == 1) {
+		half++
+	}
+	return half
 }
 
 func encodeFloat32(val float32, endian string) []byte {

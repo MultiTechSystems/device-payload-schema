@@ -300,41 +300,13 @@ DOCUMENTATION_KEYS = frozenset(
 #: no field list references. `is_known` accepts them there and nowhere else, so the
 #: validator still rejects each of them in a field that is actually decoded.
 #:
-#: Carrying only the reached definitions removes every entry and changes no decode
-#: (measured: all 1524 decode outputs byte-identical, vector-verdicts unchanged). It
-#: was not done because it moves ts007_multi_package__package_version_req from the
-#: `repeat` to the `plain fixed` encode shape bucket in all four round-trip harnesses
-#: (they classify by construct names in the file, and the only `repeat` was in an
-#: unreferenced definition), which needs the per-shape floors moved in the language
-#: runners. That is a separate, deliberate change.
-UNREAD_KEYS: Dict[Tuple[str, str], str] = {
-    ("field", "conditional"): (
-        "a C-like expression (`status_and_id & 0x3C == 0`) in ts005/ts006 definitions. "
-        "Nothing evaluates it, so the field is always decoded - the one entry here that "
-        "would change a decode if its definition were ever referenced, which is why it "
-        "is accepted only in an unreferenced definition and is an error anywhere else"
-    ),
-    ("field", "optional"): (
-        "lorawan_frames / udp_packet_forwarder: implies the field may be absent; no "
-        "implementation honours it, so a short frame errors instead"
-    ),
-    ("field", "max_length"): "lorawan_frames `fopts`: a 15-byte cap nobody enforces",
-    ("field", "example"): "udp_packet_forwarder: documentation-style sample value",
-    ("field", "items"): (
-        "udp_packet_forwarder `type: array` + `items: {$ref}` - neither exists in the "
-        "language (`repeat` does). validate_schema.py walks `items` only as a list"
-    ),
-    (
-        "field",
-        "version",
-    ): "lorawan_frames: LoRaWAN version a field applies to ('1.1.0+')",
-    ("definition", "version"): "lorawan_frames / mac_commands: LoRaWAN version tag",
-    ("definition", "cid"): "command id of a library command definition; no reader",
-    ("definition", "direction"): (
-        "uplink/downlink of a library command definition. PS-021 reads `direction` on "
-        "the schema and on a port entry, never on a definition"
-    ),
-}
+#: Empty since compose_library_vectors.py carries only the definitions a composed
+#: schema reaches (0.5.2 wave 1). Every entry was in an unreferenced library
+#: definition, so none remains; decode outputs were unchanged, and
+#: ts007_multi_package__package_version_req moved from the `repeat` to the `plain fixed`
+#: encode shape bucket in all four round-trip harnesses, whose floors moved with it.
+#: The mechanism stays for the next library key nothing reads.
+UNREAD_KEYS: Dict[Tuple[str, str], str] = {}
 
 #: Keys some implementation reads but not all, so a schema using one decodes differently
 #: per language. Accepted, but the validator WARNS with the reason.

@@ -118,6 +118,11 @@ public class Field {
     public void setByteOffset(int byteOffset) { this.byteOffset = byteOffset; }
     
     /** The `bit:` of a `bool` field, or -1 when the field does not declare one. */
+    /** A computed field written {@code type: integer} (PS-283); its type is NUMBER. */
+    private boolean integerResult;
+    public boolean isIntegerResult() { return integerResult; }
+    public void setIntegerResult(boolean integerResult) { this.integerResult = integerResult; }
+
     private int boolBit = -1;
     public int getBoolBit() { return boolBit; }
     public void setBoolBit(int boolBit) { this.boolBit = boolBit; }

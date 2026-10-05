@@ -476,10 +476,10 @@ static inline field_type_t parse_type_string(const char* type_str,
         strcmp(type_str, "int64") == 0) 
         return FIELD_TYPE_S64;
     if (strcmp(type_str, "f16") == 0) return FIELD_TYPE_F16;
-    if (strcmp(type_str, "f32") == 0 || strcmp(type_str, "float") == 0) 
-        return FIELD_TYPE_F32;
-    if (strcmp(type_str, "f64") == 0 || strcmp(type_str, "double") == 0) 
-        return FIELD_TYPE_F64;
+    /* `float`, `double`, `UDec` and `SDec` are not types of the specification, and the
+     * vocabulary is closed and case-sensitive (CR-2026-037: PS-326, PS-331, PS-333). */
+    if (strcmp(type_str, "f32") == 0) return FIELD_TYPE_F32;
+    if (strcmp(type_str, "f64") == 0) return FIELD_TYPE_F64;
     if (strcmp(type_str, "bool") == 0) return FIELD_TYPE_BOOL;
     if (strcmp(type_str, "skip") == 0) return FIELD_TYPE_SKIP;
     if (strcmp(type_str, "ascii") == 0 || strcmp(type_str, "string") == 0) 
@@ -490,10 +490,8 @@ static inline field_type_t parse_type_string(const char* type_str,
     if (strcmp(type_str, "object") == 0) return FIELD_TYPE_OBJECT;
     if (strcmp(type_str, "match") == 0) return FIELD_TYPE_MATCH;
     if (strcmp(type_str, "enum") == 0) return FIELD_TYPE_ENUM;
-    if (strcmp(type_str, "udec") == 0 || strcmp(type_str, "UDec") == 0) 
-        return FIELD_TYPE_UDEC;
-    if (strcmp(type_str, "sdec") == 0 || strcmp(type_str, "SDec") == 0) 
-        return FIELD_TYPE_SDEC;
+    if (strcmp(type_str, "udec") == 0) return FIELD_TYPE_UDEC;
+    if (strcmp(type_str, "sdec") == 0) return FIELD_TYPE_SDEC;
     
     return FIELD_TYPE_UNKNOWN;
 }

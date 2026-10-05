@@ -501,4 +501,6 @@ def test_the_key_walk_finds_the_whole_grammar(corpus):
     contexts = {ctx for ctx, _ in used}
     for ctx in ("schema", "field", "vector", "match", "tlv", "flagged", "transform"):
         assert ctx in contexts, ctx
-    assert len(used) > 120, len(used)
+    # 129 -> 119 when composed library schemas stopped carrying unreferenced
+    # definitions, whose keys nothing read.
+    assert len(used) > 100, len(used)

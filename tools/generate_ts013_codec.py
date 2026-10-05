@@ -34,20 +34,23 @@ def to_js_name(name: str) -> str:
     return re.sub(r'[^a-zA-Z0-9_]', '_', name)
 
 
+#: Byte width of every numeric type spelling clause 2 defines, canonical or alias
+#: (PS-049). The list is closed (PS-326) and case-sensitive (PS-333): this used to
+#: fall back to any `[usif]` followed by digits, so `float` read four bytes and `u17`
+#: two, where every interpreter rejects both.
+NUMERIC_TYPE_SIZES = {
+    'u8': 1, 'uint8': 1, 's8': 1, 'i8': 1, 'int8': 1,
+    'u16': 2, 'uint16': 2, 's16': 2, 'i16': 2, 'int16': 2,
+    'u24': 3, 'uint24': 3, 's24': 3, 'i24': 3, 'int24': 3,
+    'u32': 4, 'uint32': 4, 's32': 4, 'i32': 4, 'int32': 4,
+    'u32le16': 4, 's32le16': 4,
+    'u64': 8, 'uint64': 8, 's64': 8, 'i64': 8, 'int64': 8,
+    'f16': 2, 'f32': 4, 'f64': 8,
+}
+
+
 def type_size(t: str) -> Optional[int]:
-    m = re.match(r'^(?:be_|le_)?([usif])(\d+)$', t)
-    if m:
-        return int(m.group(2)) // 8
-    basic = {
-        'u8': 1, 's8': 1, 'i8': 1, 'uint8': 1, 'int8': 1,
-        'u16': 2, 's16': 2, 'i16': 2, 'uint16': 2, 'int16': 2,
-        'u24': 3, 's24': 3, 'i24': 3,
-        'u32': 4, 's32': 4, 'i32': 4, 'uint32': 4, 'int32': 4,
-        'u32le16': 4, 's32le16': 4,
-        'u64': 8, 's64': 8, 'i64': 8, 'uint64': 8, 'int64': 8,
-        'f16': 2, 'f32': 4, 'f64': 8,
-    }
-    return basic.get(t)
+    return NUMERIC_TYPE_SIZES.get(re.sub(r'^(?:be_|le_)', '', str(t)))
 
 
 def parse_bit_slice_type(t: str) -> Optional[Tuple[str, int, int]]:
@@ -84,8 +87,9 @@ def is_signed(t: str) -> bool:
 
 
 def is_float(t: str) -> bool:
-    clean = re.sub(r'^(?:be_|le_)?', '', t)
-    return clean.startswith('f')
+    # Exactly the three float spellings: a prefix test admitted `float` and `float16`,
+    # which are not types (CR-2026-037), and read them as four bytes.
+    return re.sub(r'^(?:be_|le_)?', '', str(t)) in ('f16', 'f32', 'f64')
 
 
 def field_endian_override(t: str, field: Optional[Dict[str, Any]] = None) -> Optional[str]:
@@ -603,6 +607,43 @@ function readS(buf, pos, size, endian) {
   return v;
 }
 
+/* PS-388: a computed `integer` with a fractional part is an error, never rounded. */
+function asInteger(v, name) {
+  if (typeof v === 'number' && isFinite(v) && v !== Math.floor(v)) {
+    throw new Error(name + ': type integer but the computed value is ' + v);
+  }
+  return v;
+}
+
+/* RFC 4648 base64 of a byte range. Written out because btoa is not available in every
+ * JavaScript runtime a TS013 codec runs under. */
+function toBase64(buf, pos, n) {
+  var A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  var out = '';
+  for (var i = 0; i < n; i += 3) {
+    var b0 = buf[pos + i], b1 = buf[pos + i + 1], b2 = buf[pos + i + 2];
+    var t = (b0 << 16) | ((i + 1 < n ? b1 : 0) << 8) | (i + 2 < n ? b2 : 0);
+    out += A.charAt((t >> 18) & 63) + A.charAt((t >> 12) & 63);
+    out += i + 1 < n ? A.charAt((t >> 6) & 63) : '=';
+    out += i + 2 < n ? A.charAt(t & 63) : '=';
+  }
+  return out;
+}
+
+/* IEEE 754 binary16. Generated codecs read an f16 with readF64 before, so eight bytes
+ * were taken for a two-byte field. */
+function readF16(buf, pos, endian) {
+  var h = endian === 'little'
+    ? ((buf[pos + 1] || 0) << 8) | (buf[pos] || 0)
+    : ((buf[pos] || 0) << 8) | (buf[pos + 1] || 0);
+  var sign = (h & 0x8000) ? -1 : 1;
+  var exp = (h >> 10) & 0x1F;
+  var frac = h & 0x3FF;
+  if (exp === 0) return sign * Math.pow(2, -14) * (frac / 1024);
+  if (exp === 31) return frac ? NaN : sign * Infinity;
+  return sign * Math.pow(2, exp - 15) * (1 + frac / 1024);
+}
+
 function readF32(buf, pos, endian) {
   var b = buf.slice(pos, pos + 4);
   if (endian === 'little') b = [b[3], b[2], b[1], b[0]];
@@ -972,9 +1013,14 @@ function writeS(buf, pos, size, value, endian) {
                     )
             return lines
 
-        # type: number (computed, decode-only)
-        if field.get('type') == 'number':
+        # type: number or integer (computed, decode-only). `integer` reports its value
+        # as an integer and fails on a fractional one (PS-283, PS-388).
+        if field.get('type') in ('number', 'integer'):
             name = to_js_name(field['name'])
+            as_int = field.get('type') == 'integer'
+
+            def integral(expr):
+                return f'asInteger({expr}, {json.dumps(field["name"])})' if as_int else expr
             
             # Deprecated: formula field
             if 'formula' in field:
@@ -1001,6 +1047,7 @@ function writeS(buf, pos, size, value, endian) {
                 # Apply guard if present
                 if 'guard' in field:
                     value_expr = guard_to_js(field['guard'], value_expr)
+                value_expr = integral(value_expr)
                 
                 lines.append(f'{i}  d.{name} = {value_expr};')
                 lines.append(f'{i}  vars.{name} = {value_expr};')
@@ -1017,6 +1064,7 @@ function writeS(buf, pos, size, value, endian) {
                 # Apply guard if present
                 if 'guard' in field:
                     value_expr = guard_to_js(field['guard'], value_expr)
+                value_expr = integral(value_expr)
                 
                 lines.append(f'{i}  d.{name} = {value_expr};')
                 lines.append(f'{i}  vars.{name} = {value_expr};')
@@ -1040,7 +1088,7 @@ function writeS(buf, pos, size, value, endian) {
 
         # regular field
         name = field.get('name', '_unknown')
-        ftype = field.get('type', 'u8')
+        ftype = field.get('type')
         js_name = to_js_name(name)
 
         # A string literal (spec "Literal Types"): a constant, read from no bytes.
@@ -1124,7 +1172,7 @@ function writeS(buf, pos, size, value, endian) {
         # schema using the specified spelling had no generated path, and conversions
         # fell back to a bit range with a {0: false, 1: true} lookup - outside what
         # PS-106 lists (numbers or strings), and Go dropped it silently.
-        if ftype in ('bool', 'Bool'):
+        if ftype == 'bool':
             bit = int(field.get('bit', 0))
             consume = field.get('consume', 0)
             lines.append(f'{i}  if (pos >= buf.length) throw new Error("Buffer too short for bool");')
@@ -1145,6 +1193,23 @@ function writeS(buf, pos, size, value, endian) {
         if ftype == 'skip':
             length = field.get('length', 1)
             lines.append(f'{i}  pos += {length};')
+            return lines
+
+        # base64 (clause 2 string types): this had no case and fell through to the
+        # integer path, which then had no size for it.
+        if ftype == 'base64':
+            declared = field.get('length', 1)
+            bound = 'buf.length - pos' if is_remaining_length(declared) else str(declared)
+            lines.append(f'{i}  var {js_name}_n = {bound};')
+            lines.append(f'{i}  if (pos + {js_name}_n > buf.length) throw new Error("Buffer too short for base64");')
+            lines.append(f'{i}  var {js_name} = toBase64(buf, pos, {js_name}_n);')
+            lines.append(f'{i}  pos += {js_name}_n;')
+            if not name.startswith('_'):
+                guards, target = name_from_to_js(field, js_name)
+                for guard in guards:
+                    lines.append(f'{i}  {guard}')
+                lines.append(f'{i}  {target} = {js_name};')
+            lines.append(f'{i}  vars.{js_name} = {js_name};')
             return lines
 
         # string types
@@ -1180,7 +1245,9 @@ function writeS(buf, pos, size, value, endian) {
             sz = type_size(ftype) or 4
             eo = field_endian_override(ftype, field)
             endian_arg = f'"{eo}"' if eo else 'endian'
-            if sz == 4:
+            if sz == 2:
+                lines.append(f'{i}  var {js_name} = readF16(buf, pos, {endian_arg});')
+            elif sz == 4:
                 lines.append(f'{i}  var {js_name} = readF32(buf, pos, {endian_arg});')
             else:
                 lines.append(f'{i}  var {js_name} = readF64(buf, pos, {endian_arg});')
@@ -1195,11 +1262,34 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append(f'{i}  {target} = {js_name}_out;')
             return lines
 
+        # Nibble-decimal (PS-329, PS-330): upper nibble whole, lower nibble tenths, the
+        # upper nibble a 4-bit two's-complement value for sdec.
+        if ftype in ('udec', 'sdec'):
+            lines.append(f'{i}  if (pos >= buf.length) throw new Error("Buffer too short for {ftype}");')
+            if ftype == 'sdec':
+                lines.append(f'{i}  var {js_name}_w = buf[pos] >> 4; if ({js_name}_w >= 8) {js_name}_w -= 16;')
+            else:
+                lines.append(f'{i}  var {js_name}_w = buf[pos] >> 4;')
+            lines.append(f'{i}  var {js_name} = {js_name}_w + (buf[pos] & 0x0F) * 0.1;')
+            lines.append(f'{i}  pos += 1;')
+            val_expr = self._apply_modifiers_expr(js_name, field)
+            lines.append(f'{i}  var {js_name}_out = {val_expr};')
+            lines.append(f'{i}  vars.{js_name} = {js_name}_out;')
+            if not name.startswith('_'):
+                guards, target = name_from_to_js(field, js_name)
+                for guard in guards:
+                    lines.append(f'{i}  {guard}')
+                lines.append(f'{i}  {target} = {js_name}_out;')
+            return lines
+
         # integer
         sz = type_size(ftype)
         if sz is None:
-            lines.append(f'{i}  // TODO: unsupported type {ftype}')
-            return lines
+            # PS-327/PS-328. This emitted a TODO comment and no read, so the field
+            # vanished and every later field came from the wrong offset.
+            if not ftype:
+                raise ValueError(f"Field '{name}' declares no type")
+            raise ValueError(f"Field '{name}': unknown type: {ftype}")
 
         signed = is_signed(ftype)
         read_fn = 'readS' if signed else 'readU'
@@ -1595,7 +1685,7 @@ function writeS(buf, pos, size, value, endian) {
         i = self._i()
 
         # skip computed fields (formula, ref, or compute)
-        if field.get('type') == 'number':
+        if field.get('type') in ('number', 'integer'):
             is_computed = any(k in field for k in ('formula', 'ref', 'compute'))
             if is_computed:
                 lines.append(f'{i}  // skip computed field {field.get("name", "")}')

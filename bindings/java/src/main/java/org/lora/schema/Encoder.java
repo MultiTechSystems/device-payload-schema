@@ -895,7 +895,9 @@ final class Encoder {
         double result = reverseCanonicalModifiers(
                 reverseTransformStages(numeric, field.getTransform()), field);
 
-        if (field.getType().isFloat()) {
+        // The nibble-decimals carry tenths, so they keep their fraction too.
+        if (field.getType().isFloat() || field.getType() == FieldType.UDEC
+                || field.getType() == FieldType.SDEC) {
             return result;
         }
         // Half-to-even, matching the reference interpreter's rounding.
@@ -1038,6 +1040,25 @@ final class Encoder {
                 default -> writeInt(Float.floatToIntBits((float) (double) raw) & 0xFFFFFFFFL,
                         4, false, useLittle);
             };
+        }
+
+        if (type == FieldType.UDEC || type == FieldType.SDEC) {
+            // The inverse of PS-330, as tools/schema_interpreter.py writes it: floor the
+            // whole part so the tenths stay non-negative (-1.5 is -2 + 0.5).
+            Double raw = asDouble(value);
+            if (raw == null) {
+                throw new SchemaException.EncodeException("field '" + field.getName()
+                        + "': expected a number, got " + describeValue(value));
+            }
+            long whole = (long) Math.floor(raw);
+            long tenths = Math.round((raw - whole) * 10);
+            if (tenths == 10) { whole += 1; tenths = 0; }
+            long low = type == FieldType.SDEC ? -8 : 0, high = type == FieldType.SDEC ? 7 : 15;
+            if (whole < low || whole > high) {
+                throw new SchemaException.EncodeException("field '" + field.getName()
+                        + "': " + raw + " does not fit " + type.name().toLowerCase());
+            }
+            return new byte[] {(byte) (((whole & 0x0F) << 4) | tenths)};
         }
 
         if (type == FieldType.BYTES || type == FieldType.HEX) {

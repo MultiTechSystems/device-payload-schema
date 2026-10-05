@@ -215,7 +215,12 @@ def test_conditional_on_a_decoded_field_is_an_error():
     assert "always decodes" in errors[0]
 
 
-def test_unread_key_is_accepted_only_in_an_unreferenced_definition():
+def test_unread_key_is_accepted_only_in_an_unreferenced_definition(monkeypatch):
+    # The allowlist is empty since composed library schemas carry only the definitions
+    # they reach; the mechanism is held with two entries supplied here.
+    import schema_vocabulary
+    monkeypatch.setitem(schema_vocabulary.UNREAD_KEYS, ("definition", "cid"), "probe")
+    monkeypatch.setitem(schema_vocabulary.UNREAD_KEYS, ("field", "conditional"), "probe")
     inert = {
         "name": "probe",
         "fields": [{"name": "x", "type": "u8"}],

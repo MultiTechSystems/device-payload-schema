@@ -970,12 +970,12 @@ class TestNewTypes:
         assert result.success
         assert result.data['mac'] == 'deadbeef'
 
-    def test_hex_upper_type(self):
-        """Uppercase is the separate `hex:upper` type, not the default."""
+    def test_hex_upper_is_not_a_type(self):
+        """`hex:upper` is a `bytes` format (PS-079), not a type (CR-2026-037)."""
         schema = {'fields': [{'name': 'mac', 'type': 'hex:upper', 'length': 4}]}
         result = SchemaInterpreter(schema).decode(bytes([0xDE, 0xAD, 0xBE, 0xEF]))
-        assert result.success
-        assert result.data['mac'] == 'DEADBEEF'
+        assert not result.success
+        assert any("unknown type: hex:upper" in e for e in result.errors)
 
     def test_base64_type(self):
         """Test base64 string output."""
@@ -2399,75 +2399,8 @@ class TestPhase3TimestampFormatting:
         assert result.data['sample_time'] == '2026-02-16T11:58:00.000Z'
 
 
-class TestPhase3VersionString:
-    """Tests for version_string type.
-    
-    Spec Requirements:
-    - M077-M082: Bitfield string (parts processed in order, prefix prepended)
-    """
-    
-    def test_version_string_decode(self):
-        """Test decoding version_string from 3 bytes."""
-        schema = {
-            'fields': [{
-                'name': 'firmware',
-                'type': 'version_string',
-                'length': 3,
-                'delimiter': '.',
-                'prefix': 'v'
-            }]
-        }
-        interpreter = SchemaInterpreter(schema)
-        result = interpreter.decode(bytes([0x02, 0x03, 0x0A]))
-        assert result.success
-        assert result.data['firmware'] == 'v2.3.10'
-    
-    def test_version_string_no_prefix(self):
-        """Test version_string without prefix."""
-        schema = {
-            'fields': [{
-                'name': 'version',
-                'type': 'version_string',
-                'length': 2,
-                'delimiter': '.'
-            }]
-        }
-        interpreter = SchemaInterpreter(schema)
-        result = interpreter.decode(bytes([0x01, 0x05]))
-        assert result.success
-        assert result.data['version'] == '1.5'
-    
-    def test_version_string_encode(self):
-        """Test encoding version_string back to bytes."""
-        schema = {
-            'fields': [{
-                'name': 'firmware',
-                'type': 'version_string',
-                'length': 3,
-                'delimiter': '.',
-                'prefix': 'v'
-            }]
-        }
-        interpreter = SchemaInterpreter(schema)
-        result = interpreter.encode({'firmware': 'v2.3.10'})
-        assert result.success
-        assert result.payload == bytes([0x02, 0x03, 0x0A])
-    
-    def test_version_string_roundtrip(self):
-        """Test version_string encode/decode roundtrip."""
-        schema = {
-            'fields': [{
-                'name': 'fw',
-                'type': 'version_string',
-                'length': 3,
-                'delimiter': '.',
-                'prefix': 'v'
-            }]
-        }
-        interpreter = SchemaInterpreter(schema)
-        encoded = interpreter.encode({'fw': 'v1.0.255'})
-        decoded = interpreter.decode(encoded.payload)
-        assert decoded.data['fw'] == 'v1.0.255'
+# version_string was removed by CR-2026-058 (PS-401); its rejection is held by
+# tests/test_cr_2026_058_described_constructs.py.
 
 
 class TestPhase3EncodeFormula:

@@ -106,9 +106,10 @@ public static class Helpers
 
     public static byte[] EncodeSint(long val, int length, string endian)
     {
-        if (val < 0)
-            val = (1L << (length * 8)) + val;
-        return EncodeUint((ulong)val, length, endian);
+        // Two's complement is the low `length` bytes of the value's own bit pattern.
+        // This added 1L << (length * 8), and C# takes a long shift count modulo 64, so
+        // for an 8-byte field it added 1: an s64 of -9 was written as -8.
+        return EncodeUint(unchecked((ulong)val), length, endian);
     }
 
     public static byte[] EncodeFloat32(float val, string endian)
@@ -199,43 +200,54 @@ public static class Helpers
         };
     }
 
+    /// <summary>
+    /// The field type a schema's `type:` string names, or Unknown.
+    ///
+    /// The vocabulary is closed (CR-2026-037): the alias table is exhaustive (PS-326) and
+    /// names are case-sensitive (PS-333). This lowercased its input and accepted `byte`,
+    /// `uint`, `float16`-`float64`, `bits`, `switch`, `ctrl-switch`, `tlv` and
+    /// `version_string`, none of which is a type of the specification, while missing all
+    /// ten PS-049 aliases, `base64`, `udec`, `sdec` and `integer`.
+    /// </summary>
     public static FieldType ParseFieldType(string typeStr)
     {
         var baseType = typeStr.Contains('[') ? typeStr[..typeStr.IndexOf('[')] : typeStr;
         if (baseType.StartsWith("le_") || baseType.StartsWith("be_"))
             baseType = baseType[3..];
 
-        return baseType.ToLowerInvariant() switch
+        return baseType switch
         {
-            "u8" or "byte" or "uint" => FieldType.U8,
-            "u16" => FieldType.U16,
-            "u24" => FieldType.U24,
-            "u32" => FieldType.U32,
+            "u8" or "uint8" => FieldType.U8,
+            "u16" or "uint16" => FieldType.U16,
+            "u24" or "uint24" => FieldType.U24,
+            "u32" or "uint32" => FieldType.U32,
+            "u64" or "uint64" => FieldType.U64,
             "u32le16" => FieldType.U32LE16,
             "s32le16" => FieldType.S32LE16,
-            "u64" => FieldType.U64,
-            "s8" or "i8" => FieldType.S8,
-            "s16" or "i16" => FieldType.S16,
-            "s24" => FieldType.S24,
-            "s32" or "i32" => FieldType.S32,
-            "s64" or "i64" => FieldType.S64,
-            "f16" or "float16" => FieldType.F16,
-            "f32" or "float32" => FieldType.F32,
-            "f64" or "float64" => FieldType.F64,
+            "s8" or "i8" or "int8" => FieldType.S8,
+            "s16" or "i16" or "int16" => FieldType.S16,
+            "s24" or "i24" or "int24" => FieldType.S24,
+            "s32" or "i32" or "int32" => FieldType.S32,
+            "s64" or "i64" or "int64" => FieldType.S64,
+            "f16" => FieldType.F16,
+            "f32" => FieldType.F32,
+            "f64" => FieldType.F64,
+            "udec" => FieldType.UDec,
+            "sdec" => FieldType.SDec,
             "bool" => FieldType.Bool,
-            "bits" => FieldType.Bits,
             "ascii" => FieldType.Ascii,
             "hex" => FieldType.Hex,
+            "base64" => FieldType.Base64,
             "bytes" => FieldType.Bytes,
             "skip" => FieldType.Skip,
             "string" => FieldType.String,
             "number" => FieldType.Number,
+            "integer" => FieldType.Integer,
             "object" => FieldType.Object,
-            "match" or "ctrl-switch" or "switch" => FieldType.Match,
-            "tlv" => FieldType.TLV,
+            "match" => FieldType.Match,
             "repeat" => FieldType.Repeat,
             "enum" => FieldType.Enum,
-            "bitfield_string" or "version_string" => FieldType.BitfieldString,
+            "bitfield_string" => FieldType.BitfieldString,
             _ => FieldType.Unknown
         };
     }

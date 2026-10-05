@@ -82,13 +82,38 @@ public static class SchemaParser
         return schema;
     }
 
+    /// <summary>The keys that make a field a construct, declaring no type of its own.</summary>
+    static readonly string[] ConstructKeys = { "$ref", "flagged", "tlv", "byte_group", "object", "match" };
+
     static List<SchemaField> ParseFields(YamlSequenceNode seq)
     {
         var fields = new List<SchemaField>();
         foreach (var item in seq.Children)
         {
-            if (item is YamlMappingNode fieldMap)
-                fields.Add(ParseField(fieldMap));
+            if (item is not YamlMappingNode fieldMap)
+                continue;
+            // PS-334: a field carrying no construct needs a type; none is supplied.
+            // Checked on list members, because ParseField also parses construct bodies.
+            var hasType = fieldMap.TryGetValue("type", out var typeNode)
+                && !string.IsNullOrWhiteSpace(Scalar(typeNode));
+            if (!hasType && !ConstructKeys.Any(key => fieldMap.Children.ContainsKey(new YamlScalarNode(key))))
+            {
+                var name = fieldMap.TryGetValue("name", out var n) ? Scalar(n) : "?";
+                throw new InvalidOperationException($"Field '{name}' declares no type");
+            }
+            // CR-2026-037: an unknown type is rejected when the schema is loaded, naming
+            // the field and the spelling (PS-327, PS-328).
+            if (hasType)
+            {
+                var spelling = Scalar(typeNode!);
+                if (Helpers.ParseBitRange(spelling) == null
+                    && Helpers.ParseFieldType(spelling) == FieldType.Unknown)
+                {
+                    var name = fieldMap.TryGetValue("name", out var n) ? Scalar(n) : "?";
+                    throw new InvalidOperationException($"Field '{name}': unknown type: {spelling}");
+                }
+            }
+            fields.Add(ParseField(fieldMap));
         }
         return fields;
     }
@@ -121,6 +146,16 @@ public static class SchemaParser
             }
 
             f.Type = Helpers.ParseFieldType(f.RawType);
+            // The inline `tlv:` block arrives here as a synthetic map typed `tlv`. No
+            // schema spells that as a type; ParseFields rejects it on a list member.
+            if (f.Type == FieldType.Unknown && f.RawType == "tlv")
+                f.Type = FieldType.TLV;
+            // `integer` is `number` declaring an integer result (PS-283).
+            if (f.Type == FieldType.Integer)
+            {
+                f.Type = FieldType.Number;
+                f.IntegerResult = true;
+            }
             if (bitRange != null)
             {
                 // ParseFieldType strips the range, so `u8[0:0]` resolved to U8 and the

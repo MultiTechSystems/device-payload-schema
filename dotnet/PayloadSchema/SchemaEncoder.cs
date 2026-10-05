@@ -976,7 +976,8 @@ public static class SchemaEncoder
             double result = ReverseCanonicalModifiers(
                 ReverseTransformStages(numeric, field.Transform), field);
 
-            if (field.Type is FieldType.F16 or FieldType.F32 or FieldType.F64)
+            if (field.Type is FieldType.F16 or FieldType.F32 or FieldType.F64
+                or FieldType.UDec or FieldType.SDec)
                 return result;
             // Half-to-even, matching the reference interpreter's rounding.
             return Math.Round(result, MidpointRounding.ToEven);
@@ -1124,6 +1125,26 @@ public static class SchemaEncoder
                     var (ok, numeric) = Helpers.ToFloat64(value);
                     if (!ok) throw NotANumber(field, value);
                     return Helpers.EncodeFloat64(numeric, endian);
+                }
+                case FieldType.UDec or FieldType.SDec:
+                {
+                    // The inverse of PS-330, as tools/schema_interpreter.py writes it:
+                    // floor the whole part so the tenths stay non-negative.
+                    var (ok, numeric) = Helpers.ToFloat64(value);
+                    if (!ok) throw NotANumber(field, value);
+                    long whole = (long)Math.Floor(numeric);
+                    long tenths = (long)Math.Round((numeric - whole) * 10, MidpointRounding.ToEven);
+                    if (tenths == 10) { whole += 1; tenths = 0; }
+                    var (low, high) = field.Type == FieldType.SDec ? (-8L, 7L) : (0L, 15L);
+                    if (whole < low || whole > high)
+                        throw new InvalidOperationException(
+                            $"field '{field.Name}': {numeric} does not fit {field.RawType}");
+                    return new[] { (byte)(((whole & 0x0F) << 4) | tenths) };
+                }
+                case FieldType.Base64:
+                {
+                    var raw = Convert.FromBase64String(value?.ToString() ?? "");
+                    return Pad(raw, field.Length > 0 ? field.Length : raw.Length);
                 }
                 case FieldType.Skip:
                     return new byte[field.Length > 0 ? field.Length : 0];

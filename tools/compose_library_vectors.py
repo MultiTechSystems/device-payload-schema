@@ -104,6 +104,28 @@ def infer_definition(definitions, expected):
     return best if best_score == len(expected) else None
 
 
+def reached_definitions(fields, definitions):
+    """The definitions a field list reaches through `$ref`, transitively, in order."""
+    reached = {}
+
+    def visit(node):
+        if isinstance(node, dict):
+            ref = node.get("$ref")
+            if isinstance(ref, str) and ref.startswith("#/definitions/"):
+                name = ref[len("#/definitions/"):]
+                if name in definitions and name not in reached:
+                    reached[name] = definitions[name]
+                    visit(definitions[name])
+            for value in node.values():
+                visit(value)
+        elif isinstance(node, list):
+            for value in node:
+                visit(value)
+
+    visit(fields)
+    return {name: definitions[name] for name in definitions if name in reached}
+
+
 def compose(source, document, vector, definitions):
     """Build a standalone schema for one library vector, or None if not possible."""
     if JSON_ONLY in vector:
@@ -132,14 +154,15 @@ def compose(source, document, vector, definitions):
         # descended into and every field reports as missing.
         "fields": defn["fields"],
     }
-    # Carried so a definition using a local `#/definitions/...` ref still resolves.
-    # The catalogue's other definitions come along too and affect no decode; the keys
-    # only they use are allowlisted in tools/schema_vocabulary.py (UNREAD_KEYS) for
-    # unreferenced definitions only. Carrying just the reached definitions would be
-    # cleaner, but it moves one schema's encode shape bucket (the Go/Java/C#
-    # harnesses scan the raw text for construct names) - see UNREAD_KEYS.
-    if document.get("definitions"):
-        composed["definitions"] = document["definitions"]
+    # Carried so a definition using a local `#/definitions/...` ref still resolves -
+    # only the definitions the composed fields reach. The whole catalogue used to
+    # come along, so udp_packet_forwarder's JSON-message definitions (`type: array`,
+    # which is not a type) sat in a binary schema, and once the type vocabulary was
+    # closed (CR-2026-037) an implementation checking every field at load rejected
+    # a schema whose decode never touched them.
+    reached = reached_definitions(defn["fields"], document.get("definitions") or {})
+    if reached:
+        composed["definitions"] = reached
 
     tv = {"name": vector["name"], "payload": payload}
     if vector.get("description"):

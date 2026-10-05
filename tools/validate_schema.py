@@ -499,13 +499,16 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
         's8', 's16', 's24', 's32', 's64',
         'i8', 'i16', 'i24', 'i32', 'i64',
         'int8', 'int16', 'int24', 'int32', 'int64',
-        'f16', 'f32', 'f64', 'float', 'double',
+        'f16', 'f32', 'f64',
         'bool', 'bytes', 'string', 'ascii', 'hex', 'base64',
         'object', 'match', 'enum', 'repeat', 'skip',
-        'bitfield_string', 'number', 'version_string',
+        'bitfield_string', 'number',
         # PS-283: a computed field declaring an integer result.
         'integer',
-        'udec', 'sdec', 'UDec', 'SDec',
+        # PS-329. `UDec`/`SDec` are not spellings of them (PS-331), and `float`,
+        # `double` and `version_string` are not types (PS-326, PS-401): the list is
+        # closed, and case-sensitive (PS-333).
+        'udec', 'sdec',
     }
     
     for i, fld in enumerate(fields):
@@ -670,6 +673,13 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                 f"{path}[{i}]: must have "
                 f"{', '.join(repr(k) for k in field_constructs[:-1])} or "
                 f"{field_constructs[-1]!r}")
+        elif not any(key in fld for key in field_constructs[1:]) or (
+                'type' in fld and not fld['type']):
+            # PS-334: a field carrying no construct needs a type, and none is
+            # supplied by default. Every implementation used to read it as a u8.
+            errors.append(
+                f"{path}[{i}]{f' ({name})' if name else ''}: declares no 'type' "
+                "(PS-334: a decoder must not supply a default type)")
 
         # A field-level `endian:` is honoured by all five implementations, so a value
         # outside the two it can take is a silent wrong byte order rather than a typo
@@ -876,6 +886,11 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                         )
                 continue
 
+            if ftype in _COLON_STRING_TYPES:
+                errors.append(
+                    f"{path}[{i}] ({name}): unknown type '{ftype}' - it is a `bytes` "
+                    f"format (PS-079): type: bytes, format: {ftype}")
+                continue
             base_type = ftype.split('[')[0].split(':')[0].split('<')[0]
             if base_type not in KNOWN_TYPES and not base_type.startswith('be_') and not base_type.startswith('le_'):
                 if not re.match(r'(u|i|s)\d+\[', ftype):

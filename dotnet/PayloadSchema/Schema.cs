@@ -12,6 +12,12 @@ public enum FieldType
     U32LE16, S32LE16,
     S8, S16, S24, S32, S64,
     F16, F32, F64,
+    // Nibble-decimal (PS-329)
+    UDec, SDec,
+    Base64,
+    // A computed field reporting an integer (PS-283). Parsed to Number with
+    // SchemaField.IntegerResult set, so it never reaches the decoder as itself.
+    Integer,
     Bool,
     Bits,
     Ascii,
@@ -95,6 +101,8 @@ public class SchemaField
 {
     public string Name { get; set; } = "";
     public FieldType Type { get; set; }
+    /// <summary>A computed field written `type: integer` (PS-283); its Type is Number.</summary>
+    public bool IntegerResult { get; set; }
     public string RawType { get; set; } = "";
     public int Length { get; set; }
     public int ByteOffset { get; set; }

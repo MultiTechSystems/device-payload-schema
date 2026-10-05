@@ -141,6 +141,13 @@ public class Schema {
         if (fieldsRaw == null) return fields;
 
         for (Map<String, Object> fm : fieldsRaw) {
+            // PS-334: a field carrying no construct needs a type; none is supplied.
+            // Checked here, on list members, because parseField also parses construct
+            // bodies such as an inline `tlv:` block, which carry no type.
+            Object rawType = fm.get("type");
+            if ((rawType == null || String.valueOf(rawType).isBlank()) && !hasConstruct(fm)) {
+                throw new SchemaException("Field '" + fm.get("name") + "' declares no type");
+            }
             fields.add(parseField(fm));
         }
         return fields;
@@ -198,6 +205,17 @@ public class Schema {
         return fields instanceof List ? (List<Map<String, Object>>) fields : null;
     }
 
+    /** The keys that make a field a construct, so it declares no type of its own. */
+    private static final List<String> CONSTRUCT_KEYS =
+            List.of("$ref", "flagged", "tlv", "byte_group", "object", "match");
+
+    private static boolean hasConstruct(Map<String, Object> fm) {
+        for (String key : CONSTRUCT_KEYS) {
+            if (fm.containsKey(key)) return true;
+        }
+        return false;
+    }
+
     @SuppressWarnings("unchecked")
     private static Field parseField(Map<String, Object> fm) {
         Field f = new Field();
@@ -208,7 +226,17 @@ public class Schema {
         // parse it and now rejects a spelling it does not know rather than returning U8.
         Matcher bitRange = BIT_RANGE.matcher(rawType == null ? "" : rawType.trim());
         boolean isBitRange = bitRange.matches();
-        f.setType(isBitRange ? FieldType.BITS : FieldType.fromString(rawType));
+        try {
+            f.setType(isBitRange ? FieldType.BITS : FieldType.fromString(rawType));
+        } catch (SchemaException e) {
+            // PS-328: the rejection names the field as well as the spelling.
+            throw new SchemaException("Field '" + fm.get("name") + "': " + e.getMessage());
+        }
+        // `integer` is `number` declaring an integer result (PS-283).
+        if (f.getType() == FieldType.INTEGER) {
+            f.setType(FieldType.NUMBER);
+            f.setIntegerResult(true);
+        }
         // `length: remaining` (PS-014) is carried as a negative sentinel; toInt would
         // otherwise silently return the 0 default and the field would read one byte.
         Object lengthSpec = fm.get("length");
@@ -868,6 +896,15 @@ public class Schema {
                 value = ctx.decodeFloat(data, size, fieldEndian);
             }
             
+            case UDEC, SDEC -> {
+                // Nibble-decimal (PS-330): upper nibble the whole part, a 4-bit
+                // two's-complement value for sdec; lower nibble the tenths.
+                int b = ctx.read(1)[0] & 0xFF;
+                int whole = b >> 4;
+                if (field.getType() == FieldType.SDEC && whole >= 8) whole -= 16;
+                value = whole + (b & 0x0F) * 0.1;
+            }
+
             case BOOL -> {
                 // PS-065/066: one bit of the current byte, the spec's `bit:` key naming
                 // it, and no advance unless `consume` says so. `bit:` was never read,
@@ -912,6 +949,12 @@ public class Schema {
                 byte[] data = ctx.read(length);
                 value = bytesToHex(data);
             }
+
+            case BASE64 -> {
+                // RFC 4648 base64 of the bytes read. The type parsed and had no decode
+                // case, so every `type: base64` field failed as an unknown type.
+                value = Base64.getEncoder().encodeToString(ctx.read(length));
+            }
             
             case SKIP -> {
                 ctx.read(length);
@@ -939,6 +982,16 @@ public class Schema {
             
             case NUMBER -> {
                 value = decodeComputed(field, ctx);
+                if (field.isIntegerResult() && value instanceof Number n) {
+                    double d = n.doubleValue();
+                    // PS-388: a fractional part is an error, never truncated or rounded.
+                    if (d != Math.rint(d) || Double.isInfinite(d)) {
+                        throw new SchemaException.DecodeException(field.getName()
+                                + ": type integer but the computed value is " + d
+                                + "; add `idiv` to truncate or a {op: round} transform stage");
+                    }
+                    value = (long) d;
+                }
             }
 
             case ENUM -> {
