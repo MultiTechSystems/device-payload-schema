@@ -500,7 +500,13 @@ func applyCanonicalModifiers(value float64, field Field) float64 {
 	if field.Mult != nil {
 		value = value * *field.Mult
 	}
-	if field.Div != nil && *field.Div != 0 {
+	if field.Div != nil {
+		// A zero divisor omits the field (PS-100): NaN here, which the post-read
+		// pipeline turns into an omission. Skipping the division reported the
+		// undivided value.
+		if *field.Div == 0 {
+			return math.NaN()
+		}
 		value = value / *field.Div
 	}
 	if field.Add != nil {
@@ -548,10 +554,11 @@ func applyTransformStages(value float64, stages []Transform) float64 {
 			continue
 		}
 		// Unary maths stages, each exclusive of the others and of the arithmetic
-		// ops, in the same order the Python interpreter checks them. The domain
-		// clamps match it exactly: sqrt of a negative and log of a non-positive
-		// would otherwise return NaN and poison every later stage, where the
-		// interpreter yields 0 and log(1e-10).
+		// ops, in the same order the Python interpreter checks them. sqrt clamps a
+		// negative input at 0 (PS-116). The log of a non-positive number has no
+		// value, so the field is absent (PS-117): NaN, which the post-read pipeline
+		// turns into an omission. The logs clamped at 1e-10 before, reporting
+		// log10(0) as -10.
 		if stage.Sqrt {
 			value = math.Sqrt(math.Max(0, value))
 			continue
@@ -565,17 +572,26 @@ func applyTransformStages(value float64, stages []Transform) float64 {
 			continue
 		}
 		if stage.Log10 {
-			value = math.Log10(math.Max(1e-10, value))
+			if value <= 0 {
+				return math.NaN()
+			}
+			value = math.Log10(value)
 			continue
 		}
 		if stage.Log {
-			value = math.Log(math.Max(1e-10, value))
+			if value <= 0 {
+				return math.NaN()
+			}
+			value = math.Log(value)
 			continue
 		}
 		if stage.Mult != nil {
 			value = value * *stage.Mult
 		}
-		if stage.Div != nil && *stage.Div != 0 {
+		if stage.Div != nil {
+			if *stage.Div == 0 {
+				return math.NaN() // PS-100: the field is absent
+			}
 			value = value / *stage.Div
 		}
 		if stage.Sub != nil {
@@ -2269,7 +2285,7 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		}
 
 		if field.IntegerResult && value != omitted {
-			if numVal, ok := toFloat64(value); ok {
+			if numVal, ok := toFloat64(value); ok && !math.IsNaN(numVal) && !math.IsInf(numVal, 0) {
 				// PS-388: a fractional part is an error, never truncated or rounded.
 				if numVal != math.Trunc(numVal) {
 					return nil, fmt.Errorf("%s: type integer but the computed value is %v; "+
@@ -2368,6 +2384,12 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 			numVal = applyCanonicalModifiers(numVal, field)
 		}
 		value = numVal
+	}
+
+	// A value the arithmetic could not produce - a zero divisor (PS-100), the log of
+	// a non-positive number (PS-117) - is absent, and NaN is never reported (PS-282).
+	if f, ok := value.(float64); ok && (math.IsNaN(f) || math.IsInf(f, 0)) {
+		return omitted, nil
 	}
 
 	// Apply lookup. A mapping is matched on its keys, which need not start at

@@ -313,7 +313,13 @@ def apply_canonical_modifiers(value, field_def: Dict[str, Any]):
     C#, C), Protocol Buffers or the binary schema form cannot preserve -- and the
     implementations of this specification consequently disagreed with each other.
     An absent modifier is the identity operation.
+
+    A zero divisor returns OMITTED: the field is absent (PS-100, PS-278). This skipped
+    the division instead, so `div: 0` reported the undivided value as though it were
+    the scaled one.
     """
+    if value is OMITTED:
+        return OMITTED
     for key in CANONICAL_MODIFIER_ORDER:
         operand = field_def.get(key)
         if operand is None:
@@ -321,8 +327,9 @@ def apply_canonical_modifiers(value, field_def: Dict[str, Any]):
         if key == 'mult':
             value = value * operand
         elif key == 'div':
-            if operand != 0:
-                value = value / operand
+            if operand == 0:
+                return OMITTED
+            value = value / operand
         else:
             value = value + operand
     return value
@@ -1836,10 +1843,17 @@ class SchemaInterpreter:
         
         Supported ops: sqrt, abs, pow, floor, ceiling, clamp, log10, log,
                        add, mult, div
+
+        Returns OMITTED where a stage has no value to give: a zero divisor (PS-100) or
+        the log of a non-positive number (PS-117). The log stages clamped their input at
+        1e-10 instead, so log10(0) was reported as -10 - a plausible number standing in
+        for no reading at all.
         """
         import math
         
         for op in transform_ops:
+            if value is OMITTED:
+                return OMITTED
             if 'sqrt' in op and op['sqrt']:
                 value = math.sqrt(max(0, value))  # Clamp to avoid domain error
             elif 'abs' in op and op['abs']:
@@ -1855,9 +1869,9 @@ class SchemaInterpreter:
                 if isinstance(bounds, list) and len(bounds) >= 2:
                     value = max(float(bounds[0]), min(float(bounds[1]), value))
             elif 'log10' in op and op['log10']:
-                value = math.log10(max(1e-10, value))  # Avoid domain error
+                value = math.log10(value) if value > 0 else OMITTED
             elif 'log' in op and op['log']:
-                value = math.log(max(1e-10, value))  # Natural log
+                value = math.log(value) if value > 0 else OMITTED
             elif any(key in op for key in CANONICAL_MODIFIER_ORDER):
                 # A stage normally carries one arithmetic op. Where it carries
                 # several, they are applied in the canonical order so that a
@@ -2241,7 +2255,7 @@ class SchemaInterpreter:
 
         # Apply transform array (new declarative constructs)
         transform = field_def.get('transform')
-        if transform and isinstance(transform, list):
+        if transform and isinstance(transform, list) and value is not OMITTED:
             value = self._apply_transform(float(value), transform)
         
         # Apply lookup table

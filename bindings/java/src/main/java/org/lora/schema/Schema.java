@@ -982,7 +982,8 @@ public class Schema {
             
             case NUMBER -> {
                 value = decodeComputed(field, ctx);
-                if (field.isIntegerResult() && value instanceof Number n) {
+                if (field.isIntegerResult() && value instanceof Number n
+                        && !Double.isNaN(n.doubleValue()) && !Double.isInfinite(n.doubleValue())) {
                     double d = n.doubleValue();
                     // PS-388: a fractional part is an error, never truncated or rounded.
                     if (d != Math.rint(d) || Double.isInfinite(d)) {
@@ -1046,6 +1047,13 @@ public class Schema {
             value = applyArithmetic(((Number) value).doubleValue(), field);
         }
         
+        // A value the arithmetic could not produce - a zero divisor (PS-100), the log of
+        // a non-positive number (PS-117) - is absent, and NaN is never reported (PS-282).
+        // Checked before the lookup, which would read NaN as index 0.
+        if (value instanceof Double d && (d.isNaN() || d.isInfinite())) {
+            return OMITTED;
+        }
+
         // Apply lookup. A mapping's keys need not start at zero or be contiguous
         // (PS-268); an unmatched value omits the field rather than reporting the raw
         // integer under a name that promises a label, unless a default is declared
@@ -1827,7 +1835,12 @@ public class Schema {
      */
     private static double applyArithmetic(double value, Field field) {
         if (field.getMult() != null) value *= field.getMult();
-        if (field.getDiv() != null && field.getDiv() != 0) value /= field.getDiv();
+        if (field.getDiv() != null) {
+            // A zero divisor omits the field (PS-100): NaN, which the post-read step
+            // turns into an omission. Skipping the division reported the undivided value.
+            if (field.getDiv() == 0) return Double.NaN;
+            value /= field.getDiv();
+        }
         if (field.getAdd() != null) value += field.getAdd();
         return applyTransform(value, field.getTransform());
     }
@@ -1845,10 +1858,10 @@ public class Schema {
                 continue;
             }
             // Unary maths stages, each exclusive of the others and of the arithmetic
-            // ops, in the order the Python interpreter checks them. The domain clamps
-            // match it exactly: sqrt of a negative and log of a non-positive would
-            // otherwise yield NaN and poison every later stage, where the interpreter
-            // yields 0 and log(1e-10).
+            // ops, in the order the Python interpreter checks them. sqrt clamps a
+            // negative input at 0 (PS-116). The log of a non-positive number has no
+            // value, so the field is absent (PS-117): NaN, which the post-read step
+            // omits. The logs clamped at 1e-10 before, reporting log10(0) as -10.
             if (Boolean.TRUE.equals(stage.getSqrt())) {
                 value = Math.sqrt(Math.max(0.0, value));
                 continue;
@@ -1862,15 +1875,20 @@ public class Schema {
                 continue;
             }
             if (Boolean.TRUE.equals(stage.getLog10())) {
-                value = Math.log10(Math.max(1e-10, value));
+                if (!(value > 0)) return Double.NaN;
+                value = Math.log10(value);
                 continue;
             }
             if (Boolean.TRUE.equals(stage.getLog())) {
-                value = Math.log(Math.max(1e-10, value));
+                if (!(value > 0)) return Double.NaN;
+                value = Math.log(value);
                 continue;
             }
             if (stage.getMult() != null) value *= stage.getMult();
-            if (stage.getDiv() != null && stage.getDiv() != 0) value /= stage.getDiv();
+            if (stage.getDiv() != null) {
+                if (stage.getDiv() == 0) return Double.NaN;   // PS-100: absent
+                value /= stage.getDiv();
+            }
             if (stage.getAdd() != null) value += stage.getAdd();
         }
         return value;

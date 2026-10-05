@@ -4134,22 +4134,16 @@ fields:
 		t.Fatalf("ParseSchema() error = %v", err)
 	}
 
-	// Infinity: 0x7C00
-	decoded, err := schema.Decode([]byte{0x7C, 0x00})
-	if err != nil {
-		t.Fatalf("Decode() error = %v", err)
-	}
-	if !math.IsInf(mustNum(decoded["value"]), 1) {
-		t.Errorf("value = %v, want +Inf", decoded["value"])
-	}
-
-	// NaN: 0x7C01
-	decoded2, err := schema.Decode([]byte{0x7C, 0x01})
-	if err != nil {
-		t.Fatalf("Decode() error = %v", err)
-	}
-	if !math.IsNaN(mustNum(decoded2["value"])) {
-		t.Errorf("value = %v, want NaN", decoded2["value"])
+	// Infinity (0x7C00) and NaN (0x7C01) are not JSON values, so the field is absent
+	// (PS-282), as it is in Python, Java and C#. This reported both.
+	for _, raw := range [][]byte{{0x7C, 0x00}, {0x7C, 0x01}} {
+		decoded, err := schema.Decode(raw)
+		if err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		if v, present := decoded["value"]; present {
+			t.Errorf("% x: value = %v, want absent", raw, v)
+		}
 	}
 }
 

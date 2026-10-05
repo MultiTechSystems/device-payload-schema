@@ -278,6 +278,27 @@ static void test_a_modifier_makes_the_field_a_number(void) {
     TCHECK(r.fields[0].value.f64 > 23.4 && r.fields[0].value.f64 < 23.6);
 }
 
+/* CR-2026-057, PS-100: a zero divisor leaves the field absent, and the next field still
+ * decodes. The division used to be skipped, reporting the undivided value. */
+static void test_a_zero_divisor_omits_the_field(void) {
+    schema_t s;
+    decode_result_t r;
+    uint8_t payload[] = {0x00, 0x07, 0x05};
+
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t f = field_u16("v", ENDIAN_BIG);
+    f.has_div = true;
+    f.div = 0.0f;
+    schema_add_field(&s, &f);
+    field_def_t w = field_u8("w");
+    schema_add_field(&s, &w);
+
+    TCHECK(schema_decode(&s, payload, sizeof(payload), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 1);
+    TCHECK(strcmp(r.fields[0].name, "w") == 0);
+}
+
 static void test_a_u64_is_exact_at_the_top_of_its_range(void) {
     schema_t s;
     decode_result_t r;
@@ -311,6 +332,7 @@ void selftest_schema(void) {
     test_direction_survives_the_binary_format();
     test_an_integer_field_uses_the_integer_member();
     test_a_modifier_makes_the_field_a_number();
+    test_a_zero_divisor_omits_the_field();
     test_a_u64_is_exact_at_the_top_of_its_range();
 
     LOG(LOG_INFO, MOD, "Schema interpreter self-tests complete");

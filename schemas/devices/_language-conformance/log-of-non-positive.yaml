@@ -1,0 +1,35 @@
+# The log of a non-positive number has no value, so the field is absent (PS-117,
+# CR-2026-057) and the fields after it decode as usual.
+#
+# All five implementations clamped the input at 1e-10 instead, so log10(0) was
+# reported as -10: a plausible reading standing in for no reading at all. Python and
+# the generated codec would have reported NaN for a negative input without the clamp,
+# which PS-282 forbids, and that is why the clamp was there.
+#
+# The first vector round-trips: both absent fields are re-encoded as zero, which is
+# what the payload holds. The second cannot, since the -1 that made the field absent
+# is not in the output to write back.
+name: probe_log_of_non_positive
+endian: big
+fields:
+- name: log10_of_zero
+  type: u8
+  transform:
+  - log10: true
+- name: log_of_input
+  type: s8
+  transform:
+  - log: true
+- name: after
+  type: u8
+test_vectors:
+- name: zero_is_absent
+  source: spec-example
+  payload: "00 00 05"
+  expected:
+    after: 5
+- name: negative_is_absent
+  source: spec-example
+  payload: "00 FF 05"
+  expected:
+    after: 5

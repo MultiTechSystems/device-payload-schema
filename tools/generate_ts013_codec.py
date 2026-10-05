@@ -242,8 +242,9 @@ def canonical_modifiers_to_js(field: Dict[str, Any], input_expr: str) -> str:
         if key == 'mult':
             expr = f'({expr} * {operand})'
         elif key == 'div':
-            if operand != 0:
-                expr = f'({expr} / {operand})'
+            # A zero divisor omits the field (PS-100): undefined, which the output
+            # pass drops. Skipping the division reported the undivided value.
+            expr = f'({expr} / {operand})' if operand != 0 else 'undefined'
         else:
             expr = f'({expr} + {operand})'
     return expr
@@ -268,15 +269,17 @@ def transform_to_js(transform_ops: List[Dict[str, Any]], input_expr: str) -> str
             if isinstance(bounds, list) and len(bounds) >= 2:
                 result = f'Math.max({bounds[0]}, Math.min({bounds[1]}, {result}))'
         elif 'log10' in op and op['log10']:
-            result = f'Math.log10(Math.max(1e-10, {result}))'
+            # A non-positive input has no logarithm: the field is absent (PS-117).
+            # Math.log10 gives -Infinity or NaN there, which the output pass drops.
+            result = f'Math.log10({result})'
         elif 'log' in op and op['log']:
-            result = f'Math.log(Math.max(1e-10, {result}))'
+            result = f'Math.log({result})'
         elif 'add' in op:
             result = f'({result} + {op["add"]})'
         elif 'mult' in op:
             result = f'({result} * {op["mult"]})'
-        elif 'div' in op and op['div'] != 0:
-            result = f'({result} / {op["div"]})'
+        elif 'div' in op:
+            result = f'({result} / {op["div"]})' if op['div'] != 0 else 'undefined'
         elif 'round' in op:
             decimals = op['round']
             if decimals is True or decimals == 0:
@@ -476,6 +479,33 @@ function tlvUnknownRaw(d, tag, buf, from, span) {
   }
   if (!d.unknown_tags) { d.unknown_tags = []; }
   d.unknown_tags.push({ tag: tag, raw: hex });
+}
+
+// --- Absent values ---
+// A field with no value to report is absent (PS-278, PS-100, PS-117), and NaN and the
+// infinities are not JSON values (PS-282). An omitted step yields undefined, which
+// later arithmetic turns into NaN, so both are dropped here, once, on the way out -
+// the generated codec reported null for log10(0) and the undivided value for div 0.
+// Mirrors normalize_output in the reference interpreter.
+function omitAbsent(v) {
+  if (typeof v === 'number') return isFinite(v) ? v : undefined;
+  if (Array.isArray(v)) {
+    var list = [];
+    for (var i = 0; i < v.length; i++) {
+      var item = omitAbsent(v[i]);
+      if (item !== undefined) list.push(item);
+    }
+    return list;
+  }
+  if (v === null || typeof v !== 'object') return v;
+  var out = {};
+  for (var k in v) {
+    if (Object.prototype.hasOwnProperty.call(v, k)) {
+      var x = omitAbsent(v[k]);
+      if (x !== undefined) out[k] = x;
+    }
+  }
+  return out;
 }
 
 // --- Rounding ---
@@ -2036,7 +2066,7 @@ function writeS(buf, pos, size, value, endian) {
                     lines.append(f'    if (input.fPort === {port_key}) {{')
                     if declared in (direction, 'both'):
                         lines.append(f'      var r = decodePort{port_key}(input.bytes, endian);')
-                        lines.append(f'      return {{ data: r.data, warnings: r.warnings || [], errors: [] }};')
+                        lines.append(f'      return {{ data: omitAbsent(r.data), warnings: r.warnings || [], errors: [] }};')
                     else:
                         message = (f'fPort {port_key} is declared direction:{declared}; '
                                    f'message direction is {direction}')
@@ -2070,7 +2100,7 @@ function writeS(buf, pos, size, value, endian) {
             lines.append('function decodeUplink(input) {')
             lines.append('  try {')
             lines.append(f'    var r = decodePayload(input.bytes, "{self.endian}");')
-            lines.append('    return { data: r.data, warnings: r.warnings || [], errors: [] };')
+            lines.append('    return { data: omitAbsent(r.data), warnings: r.warnings || [], errors: [] };')
             lines.append('  } catch (e) {')
             lines.append('    return { data: {}, warnings: [], errors: [e.message] };')
             lines.append('  }')
@@ -2082,7 +2112,7 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append('function decodeDownlink(input) {')
                 lines.append('  try {')
                 lines.append(f'    var r = decodeCommand(input.bytes, "{self.endian}");')
-                lines.append('    return { data: r.data, warnings: r.warnings || [], errors: [] };')
+                lines.append('    return { data: omitAbsent(r.data), warnings: r.warnings || [], errors: [] };')
                 lines.append('  } catch (e) {')
                 lines.append('    return { data: {}, warnings: [], errors: [e.message] };')
                 lines.append('  }')
@@ -2108,7 +2138,7 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append('  try {')
                 lines.append(f'    var endian = "{self.endian}";')
                 lines.append('    var r = decodePayload(input.bytes, endian);')
-                lines.append('    return { data: r.data, warnings: r.warnings || [], errors: [] };')
+                lines.append('    return { data: omitAbsent(r.data), warnings: r.warnings || [], errors: [] };')
                 lines.append('  } catch (e) {')
                 lines.append('    return { data: {}, warnings: [], errors: [e.message] };')
                 lines.append('  }')
@@ -2195,7 +2225,7 @@ function writeS(buf, pos, size, value, endian) {
             '',
         ])
         tail = code[entry:]
-        tail = tail.replace('data: r.data,', 'data: renameKeys(r.data, OUTPUT_KEYS),')
+        tail = tail.replace('data: omitAbsent(r.data),', 'data: renameKeys(r.data, OUTPUT_KEYS),')
         tail = tail.replace('(input.data, ', '(renameKeys(input.data, INPUT_KEYS), ')
         return code[:entry] + helper + tail
 

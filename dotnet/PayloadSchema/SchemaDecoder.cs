@@ -457,7 +457,7 @@ public static class SchemaDecoder
             case FieldType.Number:
             {
                 value = DecodeNumber(field, ctx);
-                if (field.IntegerResult && value is double d)
+                if (field.IntegerResult && value is double d && !double.IsNaN(d) && !double.IsInfinity(d))
                 {
                     // PS-388: a fractional part is an error, never truncated or rounded.
                     if (d != Math.Round(d) || double.IsInfinity(d))
@@ -545,6 +545,12 @@ public static class SchemaDecoder
                 value = numVal;
             }
         }
+
+        // A value the arithmetic could not produce - a zero divisor (PS-100), the log of
+        // a non-positive number (PS-117) - is absent, and NaN is never reported (PS-282).
+        // Checked before the lookup, which would read NaN as some index.
+        if (value is double nd && (double.IsNaN(nd) || double.IsInfinity(nd)))
+            return Omitted;
 
         // Apply lookup. A mapping is matched on its keys, which need not start at
         // zero or be contiguous (PS-268). An unmatched value omits the field rather
@@ -649,17 +655,21 @@ public static class SchemaDecoder
                 continue;
             }
             // Unary maths stages, each exclusive of the others and of the arithmetic
-            // ops, in the order the Python interpreter checks them. The domain clamps
-            // match it exactly: sqrt of a negative and log of a non-positive would
-            // otherwise yield NaN and poison every later stage, where the interpreter
-            // yields 0 and log(1e-10).
+            // ops, in the order the Python interpreter checks them. sqrt clamps a
+            // negative input at 0 (PS-116). The log of a non-positive number has no
+            // value, so the field is absent (PS-117): NaN, which ApplyPostRead omits.
+            // The logs clamped at 1e-10 before, reporting log10(0) as -10.
             if (stage.Sqrt) { numVal = Math.Sqrt(Math.Max(0.0, numVal)); continue; }
             if (stage.Abs) { numVal = Math.Abs(numVal); continue; }
             if (stage.Pow.HasValue) { numVal = Math.Pow(numVal, stage.Pow.Value); continue; }
-            if (stage.Log10) { numVal = Math.Log10(Math.Max(1e-10, numVal)); continue; }
-            if (stage.Log) { numVal = Math.Log(Math.Max(1e-10, numVal)); continue; }
+            if (stage.Log10) { if (!(numVal > 0)) return double.NaN; numVal = Math.Log10(numVal); continue; }
+            if (stage.Log) { if (!(numVal > 0)) return double.NaN; numVal = Math.Log(numVal); continue; }
             if (stage.Mult.HasValue) numVal *= stage.Mult.Value;
-            if (stage.Div.HasValue && stage.Div.Value != 0) numVal /= stage.Div.Value;
+            if (stage.Div.HasValue)
+            {
+                if (stage.Div.Value == 0) return double.NaN;   // PS-100: the field is absent
+                numVal /= stage.Div.Value;
+            }
             if (stage.Sub.HasValue) numVal -= stage.Sub.Value;
             if (stage.Add.HasValue) numVal += stage.Add.Value;
         }
@@ -693,7 +703,13 @@ public static class SchemaDecoder
     static double ApplyModifiers(double numVal, SchemaField field)
     {
         if (field.Mult.HasValue) numVal *= field.Mult.Value;
-        if (field.Div.HasValue && field.Div.Value != 0) numVal /= field.Div.Value;
+        if (field.Div.HasValue)
+        {
+            // A zero divisor omits the field (PS-100): NaN, which ApplyPostRead turns
+            // into an omission. Skipping the division reported the undivided value.
+            if (field.Div.Value == 0) return double.NaN;
+            numVal /= field.Div.Value;
+        }
         if (field.Add.HasValue) numVal += field.Add.Value;
         return ApplyTransformStages(numVal, field.Transform);
     }
