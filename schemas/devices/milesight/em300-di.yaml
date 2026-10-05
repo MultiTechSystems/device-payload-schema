@@ -157,3 +157,10 @@ test_vectors:
     source: vendor-codec
     expected:
       temperature: -0.1
+  - name: temperature_s16_byte_order
+    description: "Temperature word 0xFEF6 little-endian: -26.6 C, asymmetric bytes pin byte order and sign"
+    payload: "0367F6FE"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: -26.6

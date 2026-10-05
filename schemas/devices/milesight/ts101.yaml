@@ -147,3 +147,46 @@ test_vectors:
       temperature_change: 0.16
       temperature_alert: "mutation"
       battery: 100
+  - name: ch131_type103_temperature_alert_normal
+    description: "Channel 131 type 103, chosen to pin temperature_alert; expected values from the vendor's own decoder"
+    payload: "8367120100"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 27.4
+      temperature_alert: "normal"
+  - name: ch131_type103_temperature_alert_mutation
+    description: "Channel 131 type 103, chosen to pin temperature_alert; expected values from the vendor's own decoder"
+    payload: "8367000002"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 0
+      temperature_alert: "mutation"
+  - name: ch147_type215_temperature_alert_labels
+    description: "Channel 147 type 215, chosen to pin temperature_alert; expected values from the vendor's own decoder"
+    payload: "93D71201000000"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 27.4
+      temperature_change: 0
+      temperature_alert: "normal"
+  - name: ch147_type215_temperature_alert_threshold
+    description: "Channel 147 type 215, chosen to pin temperature_alert; expected values from the vendor's own decoder"
+    payload: "93D70000001201"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 0
+      temperature_change: 46.08
+      temperature_alert: "threshold"
+  - name: ch147_type215_temperature_alert_unmapped
+    description: "Channel 147 type 215, chosen to pin temperature_alert; expected values from the vendor's own decoder"
+    payload: "93D70000003412"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      temperature: 0
+      temperature_change: 133.12
+      temperature_alert: "unkown"

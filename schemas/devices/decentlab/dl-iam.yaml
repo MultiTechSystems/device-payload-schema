@@ -277,3 +277,21 @@ test_vectors:
       flags: 2
       air_temperature: -45
       air_humidity: 100
+  - name: co2_asymmetric_status
+    description: "CO2 group alone, sensor status 0x0102 so a byte-swapped read gives 0x0201"
+    source: vendor-codec
+    payload: "020bbd001081c7010293d4"
+    expected:
+      protocol_version: 2
+      device_id: 3005
+      co2_concentration: 455
+      co2_sensor_status: 258
+      raw_ir_reading: 37844
+  - name: activity_counter_only
+    description: "Flags 0x0020: activity counter alone, which pins its group to bit 5"
+    source: vendor-codec
+    payload: "020bbd00200123"
+    expected:
+      protocol_version: 2
+      device_id: 3005
+      activity_counter: 291

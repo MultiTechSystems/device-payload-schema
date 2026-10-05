@@ -455,3 +455,60 @@ test_vectors:
       pm1.0 Threshold: 16777215
       pm2.5 Threshold: 16777215
       pm10 Threshold: 16777215
+
+  # --- One vector per gas-type label, and asymmetric PM threshold bytes; expected
+  # values from the vendor decoder (lrs10701.js) under node ---
+  - name: device_settings_gas_none_nh3
+    description: "gas1Type None, gas2Type NH3"
+    fPort: 12
+    payload: "00 0F 01 1D 1D 00 01"
+    source: vendor-codec
+    expected:
+      dataUploadInterval: 15
+      statusLED: "on"
+      gas1Type: "None"
+      gas2Type: "NH3"
+
+  - name: device_settings_gas_no2_h2s
+    description: "gas1Type NO2, gas2Type H2S"
+    fPort: 12
+    payload: "00 0F 01 1D 1D 03 02"
+    source: vendor-codec
+    expected:
+      dataUploadInterval: 15
+      statusLED: "on"
+      gas1Type: "NO2"
+      gas2Type: "H2S"
+
+  - name: device_settings_gas_co_co
+    description: "gas1Type CO, gas2Type CO"
+    fPort: 12
+    payload: "00 0F 01 1D 1D 04 04"
+    source: vendor-codec
+    expected:
+      dataUploadInterval: 15
+      statusLED: "on"
+      gas1Type: "CO"
+      gas2Type: "CO"
+
+  - name: device_settings_gas_hcho_hcho
+    description: "gas1Type HCHO, gas2Type HCHO"
+    fPort: 12
+    payload: "00 0F 01 1D 1D 05 05"
+    source: vendor-codec
+    expected:
+      dataUploadInterval: 15
+      statusLED: "on"
+      gas1Type: "HCHO"
+      gas2Type: "HCHO"
+
+  - name: pm_thresholds_asymmetric
+    description: "Distinct bytes in every PM threshold, so byte order is observable"
+    fPort: 13
+    payload: "02 01 02 03 04 05 06 07 08 09"
+    source: vendor-codec
+    expected:
+      packetType: 2
+      pm1.0 Threshold: 66051
+      pm2.5 Threshold: 263430
+      pm10 Threshold: 460809

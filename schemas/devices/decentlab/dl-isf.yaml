@@ -134,3 +134,26 @@ test_vectors:
       diagnostic: 20228605
       upstream_tmax_outer: 10
       upstream_tmax_inner: 10
+  - name: alpha_beta_exact_offsets
+    description: "Vendor example with alpha/beta words 0 and 31250, where the decoder yields exactly -10 and 0"
+    source: vendor-codec
+    payload: "023d0100030c290bab0c3e00007a127a120000490845997e4cacdeaa6e00000000457e415a0b59"
+    expected:
+      protocol_version: 2
+      device_id: 15617
+      sap_flow: -0.192
+      heat_velocity_outer: -2.208
+      heat_velocity_inner: 0.144
+      alpha_outer: -10
+      alpha_inner: 0
+      beta_outer: 0
+      beta_inner: -10
+      tmax_outer: 37.392
+      tmax_inner: 35.634
+      temperature_outer: -4.36
+      max_voltage: 11.486
+      min_voltage: 10.862
+      diagnostic: 0
+      upstream_tmax_outer: 35.58
+      upstream_tmax_inner: 33.46
+      battery_voltage: 2.905

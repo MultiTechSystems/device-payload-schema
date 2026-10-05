@@ -187,3 +187,33 @@ test_vectors:
     source: vendor-codec
     expected:
       temperature: -0.1
+  - name: activity_u16_byte_order
+    description: "Activity word 0x1234 little-endian: asymmetric bytes pin the byte order"
+    payload: "056A3412"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      activity: 4660
+  - name: illumination_words_byte_order
+    description: "Three light words with asymmetric bytes pin each word's byte order"
+    payload: "0665341278569A00"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      illumination: 4660
+      infrared_and_visible: 22136
+      infrared: 154
+  - name: tvoc_u16_byte_order
+    description: "TVOC word 0x0234 little-endian"
+    payload: "087D3402"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      tvoc: 564
+  - name: pressure_u16_byte_order
+    description: "Pressure word 0x2734 little-endian, /10"
+    payload: "09733427"
+    fPort: 85
+    source: vendor-codec
+    expected:
+      pressure: 1003.6
