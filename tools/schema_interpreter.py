@@ -694,6 +694,178 @@ class LookupIndexError(ValueError):
     """
 
 
+#: The token a mapping's `default` substitutes with the unmapped value (PS-406).
+LOOKUP_VALUE_TOKEN = '${value}'
+
+#: A decimal number as format_lookup_value writes one, for recovering it on encode.
+_LOOKUP_NUMBER = r'(-?\d+(?:\.\d+)?(?:e[-+]?\d+)?)'
+
+
+def lookup_template(lookup):
+    """The mapping's `default` where it carries `${value}` (PS-406), else None.
+
+    Only a mapping's default is a template (PS-408): a label, or a sequence, is never one.
+    """
+    if not isinstance(lookup, dict):
+        return None
+    default = lookup.get('default')
+    if isinstance(default, str) and LOOKUP_VALUE_TOKEN in default:
+        return default
+    return None
+
+
+def format_lookup_value(value):
+    """The value written into a `${value}` default: decimal, no fraction where integral.
+
+    PS-406 and PS-280. Written as JavaScript's String(number) writes it, which is what
+    the generated codec produces: the shortest round-tripping digits, in fixed notation
+    for 1e-6 <= |v| < 1e21 and as 1e-7 / 1.5e+21 outside that range.
+    """
+    if isinstance(value, float) and value.is_integer() and abs(value) < 1e21:
+        value = int(value)
+    if isinstance(value, int) and abs(value) < 10 ** 21:
+        return str(value)
+    value = float(value)
+    text = repr(value)
+    if 1e-6 <= abs(value) < 1e21:
+        if 'e' in text:
+            from decimal import Decimal
+            text = format(Decimal(text), 'f')
+        return text
+    from decimal import Decimal
+    digits, exponent = format(Decimal(text).normalize(), 'e').split('e')
+    if digits.endswith('.0'):
+        digits = digits[:-2]
+    sign = '-' if exponent.startswith('-') else '+'
+    return f"{digits}e{sign}{exponent.lstrip('+-').lstrip('0') or '0'}"
+
+
+def lookup_template_pattern(template):
+    """A regular expression for every string a `${value}` default can produce."""
+    parts = template.split(LOOKUP_VALUE_TOKEN)
+    body = re.escape(parts[0])
+    for part in parts[1:]:
+        body += _LOOKUP_NUMBER + re.escape(part)
+    return '^' + body + '$'
+
+
+def match_lookup_template(template, text):
+    """The number a `${value}` default wrote into `text`, or None if it does not match.
+
+    Every `${value}` in the template must hold the same number (PS-409).
+    """
+    parts = template.split(LOOKUP_VALUE_TOKEN)
+    pattern = re.escape(parts[0]) + _LOOKUP_NUMBER
+    for part in parts[1:-1]:
+        pattern += re.escape(part) + r'\1'
+    pattern += re.escape(parts[-1])
+    match = re.fullmatch(pattern, text)
+    if not match:
+        return None
+    digits = match.group(1)
+    number = float(digits)
+    return int(number) if number.is_integer() and re.fullmatch(r'-?\d+', digits) else number
+
+
+def lookup_template_errors(field_def):
+    """PS-407: a `${value}` default reports a string, so every label must be one."""
+    if not isinstance(field_def, dict):
+        return []
+    lookup = field_def.get('lookup')
+    if lookup_template(lookup) is None:
+        return []
+    numeric = [k for k, label in lookup.items()
+               if k != 'default' and not isinstance(label, str)]
+    if not numeric:
+        return []
+    return [f"Field '{field_def.get('name', '?')}': a lookup whose default carries "
+            f"${{value}} reports a string, so its labels must be strings; "
+            f"{len(numeric)} are not (PS-407)"]
+
+
+#: The timestamp modes that read a field as seconds since an epoch (PS-354, PS-410).
+EPOCH_MODES = ('unix_epoch', 'iso8601', 'calendar')
+
+#: A `calendar` entry's members, in the order it reports them (PS-410).
+CALENDAR_PARTS = ('year', 'month', 'day', 'hour', 'minute', 'second')
+
+_RFC3339_UTC = re.compile(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z')
+
+
+def parse_epoch(text):
+    """An `epoch` as seconds since 1970-01-01T00:00:00Z, or None if it is not valid.
+
+    PS-355: an RFC 3339 date-time in UTC with a `Z` designator, and nothing else - a
+    numeric offset is refused, because a local-time epoch is exactly the mistake a
+    declared epoch exists to make visible.
+    """
+    from datetime import datetime, timezone
+    match = _RFC3339_UTC.fullmatch(text) if isinstance(text, str) else None
+    if not match:
+        return None
+    try:
+        instant = datetime.strptime(text[:19], '%Y-%m-%dT%H:%M:%S').replace(
+            tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    seconds = int((instant - datetime(1970, 1, 1, tzinfo=timezone.utc)).total_seconds())
+    fraction = match.group(1)
+    return seconds + float(fraction) if fraction and float(fraction) else seconds
+
+
+def timestamp_errors(metadata):
+    """PS-355, PS-411 and PS-412: what a timestamp entry may declare, checked at load.
+
+    Also refuses `format:` on an `iso8601` entry, which CR-2026-050 withdrew: it was a
+    Python strftime pattern no clause described, and PS-356 now fixes the output.
+    """
+    errors = []
+    if not isinstance(metadata, dict):
+        return errors
+    for i, ts in enumerate(metadata.get('timestamps') or []):
+        if not isinstance(ts, dict):
+            continue
+        where = f"metadata.timestamps[{i}] ({ts.get('name', '?')})"
+        mode = ts.get('mode')
+        if 'epoch' in ts:
+            if mode not in EPOCH_MODES:
+                errors.append(f"{where}: epoch applies only to the "
+                              f"{', '.join(EPOCH_MODES)} modes, not {mode!r} (PS-355)")
+            elif parse_epoch(ts['epoch']) is None:
+                hint = (" - quote it, or YAML reads it as a date"
+                        if not isinstance(ts['epoch'], str) else "")
+                errors.append(f"{where}: epoch {ts['epoch']!r} is not an RFC 3339 "
+                              f"date-time string in UTC with a Z designator{hint} (PS-355)")
+        if 'format' in ts:
+            errors.append(f"{where}: format is withdrawn; an iso8601 entry reports "
+                          f"YYYY-MM-DDTHH:MM:SSZ (PS-356, CR-2026-050)")
+        for key in ('month_labels', 'keys'):
+            if key in ts and mode != 'calendar':
+                errors.append(f"{where}: {key} applies only to the calendar mode "
+                              f"(PS-{411 if key == 'month_labels' else 412})")
+        labels = ts.get('month_labels')
+        if mode == 'calendar' and labels is not None and not (
+                isinstance(labels, list) and len(labels) == 12
+                and all(isinstance(label, str) for label in labels)):
+            errors.append(f"{where}: month_labels must be exactly twelve strings (PS-411)")
+        keys = ts.get('keys')
+        if mode == 'calendar' and keys is not None:
+            if not isinstance(keys, dict) or not all(
+                    isinstance(v, str) and v for v in keys.values()):
+                errors.append(f"{where}: keys must map part names to member names (PS-412)")
+            else:
+                unknown = [k for k in keys if k not in CALENDAR_PARTS]
+                if unknown:
+                    errors.append(f"{where}: keys names {', '.join(map(str, unknown))}, "
+                                  f"which are not among {', '.join(CALENDAR_PARTS)} (PS-412)")
+                names = [keys.get(part, part) for part in CALENDAR_PARTS]
+                clashes = sorted({n for n in names if names.count(n) > 1})
+                if clashes:
+                    errors.append(f"{where}: keys maps two parts to "
+                                  f"{', '.join(clashes)} (PS-412)")
+    return errors
+
+
 def apply_lookup(value, lookup):
     """Map a decoded integer through a ``lookup`` table (PS-103..PS-107, PS-268).
 
@@ -715,18 +887,28 @@ def apply_lookup(value, lookup):
     ``0 <= value < len(lookup)`` was written for a list, so the last entry of any
     mapping was unreachable and leaked through as a raw integer.
     """
-    if not lookup or isinstance(value, bool) or not isinstance(value, int):
+    if not lookup or isinstance(value, bool) or not isinstance(value, (int, float)):
         return value
     if isinstance(lookup, dict):
-        for key, label in lookup.items():
-            try:
-                if int(key) == value:
-                    return label
-            except (TypeError, ValueError):
-                continue
+        # Arithmetic before the lookup (PS-107) can leave an integral value as a float:
+        # 7.0 is the key 7. A value with a fraction matches no key.
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)
+        if isinstance(value, int):
+            for key, label in lookup.items():
+                try:
+                    if int(key) == value:
+                        return label
+                except (TypeError, ValueError):
+                    continue
         if 'default' in lookup:
+            template = lookup_template(lookup)
+            if template is not None:
+                return template.replace(LOOKUP_VALUE_TOKEN, format_lookup_value(value))
             return lookup['default']
         return OMITTED
+    if not isinstance(value, int):
+        return value
     if 0 <= value < len(lookup):
         return lookup[value]
     raise LookupIndexError(
@@ -767,16 +949,27 @@ def _match_composite_key(case_key: str, tag_tuple):
 
 
 def reverse_lookup(value, lookup):
-    """Map a label back to its integer for encoding."""
+    """Map a label back to its integer for encoding.
+
+    A string that is no label but matches the mapping's `${value}` default yields the
+    value written into it (PS-409); the caller rejects any other string.
+    """
     if not lookup:
         return value
     if isinstance(lookup, dict):
         for key, label in lookup.items():
+            if key == 'default':
+                continue
             if label == value:
                 try:
                     return int(key)
                 except (TypeError, ValueError):
                     return value
+        template = lookup_template(lookup)
+        if template is not None and isinstance(value, str):
+            recovered = match_lookup_template(template, value)
+            if recovered is not None:
+                return recovered
         return value
     try:
         return lookup.index(value)
@@ -913,6 +1106,8 @@ class SchemaInterpreter:
         for field_def in typed_field_dicts(schema):
             self._load_errors.extend(literal_errors(field_def))
             self._load_errors.extend(encoding_errors(field_def))
+            self._load_errors.extend(lookup_template_errors(field_def))
+        self._load_errors.extend(timestamp_errors(schema.get('metadata')))
         self.schema = schema
         self.endian = Endian(schema.get('endian', 'big'))
         self.name = schema.get('name', 'unknown')
@@ -3180,23 +3375,51 @@ class SchemaInterpreter:
                     warn.append(f"metadata: '{name}' omitted, {field} is not a number "
                                 f"of seconds ({exc})")
 
-            elif mode in ('unix_epoch', 'iso8601'):
+            elif mode in EPOCH_MODES:
                 field = ts.get('field')
                 if not field:
                     warn.append(f"metadata: '{name}' omitted, mode '{mode}' names no field")
                     continue
-                if field not in data:
+                # PS-435: an internal field is not reported, and still resolves here.
+                if field in data:
+                    count = data[field]
+                elif field.startswith('_') and field in self._variables:
+                    count = self._variables[field]
+                else:
                     place(name, None, f"field '{field}'")
                     continue
-                fmt = ts.get('format', '%Y-%m-%dT%H:%M:%SZ')
+                if isinstance(count, bool) or not isinstance(count, (int, float)):
+                    warn.append(f"metadata: '{name}' omitted, {field} is not a number "
+                                f"of seconds")
+                    continue
+                # PS-354: seconds since the entry's epoch, 1970 where none is declared.
+                # PS-356: the time is the epoch plus that count, in UTC (PS-320).
+                unix = parse_epoch(ts.get('epoch', '1970-01-01T00:00:00Z')) + count
+                if isinstance(unix, float) and unix.is_integer():
+                    unix = int(unix)
                 try:
-                    # PS-320: derived times are UTC.
-                    dt = datetime.fromtimestamp(data[field], tz=timezone.utc)
-                    place(name, stamp(dt) if mode == 'unix_epoch' else dt.strftime(fmt),
-                          field)
-                except Exception as exc:
-                    warn.append(f"metadata: '{name}' omitted, {field} is not a Unix "
-                                f"timestamp ({exc})")
+                    dt = (datetime(1970, 1, 1, tzinfo=timezone.utc)
+                          + timedelta(seconds=unix))
+                except OverflowError as exc:
+                    warn.append(f"metadata: '{name}' omitted, {field} is out of range ({exc})")
+                    continue
+                if mode == 'unix_epoch':
+                    place(name, unix, field)
+                elif mode == 'iso8601':
+                    text = dt.strftime('%Y-%m-%dT%H:%M:%S')
+                    if dt.microsecond:
+                        text += ('.%06d' % dt.microsecond).rstrip('0')
+                    place(name, text + 'Z', field)
+                else:
+                    # PS-410 to PS-413: the instant's UTC parts. A datetime never holds
+                    # second 60, which is PS-413's POSIX reading.
+                    parts = {'year': dt.year, 'month': dt.month, 'day': dt.day,
+                             'hour': dt.hour, 'minute': dt.minute, 'second': dt.second}
+                    labels = ts.get('month_labels')
+                    if labels:
+                        parts['month'] = labels[dt.month - 1]
+                    keys = ts.get('keys') or {}
+                    place(name, {keys.get(p, p): parts[p] for p in CALENDAR_PARTS}, field)
 
             elif mode is not None:
                 warn.append(f"metadata: '{name}' omitted, unknown mode '{mode}'")
@@ -4027,6 +4250,12 @@ class SchemaInterpreter:
             # which stands for every value the table does not list (PS-269) - there is no
             # original to recover. Said plainly here, because otherwise int() reported
             # "invalid literal for int() with base 10: 'unknown'".
+            template = lookup_template(field_def.get('lookup'))
+            if template is not None:
+                raise ValueError(
+                    f"{value!r} is neither a label in the lookup for "
+                    f"{field_def.get('name')!r} nor a match for its default "
+                    f"{template!r} (PS-409)")
             raise ValueError(
                 f"{value!r} is not a label in the lookup for {field_def.get('name')!r}; "
                 "a `default` label matches any unmapped value, so the value that "

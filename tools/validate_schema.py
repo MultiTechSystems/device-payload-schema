@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from schema_interpreter import (SchemaInterpreter, DecodeResult, check_byte_group_overlap,
                                 byte_group_endian,
                                 encoding_errors, expand_refs, fport_declaration_errors,
-                                literal_errors,
+                                literal_errors, lookup_template_errors, timestamp_errors,
                                 typed_field_dicts)
 import schema_vocabulary
 
@@ -1154,6 +1154,7 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
         for field_def in typed_field_dicts(schema):
             errors.extend(literal_errors(field_def))
             errors.extend(encoding_errors(field_def))
+            errors.extend(lookup_template_errors(field_def))      # PS-407
     has_fields = False
     has_ports = False
     
@@ -1260,6 +1261,7 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
             NEEDS = {'subtract': ('offset_field',),
                      'unix_epoch': ('field',),
                      'iso8601': ('field',),
+                     'calendar': ('field',),
                      'elapsed_to_absolute': ('elapsed_field', 'offset_field')}
             MODES = ('rx_time',) + tuple(NEEDS)
             for i, ts in enumerate(md.get('timestamps', []) or []):
@@ -1279,6 +1281,8 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
                 elif mode in NEEDS and not any(ts.get(k) for k in NEEDS[mode]):
                     errors.append(f"{path}: mode '{mode}' requires "
                                   f"{' or '.join(NEEDS[mode])}")
+            # PS-355, PS-411, PS-412 and the withdrawn `format:` (CR-2026-050/061).
+            errors.extend(timestamp_errors(md))
 
     if 'test_vectors' in schema:
         if not isinstance(schema['test_vectors'], list):

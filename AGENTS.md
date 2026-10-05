@@ -85,7 +85,8 @@ BYTES FORMAT: hex hex:upper base64 array | separator (hex formats only)
 STRUCTURES:   type: object | repeat | byte_group | tlv
 NAMING:       name | name_from ("region_${region_id}_dwell")
 TAG KEYS:     "[1, 200]" exact | "[1, !0]" excluding | "[2, *]" any
-MODIFIERS:    add mult div | lookup (sequence or sparse mapping) | polynomial
+MODIFIERS:    add mult div | lookup (sequence or sparse mapping; default "x${value}")
+              | polynomial
               | compute | guard | transform
 CONDITIONALS: match (value; "[1, 2]" list keys; field XOR length) | flagged | tlv
 TRANSFORMS:   sqrt abs pow log10 log floor ceiling clamp | {op: round, ties: even|away}
@@ -184,17 +185,17 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2015 payload vectors in `schemas/devices/` (measured 2026-10-05 with
+The 2020 payload vectors in `schemas/devices/` (measured 2026-10-05 with
 `tools/check-floors.py`, after merging the mutation-survivor vectors into 0.5.2) are the shared
 cross-language test set. Every implementation has a runner that reads the same YAML and
 the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1608 |
-| Go | `go/schema/corpus_conformance_test.go` | 2015 | 1624 (plain API 1601) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2015 | 1607 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2015 | 1606 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1613 |
+| Go | `go/schema/corpus_conformance_test.go` | 2020 | 1629 (plain API 1606) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2020 | 1612 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2020 | 1611 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 487 of 487 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -751,10 +752,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1608 |
-| Go | `go/schema/corpus_encode_test.go` | 1624 (plain 1601) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1606 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1607 |
+| Python | `tests/test_encode_round_trip.py` | 1613 |
+| Go | `go/schema/corpus_encode_test.go` | 1629 (plain 1606) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1611 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1612 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1164,7 +1165,7 @@ baseline - a regression fails, an improvement is reported and locked in with the
 | `gate-provenance` | a changed device schema has no independently sourced vector, or an added vector lacks `source:` | none: the diff against `BASE` |
 | `gate-crossval` | a schema stops agreeing with its vendor's own decoder (TTN declared examples + vendor JS, Decentlab decoders), or a new one does not agree | `tools/crossval-baseline.json`, oracle commits pinned |
 | `gate-mutation` | a schema's vectors notice fewer one-step mutations than before (score or killed count), or a new schema scores below 0.80 | `tools/mutation-baseline.json` |
-| `gate-verdicts` | a changed schema's vector fails in any of Python, Go, Java, C#, TS013, or a vector the reference passes fails elsewhere | `tools/verdicts-baseline.json` (empty: all five agree on 2015/2015) |
+| `gate-verdicts` | a changed schema's vector fails in any of Python, Go, Java, C#, TS013, or a vector the reference passes fails elsewhere | `tools/verdicts-baseline.json` (empty: all five agree on 2020/2020) |
 
 The mutation gate ratchets the killed count as well as the score on purpose: deleting
 vectors makes the mutants only they reached "unreached", which *raises* the score.
@@ -1213,6 +1214,20 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   which were Python-only before 0.5.2. A bit range's base is read in the field's effective
   byte order (PS-059) and `sN[...]` sign-extends from the range's width; a byte_group's
   bits refer to the group's assembled value, in the group's own `endian` (PS-364).
+- **Wave 5 (CR-2026-050, -060, -061).** A mapping lookup's `default` may carry `${value}`
+  (PS-406 to PS-409) in Python, Go, Java, C# and the TS013 decoder; one helper per language
+  (`go/schema/wave5.go`, Java `Wave5`, C# `Wave5`, `format_lookup_value` in
+  `schema_interpreter.py`). The value is written as **JavaScript's `String()`** writes it -
+  fixed notation for 1e-6 <= |v| < 1e21, `1e-7` / `1.5e+21` outside - because the generated
+  codec is one of the five paths; Python's `repr` and Go's `FormatFloat` differ from it at
+  both ends. A lookup value with a fraction matches no key: Go's `toInt`, Java's
+  `intValue()` and C#'s `ToInt` all truncated 2.5 to key 2, unseen because no corpus vector
+  reaches it. The generated `encodeDownlink` reverses no lookup at all, so PS-409 is not
+  met on that path; that gap predates the CR. C has no lookup default of any kind.
+  `metadata.timestamps` gains `epoch`, `iso8601`/`unix_epoch` reporting rules and the
+  `calendar` mode (PS-354 to PS-356, PS-410 to PS-413) in Python only, which PS-310
+  permits; `metadata-epoch-calendar.yaml` holds the other four to decoding a schema that
+  carries them. `unix_epoch` now reports a number, not a string, and `format:` is refused.
 - **`_meta` is not produced by any implementation**, so CR-2026-043 (`_meta.fPort`) and
   the `_meta` parts of CR-2026-054 wait for their own change (decided 2026-10-05).
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,

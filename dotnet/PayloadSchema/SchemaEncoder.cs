@@ -980,6 +980,12 @@ public static class SchemaEncoder
         {
             var reversed = ReverseLookup(value, field.Lookup);
 
+            // PS-409: a string matching the ${value} default carries the value it stands for.
+            if (reversed is string text && Wave5.Template(field) is { } template)
+                reversed = Wave5.MatchTemplate(template, text) ?? throw new InvalidOperationException(
+                    $"'{text}' is neither a label in the lookup for '{field.Name}' nor a match "
+                    + $"for its default '{template}' (PS-409)");
+
             if (reversed is string label && field.Lookup is { Count: > 0 })
                 // The label is not in the table, so it came from the mapping's `default`,
                 // which stands for every value the table does not list (PS-269) - there is

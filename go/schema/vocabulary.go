@@ -314,6 +314,10 @@ func checkFieldRules(field map[string]any, at string) error {
 			return fmt.Errorf("%s: encoding applies only to an unsigned integer type uN, not %v (PS-422)", at, field["type"])
 		}
 	}
+	// PS-407: a ${value} lookup default needs string labels.
+	if err := checkLookupTemplate(field, at); err != nil {
+		return err
+	}
 	// PS-430: a bitfield_string part is decimal, hex or hex:upper.
 	if parts, ok := field["parts"].([]any); ok && field["type"] == "bitfield_string" {
 		for _, raw := range parts {

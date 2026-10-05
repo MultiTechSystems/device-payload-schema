@@ -157,6 +157,7 @@ public class Schema {
             if (fm.containsKey("byte_group")) checkByteGroupOverlap(fm.get("byte_group"));
             checkLiteral(fm);
             checkWave4(fm);
+            Wave5.checkLookupTemplate(fm);     // PS-407
             // PS-399: exactly one discriminator source. With both, `field` won and the
             // `length` byte was left unread, misaligning every later field.
             if (fm.get("match") instanceof Map<?, ?> match
@@ -1400,9 +1401,17 @@ public class Schema {
         // index is an error (PS-105), not the raw value: the payload does not match
         // the schema's shape at all.
         if (field.getLookup() != null && value instanceof Number) {
-            int intVal = ((Number) value).intValue();
-            if (field.getLookup().containsKey(intVal)) {
+            // A value with a fraction matches no key: intValue() would truncate 2.5 to
+            // the key 2. An integral double such as 7.0 is the key 7.
+            double numVal = ((Number) value).doubleValue();
+            int intVal = (int) numVal;
+            boolean integral = numVal == Math.rint(numVal) && !Double.isInfinite(numVal);
+            String template = Wave5.template(field);
+            if (integral && field.getLookup().containsKey(intVal)) {
                 value = field.getLookup().get(intVal);
+            } else if (template != null) {
+                // PS-406: the default names the value it could not map.
+                value = template.replace(Wave5.VALUE_TOKEN, Wave5.formatLookupValue(numVal));
             } else if (field.getLookupDefault() != null) {
                 value = field.getLookupDefault();
             } else if (field.isLookupSequence()) {

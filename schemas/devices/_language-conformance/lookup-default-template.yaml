@@ -1,0 +1,55 @@
+# A mapping's default may name the value it could not map (PS-406, CR-2026-060).
+#
+# Volley Boast reports an analog sensor its table does not list as "AnalogSensor" + n,
+# which a fixed default label cannot reproduce. With ${value} in the default the label
+# carries the number, so the encoder can recover it (PS-409) - which a plain default
+# label never allowed, since it stands for every unmapped value at once.
+#
+# `half` divides by two before its lookup (PS-107), so 5 arrives as 2.5. That matches no
+# key - it is not the key 2 - and is written into the default in decimal, as JavaScript's
+# String() writes it.
+#
+# Every vector round-trips: a mapped label and a templated default both encode back to
+# the byte they came from.
+name: probe_lookup_default_template
+endian: big
+fields:
+- name: sensor
+  type: u8
+  lookup:
+    0: Battery Voltage
+    1: AIN1
+    2: AIN2
+    15: ADC Temperature
+    default: "AnalogSensor${value}"
+- name: half
+  type: u8
+  div: 2
+  lookup:
+    1: one
+    default: "half${value}"
+test_vectors:
+- name: both_mapped
+  source: spec-example
+  payload: "01 02"
+  expected:
+    sensor: AIN1
+    half: one
+- name: unmapped_names_the_value
+  source: spec-example
+  payload: "07 08"
+  expected:
+    sensor: AnalogSensor7
+    half: half4
+- name: fraction_is_no_key
+  source: spec-example
+  payload: "0F 05"
+  expected:
+    sensor: ADC Temperature
+    half: half2.5
+- name: top_of_range
+  source: spec-example
+  payload: "FF 00"
+  expected:
+    sensor: AnalogSensor255
+    half: half0

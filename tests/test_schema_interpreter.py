@@ -2272,8 +2272,9 @@ class TestPhase3TimestampFormatting:
         assert result.data['epoch'] == 1739721600
         assert result.data['formatted_time'] == '2025-02-16T16:00:00Z'
     
-    def test_iso8601_custom_format(self):
-        """Test iso8601 with custom strftime format."""
+    def test_iso8601_format_is_withdrawn(self):
+        """`format:` was a Python strftime pattern no clause described; CR-2026-050
+        withdrew it and PS-356 fixes the output, so a schema carrying it is refused."""
         schema = {
             'endian': 'big',
             'fields': [
@@ -2289,8 +2290,8 @@ class TestPhase3TimestampFormatting:
         interpreter = SchemaInterpreter(schema)
         payload = (1739721600).to_bytes(4, 'big')
         result = interpreter.decode(payload, input_metadata={})
-        assert result.success
-        assert result.data['date_only'] == '2025-02-16'
+        assert not result.success
+        assert any('format is withdrawn' in e for e in result.errors), result.errors
     
     def test_elapsed_to_absolute(self):
         """Test elapsed_to_absolute mode converting offset to timestamp."""

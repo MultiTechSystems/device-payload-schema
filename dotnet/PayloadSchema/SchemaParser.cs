@@ -270,6 +270,23 @@ public static class SchemaParser
     /// a bitfield_string part is decimal, hex or hex:upper. PS-364: a byte_group member
     /// declares no endian.
     /// </summary>
+    /// <summary>PS-407: a ${value} lookup default reports a string, so every label must be one.</summary>
+    static void CheckLookupTemplate(YamlMappingNode fm)
+    {
+        if (!fm.TryGetValue("lookup", out var node) || node is not YamlMappingNode lookup) return;
+        var fallback = lookup.Children.FirstOrDefault(kv => Scalar(kv.Key) == "default").Value;
+        if (fallback is not YamlScalarNode s || !(s.Value ?? "").Contains(Wave5.ValueToken)) return;
+        int numeric = lookup.Children.Count(kv => Scalar(kv.Key) != "default"
+            && !(kv.Value is YamlScalarNode label
+                 && (label.Style != YamlDotNet.Core.ScalarStyle.Plain || ParseScalarValue(label) is string)));
+        if (numeric > 0)
+        {
+            var name = fm.TryGetValue("name", out var n) ? Scalar(n) : "?";
+            throw new InvalidOperationException($"Field '{name}': a lookup whose default carries "
+                + $"${{value}} reports a string, so its labels must be strings; {numeric} are not (PS-407)");
+        }
+    }
+
     static void CheckWave4(YamlMappingNode fm)
     {
         var name = fm.TryGetValue("name", out var n) ? Scalar(n) : "?";
@@ -388,6 +405,7 @@ public static class SchemaParser
             CheckBytesFormat(fieldMap);
             CheckLiteral(fieldMap);
             CheckWave4(fieldMap);
+            CheckLookupTemplate(fieldMap);    // PS-407
             if (fieldMap.TryGetValue("byte_group", out var group))
                 CheckByteGroupOverlap(group);
             // PS-399: exactly one discriminator source. With both, `field` won and the

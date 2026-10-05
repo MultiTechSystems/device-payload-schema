@@ -3,10 +3,10 @@
   "min_score_new": 0.8,
   "include_library_composed": false,
   "distribution": {
-    "100%": 148,
+    "100%": 149,
     "95-99%": 5,
     "90-94%": 1,
-    "80-89%": 4,
+    "80-89%": 5,
     "70-79%": 1,
     "<70%": 1,
     "unscored": 5
@@ -152,6 +152,16 @@
       "provenance": "independent",
       "failing_original": 0
     },
+    "_language-conformance/lookup-default-template.yaml": {
+      "score": 0.8571,
+      "killed": 12,
+      "survived": 2,
+      "unreached": 0,
+      "generated": 16,
+      "vectors": 4,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "_language-conformance/lookup-default.yaml": {
       "score": 0.75,
       "killed": 3,
@@ -240,6 +250,16 @@
       "generated": 13,
       "vectors": 3,
       "provenance": "unsourced",
+      "failing_original": 0
+    },
+    "_language-conformance/metadata-epoch-calendar.yaml": {
+      "score": 1.0,
+      "killed": 6,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 9,
+      "vectors": 1,
+      "provenance": "independent",
       "failing_original": 0
     },
     "_language-conformance/minifloat.yaml": {
