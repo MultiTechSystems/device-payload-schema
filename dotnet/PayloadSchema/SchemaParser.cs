@@ -6,7 +6,7 @@ using YamlDotNet.RepresentationModel;
 
 namespace PayloadSchema;
 
-public static class SchemaParser
+public static partial class SchemaParser
 {
     public static PayloadSchemaDefinition Parse(string yamlOrJson)
     {
@@ -128,6 +128,10 @@ public static class SchemaParser
 
         if (root.TryGetValue("fields", out var fields) && fields is YamlSequenceNode fieldsSeq)
             schema.Fields = ParseFields(fieldsSeq);
+        // The repeat iterator's rules and a tlv's reserve (CR-2026-048 to -055, -081),
+        // over the whole document so an enclosing repeat's names are known.
+        CheckIterator(root);
+        schema.RepeatOnlyNames = RepeatOnlyNames(root);
 
         if (root.TryGetValue("definitions", out var defs) && defs is YamlMappingNode defsMap)
         {
@@ -648,6 +652,21 @@ public static class SchemaParser
         if (fm.TryGetValue("until", out var until)) f.Until = Scalar(until);
         if (fm.TryGetValue("max", out var maxV)) f.Max = Int(maxV);
         if (fm.TryGetValue("min", out var minV)) f.Min = Int(minV);
+        // The repeat iterator (CR-2026-048, -053, -054, -055). Their schema rules are
+        // checked over the whole document by CheckIterator once the fields are parsed.
+        if (fm.TryGetValue("index", out var indexNode)) f.Index = Scalar(indexNode);
+        if (fm.TryGetValue("count_as", out var countAsNode)) f.CountAs = Scalar(countAsNode);
+        if (fm.TryGetValue("identity", out var identityNode)) f.Identity = Scalar(identityNode);
+        if (fm.TryGetValue("reserve", out var reserveNode)) f.Reserve = Int(reserveNode);
+        if (fm.TryGetValue("trailer", out var trailerNode) && trailerNode is YamlSequenceNode trailerSeq)
+            f.Trailer = ParseFields(trailerSeq);
+        if (fm.TryGetValue("present_if", out var presentNode) && presentNode is YamlMappingNode presentMap)
+            f.PresentIf = ParseGuardCondition(presentMap);
+        if (fm.TryGetValue("carry", out var carryNode))
+        {
+            var carry = ParseScalarValue(carryNode);
+            f.Carry = carry is int ci2 ? (double)ci2 : carry;
+        }
 
         // Bytes format
         if (fm.TryGetValue("format", out var fmt)) f.Format = Scalar(fmt);
@@ -771,21 +790,7 @@ public static class SchemaParser
                 foreach (var w in whenSeq.Children)
                 {
                     if (w is YamlMappingNode wm)
-                    {
-                        var gc = new GuardCondition();
-                        if (wm.TryGetValue("field", out var gf)) gc.Field = Scalar(gf);
-                        if (wm.TryGetValue("gt", out var gt)) gc.Gt = Double(gt);
-                        if (wm.TryGetValue("gte", out var gte)) gc.Gte = Double(gte);
-                        if (wm.TryGetValue("lt", out var lt)) gc.Lt = Double(lt);
-                        if (wm.TryGetValue("lte", out var lte)) gc.Lte = Double(lte);
-                        if (wm.TryGetValue("eq", out var eq)) gc.Eq = Double(eq);
-                        // ne was neither parsed nor evaluated, so a guard written with
-                        // it could never fail: vicki's _tempStandard stayed live on the
-                        // firmware 3.5 path and was added to _tempFw35, reporting 46.95
-                        // where the vendor gives 14.76.
-                        if (wm.TryGetValue("ne", out var ne)) gc.Ne = Double(ne);
-                        gd.When.Add(gc);
-                    }
+                        gd.When.Add(ParseGuardCondition(wm));
                 }
             }
             f.Guard = gd;
@@ -873,6 +878,22 @@ public static class SchemaParser
         }
 
         return f;
+    }
+
+    static GuardCondition ParseGuardCondition(YamlMappingNode wm)
+    {
+        var gc = new GuardCondition();
+        if (wm.TryGetValue("field", out var gf)) gc.Field = Scalar(gf);
+        if (wm.TryGetValue("gt", out var gt)) gc.Gt = Double(gt);
+        if (wm.TryGetValue("gte", out var gte)) gc.Gte = Double(gte);
+        if (wm.TryGetValue("lt", out var lt)) gc.Lt = Double(lt);
+        if (wm.TryGetValue("lte", out var lte)) gc.Lte = Double(lte);
+        if (wm.TryGetValue("eq", out var eq)) gc.Eq = Double(eq);
+        // ne was neither parsed nor evaluated, so a guard written with it could never
+        // fail: vicki's _tempStandard stayed live on the firmware 3.5 path and was added
+        // to _tempFw35, reporting 46.95 where the vendor gives 14.76.
+        if (wm.TryGetValue("ne", out var ne)) gc.Ne = Double(ne);
+        return gc;
     }
 
     // Helper: get scalar string value from a YAML node
