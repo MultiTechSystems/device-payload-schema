@@ -35,6 +35,8 @@ public class Schema {
     private String direction;
     private List<Field> fields;
     private Map<String, PortDef> ports;
+    /** Names declared only inside some repeat's elements (PS-368). */
+    private Set<String> repeatOnlyNames = Set.of();
 
     public Schema() {
         this.fields = new ArrayList<>();
@@ -81,8 +83,13 @@ public class Schema {
     private static Schema parseRaw(Map<String, Object> raw) {
         // CR-2026-045: splice every $ref first, rejecting what cannot be (PS-345 to PS-349).
         raw = expandRawRefs(raw);
+        // Wave 6a (CR-2026-048, -053, -054, -055, -081): the iterator's and the reserves'
+        // schema rules, over the whole document, since PS-369 and PS-381 depend on which
+        // repeats enclose a field.
+        Wave6a.checkSchema(raw);
         Schema schema = new Schema();
-        
+        schema.repeatOnlyNames = Wave6a.repeatOnlyNames(raw);
+
         schema.name = (String) raw.getOrDefault("name", "unnamed");
         schema.version = toInt(raw.get("version"), 1);
         schema.description = (String) raw.get("description");
@@ -762,7 +769,20 @@ public class Schema {
         f.setUntil((String) fm.get("until"));
         f.setMax(toInt(fm.get("max"), 0));
         f.setMin(toInt(fm.get("min"), 0));
-        
+        // The iterator and reserved trailers (wave 6a). Their schema rules are checked by
+        // Wave6a before parsing; `reserve` is read here for a repeat and, through the
+        // parse of the inline block, for a tlv (PS-471).
+        if (fm.get("index") instanceof String index && !index.isEmpty()) f.setIndex(index);
+        if (fm.get("count_as") instanceof String countAs && !countAs.isEmpty()) f.setCountAs(countAs);
+        if (fm.get("present_if") instanceof Map<?, ?> presentIf) {
+            f.setPresentIf(parseGuard(Map.of("when", List.of(presentIf))));
+        }
+        if (fm.containsKey("carry")) f.setCarry(fm.get("carry"));
+        f.setReserve(toInt(fm.get("reserve"), 0));
+        if (fm.get("trailer") instanceof List<?> trailer) {
+            f.setTrailer(parseFields((List<Map<String, Object>>) trailer));
+        }
+
         // Bytes format
         f.setFormat((String) fm.get("format"));
         f.setSeparator((String) fm.get("separator"));
@@ -898,6 +918,7 @@ public class Schema {
                     + name + "' selects its fields by port (PS-459)");
         }
         DecodeContext ctx = new DecodeContext(data, endian);
+        ctx.setRepeatOnlyNames(repeatOnlyNames);
         Map<String, Object> result = new LinkedHashMap<>();
 
         // Decode main fields
@@ -927,6 +948,7 @@ public class Schema {
         List<Field> resolvedFields = resolveFields(fPort);
         
         DecodeContext ctx = new DecodeContext(data, endian);
+        ctx.setRepeatOnlyNames(repeatOnlyNames);
         Map<String, Object> result = new LinkedHashMap<>();
 
         // Decode resolved fields
@@ -1068,6 +1090,14 @@ public class Schema {
         Map<String, Object> result = new LinkedHashMap<>();
         
         for (Field field : fieldList) {
+            // PS-383: a repeat's trailer is decoded from the reserved bytes before its
+            // first element, so its names are bound for the elements, and it is reported
+            // beside the repeat.
+            if (field.getType() == FieldType.REPEAT && field.getTrailer() != null
+                    && !field.getTrailer().isEmpty()) {
+                decodeTrailer(field, ctx, result);
+            }
+
             // Handle TLV
             if (field.getType() == FieldType.TLV) {
                 Map<String, Object> tlvResult = decodeTLV(field, ctx);
@@ -1138,6 +1168,28 @@ public class Schema {
         }
         
         return result;
+    }
+
+    /**
+     * Decode a repeat's trailer from the last {@code reserve} bytes of the region into the
+     * enclosing scope (PS-383): bound for the elements and every later field, and reported
+     * as siblings of the repeat. The read position is left where it was, for the elements.
+     */
+    private void decodeTrailer(Field repeat, DecodeContext ctx, Map<String, Object> result) {
+        int reserve = repeat.getReserve();
+        int start = ctx.getLimit() - reserve;
+        if (start < ctx.getOffset()) {
+            throw new SchemaException.DecodeException(String.format(
+                    "repeat '%s' reserves %d byte(s) but %d remain at offset %d (PS-351)",
+                    repeat.getName(), reserve, ctx.remaining(), ctx.getOffset()));
+        }
+        int saved = ctx.getOffset();
+        ctx.setOffset(start);
+        try {
+            result.putAll(decodeFields(repeat.getTrailer(), ctx));
+        } finally {
+            ctx.setOffset(saved);
+        }
     }
 
     private Map<String, Object> decodeFlagged(Field.FlaggedDef fd, DecodeContext ctx) {
@@ -1580,8 +1632,30 @@ public class Schema {
         return inline;
     }
 
-    @SuppressWarnings("unchecked")
+    /**
+     * PS-471: the loop stops {@code reserve} bytes before the region ends, and the fields
+     * after the tlv decode from them. The region is narrowed while the loop runs, so every
+     * entry is read inside it.
+     */
     private Map<String, Object> decodeTLV(Field field, DecodeContext ctx) {
+        int reserve = field.getReserve();
+        if (reserve <= 0) return decodeTLVEntries(field, ctx);
+        if (ctx.remaining() < reserve) {
+            throw new SchemaException.DecodeException(String.format(
+                    "tlv reserves %d byte(s) but %d remain at offset %d (PS-471)",
+                    reserve, ctx.remaining(), ctx.getOffset()));
+        }
+        int limit = ctx.getLimit();
+        ctx.setLimit(limit - reserve);
+        try {
+            return decodeTLVEntries(field, ctx);
+        } finally {
+            ctx.setLimit(limit);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> decodeTLVEntries(Field field, DecodeContext ctx) {
         int tagSize = field.getTagSize() > 0 ? field.getTagSize() : 1;
         int lengthSize = field.getLengthSize();
         boolean merge = field.getMerge() == null || field.getMerge();
@@ -1708,8 +1782,8 @@ public class Schema {
                     // onwards is lost (PS-302).
                     ctx.addWarning(String.format(
                         "unknown TLV tag (%s) at offset %d: %d of %d byte(s) left undecoded",
-                        label, entryStart, ctx.getData().length - entryStart,
-                        ctx.getData().length));
+                        label, entryStart, ctx.getLimit() - entryStart,
+                        ctx.getLimit()));
                     break;
                 }
             }
@@ -1837,12 +1911,30 @@ public class Schema {
         return specificity;
     }
 
+    /**
+     * Decode a repeat (count, byte_length, or until: end less any reserve).
+     *
+     * <p>Each element goes through the same field-list decoder as the top level, in a scope
+     * of its own: its names resolve within the element and are gone after it (PS-368). The
+     * index is bound while each is decoded (PS-366), present_if drops an element after it is
+     * decoded (PS-386), a carried field sees its own previous value (PS-378 to PS-380), and
+     * count_as is bound to the number reported once the array is complete (PS-367,
+     * CR-2026-080). Mirrors _decode_repeat in tools/schema_interpreter.py.
+     */
     private List<Map<String, Object>> decodeRepeat(Field field, DecodeContext ctx) {
         int maxIterations = field.getMax() > 0 ? field.getMax() : 1000;
         int minIterations = field.getMin();
-        
+
         List<Map<String, Object>> result = new ArrayList<>();
-        
+        int[] iterations = {0};
+
+        // PS-378, PS-380: a carried field starts again from its `carry` value each time
+        // the repeat begins, including each iteration of an enclosing repeat.
+        Map<String, Object> carryState = new LinkedHashMap<>();
+        for (Field nested : field.getFields() == null ? List.<Field>of() : field.getFields()) {
+            if (nested.hasCarry()) carryState.put(nested.getName(), carryInitial(nested, ctx));
+        }
+
         if (field.getCount() != null) {
             int count;
             if (field.getCount() instanceof Number) {
@@ -1863,11 +1955,11 @@ public class Schema {
             // clamp had discarded.
             if (count > maxIterations) {
                 throw repeatLimitError(field, maxIterations, "count " + count,
-                        ctx.getOffset(), ctx.getData().length);
+                        ctx.getOffset(), ctx.getLimit());
             }
             
             for (int i = 0; i < count; i++) {
-                result.add(decodeFields(field.getFields(), ctx));
+                decodeElement(field, ctx, iterations, carryState, result);
             }
         } else if (field.getByteLength() != null) {
             int byteLen;
@@ -1885,11 +1977,9 @@ public class Schema {
             }
             
             int endOffset = ctx.getOffset() + byteLen;
-            int iterations = 0;
-            
-            while (ctx.getOffset() < endOffset && iterations < maxIterations) {
-                result.add(decodeFields(field.getFields(), ctx));
-                iterations++;
+
+            while (ctx.getOffset() < endOffset && iterations[0] < maxIterations) {
+                decodeElement(field, ctx, iterations, carryState, result);
             }
             
             if (ctx.getOffset() != endOffset) {
@@ -1897,7 +1987,7 @@ public class Schema {
                 // blame the payload for both ways they do not - "expected end at 4, got
                 // 2" reads as a short payload even where the schema's own ceiling stopped
                 // the loop with bytes to spare (CR-2026-022).
-                if (iterations >= maxIterations && ctx.getOffset() < endOffset) {
+                if (iterations[0] >= maxIterations && ctx.getOffset() < endOffset) {
                     throw repeatLimitError(field, maxIterations, "byte_length " + byteLen,
                             ctx.getOffset(), endOffset);
                 }
@@ -1905,39 +1995,113 @@ public class Schema {
                     String.format("Repeat byte_length mismatch: expected end at %d, got %d", endOffset, ctx.getOffset()));
             }
         } else if ("end".equals(field.getUntil())) {
-            int iterations = 0;
             // PS-343 to PS-344a: a tail too short for a whole element is an error naming
             // the repeat as a ragged tail, tested before the element begins where its
             // size is fixed. This began the element and failed part-way with the
             // underflow of whichever member ran out.
-            int elementSize = fixedElementSize(field.getFields());
-            while (ctx.remaining() > 0 && iterations < maxIterations) {
-                int start = ctx.getOffset();
-                if (elementSize > 0 && ctx.remaining() < elementSize) {
-                    throw raggedTailError(field, ctx.remaining(), elementSize, start);
-                }
-                try {
-                    result.add(decodeFields(field.getFields(), ctx));
-                } catch (SchemaException.DecodeException e) {
-                    if (e.getMessage() == null || !e.getMessage().contains("Buffer underflow")) throw e;
-                    throw raggedTailError(field, ctx.getData().length - start, 0, start);
-                }
-                iterations++;
+            //
+            // PS-350, PS-351: the region ends `reserve` bytes before the payload does,
+            // and the ragged-tail rule applies to that region. Its elements decode with
+            // the region narrowed to it, so nothing inside one can read the trailer.
+            int reserve = field.getReserve();
+            int payloadEnd = ctx.getLimit();
+            int regionEnd = payloadEnd - reserve;
+            if (regionEnd < ctx.getOffset()) {
+                throw new SchemaException.DecodeException(String.format(
+                        "repeat '%s' reserves %d byte(s) but %d remain at offset %d (PS-351)",
+                        field.getName(), reserve, ctx.remaining(), ctx.getOffset()));
             }
-            if (iterations >= maxIterations && ctx.remaining() > 0) {
-                throw repeatLimitError(field, maxIterations, "until: end",
-                        ctx.getOffset(), ctx.getData().length);
+            int elementSize = fixedElementSize(field.getFields());
+            ctx.setLimit(regionEnd);
+            try {
+                while (ctx.remaining() > 0 && iterations[0] < maxIterations) {
+                    int start = ctx.getOffset();
+                    if (elementSize > 0 && ctx.remaining() < elementSize) {
+                        throw raggedTailError(field, ctx.remaining(), elementSize, start);
+                    }
+                    try {
+                        decodeElement(field, ctx, iterations, carryState, result);
+                    } catch (SchemaException.DecodeException e) {
+                        if (e.getMessage() == null || !e.getMessage().contains("Buffer underflow")) throw e;
+                        throw raggedTailError(field, regionEnd - start, 0, start);
+                    }
+                }
+                if (iterations[0] >= maxIterations && ctx.remaining() > 0) {
+                    throw repeatLimitError(field, maxIterations, "until: end",
+                            ctx.getOffset(), regionEnd);
+                }
+            } finally {
+                ctx.setLimit(payloadEnd);
+            }
+            // PS-383: a trailer was decoded from the reserved bytes before the first
+            // element, so nothing after the repeat reads them again.
+            if (field.getTrailer() != null && !field.getTrailer().isEmpty()) {
+                ctx.setOffset(payloadEnd);
             }
         } else {
             throw new SchemaException.DecodeException("Repeat field must specify one of: count, byte_length, or until");
         }
-        
+
         if (result.size() < minIterations) {
             throw new SchemaException.DecodeException(
                 String.format("Repeat produced %d elements, but minimum is %d", result.size(), minIterations));
         }
-        
+
+        // PS-367: the number of elements reported, bound for every later field only.
+        if (field.getCountAs() != null) {
+            ctx.setVariable(field.getCountAs(), (long) result.size());
+        }
+
         return result;
+    }
+
+    /**
+     * Decode one element in a scope of its own, and append it unless present_if drops it.
+     * The iteration count advances either way (PS-386).
+     */
+    private void decodeElement(Field repeat, DecodeContext ctx, int[] iterations,
+                               Map<String, Object> carryState, List<Map<String, Object>> result) {
+        Map<String, Object> outer = ctx.snapshotVariables();
+        Set<String> savedNames = ctx.getElementNames();
+        List<Field> members = repeat.getFields() == null ? List.of() : repeat.getFields();
+        Set<String> names = new HashSet<>();
+        for (Field member : members) names.add(member.getName());
+        ctx.setElementNames(names);
+        if (repeat.getIndex() != null) {
+            ctx.setVariable(repeat.getIndex(), (long) iterations[0]);      // PS-366
+        }
+        ctx.getVariables().putAll(carryState);                              // PS-379
+        Map<String, Object> element;
+        boolean keep;
+        try {
+            element = decodeFields(members, ctx);
+            for (String carried : carryState.keySet()) {
+                if (ctx.getVariables().containsKey(carried)) {
+                    carryState.put(carried, ctx.getVariable(carried));
+                }
+            }
+            keep = repeat.getPresentIf() == null || guardPasses(repeat.getPresentIf(), ctx);
+        } finally {
+            // PS-368: an element's names do not outlive it.
+            ctx.restoreVariables(outer);
+            ctx.setElementNames(savedNames);
+        }
+        iterations[0]++;
+        if (keep) result.add(element);                                      // PS-386
+    }
+
+    /** A carried field's value before the first element (PS-378). */
+    private static Object carryInitial(Field field, DecodeContext ctx) {
+        Object carry = field.getCarry();
+        if (carry instanceof String text && text.startsWith("$")) {
+            String name = text.substring(1);
+            if (!ctx.getVariables().containsKey(name)) {
+                throw new SchemaException.DecodeException("carry of '" + field.getName() + "' names "
+                        + text + ", which was not decoded before the repeat (PS-381)");
+            }
+            return ctx.getVariable(name);
+        }
+        return carry;
     }
 
     private String decodeBitfieldString(long intVal, Field field) {
@@ -2329,7 +2493,7 @@ public class Schema {
     /** Resolve a {@code $field} reference against decoded variables, or a literal. */
     private double resolveOperand(Object spec, DecodeContext ctx) {
         if (spec instanceof String text && text.startsWith("$")) {
-            Object value = ctx.getVariable(text.substring(1));
+            Object value = ctx.ref(text.substring(1));     // PS-368
             return value instanceof Number number ? number.doubleValue() : 0.0;
         }
         Double literal = toDouble(spec);
@@ -2339,7 +2503,7 @@ public class Schema {
     private boolean guardPasses(Field.Guard guard, DecodeContext ctx) {
         for (Field.Condition condition : guard.getWhen()) {
             if (!condition.getField().startsWith("$")) continue;
-            Object raw = ctx.getVariable(condition.getField().substring(1));
+            Object raw = ctx.ref(condition.getField().substring(1));     // PS-368
             double value = raw instanceof Number number ? number.doubleValue() : 0.0;
             double operand = condition.getOperand() == null ? 0.0 : condition.getOperand();
             boolean passed = switch (condition.getOp()) {

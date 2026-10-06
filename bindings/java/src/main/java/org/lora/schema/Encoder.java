@@ -453,14 +453,42 @@ final class Encoder {
                     + "': expected a list of records, got " + records.getClass().getSimpleName());
         }
 
+        // PS-387: an element present_if dropped is not in the data, and its bytes were in
+        // the payload, so they cannot be written back. Only elements that read nothing
+        // (computed fields and literals) can be encoded.
+        if (field.getPresentIf() != null && field.getFields() != null) {
+            for (Field member : field.getFields()) {
+                boolean readsNothing = member.getType() == FieldType.NUMBER
+                        || (member.getType() == FieldType.STRING && member.getValue() != null);
+                if (!readsNothing) {
+                    throw new SchemaException.EncodeException("repeat field '" + name
+                            + "' declares present_if and its elements read payload bytes, so the "
+                            + "elements it dropped cannot be encoded (PS-387)");
+                }
+            }
+        }
+
+        String index = field.getIndex();
         ByteBuf out = new ByteBuf();
-        for (Object record : list) {
+        for (int position = 0; position < list.size(); position++) {
+            Object record = list.get(position);
             if (!(record instanceof Map<?, ?> asMap)) {
                 throw new SchemaException.EncodeException("repeat field '" + name
                         + "': expected each record to be a mapping, got "
                         + record.getClass().getSimpleName());
             }
-            out.write(encodeFieldList(field.getFields(), stringKeyed(asMap)));
+            Map<String, Object> element = stringKeyed(asMap);
+            if (index != null) {
+                // PS-370: the index is bound while each element is encoded, as it was
+                // while each was decoded, so a name_from template resolves the same way.
+                element = new LinkedHashMap<>(element);
+                element.put(index, (long) position);
+            }
+            out.write(encodeFieldList(field.getFields(), element));
+        }
+        // PS-385: the elements, then the trailer, whose values sit beside the repeat.
+        if (field.getTrailer() != null && !field.getTrailer().isEmpty()) {
+            out.write(encodeFieldList(field.getTrailer(), data));
         }
         return out.toArray();
     }
