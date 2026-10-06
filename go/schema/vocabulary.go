@@ -144,6 +144,9 @@ func checkTypeVocabulary(raw map[string]any) error {
 			if err := check(field["fields"], at+".fields"); err != nil {
 				return err
 			}
+			if err := check(field["trailer"], at+".trailer"); err != nil {
+				return err
+			}
 			switch group := field["byte_group"].(type) {
 			case []any:
 				if err := check(group, at+".byte_group"); err != nil {
