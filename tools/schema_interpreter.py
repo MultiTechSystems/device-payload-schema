@@ -803,7 +803,9 @@ def _repeat_member_ref_errors(repeat, member, where):
         refs.extend(('senml.name', name) for name in re.findall(r'\$\{([^}]+)\}', senml['name']))
     for key, name in refs:
         if name == index:
-            if not (isinstance(repeat.get('count'), int) or 'max' in repeat):
+            count = repeat.get('count')
+            if not ((isinstance(count, int) and not isinstance(count, bool))
+                    or 'max' in repeat):
                 errors.append(f"{where}: {key} uses the index {name!r}, so the repeat needs a "
                               f"literal count or a max (PS-374)")
             continue
