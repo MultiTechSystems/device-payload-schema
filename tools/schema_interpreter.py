@@ -783,6 +783,196 @@ def lookup_template_errors(field_def):
             f"{len(numeric)} are not (PS-407)"]
 
 
+_ITERATOR_KEYS = ('index', 'count_as')
+
+
+def _repeat_member_ref_errors(repeat, member, where):
+    """PS-373, PS-374: a per-element unit, IPSO instance or SenML name, and what it names."""
+    errors = []
+    by_name = {f.get('name'): f for f in repeat.get('fields') or [] if isinstance(f, dict)}
+    index = repeat.get('index')
+    refs = []
+    if isinstance(member.get('unit'), str) and member['unit'].startswith('$'):
+        refs.append(('unit', member['unit'][1:]))
+    ipso = member.get('ipso')
+    if isinstance(ipso, dict) and isinstance(ipso.get('instance'), str):
+        if ipso['instance'].startswith('$'):
+            refs.append(('ipso.instance', ipso['instance'][1:]))
+    senml = member.get('senml')
+    if isinstance(senml, dict) and isinstance(senml.get('name'), str):
+        refs.extend(('senml.name', name) for name in re.findall(r'\$\{([^}]+)\}', senml['name']))
+    for key, name in refs:
+        if name == index:
+            if not (isinstance(repeat.get('count'), int) or 'max' in repeat):
+                errors.append(f"{where}: {key} uses the index {name!r}, so the repeat needs a "
+                              f"literal count or a max (PS-374)")
+            continue
+        target = by_name.get(name)
+        if target is None:
+            errors.append(f"{where}: {key} names {name!r}, which is neither a field of the "
+                          f"element nor the repeat's index (PS-373)")
+        elif not ('lookup' in target or is_literal(target)):
+            errors.append(f"{where}: {key} names {name!r}, which must carry a lookup or be a "
+                          f"literal so its values are known from the schema (PS-374)")
+    return errors
+
+
+def iterator_errors(fields, enclosing=(), in_elements=False, where='fields'):
+    """The repeat iterator's schema rules, checked at load (CR-2026-048, -053, -054, -055).
+
+    PS-350/PS-383/PS-384 (reserve and trailer), PS-369 (index and count_as names), PS-372
+    to PS-374 (identity and per-element references), PS-381 (carry), and `present_if`'s
+    form (PS-386). Walks nested field lists so an enclosing repeat's names are known.
+    """
+    errors = []
+    for i, f in enumerate(fields or []):
+        if not isinstance(f, dict):
+            continue
+        at = f"{where}[{i}] ({f.get('name', '?')})"
+        if 'carry' in f:
+            carry = f['carry']
+            if not in_elements or f.get('type') not in COMPUTED_TYPES:
+                errors.append(f"{at}: carry applies only to a computed field declared in a "
+                              f"repeat's elements (PS-381)")
+            elif isinstance(carry, bool) or not (
+                    isinstance(carry, (int, float))
+                    or (isinstance(carry, str) and carry.startswith('$'))):
+                errors.append(f"{at}: carry must be a numeric literal or a $ reference to a "
+                              f"field decoded before the repeat (PS-381)")
+        if f.get('type') == 'repeat':
+            members = f.get('fields') or []
+            names = {m.get('name') for m in members if isinstance(m, dict)}
+            own = []
+            for key in _ITERATOR_KEYS:
+                value = f.get(key)
+                if value is None:
+                    continue
+                if not isinstance(value, str) or not value:
+                    errors.append(f"{at}: {key} must be a name (PS-366, PS-367)")
+                    continue
+                if value in names or value in enclosing or value in own:
+                    errors.append(f"{at}: {key} {value!r} names a field of the element, or an "
+                                  f"index or count_as already in scope (PS-369)")
+                own.append(value)
+            if 'reserve' in f:
+                reserve = f['reserve']
+                if f.get('until') != 'end':
+                    errors.append(f"{at}: reserve applies only to a repeat with until: end "
+                                  f"(PS-350)")
+                elif isinstance(reserve, bool) or not isinstance(reserve, int) or reserve < 0:
+                    errors.append(f"{at}: reserve must be a non-negative integer (PS-350)")
+            if 'trailer' in f:
+                trailer = f['trailer']
+                size = fixed_element_size(trailer) if isinstance(trailer, list) else None
+                if 'reserve' not in f:
+                    errors.append(f"{at}: trailer needs reserve (PS-383)")
+                elif size is None:
+                    errors.append(f"{at}: every trailer field needs a size known from the "
+                                  f"schema (PS-384)")
+                elif size != f.get('reserve'):
+                    errors.append(f"{at}: the trailer's fields take {size} byte(s), and "
+                                  f"reserve is {f.get('reserve')}; they must be equal (PS-384)")
+            present_if = f.get('present_if')
+            if present_if is not None and not (
+                    isinstance(present_if, dict)
+                    and isinstance(present_if.get('field'), str)
+                    and any(op in present_if for op in ('gt', 'gte', 'lt', 'lte', 'eq', 'ne'))):
+                errors.append(f"{at}: present_if must be one guard condition, "
+                              f"{{field: $name, <op>: value}} (PS-386)")
+            identity = f.get('identity')
+            if identity is not None and not (
+                    identity == f.get('index')
+                    or (isinstance(identity, str) and identity.startswith('$')
+                        and identity[1:] in names)):
+                errors.append(f"{at}: identity must be the repeat's index or a $ reference "
+                              f"to a field of its elements (PS-372)")
+            for j, member in enumerate(members):
+                if isinstance(member, dict):
+                    errors.extend(_repeat_member_ref_errors(
+                        f, member, f"{at}.fields[{j}] ({member.get('name', '?')})"))
+            errors.extend(iterator_errors(members, tuple(enclosing) + tuple(own), True,
+                                          f"{at}.fields"))
+            if isinstance(f.get('trailer'), list):
+                errors.extend(iterator_errors(f['trailer'], enclosing, False,
+                                              f"{at}.trailer"))
+            continue
+        for key in ('fields',):
+            if isinstance(f.get(key), list):
+                errors.extend(iterator_errors(f[key], enclosing, False, f"{at}.{key}"))
+        for construct in ('match', 'tlv', 'flagged', 'byte_group'):
+            body = f.get(construct)
+            if isinstance(body, dict):
+                cases = body.get('cases')
+                case_lists = (cases.values() if isinstance(cases, dict)
+                              else cases if isinstance(cases, list) else [])
+                for case in case_lists:
+                    group = case if isinstance(case, list) else (case or {}).get('fields')
+                    errors.extend(iterator_errors(group, enclosing, False, f"{at}.{construct}"))
+                if isinstance(body.get('fields'), list):
+                    errors.extend(iterator_errors(body['fields'], enclosing, False,
+                                                  f"{at}.{construct}"))
+                for group in body.get('groups') or []:
+                    if isinstance(group, dict):
+                        errors.extend(iterator_errors(group.get('fields'), enclosing, False,
+                                                      f"{at}.{construct}"))
+    return errors
+
+
+def repeat_only_names(schema):
+    """Names declared in some repeat's elements and nowhere outside one (PS-368)."""
+    inside, outside = set(), set()
+
+    def walk(node, in_elements):
+        if isinstance(node, dict):
+            name = node.get('name')
+            if isinstance(name, str) and ('type' in node or 'fields' in node):
+                (inside if in_elements else outside).add(name)
+            for key, value in node.items():
+                if key in ('test_vectors', 'definitions'):
+                    continue
+                walk(value, in_elements or (key == 'fields' and node.get('type') == 'repeat'))
+        elif isinstance(node, list):
+            for item in node:
+                walk(item, in_elements)
+
+    walk(schema, False)
+    return inside - outside
+
+
+def tlv_reserve_errors(field_def):
+    """PS-471: a tlv's reserve is a non-negative integer."""
+    body = field_def.get('tlv') if isinstance(field_def, dict) else None
+    if not isinstance(body, dict) or 'reserve' not in body:
+        return []
+    reserve = body['reserve']
+    if isinstance(reserve, bool) or not isinstance(reserve, int) or reserve < 0:
+        return [f"tlv reserve must be a non-negative integer, got {reserve!r} (PS-471)"]
+    return []
+
+
+def schema_iterator_errors(schema):
+    """iterator_errors over the top-level and port field lists, and every tlv's reserve."""
+    errors = iterator_errors(schema.get('fields'))
+    for port, entry in (schema.get('ports') or {}).items():
+        group = entry.get('fields') if isinstance(entry, dict) else entry
+        errors.extend(iterator_errors(group, where=f"ports[{port}].fields"))
+
+    def tlvs(node):
+        if isinstance(node, dict):
+            if 'tlv' in node and not node.get('type'):
+                yield node
+            for key, value in node.items():
+                if key not in ('test_vectors', 'definitions'):
+                    yield from tlvs(value)
+        elif isinstance(node, list):
+            for item in node:
+                yield from tlvs(item)
+
+    for node in tlvs(schema):
+        errors.extend(tlv_reserve_errors(node))
+    return errors
+
+
 #: The timestamp modes that read a field as seconds since an epoch (PS-354, PS-410).
 EPOCH_MODES = ('unix_epoch', 'iso8601', 'calendar')
 
@@ -1108,6 +1298,8 @@ class SchemaInterpreter:
             self._load_errors.extend(encoding_errors(field_def))
             self._load_errors.extend(lookup_template_errors(field_def))
         self._load_errors.extend(timestamp_errors(schema.get('metadata')))
+        self._load_errors.extend(schema_iterator_errors(schema))
+        self._repeat_only_names = repeat_only_names(schema)
         self.schema = schema
         self.endian = Endian(schema.get('endian', 'big'))
         self.name = schema.get('name', 'unknown')
@@ -1774,29 +1966,73 @@ class SchemaInterpreter:
                        pos: int) -> Tuple[List[Any], int]:
         """
         Decode repeated/array field.
-        
+
         Supports three modes:
         - count: fixed number of iterations (int or $variable)
         - byte_length: repeat until N bytes consumed (int or $variable)
-        - until: "end" to repeat until payload exhausted
-        
+        - until: "end" to repeat until payload exhausted, less any `reserve` (PS-350)
+
         Options:
         - max: maximum iterations (safety limit, default 1000)
         - min: minimum required iterations
         - fields: nested fields to decode per iteration
+        - index, count_as, present_if (PS-366 to PS-370, PS-386): the iterator
+        - reserve, trailer (PS-350, PS-351, PS-383): bytes at the end it must not read
+
+        Each element goes through the same field-list decoder as the top level, in a
+        scope of its own: its names resolve within the element and are gone after it
+        (PS-368). A carried field sees its own previous value (PS-378 to PS-380).
         """
         nested_fields = field_def.get('fields', [])
         max_iterations = field_def.get('max', 1000)
         min_iterations = field_def.get('min', 0)
-        
+
         result = []
         iterations = 0
-        
+
         # Determine iteration mode
         count = field_def.get('count')
         byte_length = field_def.get('byte_length')
         until = field_def.get('until')
-        
+
+        # PS-378, PS-380: a carried field starts again from its `carry` value each time
+        # the repeat begins, including each iteration of an enclosing repeat.
+        carry_state = {}
+        for nested in nested_fields:
+            if isinstance(nested, dict) and 'carry' in nested:
+                carry_state[nested['name']] = self._carry_initial(nested)
+
+        def element(at: int, region: bytes) -> int:
+            """Decode one element from `region`; append it unless present_if drops it."""
+            nonlocal iterations
+            outer = dict(self._variables)
+            saved_current = self._current_data
+            saved_names = getattr(self, '_element_names', None)
+            self._element_names = {f.get('name') for f in nested_fields if isinstance(f, dict)}
+            if field_def.get('index'):
+                self._variables[field_def['index']] = iterations       # PS-366
+            self._variables.update(carry_state)                      # PS-379
+            scratch = DecodeResult(data={}, bytes_consumed=0)
+            self._current_data = scratch.data
+            try:
+                new_pos = self._decode_field_list(nested_fields, region, at, scratch)
+                if scratch.errors:
+                    raise ValueError(scratch.errors[0])
+                for carried in carry_state:
+                    if carried in self._variables:
+                        carry_state[carried] = self._variables[carried]
+                keep = (not field_def.get('present_if')
+                        or self._evaluate_guard({'when': [field_def['present_if']]})[0])
+            finally:
+                # PS-368: an element's names do not outlive it.
+                self._variables = outer
+                self._current_data = saved_current
+                self._element_names = saved_names
+            iterations += 1
+            if keep:                                                 # PS-386
+                result.append(scratch.data)
+            return new_pos
+
         if count is not None:
             # Count-based: fixed number of iterations
             if isinstance(count, str) and count.startswith('$'):
@@ -1807,24 +2043,17 @@ class SchemaInterpreter:
                     raise ValueError(f"repeat count variable not found: {var_name}")
             else:
                 count = int(count)
-            
+
             # PS-396: more elements than `max` is an error, not a silent truncation. The
             # count was clamped here, so every field after the repeat was read from
             # inside an element the clamp had discarded.
             if count > max_iterations:
                 raise ValueError(repeat_limit_message(
                     field_def, max_iterations, f"count {count}", pos, len(buf)))
-            
+
             for _ in range(count):
-                element = {}
-                for nested_field in nested_fields:
-                    name = nested_field.get('name', 'unknown')
-                    value, pos = self._decode_field(nested_field, buf, pos)
-                    value = self._apply_modifiers(value, nested_field)
-                    if value is not None:
-                        element[name] = value
-                result.append(element)
-                
+                pos = element(pos, buf)
+
         elif byte_length is not None:
             # Byte-length based: consume specified number of bytes
             if isinstance(byte_length, str) and byte_length.startswith('$'):
@@ -1835,20 +2064,12 @@ class SchemaInterpreter:
                     raise ValueError(f"repeat byte_length variable not found: {var_name}")
             else:
                 byte_length = int(byte_length)
-            
+
             end_pos = pos + byte_length
-            
+
             while pos < end_pos and iterations < max_iterations:
-                element = {}
-                for nested_field in nested_fields:
-                    name = nested_field.get('name', 'unknown')
-                    value, pos = self._decode_field(nested_field, buf, pos)
-                    value = self._apply_modifiers(value, nested_field)
-                    if value is not None:
-                        element[name] = value
-                result.append(element)
-                iterations += 1
-            
+                pos = element(pos, buf)
+
             if pos != end_pos:
                 # PS-088: the members must divide the span exactly. Two ways they do not,
                 # and the message used to blame the payload for both - "expected end at 4,
@@ -1861,51 +2082,90 @@ class SchemaInterpreter:
                 raise ValueError(
                     f"repeat byte_length mismatch: expected end at {end_pos}, got {pos}")
 
-
         elif until == 'end':
             # Until-end: repeat until payload exhausted. PS-343 to PS-344a: a tail too
             # short for a whole element is an error naming the repeat as a ragged tail,
             # tested before the element begins where the element's size is fixed. This
             # began the element and failed part-way with "Buffer too short", which read
             # as an underrun of whatever member happened to run out.
+            #
+            # PS-350, PS-351: the region ends `reserve` bytes before the payload does,
+            # and the ragged-tail rule applies to that region. Its elements decode from
+            # a buffer that stops there, so nothing inside one can read the trailer.
+            reserve = int(field_def.get('reserve', 0) or 0)
+            region_end = len(buf) - reserve
+            if region_end < pos:
+                raise ValueError(
+                    f"repeat {field_def.get('name', '?')!r} reserves {reserve} byte(s) "
+                    f"but {len(buf) - pos} remain at offset {pos} (PS-351)")
+            region = buf[:region_end]
             element_size = fixed_element_size(nested_fields)
-            while pos < len(buf) and iterations < max_iterations:
-                if element_size is not None and len(buf) - pos < element_size:
+            while pos < region_end and iterations < max_iterations:
+                if element_size is not None and region_end - pos < element_size:
                     raise ValueError(ragged_tail_message(
-                        field_def, len(buf) - pos, element_size, pos))
-                element = {}
+                        field_def, region_end - pos, element_size, pos))
                 start_pos = pos
-                for nested_field in nested_fields:
-                    name = nested_field.get('name', 'unknown')
-                    try:
-                        value, pos = self._decode_field(nested_field, buf, pos)
-                    except ValueError as exc:
-                        if 'too short' not in str(exc).lower():
-                            raise
-                        raise ValueError(ragged_tail_message(
-                            field_def, len(buf) - start_pos, None, start_pos)) from exc
-                    value = self._apply_modifiers(value, nested_field)
-                    if value is not None:
-                        element[name] = value
+                try:
+                    pos = element(pos, region)
+                except ValueError as exc:
+                    if 'too short' not in str(exc).lower():
+                        raise
+                    raise ValueError(ragged_tail_message(
+                        field_def, region_end - start_pos, None, start_pos)) from exc
                 # Safety: check we made progress
                 if pos == start_pos:
                     break
-                result.append(element)
-                iterations += 1
-            if iterations >= max_iterations and pos < len(buf):
+            if iterations >= max_iterations and pos < region_end:
                 # PS-396: stopping at the ceiling with payload left is an error, not a
                 # quiet end; the bytes after it were never decoded.
                 raise ValueError(repeat_limit_message(
-                    field_def, max_iterations, "until: end", pos, len(buf)))
+                    field_def, max_iterations, "until: end", pos, region_end))
+            # PS-383: a trailer was decoded from the reserved bytes before the first
+            # element, so nothing after the repeat reads them again.
+            if field_def.get('trailer'):
+                pos = len(buf)
         else:
             raise ValueError("repeat field must specify one of: count, byte_length, or until")
-        
+
         # Validate minimum iterations
         if len(result) < min_iterations:
             raise ValueError(f"repeat produced {len(result)} elements, but minimum is {min_iterations}")
-        
+
+        # PS-367: the number of elements reported, bound for every later field only.
+        if field_def.get('count_as'):
+            self._variables[field_def['count_as']] = len(result)
+
         return result, pos
-    
+
+    def _ref(self, name: str) -> Any:
+        """The value a `$name` reference resolves to.
+
+        PS-368: a name declared in a repeat's elements has a value only inside the
+        element, and only once it is decoded. A reference that breaks either rule is an
+        error rather than the 0 every other unbound reference still reads as - which is
+        how a reference to the last element's field, from after the array, went unnoticed.
+        """
+        if name in self._variables:
+            return self._variables[name]
+        if name in (getattr(self, '_element_names', None) or ()):
+            raise ValueError(f"${name} refers to a field of this element that is not yet "
+                             f"decoded (PS-368)")
+        if name in self._repeat_only_names:
+            raise ValueError(f"${name} is declared only inside a repeat's elements, so it "
+                             f"has no value here (PS-368)")
+        return 0
+
+    def _carry_initial(self, field_def: Dict[str, Any]) -> Any:
+        """A carried field's value before the first element (PS-378)."""
+        carry = field_def['carry']
+        if isinstance(carry, str) and carry.startswith('$'):
+            name = carry[1:]
+            if name not in self._variables:
+                raise ValueError(f"carry of {field_def.get('name')!r} names {carry}, which "
+                                 f"was not decoded before the repeat (PS-381)")
+            return self._variables[name]
+        return carry
+
     def _decode_match(self, field_def: Dict[str, Any], buf: bytes, 
                       pos: int) -> Tuple[Dict[str, Any], int]:
         """
@@ -2350,7 +2610,7 @@ class SchemaInterpreter:
         
         # Substitute $field_name references
         expr = re.sub(r'\$([a-zA-Z_][a-zA-Z0-9_]*)', 
-                      lambda m: str(self._variables.get(m.group(1), 0)), expr)
+                      lambda m: str(self._ref(m.group(1))), expr)
         
         # Replace standalone 'x' with raw value
         if x is not None:
@@ -2412,7 +2672,7 @@ class SchemaInterpreter:
         def resolve_operand(spec):
             if isinstance(spec, str) and spec.startswith('$'):
                 field_name = spec[1:]
-                return float(self._variables.get(field_name, 0))
+                return float(self._ref(field_name))
             return float(spec)
         
         a = resolve_operand(a_spec)
@@ -2463,7 +2723,7 @@ class SchemaInterpreter:
             field_ref = condition.get('field', '')
             if isinstance(field_ref, str) and field_ref.startswith('$'):
                 field_name = field_ref[1:]
-                field_value = float(self._variables.get(field_name, 0))
+                field_value = float(self._ref(field_name))
             else:
                 continue  # Invalid condition
             
@@ -2496,7 +2756,7 @@ class SchemaInterpreter:
         ref_field = field_def['ref']
         if isinstance(ref_field, str) and ref_field.startswith('$'):
             ref_name = ref_field[1:]
-            value = float(self._variables.get(ref_name, 0))
+            value = float(self._ref(ref_name))
         else:
             value = float(ref_field)
         
@@ -2755,6 +3015,15 @@ class SchemaInterpreter:
         """
         tlv_def = field_def.get('tlv', {})
         tag_size = tlv_def.get('tag_size', 1)
+        # PS-471: the loop stops `reserve` bytes before the payload ends, and the
+        # fields after the tlv decode from them. A buffer that stops there keeps every
+        # entry read inside the region.
+        reserve = int(tlv_def.get('reserve', 0) or 0)
+        if reserve:
+            if len(buf) - pos < reserve:
+                raise ValueError(f"tlv reserves {reserve} byte(s) but {len(buf) - pos} "
+                                 f"remain at offset {pos} (PS-471)")
+            buf = buf[:len(buf) - reserve]
         length_size = tlv_def.get('length_size', 0)
         merge = tlv_def.get('merge', True)
         unknown_mode = tlv_def.get('unknown', 'skip')
@@ -3060,7 +3329,60 @@ class SchemaInterpreter:
         pos = 0
         fields = self._resolve_fields(fPort)
         
+        pos = self._decode_field_list(fields, payload, 0, result)
+        
+        result.bytes_consumed = pos
+        
+        # Metadata enrichment
+        metadata_def = self.schema.get('metadata')
+        if metadata_def and input_metadata is not None:
+            self._enrich_metadata(result.data, metadata_def, input_metadata,
+                                  result.warnings)
+        
+        # Add quality dict to output if any quality flags were set
+        if result.quality:
+            result.data['_quality'] = dict(result.quality)
+
+        # CR-2026-008: report each value in its JSON representation. Done once here
+        # rather than at each of the several places a value enters result.data, so no
+        # decode path can bypass it.
+        normalized = {}
+        for key, value in result.data.items():
+            reported = normalize_output(value)
+            if reported is not OMITTED:
+                normalized[key] = reported
+        result.data = normalized
+
+        return result
+    
+    def _decode_field_list(self, fields: List[Dict[str, Any]], payload: bytes, pos: int,
+                           result: DecodeResult) -> int:
+        """Decode a list of fields into `result`, returning the read position after them.
+
+        The top-level field list and every repeat element go through here, so an element
+        has the same constructs, computed fields and internal fields as the top level.
+        Elements used to decode each member with `_decode_field` alone, which knows no
+        computed type and no bare construct, and reported `_` members.
+
+        Errors are recorded in `result.errors`; a field that cannot be read stops the
+        list, since every later offset would be wrong.
+        """
         for field_def in fields:
+            # PS-383: a repeat's trailer is decoded from the reserved bytes before its
+            # first element, so its names are bound for the elements, and it is reported
+            # beside the repeat.
+            if field_def.get('type') == 'repeat' and field_def.get('trailer'):
+                reserve = int(field_def.get('reserve', 0) or 0)
+                if len(payload) - reserve < pos:
+                    result.errors.append(
+                        f"Error decoding {field_def.get('name', '?')}: repeat reserves "
+                        f"{reserve} byte(s) but {len(payload) - pos} remain at offset "
+                        f"{pos} (PS-351)")
+                    break
+                self._decode_field_list(field_def['trailer'], payload,
+                                        len(payload) - reserve, result)
+                if result.errors:
+                    break
             # Handle $ref - inline the referenced definition
             if '$ref' in field_def:
                 try:
@@ -3250,30 +3572,8 @@ class SchemaInterpreter:
                 result.errors.append(f"Error decoding {name}: {e}")
                 break
         
-        result.bytes_consumed = pos
-        
-        # Metadata enrichment
-        metadata_def = self.schema.get('metadata')
-        if metadata_def and input_metadata is not None:
-            self._enrich_metadata(result.data, metadata_def, input_metadata,
-                                  result.warnings)
-        
-        # Add quality dict to output if any quality flags were set
-        if result.quality:
-            result.data['_quality'] = dict(result.quality)
+        return pos
 
-        # CR-2026-008: report each value in its JSON representation. Done once here
-        # rather than at each of the several places a value enters result.data, so no
-        # decode path can bypass it.
-        normalized = {}
-        for key, value in result.data.items():
-            reported = normalize_output(value)
-            if reported is not OMITTED:
-                normalized[key] = reported
-        result.data = normalized
-
-        return result
-    
     def _resolve_metadata_ref(self, ref: str, input_meta: Dict[str, Any]) -> Any:
         """Resolve a $ metadata reference against TS013 input."""
         if not isinstance(ref, str) or not ref.startswith('$'):
@@ -4095,13 +4395,30 @@ class SchemaInterpreter:
                 f"repeat field {name!r}: expected a list of records, got "
                 f"{type(records).__name__}")
         record_fields = field_def.get('fields') or []
+        # PS-387: an element present_if dropped is not in the data, and its bytes were in
+        # the payload, so they cannot be written back. Only elements that read nothing
+        # (computed fields and literals) can be encoded.
+        if field_def.get('present_if') and any(
+                isinstance(f, dict) and f.get('type') not in COMPUTED_TYPES
+                and not is_literal(f) for f in record_fields):
+            raise ValueError(
+                f"repeat field {name!r} declares present_if and its elements read payload "
+                f"bytes, so the elements it dropped cannot be encoded (PS-387)")
+        index = field_def.get('index')
         out = bytearray()
-        for record in records:
+        for position, record in enumerate(records):
             if not isinstance(record, dict):
                 raise ValueError(
                     f"repeat field {name!r}: expected each record to be a mapping, got "
                     f"{type(record).__name__}")
+            if index:
+                # PS-370: the index is bound while each element is encoded, as it was
+                # while each was decoded, so a name_from template resolves the same way.
+                record = dict(record, **{index: position})
             out.extend(self._encode_field_list(record_fields, record))
+        # PS-385: the elements, then the trailer, whose values sit beside the repeat.
+        if field_def.get('trailer'):
+            out.extend(self._encode_field_list(field_def['trailer'], data))
         return bytes(out)
 
     def _claimable_fields(

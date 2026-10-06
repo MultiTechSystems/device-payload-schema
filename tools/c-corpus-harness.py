@@ -224,6 +224,9 @@ def tlv_source(field, schema_endian, next_index):
         return None, None, 0, "merge:false needs a channel list decode_result_t cannot hold"
     if tlv.get("unknown") == "raw":
         return None, None, 0, "unknown:raw needs somewhere to put the captured bytes"
+    if tlv.get("reserve"):
+        # include/schema_interpreter.h has no reserve on its tlv: an interpreter gap.
+        return None, None, 0, "the interpreter has no tlv reserve (PS-471)"
 
     tag_fields = tlv.get("tag_fields") or []
     if tag_fields:

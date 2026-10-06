@@ -126,6 +126,13 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "until": (_DECODERS, "repeat terminator"),
         "max": (_DECODERS, "repeat ceiling (CR-2026-021)"),
         "min": (("py", "go"), "repeat floor (CR-2026-021)"),
+        "reserve": (("py",), "bytes at the end a repeat must not read (PS-350)"),
+        "trailer": (("py",), "fields decoded from a repeat's reserved bytes (PS-383)"),
+        "index": (("py",), "a repeat element's zero-based position (PS-366)"),
+        "count_as": (("py",), "the number of elements a repeat reports (PS-367)"),
+        "present_if": (("py",), "drops an element whose condition is false (PS-386)"),
+        "carry": (("py",), "a computed field's value from the previous element (PS-378)"),
+        "identity": (("py",), "what identifies a repeat element's metric (PS-372)"),
         "match": (_DECODERS, "inline discriminated union (Option B)"),
         "tlv": (_DECODERS, "tag dispatch"),
         "flagged": (_DECODERS, "bitmask-gated groups"),
@@ -176,6 +183,7 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "length_size": (_DECODERS, "length prefix width"),
         "merge": (("py", "go", "java", "cs"), "merge case output into the parent"),
         "unknown": (_DECODERS, "skip | error | raw (PS-301)"),
+        "reserve": (("py",), "bytes at the end the loop must not read (PS-471)"),
     },
     "flagged": {
         "field": (_DECODERS, "the mask field"),
@@ -430,8 +438,11 @@ def iter_keys(schema: Any) -> Iterator[Tuple[str, str, str]]:
         yield from rec(ctx, fd, path)
         for key, value in fd.items():
             kpath = _p(path, key)
-            if key == "fields":
+            if key in ("fields", "trailer"):
                 yield from field_list(value, kpath)
+            elif key == "present_if" and isinstance(value, dict):
+                # One guard condition (PS-386), with the guard condition's keys.
+                yield from rec("guard_when", value, kpath)
             elif key == "cases":
                 yield from case_map(value, kpath)
             elif key == "default" and isinstance(value, list):

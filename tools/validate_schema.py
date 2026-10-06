@@ -28,7 +28,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 from schema_interpreter import (SchemaInterpreter, DecodeResult, check_byte_group_overlap,
                                 byte_group_endian,
                                 encoding_errors, expand_refs, fport_declaration_errors,
-                                literal_errors, lookup_template_errors, timestamp_errors,
+                                literal_errors, lookup_template_errors, schema_iterator_errors,
+                                timestamp_errors,
                                 typed_field_dicts)
 import schema_vocabulary
 
@@ -801,8 +802,26 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                     errors.append(
                         f"{path}[{i}] ({name}): repeat needs a non-empty 'fields'")
                 else:
+                    # PS-383: a trailer's names are bound for the elements and every later
+                    # field. PS-366, PS-379: inside an element its index and its carried
+                    # fields' own names resolve too. PS-368: the element's names are its
+                    # own, so they are checked against a copy that does not outlive it.
+                    if isinstance(fld.get('trailer'), list):
+                        validate_field_list(fld['trailer'], f"{path}[{i}].trailer", errors,
+                                            known_field_names)
+                        known_field_names.extend(
+                            t['name'] for t in fld['trailer']
+                            if isinstance(t, dict) and t.get('name'))
+                    element_names = list(known_field_names)
+                    if isinstance(fld.get('index'), str):
+                        element_names.append(fld['index'])
+                    element_names.extend(
+                        m['name'] for m in fld['fields']
+                        if isinstance(m, dict) and 'carry' in m and m.get('name'))
                     validate_field_list(fld['fields'], f"{path}[{i}].fields", errors,
-                                        known_field_names)
+                                        element_names)
+                    if isinstance(fld.get('count_as'), str):
+                        known_field_names.append(fld['count_as'])    # PS-367
                 continue
 
             # PS-392: a skip declares how many bytes it passes over.
@@ -1155,6 +1174,8 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
             errors.extend(literal_errors(field_def))
             errors.extend(encoding_errors(field_def))
             errors.extend(lookup_template_errors(field_def))      # PS-407
+        # PS-350, PS-366 to PS-387, PS-471: the repeat iterator and reserve.
+        errors.extend(schema_iterator_errors(schema))
     has_fields = False
     has_ports = False
     

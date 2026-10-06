@@ -1,0 +1,40 @@
+# A repeat's element index and element count (PS-366, PS-367, CR-2026-053).
+#
+# `index` is bound to each element's zero-based position while it is decoded, and
+# `count_as` to the number of elements once the array is complete - for every later
+# field, and not inside the elements themselves. Neither name is reported (PS-370).
+#
+# Round-trips: the index is computed, and computed fields write no bytes.
+name: probe_repeat_index_count_as
+endian: big
+fields:
+- name: channels
+  type: repeat
+  count: 3
+  index: ch
+  count_as: channel_count
+  fields:
+  - name: raw
+    type: u8
+  - name: offset
+    type: number
+    compute:
+      op: mul
+      a: $ch
+      b: 100
+- name: channels_reported
+  type: number
+  ref: $channel_count
+test_vectors:
+- name: three_channels
+  source: spec-example
+  payload: "07 08 09"
+  expected:
+    channels:
+    - raw: 7
+      offset: 0
+    - raw: 8
+      offset: 100
+    - raw: 9
+      offset: 200
+    channels_reported: 3

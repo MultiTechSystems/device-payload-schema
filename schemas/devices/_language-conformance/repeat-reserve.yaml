@@ -1,0 +1,34 @@
+# A repeat that runs to the end of the payload may reserve bytes there that it must not
+# read (PS-350, CR-2026-048). The field after it decodes from them.
+#
+# Without `reserve`, `until: end` read the two-byte checksum as an element and left
+# nothing for the field declared after it, which then failed or read zeros.
+#
+# Every vector round-trips: the elements are written, then the field after them.
+name: probe_repeat_reserve
+endian: big
+fields:
+- name: readings
+  type: repeat
+  until: end
+  reserve: 2
+  fields:
+  - name: v
+    type: u8
+- name: checksum
+  type: u16
+test_vectors:
+- name: two_elements_then_checksum
+  source: spec-example
+  payload: "01 02 ABCD"
+  expected:
+    readings:
+    - v: 1
+    - v: 2
+    checksum: 43981
+- name: no_elements
+  source: spec-example
+  payload: "ABCD"
+  expected:
+    readings: []
+    checksum: 43981

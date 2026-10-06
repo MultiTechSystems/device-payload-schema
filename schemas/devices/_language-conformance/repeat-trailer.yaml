@@ -1,0 +1,39 @@
+# A repeat's trailer is decoded from the reserved bytes before the first element, so the
+# elements can use it (PS-383, CR-2026-048). It is reported beside the array.
+#
+# The device sends register values and then, last, the slot number of the first one.
+# Each element's `slot` is that base plus the element's position, which needs the
+# trailer before the elements are read.
+#
+# Round-trips: the encoder writes the elements and then the trailer (PS-385).
+name: probe_repeat_trailer
+endian: big
+fields:
+- name: registers
+  type: repeat
+  until: end
+  reserve: 1
+  index: i
+  trailer:
+  - name: first_slot
+    type: u8
+  fields:
+  - name: value
+    type: u16
+  - name: slot
+    type: number
+    compute:
+      op: add
+      a: $first_slot
+      b: $i
+test_vectors:
+- name: base_from_the_end
+  source: spec-example
+  payload: "0064 00C8 0A"
+  expected:
+    first_slot: 10
+    registers:
+    - value: 100
+      slot: 10
+    - value: 200
+      slot: 11

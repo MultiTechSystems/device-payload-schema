@@ -1,0 +1,48 @@
+# A computed field in an element may carry its value to the next element (PS-378 to
+# PS-381, CR-2026-055): within its own computation its name is its value in the previous
+# element, or the `carry` value in the first. That is a running sum.
+#
+# The carried value starts again each time the inner array begins, including for each
+# element of the outer one (PS-380), so each day's total starts from zero.
+#
+# Round-trips: computed fields write no bytes.
+name: probe_repeat_carry
+endian: big
+fields:
+- name: days
+  type: repeat
+  count: 2
+  fields:
+  - name: hours
+    type: repeat
+    count: 3
+    fields:
+    - name: rain
+      type: u8
+    - name: so_far
+      type: number
+      carry: 0
+      compute:
+        op: add
+        a: $so_far
+        b: $rain
+test_vectors:
+- name: running_sum_restarts_each_day
+  source: spec-example
+  payload: "01 02 03 0A 00 05"
+  expected:
+    days:
+    - hours:
+      - rain: 1
+        so_far: 1
+      - rain: 2
+        so_far: 3
+      - rain: 3
+        so_far: 6
+    - hours:
+      - rain: 10
+        so_far: 10
+      - rain: 0
+        so_far: 10
+      - rain: 5
+        so_far: 15
