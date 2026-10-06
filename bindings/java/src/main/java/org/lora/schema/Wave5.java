@@ -1,6 +1,8 @@
 package org.lora.schema;
 
 import java.math.BigDecimal;
+import java.math.MathContext;
+import java.math.RoundingMode;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -32,7 +34,7 @@ final class Wave5 {
      */
     static String formatLookupValue(double v) {
         if (v == 0) return "0";
-        BigDecimal exact = new BigDecimal(Double.toString(v)).stripTrailingZeros();
+        BigDecimal exact = shortest(v);
         double abs = Math.abs(v);
         if (abs >= 1e-6 && abs < 1e21) return exact.toPlainString();
         String digits = exact.unscaledValue().abs().toString();
@@ -41,6 +43,20 @@ final class Wave5 {
                 : digits;
         return (v < 0 ? "-" : "") + mantissa + "e" + (exponent < 0 ? "-" : "+")
                 + Math.abs(exponent);
+    }
+
+    /**
+     * The fewest significant digits that read back as {@code v}, nearest the exact value -
+     * ECMAScript's rule. Double.toString is not that: it writes Double.MIN_VALUE as
+     * 4.9E-324 where JavaScript writes 5e-324, because it keeps at least two digits.
+     */
+    private static BigDecimal shortest(double v) {
+        BigDecimal exact = new BigDecimal(v);
+        for (int digits = 1; digits <= 17; digits++) {
+            BigDecimal candidate = exact.round(new MathContext(digits, RoundingMode.HALF_EVEN));
+            if (candidate.doubleValue() == v) return candidate.stripTrailingZeros();
+        }
+        return exact.stripTrailingZeros();
     }
 
     /** The number a ${value} default wrote into {@code text}, or null (PS-409). */

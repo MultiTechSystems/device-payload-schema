@@ -68,10 +68,18 @@ func TestCR060ValueFormatting(t *testing.T) {
 	for v, want := range map[float64]string{
 		7: "7", -3: "-3", 2.5: "2.5", 1e-5: "0.00001", 1e-6: "0.000001", 1.5e-7: "1.5e-7",
 		1e-8: "1e-8", 1e20: "100000000000000000000", 1e21: "1e+21", 1.5e22: "1.5e+22",
+		// CR-2026-084's extremes.
+		5e-324: "5e-324",
+		2.2250738585072014e-308: "2.2250738585072014e-308", 1.7976931348623157e308: "1.7976931348623157e+308",
 	} {
 		if got := formatLookupValue(v); got != want {
 			t.Errorf("%v: %s, want %s", v, got, want)
 		}
+	}
+	// A runtime sum: Go evaluates the constant 0.1 + 0.2 exactly, as 0.3.
+	tenth, fifth := 0.1, 0.2
+	if got := formatLookupValue(tenth + fifth); got != "0.30000000000000004" {
+		t.Errorf("0.1 + 0.2: %s", got)
 	}
 }
 

@@ -63,4 +63,16 @@ public class Wave5Tests
             + ", lookup: {0: zero, default: \"x${value}\"}}\n");
         Assert.Equal(want, SchemaDecoder.Decode(schema, new[] { (byte)raw })["x"]);
     }
+
+    [Theory]
+    [InlineData("0000000000000001", "x5e-324")]                    // CR-2026-084's extremes
+    [InlineData("3FD3333333333334", "x0.30000000000000004")]       // 0.1 + 0.2
+    [InlineData("0010000000000000", "x2.2250738585072014e-308")]
+    [InlineData("7FEFFFFFFFFFFFFF", "x1.7976931348623157e+308")]
+    public void ExtremesMatchJavaScript(string bits, string want)
+    {
+        var schema = SchemaParser.Parse("name: p\nfields:\n  - {name: x, type: f64, "
+            + "lookup: {0: zero, default: \"x${value}\"}}\n");
+        Assert.Equal(want, SchemaDecoder.Decode(schema, Convert.FromHexString(bits))["x"]);
+    }
 }

@@ -49,7 +49,9 @@ def test_every_occurrence_is_substituted():
 
 
 @pytest.mark.parametrize("value", [7, 7.0, -3, 2.5, 0.1, 1e-5, 1e-6, 1.5e-7, 1e-8,
-                                   1.2345e-9, 1e20, 1e21, 1.5e22, -0.0, 123456789.125])
+                                   1.2345e-9, 1e20, 1e21, 1.5e22, -0.0, 123456789.125,
+                                   5e-324, 0.1 + 0.2, 2.2250738585072014e-308,
+                                   1.7976931348623157e308])
 def test_rendering_matches_javascript_and_round_trips(value):
     """The interpreter and the generated codec must write the same string (PS-406)."""
     js = subprocess.run(["node", "-e", f"process.stdout.write(String({float(value)!r}))"],
