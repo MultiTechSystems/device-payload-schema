@@ -185,17 +185,17 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2335 payload vectors in `schemas/devices/` (measured 2026-10-05 with
+The 2344 payload vectors in `schemas/devices/` (measured 2026-10-05 with
 `tools/check-floors.py`, after merging the mutation-survivor vectors into 0.5.2) are the shared
 cross-language test set. Every implementation has a runner that reads the same YAML and
 the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1664 |
-| Go | `go/schema/corpus_conformance_test.go` | 2335 | 1680 (plain API 1657) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2335 | 1662 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2335 | 1662 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1672 |
+| Go | `go/schema/corpus_conformance_test.go` | 2344 | 1688 (plain API 1665) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2344 | 1670 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2344 | 1670 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 487 of 487 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -752,10 +752,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1664 |
-| Go | `go/schema/corpus_encode_test.go` | 1680 (plain 1657) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1662 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1662 |
+| Python | `tests/test_encode_round_trip.py` | 1672 |
+| Go | `go/schema/corpus_encode_test.go` | 1688 (plain 1665) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1670 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1670 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1165,7 +1165,7 @@ baseline - a regression fails, an improvement is reported and locked in with the
 | `gate-provenance` | a changed device schema has no independently sourced vector, or an added vector lacks `source:` | none: the diff against `BASE` |
 | `gate-crossval` | a schema stops agreeing with its vendor's own decoder (TTN declared examples + vendor JS, Decentlab decoders), or a new one does not agree | `tools/crossval-baseline.json`, oracle commits pinned |
 | `gate-mutation` | a schema's vectors notice fewer one-step mutations than before (score or killed count), or a new schema scores below 0.80 | `tools/mutation-baseline.json` |
-| `gate-verdicts` | a changed schema's vector fails in any of Python, Go, Java, C#, TS013, or a vector the reference passes fails elsewhere | `tools/verdicts-baseline.json` (empty: all five agree on 2335/2335) |
+| `gate-verdicts` | a changed schema's vector fails in any of Python, Go, Java, C#, TS013, or a vector the reference passes fails elsewhere | `tools/verdicts-baseline.json` (empty: all five agree on 2344/2344) |
 
 The mutation gate ratchets the killed count as well as the score on purpose: deleting
 vectors makes the mutants only they reached "unreached", which *raises* the score.
@@ -1228,6 +1228,25 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   `calendar` mode (PS-354 to PS-356, PS-410 to PS-413) in Python only, which PS-310
   permits; `metadata-epoch-calendar.yaml` holds the other four to decoding a schema that
   carries them. `unix_epoch` now reports a number, not a string, and `format:` is refused.
+- **Wave 6a (CR-2026-048, -053, -054 annotations, -055, -080, -081).** A repeat element
+  is decoded like any field list - Python's `_decode_field_list` serves the top level and
+  every element, Go, Java and C# each have one element function - so an element holds
+  computed fields, internal fields and constructs, in a scope of its own (PS-368). An
+  element's names are restored away after it; a reference to one from after the array,
+  or to a field of the element not yet decoded, is an error. Every other unbound
+  reference keeps its old behaviour, which differs: Python reads 0, Go and C# error,
+  Java reads 0. `index`, `count_as` (after `present_if`, CR-2026-080), `present_if` and
+  `carry` follow; `reserve` on a repeat and on a `tlv` is a buffer cut at the region's
+  end with absolute positions, so nothing inside can read the trailer, and a repeat's
+  `trailer` decodes first into the enclosing scope. Schema rules are rejected at load by
+  all four and by the validator and generator (`iterator_errors` in Python, `wave6a.go`,
+  Java `Wave6a`, C# `Wave6a`). PS-375 (`_meta`) waits for the `_meta` work and PS-377
+  (per-element IPSO/SenML output) for CR-2026-078. A `present_if` repeat over byte-reading
+  elements cannot be encoded (PS-387); `encode-round-trip.py` classifies it
+  `dropped-element`. Open, found in the ports' review of the reference: a `present_if`
+  whose `field` lacks `$` loads and keeps every element; `var:` names and `count: $name`
+  are outside the PS-368 check; Java runs a zero-progress `until: end` loop to `max` where
+  the others stop.
 - **`_meta` is not produced by any implementation**, so CR-2026-043 (`_meta.fPort`) and
   the `_meta` parts of CR-2026-054 wait for their own change (decided 2026-10-05).
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
