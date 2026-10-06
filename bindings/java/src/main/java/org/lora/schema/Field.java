@@ -195,6 +195,42 @@ public class Field {
     public Object getMatchDefault() { return matchDefault; }
     public void setMatchDefault(Object matchDefault) { this.matchDefault = matchDefault; }
 
+    // 0.5.2 wave 6a: the repeat iterator and reserved trailers (CR-2026-048, -053, -055,
+    // -080, -081). See Wave6a for the schema rules.
+
+    /** A repeat's element index name (PS-366). */
+    private String index;
+    /** A repeat's element count name, bound once the repeat completes (PS-367). */
+    private String countAs;
+    /** A repeat's element filter, one guard condition (PS-386). */
+    private Guard presentIf;
+    /** A computed element field's value before the first element (PS-378). */
+    private Object carry;
+    private boolean hasCarry;
+    /** Bytes at the payload's end a repeat or tlv loop must not read (PS-350, PS-471). */
+    private int reserve;
+    /** Fields decoded from a repeat's reserved bytes (PS-383). */
+    private List<Field> trailer;
+
+    public String getIndex() { return index; }
+    public void setIndex(String index) { this.index = index; }
+
+    public String getCountAs() { return countAs; }
+    public void setCountAs(String countAs) { this.countAs = countAs; }
+
+    public Guard getPresentIf() { return presentIf; }
+    public void setPresentIf(Guard presentIf) { this.presentIf = presentIf; }
+
+    public Object getCarry() { return carry; }
+    public boolean hasCarry() { return hasCarry; }
+    public void setCarry(Object carry) { this.carry = carry; this.hasCarry = true; }
+
+    public int getReserve() { return reserve; }
+    public void setReserve(int reserve) { this.reserve = reserve; }
+
+    public List<Field> getTrailer() { return trailer; }
+    public void setTrailer(List<Field> trailer) { this.trailer = trailer; }
+
     public Object getValue() { return value; }
     public void setValue(Object value) { this.value = value; }
     

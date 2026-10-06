@@ -7,6 +7,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public class DecodeContext {
     private final byte[] data;
@@ -20,9 +21,21 @@ public class DecodeContext {
      * (PS-301, PS-302).
      */
     private final List<String> warnings;
+    /**
+     * Where the readable region ends. A repeat's or tlv's {@code reserve} stops its loop
+     * short of the payload's end (PS-350, PS-471), so the region is narrowed while the
+     * loop runs and nothing inside it can read the reserved bytes. Positions stay
+     * absolute, as they do in the reference's truncated buffer.
+     */
+    private int limit;
+    /** Names declared only inside some repeat's elements (PS-368). */
+    private Set<String> repeatOnlyNames = Set.of();
+    /** The members of the element being decoded, or null outside any element (PS-368). */
+    private Set<String> elementNames;
 
     public DecodeContext(byte[] data, String endian) {
         this.data = data;
+        this.limit = data.length;
         this.offset = 0;
         this.endian = endian != null ? endian : "big";
         this.variables = new HashMap<>();
@@ -33,7 +46,44 @@ public class DecodeContext {
     public byte[] getData() { return data; }
 
     public int remaining() {
-        return data.length - offset;
+        return limit - offset;
+    }
+
+    /** The end of the readable region: the payload's length unless a reserve narrows it. */
+    public int getLimit() { return limit; }
+    public void setLimit(int limit) { this.limit = limit; }
+
+    void setRepeatOnlyNames(Set<String> names) { this.repeatOnlyNames = names == null ? Set.of() : names; }
+    Set<String> getElementNames() { return elementNames; }
+    void setElementNames(Set<String> names) { this.elementNames = names; }
+
+    /**
+     * The value a {@code $name} reference resolves to, or null where it is unbound.
+     *
+     * <p>PS-368: a name declared in a repeat's elements has a value only inside the element,
+     * and only once it is decoded. A reference breaking either rule is an error rather than
+     * the 0 every other unbound reference still reads as. Mirrors {@code _ref} in
+     * tools/schema_interpreter.py.
+     */
+    public Object ref(String name) {
+        if (variables.containsKey(name)) return variables.get(name);
+        if (elementNames != null && elementNames.contains(name)) {
+            throw new SchemaException.DecodeException("$" + name
+                    + " refers to a field of this element that is not yet decoded (PS-368)");
+        }
+        if (repeatOnlyNames.contains(name)) {
+            throw new SchemaException.DecodeException("$" + name
+                    + " is declared only inside a repeat's elements, so it has no value here (PS-368)");
+        }
+        return null;
+    }
+
+    /** A copy of the variable table, restored once an element's scope ends (PS-368). */
+    Map<String, Object> snapshotVariables() { return new HashMap<>(variables); }
+
+    void restoreVariables(Map<String, Object> saved) {
+        variables.clear();
+        variables.putAll(saved);
     }
 
     public byte[] read(int n) {
@@ -42,7 +92,7 @@ public class DecodeContext {
             // NegativeArraySizeException, which is not a decode error a caller can read.
             n = remaining();
         }
-        if (offset + n > data.length) {
+        if (offset + n > limit) {
             throw new SchemaException.DecodeException(
                 String.format("Buffer underflow: need %d bytes at offset %d, but only %d remaining",
                     n, offset, remaining()));
@@ -55,7 +105,7 @@ public class DecodeContext {
 
     public byte[] peek(int n, int relativeOffset) {
         int pos = offset + relativeOffset;
-        if (pos + n > data.length) {
+        if (pos + n > limit) {
             throw new SchemaException.DecodeException(
                 String.format("Buffer underflow at peek offset %d", pos));
         }

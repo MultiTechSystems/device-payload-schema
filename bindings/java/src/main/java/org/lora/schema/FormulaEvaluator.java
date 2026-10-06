@@ -13,7 +13,7 @@ public class FormulaEvaluator {
         StringBuffer sb = new StringBuffer();
         while (matcher.find()) {
             String name = matcher.group(1);
-            Object val = ctx.getVariable(name);
+            Object val = ctx.ref(name);   // PS-368
             double numVal = 0;
             if (val instanceof Number) {
                 numVal = ((Number) val).doubleValue();
