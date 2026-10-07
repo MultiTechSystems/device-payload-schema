@@ -96,6 +96,10 @@ func TestMissingFieldIsReported(t *testing.T) {
 // level, four ship no test vectors at all and the fifth
 // (_language-conformance/skip-type.yaml) names its skip field, which the missing
 // field path above already handles. So this test is the only guard.
+//
+// The reserved byte declares `value: 0`: since PS-434 (CR-2026-067) an internal field
+// with no value and no input is an encode error rather than a zero, and declaring the
+// value is the migration the CR names - encode-padding.yaml made the same change.
 func TestUnnamedAndInternalFieldsStillOccupyTheirBytes(t *testing.T) {
 	s, err := ParseSchema(`
 name: padded
@@ -107,6 +111,7 @@ fields:
     length: 2
   - name: _reserved
     type: u8
+    value: 0
   - name: b
     type: u8
 `)
