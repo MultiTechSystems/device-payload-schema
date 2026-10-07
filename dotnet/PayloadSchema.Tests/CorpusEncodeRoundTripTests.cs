@@ -42,7 +42,7 @@ public class CorpusEncodeRoundTripTests
     // round-trips: `plain fixed` rises from 58 to 59 and the total to 1162.
     // CR-2026-031's name_from var-mismatch fixture round-trips here too, so
     // `plain fixed` rises from 59 to 61 and the total to 1164.
-    const int EncodeFloorTotal = 1670;
+    const int EncodeFloorTotal = 1679;
 
     /// <summary>
     /// Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -50,10 +50,11 @@ public class CorpusEncodeRoundTripTests
     /// </summary>
     static readonly Dictionary<string, int> EncodeFloorByShape = new()
     {
-        ["tlv"] = 1283,
+        // 1283 -> 1281 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped only because their internal byte halves were all zero, which the encoder wrote for an internal field with no value. It now reports such a field instead.
+        ["tlv"] = 1281,
         ["flagged"] = 157,
-        ["plain fixed"] = 80,
-        ["match"] = 119,
+        ["plain fixed"] = 88,
+        ["match"] = 122,
         ["byte_group"] = 19,
         // 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now
         // carry only the definitions they reach, so one no longer contains an
