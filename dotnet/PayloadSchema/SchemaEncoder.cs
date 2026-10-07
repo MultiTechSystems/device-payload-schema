@@ -496,9 +496,12 @@ public static class SchemaEncoder
                 // Routed through the run packing for consistency with every other field
                 // list, not because anything needs it today: no `flagged` group in the
                 // corpus holds a bit range. One that grows a run will pack correctly.
+                // An internal member that reads bytes goes through PS-434 in EncodeOne - its
+                // value, else the input's, else an error. It was skipped here, writing none
+                // of the bytes the decoder reads, so every later member was misplaced. An
+                // omitted member declaring `sentinel` writes its first one (PS-427).
                 var emit = group.Fields
-                    .Where(gf => !string.IsNullOrEmpty(gf.Name) && !gf.Name.StartsWith("_")
-                                 && gf.Type != FieldType.Number)
+                    .Where(gf => !string.IsNullOrEmpty(gf.Name) && gf.Type != FieldType.Number)
                     .ToList();
                 output.AddRange(EncodeWithBitfieldRuns(emit, data, none, topLevel: false));
             }

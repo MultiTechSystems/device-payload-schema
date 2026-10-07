@@ -229,6 +229,31 @@ public class Wave6bTests
     }
 
     [Fact]
+    public void AnInternalFlaggedMemberFollowsTheSameRule()
+    {
+        var schema = Fields("{\"name\": \"mask\", \"type\": \"u8\"}",
+            "{\"flagged\": {\"field\": \"mask\", \"groups\": [{\"bit\": 0, \"fields\": ["
+            + "{\"name\": \"_r\", \"type\": \"u8\"}, {\"name\": \"v\", \"type\": \"u8\"}]}]}}");
+        var missing = Encode(schema, new() { ["mask"] = 1, ["v"] = 2 });
+        Assert.Contains(missing.Errors, e => e.Contains("PS-434") && e.Contains("_r"));
+        var supplied = Encode(schema, new() { ["mask"] = 1, ["_r"] = 9, ["v"] = 2 });
+        Assert.True(supplied.Success);
+        Assert.Equal(new byte[] { 1, 9, 2 }, supplied.Payload);
+    }
+
+    [Fact]
+    public void AnOmittedFlaggedMemberEncodesAsItsFirstSentinel()
+    {
+        var schema = Fields("{\"name\": \"mask\", \"type\": \"u8\"}",
+            "{\"flagged\": {\"field\": \"mask\", \"groups\": [{\"bit\": 0, \"fields\": ["
+            + "{\"name\": \"t\", \"type\": \"s16\", \"div\": 10, \"sentinel\": [-32768]}, "
+            + "{\"name\": \"v\", \"type\": \"u8\"}]}]}}");
+        var result = Encode(schema, new() { ["mask"] = 1, ["v"] = 2 });
+        Assert.True(result.Success);
+        Assert.Equal(new byte[] { 1, 0x80, 0x00, 2 }, result.Payload);
+    }
+
+    [Fact]
     public void AnInternalComputedFieldWritesNothing()
     {
         var schema = Fields("{\"name\": \"a\", \"type\": \"u8\"}",
