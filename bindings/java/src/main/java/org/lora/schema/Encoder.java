@@ -185,7 +185,7 @@ final class Encoder {
             } else if (field.getSentinel() != null && !field.getSentinel().isEmpty()) {
                 // A reading the decode omitted as "no reading" (PS-427) goes back as the
                 // sentinel it was, not as zero: the raw value, with no modifier reversed.
-                return encodeField(field, field.getSentinel().get(0));
+                return encodeSentinel(field);
             } else {
                 if (topLevel) {
                     warnings.add("Missing field: " + lookupName);
@@ -250,6 +250,21 @@ final class Encoder {
         return out.toString();
     }
 
+    /**
+     * The first sentinel, as the raw bits the decoder compared it with (PS-427): never
+     * through an {@code encoding}, which would write gray(255) = 0x80 for a sentinel of
+     * 0xFF, and with no modifier reversed.
+     */
+    private byte[] encodeSentinel(Field field) {
+        long sentinel = field.getSentinel().get(0);
+        FieldType type = field.getType();
+        if (field.getEncoding() != null && type.isInteger()) {
+            boolean useLittle = "little".equalsIgnoreCase(field.getEffectiveEndian(schema.getEndian()));
+            return writeInt(sentinel, type.defaultLength(), type.isSigned(), useLittle);
+        }
+        return encodeField(field, sentinel);
+    }
+
     /** Encode a list of fields - a TLV case's value bytes, a match case's body. */
     private byte[] encodeFieldList(List<Field> list, Map<String, Object> data) {
         if (list == null || list.isEmpty()) return EMPTY;
@@ -276,10 +291,13 @@ final class Encoder {
             // list, not because anything needs it today: no `flagged` group in the corpus
             // holds a bit range - they are u16, u32le16 and computed members. A group
             // that grows one will pack correctly rather than silently not.
+            // An internal member that reads bytes is encoded under PS-434 - its value, else
+            // the input's, else an error naming it - by encodeOne. It was skipped, writing
+            // none of its bytes, so every later member landed in its place.
             List<Field> emit = new ArrayList<>();
             for (Field gf : group.getFields()) {
                 String name = gf.getName();
-                if (name == null || name.isEmpty() || name.startsWith("_")) continue;
+                if (name == null || name.isEmpty()) continue;
                 if (gf.getType() == FieldType.NUMBER) continue;
                 emit.add(gf);
             }

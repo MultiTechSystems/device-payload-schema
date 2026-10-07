@@ -197,6 +197,49 @@ public class Wave6bTest {
         assertArrayEquals(hex("17"), declared.encode(data("v", 1L)).getPayload());
     }
 
+    private static final String FLAGGED = "name: p\nfields:\n  - {name: mask, type: u8}\n"
+        + "  - flagged: {field: mask, groups: [{bit: 0, fields: [{name: _r, type: u8}, {name: v, type: u8}]}]}\n";
+
+    @Test
+    public void anInternalFlaggedMemberFollowsTheSameRule() {
+        Schema schema = Schema.fromYaml(FLAGGED);
+        EncodeResult missing = schema.encode(data("mask", 1L, "v", 2L));
+        assertFalse(missing.isSuccess());
+        assertTrue(missing.getErrors().stream().anyMatch(e -> e.contains("PS-434") && e.contains("_r")),
+            missing.getErrors().toString());
+        EncodeResult supplied = schema.encode(data("mask", 1L, "_r", 9L, "v", 2L));
+        assertTrue(supplied.isSuccess(), supplied.getErrors().toString());
+        assertArrayEquals(hex("01 09 02"), supplied.getPayload());
+    }
+
+    @Test
+    public void aFlaggedMemberOmittedByItsSentinelIsWrittenBack() {
+        Schema schema = Schema.fromYaml("name: p\nfields:\n  - {name: mask, type: u8}\n"
+            + "  - flagged: {field: mask, groups: [{bit: 0, fields: [{name: t, type: u8, sentinel: [255]}, "
+            + "{name: v, type: u8}]}]}\n");
+        assertEquals(Map.of("mask", 1L, "v", 2L), schema.decode(hex("01 FF 02")));
+        assertArrayEquals(hex("01 FF 02"), schema.encode(data("mask", 1L, "v", 2L)).getPayload());
+    }
+
+    @Test
+    public void anOmittedOptionalObjectWritesNothing() {
+        Schema schema = Schema.fromYaml("name: p\nfields:\n  - {name: a, type: u8}\n"
+            + "  - {name: gps, type: object, optional: true, fields: [{name: lat, type: s16}]}\n");
+        EncodeResult result = schema.encode(data("a", 1L));
+        assertTrue(result.isSuccess(), result.getErrors().toString());
+        assertArrayEquals(hex("01"), result.getPayload());
+        assertTrue(result.getWarnings().isEmpty(), result.getWarnings().toString());
+    }
+
+    @Test
+    public void aSentinelIsWrittenAsRawBitsNotThroughItsEncoding() {
+        Schema schema = Schema.fromYaml("name: p\nfields:\n  - {name: v, type: u8, encoding: gray, sentinel: [255]}\n");
+        EncodeResult result = schema.encode(Map.of());
+        assertTrue(result.isSuccess(), result.getErrors().toString());
+        assertArrayEquals(hex("FF"), result.getPayload());
+        assertEquals(Map.of(), schema.decode(hex("FF")));
+    }
+
     @Test
     public void anInternalComputedFieldWritesNothing() {
         Schema schema = Schema.fromYaml("name: p\nfields:\n  - {name: a, type: u8}\n"
