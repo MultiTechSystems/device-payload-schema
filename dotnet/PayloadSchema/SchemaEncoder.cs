@@ -525,14 +525,34 @@ public static class SchemaEncoder
                     $"repeat field '{field.Name}': expected a list of records, got {records.GetType().Name}")
             };
 
+            // PS-387: an element present_if dropped is not in the data, and its bytes were
+            // in the payload, so they cannot be written back. Only elements that read
+            // nothing (computed fields and literals) can be encoded.
+            if (field.PresentIf != null && field.Fields.Any(f =>
+                    f.Type != FieldType.Number && !(f.Type == FieldType.String && f.Value != null)))
+                throw new InvalidOperationException($"repeat field '{field.Name}' declares present_if "
+                    + "and its elements read payload bytes, so the elements it dropped cannot be "
+                    + "encoded (PS-387)");
+
             var output = new List<byte>();
+            int position = 0;
             foreach (var record in list)
             {
                 if (record is not Dictionary<string, object?> asMap)
                     throw new InvalidOperationException($"repeat field '{field.Name}': "
                         + $"expected each record to be a mapping, got {record?.GetType().Name ?? "null"}");
+                if (!string.IsNullOrEmpty(field.Index))
+                {
+                    // PS-370: the index is bound while each element is encoded, as it was
+                    // while each was decoded, so a name_from template resolves the same way.
+                    asMap = new Dictionary<string, object?>(asMap) { [field.Index!] = position };
+                }
                 output.AddRange(EncodeFieldList(field.Fields, asMap));
+                position++;
             }
+            // PS-385: the elements, then the trailer, whose values sit beside the repeat.
+            if (field.Trailer is { Count: > 0 })
+                output.AddRange(EncodeFieldList(field.Trailer, data));
             return output.ToArray();
         }
 

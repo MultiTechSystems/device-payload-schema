@@ -611,6 +611,106 @@ independently sourced vector is capped at Silver (PS-264).
       type: u16
 ```
 
+Each element is decoded like a field list of its own: it may hold computed fields,
+internal (`_`) fields and constructs. Its names exist only inside the element (PS-368):
+a reference to one from after the array is an error, as is a reference inside an
+element to one of its fields not yet decoded.
+
+### Index, count and dropped elements
+
+```yaml
+- name: slots
+  type: repeat
+  count: 4
+  index: i              # 0, 1, 2, 3 while each element decodes (PS-366)
+  count_as: occupied    # after the array: elements reported (PS-367)
+  present_if:           # one guard condition; a false element is dropped (PS-386)
+    field: $id
+    ne: 0
+  fields:
+    - name: id
+      type: u8
+    - name: position
+      type: number
+      ref: $i
+- name: occupied_slots
+  type: number
+  ref: $occupied
+```
+
+`index` and `count_as` are never reported unless a field refers to them (PS-370). A
+dropped element still advances `index` and consumes its bytes, and `count_as` counts the
+elements reported, not read (CR-2026-080). A repeat with `present_if` over elements that
+read bytes cannot be encoded - the dropped elements are not in the output (PS-387).
+
+### Running values (`carry`)
+
+```yaml
+- name: hours
+  type: repeat
+  count: 24
+  fields:
+    - name: rain
+      type: u8
+    - name: so_far
+      type: number
+      carry: 0                        # or a $ref decoded before the repeat
+      compute: {op: add, a: $so_far, b: $rain}
+```
+
+Inside its own computation, a carried field's name is its value in the previous
+element - the `carry` value in the first (PS-378, PS-379). It restarts each time the
+repeat begins, including inside each element of an enclosing repeat (PS-380).
+
+### Bytes reserved at the end
+
+```yaml
+- name: registers
+  type: repeat
+  until: end
+  reserve: 1            # the last byte is not an element (PS-350)
+  index: i
+  trailer:              # decoded first, from the reserved bytes (PS-383)
+    - name: first_slot
+      type: u8
+  fields:
+    - name: value
+      type: u16
+    - name: slot
+      type: number
+      compute: {op: add, a: $first_slot, b: $i}
+```
+
+`reserve` keeps `until: end` off the last bytes, and the fields declared after the
+repeat decode them. A `trailer` reads them before the first element instead, so the
+elements can use its values; it is reported beside the array, and its fields' sizes
+must add up to `reserve` (PS-384). The encoder writes the elements, then the trailer.
+Fewer bytes than `reserve` at the start of the repeat is an error (PS-351).
+
+### What each element measures
+
+```yaml
+- name: probes
+  type: repeat
+  count: 2
+  index: i
+  identity: i                         # or a $ref to a field of the element (PS-372)
+  fields:
+    - name: unit_code
+      type: u8
+      lookup: {1: Cel, 2: "%RH"}
+    - name: reading
+      type: s16
+      div: 10
+      unit: $unit_code                # per element (PS-373)
+      ipso: {object: 3303, instance: $i, resource: 5700}
+      senml: {name: "probe_${i}"}
+```
+
+These are annotations: they change no decoded value (PS-376). A field they name must
+carry a `lookup` or be a literal, so its values are known from the schema, and the index
+needs a literal `count` or a `max` (PS-374).
+
 ## Nested Objects
 
 ```yaml
@@ -687,6 +787,21 @@ Parse tag-based variable content. Supports single and multi-byte tags.
         - name: humidity
           type: u8
 ```
+
+### A trailer after the entries
+
+```yaml
+- tlv:
+    tag_size: 1
+    reserve: 9            # the last nine bytes are not entries (PS-471)
+    cases: { ... }
+- name: keepalive
+  type: bytes
+  length: 9
+```
+
+The loop stops where the reserved bytes begin, and the fields after it read them. Fewer
+bytes than `reserve` at the start is an error.
 
 ### Multi-Byte Tags (Tektelic-style)
 

@@ -638,6 +638,10 @@ def process_fields(fields: List[Dict], properties: Dict, required: List[str],
             required.append(obj_name)
             continue
         
+        # PS-383: a repeat's trailer is reported beside the repeat, not inside it.
+        if field.get('type') == 'repeat' and isinstance(field.get('trailer'), list):
+            process_fields(field['trailer'], properties, required, definitions, context)
+
         # Regular field
         name = field.get('name', '')
         if name and not name.startswith('_'):

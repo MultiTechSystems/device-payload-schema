@@ -42,7 +42,7 @@ public class CorpusEncodeRoundTripTests
     // round-trips: `plain fixed` rises from 58 to 59 and the total to 1162.
     // CR-2026-031's name_from var-mismatch fixture round-trips here too, so
     // `plain fixed` rises from 59 to 61 and the total to 1164.
-    const int EncodeFloorTotal = 1662;
+    const int EncodeFloorTotal = 1670;
 
     /// <summary>
     /// Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -50,7 +50,7 @@ public class CorpusEncodeRoundTripTests
     /// </summary>
     static readonly Dictionary<string, int> EncodeFloorByShape = new()
     {
-        ["tlv"] = 1281,
+        ["tlv"] = 1283,
         ["flagged"] = 157,
         ["plain fixed"] = 80,
         ["match"] = 119,
@@ -58,7 +58,7 @@ public class CorpusEncodeRoundTripTests
         // 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now
         // carry only the definitions they reach, so one no longer contains an
         // unreferenced definition's `repeat` text for the classifier to find.
-        ["repeat"] = 6,
+        ["repeat"] = 12,
     };
 
     readonly ITestOutputHelper _output;

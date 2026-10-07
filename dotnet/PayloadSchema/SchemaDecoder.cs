@@ -15,7 +15,7 @@ public static class SchemaDecoder
         if (schema.Ports is { Count: > 0 })
             throw new InvalidOperationException(
                 $"no FPort was supplied, and schema '{schema.Name}' selects its fields by port (PS-459)");
-        var ctx = new DecodeContext(data, schema.Endian);
+        var ctx = new DecodeContext(data, schema.Endian) { RepeatOnlyNames = schema.RepeatOnlyNames };
         var result = new Dictionary<string, object?>();
 
         MergeTo(result, DecodeFields(schema.Fields, ctx, schema));
@@ -46,7 +46,7 @@ public static class SchemaDecoder
         SchemaDirection.Check(schema, fPort, direction);
 
         var fields = ResolveFields(schema, fPort);
-        var ctx = new DecodeContext(data, schema.Endian);
+        var ctx = new DecodeContext(data, schema.Endian) { RepeatOnlyNames = schema.RepeatOnlyNames };
         var result = new Dictionary<string, object?>();
 
         MergeTo(result, DecodeFields(fields, ctx, schema));
@@ -81,6 +81,21 @@ public static class SchemaDecoder
 
         foreach (var field in fields)
         {
+            // PS-383: a repeat's trailer is decoded from the reserved bytes before its
+            // first element, so its names are bound for the elements and later fields,
+            // and it is reported beside the repeat, not inside it.
+            if (field.Type == FieldType.Repeat && field.Trailer is { Count: > 0 })
+            {
+                var trailerAt = ctx.Data.Length - field.Reserve;
+                if (trailerAt < ctx.Offset)
+                    throw new InvalidOperationException($"repeat '{field.Name}' reserves {field.Reserve} "
+                        + $"byte(s) but {ctx.Remaining} remain at offset {ctx.Offset} (PS-351)");
+                var resume = ctx.Offset;
+                ctx.Offset = trailerAt;
+                MergeTo(result, DecodeFields(field.Trailer, ctx, schema));
+                ctx.Offset = resume;
+            }
+
             // $ref
             if (field.Ref2 != null && schema?.Definitions != null)
             {
@@ -641,7 +656,7 @@ public static class SchemaDecoder
     /// 78.125 is a tie, while 2.355 is stored just below one.
     /// </summary>
     /// <summary>The bytes one element always takes, or 0 where it varies (PS-344a).</summary>
-    static int FixedElementSize(List<SchemaField> fields)
+    internal static int FixedElementSize(List<SchemaField> fields)
     {
         int total = 0;
         foreach (var f in fields)
@@ -813,7 +828,10 @@ public static class SchemaDecoder
         {
             var refName = field.Ref.TrimStart('$');
             if (!ctx.Variables.TryGetValue(refName, out var refVal))
+            {
+                ctx.CheckUnbound(refName);    // PS-368
                 throw new InvalidOperationException($"Ref field not found: {refName}");
+            }
 
             var (ok, rv) = Helpers.ToFloat64(refVal);
             numVal = ok ? rv : 0;
@@ -886,18 +904,22 @@ public static class SchemaDecoder
                 var (ok, f) = Helpers.ToFloat64(val);
                 if (ok) return f;
             }
+            else ctx.CheckUnbound(name);    // PS-368
             throw new InvalidOperationException($"Operand field not found: {op}");
         }
         return double.Parse(op, CultureInfo.InvariantCulture);
     }
 
-    static bool EvaluateGuardConditions(GuardDef gd, DecodeContext ctx)
+    internal static bool EvaluateGuardConditions(GuardDef gd, DecodeContext ctx)
     {
         foreach (var cond in gd.When)
         {
             var fieldName = cond.Field.TrimStart('$');
             if (!ctx.Variables.TryGetValue(fieldName, out var fieldVal))
+            {
+                ctx.CheckUnbound(fieldName);    // PS-368
                 return false;
+            }
             var (ok, fv) = Helpers.ToFloat64(fieldVal);
             if (!ok) return false;
             if (cond.Gt.HasValue && !(fv > cond.Gt.Value)) return false;
@@ -916,7 +938,10 @@ public static class SchemaDecoder
         {
             var fieldName = cond.Field.TrimStart('$');
             if (!ctx.Variables.TryGetValue(fieldName, out var fieldVal))
+            {
+                ctx.CheckUnbound(fieldName);    // PS-368
                 return gd.ElseValue;
+            }
 
             var (ok, fv) = Helpers.ToFloat64(fieldVal);
             if (!ok) return gd.ElseValue;
@@ -1051,6 +1076,21 @@ public static class SchemaDecoder
     }
 
     static Dictionary<string, object?> DecodeTLV(SchemaField field, DecodeContext ctx)
+    {
+        // PS-471: the loop stops `reserve` bytes before the payload ends, and the fields
+        // after the tlv decode from them. A buffer that stops there keeps every entry
+        // read inside the region.
+        if (field.Reserve > 0)
+        {
+            if (ctx.Remaining < field.Reserve)
+                throw new InvalidOperationException($"tlv reserves {field.Reserve} byte(s) but "
+                    + $"{ctx.Remaining} remain at offset {ctx.Offset} (PS-471)");
+            return ctx.WithRegion(ctx.Data.Length - field.Reserve, () => DecodeTLVEntries(field, ctx));
+        }
+        return DecodeTLVEntries(field, ctx);
+    }
+
+    static Dictionary<string, object?> DecodeTLVEntries(SchemaField field, DecodeContext ctx)
     {
         int tagSize = field.TagSize > 0 ? field.TagSize : 1;
         int lengthSize = field.LengthSize;
@@ -1320,6 +1360,51 @@ public static class SchemaDecoder
         int maxIterations = field.Max > 0 ? field.Max : 1000;
         int minIterations = field.Min;
         var result = new List<object?>();
+        int iterations = 0;
+
+        // PS-378, PS-380: a carried field starts again from its `carry` value each time
+        // the repeat begins, including each iteration of an enclosing repeat.
+        var carryState = new Dictionary<string, object?>();
+        foreach (var member in field.Fields)
+            if (member.Carry != null && !string.IsNullOrEmpty(member.Name))
+                carryState[member.Name] = CarryInitial(member, ctx);
+        var elementNames = new HashSet<string>(
+            field.Fields.Select(f => f.Name).Where(n => !string.IsNullOrEmpty(n)));
+
+        // One element, in a scope of its own: its names are gone after it (PS-368).
+        // Appended unless present_if drops it; a dropped element still counts, still
+        // advances the index and still consumed its bytes (PS-386).
+        void Element()
+        {
+            var outer = new Dictionary<string, object?>(ctx.Variables);
+            var savedNames = ctx.ElementNames;
+            ctx.ElementNames = elementNames;
+            if (!string.IsNullOrEmpty(field.Index))
+                ctx.Variables[field.Index!] = iterations;                          // PS-366
+            foreach (var kv in carryState)
+                ctx.Variables[kv.Key] = kv.Value;                                  // PS-379
+            Dictionary<string, object?> element;
+            bool keep;
+            try
+            {
+                element = DecodeFields(field.Fields, ctx, schema);
+                foreach (var name in carryState.Keys.ToList())
+                    if (ctx.Variables.TryGetValue(name, out var carried))
+                        carryState[name] = carried;
+                keep = field.PresentIf == null
+                       || EvaluateGuardConditions(new GuardDef { When = { field.PresentIf } }, ctx);
+            }
+            finally
+            {
+                ctx.Variables.Clear();
+                foreach (var kv in outer)
+                    ctx.Variables[kv.Key] = kv.Value;
+                ctx.ElementNames = savedNames;
+            }
+            iterations++;
+            if (keep)
+                result.Add(element);
+        }
 
         if (field.Count != null)
         {
@@ -1343,7 +1428,7 @@ public static class SchemaDecoder
             if (count > maxIterations)
                 throw RepeatLimitError(field, maxIterations, $"count {count}", ctx.Offset, ctx.Data.Length);
             for (int i = 0; i < count; i++)
-                result.Add(DecodeFields(field.Fields, ctx, schema));
+                Element();
         }
         else if (field.ByteLength != null)
         {
@@ -1362,12 +1447,8 @@ public static class SchemaDecoder
             else byteLength = 0;
 
             int endOffset = ctx.Offset + byteLength;
-            int iterations = 0;
             while (ctx.Offset < endOffset && iterations < maxIterations)
-            {
-                result.Add(DecodeFields(field.Fields, ctx, schema));
-                iterations++;
-            }
+                Element();
 
             // PS-088: the members must divide the span exactly. This implementation had
             // no check at all, so it accepted both ways they do not - an iteration
@@ -1388,29 +1469,44 @@ public static class SchemaDecoder
         }
         else if (field.Until == "end")
         {
-            int iterations = 0;
+            // PS-350, PS-351: the region ends `reserve` bytes before the payload does, and
+            // the ragged-tail rule applies to that region. Its elements decode from a
+            // buffer that stops there, so nothing inside one can read the reserved bytes.
+            int regionEnd = ctx.Data.Length - field.Reserve;
+            if (regionEnd < ctx.Offset)
+                throw new InvalidOperationException($"repeat '{field.Name}' reserves {field.Reserve} "
+                    + $"byte(s) but {ctx.Remaining} remain at offset {ctx.Offset} (PS-351)");
             // PS-343 to PS-344a: a tail too short for a whole element is an error naming
             // the repeat as a ragged tail, tested before the element begins where its
             // size is fixed. This began the element and failed part-way with the
             // underflow of whichever member ran out.
             var elementSize = FixedElementSize(field.Fields);
-            while (ctx.Remaining > 0 && iterations < maxIterations)
+            ctx.WithRegion(regionEnd, () =>
             {
-                var start = ctx.Offset;
-                if (elementSize > 0 && ctx.Remaining < elementSize)
-                    throw RaggedTailError(field, ctx.Remaining, elementSize, start);
-                try
+                while (ctx.Remaining > 0 && iterations < maxIterations)
                 {
-                    result.Add(DecodeFields(field.Fields, ctx, schema));
+                    var start = ctx.Offset;
+                    if (elementSize > 0 && ctx.Remaining < elementSize)
+                        throw RaggedTailError(field, ctx.Remaining, elementSize, start);
+                    try
+                    {
+                        Element();
+                    }
+                    catch (InvalidOperationException e) when (e.Message.Contains("Buffer underflow"))
+                    {
+                        throw RaggedTailError(field, ctx.Data.Length - start, 0, start);
+                    }
+                    // An element that read nothing would never end the loop.
+                    if (ctx.Offset == start) break;
                 }
-                catch (InvalidOperationException e) when (e.Message.Contains("Buffer underflow"))
-                {
-                    throw RaggedTailError(field, ctx.Data.Length - start, 0, start);
-                }
-                iterations++;
-            }
-            if (iterations >= maxIterations && ctx.Remaining > 0)
-                throw RepeatLimitError(field, maxIterations, "until: end", ctx.Offset, ctx.Data.Length);
+                if (iterations >= maxIterations && ctx.Remaining > 0)
+                    throw RepeatLimitError(field, maxIterations, "until: end", ctx.Offset, ctx.Data.Length);
+                return 0;
+            });
+            // PS-383: the trailer was decoded from the reserved bytes before the first
+            // element, so nothing after the repeat reads them again.
+            if (field.Trailer is { Count: > 0 })
+                ctx.Offset = ctx.Data.Length;
         }
         else
         {
@@ -1420,7 +1516,24 @@ public static class SchemaDecoder
         if (result.Count < minIterations)
             throw new InvalidOperationException($"Repeat produced {result.Count} elements, but minimum is {minIterations}");
 
+        // PS-367: the number of elements reported (CR-2026-080), bound for later fields only.
+        if (!string.IsNullOrEmpty(field.CountAs))
+            ctx.Variables[field.CountAs!] = result.Count;
+
         return result;
+    }
+
+    /// <summary>A carried field's value before the first element (PS-378).</summary>
+    static object? CarryInitial(SchemaField member, DecodeContext ctx)
+    {
+        if (member.Carry is string text && text.StartsWith('$'))
+        {
+            if (!ctx.Variables.TryGetValue(text[1..], out var value))
+                throw new InvalidOperationException($"carry of '{member.Name}' names {text}, which "
+                    + "was not decoded before the repeat (PS-381)");
+            return value;
+        }
+        return member.Carry;
     }
 
     static void MergeTo(Dictionary<string, object?> target, Dictionary<string, object?> source)

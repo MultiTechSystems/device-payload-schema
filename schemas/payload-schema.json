@@ -248,7 +248,47 @@
           "type": "integer",
           "minimum": 0,
           "description": "`type: repeat`: fewest iterations that count as a valid decode; fewer is an error. Honoured by the four interpreters, not read by the TS013 generator."
-        }
+        },
+          "reserve": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "`type: repeat` with `until: end`: bytes at the end of the payload the repeat must not consume; the fields after it decode from them (PS-350). An error where fewer remain at the start (PS-351)."
+          },
+          "trailer": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/field"
+            },
+            "description": "`type: repeat` with `reserve`: fields decoded from the reserved bytes before the first element, bound for the elements and reported beside the repeat (PS-383). Each has a fixed size, and the sizes sum to `reserve` (PS-384). Encoded after the elements (PS-385)."
+          },
+          "index": {
+            "type": "string",
+            "description": "`type: repeat`: a name bound to each element's zero-based position while it is decoded and encoded (PS-366, PS-370)."
+          },
+          "count_as": {
+            "type": "string",
+            "description": "`type: repeat`: a name bound after the repeat to the number of elements it reports, after present_if (PS-367)."
+          },
+          "present_if": {
+            "type": "object",
+            "description": "`type: repeat`: one guard condition evaluated after each element; an element for which it is false is omitted, still advancing the index (PS-386). Such a repeat cannot be encoded where its elements read bytes (PS-387)."
+          },
+          "carry": {
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "pattern": "^\\$"
+              }
+            ],
+            "description": "A computed field in a repeat's elements: its own name resolves to its value in the previous element, or to this value in the first (PS-378 to PS-381)."
+          },
+          "identity": {
+            "type": "string",
+            "description": "`type: repeat`: its `index`, or a `$` reference to a field of its elements, identifying the metric each element carries (PS-372). An annotation; decoding ignores it (PS-376)."
+          }
       },
       "additionalProperties": true
     },
@@ -298,6 +338,11 @@
           "default": "skip",
           "description": "What to do with a tag no case describes (PS-155, PS-301 to PS-304). `skip` steps over it where a length says how long it is and otherwise abandons the rest of the payload; `raw` captures its bytes under `unknown_tags` (PS-303); `error` fails the decode. Every mode but `error` reports what it did. Implementations fall back to `skip` on an unrecognised value, so a misspelling silently discards data - tools/validate_schema.py refuses one."
         },
+          "reserve": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Bytes at the end of the payload the loop must not consume; the fields after the tlv decode from them (PS-471). An error where fewer remain at the start of the tlv."
+          },
         "cases": {
           "type": "object",
           "description": "Tag to the fields it introduces. A key is an integer (`1`, or `0x20` which YAML reads as 32); a range `\"2..5\"` or a list `[1, 2, 3]` for a single tag; a composite `\"[1, 117]\"` for a tag read through tag_fields, where a part may be `*` for any value or `!0` for any value but that one (PS-270); or `default`.",

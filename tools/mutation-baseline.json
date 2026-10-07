@@ -3,7 +3,7 @@
   "min_score_new": 0.8,
   "include_library_composed": false,
   "distribution": {
-    "100%": 149,
+    "100%": 156,
     "95-99%": 6,
     "90-94%": 1,
     "80-89%": 5,
@@ -332,6 +332,16 @@
       "provenance": "generated-only",
       "failing_original": 0
     },
+    "_language-conformance/repeat-carry.yaml": {
+      "score": 1.0,
+      "killed": 2,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 4,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "_language-conformance/repeat-count.yaml": {
       "score": 1.0,
       "killed": 4,
@@ -340,6 +350,26 @@
       "generated": 7,
       "vectors": 1,
       "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/repeat-identity.yaml": {
+      "score": 1.0,
+      "killed": 10,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 13,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/repeat-index-count-as.yaml": {
+      "score": 1.0,
+      "killed": 3,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 6,
+      "vectors": 1,
+      "provenance": "independent",
       "failing_original": 0
     },
     "_language-conformance/repeat-max-count.yaml": {
@@ -360,6 +390,36 @@
       "generated": 3,
       "vectors": 1,
       "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/repeat-present-if.yaml": {
+      "score": 1.0,
+      "killed": 4,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 7,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/repeat-reserve.yaml": {
+      "score": 1.0,
+      "killed": 7,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 9,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/repeat-trailer.yaml": {
+      "score": 1.0,
+      "killed": 4,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 6,
+      "vectors": 1,
+      "provenance": "independent",
       "failing_original": 0
     },
     "_language-conformance/round-half-to-even.yaml": {
@@ -400,6 +460,16 @@
       "generated": 6,
       "vectors": 1,
       "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/tlv-reserve.yaml": {
+      "score": 1.0,
+      "killed": 14,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 17,
+      "vectors": 2,
+      "provenance": "independent",
       "failing_original": 0
     },
     "_language-conformance/transform-maths.yaml": {
