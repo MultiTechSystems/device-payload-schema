@@ -1,9 +1,9 @@
 # A byte or text field's length may name a preceding field (PS-464, PS-465,
-# CR-2026-056), written with or without `$`, as `repeat`'s byte_length already could.
+# CR-2026-056), written with or without `$`, as a byte_length already could.
 #
 # A length octet followed by that many opaque bytes is the commonest framing there is,
 # and it had no spelling: `length` took an integer or `remaining` only, so the bytes had
-# to be decoded as a list of u8 records. The field after the run proves the read
+# to be decoded as a list of u8 elements. The field after the run proves the read
 # position moved by exactly the named count.
 #
 # Round-trips: the encoder writes the count from its own field, then the bytes.

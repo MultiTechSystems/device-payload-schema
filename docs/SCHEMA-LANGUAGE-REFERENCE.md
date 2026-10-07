@@ -95,7 +95,45 @@ Consumes every byte from the read position to the end of the payload (PS-013):
 - At the end of a payload it yields an empty value, not an error and not a one-byte read
   (PS-014).
 - At most one field per nesting level may use it (PS-015), and only on a variable-length
-  type — `bytes`, `hex`, `ascii`, `string`. On a fixed-width type it is a validation error.
+  type — `bytes`, `hex`, `ascii`, `base64`. On a fixed-width type it is a validation error.
+
+#### A length taken from an earlier field
+
+`length` may name a field decoded before it, with or without `$` (PS-464). A length octet
+followed by that many bytes is written directly:
+
+```yaml
+- name: n
+  type: u8
+- name: frame
+  type: bytes
+  length: $n            # or `length: n`
+```
+
+A name that no earlier field binds is an error naming it (PS-465).
+
+#### Optional trailing fields
+
+A field declaring `optional: true` is decoded where its bytes remain and is absent where
+none do (PS-402). Devices that append fields in later firmware are described by one schema:
+
+```yaml
+- name: reset_cause
+  type: u8
+- name: firmware
+  type: u16
+  optional: true        # absent from a 1-byte frame
+- name: ble_firmware
+  type: u16
+  optional: true        # absent unless 5 bytes arrive
+```
+
+- Some bytes but fewer than the field takes is an error; an optional field is never partly
+  read (PS-403). A `type: object` is present or absent whole, sized as its fields sum.
+- Every field after an optional one must be optional too (PS-404), so an absent field never
+  leaves a later one reading the wrong bytes.
+- An encoder writes an optional field only where the input has it, and rejects an input
+  that supplies one after omitting an earlier one (PS-405).
 - When encoding it contributes no fixed count; the value supplies its own length.
 
 ### Special Types
@@ -406,6 +444,26 @@ generator; Go, Java and C# ignore them, so avoid them where cross-language resul
           type: u8
 ```
 
+### Match on the bytes remaining
+
+Some devices tell their layouts apart by length alone. `remaining: true` makes the
+discriminator the number of bytes from here to the end, less any enclosing repeat's
+`reserve` (PS-414); it reads nothing:
+
+```yaml
+- match:
+    remaining: true
+    cases:
+      2:                  # two bytes left
+        - name: short_reading
+          type: u16
+      4..255:             # four or more - a range is how "at least" is written
+        - name: long_reading
+          type: u32
+```
+
+A match declares exactly one of `field`, `length` and `remaining` (PS-416).
+
 ### Flagged (bitmask presence)
 
 ```yaml
@@ -660,8 +718,23 @@ Store values for later reference:
       2: [...]
 ```
 
-A name beginning with `_` is internal: it becomes a variable that later fields can
-reference, but it is not reported in the output. Use it for intermediates.
+A name beginning with `_` is internal: it is decoded and can be referenced like any
+field, and it is never reported (PS-432). Use it for protocol bytes, masks, reserved bits
+and the steps of a computation.
+
+- `_meta`, `_quality` and `_warnings` are reserved for interpreter output and cannot name a
+  field (PS-433).
+- An encoder never needs an internal field in its input. One that reads bytes writes its
+  `value`; without one it takes the input's value under its name, and otherwise reports an
+  error naming it (PS-434). So a reserved field states what it carries:
+
+```yaml
+- name: _reserved
+  type: u8[1:1]
+  value: 0              # what an encoder writes
+```
+
+- A `metadata` timestamp may read an internal field (PS-435).
 
 ## Computed Output Keys (`name_from`)
 
@@ -1085,6 +1158,28 @@ warning but are not modified.
 
 `_quality` is added to the output by the Python, Go and C# interpreters and the TS013
 codec, and only when a decoded field declares `valid_range`; Java does not emit it.
+
+#### No reading: `sentinel` and `out_of_range: omit`
+
+A device that reports "no reading" with a reserved value - SenseCAP's `0x8000`, a humidity
+of 200 % - should not have it decoded as a quantity. Both forms leave the field absent
+(PS-427 to PS-429):
+
+```yaml
+- name: temperature
+  type: s16
+  div: 10
+  sentinel: [-32768]     # the raw integer, before div and before any encoding
+- name: humidity
+  type: u8
+  valid_range: [0, 100]
+  out_of_range: omit     # outside the range is no reading, not a flagged one
+```
+
+An absent reading is neither reported nor bound for later references, and `_quality`
+records it as `absent` or `out_of_range` wherever `_quality` is produced. Without
+`out_of_range` (or with `flag`), a value outside `valid_range` is reported and flagged as
+before. An encoder writes the first sentinel back for a field the input omits.
 Python reports the warning in `result.warnings`; Go, Java and C# put it in the output
 under `_warnings`.
 

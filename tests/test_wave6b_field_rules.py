@@ -116,8 +116,31 @@ def test_remaining_excludes_an_enclosing_reserve():
 
 def test_sentinel_compares_the_bits_before_an_encoding():
     schema = fields({"name": "v", "type": "u8", "encoding": "bcd", "sentinel": [255]})
-    assert decode(schema, "FF").data == {}
+    absent = decode(schema, "FF")
+    assert absent.success and absent.data == {}, absent.errors   # not an invalid BCD digit
     assert decode(schema, "42").data == {"v": 42}
+    # and written back as the raw bits, never through the code
+    assert SchemaInterpreter(schema).encode({}).payload == b"\xff"
+    gray = fields({"name": "v", "type": "u8", "encoding": "gray", "sentinel": [255]})
+    assert SchemaInterpreter(gray).encode({}).payload == b"\xff"
+
+
+def test_an_internal_flagged_member_follows_ps_434():
+    schema = fields({"name": "mask", "type": "u8"},
+                    {"flagged": {"field": "mask", "groups": [{"bit": 0, "fields": [
+                        {"name": "_r", "type": "u8"}, {"name": "v", "type": "u8"}]}]}})
+    assert any("PS-434" in e
+               for e in SchemaInterpreter(schema).encode({"mask": 1, "v": 2}).errors)
+    assert SchemaInterpreter(schema).encode({"mask": 1, "_r": 9, "v": 2}).payload \
+        == b"\x01\x09\x02"
+
+
+def test_an_omitted_optional_object_writes_nothing():
+    schema = fields({"name": "a", "type": "u8"},
+                    {"name": "gps", "type": "object", "optional": True,
+                     "fields": [{"name": "lat", "type": "s16"}]})
+    result = SchemaInterpreter(schema).encode({"a": 1})
+    assert result.payload == b"\x01" and not result.warnings
 
 
 def test_absent_readings_join_quality_only_where_it_is_produced():

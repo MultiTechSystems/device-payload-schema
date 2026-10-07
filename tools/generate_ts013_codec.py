@@ -948,6 +948,16 @@ function writeS(buf, pos, size, value, endian) {
                 for group in groups:
                     if isinstance(group, dict) and isinstance(group.get('fields'), list):
                         found.extend(self._valid_range_fields(group['fields']))
+            # A match case body is decoded by the interpreters' field-list decoder, whose
+            # `_quality` belongs to the decode (wave 6b), so its ranges are checked too.
+            match = field.get('match')
+            if isinstance(match, dict):
+                cases = match.get('cases')
+                for body in (cases.values() if isinstance(cases, dict) else []):
+                    if isinstance(body, list):
+                        found.extend(self._valid_range_fields(body))
+                if isinstance(match.get('default'), list):
+                    found.extend(self._valid_range_fields(match['default']))
             valid_range = field.get('valid_range')
             name = field.get('name')
             if not name or not isinstance(valid_range, (list, tuple)) or len(valid_range) < 2:

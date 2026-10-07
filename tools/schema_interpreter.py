@@ -422,6 +422,11 @@ def internal_name_errors(schema):
     return errors
 
 
+def raw_bits_field(field_def):
+    """The field without its `encoding`: a sentinel is written as the bits it is (PS-427)."""
+    return {k: v for k, v in field_def.items() if k != 'encoding'}
+
+
 def optional_field_size(field_def):
     """The bytes an optional field takes, or None where its size depends on the payload.
 
@@ -1875,6 +1880,11 @@ class SchemaInterpreter:
                 # For encoded values, read as unsigned first
                 if signed:
                     value, _ = self._read_int(buf, pos, size, False)
+                # PS-427: a sentinel is the bit pattern, compared before the code. Left
+                # undecoded here, so a sentinel no code can represent - BCD 0xFF - is "no
+                # reading" rather than an invalid-digit error.
+                if value in (field_def.get('sentinel') or ()):
+                    return value, new_pos
                 value = self._decode_encoding(value, encoding, size)
             return value, new_pos
         
@@ -2524,6 +2534,9 @@ class SchemaInterpreter:
         result.update(scratch.data)
         if saved_current is not None:
             saved_current.update(scratch.data)
+        # A case body's `_quality` belongs to the decode, as it does in Go and C#, which
+        # keep one quality table per decode.
+        self._case_quality.update(scratch.quality)
         return result, pos
     
     def _match_case_pattern(self, value: Any, pattern: Any) -> bool:
@@ -3458,6 +3471,8 @@ class SchemaInterpreter:
         self._variables = {}
         # Readings omitted under PS-427/PS-428, for `_quality` if it is produced.
         self._pending_absent = {}
+        # `_quality` from match case bodies, which decode into a scratch result.
+        self._case_quality = {}
         
         pos = 0
         fields = self._resolve_fields(fPort)
@@ -3472,6 +3487,8 @@ class SchemaInterpreter:
             self._enrich_metadata(result.data, metadata_def, input_metadata,
                                   result.warnings)
         
+        for case_name, flag in self._case_quality.items():
+            result.quality.setdefault(case_name, flag)
         # PS-427, PS-428: an omitted reading is recorded where `_quality` is produced -
         # which a field declaring `valid_range` does (PS-182) - and only there.
         if result.quality:
@@ -3952,6 +3969,18 @@ class SchemaInterpreter:
                     result.errors.append(f"Error encoding bit range(s) {names}: {e}")
                 continue
             field_def = _item
+            # PS-405, before any construct: an optional object or repeat the input omits
+            # writes nothing, as a plain field does. The object branch ran first and wrote
+            # its members as zeros.
+            if field_def.get('optional') is True and field_def.get('name'):
+                if data.get(field_def['name']) is None:
+                    omitted_optional = omitted_optional or field_def['name']
+                    continue
+                if omitted_optional:
+                    result.errors.append(
+                        f"Error encoding {field_def['name']}: optional field supplied while "
+                        f"the earlier optional field {omitted_optional!r} is not (PS-405)")
+                    continue
             if '$ref' in field_def:
                 # Decoding splices the referenced definition's fields in place; encoding
                 # never did, so the whole header collapsed to one zero byte -
@@ -4087,7 +4116,7 @@ class SchemaInterpreter:
                     # A reading the decode omitted as "no reading" (PS-427) goes back as
                     # the sentinel it was, not as zero.
                     try:
-                        output.extend(self._encode_field(field_def,
+                        output.extend(self._encode_field(raw_bits_field(field_def),
                                                          field_def['sentinel'][0]))
                     except Exception as e:
                         result.errors.append(f"Error encoding {name}: {e}")
@@ -4122,7 +4151,7 @@ class SchemaInterpreter:
             for gf in group_fields:
                 gf_name = gf.get('name', '')
                 gf_type = gf.get('type', 'u8')
-                if not gf_name or gf_name.startswith('_'):
+                if not gf_name:
                     continue
                 if gf_type in COMPUTED_TYPES:
                     # A derived value: computed from other fields, so it has no bytes of
@@ -4130,7 +4159,15 @@ class SchemaInterpreter:
                     # field using `ref`, `compute`, `polynomial` or `guard` was encoded
                     # as though it were on the wire.
                     continue
-                value = data.get(gf_name, 0)
+                if gf_name.startswith('_'):
+                    # PS-434. An internal member was skipped outright, writing none of
+                    # the bytes the decoder reads, so every later member was misplaced.
+                    value = self._internal_encode_value(gf, data)
+                elif gf_name not in data and gf.get('sentinel'):
+                    output.extend(self._encode_field(raw_bits_field(gf), gf['sentinel'][0]))   # PS-427
+                    continue
+                else:
+                    value = data.get(gf_name, 0)
                 value = self._reverse_modifiers(value, gf)
                 output.extend(self._encode_field(gf, value))
         
@@ -4523,14 +4560,14 @@ class SchemaInterpreter:
             else:
                 # As in the top-level loop: a templated key is where the value lives.
                 lookup_name = self._resolve_encode_name(f, name, data) or name
-                if lookup_name not in data:
+                if data.get(lookup_name) is None:
                     if f.get('optional') is True:
                         omitted_optional = omitted_optional or name    # PS-405
                         continue
                     if f.get('sentinel'):
                         # A reading the decode omitted as "no reading" (PS-427) goes back
                         # as the sentinel it was, not as zero.
-                        out.extend(self._encode_field(f, f['sentinel'][0]))
+                        out.extend(self._encode_field(raw_bits_field(f), f['sentinel'][0]))
                         continue
                 elif f.get('optional') is True and omitted_optional:
                     raise ValueError(f"optional field {name!r} is supplied while the earlier "
