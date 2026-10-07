@@ -257,6 +257,27 @@ func TestWave6bInternalFieldEncode(t *testing.T) {
 	}
 }
 
+// PS-434 in a flagged group: an internal member that reads bytes writes its value, else
+// the input's, else it is an error naming it; an omitted sentinel member writes its
+// sentinel's raw bits.
+func TestWave6bFlaggedInternalMember(t *testing.T) {
+	s := wave6bSchema(t, "  - {name: mask, type: u8}\n"+
+		"  - flagged: {field: mask, groups: [{bit: 0, fields: [{name: _r, type: u8}, {name: v, type: u8}]}]}\n")
+	_, err := s.Encode(map[string]any{"mask": 1, "v": 2})
+	expectErrorCiting(t, "flagged internal member", err, "PS-434")
+	if err != nil && !strings.Contains(err.Error(), "_r") {
+		t.Errorf("the error does not name the field: %v", err)
+	}
+	if out, err := s.Encode(map[string]any{"mask": 1, "_r": 9, "v": 2}); err != nil || !bytes.Equal(out, []byte{1, 9, 2}) {
+		t.Errorf("% x %v, want 01 09 02", out, err)
+	}
+	sentinel := wave6bSchema(t, "  - {name: mask, type: u8}\n"+
+		"  - flagged: {field: mask, groups: [{bit: 0, fields: [{name: t, type: s16, div: 10, sentinel: [-32768]}, {name: v, type: u8}]}]}\n")
+	if out, err := sentinel.Encode(map[string]any{"mask": 1, "v": 2}); err != nil || !bytes.Equal(out, []byte{1, 0x80, 0, 2}) {
+		t.Errorf("% x %v, want 01 8000 02", out, err)
+	}
+}
+
 // PS-434: the discriminator of a match is not inferred from the case the data fits.
 func TestWave6bInternalDiscriminatorIsNotInferred(t *testing.T) {
 	s := wave6bSchema(t, "  - {name: _kind, type: u8}\n"+

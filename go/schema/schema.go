@@ -4743,7 +4743,10 @@ func encodeFlagged(fd *FlaggedDef, data map[string]any, ctx *EncodeContext) erro
 			return encodeBitfieldRun(pending, data, ctx)
 		}
 		for _, gf := range group.Fields {
-			if gf.Name == "" || strings.HasPrefix(gf.Name, "_") {
+			// Unnamed and computed members are skipped. An internal member that reads
+			// bytes follows PS-434 below; it used to be skipped too, so its bytes went
+			// missing from the group and every later member landed at the wrong offset.
+			if gf.Name == "" {
 				continue
 			}
 			// A derived value is computed from other fields and occupies no bytes of
@@ -4768,9 +4771,27 @@ func encodeFlagged(fd *FlaggedDef, data map[string]any, ctx *EncodeContext) erro
 			if err := flush(); err != nil {
 				return err
 			}
-			value, ok := data[gf.Name]
-			if !ok {
-				continue
+			var value any
+			if strings.HasPrefix(gf.Name, "_") {
+				// PS-434: its value, else the input's, else an error naming it.
+				v, err := internalEncodeValue(gf, data)
+				if err != nil {
+					return err
+				}
+				value = v
+			} else {
+				v, ok := data[gf.Name]
+				if !ok || v == nil {
+					if len(gf.Sentinel) > 0 {
+						// A reading omitted as "no reading" (PS-427) goes back as the
+						// sentinel's raw bits.
+						if err := encodeSentinel(gf, ctx); err != nil {
+							return err
+						}
+					}
+					continue
+				}
+				value = v
 			}
 			if err := encodeField(gf, value, ctx); err != nil {
 				return err
