@@ -95,6 +95,11 @@ public class CorpusEncodeRoundTripTests
         var byShape = new SortedDictionary<string, Dictionary<string, int>>();
         var errorDetail = new Dictionary<string, int>();
         int decoded = 0;
+        // ENCODE_REPORT=/path/file.txt writes one "schema<TAB>vector<TAB>status" line per
+        // decoded vector, so the vectors that start or stop round-tripping can be named
+        // rather than inferred from a count.
+        var reportPath = Environment.GetEnvironmentVariable("ENCODE_REPORT");
+        var reportLines = new List<string>();
 
         foreach (var file in Directory.GetFiles(corpus, "*.yaml", SearchOption.AllDirectories)
                      .OrderBy(f => f))
@@ -152,6 +157,9 @@ public class CorpusEncodeRoundTripTests
                     continue;   // a decode gap is CorpusConformanceTests' business
                 }
                 decoded++;
+                var vectorName = Text(vector, "name");
+                var rel = Path.GetRelativePath(corpus, file).Replace('\\', '/');
+                void Report(string status) => reportLines.Add($"{rel}\t{vectorName}\t{status}");
 
                 EncodeResult result;
                 try
@@ -164,28 +172,34 @@ public class CorpusEncodeRoundTripTests
                 {
                     Bump(counts, "error");
                     Bump(errorDetail, $"{Path.GetFileName(file)}: {e.GetType().Name}: {e.Message}");
+                    Report("error");
                     continue;
                 }
 
+                string status;
                 if (!result.Success)
                 {
-                    Bump(counts, "error");
+                    Bump(counts, status = "error");
                     Bump(errorDetail, $"{Path.GetFileName(file)}: {result.Errors[0]}");
                 }
                 else if (result.Payload.AsSpan().SequenceEqual(payload))
                 {
-                    Bump(counts, "round-trips");
+                    Bump(counts, status = "round-trips");
                 }
                 else if (result.Payload.Length != payload.Length)
                 {
-                    Bump(counts, "length differs");
+                    Bump(counts, status = "length differs");
                 }
                 else
                 {
-                    Bump(counts, "bytes differ");
+                    Bump(counts, status = "bytes differ");
                 }
+                Report(status);
             }
         }
+
+        if (!string.IsNullOrEmpty(reportPath))
+            File.WriteAllLines(reportPath, reportLines);
 
         int exact = 0;
         foreach (var (shape, counts) in byShape)
