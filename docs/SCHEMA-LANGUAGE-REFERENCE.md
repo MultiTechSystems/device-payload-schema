@@ -38,11 +38,52 @@ downlink_commands: [...]  # Command definitions (for downlink)
 
 **Note:** 24-bit types (`u24`, `s24`) are commonly used for GPS coordinates in compact formats.
 
+Each integer type has fixed aliases, and no others (PS-049, PS-326); they are case-sensitive:
+
+| Type | Aliases |
+|------|---------|
+| `u8`, `u16`, `u24`, `u32`, `u64` | `uint8`, `uint16`, `uint24`, `uint32`, `uint64` |
+| `s8`, `s16`, `s24`, `s32`, `s64` | `i8`, `i16`, `i24`, `i32`, `i64` and `int8`, `int16`, `int24`, `int32`, `int64` |
+
+### Word-Ordered 32-Bit Types
+
+Some devices send a 32-bit value as two 16-bit units in an order neither `endian`
+setting describes. The type names the order, and a field's `endian:` does not change it
+(PS-271, PS-272, PS-362, PS-363):
+
+| Type | Units | Bytes within a unit | Interpreted as |
+|------|-------|---------------------|----------------|
+| `u32le16` | least significant first | big-endian | unsigned |
+| `s32le16` | least significant first | big-endian | two's complement |
+| `f32le16` | least significant first | big-endian | IEEE 754 binary32 |
+| `u32be16le` | most significant first | little-endian | unsigned |
+| `s32be16le` | most significant first | little-endian | two's complement |
+| `f32be16le` | most significant first | little-endian | IEEE 754 binary32 |
+
+```yaml
+- name: counter
+  type: u32le16      # 5678 1234 -> 0x12345678
+```
+
 ### Floating Point Types
 
 | Type | Bytes | Description |
 |------|-------|-------------|
 | `f16`, `f32`, `f64` | 2,4,8 | IEEE 754 float |
+
+### Compact Floats (MCCI)
+
+Unsigned and signed minifloats used by MCCI sensors (PS-417 to PS-421). They are not
+IEEE half precision:
+
+| Type | Bytes | Layout | Value |
+|------|-------|--------|-------|
+| `uflt16` | 2 | exponent 4 bits, fraction 12 | `f / 4096 x 2^(e - 15)`, range [0, 1) |
+| `sflt16` | 2 | sign, exponent 4, fraction 11 | `+-f / 2048 x 2^(e - 15)`; `-0` reports 0 |
+| `sflt24` | 3 | sign, exponent 7, fraction 16 | `+-(1 + f / 65536) x 2^(e - 63)`; exponent 127 means no value, and the field is absent |
+
+An encoder picks the smallest exponent whose fraction fits, ties to even; a value outside
+the range is an error (PS-420).
 
 ### Decimal Types
 
@@ -104,7 +145,7 @@ Consumes every byte from the read position to the end of the payload (PS-013):
 |------|-------------|
 | `bool` | Boolean (0=false, nonzero=true) |
 | `number` | Computed field, or a constant with `value:` (no wire bytes) |
-| `string` | Constant with `value:` (no wire bytes), or text read with `length:` |
+| `string` | Constant with `value:` (no wire bytes) only; text read from the payload is `ascii` (PS-361) |
 | `skip` | Skip bytes (padding) |
 | `enum` | Enumerated values |
 | `bitfield_string` | Bit flags as string |
@@ -135,8 +176,18 @@ from the same byte. Add `consume: 1` to advance after reading.
 
 `uN[start:end]` (inclusive) is the only bitfield spelling; `u8:2`, `u8[3+:2]`,
 `bits<3,2>` and `bits:2@3` were withdrawn (CR-2026-006) and are rejected. A bit range
-reads its base value big-endian whatever the schema's `endian` (PS-059), and consumes
-nothing unless `consume: N` is given, so the last range over a byte needs `consume: 1`.
+assembles its base value from N/8 bytes in the field's effective byte order - the schema's
+`endian`, or the field's own (PS-059) - and consumes nothing unless `consume: N` is given,
+so the last range over a byte needs `consume: 1`.
+
+A signed base, `sN[start:end]`, sign-extends from the width of the range, not of the base
+(PS-352, PS-353):
+
+```yaml
+- name: offset
+  type: s8[0:3]      # 0x0F -> -1, not 15
+  consume: 1
+```
 
 ### Byte Order
 
@@ -152,8 +203,9 @@ fields:
 ```
 
 The override does not cascade into the members of a nested construct (`object`, `repeat`,
-`match` ...); set it on each member. `le_`/`be_` type prefixes (`le_u16`) are not part of
-the language — the Python and Java interpreters reject them as unknown types.
+`match` ...); set it on each member. Byte order is never part of a type name: the `le_`
+and `be_` prefixes (`le_u16`) are withdrawn and every implementation rejects them
+(PS-053a, CR-2026-039).
 
 ### Byte Group (multiple values from shared bytes)
 
@@ -165,6 +217,20 @@ the language — the Python and Java interpreters reject them as unknown types.
         type: u8[0:3]
       - name: value_b
         type: u8[4:7]
+```
+
+A group assembles its `size` bytes into one value, and its members' bit positions refer to
+that value (PS-364). The group may declare `endian`; its members may not:
+
+```yaml
+- byte_group:
+    size: 2
+    endian: little     # 34 12 -> 0x1234; bits 12-15 are the 1
+    fields:
+      - name: kind
+        type: u16[12:15]
+      - name: value
+        type: u16[0:11]
 ```
 
 Shorthand (size inferred from field types):
@@ -379,13 +445,18 @@ transform:
   - sqrt: true        # √x (input clamped at 0)
   - abs: true         # |x|
   - pow: 2            # x²
-  - log10: true       # Base-10 logarithm (input clamped at 1e-10)
-  - log: true         # Natural logarithm (input clamped at 1e-10)
-  - {op: round, decimals: 2}   # Round half-to-even
+  - log10: true       # Base-10 logarithm; x <= 0 leaves the field absent (PS-117)
+  - log: true         # Natural logarithm; likewise
+  - floor: 0          # Lower bound: max(x, 0)
+  - ceiling: 100      # Upper bound: min(x, 100)
+  - clamp: [0, 100]   # Both bounds
+  - {op: round, decimals: 2}              # Half-to-even: `ties: even`, the default
+  - {op: round, decimals: 2, ties: away}  # A tie rounds away from zero (toFixed)
 ```
 
-`floor:`, `ceiling:` and `clamp:` stages exist only in the Python interpreter and the TS013
-generator; Go, Java and C# ignore them, so avoid them where cross-language results matter.
+All five implementations support every stage. Any other stage - `{round: n}`, `{op:
+floor}`, `{sub: n}` - is rejected, never skipped (PS-390). A zero divisor, like the log of
+x <= 0, leaves the field absent rather than reporting NaN (PS-100, PS-282).
 
 ## Conditional Parsing
 
@@ -439,12 +510,12 @@ generator; Go, Java and C# ignore them, so avoid them where cross-language resul
 | `bcd` | Binary-coded decimal |
 | `gray` | Gray code |
 
-**`encoding:` is implemented in the Python interpreter only.** Go, Java, C#, C and the
-TS013 generator ignore the key and report the raw value, so a schema using it decodes
-differently outside Python.
+`encoding` applies only to an unsigned integer type, reading it unsigned and then decoding
+the code (PS-422 to PS-425); Python, Go, Java, C# and the TS013 codec all support it. An
+encoder rejects a value the code cannot represent (PS-463). C does not have it.
 
-`match_value` (value-range conditional transforms) appears in the specification's field
-table but is implemented in no interpreter; do not use it.
+`match_value` is withdrawn and rejected (PS-426): write a signed type, a signed bit range,
+`encoding`, `match` or `guard` instead.
 
 ## Bitfield String
 
@@ -517,6 +588,16 @@ independently sourced vector is capped at Silver (PS-264).
 - name: readings
   type: repeat
   count: $num_readings
+  fields:
+    - name: value
+      type: u16
+
+# A span of bytes taken from an earlier field; the elements must divide it exactly (PS-088)
+- name: data_length
+  type: u8
+- name: samples
+  type: repeat
+  byte_length: $data_length
   fields:
     - name: value
       type: u16
@@ -840,6 +921,12 @@ metadata:
     - name: measurement_time
       mode: subtract
       offset_field: seconds_ago
+
+    # A base time minus an elapsed count from a field (PS-318, PS-319)
+    - name: sampled_at
+      mode: elapsed_to_absolute
+      elapsed_field: seconds_ago        # `offset_field` is the older spelling
+      time_base: rx_time                # the default
 
     # A device count of seconds since an epoch, as Unix seconds (a number)
     - name: device_time
@@ -1278,7 +1365,7 @@ COMPUTE OPS:  add sub mul div mod idiv
 
 GUARD OPS:    gt gte lt lte eq ne
 
-ENCODINGS:    sign_magnitude bcd gray (Python only)
+ENCODINGS:    sign_magnitude bcd gray (on uN only)
 
 MATCH:        exact | range ("n..m", decimal) | list ("[1, 2, 3]", quoted) | default
               exactly one of field: or length: (PS-399)
