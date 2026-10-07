@@ -28,7 +28,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 from schema_interpreter import (SchemaInterpreter, DecodeResult, check_byte_group_overlap,
                                 byte_group_endian,
                                 encoding_errors, expand_refs, fport_declaration_errors,
-                                literal_errors, lookup_template_errors, schema_iterator_errors,
+                                internal_name_errors, literal_errors,
+                                lookup_template_errors, optional_errors,
+                                schema_iterator_errors,
                                 timestamp_errors,
                                 typed_field_dicts)
 import schema_vocabulary
@@ -601,13 +603,18 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
             if not isinstance(match, dict):
                 errors.append(f"{mpath}: must be an object")
                 continue
-            if 'field' not in match and 'length' not in match:
+            sources = [k for k in ('field', 'length', 'remaining') if k in match]
+            if not sources:
                 errors.append(
-                    f"{mpath}: needs 'field' (a discriminator already decoded) or "
-                    "'length' (one read from the payload here)")
-            elif 'field' in match and 'length' in match:
+                    f"{mpath}: needs 'field' (a discriminator already decoded), "
+                    "'length' (one read from the payload here) or 'remaining: true' "
+                    "(the bytes left)")
+            elif len(sources) > 1:
                 errors.append(
-                    f"{mpath}: declares both 'field' and 'length'; exactly one (PS-399)")
+                    f"{mpath}: declares {' and '.join(sources)}; exactly one "
+                    f"(PS-399, PS-416)")
+            if 'remaining' in match and match['remaining'] is not True:
+                errors.append(f"{mpath}.remaining: must be true (PS-414)")
             if 'field' in match and not isinstance(match['field'], str):
                 errors.append(f"{mpath}.field: must be a string")
             if 'length' in match:
@@ -1136,10 +1143,22 @@ def check_remaining_length(schema: Dict[str, Any]) -> List[str]:
     errors = []
     for path, fields in iter_field_lists(schema):
         seen = []
+        earlier = set()
         for i, fld in enumerate(fields):
             if not isinstance(fld, dict):
                 continue
             length = fld.get('length')
+            if isinstance(length, str) and length.strip().lower() != 'remaining' \
+                    and not re.fullmatch(r'-?\d+', length.strip()):
+                # PS-464, PS-465: the name of a preceding field, with or without `$`.
+                ref = length.strip().lstrip('$')
+                if ref not in earlier:
+                    errors.append(f"{fld.get('name') or f'{path}[{i}]'}: length names "
+                                  f"{ref!r}, which is not a field before it in the same "
+                                  f"list (PS-465)")
+            for key in ('name', 'var'):
+                if isinstance(fld.get(key), str):
+                    earlier.add(fld[key])
             name = fld.get('name') or f"{path}[{i}]"
             ftype = str(fld.get('type', ''))
             if isinstance(length, str) and length.strip().lower() == 'remaining':
@@ -1176,6 +1195,26 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
             errors.extend(lookup_template_errors(field_def))      # PS-407
         # PS-350, PS-366 to PS-387, PS-471: the repeat iterator and reserve.
         errors.extend(schema_iterator_errors(schema))
+        # PS-014, PS-015, PS-464, PS-465: what `length` may be. Checked only on the
+        # file-validation path before, so a caller of this function never saw them.
+        errors.extend(check_remaining_length(schema))
+        # PS-404: optional fields form the tail of their list. PS-433: reserved names.
+        errors.extend(optional_errors(schema.get('fields')))
+        for port, entry in (schema.get('ports') or {}).items():
+            group = entry.get('fields') if isinstance(entry, dict) else entry
+            errors.extend(optional_errors(group, f"ports[{port}].fields"))
+        errors.extend(internal_name_errors(schema))
+        for field_def in typed_field_dicts(schema):
+            # PS-427: a list of integers. PS-428: omit or flag.
+            sentinel = field_def.get('sentinel')
+            if sentinel is not None and not (
+                    isinstance(sentinel, list) and sentinel and all(
+                        isinstance(s, int) and not isinstance(s, bool) for s in sentinel)):
+                errors.append(f"Field '{field_def.get('name', '?')}': sentinel must be a "
+                              f"non-empty list of integers (PS-427)")
+            if field_def.get('out_of_range', 'flag') not in ('flag', 'omit'):
+                errors.append(f"Field '{field_def.get('name', '?')}': out_of_range must be "
+                              f"omit or flag (PS-428)")
     has_fields = False
     has_ports = False
     
@@ -1622,7 +1661,6 @@ def validate_schema(schema: Dict[str, Any], strict_keys: bool = True) -> Validat
     
     # Validate structure (errors only)
     structure_errors = validate_schema_structure(schema)
-    structure_errors = structure_errors + check_remaining_length(schema)
     key_errors, key_warnings = check_vocabulary(schema)
     if strict_keys:
         structure_errors = structure_errors + key_errors

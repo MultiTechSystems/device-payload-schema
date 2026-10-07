@@ -1,0 +1,24 @@
+# An internal field is decoded, can be referenced, and is never reported (PS-432,
+# CR-2026-067). One that reads bytes writes its `value` on encode (PS-434).
+#
+# `_protocol` is checked by the inline dispatch below it and never appears in the
+# output. Its `value` is what the encoder writes, so the vector round-trips; without one
+# the encoder would have to report an error, having nothing to write.
+name: probe_internal_field_value
+endian: big
+fields:
+- name: _protocol
+  type: u8
+  value: 2
+- match:
+    field: $_protocol
+    cases:
+      2:
+      - name: reading
+        type: u16
+test_vectors:
+- name: protocol_two
+  source: spec-example
+  payload: "02 0102"
+  expected:
+    reading: 258

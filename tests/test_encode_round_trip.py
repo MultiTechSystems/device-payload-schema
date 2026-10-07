@@ -59,7 +59,10 @@ FLOOR_TOTAL = 1672
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
 FLOOR_BY_SHAPE = {
-    "tlv": 1283,
+    # 1283 -> 1281 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped
+    # only because their internal byte halves were all zero, which the encoder wrote
+    # for an internal field with no value. It now reports such a field instead.
+    "tlv": 1281,
     "flagged": 157,
     "plain fixed": 80,
     "match": 121,

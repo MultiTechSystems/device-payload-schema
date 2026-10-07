@@ -288,6 +288,26 @@
           "identity": {
             "type": "string",
             "description": "`type: repeat`: its `index`, or a `$` reference to a field of its elements, identifying the metric each element carries (PS-372). An annotation; decoding ignores it (PS-376)."
+          },
+          "optional": {
+            "const": true,
+            "description": "Decoded where its bytes remain, absent where none do, an error where some do but too few (PS-402, PS-403). Every later field in the list must be optional too (PS-404). Encoded only where the input supplies it (PS-405)."
+          },
+          "sentinel": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 1,
+            "description": "Raw integers, compared before any modifier or encoding, that mean no reading: the field is absent (PS-427, PS-429)."
+          },
+          "out_of_range": {
+            "enum": [
+              "flag",
+              "omit"
+            ],
+            "default": "flag",
+            "description": "With valid_range: `omit` drops a value outside the range rather than reporting it flagged (PS-428)."
           }
       },
       "additionalProperties": true
@@ -452,6 +472,10 @@
               }
             }
           ]
+        },
+        "remaining": {
+          "const": true,
+          "description": "Dispatch on the number of bytes from here to the end of the payload, less an enclosing repeat's reserve; reads nothing (PS-414, PS-415). Exactly one of field, length and remaining (PS-416)."
         }
       },
       "anyOf": [
@@ -463,6 +487,11 @@
         {
           "required": [
             "length"
+          ]
+        },
+        {
+          "required": [
+            "remaining"
           ]
         }
       ],

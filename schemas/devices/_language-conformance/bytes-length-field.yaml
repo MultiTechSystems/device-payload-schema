@@ -1,0 +1,43 @@
+# A byte or text field's length may name a preceding field (PS-464, PS-465,
+# CR-2026-056), written with or without `$`, as `repeat`'s byte_length already could.
+#
+# A length octet followed by that many opaque bytes is the commonest framing there is,
+# and it had no spelling: `length` took an integer or `remaining` only, so the bytes had
+# to be decoded as a list of u8 records. The field after the run proves the read
+# position moved by exactly the named count.
+#
+# Round-trips: the encoder writes the count from its own field, then the bytes.
+name: probe_bytes_length_field
+endian: big
+fields:
+- name: n
+  type: u8
+- name: frame
+  type: bytes
+  length: $n
+- name: label_length
+  type: u8
+- name: label
+  type: ascii
+  length: label_length
+- name: after
+  type: u8
+test_vectors:
+- name: two_bytes_then_three_chars
+  source: spec-example
+  payload: "02 AABB 03 414243 07"
+  expected:
+    n: 2
+    frame: aabb
+    label_length: 3
+    label: ABC
+    after: 7
+- name: empty_frame
+  source: spec-example
+  payload: "00 01 5A 09"
+  expected:
+    n: 0
+    frame: ""
+    label_length: 1
+    label: Z
+    after: 9

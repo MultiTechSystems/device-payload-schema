@@ -23,6 +23,7 @@ fields:
           description: "Alarm triggered (1=TRUE, 0=FALSE)"
         - name: _reserved
           type: u8[1:1]
+          value: 0             # what an encoder writes for the reserved bit (PS-434)
         - name: mode
           type: u8[2:6]
           description: "Work mode: 1=CO2, 31=ALARM config"

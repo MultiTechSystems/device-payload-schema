@@ -104,6 +104,10 @@ UNREACHABLE_KEYS = {
     # A bytes rendering other than lowercase hex. include/schema_interpreter.h has no
     # `format` or `separator` (zero occurrences), so it is an interpreter gap, not this
     # harness's: PS-079 and PS-391 are met by Python, Go, Java, C# and TS013.
+    # Wave 6b (CR-2026-059, -065): none has a slot in field_def_t.
+    "optional": "the interpreter has no optional fields (PS-402)",
+    "sentinel": "the interpreter has no sentinel (PS-427)",
+    "out_of_range": "the interpreter has no out_of_range: omit (PS-428)",
     "format": "the interpreter has no bytes format (PS-079)",
     "separator": "the interpreter has no bytes separator (PS-391)",
 }

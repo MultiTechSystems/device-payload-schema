@@ -334,6 +334,24 @@ def is_remaining_length(declared):
     return isinstance(declared, int) and declared < 0
 
 
+def length_to_js(field: Dict[str, Any], default: Any = 1) -> str:
+    """A field's byte count as JS: an integer, `remaining`, or a preceding field (PS-464).
+
+    A name, with or without `$`, resolves through `vars` as `repeat`'s byte_length does;
+    unbound, it throws naming it (PS-465). Interpolated as written before, so `$n` was a
+    JS syntax error and a bare `n` resolved to whatever local happened to share the name.
+    """
+    declared = field.get('length', default)
+    if is_remaining_length(declared):
+        return 'buf.length - pos'
+    if isinstance(declared, str) and not re.fullmatch(r'-?\d+', declared.strip()):
+        ref = to_js_name(declared.strip().lstrip('$'))
+        return (f'(vars.{ref} === undefined ? (function () {{ throw new Error("length names '
+                f'{json.dumps(ref)[1:-1]}, which is not a field decoded before this one '
+                f'(PS-465)"); }})() : vars.{ref})')
+    return str(int(declared))
+
+
 def name_from_to_js(field: Dict[str, Any], js_name: str) -> Tuple[List[str], str]:
     """Build the JS for a field's output key, honouring `name_from` (PS-265..PS-267).
 
@@ -416,6 +434,11 @@ class TS013Generator:
         # The repeat iterator's and reserve's schema rules (PS-350 to PS-387, PS-471).
         from schema_interpreter import schema_iterator_errors
         iterator_problems = schema_iterator_errors(schema)
+        from schema_interpreter import internal_name_errors, optional_errors
+        iterator_problems += optional_errors(schema.get('fields')) + internal_name_errors(schema)
+        for port_entry in (schema.get('ports') or {}).values():
+            group = port_entry.get('fields') if isinstance(port_entry, dict) else port_entry
+            iterator_problems += optional_errors(group)
         if iterator_problems:
             raise ValueError(iterator_problems[0])
         self.schema = schema
@@ -950,6 +973,8 @@ function writeS(buf, pos, size, value, endian) {
     def _gen_decode_fn(self, fname: str, fields: List[Dict]) -> str:
         lines = [f'function {fname}(buf, endian) {{']
         lines.append(f'  var pos = 0, d = {{}}, vars = {{}}, w = [];')
+        # Readings omitted as "no reading" (PS-427, PS-428), for `_quality` if produced.
+        lines.append('  var aqr = {}, aqp = {};')
         lines.append(f'  endian = endian || "{self.endian}";')
         self.indent = 1
         for field in self._expand_refs(fields):
@@ -967,21 +992,43 @@ function writeS(buf, pos, size, value, endian) {
         ranges = self._valid_range_fields(fields)
         for gap in self.gaps:
             lines.append(f'  // TODO: {gap}')
-        if ranges:
-            lines.append('  var q = {}, qn = 0;')
-            for js_name, schema_name, lo, hi in ranges:
-                lines.append(
-                    f'  if (Object.prototype.hasOwnProperty.call(d, {json.dumps(js_name)})) '
-                    f'{{ checkRange(q, w, {json.dumps(schema_name)}, d.{js_name}, '
-                    f'{json.dumps(lo)}, {json.dumps(hi)}); qn++; }}'
-                )
-            # PS-182: `_quality` appears only when a field actually carried a range.
-            lines.append('  if (qn) d._quality = q;')
+        lines.append('  var q = {}, qn = 0;')
+        for js_name, schema_name, lo, hi in ranges:
+            lines.append(
+                f'  if (Object.prototype.hasOwnProperty.call(d, {json.dumps(js_name)})) '
+                f'{{ checkRange(q, w, {json.dumps(schema_name)}, d.{js_name}, '
+                f'{json.dumps(lo)}, {json.dumps(hi)}); qn++; }}'
+            )
+        # PS-427, PS-428: an omitted reading is recorded where `_quality` is produced: a
+        # field that declares a range produces it, and then the others join it.
+        lines.append('  for (var _a in aqr) { q[_a] = aqr[_a]; qn++; }')
+        lines.append('  if (qn) for (var _p in aqp) { if (!(_p in q)) q[_p] = aqp[_p]; }')
+        # PS-182: `_quality` appears only when a field actually carried a range.
+        lines.append('  if (qn) d._quality = q;')
         lines.append('  return { data: d, pos: pos, warnings: w };')
         lines.append('}')
         return '\n'.join(lines)
 
     def _gen_decode_field(self, field: Dict) -> List[str]:
+        if isinstance(field, dict) and field.get('optional') is True:
+            # PS-402, PS-403: decoded where its bytes remain, absent where none do, an
+            # error where some do but too few. An absent field consumes nothing, so every
+            # later field - optional too, by PS-404 - finds no bytes and is absent as well.
+            from schema_interpreter import optional_field_size
+            i = self._i()
+            size = optional_field_size(field)
+            inner = dict(field)
+            del inner['optional']
+            lines = [f'{i}  if (pos < buf.length) {{']
+            if size:
+                lines.append(f'{i}    if (buf.length - pos < {size}) throw new Error("Error decoding '
+                             f'{field.get("name", "?")}: optional field takes {size} byte(s) but " + '
+                             f'(buf.length - pos) + " remain at offset " + pos + " (PS-403)");')
+            self.indent += 1
+            lines.extend(self._gen_decode_field(inner))
+            self.indent -= 1
+            lines.append(f'{i}  }}')
+            return lines
         lines = []
         i = self._i()
         # PS-422, PS-426: `encoding` only on uN and only a named code; no `match_value`.
@@ -1077,8 +1124,9 @@ function writeS(buf, pos, size, value, endian) {
         # modifiers, lookups and bitfields keep working through the existing generators.
         if field.get('type') == 'repeat' and field.get('fields'):
             arr = to_js_name(field.get('name', '_items'))
-            members = [m for m in field['fields']
-                       if isinstance(m, dict) and m.get('name')]
+            # Every member, constructs included: a bare `match` or `tlv` inside an
+            # element has no name, and filtering on one dropped it from the codec.
+            members = [m for m in field['fields'] if isinstance(m, dict)]
             lines.append(f'{i}  var {arr} = [];')
             # Iterations, not reported elements: present_if drops an element and it still
             # advances the index and counts toward `count` and `max` (PS-386).
@@ -1189,7 +1237,7 @@ function writeS(buf, pos, size, value, endian) {
             self.indent -= 1
             lines.append(f'{i}    var {arr}_rec = d; d = {arr}_outer;')
             for member in members:
-                if member['name'].startswith('_'):
+                if str(member.get('name', '')).startswith('_'):
                     # Internal members stay out of the record.
                     lines.append(f'{i}    delete {arr}_rec.{to_js_name(member["name"])};')
             if ragged:
@@ -1310,9 +1358,7 @@ function writeS(buf, pos, size, value, endian) {
                 if 'guard' in field:
                     value_expr = guard_to_js(field['guard'], value_expr)
                 value_expr = integral(value_expr)
-                
-                lines.append(f'{i}  d.{name} = {value_expr};')
-                lines.append(f'{i}  vars.{name} = {value_expr};')
+                lines.extend(self._computed_tail(i, field, name, value_expr))
                 return lines
             
             # New: compute with optional guard and transform
@@ -1327,9 +1373,7 @@ function writeS(buf, pos, size, value, endian) {
                 if 'guard' in field:
                     value_expr = guard_to_js(field['guard'], value_expr)
                 value_expr = integral(value_expr)
-                
-                lines.append(f'{i}  d.{name} = {value_expr};')
-                lines.append(f'{i}  vars.{name} = {value_expr};')
+                lines.extend(self._computed_tail(i, field, name, value_expr))
                 return lines
             
             # Literal value. JSON, not Python's repr: `value: true` emitted `True`,
@@ -1406,15 +1450,7 @@ function writeS(buf, pos, size, value, endian) {
 
             val_expr = self._apply_modifiers_expr(js_name, field)
             lines.append(f'{i}  var {js_name}_out = {val_expr};')
-            if field.get('var'):
-                lines.append(f'{i}  vars.{to_js_name(field["var"])} = {js_name}_out;')
-            lines.append(f'{i}  vars.{js_name} = {js_name}_out;')
-
-            if not name.startswith('_'):
-                guards, target = name_from_to_js(field, js_name)
-                for guard in guards:
-                    lines.append(f'{i}  {guard}')
-                lines.append(f'{i}  {target} = {js_name}_out;')
+            self._emit_tail(lines, i, field, js_name, name, bits_var=js_name)
 
             return lines
 
@@ -1467,16 +1503,13 @@ function writeS(buf, pos, size, value, endian) {
 
         # skip
         if ftype == 'skip':
-            length = field.get('length', 1)
-            lines.append(f'{i}  pos += {length};')
+            lines.append(f'{i}  pos += {length_to_js(field)};')
             return lines
 
         # base64 (clause 2 string types): this had no case and fell through to the
         # integer path, which then had no size for it.
         if ftype == 'base64':
-            declared = field.get('length', 1)
-            bound = 'buf.length - pos' if is_remaining_length(declared) else str(declared)
-            lines.append(f'{i}  var {js_name}_n = {bound};')
+            lines.append(f'{i}  var {js_name}_n = {length_to_js(field)};')
             lines.append(f'{i}  if (pos + {js_name}_n > buf.length) throw new Error("Buffer too short for base64");')
             lines.append(f'{i}  var {js_name} = toBase64(buf, pos, {js_name}_n);')
             lines.append(f'{i}  pos += {js_name}_n;')
@@ -1490,14 +1523,10 @@ function writeS(buf, pos, size, value, endian) {
 
         # string types
         if ftype in ('ascii', 'hex', 'bytes'):
-            declared = field.get('length', 1)
-            # `length: remaining` consumes to the end of the payload (PS-014).
-            if is_remaining_length(declared):
-                bound = 'buf.length - pos'
-            else:
-                bound = str(declared)
+            # `length: remaining` consumes to the end of the payload (PS-014); a name is a
+            # preceding field (PS-464).
             lines.append(f'{i}  var {js_name} = "";')
-            lines.append(f'{i}  var {js_name}_n = {bound};')
+            lines.append(f'{i}  var {js_name}_n = {length_to_js(field)};')
             if ftype == 'ascii':
                 lines.append(f'{i}  for (var _si = 0; _si < {js_name}_n && pos < buf.length; _si++)'
                              f' {{ {js_name} += String.fromCharCode(buf[pos++]); }}')
@@ -1615,22 +1644,67 @@ function writeS(buf, pos, size, value, endian) {
         else:
             lines.append(f'{i}  var {js_name} = {read_fn}(buf, pos, {sz}, {endian_arg});')
             lines.append(f'{i}  pos += {sz};')
+            if field.get('sentinel'):
+                # PS-427: the sentinel is the bit pattern, before any encoding.
+                lines.append(f'{i}  var {js_name}_bits = {js_name};')
             if field.get('encoding'):
                 lines.append(f'{i}  {js_name} = decodeEncoding({js_name}, "{field["encoding"]}", {sz});')
 
         val_expr = self._apply_modifiers_expr(js_name, field)
         lines.append(f'{i}  var {js_name}_out = {val_expr};')
-        if field.get('var'):
-            lines.append(f'{i}  vars.{to_js_name(field["var"])} = {js_name}_out;')
-        lines.append(f'{i}  vars.{js_name} = {js_name}_out;')
+        self._emit_tail(lines, i, field, js_name, name,
+                        bits_var=f'{js_name}_bits' if field.get('sentinel') else js_name)
+        return lines
 
+    def _computed_tail(self, i: str, field: Dict, name: str, value_expr: str) -> List[str]:
+        """A computed field's report and binding, unless `out_of_range: omit` drops it."""
+        bounds = field.get('valid_range')
+        if field.get('out_of_range') != 'omit' or not isinstance(bounds, (list, tuple)) \
+                or len(bounds) != 2:
+            return [f'{i}  d.{name} = {value_expr};', f'{i}  vars.{name} = {value_expr};']
+        tmp = f'_c_{to_js_name(name)}'
+        return [f'{i}  var {tmp} = {value_expr};',
+                f'{i}  if (typeof {tmp} === "number" && ({tmp} < {bounds[0]} || {tmp} > {bounds[1]})) '
+                f'{{ aqr[{json.dumps(name)}] = "out_of_range"; }}',
+                f'{i}  else {{ d.{name} = {tmp}; vars.{name} = {tmp}; }}']
+
+    def _emit_tail(self, lines: List[str], i: str, field: Dict, js_name: str, name: str,
+                   bits_var: str = '') -> None:
+        """Bind and report a numeric field's value, unless it is "no reading".
+
+        PS-427: a sentinel compares the raw bits, before any modifier or encoding.
+        PS-428: `out_of_range: omit` drops a value outside `valid_range`. Either way the
+        field is absent - not bound, not reported - and `_quality` records why where it
+        is produced (`aqr` for a field declaring a range, `aqp` otherwise).
+        """
+        body = []
+        if field.get('var'):
+            body.append(f'vars.{to_js_name(field["var"])} = {js_name}_out;')
+        body.append(f'vars.{js_name} = {js_name}_out;')
         if not name.startswith('_'):
             guards, target = name_from_to_js(field, js_name)
-            for guard in guards:
-                lines.append(f'{i}  {guard}')
-            lines.append(f'{i}  {target} = {js_name}_out;')
-
-        return lines
+            body.extend(guards)
+            body.append(f'{target} = {js_name}_out;')
+        conditions = []
+        bucket = 'aqr' if field.get('valid_range') else 'aqp'
+        key = json.dumps(name)
+        if field.get('sentinel') and bits_var:
+            conditions.append((f'{json.dumps(list(field["sentinel"]))}.indexOf({bits_var}) >= 0',
+                               '"absent"'))
+        bounds = field.get('valid_range')
+        if field.get('out_of_range') == 'omit' and isinstance(bounds, (list, tuple)) \
+                and len(bounds) == 2:
+            conditions.append((f'(typeof {js_name}_out === "number" && ({js_name}_out < '
+                               f'{bounds[0]} || {js_name}_out > {bounds[1]}))',
+                               '"out_of_range"'))
+        if not conditions:
+            lines.extend(f'{i}  {line}' for line in body)
+            return
+        keyword = 'if'
+        for condition, why in conditions:
+            lines.append(f'{i}  {keyword} ({condition}) {{ {bucket}[{key}] = {why}; }}')
+            keyword = 'else if'
+        lines.append(f'{i}  else {{ ' + ' '.join(body) + ' }')
 
     def _apply_modifiers_expr(self, raw_var: str, field: Dict) -> str:
         # Deprecated formula takes precedence
@@ -1886,10 +1960,18 @@ function writeS(buf, pos, size, value, endian) {
         width = match.get('length')
         # PS-399: exactly one discriminator source; a schema with both or neither is
         # invalid. With neither, this read a one-byte discriminator nobody declared.
-        if ('field' in match) == ('length' in match):
-            raise ValueError("a match must declare exactly one of 'field' and 'length' (PS-399)")
+        if sum(key in match for key in ('field', 'length', 'remaining')) != 1:
+            raise ValueError("a match must declare exactly one of 'field', 'length' and "
+                             "'remaining' (PS-399, PS-416)")
 
-        if match.get('field'):
+        if 'remaining' in match:
+            # PS-414: the bytes left, less any enclosing reserve - which the sliced buffer
+            # already excludes. Nothing is read.
+            if match['remaining'] is not True:
+                raise ValueError("a match's remaining must be true (PS-414)")
+            lines.append(f'{i}  var _mr = buf.length - pos;')
+            discriminator = '_mr'
+        elif match.get('field'):
             reference = match['field']
             discriminator = f'vars.{to_js_name(reference.lstrip("$"))}'
             lines.append(f'{i}  // match on {discriminator}')
