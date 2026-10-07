@@ -11,6 +11,34 @@ public class DecodeContext
     public Dictionary<string, object?> Variables { get; } = new();
     public Dictionary<string, string> Quality { get; } = new();
     public List<string> Warnings { get; } = new();
+    /// <summary>
+    /// Readings omitted under PS-427/PS-428 that wait to learn whether `_quality` is
+    /// produced at all; joined to it at the end of the decode only where it is.
+    /// </summary>
+    internal Dictionary<string, string> PendingAbsent { get; } = new();
+    /// <summary>Above zero while a flagged group's members decode; their marks always wait.</summary>
+    internal int FlaggedDepth { get; set; }
+
+    /// <summary>
+    /// Records an omitted reading (PS-427, PS-428). A field declaring valid_range produces
+    /// `_quality` itself, so its mark goes in at once; any other waits (PS-182). Mirrors
+    /// _mark_absent in tools/schema_interpreter.py.
+    /// </summary>
+    internal void MarkAbsent(SchemaField field, string why)
+    {
+        if (field.ValidRange is { Length: >= 2 } && FlaggedDepth == 0)
+            Quality[field.Name] = why;
+        else
+            PendingAbsent[field.Name] = why;
+    }
+
+    /// <summary>Joins the waiting marks to `_quality` where it is produced.</summary>
+    internal void FinishQuality()
+    {
+        if (Quality.Count == 0) return;
+        foreach (var (name, why) in PendingAbsent)
+            Quality.TryAdd(name, why);
+    }
     /// <summary>Names declared only inside some repeat's elements (PS-368).</summary>
     internal HashSet<string> RepeatOnlyNames { get; set; } = new();
     /// <summary>The fields of the element being decoded, or null outside one (PS-368).</summary>

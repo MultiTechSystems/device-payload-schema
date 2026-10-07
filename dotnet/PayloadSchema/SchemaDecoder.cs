@@ -20,6 +20,8 @@ public static class SchemaDecoder
 
         MergeTo(result, DecodeFields(schema.Fields, ctx, schema));
 
+        // PS-427, PS-428: an omitted reading joins `_quality` only where it is produced.
+        ctx.FinishQuality();
         if (ctx.Quality.Count > 0)
             result["_quality"] = new Dictionary<string, string>(ctx.Quality);
         // Warnings were collected and never reported, so an unknown TLV tag had nowhere
@@ -51,6 +53,8 @@ public static class SchemaDecoder
 
         MergeTo(result, DecodeFields(fields, ctx, schema));
 
+        // PS-427, PS-428: an omitted reading joins `_quality` only where it is produced.
+        ctx.FinishQuality();
         if (ctx.Quality.Count > 0)
             result["_quality"] = new Dictionary<string, string>(ctx.Quality);
         // Warnings were collected and never reported, so an unknown TLV tag had nowhere
@@ -94,6 +98,21 @@ public static class SchemaDecoder
                 ctx.Offset = trailerAt;
                 MergeTo(result, DecodeFields(field.Trailer, ctx, schema));
                 ctx.Offset = resume;
+            }
+
+            // PS-402, PS-403: an optional field is decoded where its bytes remain and is
+            // absent where none do. Every later field is optional too (PS-404), so once one
+            // is absent the list ends. Some bytes but too few is an error: an optional
+            // field is never partly read.
+            if (field.Optional)
+            {
+                var remaining = ctx.Remaining;
+                if (remaining <= 0) break;
+                var size = FixedElementSize(field.Type == FieldType.Object
+                    ? field.Fields : new List<SchemaField> { field });
+                if (size > 0 && remaining < size)
+                    throw new InvalidOperationException($"Error decoding {(string.IsNullOrEmpty(field.Name) ? "?" : field.Name)}: "
+                        + $"optional field takes {size} byte(s) but {remaining} remain at offset {ctx.Offset} (PS-403)");
             }
 
             // $ref
@@ -167,6 +186,15 @@ public static class SchemaDecoder
             }
 
             var value = DecodeField(field, ctx, schema);
+
+            if (value is AbsentReading absent)
+            {
+                // PS-427, PS-428: no reading - not reported and not bound. An internal
+                // field has no output to mark.
+                if (!string.IsNullOrEmpty(field.Name) && !field.Name.StartsWith("_"))
+                    ctx.MarkAbsent(field, absent.Why);
+                continue;
+            }
 
             if (ReferenceEquals(value, Omitted))
             {
@@ -256,8 +284,12 @@ public static class SchemaDecoder
         foreach (var group in fd.Groups)
         {
             int isPresent = (flags >> group.Bit) & 1;
-            if (isPresent != 0)
-                MergeTo(result, DecodeFields(group.Fields, ctx, null));
+            if (isPresent == 0) continue;
+            // A member omitted under PS-427/PS-428 waits to learn whether `_quality` is
+            // produced, as _decode_flagged's members do in the reference.
+            ctx.FlaggedDepth++;
+            try { MergeTo(result, DecodeFields(group.Fields, ctx, null)); }
+            finally { ctx.FlaggedDepth--; }
         }
 
         return result;
@@ -267,9 +299,14 @@ public static class SchemaDecoder
     {
         // A negative Length is the `remaining` sentinel and is passed through to
         // Read, which resolves it; only an absent length infers from the type.
-        int length = field.Length != 0 ? field.Length : Helpers.InferLengthFromType(field.Type);
+        int length = field.LengthRef != null && field.Type is FieldType.Bytes or FieldType.Ascii
+                         or FieldType.Hex or FieldType.Base64 or FieldType.Skip
+            ? ResolveLengthRef(field, ctx)
+            : field.Length != 0 ? field.Length : Helpers.InferLengthFromType(field.Type);
         string endian = field.Endian ?? ctx.Endian;
         object? value = null;
+        // The integer as read, before any `encoding` is decoded, for PS-427.
+        object? read = null;
 
         switch (field.Type)
         {
@@ -303,10 +340,16 @@ public static class SchemaDecoder
             case FieldType.U64:
             {
                 var data = ctx.Read(length);
+                var unsigned = Helpers.DecodeUint(data, endian);
+                read = unsigned;
+                // PS-427: compared before the code is decoded, so a sentinel that is no
+                // valid codeword (0xFF under bcd) is absent rather than an error.
+                if (field.Encoding != null && field.Sentinel is { Count: > 0 } && SentinelHit(field, read))
+                    return AbsentReading.Sentinel;
                 value = field.Encoding != null
                     // Applied to the integer read, before the modifiers (PS-422).
-                    ? Wave4.DecodeEncoding(Helpers.DecodeUint(data, endian), field.Encoding, length, field.Name)
-                    : Helpers.DecodeUint(data, endian);
+                    ? Wave4.DecodeEncoding(unsigned, field.Encoding, length, field.Name)
+                    : unsigned;
                 break;
             }
 
@@ -516,7 +559,53 @@ public static class SchemaDecoder
                 throw new InvalidOperationException($"Unknown field type: {field.Type} ({field.RawType})");
         }
 
-        return ApplyPostRead(value, field, ctx);
+        // PS-427: the integer read, before any modifier and before any encoding is
+        // decoded, is a sentinel: the field is absent.
+        if (field.Sentinel is { Count: > 0 } && SentinelHit(field, read ?? value))
+            return AbsentReading.Sentinel;
+        return ApplyPostRead(value, field, ctx, fieldRules: true);
+    }
+
+    /// <summary>A field read and found to carry no reading (PS-427, PS-428).</summary>
+    internal sealed class AbsentReading
+    {
+        public string Why { get; }
+        AbsentReading(string why) => Why = why;
+        public static readonly AbsentReading Sentinel = new("absent");
+        public static readonly AbsentReading OutOfRange = new("out_of_range");
+    }
+
+    /// <summary>Whether the integer read is one of the field's sentinels (PS-427).</summary>
+    static bool SentinelHit(SchemaField field, object? raw)
+    {
+        long n;
+        switch (raw)
+        {
+            case ulong u when u <= long.MaxValue: n = (long)u; break;
+            case long l: n = l; break;
+            case int i: n = i; break;
+            // A bit range is read as a double here; it is an integer in the reference.
+            case double d when field.Type == FieldType.Bits && d == Math.Floor(d): n = (long)d; break;
+            default: return false;
+        }
+        return field.Sentinel!.Contains(n);
+    }
+
+    /// <summary>
+    /// PS-464, PS-465: `length` naming a preceding field takes that field's decoded value
+    /// as the count. An unresolved name is an error naming it.
+    /// </summary>
+    static int ResolveLengthRef(SchemaField field, DecodeContext ctx)
+    {
+        var name = field.LengthRef!;
+        if (!ctx.Variables.TryGetValue(name, out var value))
+            throw new InvalidOperationException(
+                $"length names '{name}', which is not a field decoded before this one (PS-465)");
+        var (ok, numeric) = value is bool ? (false, 0.0) : Helpers.ToFloat64(value);
+        if (!ok || numeric < 0 || numeric != Math.Floor(numeric))
+            throw new InvalidOperationException(
+                $"length names '{name}', whose value {value} is not a byte count (PS-464)");
+        return (int)numeric;
     }
 
     /// <summary>
@@ -525,7 +614,8 @@ public static class SchemaDecoder
     /// lrs10701's temperature, u32[0:9] with div and add inside a group, came back as
     /// the raw 1023 where Python, Java and Go gave 72.3.
     /// </summary>
-    static object? ApplyPostRead(object? value, SchemaField field, DecodeContext ctx)
+    static object? ApplyPostRead(object? value, SchemaField field, DecodeContext ctx,
+        bool fieldRules = false)
     {
         // Apply modifiers, skipping a Number whose value came from a ref or a
         // compute - DecodeNumber already applied its stages, so doing it again here
@@ -591,6 +681,15 @@ public static class SchemaDecoder
                     return Omitted;
             }
         }
+
+        // PS-428: `out_of_range: omit` makes a value outside valid_range no reading - not
+        // reported, not bound. Applied on the field-list path, not to byte_group members,
+        // as in the reference; and to an internal field only where it is computed.
+        if (fieldRules && field.OutOfRangeOmit && field.ValidRange is { Length: 2 } bounds
+            && (field.Type == FieldType.Number || !field.Name.StartsWith("_"))
+            && value is not bool && Helpers.ToFloat64(value) is (true, var checkedValue)
+            && !(bounds[0] <= checkedValue && checkedValue <= bounds[1]))
+            return AbsentReading.OutOfRange;
 
         // Store variable
         if (field.Var != null)
@@ -963,7 +1062,13 @@ public static class SchemaDecoder
         // where it was read here and named. Null where there is nothing to report.
         Dictionary<string, object?>? inline = null;
 
-        if (!string.IsNullOrEmpty(field.On))
+        if (field.MatchRemaining)
+        {
+            // PS-414: the bytes from here to the end of the region - a reserving repeat's
+            // buffer already stops short of the reserve. Nothing is read.
+            matchValue = ctx.Remaining;
+        }
+        else if (!string.IsNullOrEmpty(field.On))
         {
             var varName = field.On.TrimStart('$');
             if (!ctx.Variables.TryGetValue(varName, out var val))

@@ -126,6 +126,19 @@ public class SchemaField
     public bool IntegerResult { get; set; }
     public string RawType { get; set; } = "";
     public int Length { get; set; }
+    /// <summary>
+    /// `length` naming a preceding field, with or without `$`, whose decoded value is the
+    /// count (PS-464, PS-465). Stored without the `$`; Length is then 0.
+    /// </summary>
+    public string? LengthRef { get; set; }
+    /// <summary>Decoded where its bytes remain, absent where none do (PS-402 to PS-405).</summary>
+    public bool Optional { get; set; }
+    /// <summary>Raw integers that mean "no reading": the field is absent (PS-427).</summary>
+    public List<long>? Sentinel { get; set; }
+    /// <summary>`out_of_range: omit`: a value outside valid_range is absent (PS-428).</summary>
+    public bool OutOfRangeOmit { get; set; }
+    /// <summary>A match on the bytes left in the region (PS-414): nothing is read.</summary>
+    public bool MatchRemaining { get; set; }
     public int ByteOffset { get; set; }
     public int BitOffset { get; set; }
     public int BitCount { get; set; }

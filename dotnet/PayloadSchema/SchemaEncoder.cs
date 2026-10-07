@@ -208,8 +208,13 @@ public static class SchemaEncoder
             }
 
             object? value;
-            if (string.IsNullOrEmpty(field.Name) || field.Name.StartsWith("_"))
-                value = 0.0;
+            if (string.IsNullOrEmpty(field.Name))
+                value = 0.0;    // unnamed padding
+            else if (field.Name.StartsWith("_"))
+                // PS-434: an internal field that reads bytes writes its value (handled
+                // above), else the input's, else it is an error naming the field. This
+                // wrote 0, which reads back as a value the device never sent.
+                value = InternalEncodeValue(field, data);
             else if (flagsPatches.TryGetValue(field.Name, out var flags))
                 value = (double)flags;
             else
@@ -221,7 +226,13 @@ public static class SchemaEncoder
                     throw new InvalidOperationException($"name_from '{field.NameFrom}' "
                         + "references a field the data does not carry, so its output key "
                         + "cannot be rebuilt");
-                if (data.TryGetValue(lookupName, out var supplied))
+                if (data.TryGetValue(lookupName, out var supplied) && supplied != null)
+                    value = supplied;
+                else if (field.Sentinel is { Count: > 0 })
+                    // A reading the decode omitted as "no reading" (PS-427) goes back as
+                    // the sentinel it was, not as zero.
+                    return EncodeSentinel(field);
+                else if (supplied != null || data.ContainsKey(lookupName))
                     value = supplied;
                 else
                 {
@@ -286,6 +297,32 @@ public static class SchemaEncoder
         }
 
         /// <summary>
+        /// What an encoder writes for an internal field that reads bytes (PS-434): its
+        /// `value`, else the input's value under its name, else an error naming it. Mirrors
+        /// _internal_encode_value in tools/schema_interpreter.py.
+        /// </summary>
+        static object? InternalEncodeValue(SchemaField field, Dictionary<string, object?> data)
+        {
+            if (field.Value != null) return field.Value;
+            if (data.TryGetValue(field.Name, out var supplied)) return supplied;
+            throw new InvalidOperationException($"internal field '{field.Name}' reads payload bytes "
+                + "and declares no value, and the input does not supply it (PS-434)");
+        }
+
+        /// <summary>
+        /// A field's first sentinel, written as the raw integer the decode compared (PS-427):
+        /// no modifier reversed and no `encoding` applied, since both came after the compare.
+        /// </summary>
+        byte[] EncodeSentinel(SchemaField field)
+        {
+            long raw = field.Sentinel![0];
+            if (field.Encoding != null)
+                return WriteUint(raw, Helpers.InferLengthFromType(field.Type),
+                    string.IsNullOrEmpty(field.Endian) ? _endian : field.Endian!);
+            return EncodeField(field, (double)raw);
+        }
+
+        /// <summary>
         /// Whether a plain field reads a bit range out of a byte it may share with others.
         /// A byte_group member is excluded: that construct packs its own.
         /// </summary>
@@ -331,8 +368,31 @@ public static class SchemaEncoder
                 }
             }
 
+            // PS-405: an optional field is written only where the input supplies it, and one
+            // supplied after an omitted earlier one cannot be placed.
+            string? omittedOptional = null;
+
             foreach (var field in fields)
             {
+                if (field.Optional && !string.IsNullOrEmpty(field.Name) && !field.Name.StartsWith("_"))
+                {
+                    var key = ResolveEncodeName(field, data) ?? field.Name;
+                    if (!data.TryGetValue(key, out var supplied) || supplied == null)
+                    {
+                        Flush();
+                        omittedOptional ??= field.Name;
+                        continue;
+                    }
+                    if (omittedOptional != null)
+                    {
+                        Flush();
+                        var message = $"optional field '{field.Name}' is supplied while the earlier "
+                            + $"optional field '{omittedOptional}' is not (PS-405)";
+                        if (!topLevel) throw new InvalidOperationException(message);
+                        _result.Errors.Add($"Error encoding {field.Name}: {message}");
+                        continue;
+                    }
+                }
                 if (!IsBareBitfield(field))
                 {
                     Flush();
@@ -361,8 +421,8 @@ public static class SchemaEncoder
             int size = 1;
             foreach (var member in run)
             {
-                object? value = string.IsNullOrEmpty(member.Name) || member.Name.StartsWith("_")
-                    ? 0.0
+                object? value = string.IsNullOrEmpty(member.Name) ? 0.0
+                    : member.Name.StartsWith("_") ? InternalEncodeValue(member, data)      // PS-434
                     : (data.TryGetValue(member.Name, out var v) ? v : 0.0);
                 value = ReverseModifiers(value, member);
                 var (ok, numeric) = Helpers.ToFloat64(value);
@@ -460,8 +520,8 @@ public static class SchemaEncoder
 
             foreach (var member in group.ByteGroup)
             {
-                object? value = string.IsNullOrEmpty(member.Name) || member.Name.StartsWith("_")
-                    ? 0.0
+                object? value = string.IsNullOrEmpty(member.Name) ? 0.0
+                    : member.Name.StartsWith("_") ? InternalEncodeValue(member, data)      // PS-434
                     : (data.TryGetValue(member.Name, out var v) ? v : 0.0);
                 if (member.Type == FieldType.Bool)
                 {

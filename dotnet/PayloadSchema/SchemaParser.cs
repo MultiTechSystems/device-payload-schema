@@ -131,6 +131,7 @@ public static partial class SchemaParser
         // The repeat iterator's rules and a tlv's reserve (CR-2026-048 to -055, -081),
         // over the whole document so an enclosing repeat's names are known.
         CheckIterator(root);
+        CheckWave6b(root);    // PS-404, PS-433
         schema.RepeatOnlyNames = RepeatOnlyNames(root);
 
         if (root.TryGetValue("definitions", out var defs) && defs is YamlMappingNode defsMap)
@@ -412,13 +413,22 @@ public static partial class SchemaParser
             CheckLookupTemplate(fieldMap);    // PS-407
             if (fieldMap.TryGetValue("byte_group", out var group))
                 CheckByteGroupOverlap(group);
-            // PS-399: exactly one discriminator source. With both, `field` won and the
-            // `length` byte was left unread, misaligning every later field.
-            if (fieldMap.TryGetValue("match", out var matchNode) && matchNode is YamlMappingNode matchMap
-                && matchMap.Children.ContainsKey(new YamlScalarNode("field"))
-                    == matchMap.Children.ContainsKey(new YamlScalarNode("length")))
-                throw new InvalidOperationException(
-                    "a match must declare exactly one of 'field' and 'length' (PS-399)");
+            // PS-399, PS-416: exactly one discriminator source. With both `field` and
+            // `length`, `field` won and the `length` byte was left unread, misaligning
+            // every later field. PS-414: `remaining` is only ever true.
+            if (fieldMap.TryGetValue("match", out var matchNode) && matchNode is YamlMappingNode matchMap)
+            {
+                var sources = new[] { "field", "length", "remaining" }
+                    .Count(key => matchMap.Children.ContainsKey(new YamlScalarNode(key)));
+                if (sources != 1)
+                    throw new InvalidOperationException("a match must declare exactly one of 'field', "
+                        + "'length' and 'remaining' (PS-399, PS-416)");
+                if (matchMap.TryGetValue("remaining", out var remainingNode)
+                    && !(remainingNode is YamlScalarNode { Style: YamlDotNet.Core.ScalarStyle.Plain } rs
+                         && rs.Value is "true" or "True"))
+                    throw new InvalidOperationException("a match's remaining must be true (PS-414)");
+            }
+            CheckFieldRules(fieldMap);    // PS-427, PS-428
             fields.Add(ParseField(fieldMap));
         }
         return fields;
@@ -474,12 +484,28 @@ public static partial class SchemaParser
         }
 
         if (fm.TryGetValue("length", out var len))
+        {
             // `length: remaining` consumes to the end of the payload (PS-014), carried
             // as a negative sentinel. Int() would return its 0 default for the word and
             // the field would silently read a single byte.
-            f.Length = string.Equals(Scalar(len).Trim(), "remaining", StringComparison.OrdinalIgnoreCase)
-                ? -1
-                : Int(len);
+            var lengthText = Scalar(len).Trim();
+            if (string.Equals(lengthText, "remaining", StringComparison.OrdinalIgnoreCase))
+                f.Length = -1;
+            else if (System.Text.RegularExpressions.Regex.IsMatch(lengthText, @"^-?\d+$")
+                     || lengthText.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                f.Length = Int(len);
+            else
+                // PS-464: the name of a preceding field, with or without `$`, resolved
+                // when the field is decoded (PS-465). Int() read it as 0 bytes.
+                f.LengthRef = lengthText.StartsWith('$') ? lengthText[1..] : lengthText;
+        }
+        // Wave 6b (CR-2026-059, -065): optional, sentinel and out_of_range.
+        if (fm.TryGetValue("optional", out var optionalNode))
+            f.Optional = Scalar(optionalNode) is "true" or "True";
+        if (fm.TryGetValue("sentinel", out var sentinelNode) && sentinelNode is YamlSequenceNode sentinelSeq)
+            f.Sentinel = sentinelSeq.Children.Select(n => YamlInt(n)!.Value).ToList();
+        if (fm.TryGetValue("out_of_range", out var oorNode))
+            f.OutOfRangeOmit = Scalar(oorNode) == "omit";
         if (fm.TryGetValue("endian", out var endian))
             f.Endian = Scalar(endian);
 
@@ -842,6 +868,9 @@ public static partial class SchemaParser
             // discriminator read as one byte.
             if (matchMap.TryGetValue("name", out var mn)) matchField.Name = Scalar(mn);
             if (matchMap.TryGetValue("length", out var ml)) matchField.Length = Int(ml);
+            // PS-414: the discriminator is the number of bytes left; CheckWave6b has
+            // already refused any value but true.
+            if (matchMap.TryGetValue("remaining", out var mr)) matchField.MatchRemaining = Scalar(mr) is "true" or "True";
             if (matchMap.TryGetValue("var", out var mv)) matchField.Var = Scalar(mv);
             // `default`: "error", "skip", or a field list decoded when no case matches
             // (CR-2026-020). Parsed here rather than at decode time, because by then the
