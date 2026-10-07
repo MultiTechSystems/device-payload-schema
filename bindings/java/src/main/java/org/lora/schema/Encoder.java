@@ -163,8 +163,12 @@ final class Encoder {
         }
 
         Object value;
-        if (name == null || name.isEmpty() || name.startsWith("_")) {
+        if (name == null || name.isEmpty()) {
             value = 0L;
+        } else if (name.startsWith("_")) {
+            // PS-434: an internal field that reads bytes writes its value, else the
+            // input's, else it is an error naming the field. It wrote 0.
+            value = Wave6b.internalEncodeValue(field, data);
         } else if (flagsPatches.containsKey(name)) {
             value = flagsPatches.get(name);
         } else {
@@ -178,6 +182,10 @@ final class Encoder {
             }
             if (data.containsKey(lookupName)) {
                 value = data.get(lookupName);
+            } else if (field.getSentinel() != null && !field.getSentinel().isEmpty()) {
+                // A reading the decode omitted as "no reading" (PS-427) goes back as the
+                // sentinel it was, not as zero: the raw value, with no modifier reversed.
+                return encodeField(field, field.getSentinel().get(0));
             } else {
                 if (topLevel) {
                     warnings.add("Missing field: " + lookupName);
@@ -309,9 +317,28 @@ final class Encoder {
                                           Map<String, Integer> patches, boolean topLevel) {
         ByteBuf out = new ByteBuf();
         List<Field> run = new ArrayList<>();
+        String omittedOptional = null;      // the first optional field the input left out
         for (Field field : list) {
             if (!isBareBitfield(field)) {
                 flushRun(out, run, data, topLevel);
+                // PS-405: an optional field is written only where the input has it, and
+                // supplying one after an omitted earlier one is an error: the decoder
+                // would read it into the earlier field's place.
+                String name = field.getName();
+                if (field.isOptional() && name != null && !name.isEmpty() && !name.startsWith("_")) {
+                    String key = resolveEncodeName(field, data);
+                    if (key == null || data.get(key) == null) {
+                        if (omittedOptional == null) omittedOptional = name;
+                        continue;
+                    }
+                    if (omittedOptional != null) {
+                        String message = "optional field '" + name + "' is supplied while the earlier "
+                                + "optional field '" + omittedOptional + "' is not (PS-405)";
+                        if (!topLevel) throw new SchemaException.EncodeException(message);
+                        errors.add("Error encoding " + name + ": " + message);
+                        continue;
+                    }
+                }
                 try {
                     out.write(encodeOne(field, data, patches, topLevel));
                 } catch (RuntimeException e) {
@@ -355,8 +382,8 @@ final class Encoder {
         int size = 1;
         for (Field member : run) {
             String name = member.getName();
-            Object value = (name == null || name.isEmpty() || name.startsWith("_"))
-                    ? Long.valueOf(0)
+            Object value = name == null || name.isEmpty() ? Long.valueOf(0)
+                    : name.startsWith("_") ? Wave6b.internalEncodeValue(member, data)   // PS-434
                     : data.getOrDefault(name, Long.valueOf(0));
             value = reverseModifiers(value, member);
             Long raw = asLong(value);
@@ -404,8 +431,8 @@ final class Encoder {
 
         for (Field member : group.getByteGroup()) {
             String name = member.getName();
-            Object value = (name == null || name.isEmpty() || name.startsWith("_"))
-                    ? Long.valueOf(0)
+            Object value = name == null || name.isEmpty() ? Long.valueOf(0)
+                    : name.startsWith("_") ? Wave6b.internalEncodeValue(member, data)   // PS-434
                     : data.getOrDefault(name, Long.valueOf(0));
             if (member.getType() == FieldType.BOOL) {
                 // A bool member is one bit of the group's value (PS-364).

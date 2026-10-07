@@ -112,6 +112,29 @@ public class Field {
     /** Bytes the group occupies; the cursor advances by this once, at the end. */
     private int byteGroupSize = 1;
 
+    // 0.5.2 wave 6b: field-level rules (CR-2026-056, -059, -062, -065).
+    /** The preceding field whose value is this field's byte count (PS-464), or null. */
+    private String lengthRef;
+    /** Decoded where its bytes remain, absent where none do (PS-402). */
+    private boolean optional;
+    /** Raw values meaning "no reading" (PS-427), or null. */
+    private List<Long> sentinel;
+    /** {@code valid_range} where {@code out_of_range: omit} drops a value outside it (PS-428). */
+    private double[] omitOutside;
+    /** A match on the bytes remaining (PS-414). */
+    private boolean matchRemaining;
+
+    public String getLengthRef() { return lengthRef; }
+    public void setLengthRef(String lengthRef) { this.lengthRef = lengthRef; }
+    public boolean isOptional() { return optional; }
+    public void setOptional(boolean optional) { this.optional = optional; }
+    public List<Long> getSentinel() { return sentinel; }
+    public void setSentinel(List<Long> sentinel) { this.sentinel = sentinel; }
+    public double[] getOmitOutside() { return omitOutside; }
+    public void setOmitOutside(double[] omitOutside) { this.omitOutside = omitOutside; }
+    public boolean isMatchRemaining() { return matchRemaining; }
+    public void setMatchRemaining(boolean matchRemaining) { this.matchRemaining = matchRemaining; }
+
     public Field() {
         this.modOrder = new ArrayList<>();
     }
