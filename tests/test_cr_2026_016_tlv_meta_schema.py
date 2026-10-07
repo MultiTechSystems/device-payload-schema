@@ -40,6 +40,7 @@ TLV = META["definitions"]["tlv"]
 #: merges - which is a narrower set, not a different one.
 IMPLEMENTED_KEYS = {
     "tag_size", "tag_fields", "tag_key", "length_size", "merge", "unknown", "cases",
+    "reserve",   # PS-471, CR-2026-081
 }
 
 

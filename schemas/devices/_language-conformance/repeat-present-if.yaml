@@ -1,0 +1,40 @@
+# present_if drops an element whose condition is false, after it is decoded (PS-386,
+# CR-2026-053). The element still advances the index and still consumes its bytes, and
+# count_as counts the elements reported, not the ones read (PS-367, CR-2026-080).
+#
+# A device that sends a fixed array of slots and marks an empty one with id 0 reports
+# only the occupied slots.
+#
+# This cannot round-trip, and must not try: a dropped element's bytes are not in the
+# output, so an encoder refuses the schema (PS-387).
+name: probe_repeat_present_if
+endian: big
+fields:
+- name: slots
+  type: repeat
+  count: 4
+  index: i
+  count_as: occupied
+  present_if:
+    field: $id
+    ne: 0
+  fields:
+  - name: id
+    type: u8
+  - name: position
+    type: number
+    ref: $i
+- name: occupied_slots
+  type: number
+  ref: $occupied
+test_vectors:
+- name: two_of_four_occupied
+  source: spec-example
+  payload: "05 00 00 09"
+  expected:
+    slots:
+    - id: 5
+      position: 0
+    - id: 9
+      position: 3
+    occupied_slots: 2

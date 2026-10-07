@@ -199,6 +199,21 @@ type Field struct {
 	// no case matches (CR-2026-020). Distinct from Case.Default, which marks a case in
 	// the legacy list spelling.
 	MatchDefault any `json:"-" yaml:"-"`
+
+	// The repeat iterator and reserved trailers (0.5.2 wave 6a; see wave6a.go).
+	// Reserve is a repeat's (PS-350) or a tlv block's (PS-471) count of bytes at the end
+	// of the payload the loop must not read. Trailer is the repeat's fields decoded from
+	// them before the first element (PS-383).
+	Reserve int     `json:"-" yaml:"-"`
+	Trailer []Field `json:"-" yaml:"-"`
+	// Index and CountAs name the element's position and the reported element count
+	// (PS-366, PS-367). PresentIf drops an element whose condition fails (PS-386).
+	Index     string          `json:"-" yaml:"-"`
+	CountAs   string          `json:"-" yaml:"-"`
+	PresentIf *GuardCondition `json:"-" yaml:"-"`
+	// Carry is a computed element field's value before the first element: a number or a
+	// `$name` (PS-378). nil when the field carries nothing.
+	Carry any `json:"-" yaml:"-"`
 }
 
 // Transform represents a single transformation stage.
@@ -294,6 +309,9 @@ type Schema struct {
 	Fields      []Field                   `json:"fields,omitempty" yaml:"fields,omitempty"`
 	Ports       map[string]*PortDef       `json:"-" yaml:"-"` // Port-based schema selection
 	Definitions map[string]*DefinitionDef `json:"-" yaml:"-"` // Reusable definitions
+	// repeatOnly is every name declared in some repeat's elements and nowhere outside
+	// one (PS-368): a reference to one from outside an element is an error.
+	repeatOnly map[string]bool
 }
 
 // DecodeContext maintains state during decoding.
@@ -308,6 +326,11 @@ type DecodeContext struct {
 	// A Go map cannot carry that, and encoding needs it: without it channels come back
 	// in ascending tag order, which is how most devices lay them out but not all.
 	TLVOrder []string
+	// elementNames are the field names of the repeat element being decoded, and
+	// repeatOnly the schema's names declared only inside elements (PS-368). Both are
+	// consulted only when a reference is unbound; see scopeError.
+	elementNames map[string]bool
+	repeatOnly   map[string]bool
 }
 
 // EncodeContext maintains state during encoding.
@@ -789,8 +812,12 @@ func ParseSchema(data string) (*Schema, error) {
 	if err := checkTypeVocabulary(raw); err != nil {
 		return nil, err
 	}
+	// 0.5.2 wave 6a: the repeat iterator's and the tlv reserve's schema rules.
+	if err := checkIteratorRules(raw); err != nil {
+		return nil, err
+	}
 
-	schema := &Schema{}
+	schema := &Schema{repeatOnly: repeatOnlyNames(raw)}
 	
 	if name, ok := raw["name"].(string); ok {
 		schema.Name = name
@@ -1250,6 +1277,8 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	} else if min, ok := fm["min"].(float64); ok {
 		f.Min = int(min)
 	}
+
+	parseIteratorKeys(&f, fm)
 
 	// Bytes format options
 	if format, ok := fm["format"].(string); ok {
@@ -1743,6 +1772,7 @@ func (s *Schema) DecodeWithPortDirection(data []byte, fPort int, direction strin
 	}
 
 	ctx := NewDecodeContext(data, s.Endian)
+	ctx.repeatOnly = s.repeatOnly
 	result := make(map[string]any)
 
 	if len(s.Header) > 0 {
@@ -1784,6 +1814,7 @@ func (s *Schema) Decode(data []byte) (map[string]any, error) {
 		return nil, fmt.Errorf("no FPort was supplied, and schema '%s' selects its fields by port (PS-459)", s.Name)
 	}
 	ctx := NewDecodeContext(data, s.Endian)
+	ctx.repeatOnly = s.repeatOnly
 	result := make(map[string]any)
 
 	// Decode header fields
@@ -1827,6 +1858,19 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 	result := make(map[string]any)
 
 	for _, field := range fields {
+		// PS-383: a repeat's trailer is decoded from the reserved bytes before its first
+		// element, so its names are bound for the elements, and it is reported beside
+		// the repeat.
+		if (field.Type == TypeRepeat || field.Type == TypeRepeatLower) && len(field.Trailer) > 0 {
+			trailer, err := decodeTrailer(field, ctx, schema)
+			if err != nil {
+				return nil, err
+			}
+			for k, v := range trailer {
+				result[k] = v
+			}
+		}
+
 		// $ref to definition
 		if field.Ref2 != "" && schema != nil {
 			refResult, err := resolveRef(field.Ref2, ctx, schema)
@@ -2367,10 +2411,20 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 	case TypeNumber, "number":
 		// Computed field — reads no bytes
 		// Phase 2: ref with polynomial/transform, compute with guard
+		if field.Guard != nil {
+			// PS-368: a guard reading an element name out of scope is an error, not
+			// a failed condition.
+			if err := guardScopeError(field.Guard.When, ctx); err != nil {
+				return nil, err
+			}
+		}
 		if field.Ref != "" {
 			refName := strings.TrimPrefix(field.Ref, "$")
 			refVal, ok := ctx.Variables[refName]
 			if !ok {
+				if err := ctx.scopeError(refName); err != nil {
+					return nil, err
+				}
 				return nil, fmt.Errorf("ref field not found: %s", refName)
 			}
 			numVal, _ := toFloat64(refVal)
@@ -2843,6 +2897,18 @@ func mergeMatchResult(inline map[string]any, decoded map[string]any, err error) 
 }
 
 func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
+	// PS-471: the loop stops `reserve` bytes before the payload ends, and the fields
+	// after the tlv decode from them. A buffer that stops there keeps every entry read
+	// inside the region.
+	if field.Reserve > 0 {
+		if ctx.Remaining() < field.Reserve {
+			return nil, fmt.Errorf("tlv reserves %d byte(s) but %d remain at offset %d (PS-471)",
+				field.Reserve, ctx.Remaining(), ctx.Offset)
+		}
+		full := ctx.Data
+		ctx.Data = full[:len(full)-field.Reserve]
+		defer func() { ctx.Data = full }()
+	}
 	tagSize := field.TagSize
 	if tagSize == 0 {
 		tagSize = 1
@@ -3222,10 +3288,19 @@ func formatBytes(data []byte, format, separator string) any {
 // fixedElementSize is the bytes one element of these fields always takes, or 0 where it
 // varies (PS-344a can only be tested before an element of known size).
 func fixedElementSize(fields []Field) int {
+	size, _ := fixedElementSizeKnown(fields)
+	return size
+}
+
+// fixedElementSizeKnown is fixedElementSize telling a size of 0 apart from one that
+// varies, which a trailer's size check needs (PS-384).
+func fixedElementSizeKnown(fields []Field) (int, bool) {
 	total := 0
 	for _, f := range fields {
 		switch {
-		case f.Type == TypeNumber || f.IntegerResult:
+		// A computed field reads no bytes. Only the capitalised constant was matched, so
+		// the schema's own `number` spelling was counted as a one-byte read.
+		case f.Type == TypeNumber || f.Type == "number" || f.IntegerResult:
 			continue
 		case (f.Type == TypeString || f.Type == TypeStringLower) && f.Value != nil:
 			continue
@@ -3234,7 +3309,7 @@ func fixedElementSize(fields []Field) int {
 		case f.Type == TypeBytesLower || f.Type == TypeAsciiLower || f.Type == TypeHexLower ||
 			f.Type == TypeBase64Lower || f.Type == TypeSkipLower:
 			if f.Length <= 0 {
-				return 0
+				return 0, false
 			}
 			total += f.Length
 		default:
@@ -3242,12 +3317,12 @@ func fixedElementSize(fields []Field) int {
 			if _, known := canonicalTypes[string(f.Type)]; !known || f.Type == TypeObjectLower ||
 				f.Type == TypeRepeatLower || f.Type == TypeEnumLower || f.Type == TypeMatchLower ||
 				f.Type == TypeBitfieldString || f.Type == "" {
-				return 0
+				return 0, false
 			}
 			total += size
 		}
 	}
-	return total
+	return total, true
 }
 
 // raggedTailError is the PS-344 error: the repeat, reported as a ragged tail.
@@ -3274,7 +3349,12 @@ func decodeRepeat(field Field, ctx *DecodeContext) ([]any, error) {
 	}
 	minIterations := field.Min
 
-	var result []any
+	// Each element is decoded in a scope of its own (PS-368), with the index and any
+	// carried values bound (PS-366, PS-379); present_if may drop it (PS-386).
+	elements, err := newRepeatElements(field, ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	// Determine iteration mode
 	if field.Count != nil {
@@ -3306,11 +3386,9 @@ func decodeRepeat(field Field, ctx *DecodeContext) ([]any, error) {
 		}
 
 		for i := 0; i < count; i++ {
-			element, err := decodeFields(field.Fields, ctx)
-			if err != nil {
+			if err := elements.element(); err != nil {
 				return nil, err
 			}
-			result = append(result, element)
 		}
 
 	} else if field.ByteLength != nil {
@@ -3333,15 +3411,11 @@ func decodeRepeat(field Field, ctx *DecodeContext) ([]any, error) {
 		}
 
 		endOffset := ctx.Offset + byteLength
-		iterations := 0
 
-		for ctx.Offset < endOffset && iterations < maxIterations {
-			element, err := decodeFields(field.Fields, ctx)
-			if err != nil {
+		for ctx.Offset < endOffset && elements.iterations < maxIterations {
+			if err := elements.element(); err != nil {
 				return nil, err
 			}
-			result = append(result, element)
-			iterations++
 		}
 
 		if ctx.Offset != endOffset {
@@ -3349,7 +3423,7 @@ func decodeRepeat(field Field, ctx *DecodeContext) ([]any, error) {
 			// the payload for both ways they do not - "expected end at 4, got 2" reads as
 			// a short payload even where the schema's own ceiling stopped the loop with
 			// bytes to spare (CR-2026-022).
-			if iterations >= maxIterations && ctx.Offset < endOffset {
+			if elements.iterations >= maxIterations && ctx.Offset < endOffset {
 				return nil, repeatLimitError(field, maxIterations,
 					fmt.Sprintf("byte_length %d", byteLength), ctx.Offset, endOffset)
 			}
@@ -3358,41 +3432,71 @@ func decodeRepeat(field Field, ctx *DecodeContext) ([]any, error) {
 		}
 
 	} else if field.Until == "end" {
-		// Until-end: repeat until payload exhausted
-		iterations := 0
-
-		// PS-343 to PS-344a: a tail too short for a whole element is an error naming the
-		// repeat as a ragged tail, tested before the element begins where its size is
-		// fixed. This began the element and failed part-way with the read error of
-		// whichever member ran out.
-		elementSize := fixedElementSize(field.Fields)
-		for ctx.Remaining() > 0 && iterations < maxIterations {
-			start := ctx.Offset
-			if elementSize > 0 && ctx.Remaining() < elementSize {
-				return nil, raggedTailError(field, ctx.Remaining(), elementSize, start)
-			}
-			element, err := decodeFields(field.Fields, ctx)
-			if err != nil {
-				if strings.Contains(err.Error(), "buffer underflow") {
-					return nil, raggedTailError(field, len(ctx.Data)-start, 0, start)
-				}
-				return nil, err
-			}
-			result = append(result, element)
-			iterations++
+		// Until-end: repeat until payload exhausted, less any `reserve`.
+		//
+		// PS-350, PS-351: the region ends `reserve` bytes before the payload does, and
+		// the ragged-tail rule applies to that region. Its elements decode from a
+		// buffer that stops there, so nothing inside one can read the trailer; offsets
+		// stay absolute.
+		full := ctx.Data
+		regionEnd := len(full) - field.Reserve
+		if regionEnd < ctx.Offset {
+			return nil, fmt.Errorf("repeat '%s' reserves %d byte(s) but %d remain at offset %d (PS-351)",
+				field.Name, field.Reserve, len(full)-ctx.Offset, ctx.Offset)
 		}
-		if iterations >= maxIterations && ctx.Remaining() > 0 {
-			return nil, repeatLimitError(field, maxIterations, "until: end", ctx.Offset, len(ctx.Data))
+		ctx.Data = full[:regionEnd]
+		err := func() error {
+			// PS-343 to PS-344a: a tail too short for a whole element is an error naming
+			// the repeat as a ragged tail, tested before the element begins where its
+			// size is fixed. This began the element and failed part-way with the read
+			// error of whichever member ran out.
+			elementSize := fixedElementSize(field.Fields)
+			for ctx.Remaining() > 0 && elements.iterations < maxIterations {
+				start := ctx.Offset
+				if elementSize > 0 && ctx.Remaining() < elementSize {
+					return raggedTailError(field, ctx.Remaining(), elementSize, start)
+				}
+				if err := elements.element(); err != nil {
+					if strings.Contains(err.Error(), "buffer underflow") {
+						return raggedTailError(field, len(ctx.Data)-start, 0, start)
+					}
+					return err
+				}
+				// Safety: an element that consumed nothing would loop forever.
+				if ctx.Offset == start {
+					break
+				}
+			}
+			if elements.iterations >= maxIterations && ctx.Remaining() > 0 {
+				return repeatLimitError(field, maxIterations, "until: end", ctx.Offset, len(ctx.Data))
+			}
+			return nil
+		}()
+		ctx.Data = full
+		if err != nil {
+			return nil, err
+		}
+		// PS-383: a trailer was decoded from the reserved bytes before the first
+		// element, so nothing after the repeat reads them again.
+		if len(field.Trailer) > 0 {
+			ctx.Offset = len(full)
 		}
 
 	} else {
 		return nil, fmt.Errorf("repeat field must specify one of: count, byte_length, or until")
 	}
 
+	result := elements.result
+
 	// Validate minimum iterations
 	if len(result) < minIterations {
 		return nil, fmt.Errorf("repeat produced %d elements, but minimum is %d",
 			len(result), minIterations)
+	}
+
+	// PS-367: the number of elements reported, bound for every later field only.
+	if field.CountAs != "" {
+		ctx.Variables[field.CountAs] = len(result)
 	}
 
 	return result, nil
@@ -3514,6 +3618,7 @@ func (s *Schema) DecodeOrderedWithPort(data []byte, fPort int) (map[string]any, 
 		return nil, nil, err
 	}
 	ctx := NewDecodeContext(data, s.Endian)
+	ctx.repeatOnly = s.repeatOnly
 	result := make(map[string]any)
 	if len(s.Header) > 0 {
 		headerResult, err := decodeFieldsWithSchema(s.Header, ctx, s)
@@ -4117,10 +4222,36 @@ func encodeRepeat(field Field, data map[string]any, ctx *EncodeContext) error {
 	if !ok {
 		return fmt.Errorf("repeat field %q: expected a list of records", field.Name)
 	}
-	for _, item := range records {
+	if err := encodeRepeatRecords(field, records, ctx); err != nil {
+		return err
+	}
+	// PS-385: the elements, then the trailer, whose values sit beside the repeat.
+	if len(field.Trailer) > 0 {
+		return encodeFields(field.Trailer, data, ctx)
+	}
+	return nil
+}
+
+// encodeRepeatRecords writes a repeat's records back to back.
+func encodeRepeatRecords(field Field, records []any, ctx *EncodeContext) error {
+	if presentIfBlocksEncode(field) {
+		return fmt.Errorf("repeat field %q declares present_if and its elements read payload "+
+			"bytes, so the elements it dropped cannot be encoded (PS-387)", field.Name)
+	}
+	for position, item := range records {
 		record, ok := item.(map[string]any)
 		if !ok {
 			return fmt.Errorf("repeat field %q: expected each record to be a mapping", field.Name)
+		}
+		if field.Index != "" {
+			// PS-370: the index is bound while each element is encoded, as it was while
+			// each was decoded, so a name_from template resolves the same way.
+			bound := make(map[string]any, len(record)+1)
+			for k, v := range record {
+				bound[k] = v
+			}
+			bound[field.Index] = position
+			record = bound
 		}
 		if err := encodeFields(field.Fields, record, ctx); err != nil {
 			return err
@@ -4855,12 +4986,8 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 
 	case TypeRepeat, TypeRepeatLower:
 		if arrVal, ok := value.([]any); ok {
-			for _, elem := range arrVal {
-				if elemMap, ok := elem.(map[string]any); ok {
-					if err := encodeFields(field.Fields, elemMap, ctx); err != nil {
-						return err
-					}
-				}
+			if err := encodeRepeatRecords(field, arrVal, ctx); err != nil {
+				return err
 			}
 		}
 
@@ -5341,6 +5468,8 @@ func resolveOperand(op string, ctx *DecodeContext) (float64, error) {
 			if f, ok := toFloat64(val); ok {
 				return f, nil
 			}
+		} else if err := ctx.scopeError(name); err != nil {
+			return 0, err
 		}
 		return 0, fmt.Errorf("operand field not found: %s", name)
 	}
@@ -5425,15 +5554,22 @@ func evaluateFormula(formula string, x float64, ctx *DecodeContext) (float64, er
 
 	// Substitute $field_name references
 	varPattern := regexp.MustCompile(`\$([a-zA-Z_][a-zA-Z0-9_]*)`)
+	var scopeErr error
 	expr = varPattern.ReplaceAllStringFunc(expr, func(match string) string {
 		name := match[1:]
 		if val, ok := ctx.Variables[name]; ok {
 			if f, ok := toFloat64(val); ok {
 				return strconv.FormatFloat(f, 'f', -1, 64)
 			}
+		} else if err := ctx.scopeError(name); err != nil && scopeErr == nil {
+			scopeErr = err
 		}
 		return "0"
 	})
+	// PS-368: an element name out of scope is an error, not the 0 an unbound name reads as.
+	if scopeErr != nil {
+		return 0, scopeErr
+	}
 
 	// Replace standalone 'x' with raw value
 	xPattern := regexp.MustCompile(`\bx\b`)

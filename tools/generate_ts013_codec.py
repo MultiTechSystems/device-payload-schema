@@ -195,6 +195,17 @@ def compute_to_js(compute: Dict[str, Any]) -> str:
     return '0'
 
 
+def condition_to_js(cond: Dict[str, Any]) -> str:
+    """One guard condition, {field: $x, <op>: value}, as a JS boolean (PS-386)."""
+    field_ref = cond.get('field', '')
+    field_js = f'vars.{to_js_name(field_ref[1:])}'  # see ref_to_js
+    for op, js in (('gt', '>'), ('gte', '>='), ('lt', '<'), ('lte', '<='),
+                   ('eq', '==='), ('ne', '!==')):
+        if op in cond:
+            return f'({field_js} {js} {cond[op]})'
+    return 'true'
+
+
 def guard_to_js(guard: Dict[str, Any], value_expr: str) -> str:
     """Generate JS for guard conditional evaluation."""
     when_conditions = guard.get('when', [])
@@ -402,6 +413,11 @@ class TS013Generator:
         schema, ref_errors = expand_refs(schema)
         if ref_errors:
             raise ValueError(ref_errors[0])
+        # The repeat iterator's and reserve's schema rules (PS-350 to PS-387, PS-471).
+        from schema_interpreter import schema_iterator_errors
+        iterator_problems = schema_iterator_errors(schema)
+        if iterator_problems:
+            raise ValueError(iterator_problems[0])
         self.schema = schema
         self.source = source
         self.name = schema.get('name', 'unknown')
@@ -833,6 +849,11 @@ function writeS(buf, pos, size, value, endian) {
   writeU(buf, pos, size, value, endian);
 }'''
 
+    def _next_uid(self) -> int:
+        """A number for a generated variable that must not collide with a nested one."""
+        self._uid = getattr(self, '_uid', 0) + 1
+        return self._uid
+
     def _gen_decode_fields(self) -> str:
         parts = []
         if self.has_ports:
@@ -1025,7 +1046,19 @@ function writeS(buf, pos, size, value, endian) {
 
         # tlv
         if 'tlv' in field:
-            return self._gen_decode_tlv(field['tlv'])
+            reserve = field['tlv'].get('reserve') if isinstance(field['tlv'], dict) else None
+            if not reserve:
+                return self._gen_decode_tlv(field['tlv'])
+            # PS-471: the loop reads a buffer that stops `reserve` bytes early, so no
+            # entry reaches the trailer, and the fields after the tlv read it.
+            uid = self._next_uid()
+            lines.append(f'{i}  if (buf.length - pos < {int(reserve)}) throw new Error("tlv reserves '
+                         f'{int(reserve)} byte(s) but " + (buf.length - pos) + " remain at offset " '
+                         f'+ pos + " (PS-471)");')
+            lines.append(f'{i}  var _tlvBuf{uid} = buf; buf = buf.slice(0, buf.length - {int(reserve)});')
+            lines.extend(self._gen_decode_tlv(field['tlv']))
+            lines.append(f'{i}  buf = _tlvBuf{uid};')
+            return lines
 
         # match
         if 'match' in field:
@@ -1047,6 +1080,34 @@ function writeS(buf, pos, size, value, endian) {
             members = [m for m in field['fields']
                        if isinstance(m, dict) and m.get('name')]
             lines.append(f'{i}  var {arr} = [];')
+            # Iterations, not reported elements: present_if drops an element and it still
+            # advances the index and counts toward `count` and `max` (PS-386).
+            lines.append(f'{i}  var {arr}_i = 0;')
+            # PS-350, PS-351, PS-383: the region ends `reserve` bytes early. A trailer is
+            # decoded from those bytes first, into the enclosing scope, and the elements
+            # then read a buffer that stops at the region's end.
+            reserve = field.get('reserve')
+            if reserve:
+                lines.append(f'{i}  var {arr}_end = buf.length - {int(reserve)};')
+                lines.append(f'{i}  if ({arr}_end < pos) throw new Error("repeat \'" + '
+                             f'{json.dumps(str(field.get("name", "?")))} + "\' reserves {int(reserve)} '
+                             f'byte(s) but " + (buf.length - pos) + " remain at offset " + pos + " (PS-351)");')
+                if field.get('trailer'):
+                    lines.append(f'{i}  var {arr}_at = pos; pos = {arr}_end;')
+                    for trailer_field in field['trailer']:
+                        lines.extend(self._gen_decode_field(trailer_field))
+                    lines.append(f'{i}  pos = {arr}_at;')
+                lines.append(f'{i}  var {arr}_buf = buf; buf = buf.slice(0, {arr}_end);')
+            # PS-378 to PS-380: a carried field starts from its `carry` value each time the
+            # repeat begins, and its own name resolves to its previous value.
+            carried = [(m['name'], m['carry']) for m in field['fields']
+                       if isinstance(m, dict) and 'carry' in m]
+            if carried:
+                initial = ', '.join(
+                    f'{json.dumps(to_js_name(name))}: '
+                    + (ref_to_js(value) if isinstance(value, str) else json.dumps(value))
+                    for name, value in carried)
+                lines.append(f'{i}  var {arr}_carry = {{{initial}}};')
             lines.append(f'{i}  var {arr}_start = pos;')
 
             count = field.get('count')
@@ -1055,7 +1116,7 @@ function writeS(buf, pos, size, value, endian) {
             if count is not None:
                 bound = ref_to_js(count) if isinstance(count, str) else str(int(count))
                 lines.append(f'{i}  var {arr}_n = {bound};')
-                condition = f'{arr}.length < {arr}_n'
+                condition = f'{arr}_i < {arr}_n'
             elif byte_length is not None:
                 bound = (ref_to_js(byte_length) if isinstance(byte_length, str)
                          else str(int(byte_length)))
@@ -1093,7 +1154,7 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append(f'{i}  if ({arr}_n > {arr}_max) {{ '
                              + limit_error.replace('MODE', mode).replace('END', 'buf.length')
                              + ' }')
-            condition = f'({condition}) && {arr}.length < {arr}_max'
+            condition = f'({condition}) && {arr}_i < {arr}_max'
 
             # A member set that consumes nothing would spin forever; bound the loop by
             # the payload as well and stop if the position does not advance.
@@ -1102,6 +1163,12 @@ function writeS(buf, pos, size, value, endian) {
             # Each record decodes into a fresh `d` (see `object`): lifting members out of
             # the enclosing one deleted any enclosing field sharing a member's name.
             lines.append(f'{i}    var {arr}_outer = d; d = {{}};')
+            # PS-368: an element's names do not outlive it; `vars` is restored after it.
+            lines.append(f'{i}    var {arr}_vars = Object.assign({{}}, vars);')
+            if field.get('index'):
+                lines.append(f'{i}    vars.{to_js_name(field["index"])} = {arr}_i;')   # PS-366
+            for name, _ in carried:
+                lines.append(f'{i}    vars.{to_js_name(name)} = {arr}_carry.{to_js_name(name)};')
             ragged = None
             if until == 'end' and count is None and byte_length is None:
                 # PS-343 to PS-344a: a tail too short for a whole element is an error
@@ -1127,7 +1194,12 @@ function writeS(buf, pos, size, value, endian) {
                     lines.append(f'{i}    delete {arr}_rec.{to_js_name(member["name"])};')
             if ragged:
                 lines.append(f'{i}    if (pos > buf.length) {{ {ragged} }}')
-            lines.append(f'{i}    {arr}.push({arr}_rec);')
+            for name, _ in carried:
+                lines.append(f'{i}    {arr}_carry.{to_js_name(name)} = vars.{to_js_name(name)};')
+            keep = condition_to_js(field['present_if']) if field.get('present_if') else 'true'
+            lines.append(f'{i}    var {arr}_keep = {keep};')
+            lines.append(f'{i}    vars = {arr}_vars; {arr}_i++;')
+            lines.append(f'{i}    if ({arr}_keep) {arr}.push({arr}_rec);')
             lines.append(f'{i}    if (pos <= {arr}_before) break;')
             lines.append(f'{i}    if (pos >= buf.length && !({condition})) break;')
             lines.append(f'{i}  }}')
@@ -1139,13 +1211,13 @@ function writeS(buf, pos, size, value, endian) {
             # member over a 5-byte span produced a third record holding the following
             # field's byte, and the following field read past the payload (CR-2026-022).
             if until == 'end' and count is None and byte_length is None:
-                lines.append(f'{i}  if ({arr}.length >= {arr}_max && pos < buf.length) {{ '
+                lines.append(f'{i}  if ({arr}_i >= {arr}_max && pos < buf.length) {{ '
                              + limit_error.replace('MODE', '"until: end"').replace('END', 'buf.length')
                              + ' }')
             if byte_length is not None:
                 end = f'{arr}_start + {arr}_len'
                 lines.append(f'{i}  if (pos !== {end}) {{')
-                lines.append(f'{i}    if ({arr}.length >= {arr}_max && pos < {end}) {{')
+                lines.append(f'{i}    if ({arr}_i >= {arr}_max && pos < {end}) {{')
                 lines.append(f'{i}      '
                              + limit_error.replace('MODE', '"byte_length " + ' + f'{arr}_len')
                              .replace('END', f'({end})'))
@@ -1166,6 +1238,12 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append(f'{i}    throw new Error("repeat produced " + {arr}.length'
                              f' + " elements, but minimum is {floor}");')
                 lines.append(f'{i}  }}')
+            if reserve:
+                lines.append(f'{i}  buf = {arr}_buf;')
+                if field.get('trailer'):
+                    lines.append(f'{i}  pos = buf.length;')   # the trailer was read already
+            if field.get('count_as'):
+                lines.append(f'{i}  vars.{to_js_name(field["count_as"])} = {arr}.length;')  # PS-367
             lines.append(f'{i}  vars.{arr} = {arr};')
             if not str(field.get('name', '')).startswith('_'):
                 lines.append(f'{i}  d.{arr} = {arr};')

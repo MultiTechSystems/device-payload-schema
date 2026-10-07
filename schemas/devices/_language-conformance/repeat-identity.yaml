@@ -1,0 +1,43 @@
+# Element identity, units and IPSO instances given per element (PS-372 to PS-376,
+# CR-2026-054). These are annotations: they describe what each element measures, and a
+# decoder must not move, rename or remove anything because of them (PS-376).
+#
+# So this holds every implementation to decoding the array exactly as it would without
+# them - and to accepting a schema that carries them. What they mean for `_meta` and for
+# IPSO or SenML output is outside the shared corpus.
+#
+# Round-trips: encoders ignore annotations (PS-376).
+name: probe_repeat_identity
+endian: big
+fields:
+- name: probes
+  type: repeat
+  count: 2
+  index: i
+  identity: i
+  fields:
+  - name: unit_code
+    type: u8
+    lookup:
+      1: Cel
+      2: "%RH"
+  - name: reading
+    type: s16
+    div: 10
+    unit: $unit_code
+    ipso:
+      object: 3303
+      instance: $i
+      resource: 5700
+    senml:
+      name: "probe_${i}"
+test_vectors:
+- name: two_probes
+  source: spec-example
+  payload: "01 00E7 02 0258"
+  expected:
+    probes:
+    - unit_code: Cel
+      reading: 23.1
+    - unit_code: "%RH"
+      reading: 60

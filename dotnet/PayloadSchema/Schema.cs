@@ -176,6 +176,26 @@ public class SchemaField
     public string? Until { get; set; }
     public int Max { get; set; }
     public int Min { get; set; }
+    /// <summary>The element's zero-based iteration number is bound under this name (PS-366).</summary>
+    public string? Index { get; set; }
+    /// <summary>Bound to the number of elements reported, after the repeat (PS-367).</summary>
+    public string? CountAs { get; set; }
+    /// <summary>An element is reported only where this holds (PS-386).</summary>
+    public GuardCondition? PresentIf { get; set; }
+    /// <summary>
+    /// Bytes at the end of the payload an until-end repeat (PS-350) or a tlv (PS-471)
+    /// must not read.
+    /// </summary>
+    public int Reserve { get; set; }
+    /// <summary>Fields decoded from the reserved bytes before the first element (PS-383).</summary>
+    public List<SchemaField>? Trailer { get; set; }
+    /// <summary>A repeat's identity: its index or a $ reference to an element field (PS-372).</summary>
+    public string? Identity { get; set; }
+    /// <summary>
+    /// A computed element field's value before the first element (PS-378): a double, or
+    /// a "$name" naming a field decoded before the repeat.
+    /// </summary>
+    public object? Carry { get; set; }
 
     // Bytes format
     public string? Format { get; set; }
@@ -273,4 +293,6 @@ public class PayloadSchemaDefinition
     public List<SchemaField> Fields { get; set; } = new();
     public Dictionary<string, PortDef>? Ports { get; set; }
     public Dictionary<string, DefinitionDef>? Definitions { get; set; }
+    /// <summary>Names declared only inside some repeat's elements (PS-368).</summary>
+    internal HashSet<string> RepeatOnlyNames { get; set; } = new();
 }

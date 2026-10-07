@@ -49,6 +49,9 @@ The `inherent` reasons, each of which is a decision recorded elsewhere:
                     output. ws50x's `v11.1` leaves the low nibble undescribed.
   ambiguous-case    Several TLV or match cases carry the same field names, so the tag that
                     produced them is not recoverable from the names alone.
+  dropped-element   A repeat declaring `present_if` omits the elements whose condition is
+                    false (PS-386); their bytes are not in the output, so an encoder
+                    refuses the schema rather than invent them (PS-387).
   absent-value      A declared field was left out of the output because it had no value to
                     report - a zero divisor (PS-100), the log of a non-positive number
                     (PS-117), a failed guard with no `else` (PS-400), an unmapped lookup
@@ -80,6 +83,7 @@ from validate_schema import is_encode_vector  # noqa: E402
 CORPUS = REPO_ROOT / "schemas" / "devices"
 
 INHERENT = (
+    "dropped-element",
     "absent-value",
     "undecoded-bytes",
     "internal-field",
@@ -117,6 +121,8 @@ def schema_traits(schema):
             traits.add("internal-field")
         if node.get("type") == "skip":
             traits.add("skip-field")
+        if node.get("type") == "repeat" and node.get("present_if"):
+            traits.add("dropped-element")
         if node.get("type") in ("version_string", "bitfield_string"):
             covered = 0
             for part in node.get("parts") or []:

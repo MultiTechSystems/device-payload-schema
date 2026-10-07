@@ -1,0 +1,35 @@
+# A tag-value loop may stop short of a fixed trailer (PS-471, CR-2026-081). The loop reads
+# entries until the reserved bytes begin, and the fields declared after it read them.
+#
+# MClimate's decoders end a command stream with a fixed nine-byte keepalive; without
+# `reserve` the loop read its first byte as a tag.
+#
+# Round-trips: the entries, then the trailer.
+name: probe_tlv_reserve
+endian: big
+fields:
+- tlv:
+    tag_size: 1
+    reserve: 2
+    cases:
+      1:
+      - name: setpoint
+        type: u8
+      2:
+      - name: interval
+        type: u16
+- name: trailer
+  type: u16
+test_vectors:
+- name: two_entries_then_trailer
+  source: spec-example
+  payload: "01 15 02 0258 BEEF"
+  expected:
+    setpoint: 21
+    interval: 600
+    trailer: 48879
+- name: trailer_only
+  source: spec-example
+  payload: "BEEF"
+  expected:
+    trailer: 48879
