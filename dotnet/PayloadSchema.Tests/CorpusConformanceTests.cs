@@ -38,7 +38,11 @@ public class CorpusConformanceTests
     // CR-2026-071/073 brought a computed field's arithmetic onto PS-443/PS-444, so the
     // three arithmetic-order fixtures decode here: the full count of payload vectors
     // is 2363 (2374 vectors, 11 without a payload or an expected block).
-    const int CorpusFloor = 2365;   // + guard-else-as-declared's two label vectors
+    // CR-2026-085/086 added leftover-bytes.yaml (2 vectors) and range-before-lookup.yaml
+    // (4), and match-default-skip.yaml's skipped body now expects the PS-472 warning.
+    // All six new vectors decode here, so the floor is the full 2371 (2382 vectors, 11
+    // without a payload or an expected block).
+    const int CorpusFloor = 2371;
 
     readonly ITestOutputHelper _output;
 
