@@ -1727,12 +1727,15 @@ public static class SemanticFormatter
     /// plain nested lists only, so a port entry's, a case's or a group's fields had no
     /// name or unit, and an object came out as one record holding the whole mapping.
     /// <paramref name="fPort"/> selects a port entry's fields; without it every entry's
-    /// are searched.
+    /// are searched. A record's unit is the one <see cref="SenmlUnits.Resolve"/> derives:
+    /// a secondary unit re-expressed in its primary unit (PS-487), an unregistered one
+    /// left out with a warning added to <paramref name="warnings"/> (PS-488).
     /// </summary>
     public static List<Dictionary<string, object?>> ToSenML(
         PayloadSchemaDefinition schema,
         Dictionary<string, object?> decoded,
-        int? fPort = null)
+        int? fPort = null,
+        List<string>? warnings = null)
     {
         var fields = new List<SchemaField>(schema.Fields);
         if (schema.Ports != null)
@@ -1743,12 +1746,13 @@ public static class SemanticFormatter
                 foreach (var entry in schema.Ports.Values) fields.AddRange(entry.Fields);
         }
         var records = new List<Dictionary<string, object?>>();
-        AddSenML(records, decoded, fields, "");
+        AddSenML(records, decoded, fields, "", warnings ?? new List<string>());
         return records;
     }
 
     static void AddSenML(List<Dictionary<string, object?>> records,
-        Dictionary<string, object?> decoded, List<SchemaField> fields, string prefix)
+        Dictionary<string, object?> decoded, List<SchemaField> fields, string prefix,
+        List<string> warnings)
     {
         var declared = ReportedFields(fields);
         foreach (var kv in decoded)
@@ -1758,23 +1762,27 @@ public static class SemanticFormatter
             var path = prefix.Length > 0 ? prefix + "/" + kv.Key : kv.Key;
             if (kv.Value is Dictionary<string, object?> nested)
             {
-                AddSenML(records, nested, field == null ? new() : Members(field), path);
+                AddSenML(records, nested, field == null ? new() : Members(field), path, warnings);
                 continue;
             }
             var record = new Dictionary<string, object?>
             {
                 ["n"] = string.IsNullOrEmpty(field?.Senml?.Name) ? path : field!.Senml!.Name
             };
-            if (kv.Value is bool b)
+            var declaredUnit = string.IsNullOrEmpty(field?.Senml?.Unit) ? field?.Unit : field!.Senml!.Unit;
+            var (value, unit, unregistered) = SenmlUnits.Resolve(kv.Value, declaredUnit);
+            if (unregistered != null)
+                warnings.Add($"{path}: unit '{unregistered}' is not a registered SenML unit, "
+                    + "so its record has no 'u' (PS-488)");
+            if (value is bool b)
                 record["vb"] = b;
-            else if (kv.Value is string s)
+            else if (value is string s)
                 record["vs"] = s;
-            else if (kv.Value is byte[] bytes)
+            else if (value is byte[] bytes)
                 record["vd"] = Convert.ToBase64String(bytes);
             else
-                record["v"] = kv.Value;     // a repeat's elements: PS-377, unchanged here
-            var unit = string.IsNullOrEmpty(field?.Senml?.Unit) ? field?.Unit : field!.Senml!.Unit;
-            if (!string.IsNullOrEmpty(unit))
+                record["v"] = value;        // a repeat's elements: PS-377, unchanged here
+            if (unit != null)
                 record["u"] = unit;
             records.Add(record);
         }

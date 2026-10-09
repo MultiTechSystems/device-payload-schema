@@ -1333,6 +1333,19 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   the 8 schemas with a `length_size`, probed), so no floor moves. C's `error_msg` grew from
   112 to 152 bytes to hold the length message's worst case, since the build treats a
   possible truncation as an error.
+- **CR-2026-094: SenML output takes primary units** (PS-478 amended, PS-487, PS-488).
+  Python's `get_semantic_output(..., "senml")` and C#'s `SemanticFormatter.ToSenML` are
+  the only SenML producers. A record's `u` is a registered SenML unit: a secondary unit is
+  re-expressed in its primary unit by the registry's scale and offset, in decimal (3284 mV
+  is 3.284 V, 90 /100 is 0.9 /); `%` is written `/`; an unregistered unit is left out with
+  a warning, `"{path}: unit '{u}' is not a registered SenML unit, so its record has no 'u'
+  (PS-488)"`. The return values are unchanged, because td-tools reads Python's: the
+  warnings go to `interpreter.semantic_warnings` (reset per call) and to C#'s optional
+  `warnings` list. The tables (`SENML_UNITS`/`SENML_SECONDARY_UNITS`, C# `SenmlUnits`) are
+  the IANA registry as updated 2026-02-02 - 67 units, 39 secondary - checked against its
+  XML, not copied by hand. Measured on the corpus: 70 device-schema and 39 library fields
+  declare a unit the registry lacks (`d`, `kPa`, `mg/m³`, `°C`, `bar`, ...) and now carry no
+  `u` in SenML; 534 are re-expressed, most often `/100`, `ms`, `ppm`, `mm` and `mV`.
 - **`_meta` is not produced by any implementation**, so CR-2026-043 (`_meta.fPort`) and
   the `_meta` parts of CR-2026-054 wait for their own change (decided 2026-10-05).
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,

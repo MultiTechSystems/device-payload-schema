@@ -519,7 +519,12 @@ class TestSemanticOutputs:
         assert len(senml) == 2
         assert senml[0]['n'] == 'temperature'
         assert senml[0]['v'] == 23.45
-        assert senml[0]['u'] == '°C'
+        # `°C` is not a registered SenML unit: no `u`, and a warning (PS-488).
+        assert 'u' not in senml[0]
+        assert interpreter.semantic_warnings == [
+            "temperature: unit '°C' is not a registered SenML unit, "
+            "so its record has no 'u' (PS-488)"
+        ]
     
     def test_ttn_output(self, semantic_schema):
         """Test TTN normalized output."""

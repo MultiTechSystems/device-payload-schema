@@ -20,6 +20,8 @@ import re
 import json
 import math
 from dataclasses import dataclass, field
+from decimal import Decimal
+from fractions import Fraction
 from typing import Dict, Any, List, Optional, Tuple, Union
 from enum import Enum
 
@@ -1442,6 +1444,99 @@ def reverse_canonical_modifiers(value, field_def: Dict[str, Any]):
     return value
 
 
+
+#: The IANA SenML Units registry (RFC 8428 section 12.1, RFC 8798), as updated
+#: 2026-02-02: every unit a SenML record's `u` may carry (CR-2026-094).
+SENML_UNITS = frozenset([
+    'm', 'kg', 'g', 's', 'A', 'K', 'cd', 'mol', 'Hz', 'rad', 'sr', 'N', 'Pa', 'J', 'W',
+    'C', 'V', 'F', 'Ohm', 'S', 'Wb', 'T', 'H', 'Cel', 'lm', 'lx', 'Bq', 'Gy', 'Sv',
+    'kat', 'm2', 'm3', 'l', 'm/s', 'm/s2', 'm3/s', 'l/s', 'W/m2', 'cd/m2', 'bit',
+    'bit/s', 'lat', 'lon', 'pH', 'dB', 'dBW', 'Bspl', 'count', '/', '%', '%RH', '%EL',
+    'EL', '1/s', '1/min', 'beat/min', 'beats', 'S/m', 'B', 'VA', 'VAs', 'var', 'vars',
+    'J/m', 'kg/m3', 'deg', 'NTU',
+])
+
+#: Its Secondary Units: name -> (primary unit, scale, offset), as the registry writes
+#: them. A record gives the primary unit and the value re-expressed in it (PS-487).
+SENML_SECONDARY_UNITS = {
+    'ms': ('s', '1/1000', '0'),
+    'min': ('s', '60', '0'),
+    'h': ('s', '3600', '0'),
+    'MHz': ('Hz', '1000000', '0'),
+    'kW': ('W', '1000', '0'),
+    'kVA': ('VA', '1000', '0'),
+    'kvar': ('var', '1000', '0'),
+    'Ah': ('C', '3600', '0'),
+    'Wh': ('J', '3600', '0'),
+    'kWh': ('J', '3600000', '0'),
+    'varh': ('vars', '3600', '0'),
+    'kvarh': ('vars', '3600000', '0'),
+    'kVAh': ('VAs', '3600000', '0'),
+    'Wh/km': ('J/m', '3.6', '0'),
+    'KiB': ('B', '1024', '0'),
+    'GB': ('B', '1e9', '0'),
+    'Mbit/s': ('bit/s', '1000000', '0'),
+    'B/s': ('bit/s', '8', '0'),
+    'MB/s': ('bit/s', '8000000', '0'),
+    'mV': ('V', '1/1000', '0'),
+    'mA': ('A', '1/1000', '0'),
+    'dBm': ('dBW', '1', '-30'),
+    'ug/m3': ('kg/m3', '1e-9', '0'),
+    'mm/h': ('m/s', '1/3600000', '0'),
+    'm/h': ('m/s', '1/3600', '0'),
+    'ppm': ('/', '1e-6', '0'),
+    '/100': ('/', '1/100', '0'),
+    '/1000': ('/', '1/1000', '0'),
+    'hPa': ('Pa', '100', '0'),
+    'mm': ('m', '1/1000', '0'),
+    'cm': ('m', '1/100', '0'),
+    'km': ('m', '1000', '0'),
+    'km/h': ('m/s', '1/3.6', '0'),
+    'ppb': ('/', '1e-9', '0'),
+    'ppt': ('/', '1e-12', '0'),
+    'VAh': ('VAs', '3600', '0'),
+    'mg/l': ('kg/m3', '1/1000', '0'),
+    'ug/l': ('kg/m3', '1e-6', '0'),
+    'g/l': ('kg/m3', '1', '0'),
+}
+
+
+def _registry_number(text):
+    """A scale or offset as the registry writes it: `1/1000`, `1e9`, `3.6`, `1/3.6`."""
+    if "/" in text:
+        num, den = text.split("/")
+        return Fraction(Decimal(num)) / Fraction(Decimal(den))
+    return Fraction(Decimal(text))
+
+
+def senml_unit(value, unit):
+    """The value and `u` of a SenML record for a field declared in `unit` (PS-487, PS-488).
+
+    Returns (value, u, unregistered). `u` is None where the record carries no unit, and
+    `unregistered` names a unit the registry does not have, for the warning PS-488
+    requires. A secondary unit is re-expressed in its primary unit by the registry's
+    scale and offset, computed exactly on the value's decimal form, so 3284 mV is 3.284 V
+    and not 3.2840000000000003. `%` is written by its preferred name `/`, which changes
+    no value. Only a number is converted; a string or boolean keeps its value.
+    """
+    if not unit:
+        return value, None, None
+    if unit == "%":
+        return value, "/", None
+    if unit in SENML_UNITS:
+        return value, unit, None
+    if unit in SENML_SECONDARY_UNITS:
+        primary, scale, offset = SENML_SECONDARY_UNITS[unit]
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            if not math.isfinite(value):
+                return value, primary, None
+            exact = Fraction(Decimal(repr(value))) * _registry_number(scale)
+            exact += _registry_number(offset)
+            value = int(exact) if exact.denominator == 1 else float(exact)
+        return value, primary, None
+    return value, None, unit
+
+
 class SchemaInterpreter:
     """
     Runtime interpreter for Payload Schema definitions.
@@ -1485,6 +1580,10 @@ class SchemaInterpreter:
         self._pre_lookup = {}           # PS-475, reset by decode
         self._guard_else = set()
         self._leftover_reported = False
+        #: What the last get_semantic_output call could not express, such as a unit
+        #: the SenML registry does not have (PS-488). Its return value stays the
+        #: records alone, as callers already read it.
+        self.semantic_warnings: List[str] = []
         self.endian = Endian(schema.get('endian', 'big'))
         self.name = schema.get('name', 'unknown')
         self.version = schema.get('version', 1)
@@ -5324,8 +5423,10 @@ class SchemaInterpreter:
                 fields by port; its entry's fields are the ones reported (PS-478).
             
         Returns:
-            Semantically formatted output
+            Semantically formatted output. What it could not express is in
+            `semantic_warnings` afterwards.
         """
+        self.semantic_warnings = []
         if fPort is not None or not self.schema.get('ports'):
             fields = self._resolve_fields(fPort)
         else:
@@ -5421,7 +5522,9 @@ class SchemaInterpreter:
         """Convert to SenML format (PS-478, PS-479).
 
         One record per field the output reports, wherever it is declared, named by its
-        `senml.name` or else its reported name, with `senml.unit` or else `unit`. This
+        `senml.name` or else its reported name, with the unit PS-487 and PS-488 derive
+        from `senml.unit` or else `unit`: a secondary unit is re-expressed in its primary
+        unit, and an unregistered one is left out with a warning (CR-2026-094). This
         used to walk the top-level field list only and ignore the `senml` block: a
         schema's `{name: temp, unit: Cel}` came out as `temperature` in `°C`, and a
         field inside a port entry, a case or a group had no record. A member of an
@@ -5443,6 +5546,12 @@ class SchemaInterpreter:
                 continue
             senml = field_def.get('senml') if isinstance(field_def.get('senml'), dict) else {}
             record = {'n': senml.get('name') or path}
+            value, unit, unregistered = senml_unit(
+                value, senml.get('unit') or field_def.get('unit'))
+            if unregistered:
+                self.semantic_warnings.append(
+                    f"{path}: unit {unregistered!r} is not a registered SenML unit, "
+                    f"so its record has no 'u' (PS-488)")
 
             if isinstance(value, bool):
                 record['vb'] = value
@@ -5455,7 +5564,6 @@ class SchemaInterpreter:
             else:
                 record['v'] = value     # a repeat's elements: PS-377, unchanged here
 
-            unit = senml.get('unit') or field_def.get('unit')
             if unit:
                 record['u'] = unit
 
