@@ -1358,7 +1358,8 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     write wins, never inside an object or repeat (a depth counter), and under the resolved
     key for `name_from`. With nothing recorded, an entry falls back to the first declaration,
     else `{}`. That happens for a Python-only `metadata` block key and a raw tlv's
-    `unknown_tags`. Nested entries are declared, not produced.
+    `unknown_tags` (PS-499). Nested entries are declared, not produced (PS-500). A tlv with
+    `merge: false` reports under the fixed key `channels`, whose entry is `tlv` (PS-493).
   - **Read the declaration as written.** Go, Java and C# all read the field's raw YAML
     mapping, not their typed model, because the typed model had already canonicalised the
     type and dropped `unit`, `ipso` and `senml`. Go also recovers YAML key order from the
@@ -1367,8 +1368,8 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     every corpus vector's `_meta` must equal Python's exactly in Go, Java and C#. It
     measured 2549 of 2549 identical on landing. `expected_meta` on a vector is compared
     exactly by all four runners; the `meta-*.yaml` fixtures carry it.
-  - **Taken from the spec prototype where the text was silent** (CR-2026-097, proposed,
-    settles these):
+  - **Taken from the spec prototype where the text was silent, then written into the
+    spec by CR-2026-097:**
     - a malformed devEUI or recvTime is an error and produces no `_meta`;
     - `rx_time` keeps milliseconds, rounded half to even in decimal;
     - `version` only when declared;
@@ -1377,8 +1378,6 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     checked at load everywhere and rejects no corpus schema. Go, Java and C# report only the
     first violation; Python reports all.
   - **Known gaps, not fixed here:**
-    - A named `tlv` with `merge: false` reports under `channels`, not its own name, so its
-      `_meta` entry is `{}`. No corpus schema uses it.
     - Java decodes a field with no `type` as `u8` when it carries a construct key whose
       value is malformed (`match: 3`), which slips past the PS-334 check.
     - Go reads a typeless tlv `tag_fields` member, and an enum with no `base`, as one byte.
