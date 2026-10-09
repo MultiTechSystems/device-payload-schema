@@ -7217,8 +7217,10 @@ fields: []
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	if len(result) != 0 {
-		t.Errorf("expected empty result, got %v", result)
+	// The byte no field reads is reported as left over (PS-472), and nothing else.
+	want := "1 byte(s) after the last field left undecoded, from offset 0 (PS-472)"
+	if w, _ := result["_warnings"].([]string); len(result) != 1 || len(w) != 1 || w[0] != want {
+		t.Errorf("expected only the PS-472 warning, got %v", result)
 	}
 }
 

@@ -343,6 +343,11 @@ type DecodeContext struct {
 	// the reference always defers the mark (see markAbsent).
 	pendingAbsent map[string]string
 	inFlagged     int
+	// rangeStash is what valid_range compares for the field just decoded (PS-475); see
+	// rangeValue. leftoverReported is set where a PS-302 warning has already reported
+	// the bytes left, so PS-472 reports no second one.
+	rangeStash       rangeStash
+	leftoverReported bool
 }
 
 // EncodeContext maintains state during encoding.
@@ -450,7 +455,12 @@ func (ctx *DecodeContext) checkValidRange(value any, field Field) string {
 	if len(field.ValidRange) < 2 {
 		return "good"
 	}
-	
+	checked, value := ctx.rangeValue(field, value)
+	if !checked {
+		ctx.Quality[field.Name] = "good"
+		return "good"
+	}
+
 	numVal, ok := toFloat64(value)
 	if !ok {
 		return "good"
@@ -1806,6 +1816,9 @@ func (s *Schema) DecodeWithPortDirection(data []byte, fPort int, direction strin
 		result[k] = v
 	}
 
+	// PS-472: bytes after the last field of the selected list are reported.
+	ctx.reportLeftover()
+
 	// Add quality dict to output if any quality flags were set, with any reading
 	// omitted under PS-427/PS-428 joined to it.
 	ctx.settleQuality()
@@ -1851,6 +1864,9 @@ func (s *Schema) Decode(data []byte) (map[string]any, error) {
 	for k, v := range fieldsResult {
 		result[k] = v
 	}
+
+	// PS-472: bytes after the last field of the selected list are reported.
+	ctx.reportLeftover()
 
 	// Add quality dict to output if any quality flags were set, with any reading
 	// omitted under PS-427/PS-428 joined to it.
@@ -1990,6 +2006,7 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 			savedVar, hadVar = ctx.Variables[field.Var]
 		}
 
+		ctx.rangeStash = rangeStash{}
 		value, err := decodeField(field, ctx)
 		if err != nil {
 			return nil, err
@@ -2005,7 +2022,7 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 			}
 			continue
 		}
-		if value != omitted && rangeOmits(field, value) && (!internal || ctx.inFlagged > 0) {
+		if value != omitted && ctx.rangeOmitsDecoded(field, value) && (!internal || ctx.inFlagged > 0) {
 			// PS-428: outside the range is no reading, not a flagged one.
 			if field.Var != "" {
 				if hadVar {
@@ -2511,6 +2528,8 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 					return nil, err
 				}
 				if !guardConditionsHold(field.Guard, ctx) {
+					// The `else` ends the sequence (PS-443): not compared with the range.
+					ctx.rangeStash = rangeStash{owner: field.Name, guardElse: true}
 					return finishComputedValue(field.Guard.Else, field, ctx)
 				}
 			}
@@ -2636,6 +2655,16 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 	// a non-positive number (PS-117) - is absent, and NaN is never reported (PS-282).
 	if f, ok := value.(float64); ok && (math.IsNaN(f) || math.IsInf(f, 0)) {
 		return omitted, nil
+	}
+
+	// PS-475: valid_range compares the value here, after the arithmetic and before the
+	// lookup, and a value `out_of_range: omit` drops takes no further step - it is not
+	// looked up, so an index its sequence lacks is no error for a field dropped anyway.
+	if (field.Lookup != nil || field.LookupArray != nil) && len(field.ValidRange) >= 2 {
+		ctx.rangeStash = rangeStash{owner: field.Name, preLookup: value, hasPreLookup: true}
+		if rangeOmits(field, value) {
+			return value, nil
+		}
 	}
 
 	// Apply lookup. A mapping is matched on its keys, which need not start at
@@ -3026,6 +3055,14 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 		// unknown tag itself rather than from after it (PS-302).
 		entryStart := ctx.Offset
 
+		// PS-477: a tag is never partly read. Fewer bytes than the tag at the start of an
+		// entry is an error identifying the tlv; this stopped the loop and reported a
+		// complete decode.
+		if width := tlvTagWidth(field, tagSize); ctx.Remaining() < width {
+			return nil, fmt.Errorf("tlv entry at offset %d: %d byte(s) remain, fewer than its %d-byte tag (PS-477)",
+				ctx.Offset, ctx.Remaining(), width)
+		}
+
 		var tag []int
 		var tagValues map[string]int
 
@@ -3081,6 +3118,9 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 		if lengthSize > 0 {
 			data, err := ctx.Read(lengthSize)
 			if err != nil {
+				// No entry was decoded here: the bytes from its tag on are left over,
+				// and PS-472 reports them from the tag's offset.
+				ctx.Offset = entryStart
 				break
 			}
 			dataLength = int(decodeUint(data, ctx.Endian))
@@ -3168,6 +3208,8 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 			ctx.Warnings = append(ctx.Warnings, fmt.Sprintf(
 				"unknown TLV tag (%s) at offset %d: %d of %d byte(s) left undecoded",
 				label, entryStart, len(ctx.Data)-entryStart, len(ctx.Data)))
+			// This warning is PS-472's for these bytes; no second one is reported.
+			ctx.leftoverReported = true
 			break
 		}
 	}

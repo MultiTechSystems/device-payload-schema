@@ -42,7 +42,10 @@ import (
 // guard-else-as-declared) decode now that a compute takes its bare modifiers and a failed
 // guard's `else` skips the lookup, so the full count is 2363; guard-else-as-declared's two
 // further vectors (one per lookup label, for the mutation gate) make it 2365.
-const corpusFloor = 2365
+// CR-2026-085/086's fixtures decode now that bytes after the last field are reported
+// (leftover-bytes, match-default-skip's skipped body) and valid_range is compared before
+// the lookup (range-before-lookup's four vectors), so the full count is 2371.
+const corpusFloor = 2371
 
 type corpusVector struct {
 	Name    string `yaml:"name"`
