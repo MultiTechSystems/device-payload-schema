@@ -34,3 +34,22 @@ fields:
               type: u16
               div: 1000
               unit: "V"
+test_vectors:
+  - name: vendor_reference_1
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "02019200020C25"
+    expected:
+      device_id: 402
+      protocol_version: 2
+      battery_voltage: 3.109
+  - name: vendor_reference_2
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "0201920003007580A10C25"
+    expected:
+      device_id: 402
+      protocol_version: 2
+      water_potential: -11.7
+      soil_temperature: 16.1
+      battery_voltage: 3.109

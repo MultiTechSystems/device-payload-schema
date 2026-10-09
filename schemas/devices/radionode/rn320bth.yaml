@@ -40,7 +40,6 @@ fields:
           - name: temperature
             type: f32
             unit: "°C"
-            senml: {unit: Cel}
           - name: humidity
             type: f32
             unit: "%RH"

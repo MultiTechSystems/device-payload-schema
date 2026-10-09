@@ -145,3 +145,13 @@ test_vectors:
     expected:
       co2: 500
       vdd: 3400
+  - name: vendor_reference_1
+    description: "Example declared by the vendor in the TTN device repository"
+    source: vendor-doc
+    fPort: 1
+    payload: "0100E202290400270506"
+    expected:
+      temperature: 22.6
+      humidity: 41
+      light: 39
+      motion: 6

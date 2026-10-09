@@ -77,3 +77,28 @@ fields:
               type: u16
               div: 1000
               unit: "V"
+test_vectors:
+  - name: vendor_reference_1
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "0258C000040B91"
+    expected:
+      device_id: 22720
+      protocol_version: 2
+      battery_voltage: 2.961
+  - name: vendor_reference_2
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "0258C000074676FA0A81C9813FA6D88137802581300B91"
+    expected:
+      device_id: 22720
+      protocol_version: 2
+      air_temperature_radiation_shield: 3.167391470206759
+      air_humidity_radiation_shield: 97.67299916075379
+      surface_temperature: 4.57
+      air_temperature: 3.19
+      air_humidity: 99.44
+      dew_point: 3.11
+      angle: 37
+      sensor_temperature: 3.04
+      battery_voltage: 2.961

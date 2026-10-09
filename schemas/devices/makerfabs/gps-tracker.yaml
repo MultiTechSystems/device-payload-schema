@@ -30,7 +30,6 @@ fields:
     type: u32
     div: 100000
     unit: "°"
-    senml: {unit: lat}
   - name: nsHemi
     type: u8
     lookup:
@@ -40,7 +39,6 @@ fields:
     type: u32
     div: 100000
     unit: "°"
-    senml: {unit: lon}
   - name: ewHemi
     type: u8
     lookup:

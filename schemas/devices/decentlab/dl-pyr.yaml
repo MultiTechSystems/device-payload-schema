@@ -29,3 +29,21 @@ fields:
               type: u16
               div: 1000
               unit: "V"
+test_vectors:
+  - name: vendor_reference_1
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "02029100020C60"
+    expected:
+      device_id: 657
+      protocol_version: 2
+      battery_voltage: 3.168
+  - name: vendor_reference_2
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "020291000380690C60"
+    expected:
+      device_id: 657
+      protocol_version: 2
+      total_solar_radiation: 48.065185546875
+      battery_voltage: 3.168

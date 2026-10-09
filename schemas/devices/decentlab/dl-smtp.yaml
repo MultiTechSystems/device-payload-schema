@@ -118,3 +118,36 @@ fields:
               type: u16
               div: 1000
               unit: "V"
+test_vectors:
+  - name: vendor_reference_1
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "020B5000020B3B"
+    expected:
+      device_id: 2896
+      protocol_version: 2
+      battery_voltage: 2.875
+  - name: vendor_reference_2
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "020B50000309018A8C09438A9809278A920B3C8AA50C9C8A8C11E08AA500000000000000000B3B"
+    expected:
+      device_id: 2896
+      protocol_version: 2
+      soil_moisture_at_depth_0: -0.39
+      soil_temperature_at_depth_0: 27.0
+      soil_moisture_at_depth_1: -0.258
+      soil_temperature_at_depth_1: 27.12
+      soil_moisture_at_depth_2: -0.314
+      soil_temperature_at_depth_2: 27.06
+      soil_moisture_at_depth_3: 0.752
+      soil_temperature_at_depth_3: 27.25
+      soil_moisture_at_depth_4: 1.456
+      soil_temperature_at_depth_4: 27.0
+      soil_moisture_at_depth_5: 4.152
+      soil_temperature_at_depth_5: 27.25
+      soil_moisture_at_depth_6: -5.0
+      soil_temperature_at_depth_6: -327.68
+      soil_moisture_at_depth_7: -5.0
+      soil_temperature_at_depth_7: -327.68
+      battery_voltage: 2.875

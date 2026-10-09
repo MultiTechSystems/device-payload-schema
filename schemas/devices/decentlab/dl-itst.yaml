@@ -36,3 +36,22 @@ fields:
               type: u16
               div: 1000
               unit: "V"
+test_vectors:
+  - name: vendor_reference_1
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "0202D900020C54"
+    expected:
+      device_id: 729
+      protocol_version: 2
+      battery_voltage: 3.156
+  - name: vendor_reference_2
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "0202D9000304F904C40C54"
+    expected:
+      device_id: 729
+      protocol_version: 2
+      temperature_target: 27.3
+      temperature_head: 22.0
+      battery_voltage: 3.156

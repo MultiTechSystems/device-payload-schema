@@ -79,3 +79,24 @@ fields:
               type: u16
               div: 1000
               unit: "V"
+test_vectors:
+  - name: vendor_reference_1
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "02057800080C25"
+    expected:
+      device_id: 1400
+      protocol_version: 2
+      battery_voltage: 3.109
+  - name: vendor_reference_2
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "020578000B67BD618D1CEDBD100C25"
+    expected:
+      device_id: 1400
+      protocol_version: 2
+      air_temperature: 24.35660461425781
+      air_humidity: 41.63221740722656
+      barometer_temperature: 24.05
+      barometric_pressure: 96800
+      battery_voltage: 3.109

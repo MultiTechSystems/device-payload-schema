@@ -20,7 +20,6 @@ fields:
     type: s16
     div: 10
     unit: "°C"
-    senml: {unit: Cel}
   - name: interval
     type: u32
     div: 1000

@@ -63,3 +63,24 @@ fields:
               type: u16
               div: 1000
               unit: "V"
+test_vectors:
+  - name: vendor_reference_1
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "0210D300020C80"
+    expected:
+      device_id: 4307
+      protocol_version: 2
+      battery_voltage: 3.2
+  - name: vendor_reference_2
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "0210D3000346BE813D00000C80"
+    expected:
+      device_id: 4307
+      protocol_version: 2
+      dielectric_permittivity: 1.1831248966814998
+      volumetric_water_content: 0.006886900000000029
+      soil_temperature: 31.7
+      electrical_conductivity: 0
+      battery_voltage: 3.2

@@ -20,7 +20,6 @@ fields:
     type: s16
     div: 10
     unit: "°C"
-    senml: {unit: Cel}
   - name: ec
     type: u16
     unit: "µS/cm"
