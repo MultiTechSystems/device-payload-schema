@@ -64,8 +64,11 @@ def constructs(key):
         if isinstance(node, dict):
             if key in node:
                 yield node, path
-            for value in node.values():
-                yield from walk(value, path)
+            for name, value in node.items():
+                # A vector's `expected_meta` describes fields (`type: repeat`) without
+                # declaring them; only the schema itself is a use of the construct.
+                if name != "test_vectors":
+                    yield from walk(value, path)
         elif isinstance(node, list):
             for item in node:
                 yield from walk(item, path)

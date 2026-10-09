@@ -1415,8 +1415,9 @@ class TS013Generator:
             group = port_entry.get('fields') if isinstance(port_entry, dict) else port_entry
             iterator_problems += optional_errors(group)
         # PS-445, PS-452: a guard only on a computed field, one operation per stage.
-        from schema_interpreter import arithmetic_schema_errors
+        from schema_interpreter import arithmetic_schema_errors, meta_declaration_errors
         iterator_problems += arithmetic_schema_errors(schema)
+        iterator_problems += meta_declaration_errors(schema)    # PS-491
         if iterator_problems:
             raise ValueError(iterator_problems[0])
         self.schema = schema
@@ -3310,11 +3311,13 @@ function writeS(buf, pos, size, value, endian) {
         lines = []
 
         if self.has_ports:
-            # Rejects a `default` port entry, which this generator cannot express as an
-            # fPort comparison. Keep it: without it the loops below emit
-            # `input.fPort === default`.
+            # A `default` entry is not an fPort comparison: it is the fallback for every
+            # port the schema does not list (PS-024), emitted after them below. It used to
+            # be refused here, by int('default').
             port_map = {}
             for port_key, port_def in self.schema['ports'].items():
+                if str(port_key) == 'default':
+                    continue
                 port_map[int(port_key)] = {
                     'direction': port_def.get('direction', DEFAULT_PORT_DIRECTION),
                 }
@@ -3338,6 +3341,8 @@ function writeS(buf, pos, size, value, endian) {
                 for port_key in self.schema['ports']:
                     declared = self.schema['ports'][port_key].get(
                         'direction', DEFAULT_PORT_DIRECTION)
+                    if str(port_key) == 'default':
+                        continue
                     lines.append(f'    if (input.fPort === {port_key}) {{')
                     if declared in (direction, 'both'):
                         lines.append(f'      var r = decodePort{port_key}(input.bytes, endian);')
@@ -3347,6 +3352,17 @@ function writeS(buf, pos, size, value, endian) {
                                    f'message direction is {direction}')
                         lines.append(f'      return {{ data: {{}}, warnings: [], errors: ["{message}"] }};')
                     lines.append(f'    }}')
+                fallback = self.schema['ports'].get('default')
+                if isinstance(fallback, dict):
+                    # PS-024: every port not listed falls through to `default`.
+                    declared = fallback.get('direction', DEFAULT_PORT_DIRECTION)
+                    if declared == 'both' or declared == direction:
+                        lines.append('    var rd = decodePortdefault(input.bytes, endian);')
+                        lines.append('    return { data: omitAbsent(rd.data), warnings: rd.warnings || [], errors: [] };')
+                    else:
+                        message = (f'the default port entry is declared direction:{declared}; '
+                                   f'message direction is {direction}')
+                        lines.append(f'    return {{ data: {{}}, warnings: [], errors: ["{message}"] }};')
                 # PS-025: an FPort the schema does not describe is an error. It was a
                 # warning beside an empty result, which reads as a successful decode.
                 lines.append(f'    return {{ data: {{}}, warnings: [], errors: ["No port definition for fPort " + input.fPort] }};')
@@ -3388,6 +3404,12 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append(f'      return {{ bytes: [], fPort: {pk}, warnings: [], errors: '
                              f'["fPort {pk} declares direction uplink, so it is not encoded as a '
                              f'downlink (PS-292)"] }};')
+            if 'default' in encodable:
+                # PS-024: an unlisted port encodes through the `default` entry.
+                kw = 'if' if first else '} else if'
+                first = False
+                lines.append(f'    {kw} (typeof port === "number") {{')
+                lines.append('      r = encodePortdefault(input.data, endian);')
             kw = 'if' if first else '} else if'
             if dl_ports:
                 lines.append(f'    {kw} (port === undefined || port === null) {{')

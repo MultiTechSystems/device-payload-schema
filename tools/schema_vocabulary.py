@@ -282,6 +282,7 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "payload": (("runners",), "bytes to decode"),
         "expected": (("runners",), "values to compare"),
         "expected_warnings": (("runners",), "PS-305 warning assertions"),
+        "expected_meta": (("runners",), "the interpreter output's _meta (CR-2026-096)"),
         "expected_payload": (("runners",), "encode vector's bytes (PS-047)"),
         "input": (("runners",), "encode vector's values (PS-047)"),
         "input_metadata": (("verdicts",), "TS013 input for metadata enrichment"),

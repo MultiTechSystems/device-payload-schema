@@ -15,6 +15,7 @@ Usage:
     payload = interpreter.encode(data_dict)
 """
 
+import calendar
 import struct
 import re
 import json
@@ -1537,6 +1538,279 @@ def senml_unit(value, unit):
     return value, None, unit
 
 
+
+# --- _meta (Clause 7: PS-175, PS-177, PS-178, PS-180, PS-181, PS-340 to PS-342, PS-371 to
+# PS-376; CR-2026-088 PS-480/481; CR-2026-095 PS-489; CR-2026-096 PS-490 to PS-497) ---
+
+#: Alias type names written as their canonical name in `_meta` (PS-493).
+_META_TYPE_ALIASES = dict(
+    [('uint%d' % n, 'u%d' % n) for n in (8, 16, 24, 32, 64)]
+    + [('int%d' % n, 's%d' % n) for n in (8, 16, 24, 32, 64)]
+    + [('i%d' % n, 's%d' % n) for n in (8, 16, 24, 32, 64)]
+)
+
+_DEV_EUI = re.compile(r'[0-9a-f]{16}')
+_RECV_TIME = re.compile(
+    r'(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?'
+    r'(Z|z|[+-]\d{2}:?\d{2})?')
+
+
+def meta_type(field_def):
+    """A `_meta` entry's `type` (PS-493): the declared type, an alias by its canonical
+    name, a bit range as written. A named `tlv` with `merge: false` reports its channels
+    and is `tlv`; a field declaring no type is read as `u8`."""
+    declared = field_def.get('type')
+    if isinstance(declared, str):
+        return _META_TYPE_ALIASES.get(declared, declared)
+    if isinstance(field_def.get('tlv'), dict):
+        return 'tlv'
+    return 'u8'
+
+
+def meta_declarations(fields):
+    """Reported name -> declaration for one level of decoded output, first declaration
+    first (PS-371, PS-481 as amended by CR-2026-096: what is declared, not what is
+    present). A construct that merges into its parent (`match` cases and `default`,
+    `tlv` cases, `flagged` groups, `byte_group`) contributes its fields at this level; an
+    object or repeat contributes its own name. Internal fields (PS-494) and `name_from`
+    fields, whose key is known only at run time (PS-492), have no entry here."""
+    found = {}
+
+    def visit(items):
+        if not isinstance(items, list):
+            return
+        for f in items:
+            if not isinstance(f, dict):
+                continue
+            group = f.get('byte_group')
+            if group is not None:
+                visit(group.get('fields') if isinstance(group, dict) else group)
+            if isinstance(f.get('flagged'), dict):
+                for g in f['flagged'].get('groups') or []:
+                    if isinstance(g, dict):
+                        visit(g.get('fields'))
+            match = f.get('match')
+            if isinstance(match, dict):
+                for body in (match.get('cases') if isinstance(match.get('cases'), dict) else {}).values():
+                    if isinstance(body, list):
+                        visit(body)
+                if isinstance(match.get('default'), list):
+                    visit(match['default'])
+                label = match.get('name')
+                if isinstance(label, str) and not label.startswith('_'):
+                    found.setdefault(label, {'name': label,
+                                             'type': 'u%d' % (8 * int(match.get('length', 1)))})
+            if f.get('type') == 'match' and isinstance(f.get('cases'), dict):
+                for body in f['cases'].values():
+                    if isinstance(body, list):
+                        visit(body)
+            tlv = f.get('tlv')
+            if isinstance(tlv, dict) and tlv.get('merge', True) is not False:
+                for body in (tlv.get('cases') if isinstance(tlv.get('cases'), dict) else {}).values():
+                    if isinstance(body, list):
+                        visit(body)
+                continue
+            name = f.get('name')
+            if not isinstance(name, str) or name.startswith('_') or f.get('name_from'):
+                continue
+            if 'match' in f and 'type' not in f:
+                continue
+            found.setdefault(name, f)
+
+    visit(fields)
+    return found
+
+
+def meta_reference(value, repeat=None, bare=False):
+    """A per-element `unit`, `ipso.instance` or `identity` as PS-375 lists it: the repeat's
+    index as {index, count}, or an element field as {field, values} with a lookup's
+    `default` last, marked `open` where that default carries `${value}` (PS-489). A
+    literal is itself. PS-374, checked at load, restricts what a reference may name."""
+    if repeat is None or not isinstance(value, str):
+        return value
+    if not (bare or value.startswith('$')):
+        return value
+    name = value[1:] if value.startswith('$') else value
+    if name == repeat.get('index'):
+        count = repeat.get('count')
+        if not (isinstance(count, int) and not isinstance(count, bool)):
+            count = repeat.get('max')
+        return {'index': name, 'count': count}
+    target = next((f for f in repeat.get('fields') or [] if isinstance(f, dict)
+                   and f.get('name') == name), {})
+    lookup = target.get('lookup')
+    if isinstance(lookup, dict):
+        values = [label for key, label in lookup.items() if key != 'default']
+        if 'default' in lookup:
+            values.append(lookup['default'])
+    elif isinstance(lookup, list):
+        values = list(lookup)
+    elif 'value' in target:
+        values = [target['value']]
+    else:
+        values = []
+    listing = {'field': name, 'values': values}
+    if lookup_template(lookup) is not None:
+        listing['open'] = True                                  # PS-489
+    return listing
+
+
+def field_meta(field_def, repeat=None):
+    """One `_meta.fields` entry, derived from one declaration (PS-178, PS-493, PS-480,
+    PS-371, PS-481). `repeat` is the repeat whose elements the field belongs to, for the
+    per-element references of PS-373 and PS-375."""
+    entry = {'type': meta_type(field_def)}
+    senml = field_def.get('senml') if isinstance(field_def.get('senml'), dict) else {}
+    unit = senml.get('unit') or field_def.get('unit')          # PS-178, no conversion
+    if unit is not None:
+        entry['unit'] = meta_reference(unit, repeat)
+    ipso = field_def.get('ipso')
+    if isinstance(ipso, dict) and 'object' in ipso:
+        entry['ipso'] = {'object': ipso['object'],
+                         'instance': meta_reference(ipso.get('instance', 0), repeat),
+                         'resource': ipso.get('resource', 5700)}
+    if isinstance(senml.get('name'), str):
+        entry['senml'] = {'name': senml['name']}               # PS-480; a template, PS-373
+    if field_def.get('description'):
+        entry['description'] = field_def['description']
+    if entry['type'] == 'repeat':
+        entry['elements'] = {name: field_meta(member, field_def)            # PS-371
+                             for name, member in meta_declarations(
+                                 field_def.get('fields')).items()}
+        if 'identity' in field_def:
+            entry['identity'] = meta_reference(field_def['identity'], field_def, bare=True)
+    elif entry['type'] == 'object':
+        entry['fields'] = {name: field_meta(member)                          # PS-481
+                           for name, member in meta_declarations(
+                               field_def.get('fields')).items()}
+    return entry
+
+
+def normalise_dev_eui(text):
+    """PS-496: 16 lower-case hexadecimal digits, `-`, `:` and spaces removed. None where
+    the input is not a device EUI once normalised."""
+    if not isinstance(text, str):
+        return None
+    eui = re.sub(r'[-: ]', '', text).lower()
+    return eui if _DEV_EUI.fullmatch(eui) else None
+
+
+def rx_time_seconds(recv_time):
+    """PS-177, PS-495: `recvTime` as numeric Unix seconds in UTC, keeping its fraction.
+
+    TS013 gives an ISO 8601 string; a number is taken as seconds already. The fraction is
+    carried as written - `<seconds>.<digits>` read as one decimal - so every implementation
+    lands on the same double. None where the input is neither."""
+    if isinstance(recv_time, bool):
+        return None
+    if isinstance(recv_time, (int, float)):
+        return recv_time
+    if not isinstance(recv_time, str):
+        return None
+    m = _RECV_TIME.fullmatch(recv_time.strip())
+    if not m:
+        return None
+    year, month, day, hour, minute, second = (int(m.group(i)) for i in range(1, 7))
+    try:
+        seconds = calendar.timegm((year, month, day, hour, minute, second, 0, 0, 0))
+    except (ValueError, OverflowError):
+        return None
+    zone = m.group(8)
+    if zone and zone not in ('Z', 'z'):
+        sign = -1 if zone[0] == '-' else 1
+        digits = zone[1:].replace(':', '')
+        seconds -= sign * (int(digits[:2]) * 3600 + int(digits[2:]) * 60)
+    fraction = (m.group(7) or '').rstrip('0')
+    if not fraction:
+        return seconds
+    return float(Decimal('%d.%s' % (seconds, fraction)))
+
+
+def _meta_agreement_key(field_def):
+    """What PS-491 requires one reported name's declarations to agree on."""
+    ipso = field_def.get('ipso')
+    if isinstance(ipso, dict):
+        ipso = (ipso.get('object'), ipso.get('instance', 0), ipso.get('resource', 5700))
+    senml = field_def.get('senml')
+    if isinstance(senml, dict):
+        senml = tuple(sorted((str(k), str(v)) for k, v in senml.items()))
+    return {'unit': field_def.get('unit'), 'senml': senml, 'ipso': ipso}
+
+
+def meta_declaration_errors(schema):
+    """PS-491: the declarations of one reported name in one field list must agree on
+    `unit`, `senml` and `ipso`. A field list is the top level, each port's, and each
+    object's or repeat's members; `match` and `tlv` cases, `flagged` groups and
+    `byte_group`s merge into theirs. `type`, `lookup` and `description` may differ."""
+    errors = []
+
+    def check(fields, where):
+        seen = {}
+
+        def visit(items):
+            if not isinstance(items, list):
+                return
+            for f in items:
+                if not isinstance(f, dict):
+                    continue
+                group = f.get('byte_group')
+                if group is not None:
+                    visit(group.get('fields') if isinstance(group, dict) else group)
+                if isinstance(f.get('flagged'), dict):
+                    for g in f['flagged'].get('groups') or []:
+                        if isinstance(g, dict):
+                            visit(g.get('fields'))
+                match = f.get('match')
+                if isinstance(match, dict):
+                    for body in (match.get('cases') if isinstance(match.get('cases'), dict) else {}).values():
+                        if isinstance(body, list):
+                            visit(body)
+                    if isinstance(match.get('default'), list):
+                        visit(match['default'])
+                if f.get('type') == 'match' and isinstance(f.get('cases'), dict):
+                    for body in f['cases'].values():
+                        if isinstance(body, list):
+                            visit(body)
+                tlv = f.get('tlv')
+                if isinstance(tlv, dict):
+                    bodies = [b for b in (tlv.get('cases') if isinstance(tlv.get('cases'), dict) else {}).values()
+                              if isinstance(b, list)]
+                    if tlv.get('merge', True) is False:
+                        check([m for b in bodies for m in b],
+                              '%s/%s' % (where, f.get('name', 'tlv')))
+                    else:
+                        for body in bodies:
+                            visit(body)
+                    continue
+                if f.get('type') in ('object', 'repeat') and isinstance(f.get('fields'), list):
+                    check(f['fields'], '%s/%s' % (where, f.get('name', '?')))
+                name = f.get('name')
+                if (isinstance(name, str) and not name.startswith('_')
+                        and not f.get('name_from')):
+                    seen.setdefault(name, []).append(f)
+
+        visit(fields)
+        for name, decls in seen.items():
+            keys = [_meta_agreement_key(d) for d in decls]
+            differing = [k for k in ('unit', 'senml', 'ipso')
+                         if len({repr(x[k]) for x in keys}) > 1]
+            if differing:
+                errors.append(
+                    "Field '%s' is declared %d times in %s and its declarations differ in "
+                    "%s; the declarations of one reported name must agree on unit, senml "
+                    "and ipso (PS-491)" % (name, len(decls), where, ', '.join(differing)))
+
+    if not isinstance(schema, dict):
+        return errors
+    if isinstance(schema.get('fields'), list):
+        check(schema['fields'], 'fields')
+    for port, entry in (schema.get('ports') or {}).items():
+        group = entry.get('fields') if isinstance(entry, dict) else entry
+        if isinstance(group, list):
+            check(group, 'port %s' % port)
+    return errors
+
+
 class SchemaInterpreter:
     """
     Runtime interpreter for Payload Schema definitions.
@@ -1568,6 +1842,7 @@ class SchemaInterpreter:
             self._load_errors.extend(encoding_errors(field_def))
             self._load_errors.extend(lookup_template_errors(field_def))
         self._load_errors.extend(arithmetic_schema_errors(schema))    # PS-445, PS-452
+        self._load_errors.extend(meta_declaration_errors(schema))      # PS-491
         self._load_errors.extend(timestamp_errors(schema.get('metadata')))
         self._load_errors.extend(schema_iterator_errors(schema))
         self._repeat_only_names = repeat_only_names(schema)
@@ -1584,6 +1859,10 @@ class SchemaInterpreter:
         #: the SenML registry does not have (PS-488). Its return value stays the
         #: records alone, as callers already read it.
         self.semantic_warnings: List[str] = []
+        # PS-490: the declaration that wrote each top-level reported value, by key, and
+        # how deep inside an object or repeat the decode is (only depth 0 records).
+        self._producers: Dict[str, Dict[str, Any]] = {}
+        self._meta_depth = 0
         self.endian = Endian(schema.get('endian', 'big'))
         self.name = schema.get('name', 'unknown')
         self.version = schema.get('version', 1)
@@ -1991,6 +2270,28 @@ class SchemaInterpreter:
         big-endian and nothing reported it. The reference implementation was the only
         one of the five that got it wrong, and it is the surface `td-tools` imports.
         """
+        self._produced(field_def)
+        if field_def.get('type') in ('object', 'repeat'):
+            # Its members are another level of output, described by the declaration's
+            # nested entries (PS-371, PS-481), not by what they wrote.
+            self._meta_depth += 1
+            try:
+                return self._decode_field_endian(field_def, buf, pos)
+            finally:
+                self._meta_depth -= 1
+        return self._decode_field_endian(field_def, buf, pos)
+
+    def _produced(self, field_def: Dict[str, Any], key: Optional[str] = None) -> None:
+        """PS-490: record the declaration about to report `key` (its name by default).
+        The last one decoded is the one whose value is reported, so the last write wins."""
+        if self._meta_depth:
+            return
+        key = key if key is not None else field_def.get('name')
+        if isinstance(key, str) and not key.startswith('_'):
+            self._producers[key] = field_def
+
+    def _decode_field_endian(self, field_def: Dict[str, Any], buf: bytes,
+                             pos: int) -> Tuple[Any, int]:
         endian_override = field_def.get('endian')
         if (endian_override is None
                 or field_def.get('type', 'u8') in self._ENDIAN_OPAQUE_TYPES):
@@ -2871,6 +3172,7 @@ class SchemaInterpreter:
         declared. The `compute` path passed it through the `transform`, so
         `transform: [{mult: 10}]` turned `else: 5` into 50.
         """
+        self._produced(field_def)
         # Deprecated: formula field
         if field_def.get('formula'):
             import warnings
@@ -2899,6 +3201,7 @@ class SchemaInterpreter:
     
     def _decode_bitfield_string(self, field_def: Dict[str, Any], buf: bytes, pos: int) -> Tuple[str, int]:
         """Decode a bitfield_string field (e.g., firmware version)."""
+        self._produced(field_def)
         length = field_def.get('length', 2)
         parts = field_def.get('parts', [])
         delimiter = field_def.get('delimiter', '.')
@@ -3316,6 +3619,7 @@ class SchemaInterpreter:
             
             try:
                 match = _BIT_RANGE.match(str(gf.get('type', '')))
+                self._produced(gf)
                 if match:
                     start, end = int(match.group(2)), int(match.group(3))
                     width = end - start + 1
@@ -3716,6 +4020,8 @@ class SchemaInterpreter:
         # their `else`, by field definition.
         self._pre_lookup = {}
         self._guard_else = set()
+        self._producers = {}
+        self._meta_depth = 0
         
         pos = 0
         fields = self._resolve_fields(fPort)
@@ -3754,6 +4060,69 @@ class SchemaInterpreter:
 
         return result
     
+    def interpret(self, payload: bytes, fPort: int = None,
+                  input_metadata: Dict[str, Any] = None,
+                  direction: str = None) -> DecodeResult:
+        """Interpreter output: the decoded JSON with its `_meta` (PS-174, PS-175, PS-180).
+
+        `decode()` returns the decoded fields alone and is unchanged, because td-tools and
+        every other caller reads it; a generated codec never carries `_meta` (PS-467).
+        This is what an interpreter integration hands downstream.
+
+        The input context (PS-495) is the TS013 uplink input and the device's EUI:
+        `fPort`, and `input_metadata` with `recvTime` and `devEUI` (`fPort` there too,
+        where the argument is not given). `_meta` holds:
+          - `schema` and `version` from the schema;
+          - `device_eui` (PS-496), `rx_time` (PS-177) and `fPort` (PS-340 to PS-342),
+            each omitted where the context does not supply it;
+          - `fields`: exactly one entry per top-level reported key (PS-181), from the
+            declaration that produced its value (PS-490), a `name_from` key's included
+            (PS-492). Nested entries list what is declared (PS-371, PS-481) and no
+            internal field has one at any depth (PS-494).
+        A failed decode has no `_meta` (PS-497).
+        """
+        context = dict(input_metadata or {})
+        if fPort is None and isinstance(context.get('fPort'), int):
+            fPort = context['fPort']
+        result = self.decode(payload, fPort=fPort, input_metadata=input_metadata,
+                             direction=direction)
+        if not result.success:
+            return result
+
+        meta: Dict[str, Any] = {}
+        if self.schema.get('name') is not None:
+            meta['schema'] = self.schema['name']
+        if 'version' in self.source_schema:
+            meta['version'] = self.source_schema['version']
+        if context.get('devEUI') is not None:
+            eui = normalise_dev_eui(context['devEUI'])
+            if eui is None:
+                result.warnings.append(
+                    "devEUI %r is not 16 hexadecimal digits, so _meta has no device_eui "
+                    "(PS-496)" % (context['devEUI'],))
+            else:
+                meta['device_eui'] = eui
+        if context.get('recvTime') is not None:
+            rx_time = rx_time_seconds(context['recvTime'])
+            if rx_time is None:
+                result.warnings.append(
+                    "recvTime %r is not an ISO 8601 time or a number of seconds, so _meta "
+                    "has no rx_time (PS-495)" % (context['recvTime'],))
+            else:
+                meta['rx_time'] = rx_time
+        if fPort is not None:
+            meta['fPort'] = fPort                          # PS-340, PS-342: as supplied
+
+        declared = meta_declarations(self._resolve_fields(fPort))
+        meta['fields'] = {}
+        for key in result.data:
+            if key.startswith('_'):
+                continue                                   # `_quality`, `_warnings`
+            source = self._producers.get(key) or declared.get(key)
+            meta['fields'][key] = field_meta(source) if source is not None else {}
+        result.data = dict(result.data, _meta=meta)
+        return result
+
     def _decode_field_list(self, fields: List[Dict[str, Any]], payload: bytes, pos: int,
                            result: DecodeResult) -> int:
         """Decode a list of fields into `result`, returning the read position after them.
@@ -3983,6 +4352,8 @@ class SchemaInterpreter:
                         # out rather than reported as a raw integer (PS-269).
                         continue
                     output_name = self._resolve_field_name(field_def, name)
+                    if output_name != name:
+                        self._produced(field_def, output_name)      # PS-492
                     result.data[output_name] = value
                     # Check valid_range and update quality
                     if field_def.get('valid_range'):
@@ -5496,7 +5867,7 @@ class SchemaInterpreter:
                         visit(g.get('fields'))
                 match = f.get('match')
                 if isinstance(match, dict):
-                    for body in (match.get('cases') or {}).values():
+                    for body in (match.get('cases') if isinstance(match.get('cases'), dict) else {}).values():
                         if isinstance(body, list):
                             visit(body)
                     if isinstance(match.get('default'), list):
@@ -5508,7 +5879,7 @@ class SchemaInterpreter:
                     if tlv.get('merge', True) is False and f.get('name'):
                         found.setdefault(f['name'], dict(f, type='object'))
                     else:
-                        for body in (tlv.get('cases') or {}).values():
+                        for body in (tlv.get('cases') if isinstance(tlv.get('cases'), dict) else {}).values():
                             if isinstance(body, list):
                                 visit(body)
                 if f.get('name'):

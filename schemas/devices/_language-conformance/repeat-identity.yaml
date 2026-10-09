@@ -41,3 +41,16 @@ test_vectors:
       reading: 23.1
     - unit_code: "%RH"
       reading: 60
+  expected_meta:
+    schema: probe_repeat_identity
+    fields:
+      probes:
+        type: repeat
+        elements:
+          unit_code: {type: u8}
+          reading:
+            type: s16
+            unit: {field: unit_code, values: [Cel, "%RH"]}
+            ipso: {object: 3303, instance: {index: i, count: 2}, resource: 5700}
+            senml: {name: "probe_${i}"}
+        identity: {index: i, count: 2}

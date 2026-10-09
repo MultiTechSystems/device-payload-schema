@@ -18,6 +18,7 @@ fields:
     var: idx
   - name: reading
     type: u8
+    unit: V
     name_from: channel_${idx}_reading
 test_vectors:
   - name: the_template_resolves_through_the_declaring_field
@@ -28,6 +29,11 @@ test_vectors:
       channel_id: 3
       channel_3_reading: 42
     expected_warnings: []
+    expected_meta:
+      schema: probe_name_from_var
+      fields:
+        channel_id: {type: u8}
+        channel_3_reading: {type: u8, unit: V}
   - name: a_different_channel_moves_the_key
     description: "The key is built from the payload, so channel 7 names a different one"
     payload: "072A"
@@ -36,3 +42,8 @@ test_vectors:
       channel_id: 7
       channel_7_reading: 42
     expected_warnings: []
+    expected_meta:
+      schema: probe_name_from_var
+      fields:
+        channel_id: {type: u8}
+        channel_7_reading: {type: u8, unit: V}

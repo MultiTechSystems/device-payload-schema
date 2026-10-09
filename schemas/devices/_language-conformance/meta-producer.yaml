@@ -1,0 +1,32 @@
+# One reported name declared in two cases: its _meta entry comes from the declaration that
+# produced the value (CR-2026-096 PS-490). The two agree on unit, as PS-491 requires; their
+# type and description differ, which it allows.
+name: meta_producer
+endian: big
+fields:
+  - name: _kind
+    type: u8
+  - match:
+      field: $_kind
+      cases:
+        1:
+          - {name: reading, type: u8, unit: Cel, description: One-byte reading}
+        2:
+          - {name: reading, type: s16, unit: Cel, description: Two-byte reading}
+test_vectors:
+  - name: first_case
+    source: spec-example
+    payload: "01 17"
+    expected: {reading: 23}
+    expected_meta:
+      schema: meta_producer
+      fields:
+        reading: {type: u8, unit: Cel, description: One-byte reading}
+  - name: second_case
+    source: spec-example
+    payload: "02 FF9C"
+    expected: {reading: -100}
+    expected_meta:
+      schema: meta_producer
+      fields:
+        reading: {type: s16, unit: Cel, description: Two-byte reading}

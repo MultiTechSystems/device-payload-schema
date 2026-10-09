@@ -1,0 +1,33 @@
+# _meta.fPort is the FPort supplied, whichever port entry was selected - also where
+# selection fell through to `default` (PS-340, PS-342). The entries come from the selected
+# entry's fields.
+name: meta_port_default
+endian: big
+ports:
+  1:
+    fields:
+      - {name: battery, type: u16, unit: mV}
+  default:
+    fields:
+      - {name: level, type: u8, unit: "/100"}
+test_vectors:
+  - name: listed_port
+    source: spec-example
+    payload: "0CE4"
+    fPort: 1
+    expected: {battery: 3300}
+    expected_meta:
+      schema: meta_port_default
+      fPort: 1
+      fields:
+        battery: {type: u16, unit: mV}
+  - name: unlisted_port_reports_what_was_received
+    source: spec-example
+    payload: "5A"
+    fPort: 9
+    expected: {level: 90}
+    expected_meta:
+      schema: meta_port_default
+      fPort: 9
+      fields:
+        level: {type: u8, unit: "/100"}
