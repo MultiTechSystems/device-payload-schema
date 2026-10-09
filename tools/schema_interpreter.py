@@ -3319,11 +3319,13 @@ class SchemaInterpreter:
             # Read length if present
             data_length = None
             if length_size > 0:
+                # PS-486: an entry is never partly read. A length cut short is an error,
+                # not leftover bytes for PS-472: the schema describes them.
                 if pos + length_size > len(buf):
-                    # No entry was decoded here: the bytes from its tag on are left over,
-                    # and PS-472 reports them from the tag's offset.
-                    pos = entry_start
-                    break
+                    raise ValueError(
+                        f"tlv entry at offset {entry_start}: {len(buf) - pos} byte(s) "
+                        f"remain after its tag, fewer than its {length_size}-byte "
+                        f"length (PS-486)")
                 if length_size == 1:
                     data_length = buf[pos]
                 elif length_size == 2:
@@ -3332,6 +3334,12 @@ class SchemaInterpreter:
                     else:
                         data_length = (buf[pos] << 8) | buf[pos + 1]
                 pos += length_size
+                # PS-486: nor may its value run past the end (`buf` already stops at a
+                # `reserve`). This holds for an unknown tag that would be skipped too.
+                if data_length > len(buf) - pos:
+                    raise ValueError(
+                        f"tlv entry at offset {entry_start}: its length declares "
+                        f"{data_length} byte(s), {len(buf) - pos} remain (PS-486)")
             
             # Find matching case. Exact keys are tried first, then negated, then
             # wildcard, so a specific case is never shadowed by a broader one

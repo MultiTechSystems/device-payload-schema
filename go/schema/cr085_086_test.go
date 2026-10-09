@@ -120,20 +120,6 @@ func TestCR085CutOffTagOnACorpusSchema(t *testing.T) {
 	}
 }
 
-// Where the tag fits and the length does not, no entry is decoded: the leftover is
-// counted from the tag.
-func TestCR085ALengthCutOffLeavesTheEntryOverFromItsTag(t *testing.T) {
-	schema := "name: probe\nfields:\n  - tlv:\n      tag_size: 1\n      length_size: 2\n      cases:\n        1:\n          - {name: a, type: u8}\n"
-	out, err := cr085Decode(t, schema, "0100012a0100")
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := cr085Leftover(cr085Warnings(out))
-	if len(found) != 1 || !strings.Contains(found[0], "offset 4") || !strings.HasPrefix(found[0], "2 byte") {
-		t.Errorf("warnings %v", cr085Warnings(out))
-	}
-}
-
 // PS-472 is about the selected field list: a port schema is reported after selection.
 func TestCR085LeftoverOnAPortSchema(t *testing.T) {
 	schema := "name: probe\nports:\n  3:\n    fields:\n      - {name: a, type: u8}\n"

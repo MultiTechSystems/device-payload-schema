@@ -3112,14 +3112,21 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 		// Read length if specified
 		var dataLength int = -1
 		if lengthSize > 0 {
-			data, err := ctx.Read(lengthSize)
-			if err != nil {
-				// No entry was decoded here: the bytes from its tag on are left over,
-				// and PS-472 reports them from the tag's offset.
-				ctx.Offset = entryStart
-				break
+			// PS-486: an entry is never partly read. A length cut short is an error,
+			// not leftover bytes for PS-472: the schema describes them.
+			if ctx.Remaining() < lengthSize {
+				return nil, fmt.Errorf("tlv entry at offset %d: %d byte(s) remain after its tag, fewer than its %d-byte length (PS-486)",
+					entryStart, ctx.Remaining(), lengthSize)
 			}
+			data, _ := ctx.Read(lengthSize)
 			dataLength = int(decodeUint(data, ctx.Endian))
+			// Nor may its value run past the end (ctx.Data already stops at a
+			// `reserve`). This holds for an unknown tag that would be skipped too:
+			// skipping read nothing and took the bytes after as a new entry.
+			if dataLength > ctx.Remaining() {
+				return nil, fmt.Errorf("tlv entry at offset %d: its length declares %d byte(s), %d remain (PS-486)",
+					entryStart, dataLength, ctx.Remaining())
+			}
 		}
 
 		// Find matching case

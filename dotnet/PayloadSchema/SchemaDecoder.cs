@@ -1303,16 +1303,20 @@ public static class SchemaDecoder
             int dataLength = -1;
             if (lengthSize > 0)
             {
+                // PS-486: an entry is never partly read. A length cut short is an error,
+                // not leftover bytes for PS-472: the schema describes them.
                 if (ctx.Remaining < lengthSize)
-                {
-                    // No entry is decoded here: the bytes from its tag on are left over,
-                    // and PS-472 reports them from the tag's offset. This was a buffer
-                    // underflow failing the whole decode.
-                    ctx.Offset = entryStart;
-                    break;
-                }
+                    throw new InvalidOperationException($"tlv entry at offset {entryStart}: "
+                        + $"{ctx.Remaining} byte(s) remain after its tag, fewer than its "
+                        + $"{lengthSize}-byte length (PS-486)");
                 var lenData = ctx.Read(lengthSize);
                 dataLength = (int)Helpers.DecodeUint(lenData, ctx.Endian);
+                // Nor may its value run past the end (the context already stops at a
+                // `reserve`), known tag or skipped: a known one read what was there and
+                // reported success, a skipped one failed with a bare underflow.
+                if (dataLength > ctx.Remaining)
+                    throw new InvalidOperationException($"tlv entry at offset {entryStart}: its length "
+                        + $"declares {dataLength} byte(s), {ctx.Remaining} remain (PS-486)");
             }
 
             string? caseKey = FindTLVCaseKey(field.TLVCases, tag);

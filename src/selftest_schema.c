@@ -481,19 +481,43 @@ static void test_a_partial_tag_size_tag_is_an_error(void) {
     TCHECK(strstr(r.error_msg, "PS-477") != NULL);
 }
 
-/* PS-477: the tag fits and its length does not, so no entry is decoded; the bytes from
- * that tag on are left over (PS-472). This returned SCHEMA_ERR_BUFFER with error_code
- * still 0 and no message. */
-static void test_a_cut_length_leaves_the_entry_over(void) {
+/* PS-486 (CR-2026-093): an entry is never partly read. A length cut short is an error
+ * naming the tlv and the entry's offset; it used to rewind to the tag and leave the
+ * bytes over (PS-472). */
+static void test_a_cut_length_is_an_error(void) {
     schema_t s;
     decode_result_t r;
     uint8_t payload[] = {0x01, 0x00, 0x01, 0x05, 0x01, 0x00};
 
     build_tlv(&s, field_tlv(1, 2), 1);
-    TCHECK(schema_decode(&s, payload, sizeof(payload), &r) == SCHEMA_OK);
-    TCHECK(r.field_count == 1 && r.fields[0].value.i64 == 5);
-    TCHECK(r.bytes_consumed == 4);
-    TCHECK(r.bytes_unread == 2);
+    TCHECK(schema_decode(&s, payload, sizeof(payload), &r) == SCHEMA_ERR_BUFFER);
+    TCHECK(r.error_code == SCHEMA_ERR_BUFFER);
+    TCHECK(strstr(r.error_msg, "channels") != NULL);
+    TCHECK(strstr(r.error_msg, "offset 4: 1 byte(s) remain after its tag, fewer than "
+                               "its 2-byte length (PS-486)") != NULL);
+}
+
+/* PS-486: a length declaring more bytes than remain is the same error, for a known tag
+ * (read from what was there and reported complete) and for an unknown one that would be
+ * skipped (stepped past the payload's end). */
+static void test_a_cut_value_is_an_error(void) {
+    schema_t s;
+    decode_result_t r;
+    uint8_t known[] = {0x01, 0x01, 0x07, 0x01, 0x05, 0xAA, 0xBB};
+    uint8_t unknown[] = {0x01, 0x01, 0x07, 0x09, 0x05, 0xAA, 0xBB};
+
+    build_tlv(&s, field_tlv(1, 1), 1);
+    TCHECK(schema_decode(&s, known, sizeof(known), &r) == SCHEMA_ERR_BUFFER);
+    TCHECK(strstr(r.error_msg, "offset 3: its length declares 5 byte(s), 2 remain "
+                               "(PS-486)") != NULL);
+    TCHECK(schema_decode(&s, unknown, sizeof(unknown), &r) == SCHEMA_ERR_BUFFER);
+    TCHECK(strstr(r.error_msg, "offset 3: its length declares 5 byte(s), 2 remain "
+                               "(PS-486)") != NULL);
+
+    /* The entries fit: decodes, nothing left over. */
+    TCHECK(schema_decode(&s, known, 3, &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 1 && r.fields[0].value.i64 == 7);
+    TCHECK(r.bytes_unread == 0);
 }
 
 /* PS-472: bytes after the last field are reported - offset bytes_consumed, count
@@ -557,7 +581,8 @@ void selftest_schema(void) {
     test_a_float_applies_its_modifiers();
     test_a_partial_composite_tag_is_an_error();
     test_a_partial_tag_size_tag_is_an_error();
-    test_a_cut_length_leaves_the_entry_over();
+    test_a_cut_length_is_an_error();
+    test_a_cut_value_is_an_error();
     test_leftover_bytes_are_reported();
     test_an_unknown_tag_is_left_over_from_the_tag();
 

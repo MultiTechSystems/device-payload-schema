@@ -2893,15 +2893,19 @@ function writeS(buf, pos, size, value, endian) {
         lines.append(f'{i}  // TLV loop')
         # PS-477: a tag is never partly read - fewer bytes than the tag at the start of an
         # entry is an error identifying the tlv. The loop used to require tag and length
-        # to fit and stop silently otherwise. A length cut short decodes no entry, and
-        # the bytes from its tag on are left over (PS-472).
+        # to fit and stop silently otherwise. PS-486 extends it to the rest of the entry:
+        # a length cut short, or a length declaring more bytes than remain, is an error
+        # too, whether or not the tag is known.
         lines.append(f'{i}  while (pos < buf.length) {{')
         lines.append(f'{i}    var _tlvStart = pos;')
         lines.append(f'{i}    if (buf.length - pos < {tag_size}) throw new Error("tlv entry at '
                      f'offset " + pos + ": " + (buf.length - pos) + " byte(s) remain, fewer '
                      f'than its {tag_size}-byte tag (PS-477)");')
         if length_size:
-            lines.append(f'{i}    if (buf.length - pos < {tag_size + length_size}) break;')
+            lines.append(f'{i}    if (buf.length - pos < {tag_size + length_size}) throw new Error('
+                         f'"tlv entry at offset " + pos + ": " + (buf.length - pos - {tag_size}) + '
+                         f'" byte(s) remain after its tag, fewer than its {length_size}-byte '
+                         f'length (PS-486)");')
 
         # Read tag fields
         for tf in tag_fields:
@@ -2915,6 +2919,9 @@ function writeS(buf, pos, size, value, endian) {
         if length_size:
             lines.append(f'{i}    var _tlvLen = readU(buf, pos, {length_size}, endian);')
             lines.append(f'{i}    pos += {length_size};')
+            lines.append(f'{i}    if (_tlvLen > buf.length - pos) throw new Error("tlv entry at '
+                         f'offset " + _tlvStart + ": its length declares " + _tlvLen + " byte(s), " '
+                         f'+ (buf.length - pos) + " remain (PS-486)");')
 
         # Build tag key for matching
         if not tag_fields:
