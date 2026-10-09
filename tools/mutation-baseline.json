@@ -3,15 +3,35 @@
   "min_score_new": 0.8,
   "include_library_composed": false,
   "distribution": {
-    "100%": 162,
-    "95-99%": 6,
+    "100%": 163,
+    "95-99%": 7,
     "90-94%": 1,
-    "80-89%": 5,
+    "80-89%": 6,
     "70-79%": 1,
     "<70%": 1,
     "unscored": 5
   },
   "schemas": {
+    "_language-conformance/arithmetic-order-computed.yaml": {
+      "score": 0.8205,
+      "killed": 32,
+      "survived": 7,
+      "unreached": 0,
+      "generated": 47,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/arithmetic-order-read.yaml": {
+      "score": 0.9714,
+      "killed": 34,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 42,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "_language-conformance/bit-range-order.yaml": {
       "score": 0.875,
       "killed": 7,
@@ -129,6 +149,16 @@
       "unreached": 0,
       "generated": 11,
       "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/guard-else-as-declared.yaml": {
+      "score": 1.0,
+      "killed": 12,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 15,
+      "vectors": 4,
       "provenance": "independent",
       "failing_original": 0
     },
@@ -998,8 +1028,8 @@
       "survived": 0,
       "unreached": 0,
       "generated": 71,
-      "vectors": 5,
-      "provenance": "unsourced",
+      "vectors": 6,
+      "provenance": "independent",
       "failing_original": 0
     },
     "elsys/ers.yaml": {
