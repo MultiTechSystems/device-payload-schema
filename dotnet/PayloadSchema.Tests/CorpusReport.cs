@@ -116,3 +116,37 @@ sealed class CorpusReport
                 ? scalar.Value ?? ""
                 : "";
 }
+
+/// <summary>
+/// The interpreter output's `_meta` for every vector with a payload, for rule 3 of
+/// tools/verdicts-gate.py (CR-2026-096). Written only where CORPUS_META_REPORT names a
+/// file; CORPUS_ONLY and CORPUS_ROOT select the vectors as they do for CorpusReport.
+/// Each entry is {schema, index, vector, meta}, meta null where the decode failed (PS-497).
+/// </summary>
+sealed class CorpusMetaReport
+{
+    readonly string? _path = Environment.GetEnvironmentVariable("CORPUS_META_REPORT");
+    readonly List<Dictionary<string, object?>> _entries = new();
+
+    public bool Enabled => !string.IsNullOrEmpty(_path);
+
+    public void Add(string schema, int index, string vector, object? meta)
+    {
+        if (!Enabled) return;
+        _entries.Add(new Dictionary<string, object?>
+        {
+            ["schema"] = schema,
+            ["index"] = index,
+            ["vector"] = vector,
+            ["meta"] = meta,
+        });
+    }
+
+    public void Write(Action<string> log)
+    {
+        if (!Enabled) return;
+        var json = JsonSerializer.Serialize(_entries, new JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(_path!, json + "\n");
+        log($"corpus _meta report: {_entries.Count} vectors written to {_path}");
+    }
+}
