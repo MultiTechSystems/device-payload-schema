@@ -16,6 +16,13 @@ on:
     pull_request:
 
 env:
+    # The Go and Java toolchain images, from Google's mirror of Docker Hub. Pulled from
+    # Docker Hub itself, a burst of pushes exhausts its unauthenticated pull limit
+    # ("toomanyrequests") and the verdicts gate fails before any test runs - which is how
+    # all eight merges of 2026-10-09 failed it. The digests are identical. The Makefile and
+    # tools/verdicts-gate.py default to the Docker Hub names, so local runs are unchanged.
+    GO_IMAGE: mirror.gcr.io/library/golang:1.22
+    JAVA_IMAGE: mirror.gcr.io/library/maven:3.9-eclipse-temurin-21
     # The oracles are pinned; the crossval gate refuses any other commit.
     TTN_DEVICES_SHA: a49b17a13f611f294a87159e8f1f2772a5c23450
     DECENTLAB_SHA: 045ec68ed7a9e5fcdcc6163b08c617d48fb8e56a

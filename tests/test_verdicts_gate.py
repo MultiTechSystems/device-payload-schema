@@ -254,6 +254,30 @@ def test_committed_baseline_is_well_formed():
         assert (REPO_ROOT / "schemas" / "devices" / item["schema"]).exists()
 
 
+def test_the_images_can_be_pointed_at_a_mirror(monkeypatch):
+    # CI pulls the Docker Hub images from mirror.gcr.io (gates.yml), because a burst of
+    # pushes exhausts Docker Hub's anonymous pull limit before any test runs.
+    monkeypatch.setenv("GO_IMAGE", "mirror.gcr.io/library/golang:1.22")
+    monkeypatch.setenv(
+        "JAVA_IMAGE", "mirror.gcr.io/library/maven:3.9-eclipse-temurin-21"
+    )
+    for impl, image in (
+        ("go", "mirror.gcr.io/library/golang:1.22"),
+        ("java", "mirror.gcr.io/library/maven:3.9-eclipse-temurin-21"),
+        ("csharp", "mcr.microsoft.com/dotnet/sdk:8.0"),
+    ):
+        assert image in gate.docker_command(impl, "/w/x.json", None, None)
+
+
+def test_the_workflow_uses_the_mirror_and_the_makefile_the_default():
+    workflow = (REPO_ROOT / ".github" / "workflows" / "gates.yml").read_text()
+    assert "GO_IMAGE: mirror.gcr.io/library/golang:1.22" in workflow
+    assert "JAVA_IMAGE: mirror.gcr.io/library/maven:3.9-eclipse-temurin-21" in workflow
+    makefile = (REPO_ROOT / "Makefile").read_text()
+    assert "GO_IMAGE ?= golang:1.22" in makefile
+    assert "$(GO_IMAGE) sh -c" in makefile and "$(JAVA_IMAGE) mvn" in makefile
+
+
 def test_docker_command_matches_the_makefile_images():
     for impl, image in (
         ("go", "golang:1.22"),

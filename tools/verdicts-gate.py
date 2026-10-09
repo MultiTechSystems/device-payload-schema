@@ -319,16 +319,16 @@ def docker_command(
             "-e",
             "GOCACHE=/tmp/gocache",
         ]
-        image = "golang:1.22"
+        image = os.environ.get("GO_IMAGE") or "golang:1.22"
         # -count=1: the report is a side effect a cached result would not reproduce.
         test = "go test -count=1 -run '^TestCorpusConformance$' ."
     elif impl == "java":
         command += ["-w", "/work/bindings/java", "-v", "%s/m2:/root/.m2" % cache]
-        image = "maven:3.9-eclipse-temurin-21"
+        image = os.environ.get("JAVA_IMAGE") or "maven:3.9-eclipse-temurin-21"
         test = "mvn -B -q test -Dtest=CorpusConformanceTest"
     elif impl == "csharp":
         command += ["-w", "/work/dotnet", "-v", "%s/nuget:/root/.nuget" % cache]
-        image = "mcr.microsoft.com/dotnet/sdk:8.0"
+        image = os.environ.get("DOTNET_IMAGE") or "mcr.microsoft.com/dotnet/sdk:8.0"
         test = (
             "dotnet test --nologo "
             "--filter FullyQualifiedName~PayloadSchema.Tests.CorpusConformanceTests"
