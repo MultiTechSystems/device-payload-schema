@@ -175,6 +175,15 @@ class TestAnnotationCorrectness:
         _ipso_ok, senml_ok, problems = check_annotation_correctness(field, "latitude", 3336)
         assert not problems, problems
 
+    def test_a_null_expectation_asserts_absence(self):
+        """PS-043: `key: null` passes when the key is absent and fails when it is not."""
+        from score_schema import run_python_tests
+        base = {"name": "t", "fields": [{"name": "a", "type": "u8", "lookup": {1: "one"}}]}
+        absent = dict(base, test_vectors=[{"name": "v", "payload": "02", "expected": {"a": None}}])
+        present = dict(base, test_vectors=[{"name": "v", "payload": "01", "expected": {"a": None}}])
+        assert run_python_tests(absent)[0] is True
+        assert run_python_tests(present)[0] is False
+
     def test_annotations_on_undetectable_fields_earn_no_credit(self):
         """Otherwise semantic marks could be farmed from unrelated fields."""
         schema = temperature_schema(sensor="none")
