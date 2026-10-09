@@ -437,6 +437,99 @@ static void test_a_float_applies_its_modifiers(void) {
     TCHECK(r.fields[0].value.f64 == 6.0);
 }
 
+/* A tlv of single-byte tags (or two-component tags), each case one u8 `v`, its body
+ * placed above field_count as a tlv's always is. */
+static void build_tlv(schema_t* s, field_def_t t, int packed_tag) {
+    memset(s, 0, sizeof(*s));
+    s->endian = ENDIAN_BIG;
+    strcpy(t.name, "channels");
+    field_add_tlv_case(&t, packed_tag, 10, 1);
+    schema_add_field(s, &t);
+    field_def_t v = field_u8("v");
+    schema_place_field(s, 10, &v);
+}
+
+/* PS-477: one byte left where a two-component tag starts is an error naming the tlv.
+ * The loop used to stop there and report a complete decode with the byte dropped. */
+static void test_a_partial_composite_tag_is_an_error(void) {
+    schema_t s;
+    decode_result_t r;
+    const int parts[2] = {1, 2};
+    uint8_t payload[] = {0x01, 0x02, 0x05, 0x01};
+
+    build_tlv(&s, field_tlv_composite(2, 0), schema_tlv_tag(parts, 2));
+    TCHECK(schema_decode(&s, payload, sizeof(payload), &r) == SCHEMA_ERR_BUFFER);
+    TCHECK(r.error_code == SCHEMA_ERR_BUFFER);
+    TCHECK(strstr(r.error_msg, "channels") != NULL);
+    TCHECK(strstr(r.error_msg, "offset 3") != NULL);
+
+    /* The whole tag present: decodes, nothing left over. */
+    TCHECK(schema_decode(&s, payload, 3, &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 1 && r.fields[0].value.i64 == 5);
+    TCHECK(r.bytes_unread == 0);
+}
+
+/* PS-477 for a tag that is one integer: `tag_size: 2` with one byte left. */
+static void test_a_partial_tag_size_tag_is_an_error(void) {
+    schema_t s;
+    decode_result_t r;
+    uint8_t payload[] = {0x01, 0x02, 0x05, 0x01};
+
+    build_tlv(&s, field_tlv(2, 0), 0x0102);
+    TCHECK(schema_decode(&s, payload, sizeof(payload), &r) == SCHEMA_ERR_BUFFER);
+    TCHECK(r.error_code == SCHEMA_ERR_BUFFER);
+    TCHECK(strstr(r.error_msg, "PS-477") != NULL);
+}
+
+/* PS-477: the tag fits and its length does not, so no entry is decoded; the bytes from
+ * that tag on are left over (PS-472). This returned SCHEMA_ERR_BUFFER with error_code
+ * still 0 and no message. */
+static void test_a_cut_length_leaves_the_entry_over(void) {
+    schema_t s;
+    decode_result_t r;
+    uint8_t payload[] = {0x01, 0x00, 0x01, 0x05, 0x01, 0x00};
+
+    build_tlv(&s, field_tlv(1, 2), 1);
+    TCHECK(schema_decode(&s, payload, sizeof(payload), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 1 && r.fields[0].value.i64 == 5);
+    TCHECK(r.bytes_consumed == 4);
+    TCHECK(r.bytes_unread == 2);
+}
+
+/* PS-472: bytes after the last field are reported - offset bytes_consumed, count
+ * bytes_unread - and the decode is otherwise unchanged. */
+static void test_leftover_bytes_are_reported(void) {
+    schema_t s;
+    decode_result_t r;
+    uint8_t payload[] = {0x2A, 0x01, 0x02};
+
+    memset(&s, 0, sizeof(s));
+    field_def_t f = field_u8("reading");
+    schema_add_field(&s, &f);
+
+    TCHECK(schema_decode(&s, payload, 1, &r) == SCHEMA_OK);
+    TCHECK(r.bytes_consumed == 1 && r.bytes_unread == 0);
+
+    TCHECK(schema_decode(&s, payload, sizeof(payload), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 1 && r.fields[0].value.i64 == 42);
+    TCHECK(r.bytes_consumed == 1);
+    TCHECK(r.bytes_unread == 2);
+}
+
+/* PS-302 with PS-472: an unknown, undelimited tag ends the loop, and the bytes left are
+ * counted from the tag itself, as the other five count them - not from after it. */
+static void test_an_unknown_tag_is_left_over_from_the_tag(void) {
+    schema_t s;
+    decode_result_t r;
+    uint8_t payload[] = {0x01, 0x05, 0x09, 0xAA};
+
+    build_tlv(&s, field_tlv(1, 0), 1);
+    TCHECK(schema_decode(&s, payload, sizeof(payload), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 1);
+    TCHECK(r.bytes_consumed == 2);
+    TCHECK(r.bytes_unread == 2);
+}
+
 /*
  * Main test entry point
  */
@@ -462,6 +555,11 @@ void selftest_schema(void) {
     test_a_fractional_value_matches_no_key();
     test_an_enum_applies_its_modifiers_first();
     test_a_float_applies_its_modifiers();
+    test_a_partial_composite_tag_is_an_error();
+    test_a_partial_tag_size_tag_is_an_error();
+    test_a_cut_length_leaves_the_entry_over();
+    test_leftover_bytes_are_reported();
+    test_an_unknown_tag_is_left_over_from_the_tag();
 
     LOG(LOG_INFO, MOD, "Schema interpreter self-tests complete");
 }
