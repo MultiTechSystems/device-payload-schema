@@ -30,8 +30,973 @@ from typing import Any, Dict, List, Optional, Tuple
 DEFAULT_PORT_DIRECTION = 'both'
 
 
+#: The runtime encoder every generated codec carries. A port of the reference's encode
+#: path; see the comment at its head.
+ENCODER_RUNTIME_JS = r'''// --- Encoder ---
+// The inverse of the decoder, as a port of tools/schema_interpreter.py's `encode` and
+// `_encode_field_list`. It walks the schema's field list, embedded beside it as JSON,
+// rather than being unrolled field by field at generation time: the unrolled encoder
+// was a second hand-maintained copy of the reference's rules, and it drifted - it undid
+// modifiers in key order, never undid a transform stage, a lookup or an encoding, wrote
+// a float as an integer, and dropped every match, object and repeat.
+//
+// Each step mirrors the reference function named beside it, so a change to one should
+// be carried to the other. ENC_TYPES, ENC_VARS and ENC_ENDIAN_OPAQUE are emitted by the
+// generator from the reference's own tables.
+
+function encFail(msg) { throw new Error(msg); }
+
+function encIsNumber(v) { return typeof v === "number" && isFinite(v); }
+
+/* Python's round(): half to even. Math.round is half up, and asymmetric for negatives. */
+function encRint(v) {
+  var r = Math.round(v);
+  if (Math.abs(v % 1) === 0.5 && r % 2 !== 0) r -= 1;
+  return r;
+}
+
+function encReverseLookup(v, lookup, name) {          // reverse_lookup
+  if (!lookup || typeof v !== "string") return v;
+  if (Array.isArray(lookup)) {
+    var at = lookup.indexOf(v);
+    return at >= 0 ? at : v;
+  }
+  var template = null;
+  for (var k in lookup) {
+    if (!Object.prototype.hasOwnProperty.call(lookup, k)) continue;
+    if (k === "default") {
+      if (typeof lookup[k] === "string" && lookup[k].indexOf("${value}") >= 0) template = lookup[k];
+      continue;
+    }
+    if (lookup[k] === v) {
+      var n = Number(k);
+      return isFinite(n) && String(k).trim() !== "" ? n : v;
+    }
+  }
+  if (template !== null) {
+    var cut = template.indexOf("${value}");
+    var head = template.slice(0, cut), tail = template.slice(cut + 8);
+    if (v.length > head.length + tail.length && v.indexOf(head) === 0 &&
+        v.slice(v.length - tail.length) === tail) {
+      var text = v.slice(head.length, v.length - tail.length);
+      if (/^-?\d+(\.\d+)?([eE][-+]?\d+)?$/.test(text)) return Number(text);
+    }
+  }
+  return v;
+}
+
+function encReverseStages(v, stages) {                // reverse_transform_stages
+  if (!encIsNumber(v) || !stages) return v;
+  for (var s = stages.length - 1; s >= 0; s--) {
+    var st = stages[s];
+    if (st === null || typeof st !== "object") continue;
+    if ("add" in st) v = v - Number(st.add);
+    else if ("mult" in st) {
+      if (Number(st.mult) === 0) encFail("cannot undo 'mult: 0'");
+      v = v / Number(st.mult);
+    }
+    else if ("div" in st) v = v * Number(st.div);
+    else if ("round" in st || "op" in st) continue;
+    else if ("floor" in st || "ceiling" in st || "clamp" in st) continue;
+    else encFail("cannot undo transform stage: " + (Object.keys(st).sort().join(", ") || "empty stage"));
+  }
+  return v;
+}
+
+function encReverseCanonical(v, f) {                  // reverse_canonical_modifiers
+  if (f.add !== undefined && f.add !== null) v = v - f.add;
+  if (f.div !== undefined && f.div !== null) v = v * f.div;
+  if (f.mult !== undefined && f.mult !== null && f.mult !== 0) v = v / f.mult;
+  return v;
+}
+
+var ENC_FLOAT_TYPES = ["f16", "f32", "f64", "udec", "sdec", "f32le16", "f32be16le",
+                       "uflt16", "sflt16", "sflt24"];
+
+function encReverseModifiers(v, f) {                  // _reverse_modifiers
+  v = encReverseLookup(v, f.lookup, f.name);
+  if (typeof v === "string" && f.lookup) {
+    encFail(JSON.stringify(v) + " is not a label in the lookup for " + JSON.stringify(f.name) +
+            "; a `default` label matches any unmapped value, so the value that produced " +
+            "it cannot be recovered");
+  }
+  if (!encIsNumber(v)) return v;
+  if (f.encode_formula) encFail("encode_formula is not supported by the generated codec");
+  v = encReverseStages(v, f.transform);
+  v = encReverseCanonical(v, f);
+  if (ENC_FLOAT_TYPES.indexOf(String(f.type || "u8")) >= 0) return v;
+  return encRint(v);
+}
+
+/* Big-endian bytes of an integer: a number, or the decimal string the decoder reports
+ * above 2^53 (PS-296). Two's complement for a negative value. */
+function encIntBytes(value, size, signed) {
+  var neg = false, digits;
+  if (typeof value === "string") {
+    var text = value.trim();
+    if (text.charAt(0) === "-") { neg = true; text = text.slice(1); }
+    if (!/^\d+$/.test(text)) encFail("cannot encode " + JSON.stringify(value) + " as an integer");
+    digits = text.split("").map(Number);
+  } else {
+    if (typeof value === "boolean") value = value ? 1 : 0;
+    if (!encIsNumber(value)) encFail("cannot encode " + JSON.stringify(value) + " as an integer");
+    value = value < 0 ? Math.ceil(value) : Math.floor(value);    // Python int()
+    if (value < 0) { neg = true; value = -value; }
+    digits = String(value).indexOf("e") >= 0 ? null : String(value).split("").map(Number);
+    if (digits === null) encFail(value + " is too large to encode exactly");
+  }
+  if (neg && !signed) encFail("can't convert negative int to unsigned");
+  var bytes = [];
+  for (var i = 0; i < size; i++) {
+    var rem = 0, next = [];
+    for (var j = 0; j < digits.length; j++) {
+      var cur = rem * 10 + digits[j];
+      var q = Math.floor(cur / 256);
+      rem = cur % 256;
+      if (next.length || q) next.push(q);
+    }
+    bytes.unshift(rem);
+    digits = next.length ? next : [0];
+  }
+  if (digits.length > 1 || digits[0] !== 0) encFail("int too big to convert");
+  if (neg) {
+    var carry = 1;
+    for (var b = size - 1; b >= 0; b--) {
+      var inv = (~bytes[b] & 0xFF) + carry;
+      bytes[b] = inv & 0xFF;
+      carry = inv >> 8;
+    }
+    if ((bytes[0] & 0x80) === 0 && !bytes.every(function (x) { return x === 0; })) encFail("int too big to convert");
+  } else if (signed && (bytes[0] & 0x80) !== 0) {
+    encFail("int too big to convert");
+  }
+  return bytes;
+}
+
+function encWriteInt(out, value, size, signed, endian) {
+  var bytes = encIntBytes(value, size, signed);
+  if (endian === "little") bytes.reverse();
+  for (var i = 0; i < bytes.length; i++) out.push(bytes[i]);
+}
+
+/* IEEE 754 binary16 from a double, rounding to nearest even, as struct.pack('e'). */
+function encHalf(v) {
+  var dv = new DataView(new ArrayBuffer(8));
+  if (isNaN(v)) return 0x7E00;
+  var sign = (v < 0 || (v === 0 && 1 / v < 0)) ? 0x8000 : 0;
+  var a = Math.abs(v);
+  if (a === Infinity) return sign | 0x7C00;
+  if (a === 0) return sign;
+  var e = Math.floor(Math.log2(a));
+  if (Math.pow(2, e) > a) e -= 1;
+  if (Math.pow(2, e + 1) <= a) e += 1;
+  var m, h;
+  if (e < -14) {
+    m = encRint(a / Math.pow(2, -24));                   // subnormal
+    h = m;                                               // may carry into the exponent
+  } else {
+    m = encRint((a / Math.pow(2, e) - 1) * 1024);
+    if (m === 1024) { m = 0; e += 1; }
+    if (e > 15) encFail("float too large to pack with e format");
+    h = ((e + 15) << 10) | m;
+  }
+  if (h >= 0x7C00) encFail("float too large to pack with e format");
+  return sign | h;
+}
+
+function encWriteFloat(out, value, type, endian) {
+  var v = Number(value);
+  var size = type === "f16" ? 2 : type === "f32" ? 4 : 8;
+  var dv = new DataView(new ArrayBuffer(size));
+  if (type === "f16") dv.setUint16(0, encHalf(v), false);
+  else if (type === "f32") dv.setFloat32(0, v, false);
+  else dv.setFloat64(0, v, false);
+  var bytes = [];
+  for (var i = 0; i < size; i++) bytes.push(dv.getUint8(i));
+  if (endian === "little") bytes.reverse();
+  for (var j = 0; j < size; j++) out.push(bytes[j]);
+}
+
+function encEncoding(v, enc, size) {                  // _encode_encoding
+  if (enc === "sign_magnitude") {
+    var half = Math.pow(2, size * 8 - 1);
+    if (Math.abs(v) > half - 1) encFail(v + " has no " + size * 8 + "-bit sign-magnitude form (PS-463)");
+    return v < 0 ? half + Math.abs(v) : v;
+  }
+  if (enc === "bcd") {
+    if (v < 0 || v > Math.pow(10, size * 2) - 1) encFail(v + " has no " + size * 8 + "-bit BCD form (PS-463)");
+    var out = 0, scale = 1, t = Math.abs(v);
+    while (t > 0) { out += (t % 10) * scale; scale *= 16; t = Math.floor(t / 10); }
+    return out;
+  }
+  if (enc === "gray") return v ^ Math.floor(v / 2);
+  return v;
+}
+
+function encMinifloat(type, value) {                  // encode_minifloat
+  var v = Number(value), mag = Math.abs(v), e, f;
+  if (type === "uflt16" || type === "sflt16") {
+    var signed = type === "sflt16";
+    if (v < 0 && !signed) encFail(value + " is negative; uflt16 holds [0, 1) (PS-420)");
+    var bits = signed ? 11 : 12;
+    for (e = 0; e < 16; e++) {
+      f = encRint(mag * Math.pow(2, bits) * Math.pow(2, 15 - e));
+      if (f < Math.pow(2, bits)) {
+        var word = e * Math.pow(2, bits) + f;
+        return word + (signed && v < 0 ? 0x8000 : 0);
+      }
+    }
+    encFail(value + " is outside the range of " + type + " (PS-420)");
+  }
+  var sign = v < 0 ? 0x800000 : 0;
+  if (mag === 0) return sign;
+  for (e = 1; e < 127; e++) {
+    if (mag < Math.pow(2, e - 62)) {
+      f = encRint((mag / Math.pow(2, e - 63) - 1) * 65536);
+      if (f === 65536) continue;
+      if (f < 0) break;
+      return sign + e * 65536 + f;
+    }
+  }
+  if (e >= 127) encFail(value + " is outside the range of sflt24 (PS-420)");
+  f = encRint(mag * 65536 * Math.pow(2, 62));
+  if (f >= 65536) return sign + 65536;
+  return sign + f;
+}
+
+function encLength(f, natural) {                      // encode_length
+  var raw = f.length === undefined ? natural : f.length;
+  if (typeof raw === "string") return Math.max(0, natural);
+  var n = parseInt(raw, 10);
+  return isNaN(n) ? Math.max(0, natural) : Math.max(0, n);
+}
+
+function encPad(out, bytes, length) {
+  for (var i = 0; i < length; i++) out.push(i < bytes.length ? bytes[i] & 0xFF : 0);
+}
+
+function encHex(text, what) {
+  text = String(text).replace(/ /g, "");
+  if (text.length % 2 || /[^0-9a-fA-F]/.test(text)) encFail(what + ": expected hex, got " + JSON.stringify(text));
+  var out = [];
+  for (var i = 0; i < text.length; i += 2) out.push(parseInt(text.substr(i, 2), 16));
+  return out;
+}
+
+function encBase64(text) {
+  var A = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  var s = String(text).replace(/[^A-Za-z0-9+/]/g, ""), out = [], bits = 0, acc = 0;
+  for (var i = 0; i < s.length; i++) {
+    acc = (acc << 6) | A.indexOf(s.charAt(i)); bits += 6;
+    if (bits >= 8) { bits -= 8; out.push((acc >> bits) & 0xFF); }
+  }
+  return out;
+}
+
+function encUtf8(text) {
+  var s = unescape(encodeURIComponent(String(text))), out = [];
+  for (var i = 0; i < s.length; i++) out.push(s.charCodeAt(i));
+  return out;
+}
+
+function encEnumLabel(entry) {
+  return entry !== null && typeof entry === "object" && "name" in entry ? entry.name : entry;
+}
+
+function encField(out, f, value, ctx) {               // _encode_field
+  var type = String(f.type);
+  var endian = ctx.endian;
+  if (f.endian !== undefined && ENC_ENDIAN_OPAQUE.indexOf(type) < 0) {
+    if (f.endian !== "big" && f.endian !== "little") {
+      encFail("field 'endian' must be 'big' or 'little', got " + JSON.stringify(f.endian));
+    }
+    endian = f.endian;
+  }
+  encFieldInner(out, f, value, endian, ctx);
+}
+
+function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
+  var type = f.type;
+  if (!type) encFail("Field '" + (f.name || "?") + "' declares no type");
+  type = String(type);
+  if (/[\[:<]/.test(type)) { out.push(Number(value) & 0xFF); return; }
+  if (ENC_WORD_ORDERED[type]) {
+    var tmp = [];
+    writeWordOrdered(tmp, 0, value, ENC_WORD_ORDERED[type][0], ENC_WORD_ORDERED[type][1]);
+    for (var w = 0; w < 4; w++) out.push(tmp[w]);
+    return;
+  }
+  if (ENC_TYPES[type]) {
+    var size = ENC_TYPES[type][0], signed = ENC_TYPES[type][1];
+    var iv = value;
+    if (f.encoding) {
+      iv = encEncoding(Number(value) < 0 ? Math.ceil(Number(value)) : Math.floor(Number(value)), f.encoding, size);
+      signed = false;
+    }
+    encWriteInt(out, iv, size, signed, endian);
+    return;
+  }
+  if (type === "uflt16" || type === "sflt16" || type === "sflt24") {
+    encWriteInt(out, encMinifloat(type, value), type === "sflt24" ? 3 : 2, false, endian);
+    return;
+  }
+  if (type === "udec" || type === "sdec") {
+    var whole = Math.floor(Number(value));
+    var tenths = encRint((Number(value) - whole) * 10);
+    if (tenths === 10) { whole += 1; tenths = 0; }
+    var lo = type === "sdec" ? -8 : 0, hi = type === "sdec" ? 7 : 15;
+    if (whole < lo || whole > hi) encFail("Field '" + (f.name || "?") + "': " + value + " does not fit " + type);
+    out.push(((whole & 0x0F) << 4) | tenths);
+    return;
+  }
+  if (type === "f16" || type === "f32" || type === "f64") { encWriteFloat(out, value, type, endian); return; }
+  if (type === "bool") { out.push(value ? 1 : 0); return; }
+  if (type === "skip") {
+    var n = typeof f.length === "string" ? 0 : Math.max(0, parseInt(f.length === undefined ? 1 : f.length, 10));
+    for (var s = 0; s < n; s++) out.push(0);
+    return;
+  }
+  if (type === "bytes") {
+    var raw;
+    if (Array.isArray(value)) raw = value.map(function (x) { return Number(x) & 0xFF; });
+    else if (typeof value === "string" && f.format === "base64") raw = encBase64(value);
+    else if (typeof value === "string") {
+      var text = value.replace(/ /g, "");
+      if (f.separator) text = text.split(String(f.separator)).join("");
+      raw = encHex(text, "bytes field " + JSON.stringify(f.name));
+    } else encFail("bytes field " + JSON.stringify(f.name) + ": cannot encode " + typeof value);
+    encPad(out, raw, encLength(f, raw.length));
+    return;
+  }
+  if (type === "string" && "value" in f) return;
+  if (type === "string" || type === "ascii") {
+    var u = encUtf8(value);
+    encPad(out, u, encLength(f, u.length));
+    return;
+  }
+  if (type === "hex") {
+    var h = encHex(value, "hex field " + JSON.stringify(f.name));
+    encPad(out, h, encLength(f, Math.floor(String(value).length / 2)));
+    return;
+  }
+  if (type === "base64") {
+    var d = encBase64(value);
+    if (f.length) encPad(out, d, f.length); else encPad(out, d, d.length);
+    return;
+  }
+  if (type === "enum") {
+    var values = f.values || {}, iv2 = null, k;
+    if (Array.isArray(values)) {
+      var labels = values.map(encEnumLabel);
+      if (labels.indexOf(value) >= 0) iv2 = labels.indexOf(value);
+    } else {
+      for (k in values) {
+        if (Object.prototype.hasOwnProperty.call(values, k) && encEnumLabel(values[k]) === value) { iv2 = Number(k); break; }
+      }
+    }
+    if (iv2 === null) {
+      if (typeof value === "string" && value.indexOf("unknown(") === 0) iv2 = parseInt(value.slice(8, -1), 10);
+      else if (typeof value === "number" && value % 1 === 0) iv2 = value;
+      else encFail("Enum value not found: " + value);
+    }
+    encFieldInner(out, { type: f.base || "u8" }, iv2, endian, ctx);
+    return;
+  }
+  encFail("Cannot encode type: " + type);
+}
+
+function encIsLiteral(f) {                            // is_literal
+  return (f.type === "string" || f.type === "number") && "value" in f;
+}
+
+function encInternalValue(f, data) {                  // _internal_encode_value
+  if ("value" in f) return f.value;
+  if (Object.prototype.hasOwnProperty.call(data, f.name)) return data[f.name];
+  encFail("internal field " + JSON.stringify(f.name) + " reads payload bytes and declares no " +
+          "value, and the input does not supply it (PS-434)");
+}
+
+function encRawBits(f) {                              // raw_bits_field
+  var g = {};
+  for (var k in f) if (k !== "encoding") g[k] = f[k];
+  return g;
+}
+
+function encDeclaringVar(name) { return ENC_VARS[name] || null; }   // _field_declaring_var
+
+function encResolveName(f, name, data) {              // _resolve_encode_name
+  if (!f.name_from) return name;
+  var missing = false;
+  var resolved = String(f.name_from).replace(/\$\{(\w+)\}/g, function (_, ref) {
+    var v;
+    if (Object.prototype.hasOwnProperty.call(data, ref)) v = data[ref];
+    else {
+      var src = encDeclaringVar(ref);
+      if (src && Object.prototype.hasOwnProperty.call(data, src.name)) v = encReverseLookup(data[src.name], src.lookup);
+      else { missing = true; return ""; }
+    }
+    return String(v);
+  });
+  return missing ? null : resolved;
+}
+
+function encBitType(type) {                           // _parse_bitfield_type
+  var m = /^[us](\d+)\[(\d+):(\d+)\]$/.exec(String(type));
+  if (!m) encFail("Unknown bitfield format: " + type);
+  return [Math.floor(Number(m[1]) / 8), Number(m[2]), Number(m[3]) - Number(m[2]) + 1];
+}
+
+function encIsBareBitfield(f) {                       // _is_bare_bitfield
+  if (!f || typeof f !== "object" || "byte_group" in f) return false;
+  var t = String(f.type === undefined ? "" : f.type);
+  if (t === "bitfield_string") return false;
+  return /[\[:<]/.test(t);
+}
+
+/* OR `value`, masked to `width` bits, into `bits` at `start`: the reference packs with
+ * `|=`, and two ranges may read the same bits (vobo reads one nibble as a number and as
+ * a label), so adding the values would carry. `bits` maps a bit index to 1, which stays
+ * exact past the 32 bits JavaScript's bitwise operators reach. */
+function encPlace(bits, value, start, width) {
+  var span = Math.pow(2, width);
+  var v = ((value % span) + span) % span;
+  for (var b = 0; b < width && v > 0; b++) {
+    if (v % 2) bits[start + b] = 1;
+    v = Math.floor(v / 2);
+  }
+  return bits;
+}
+
+function encPacked(out, bits, size, endian) {
+  var bytes = [];
+  for (var i = 0; i < size; i++) bytes.push(0);
+  for (var k in bits) {
+    var at = Number(k);
+    if (at >= size * 8) encFail("int too big to convert");
+    bytes[size - 1 - Math.floor(at / 8)] |= 1 << (at % 8);
+  }
+  if (endian === "little") bytes.reverse();
+  for (var j = 0; j < size; j++) out.push(bytes[j]);
+}
+
+function encLabelValue(label, f) {                    // _bitfield_label_value
+  var keys = ["enum", "values"];
+  for (var i = 0; i < keys.length; i++) {
+    var table = f[keys[i]];
+    if (Array.isArray(table)) { if (table.indexOf(label) >= 0) return table.indexOf(label); }
+    else if (table && typeof table === "object") {
+      for (var k in table) if (table[k] === label) return Number(k);
+    }
+  }
+  encFail(JSON.stringify(label) + " is not a declared value of " + JSON.stringify(f.name));
+}
+
+function encBitRun(out, run, data, ctx) {             // _encode_bitfield_run
+  var packed = {}, size = 1;
+  for (var i = 0; i < run.length; i++) {
+    var f = run[i], name = f.name || "", v;
+    if (!name) v = f["default"] === undefined ? 0 : f["default"];
+    else if (name.charAt(0) === "_") v = encInternalValue(f, data);
+    else v = Object.prototype.hasOwnProperty.call(data, name) ? data[name] : (f["default"] === undefined ? 0 : f["default"]);
+    v = encReverseModifiers(v, f);
+    if (typeof v === "string") v = encLabelValue(v, f);
+    if (typeof v === "boolean") v = v ? 1 : 0;
+    if (!encIsNumber(v)) encFail("cannot encode " + JSON.stringify(f.name) + " into its bit range: " + JSON.stringify(v) + " is not a number");
+    v = encRint(v);
+    var bt = encBitType(f.type);
+    size = Math.max(size, bt[0], parseInt(f.consume || 0, 10) || 0);
+    packed = encPlace(packed, v, bt[1], bt[2]);
+  }
+  var endian = ctx.endian;
+  for (var j = 0; j < run.length; j++) if (run[j].endian) { endian = run[j].endian; break; }
+  encPacked(out, packed, Math.max(1, size), endian);
+}
+
+function encByteGroup(out, f, data, ctx) {            // _encode_byte_group
+  var group = f.byte_group, members, size;
+  if (Array.isArray(group)) { members = group; size = parseInt(f.size === undefined ? 1 : f.size, 10); }
+  else { members = group.fields || []; size = parseInt(group.size === undefined ? 1 : group.size, 10); }
+  var packed = {};
+  for (var i = 0; i < members.length; i++) {
+    var g = members[i];
+    if (!g || typeof g !== "object") continue;
+    if ("endian" in g) encFail("byte_group member '" + (g.name || "?") + "' declares endian; the group's byte order is declared on the group (PS-364)");
+    var name = g.name || "", v;
+    if (!name) v = g["default"] === undefined ? 0 : g["default"];
+    else if (name.charAt(0) === "_") v = encInternalValue(g, data);
+    else v = Object.prototype.hasOwnProperty.call(data, name) ? data[name] : (g["default"] === undefined ? 0 : g["default"]);
+    v = encReverseModifiers(v, g);
+    if (typeof v === "boolean") v = v ? 1 : 0;
+    if (!encIsNumber(v)) continue;
+    v = encRint(v);
+    if (String(g.type || "").indexOf("[") >= 0) {
+      var bt = encBitType(g.type);
+      size = Math.max(size, bt[0]);
+      packed = encPlace(packed, v, bt[1], bt[2]);
+    } else {
+      if (v < 0) encFail("can't convert negative int to unsigned");
+      packed = encPlace(packed, v, 0, 53);       // a full-width member owns the bytes
+    }
+  }
+  var endian = (!Array.isArray(group) && group.endian) ? group.endian : ctx.endian;
+  encPacked(out, packed, Math.max(1, size), endian);
+}
+
+function encBitfieldString(out, f, value, ctx) {      // _encode_bitfield_string
+  var parts = f.parts || [], delim = f.delimiter === undefined ? "." : f.delimiter;
+  var prefix = f.prefix || "", length = f.length === undefined ? 2 : f.length;
+  value = String(value);
+  if (prefix && value.indexOf(prefix) === 0) value = value.slice(prefix.length);
+  var segs = value.split(delim), packed = {};
+  for (var i = 0; i < parts.length; i++) {
+    var p = parts[i];
+    if (p.length < 2) continue;
+    var fmt = p.length > 2 ? p[2] : "decimal";
+    var seg = i < segs.length ? segs[i] : "0";
+    var v = (fmt === "hex" || fmt === "hex:upper") ? parseInt(seg, 16) : parseInt(seg, 10);
+    if (isNaN(v)) encFail("invalid literal for bitfield_string segment: " + JSON.stringify(seg));
+    packed = encPlace(packed, v, Number(p[0]), Number(p[1]));
+  }
+  encPacked(out, packed, length, ctx.endian);
+}
+
+function encFlagged(out, fg, data, ctx) {             // _encode_flagged
+  var groups = fg.groups || [];
+  for (var i = 0; i < groups.length; i++) {
+    var gfs = groups[i].fields || [];
+    var has = gfs.some(function (g) { return g.name && Object.prototype.hasOwnProperty.call(data, g.name); });
+    if (!has) continue;
+    for (var j = 0; j < gfs.length; j++) {
+      var g = gfs[j], name = g.name || "", v;
+      if (!name) continue;
+      if (ENC_COMPUTED.indexOf(g.type || "u8") >= 0) continue;
+      if (name.charAt(0) === "_") v = encInternalValue(g, data);
+      else if (!Object.prototype.hasOwnProperty.call(data, name) && g.sentinel) {
+        encField(out, encRawBits(g), g.sentinel[0], ctx);
+        continue;
+      } else v = Object.prototype.hasOwnProperty.call(data, name) ? data[name] : 0;
+      encField(out, g, encReverseModifiers(v, g), ctx);
+    }
+  }
+}
+
+function encCasePattern(value, pattern) {             // _match_case_pattern
+  if (value === null || value === undefined) return false;
+  if (typeof pattern === "string" && pattern.trim().charAt(0) === "[") {
+    var list = pattern.trim().replace(/^\[|\]$/g, "").split(",").map(function (x) { return x.trim(); });
+    for (var i = 0; i < list.length; i++) {
+      var n = /^0x/i.test(list[i]) ? parseInt(list[i], 16) : Number(list[i]);
+      if (list[i] !== "" && (value === n || value === list[i].replace(/^["']|["']$/g, ""))) return true;
+    }
+    return false;
+  }
+  if (typeof pattern === "string" && pattern.indexOf("..") >= 0) {
+    var parts = pattern.split("..");
+    var a = parseInt(parts[0], 10), b = parseInt(parts[1], 10);
+    if (isNaN(a) || isNaN(b) || !/^\s*-?\d+\s*$/.test(parts[0]) || !/^\s*-?\d+\s*$/.test(parts[1])) return false;
+    return a <= value && value <= b;
+  }
+  if (value === pattern) return true;
+  if (typeof pattern === "string" && typeof value !== "string") {
+    var text = pattern.trim(), num;
+    if (/^0x[0-9a-f]+$/i.test(text)) num = parseInt(text, 16);
+    else if (/^[-+]?\d+$/.test(text)) num = parseInt(text, 10);
+    else return false;
+    return value === num;
+  }
+  return false;
+}
+
+function encCaseFieldsPresent(cases, data) {          // _case_fields_present
+  var best = null, bestHits = 0;
+  for (var key in cases) {
+    if (key === "default" || !Array.isArray(cases[key])) continue;
+    var hits = 0;
+    cases[key].forEach(function (f) {
+      if (f && f.name && String(f.name).charAt(0) !== "_" && ENC_COMPUTED.indexOf(f.type) < 0 &&
+          Object.prototype.hasOwnProperty.call(data, f.name)) hits++;
+    });
+    if (hits > bestHits) { best = [key, cases[key]]; bestHits = hits; }
+  }
+  return best;
+}
+
+function encParseInt0(text) {                         // int(text, 0)
+  text = String(text).trim();
+  var neg = text.charAt(0) === "-";
+  if (neg || text.charAt(0) === "+") text = text.slice(1);
+  var n;
+  if (/^0x[0-9a-f]+$/i.test(text)) n = parseInt(text.slice(2), 16);
+  else if (/^0o[0-7]+$/i.test(text)) n = parseInt(text.slice(2), 8);
+  else if (/^0b[01]+$/i.test(text)) n = parseInt(text.slice(2), 2);
+  else if (/^(0|[1-9]\d*)$/.test(text)) n = parseInt(text, 10);
+  else encFail("invalid literal for int() with base 0: " + JSON.stringify(text));
+  return neg ? -n : n;
+}
+
+function encMatch(out, f, data, ctx) {                // _encode_match
+  var m = f.match || {}, cases = m.cases || {}, length = m.length;
+  var dflt = m["default"] === undefined ? "error" : m["default"];
+  var disc = null;
+  if (m.name && Object.prototype.hasOwnProperty.call(data, m.name)) disc = data[m.name];
+  else if (m.field) {
+    var ref = String(m.field).replace(/^\$+/, "");
+    if (Object.prototype.hasOwnProperty.call(data, ref)) disc = data[ref];
+    else {
+      var src = encDeclaringVar(ref);
+      if (src && Object.prototype.hasOwnProperty.call(data, src.name)) disc = encReverseLookup(data[src.name], src.lookup);
+    }
+  }
+  var key = null, body = null;
+  if (disc !== null && disc !== undefined) {
+    for (var k in cases) {
+      if (k === "default") continue;
+      if (encCasePattern(disc, k)) { key = k; body = cases[k]; break; }
+    }
+  }
+  if (body === null) {
+    var found = encCaseFieldsPresent(cases, data);
+    if (found) { key = found[0]; body = found[1]; }
+  }
+  if (body === null) {
+    if (Array.isArray(dflt)) body = dflt;
+    else if (Array.isArray(cases["default"])) body = cases["default"];
+    else return;
+  }
+  if (length !== undefined && length !== null) {
+    var value = disc;
+    if (value === null || value === undefined) {
+      if (key === null) encFail("match case " + JSON.stringify(key) + " names no single discriminator value");
+      value = encParseInt0(key);
+    }
+    encWriteInt(out, value, parseInt(length, 10), false, ctx.endian);
+  }
+  encList(out, body, data, ctx);
+}
+
+function encRepeat(out, f, data, ctx) {               // _encode_repeat
+  var name = f.name || "", records = data[name];
+  if (records === undefined || records === null) return;
+  if (!Array.isArray(records) && typeof records === "object") records = [records];
+  if (!Array.isArray(records)) encFail("repeat field " + JSON.stringify(name) + ": expected a list of records, got " + typeof records);
+  var rf = f.fields || [];
+  if (f.present_if && rf.some(function (r) { return r && ENC_COMPUTED.indexOf(r.type) < 0 && !encIsLiteral(r); })) {
+    encFail("repeat field " + JSON.stringify(name) + " declares present_if and its elements read payload bytes, so the elements it dropped cannot be encoded (PS-387)");
+  }
+  for (var i = 0; i < records.length; i++) {
+    var rec = records[i];
+    if (rec === null || typeof rec !== "object" || Array.isArray(rec)) encFail("repeat field " + JSON.stringify(name) + ": expected each record to be a mapping");
+    if (f.index) { var copy = {}; for (var k in rec) copy[k] = rec[k]; copy[f.index] = i; rec = copy; }
+    encList(out, rf, rec, ctx);
+  }
+  if (f.trailer) encList(out, f.trailer, data, ctx);
+}
+
+function encClaimable(fields) {                       // _claimable_fields
+  var out = [];
+  (fields || []).forEach(function (f) {
+    if (!f || typeof f !== "object") return;
+    if ("byte_group" in f && !f.type) {
+      var g = f.byte_group;
+      out = out.concat(encClaimable(Array.isArray(g) ? g : (g.fields || [])));
+      return;
+    }
+    if ("flagged" in f && !f.type) {
+      (f.flagged.groups || []).forEach(function (grp) { out = out.concat(encClaimable(grp.fields || [])); });
+      return;
+    }
+    if (!f.name || String(f.name).charAt(0) === "_" || ENC_COMPUTED.indexOf(f.type) >= 0) return;
+    out.push(f);
+  });
+  return out;
+}
+
+function encCaseFidelity(fields, data) {              // _case_fidelity
+  var matches = 0, lossless = true;
+  encClaimable(fields).forEach(function (f) {
+    if (!Object.prototype.hasOwnProperty.call(data, f.name)) return;
+    matches++;
+    var raw = encReverseLookup(data[f.name], f.lookup);
+    if (encIsNumber(raw)) {
+      try {
+        raw = encReverseStages(raw, f.transform);
+        raw = encReverseCanonical(raw, f);
+      } catch (e) { lossless = false; return; }
+      if (Math.abs(raw - encRint(raw)) > 1e-9) lossless = false;
+      var info = ENC_TYPES[String(f.type || "u8")];
+      if (info && !ENC_WORD_ORDERED[String(f.type)]) {
+        var bits = info[0] * 8, r = encRint(raw);
+        var lo = info[1] ? -Math.pow(2, bits - 1) : 0;
+        var hi = info[1] ? Math.pow(2, bits - 1) - 1 : Math.pow(2, bits) - 1;
+        if (r < lo || r > hi) lossless = false;
+      } else if (info) {
+        var r2 = encRint(raw);
+        if (r2 < (info[1] ? -2147483648 : 0) || r2 > (info[1] ? 2147483647 : 4294967295)) lossless = false;
+      }
+    }
+  });
+  return [matches, lossless];
+}
+
+function encTlvTag(out, key, tlv, ctx) {              // _encode_tlv_tag
+  if (tlv.tag_fields && tlv.tag_key) {
+    var text = String(key).trim();
+    if (text.charAt(0) === "[") text = text.charAt(text.length - 1) === "]" ? text.slice(1, -1) : text.slice(1);
+    var parts = text.split(",").map(function (p) { return p.trim().replace(/^["']|["']$/g, ""); });
+    if (parts.some(function (p) { return p === "*" || p.charAt(0) === "!"; })) {
+      encFail("TLV case " + JSON.stringify(key) + " matches a range of tags, so encoding cannot choose one");
+    }
+    var names = Array.isArray(tlv.tag_key) ? tlv.tag_key : [tlv.tag_key];
+    if (parts.length !== names.length) encFail("TLV case " + JSON.stringify(key) + " does not match tag_key");
+    var values = {};
+    for (var i = 0; i < names.length; i++) values[names[i]] = encParseInt0(parts[i]);
+    tlv.tag_fields.forEach(function (tf) {
+      if (!(tf.name in values)) encFail("TLV case " + JSON.stringify(key) + " gives no value for " + JSON.stringify(tf.name));
+      encField(out, tf, values[tf.name], ctx);
+    });
+    return;
+  }
+  encWriteInt(out, encParseInt0(key), tlv.tag_size === undefined ? 1 : tlv.tag_size, false, ctx.endian);
+}
+
+function encTlv(out, f, data, ctx) {                  // _encode_tlv
+  var tlv = f.tlv || {}, cases = tlv.cases || {}, lsize = tlv.length_size || 0;
+  var order = Object.keys(data), cands = [];
+  for (var key in cases) {
+    if (key === "default" || !Array.isArray(cases[key])) continue;
+    var claimed = encClaimable(cases[key]).map(function (c) { return c.name; })
+      .filter(function (n) { return Object.prototype.hasOwnProperty.call(data, n); });
+    if (!claimed.length) continue;
+    var fid = encCaseFidelity(cases[key], data);
+    var position = Math.min.apply(null, claimed.map(function (n) { return order.indexOf(n); }));
+    cands.push({ p: position, l: fid[1] ? 0 : 1, m: -fid[0], key: key, body: cases[key], claimed: claimed, seq: cands.length });
+  }
+  cands.sort(function (a, b) { return a.p - b.p || a.l - b.l || a.m - b.m || a.seq - b.seq; });
+  var spent = {}, emitted = [];
+  cands.forEach(function (c) {
+    if (c.claimed.every(function (n) { return spent[n]; })) return;
+    c.claimed.forEach(function (n) { spent[n] = true; });
+    emitted.push(c);
+  });
+  emitted.sort(function (a, b) { return a.p - b.p || a.seq - b.seq; });
+  emitted.forEach(function (c) {
+    encTlvTag(out, c.key, tlv, ctx);
+    var value = [];
+    encList(value, c.body, data, ctx);
+    if (lsize > 0) encWriteInt(out, value.length, lsize, false, ctx.endian);
+    for (var i = 0; i < value.length; i++) out.push(value[i]);
+  });
+}
+
+/* Group a field list so bit ranges sharing a span are packed together (_bitfield_runs). */
+function encRuns(fields) {
+  var items = [], run = [];
+  (fields || []).forEach(function (f) {
+    if (!f || typeof f !== "object") return;
+    if (!encIsBareBitfield(f)) {
+      if (run.length) { items.push({ bits: run }); run = []; }
+      items.push({ field: f });
+      return;
+    }
+    run.push(f);
+    if ((parseInt(f.consume || 0, 10) || 0) >= 1) { items.push({ bits: run }); run = []; }
+  });
+  if (run.length) items.push({ bits: run });
+  return items;
+}
+
+function encHas(data, name) {
+  return Object.prototype.hasOwnProperty.call(data, name) && data[name] !== null && data[name] !== undefined;
+}
+
+/* `top` selects the reference's top-level loop (encode) over _encode_field_list: the
+ * flagged mask patch, the "Missing field" warning and the name_from error are its alone. */
+function encList(out, fields, data, ctx, top) {
+  var omitted = null, patches = {};
+  if (top) {
+    fields.forEach(function (f) {
+      if (!f || !f.flagged) return;
+      var flags = 0;
+      (f.flagged.groups || []).forEach(function (g) {
+        if ((g.fields || []).some(function (x) { return x.name && Object.prototype.hasOwnProperty.call(data, x.name); })) {
+          flags += Math.pow(2, g.bit || 0);
+        }
+      });
+      patches[f.flagged.field || ""] = flags;
+    });
+  }
+  encRuns(fields).forEach(function (item) {
+    if (item.bits) { encBitRun(out, item.bits, data, ctx); return; }
+    var f = item.field, name = f.name || (top ? "unknown" : ""), type = f.type === undefined ? "u8" : f.type;
+    if (top && f.optional === true && f.name) {
+      if (!encHas(data, f.name)) { omitted = omitted || f.name; return; }
+      if (omitted) encFail("Error encoding " + f.name + ": optional field supplied while the earlier optional field " + JSON.stringify(omitted) + " is not (PS-405)");
+    }
+    if ("match" in f && !f.type) { encMatch(out, f, data, ctx); return; }
+    if ("tlv" in f && !f.type) { encTlv(out, f, data, ctx); return; }
+    if ("byte_group" in f) { encByteGroup(out, f, data, ctx); return; }
+    if (type === "repeat") { encRepeat(out, f, data, ctx); return; }
+    if (type === "object") {
+      var nested = data[name];
+      var isMap = nested !== null && typeof nested === "object" && !Array.isArray(nested);
+      encList(out, f.fields || [], isMap ? nested : (top ? {} : data), ctx);
+      return;
+    }
+    if (top && "flagged" in f) { encFlagged(out, f.flagged, data, ctx); return; }
+    if (ENC_COMPUTED.indexOf(type) >= 0) return;
+    if (type === "skip") {
+      var n = typeof f.length === "string" ? 0 : Math.max(0, parseInt(f.length === undefined ? 1 : f.length, 10));
+      for (var i = 0; i < n; i++) out.push(0);
+      return;
+    }
+    if (type === "bitfield_string") {
+      encBitfieldString(out, f, data[name] === undefined ? "" : data[name], ctx);
+      return;
+    }
+    if (encIsLiteral(f)) return;
+    if ("value" in f) { encField(out, f, f.value, ctx); return; }
+    var value;
+    if (!name) {
+      value = f["default"] === undefined ? 0 : f["default"];
+    } else if (name.charAt(0) === "_") {
+      value = encInternalValue(f, data);
+    } else if (top && Object.prototype.hasOwnProperty.call(patches, name)) {
+      value = patches[name];
+    } else {
+      var key = encResolveName(f, name, data);
+      if (key === null) {
+        if (top) encFail("Error encoding " + name + ": name_from " + JSON.stringify(f.name_from) + " references a field the data does not carry, so its output key cannot be rebuilt");
+        key = name;
+      }
+      if (!encHas(data, key)) {
+        if (f.optional === true) { omitted = omitted || name; return; }
+        if (f.sentinel) { encField(out, encRawBits(f), f.sentinel[0], ctx); return; }
+        if (top) { ctx.w.push("Missing field: " + key); value = 0; }
+        else value = f["default"] === undefined ? 0 : f["default"];
+      } else {
+        if (f.optional === true && omitted) {
+          encFail("optional field " + JSON.stringify(name) + " is supplied while the earlier optional field " + JSON.stringify(omitted) + " is not (PS-405)");
+        }
+        value = data[key];
+      }
+    }
+    encField(out, f, encReverseModifiers(value, f), ctx);
+  });
+}
+
+function encodeRoot(fields, data, endian) {
+  var ctx = { endian: endian, w: [] }, out = [];
+  encList(out, fields, data || {}, ctx, true);
+  return { bytes: out, warnings: ctx.w };
+}
+'''
+
+
+def _strip_js_comments(code: str) -> str:
+    """The runtime without its commentary and indentation, which are for its readers here.
+
+    Whole-line comments and trailing ones are removed; no string or regular expression
+    in the runtime contains `//`, which tests/test_ts013_encode_parity.py checks.
+    """
+    out = []
+    in_block = False
+    for line in code.splitlines():
+        text = line.strip()
+        if in_block:
+            in_block = '*/' not in text
+            continue
+        if text.startswith('/*'):
+            in_block = '*/' not in text
+            continue
+        if not text or text.startswith('//'):
+            continue
+        out.append(re.sub(r'\s+// .*$', '', text))
+    return '\n'.join(out)
+
+
+SLIM_ENCODE_DOWNLINK = '''function encodeDownlink(input) {
+  return { bytes: [], fPort: input.fPort || 1, warnings: [], errors: ["this codec was generated without an encoder (--slim)"] };
+}'''
+
+
+def _slim(code: str) -> str:
+    """A decode-only codec: encodeDownlink refuses, and whole-line comments are dropped.
+
+    Only comment lines go, never a trailing comment: a lookup label may hold `//`, and a
+    line-oriented pass cannot tell that from a comment. A line opening with `//` or `/*`
+    is never inside a string - the generated code has no multi-line strings.
+    """
+    start = code.find('function encodeDownlink(input) {')
+    if start >= 0:
+        end = code.index('\n}', start) + 2
+        code = code[:start] + SLIM_ENCODE_DOWNLINK + code[end:]
+    # The command encoder reads the runtime this build leaves out.
+    start = code.find('function encodeCommand(')
+    if start >= 0:
+        end = code.index('\n}', start) + 2
+        code = code[:start].rstrip('\n') + code[end:]
+    out = []
+    in_block = False
+    for line in code.splitlines():
+        text = line.strip()
+        if in_block:
+            in_block = '*/' not in text
+            continue
+        if text.startswith('/*'):
+            in_block = '*/' not in text
+            continue
+        if not text or text.startswith('//'):
+            continue
+        out.append(line)
+    return '\n'.join(out) + '\n'
+
+
+#: Identifiers a field must not be staged under: the generated functions' own locals,
+#: JavaScript's reserved words and the globals a codec relies on. A field named `d`
+#: became `var d = readU(...)` and replaced the output object, so decodeUplink returned
+#: `data: 0`; `w` did the same to the warnings. A clashing name gets a trailing `_`,
+#: and `_restore_output_keys` reports it under its own name again.
+_CODEC_LOCALS = {
+    'pos', 'd', 'vars', 'w', 'aqr', 'aqp', 'endian', 'buf', 'bgVal', 'bgStart', 'q',
+    'qn', 'r', 'port', 'bytes', 'cmdName', 'cmdId', 'input', 'e', 'i', 'k',
+    '_si', '_tlvTag', '_tlvStart', '_tlvSpan', '_tlvLen', '_mv', '_mr', '_k', '_a', '_p',
+    '_i', '_flags',
+}
+_JS_RESERVED = {
+    'arguments', 'await', 'break', 'case', 'catch', 'class', 'const', 'continue',
+    'debugger', 'default', 'delete', 'do', 'else', 'enum', 'eval', 'export', 'extends',
+    'false', 'finally', 'for', 'function', 'if', 'implements', 'import', 'in',
+    'instanceof', 'interface', 'let', 'new', 'null', 'package', 'private', 'protected',
+    'public', 'return', 'static', 'super', 'switch', 'this', 'throw', 'true', 'try',
+    'typeof', 'var', 'void', 'while', 'with', 'yield', 'undefined', 'NaN', 'Infinity',
+    'Math', 'Number', 'String', 'Array', 'Object', 'JSON', 'Error', 'Date', 'Boolean',
+    'DataView', 'ArrayBuffer', 'isFinite', 'isNaN', 'parseInt', 'parseFloat', 'module',
+    'exports', 'require', 'unescape', 'encodeURIComponent',
+}
+_CODEC_GLOBALS: Optional[set] = None
+
+
+def _codec_globals() -> set:
+    """Every top-level function and var a generated codec declares."""
+    global _CODEC_GLOBALS
+    if _CODEC_GLOBALS is None:
+        text = TS013Generator._gen_helpers(None) + ENCODER_RUNTIME_JS  # type: ignore
+        names = set(re.findall(r'^function ([A-Za-z_$][\w$]*)', text, re.M))
+        names |= set(re.findall(r'^var ([A-Za-z_$][\w$]*)', text, re.M))
+        names |= {'ENC_TYPES', 'ENC_WORD_ORDERED', 'ENC_ENDIAN_OPAQUE', 'ENC_COMPUTED',
+                  'ENC_VARS', 'OUTPUT_KEYS', 'COMMANDS', 'decodeUplink', 'decodeDownlink',
+                  'encodeDownlink', 'decodePayload', 'encodePayload', 'decodeCommand',
+                  'encodeCommand'}
+        _CODEC_GLOBALS = names
+    return _CODEC_GLOBALS
+
+
 def to_js_name(name: str) -> str:
-    return re.sub(r'[^a-zA-Z0-9_]', '_', name)
+    mangled = re.sub(r'[^a-zA-Z0-9_]', '_', name)
+    if mangled in _CODEC_LOCALS or mangled in _JS_RESERVED or mangled in _codec_globals() \
+            or re.match(r'^(decodePort|encodePort)', mangled):
+        mangled += '_'
+    return mangled
 
 
 #: Byte width of every numeric type spelling clause 2 defines, canonical or alias
@@ -424,7 +1389,11 @@ def ref_to_js(ref: str) -> str:
 
 
 class TS013Generator:
-    def __init__(self, schema: Dict[str, Any], source: str = ''):
+    def __init__(self, schema: Dict[str, Any], source: str = '', slim: bool = False):
+        # `slim` builds a decode-only codec: no encoder, and no commentary. A generated
+        # codec is mostly a way to test a schema; where one is deployed, size can matter
+        # more than encoding, and the encoder runtime is most of a small codec.
+        self.slim = slim
         # Every `$ref` is spliced up front, as the interpreter does (PS-346, PS-347), and
         # a schema whose references are invalid is refused (PS-345, PS-348, PS-349).
         from schema_interpreter import expand_refs
@@ -467,8 +1436,11 @@ class TS013Generator:
         lines.append('')
         lines.append(self._gen_helpers())
         lines.append('')
+        if not self.slim:
+            lines.append(self._gen_encoder_runtime())
+            lines.append('')
         lines.append(self._gen_decode_fields())
-        encode_fields = self._gen_encode_fields()
+        encode_fields = '' if self.slim else self._gen_encode_fields()
         if encode_fields:
             lines.append('')
             lines.append(encode_fields)
@@ -477,7 +1449,10 @@ class TS013Generator:
             lines.append(self._gen_command_functions())
         lines.append('')
         lines.append(self._gen_entry_points())
-        return '\n'.join(lines)
+        code = '\n'.join(lines)
+        if self.slim:
+            code = _slim(code)
+        return code
 
     def _gen_helpers(self) -> str:
         return '''// --- Sequence lookup ---
@@ -622,7 +1597,17 @@ function roundDecimal(v, decimals, away) {
  * which not every network server's codec sandbox provides. */
 var SAFE_INTEGER = 9007199254740991;
 
+/* A read past the end of the payload is an error, as it is in every interpreter. The
+ * readers below used to substitute 0 for a missing byte, so a truncated payload decoded
+ * to plausible values with no error at all. */
+function need(buf, pos, size) {
+  if (pos + size > buf.length) {
+    throw new Error("Buffer too short: need " + size + " bytes at pos " + pos);
+  }
+}
+
 function orderedBytes(buf, pos, size, endian) {
+  need(buf, pos, size);
   var out = [];
   var i;
   if (endian === 'big') {
@@ -659,6 +1644,7 @@ function readU(buf, pos, size, endian) {
     var n = Number(text);
     return n <= SAFE_INTEGER ? n : text;
   }
+  need(buf, pos, size);
   var v = 0;
   if (endian === 'big') {
     for (var i = 0; i < size; i++) v = (v * 256) + (buf[pos + i] || 0);
@@ -671,6 +1657,7 @@ function readU(buf, pos, size, endian) {
 /* Two 16-bit big-endian units, least significant unit first (PS-271). The type fixes
  * both orders, so the endian argument is deliberately absent (PS-272). */
 function readU32LE16(buf, pos) {
+  need(buf, pos, 4);
   var low = ((buf[pos] || 0) << 8) | (buf[pos + 1] || 0);
   var high = ((buf[pos + 2] || 0) << 8) | (buf[pos + 3] || 0);
   return low + high * 65536;
@@ -777,6 +1764,7 @@ function decodeMinifloat(type, w) {
 /* IEEE 754 binary16. Generated codecs read an f16 with readF64 before, so eight bytes
  * were taken for a two-byte field. */
 function readF16(buf, pos, endian) {
+  need(buf, pos, 2);
   var h = endian === 'little'
     ? ((buf[pos + 1] || 0) << 8) | (buf[pos] || 0)
     : ((buf[pos] || 0) << 8) | (buf[pos + 1] || 0);
@@ -789,6 +1777,7 @@ function readF16(buf, pos, endian) {
 }
 
 function readF32(buf, pos, endian) {
+  need(buf, pos, 4);
   var b = buf.slice(pos, pos + 4);
   if (endian === 'little') b = [b[3], b[2], b[1], b[0]];
   var ab = new ArrayBuffer(4);
@@ -798,6 +1787,7 @@ function readF32(buf, pos, endian) {
 }
 
 function readF64(buf, pos, endian) {
+  need(buf, pos, 8);
   var b = buf.slice(pos, pos + 8);
   if (endian === 'little') b = [b[7], b[6], b[5], b[4], b[3], b[2], b[1], b[0]];
   var ab = new ArrayBuffer(8);
@@ -819,6 +1809,7 @@ function writeU(buf, pos, size, value, endian) {
  * first, each unit big-endian; `be16le` the high unit first, each unit little-endian.
  * kind is u, s or f (an IEEE 754 binary32 of the assembled word). */
 function readWordOrdered(buf, pos, layout, kind) {
+  need(buf, pos, 4);
   var b0 = buf[pos] || 0, b1 = buf[pos + 1] || 0, b2 = buf[pos + 2] || 0, b3 = buf[pos + 3] || 0;
   var word = layout === 'le16'
     ? ((b2 << 8) | b3) * 65536 + ((b0 << 8) | b1)
@@ -871,6 +1862,42 @@ function writeS(buf, pos, size, value, endian) {
   if (value < 0) value += (1 << (size * 8));
   writeU(buf, pos, size, value, endian);
 }'''
+
+    def _gen_encoder_runtime(self) -> str:
+        """The runtime encoder and the reference tables it reads.
+
+        The tables come from tools/schema_interpreter.py rather than being restated, so a
+        type the reference learns is a type the codec writes.
+        """
+        from schema_interpreter import (
+            COMPUTED_TYPES, INTEGER_TYPE_INFO, SchemaInterpreter, WORD_ORDERED_TYPES)
+        runtime = _strip_js_comments(ENCODER_RUNTIME_JS)
+        types = {k: [size, signed] for k, (size, signed) in INTEGER_TYPE_INFO.items()}
+        return '\n'.join([
+            f'var ENC_TYPES = {json.dumps(types, sort_keys=True)};',
+            f'var ENC_WORD_ORDERED = {json.dumps(WORD_ORDERED_TYPES, sort_keys=True)};',
+            f'var ENC_ENDIAN_OPAQUE = {json.dumps(list(SchemaInterpreter._ENDIAN_OPAQUE_TYPES))};',
+            f'var ENC_COMPUTED = {json.dumps(list(COMPUTED_TYPES))};',
+            runtime,
+        ])
+
+    def _enc_vars(self) -> Dict[str, Dict[str, Any]]:
+        """var name -> the field declaring it, first in document order (_field_declaring_var)."""
+        found: Dict[str, Dict[str, Any]] = {}
+
+        def visit(node):
+            if isinstance(node, dict):
+                var = node.get('var')
+                if isinstance(var, str) and node.get('name') and var not in found:
+                    found[var] = {'name': node['name'], 'lookup': node.get('lookup')}
+                for value in node.values():
+                    visit(value)
+            elif isinstance(node, list):
+                for item in node:
+                    visit(item)
+
+        visit(self.schema)
+        return found
 
     def _next_uid(self) -> int:
         """A number for a generated variable that must not collide with a nested one."""
@@ -1537,6 +2564,9 @@ function writeS(buf, pos, size, value, endian) {
             # preceding field (PS-464).
             lines.append(f'{i}  var {js_name} = "";')
             lines.append(f'{i}  var {js_name}_n = {length_to_js(field)};')
+            # A declared length the payload cannot supply is an error, as in every
+            # interpreter; the loops below stopped at the end and reported what was left.
+            lines.append(f'{i}  if (pos + {js_name}_n > buf.length) throw new Error("Buffer too short for {ftype}");')
             if ftype == 'ascii':
                 lines.append(f'{i}  for (var _si = 0; _si < {js_name}_n && pos < buf.length; _si++)'
                              f' {{ {js_name} += String.fromCharCode(buf[pos++]); }}')
@@ -1767,18 +2797,15 @@ function writeS(buf, pos, size, value, endian) {
         return expr
 
     def _reverse_modifiers_expr(self, val_var: str, field: Dict) -> str:
-        """Reverse modifier chain in opposite YAML key order: value → raw integer."""
-        # Collect modifier keys in YAML order, then reverse
-        mod_keys = [k for k in field if k in ('add', 'mult', 'div')]
-        expr = val_var
-        for key in reversed(mod_keys):
-            if key == 'add':
-                expr = f'({expr} - ({field["add"]}))'
-            elif key == 'div':
-                expr = f'({expr} * {field["div"]})'
-            elif key == 'mult':
-                expr = f'({expr} / {field["mult"]})'
-        return f'Math.round({expr})'
+        """The decode chain undone: value -> the integer the payload holds.
+
+        Delegates to the runtime encoder's `encReverseModifiers`, the port of the
+        reference's `_reverse_modifiers`: the lookup, the transform stages last first,
+        then add, div, mult (PS-101, PS-102). This used to undo only the bare modifiers,
+        in reverse *key* order, so `{add: -40, div: 10}` encoded 25 as 290 where
+        `{div: 10, add: -40}` gave 650.
+        """
+        return f'encReverseModifiers({val_var}, {json.dumps(field, default=str)})'
 
     def _gen_decode_bitfield_string(self, field: Dict) -> List[str]:
         i = self._i()
@@ -2078,7 +3105,7 @@ function writeS(buf, pos, size, value, endian) {
     # Encoder generation
     # ---------------------------------------------------------------
     def _gen_encode_fields(self) -> str:
-        parts = []
+        parts = [f'var ENC_VARS = {json.dumps(self._enc_vars(), default=str)};']
         if self.has_ports:
             for port_key, port_def in self.schema['ports'].items():
                 fname = f'encodePort{port_key}'
@@ -2095,221 +3122,20 @@ function writeS(buf, pos, size, value, endian) {
         return '\n\n'.join(parts)
 
     def _gen_encode_fn(self, fname: str, fields: List[Dict]) -> str:
-        lines = [f'function {fname}(d, endian) {{']
-        lines.append(f'  var buf = new Array(256);')
-        lines.append(f'  var pos = 0;')
-        lines.append(f'  endian = endian || "{self.endian}";')
-        self.indent = 1
-        for field in fields:
-            lines.extend(self._gen_encode_field(field))
-        lines.append('  return buf.slice(0, pos);')
-        lines.append('}')
-        return '\n'.join(lines)
+        """An encoder: the field list as data, walked by the runtime encoder.
 
-    def _gen_encode_field(self, field: Dict) -> List[str]:
-        lines = []
-        i = self._i()
-
-        # skip computed fields (formula, ref, or compute)
-        if field.get('type') in ('number', 'integer'):
-            is_computed = any(k in field for k in ('formula', 'ref', 'compute'))
-            if is_computed:
-                lines.append(f'{i}  // skip computed field {field.get("name", "")}')
-                return lines
-
-        # byte_group
-        if 'byte_group' in field:
-            bg = field['byte_group']
-            bg_fields = bg if isinstance(bg, list) else bg.get('fields', bg)
-            bg_size = 1
-            if isinstance(bg, dict):
-                bg_size = bg.get('size', 1)
-            lines.append(f'{i}  // encode byte_group')
-            lines.append(f'{i}  var bgVal = 0;')
-            for bf in (bg_fields if isinstance(bg_fields, list) else []):
-                bname = bf.get('name', '_')
-                btype = bf.get('type', 'u8')
-                bit_m = re.match(r'u\d+\[(\d+):(\d+)\]', btype)
-                if bit_m:
-                    lo, hi = int(bit_m.group(1)), int(bit_m.group(2))
-                    width = hi - lo + 1
-                    mask = (1 << width) - 1
-                    src = f'(d.{to_js_name(bname)} || 0)' if not bname.startswith('_') else '0'
-                    rev = self._reverse_modifiers_expr(src, bf)
-                    lines.append(f'{i}  bgVal |= (({rev}) & 0x{mask:X}) << {lo};')
-            lines.append(f'{i}  writeU(buf, pos, {bg_size}, bgVal, endian);')
-            lines.append(f'{i}  pos += {bg_size};')
-            return lines
-
-        # flagged
-        if 'flagged' in field:
-            fg = field['flagged']
-            flag_field = fg['field']
-            groups = fg.get('groups', [])
-            lines.append(f'{i}  // encode flagged')
-            lines.append(f'{i}  var _flags = 0;')
-            # Pre-scan: determine which groups have data
-            for group in groups:
-                bit = group['bit']
-                group_names = [f.get('name') for f in group.get('fields', []) if f.get('name') and not f['name'].startswith('_')]
-                if group_names:
-                    checks = ' || '.join(f'd.{to_js_name(n)} !== undefined' for n in group_names)
-                    lines.append(f'{i}  if ({checks}) _flags |= (1 << {bit});')
-            lines.append(f'{i}  writeU(buf, pos - {type_size("u16") or 2}, 2, _flags, endian);')
-            # Encode each present group
-            for group in groups:
-                bit = group['bit']
-                lines.append(f'{i}  if (_flags & (1 << {bit})) {{')
-                self.indent += 1
-                for gf in group.get('fields', []):
-                    lines.extend(self._gen_encode_field(gf))
-                self.indent -= 1
-                lines.append(f'{i}  }}')
-            return lines
-
-        # tlv
-        if 'tlv' in field:
-            return self._gen_encode_tlv(field['tlv'])
-
-        # match — skip during encoding (would need case selection)
-        if 'match' in field:
-            lines.append(f'{i}  // TODO: match encoding requires case selection')
-            return lines
-
-        name = field.get('name', '_unknown')
-        ftype = field.get('type', 'u8')
-        js_name = to_js_name(name)
-
-        # bitfield_string
-        if ftype == 'bitfield_string':
-            return self._gen_encode_bitfield_string(field)
-
-        # skip type
-        if ftype == 'skip':
-            length = field.get('length', 1)
-            lines.append(f'{i}  for (var _i = 0; _i < {length}; _i++) buf[pos++] = 0;')
-            return lines
-
-        # enum — reverse lookup
-        if ftype == 'enum':
-            base = field.get('base', 'u8')
-            sz = type_size(base) or 1
-            vals = field.get('values', {})
-            rev = {str(enum_label(v)): k for k, v in vals.items()}
-            rev_json = json.dumps(rev)
-            lines.append(f'{i}  var {js_name}_rev = {rev_json};')
-            lines.append(f'{i}  var {js_name}_val = typeof d.{js_name} === "string" ? parseInt({js_name}_rev[d.{js_name}] || 0) : (d.{js_name} || 0);')
-            lines.append(f'{i}  writeU(buf, pos, {sz}, {js_name}_val, endian);')
-            lines.append(f'{i}  pos += {sz};')
-            return lines
-
-        # string types — skip for now
-        if ftype in ('ascii', 'hex', 'bytes'):
-            lines.append(f'{i}  // TODO: encode string field {js_name}')
-            return lines
-
-        # integer / float
-        sz = type_size(ftype)
-        if sz is None:
-            lines.append(f'{i}  // TODO: unsupported encode type {ftype}')
-            return lines
-
-        signed = is_signed(ftype)
-        eo = field_endian_override(ftype, field)
-        endian_arg = f'"{eo}"' if eo else 'endian'
-        write_fn = 'writeS' if signed else 'writeU'
-
-        if is_word_ordered(ftype):
-            # One writer for both, since the sign only affects how the value was read.
-            if name.startswith('_') or 'value' in field:
-                source = str(field.get('value', 0))
-            else:
-                source = self._reverse_modifiers_expr(
-                    f'(d.{js_name} !== undefined ? d.{js_name} : 0)', field)
-            layout, kind = WORD_ORDERED[ftype]
-            lines.append(f'{i}  writeWordOrdered(buf, pos, {source}, "{layout}", "{kind}");')
-            lines.append(f'{i}  pos += 4;')
-            return lines
-
-        if name.startswith('_'):
-            const_val = field.get('value', 0)
-            lines.append(f'{i}  {write_fn}(buf, pos, {sz}, {const_val}, {endian_arg});')
-        elif 'value' in field:
-            lines.append(f'{i}  {write_fn}(buf, pos, {sz}, {field["value"]}, {endian_arg});')
-        elif 'formula' in field:
-            lines.append(f'{i}  // formula field — encode reversal needed')
-            lines.append(f'{i}  // formula: {field["formula"]}')
-            lines.append(f'{i}  // Provide raw value directly or use modifiers instead')
-            lines.append(f'{i}  {write_fn}(buf, pos, {sz}, d.{js_name} || 0, {endian_arg});')
-        else:
-            src = f'd.{js_name} !== undefined ? d.{js_name} : 0'
-            rev = self._reverse_modifiers_expr(f'({src})', field)
-            lines.append(f'{i}  {write_fn}(buf, pos, {sz}, {rev}, {endian_arg});')
-
-        lines.append(f'{i}  pos += {sz};')
-        return lines
-
-    def _gen_encode_tlv(self, tlv: Dict) -> List[str]:
-        i = self._i()
-        lines = []
-        tag_fields = tlv.get('tag_fields', [])
-        cases = tlv.get('cases', {})
-
-        lines.append(f'{i}  // encode TLV entries')
-        for case_key, case_fields in cases.items():
-            # Parse tag values from case key (convert to string if needed)
-            case_key_str = str(case_key)
-            if case_key_str.startswith('['):
-                tag_vals = json.loads(case_key_str)
-            else:
-                tag_vals = [int(case_key)]
-
-            # Determine which data fields this case has
-            data_names = [cf.get('name') for cf in case_fields if cf.get('name') and not cf['name'].startswith('_')]
-            if not data_names:
-                continue
-            checks = ' || '.join(f'd.{to_js_name(n)} !== undefined' for n in data_names)
-
-            lines.append(f'{i}  if ({checks}) {{')
-            # Write tag bytes
-            for idx, (tf, tv) in enumerate(zip(tag_fields, tag_vals)):
-                tfsz = type_size(tf.get('type', 'u8')) or 1
-                lines.append(f'{i}    writeU(buf, pos, {tfsz}, {tv}, endian);')
-                lines.append(f'{i}    pos += {tfsz};')
-            # Write value fields
-            self.indent += 1
-            for cf in case_fields:
-                lines.extend(self._gen_encode_field(cf))
-            self.indent -= 1
-            lines.append(f'{i}  }}')
-
-        return lines
-
-    def _gen_encode_bitfield_string(self, field: Dict) -> List[str]:
-        i = self._i()
-        lines = []
-        name = to_js_name(field['name'])
-        length = field.get('length', 2)
-        parts = field.get('parts', [])
-        delim = field.get('delimiter', '.')
-        prefix = field.get('prefix', '')
-
-        lines.append(f'{i}  // encode bitfield_string {name}')
-        lines.append(f'{i}  var {name}_str = d.{name} || "";')
-        if prefix:
-            lines.append(f'{i}  if ({name}_str.indexOf("{prefix}") === 0) {name}_str = {name}_str.slice({len(prefix)});')
-        lines.append(f'{i}  var {name}_segs = {name}_str.split("{delim}");')
-        lines.append(f'{i}  var {name}_val = 0;')
-        for idx, part in enumerate(parts):
-            offset = part[0]
-            width = part[1]
-            fmt = part[2] if len(part) > 2 else 'decimal'
-            mask = (1 << width) - 1
-            radix = 16 if fmt in ('hex', 'hex:upper') else 10
-            lines.append(f'{i}  if ({name}_segs[{idx}]) {name}_val |= (parseInt({name}_segs[{idx}], {radix}) & 0x{mask:X}) << {offset};')
-        lines.append(f'{i}  writeU(buf, pos, {length}, {name}_val, endian);')
-        lines.append(f'{i}  pos += {length};')
-        return lines
+        The field list was unrolled into code at generation time, a second hand-kept copy
+        of the reference's encode rules, and it had drifted on most constructs - see
+        ENCODER_RUNTIME_JS. The list is embedded with its references spliced,
+        exactly as the decoder sees it.
+        """
+        plan = self._expand_refs(list(fields)) if isinstance(fields, list) else fields
+        return '\n'.join([
+            f'var {fname}_FIELDS = {json.dumps(plan, default=str, separators=(",", ":"))};',
+            f'function {fname}(d, endian) {{',
+            f'  return encodeRoot({fname}_FIELDS, d, endian || "{self.endian}");',
+            '}',
+        ])
 
     # ---------------------------------------------------------------
     # Downlink Commands
@@ -2488,13 +3314,46 @@ function writeS(buf, pos, size, value, endian) {
             lines.append('function encodeDownlink(input) {')
             lines.append('  try {')
             lines.append(f'    var endian = "{self.endian}";')
-            dl_ports = [pk for pk, pd in self.schema['ports'].items() if pd.get('direction') == 'downlink']
+            # The port the caller names, where it has one (PS-292: never an entry that
+            # declares itself uplink-only); else the first entry declaring downlink. This
+            # used to ignore input.fPort and always encode the first downlink entry.
+            ports = self.schema['ports']
+            encodable = [pk for pk, pd in ports.items()
+                         if isinstance(pd, dict) and pd.get('direction') != 'uplink']
+            dl_ports = [pk for pk, pd in ports.items()
+                        if isinstance(pd, dict) and pd.get('direction') == 'downlink']
+            lines.append('    var port = input.fPort;')
+            lines.append('    var r;')
+            first = True
+            for pk in encodable:
+                if not str(pk).isdigit():
+                    continue
+                kw = 'if' if first else '} else if'
+                first = False
+                lines.append(f'    {kw} (port === {pk}) {{')
+                lines.append(f'      r = encodePort{pk}(input.data, endian);')
+            uplink_only = [pk for pk, pd in ports.items()
+                           if isinstance(pd, dict) and pd.get('direction') == 'uplink'
+                           and str(pk).isdigit()]
+            for pk in uplink_only:
+                kw = 'if' if first else '} else if'
+                first = False
+                lines.append(f'    {kw} (port === {pk}) {{')
+                lines.append(f'      return {{ bytes: [], fPort: {pk}, warnings: [], errors: '
+                             f'["fPort {pk} declares direction uplink, so it is not encoded as a '
+                             f'downlink (PS-292)"] }};')
+            kw = 'if' if first else '} else if'
             if dl_ports:
-                port = dl_ports[0]
-                lines.append(f'    var bytes = encodePort{port}(input.data, endian);')
-                lines.append(f'    return {{ bytes: bytes, fPort: {port}, warnings: [], errors: [] }};')
+                lines.append(f'    {kw} (port === undefined || port === null) {{')
+                lines.append(f'      port = {dl_ports[0]};')
+                lines.append(f'      r = encodePort{dl_ports[0]}(input.data, endian);')
+                lines.append('    } else {')
             else:
-                lines.append(f'    return {{ bytes: [], fPort: 1, warnings: ["No downlink port defined"], errors: [] }};')
+                lines.append(f'    {kw} (true) {{' if first else '    } else {')
+            lines.append('      return { bytes: [], fPort: port || 1, warnings: [], errors: '
+                         '["No encodable entry for fPort " + port] };')
+            lines.append('    }')
+            lines.append('    return { bytes: r.bytes, fPort: port, warnings: r.warnings, errors: [] };')
             lines.append('  } catch (e) {')
             lines.append('    return { bytes: [], fPort: 1, warnings: [], errors: [e.message] };')
             lines.append('  }')
@@ -2552,8 +3411,8 @@ function writeS(buf, pos, size, value, endian) {
 
                 lines.append('function encodeDownlink(input) {')
                 lines.append('  try {')
-                lines.append(f'    var bytes = encodePayload(input.data, "{self.endian}");')
-                lines.append('    return { bytes: bytes, fPort: input.fPort || 1, warnings: [], errors: [] };')
+                lines.append(f'    var r = encodePayload(input.data, "{self.endian}");')
+                lines.append('    return { bytes: r.bytes, fPort: input.fPort || 1, warnings: r.warnings, errors: [] };')
                 lines.append('  } catch (e) {')
                 lines.append('    return { bytes: [], fPort: input.fPort || 1, warnings: [], errors: [e.message] };')
                 lines.append('  }')
@@ -2614,8 +3473,6 @@ function writeS(buf, pos, size, value, endian) {
             return code
         helper = '\n'.join([
             'var OUTPUT_KEYS = %s;' % json.dumps(renames, sort_keys=True),
-            'var INPUT_KEYS = %s;' % json.dumps(
-                {v: k for k, v in renames.items()}, sort_keys=True),
             'function renameKeys(v, table) {',
             '  if (Array.isArray(v)) return v.map(function (x) { return renameKeys(x, table); });',
             '  if (v === null || typeof v !== "object") return v;',
@@ -2630,8 +3487,9 @@ function writeS(buf, pos, size, value, endian) {
             '',
         ])
         tail = code[entry:]
-        tail = tail.replace('data: omitAbsent(r.data),', 'data: renameKeys(r.data, OUTPUT_KEYS),')
-        tail = tail.replace('(input.data, ', '(renameKeys(input.data, INPUT_KEYS), ')
+        # omitAbsent still runs first: dropping it reported an omitted reading as null.
+        tail = tail.replace('data: omitAbsent(r.data),',
+                            'data: renameKeys(omitAbsent(r.data), OUTPUT_KEYS),')
         return code[:entry] + helper + tail
 
 
@@ -2653,6 +3511,9 @@ def main():
     parser = argparse.ArgumentParser(description='Generate TS013 JS codec from Payload Schema YAML')
     parser.add_argument('input', help='Schema file or directory')
     parser.add_argument('-o', '--output', help='Output file or directory')
+    parser.add_argument('--slim', action='store_true',
+                        help='decode-only codec without commentary: no encoder runtime, '
+                             'and encodeDownlink reports that it was left out')
     args = parser.parse_args()
 
     input_path = Path(args.input)
@@ -2672,7 +3533,7 @@ def main():
             if 'fields' not in schema and 'ports' not in schema:
                 continue
 
-            gen = TS013Generator(schema, schema_path.name)
+            gen = TS013Generator(schema, schema_path.name, slim=args.slim)
             js = gen.generate()
 
             if output_path:

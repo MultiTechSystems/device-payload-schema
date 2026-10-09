@@ -284,6 +284,19 @@ def run_js_tests(schema: Dict[str, Any], schema_path: str) -> Tuple[str, List[st
     test_cases = []
     for i, tv in enumerate(vectors):
         tv_name = tv.get('name', f'test_{i}')
+        if is_encode_vector(tv):
+            # PS-047: the values to encode, not bytes to decode. These went through
+            # decodeUplink with an empty payload, and passed only while the generated
+            # readers turned a missing byte into 0 - which let every encode vector
+            # "decode" whatever its schema said. They go through encodeDownlink now, as
+            # the Python half of the scorer sends them through the encoder.
+            test_cases.append({
+                'name': tv_name,
+                'encode': tv.get('input') or {},
+                'expected_payload': list(expected_encode_bytes(tv)),
+                'fPort': tv.get('fPort') or tv.get('fport'),
+            })
+            continue
         payload_hex = tv.get('payload', '').replace(' ', '')
         expected = tv.get('expected', {})
         fport = tv.get('fPort') or tv.get('fport') or 1
@@ -329,6 +342,20 @@ const errors = [];
 
 for (const t of tests) {{
     try {{
+        if (t.encode) {{
+            const enc = encodeDownlink({{ data: t.encode, fPort: t.fPort === null ? undefined : t.fPort }});
+            if (enc.errors && enc.errors.length > 0) {{
+                failed++;
+                errors.push(t.name + ': ' + enc.errors.join(', '));
+            }} else if (JSON.stringify(enc.bytes) !== JSON.stringify(t.expected_payload)) {{
+                failed++;
+                errors.push(t.name + ': encoded ' + JSON.stringify(enc.bytes)
+                            + ', expected ' + JSON.stringify(t.expected_payload));
+            }} else {{
+                passed++;
+            }}
+            continue;
+        }}
         const bytes = [];
         for (let i = 0; i < t.payload.length; i += 2) {{
             bytes.push(parseInt(t.payload.substr(i, 2), 16));
