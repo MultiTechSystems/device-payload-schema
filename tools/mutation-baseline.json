@@ -3,7 +3,7 @@
   "min_score_new": 0.8,
   "include_library_composed": false,
   "distribution": {
-    "100%": 163,
+    "100%": 165,
     "95-99%": 7,
     "90-94%": 1,
     "80-89%": 6,
@@ -179,6 +179,16 @@
       "unreached": 0,
       "generated": 10,
       "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/leftover-bytes.yaml": {
+      "score": 1.0,
+      "killed": 2,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 3,
+      "vectors": 2,
       "provenance": "independent",
       "failing_original": 0
     },
@@ -369,6 +379,16 @@
       "unreached": 0,
       "generated": 7,
       "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/range-before-lookup.yaml": {
+      "score": 1.0,
+      "killed": 15,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 18,
+      "vectors": 4,
       "provenance": "independent",
       "failing_original": 0
     },
@@ -1817,7 +1837,7 @@
       "killed": 123,
       "survived": 0,
       "unreached": 0,
-      "generated": 157,
+      "generated": 159,
       "vectors": 34,
       "provenance": "independent",
       "failing_original": 0
@@ -1843,10 +1863,10 @@
       "failing_original": 0
     },
     "volley-boast/vobo.yaml": {
-      "score": 0.9885,
+      "score": 0.9842,
       "killed": 20024,
-      "survived": 232,
-      "unreached": 955,
+      "survived": 322,
+      "unreached": 865,
       "generated": 24943,
       "vectors": 315,
       "provenance": "independent",
