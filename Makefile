@@ -103,24 +103,32 @@ DOCKER ?= docker
 DOCKER_RUN = $(DOCKER) run --rm -v "$(CURDIR)":/work
 CACHE_DIR = $(CURDIR)/.cache
 
+# The language toolchain images. CI overrides the two Docker Hub ones with the same
+# images from mirror.gcr.io (gates.yml): a burst of pushes otherwise exhausts Docker Hub's
+# unauthenticated pull limit and fails the gates with no test run, as eight merges in a
+# row did on 2026-10-09. The digests are identical, so this changes where, not what.
+GO_IMAGE ?= golang:1.22
+JAVA_IMAGE ?= maven:3.9-eclipse-temurin-21
+DOTNET_IMAGE ?= mcr.microsoft.com/dotnet/sdk:8.0
+
 test-go:
 	@mkdir -p $(CACHE_DIR)/go
 	$(DOCKER_RUN) -w /work/go/schema \
 		-v $(CACHE_DIR)/go:/tmp/gocache \
 		-e GOFLAGS=-mod=mod -e GOCACHE=/tmp/gocache \
-		golang:1.22 sh -c "go vet ./... && go test ./..."
+		$(GO_IMAGE) sh -c "go vet ./... && go test ./..."
 
 test-java:
 	@mkdir -p $(CACHE_DIR)/m2
 	$(DOCKER_RUN) -w /work/bindings/java \
 		-v $(CACHE_DIR)/m2:/root/.m2 \
-		maven:3.9-eclipse-temurin-21 mvn -B test
+		$(JAVA_IMAGE) mvn -B test
 
 test-dotnet:
 	@mkdir -p $(CACHE_DIR)/nuget
 	$(DOCKER_RUN) -w /work/dotnet \
 		-v $(CACHE_DIR)/nuget:/root/.nuget \
-		mcr.microsoft.com/dotnet/sdk:8.0 dotnet test --nologo
+		$(DOTNET_IMAGE) dotnet test --nologo
 
 # Every corpus vector through both conformance paths - the interpreted schema and the
 # generated TS013 codec - with a verdict apiece. The corpus runners cover the interpreted

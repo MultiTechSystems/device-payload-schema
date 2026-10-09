@@ -29,6 +29,7 @@ minutes. `--python` needs nothing but this repository.
 import argparse
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -135,12 +136,17 @@ def run(cmd, cwd=REPO):
     return done.stdout + done.stderr
 
 
+# As the Makefile's GO_IMAGE / DOTNET_IMAGE: CI points these at a mirror.
+GO_IMAGE = os.environ.get("GO_IMAGE") or "golang:1.22"
+DOTNET_IMAGE = os.environ.get("DOTNET_IMAGE") or "mcr.microsoft.com/dotnet/sdk:8.0"
+
+
 def go_actuals():
     # -count=1 is required. Without it `go test` answers `ok (cached)` and runs nothing,
     # which silently makes any check against it meaningless.
     return parse_log(run(
         'docker run --rm -v "$PWD":/work -w /work/go/schema -v "$PWD/.cache/go":/tmp/gocache '
-        '-e GOFLAGS=-mod=mod -e GOCACHE=/tmp/gocache golang:1.22 '
+        '-e GOFLAGS=-mod=mod -e GOCACHE=/tmp/gocache ' + GO_IMAGE + ' '
         'sh -c "go test ./... -count=1 -v"'))
 
 
@@ -153,7 +159,7 @@ def dotnet_actuals():
     # reports only "Passed! 92", which invites a guess.
     return parse_log(run(
         'docker run --rm -v "$PWD":/work -w /work/dotnet -v "$PWD/.cache/nuget":/root/.nuget '
-        'mcr.microsoft.com/dotnet/sdk:8.0 dotnet test --nologo '
+        + DOTNET_IMAGE + ' dotnet test --nologo '
         '--logger "console;verbosity=detailed"'))
 
 
