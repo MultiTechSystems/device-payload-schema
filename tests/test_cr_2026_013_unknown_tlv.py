@@ -196,15 +196,19 @@ class TestTheGeneratedCodecAgrees:
 class TestTheCorpus:
     """The measurement the CR was filed on: real schemas, real vendor payloads."""
 
+    # The example am307 declares in the TTN device repository (am307-codec.yaml, example
+    # 1). It ends in an AM10x channel, (0x05, 0x6A), that the AM307 does not send; the
+    # corpus vector was trimmed to the AM307's own channels when CR-2026-085's count
+    # found it, so the payload the CR measured is kept here as it was published.
+    AM307_TTN_EXAMPLE = "01755C03673401046865056A4900"
+
     def test_the_vendor_reference_payloads_that_stop_short_now_say_so(self):
         # am307's own reference payload decodes battery, temperature and humidity, then
         # meets tag (0x05, 0x6A) and stops. Nothing said so before.
         path = REPO_ROOT / "schemas" / "devices" / "milesight" / "am307.yaml"
         document = yaml.safe_load(path.read_text())
-        vector = next(v for v in document["test_vectors"]
-                      if v["name"] == "vendor_reference")
         result = SchemaInterpreter(document).decode(
-            bytes.fromhex(vector["payload"].replace(" ", ""))
+            bytes.fromhex(self.AM307_TTN_EXAMPLE)
         )
         assert result.success
         assert any("0x05, 0x6A" in w for w in result.warnings)
