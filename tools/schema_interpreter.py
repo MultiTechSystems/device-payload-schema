@@ -21,7 +21,7 @@ import re
 import json
 import math
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import ROUND_HALF_EVEN, Decimal
 from fractions import Fraction
 from typing import Dict, Any, List, Optional, Tuple, Union
 from enum import Enum
@@ -1720,10 +1720,13 @@ def rx_time_seconds(recv_time):
         sign = -1 if zone[0] == '-' else 1
         digits = zone[1:].replace(':', '')
         seconds -= sign * (int(digits[:2]) * 3600 + int(digits[2:]) * 60)
-    fraction = (m.group(7) or '').rstrip('0')
-    if not fraction:
-        return seconds
-    return float(Decimal('%d.%s' % (seconds, fraction)))
+    # Milliseconds are kept (PS-177): the fraction is rounded half to even at three
+    # digits, in decimal, so every implementation lands on the same double.
+    exact = Decimal(seconds) + Decimal('0.' + (m.group(7) or '0')).quantize(
+        Decimal('0.001'), rounding=ROUND_HALF_EVEN)
+    if exact == exact.to_integral_value():
+        return int(exact)
+    return float(exact)
 
 
 def _meta_agreement_key(field_def):
@@ -4079,7 +4082,8 @@ class SchemaInterpreter:
             declaration that produced its value (PS-490), a `name_from` key's included
             (PS-492). Nested entries list what is declared (PS-371, PS-481) and no
             internal field has one at any depth (PS-494).
-        A failed decode has no `_meta` (PS-497).
+        A failed decode has no `_meta` (PS-497), and neither has a malformed devEUI or
+        recvTime: each is an error, as in the specification prototype.
         """
         context = dict(input_metadata or {})
         if fPort is None and isinstance(context.get('fPort'), int):
@@ -4094,22 +4098,23 @@ class SchemaInterpreter:
             meta['schema'] = self.schema['name']
         if 'version' in self.source_schema:
             meta['version'] = self.source_schema['version']
+        # PS-496, PS-495: a context that is present but malformed is refused, not
+        # silently dropped - the Integration Layer binds identity to device_eui (IL-191),
+        # and a missing one would read as "not supplied".
         if context.get('devEUI') is not None:
             eui = normalise_dev_eui(context['devEUI'])
             if eui is None:
-                result.warnings.append(
-                    "devEUI %r is not 16 hexadecimal digits, so _meta has no device_eui "
-                    "(PS-496)" % (context['devEUI'],))
-            else:
-                meta['device_eui'] = eui
+                result.errors.append("devEUI %r is not 16 hexadecimal digits (PS-496)"
+                                     % (context['devEUI'],))
+                return result
+            meta['device_eui'] = eui
         if context.get('recvTime') is not None:
             rx_time = rx_time_seconds(context['recvTime'])
             if rx_time is None:
-                result.warnings.append(
-                    "recvTime %r is not an ISO 8601 time or a number of seconds, so _meta "
-                    "has no rx_time (PS-495)" % (context['recvTime'],))
-            else:
-                meta['rx_time'] = rx_time
+                result.errors.append("recvTime %r is not an ISO 8601 time or a number of "
+                                     "seconds (PS-495)" % (context['recvTime'],))
+                return result
+            meta['rx_time'] = rx_time
         if fPort is not None:
             meta['fPort'] = fPort                          # PS-340, PS-342: as supplied
 

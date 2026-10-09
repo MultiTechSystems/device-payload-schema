@@ -85,12 +85,23 @@ def test_dev_eui_is_normalised(text, eui):
     assert normalise_dev_eui(text) == eui  # PS-496
 
 
-def test_a_bad_dev_eui_is_left_out_with_a_warning():
-    result = SchemaInterpreter(FLAT).interpret(
-        b"\x01\x02", input_metadata={"devEUI": "nonsense"}
-    )
-    assert result.success and "device_eui" not in result.data["_meta"]
-    assert any("PS-496" in w for w in result.warnings)
+@pytest.mark.parametrize(
+    "context,message",
+    [
+        (
+            {"devEUI": "nonsense"},
+            "devEUI 'nonsense' is not 16 hexadecimal digits (PS-496)",
+        ),
+        (
+            {"recvTime": "yesterday"},
+            "recvTime 'yesterday' is not an ISO 8601 time or a number of seconds (PS-495)",
+        ),
+    ],
+)
+def test_a_malformed_context_fails_with_no_meta(context, message):
+    result = SchemaInterpreter(FLAT).interpret(b"\x01\x02", input_metadata=context)
+    assert not result.success and "_meta" not in result.data
+    assert result.errors == [message]
 
 
 @pytest.mark.parametrize(
@@ -99,6 +110,10 @@ def test_a_bad_dev_eui_is_left_out_with_a_warning():
         ("2026-08-26T12:00:00Z", 1787745600),
         ("2026-08-26T12:00:00.123Z", 1787745600.123),
         ("2026-08-26T12:00:00.120000Z", 1787745600.12),
+        ("2026-08-26T12:00:00.1234Z", 1787745600.123),
+        ("2026-08-26T12:00:00.1235Z", 1787745600.124),
+        ("2026-08-26T12:00:00.1225Z", 1787745600.122),
+        ("2026-08-26T12:00:00.9996Z", 1787745601),
         ("2026-08-26T12:00:00.000Z", 1787745600),
         ("2026-08-26T14:00:00+02:00", 1787745600),
         ("2026-08-26T07:30:00-0430", 1787745600),
