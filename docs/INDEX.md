@@ -123,7 +123,7 @@ Generated inventory of this repository: what lives where, what each document cov
 ## Device schemas
 
 271 schemas under `schemas/devices/`.
-Mean quality score 69.7% (PLATINUM 35, GOLD 40, SILVER 126, BRONZE 18, REJECTED 52). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+Mean quality score 69.7% (PLATINUM 36, GOLD 40, SILVER 125, BRONZE 18, REJECTED 52). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
@@ -138,7 +138,7 @@ Mean quality score 69.7% (PLATINUM 35, GOLD 40, SILVER 126, BRONZE 18, REJECTED 
 | dnt | 2 | 144 | SILVER 2 |
 | arwin | 1 | 22 | PLATINUM 1 |
 | digital-matter | 1 | 7 | SILVER 1 |
-| dragino | 1 | 5 | SILVER 1 |
+| dragino | 1 | 6 | PLATINUM 1 |
 | elsys | 1 | 2 | SILVER 1 |
 | hbi | 1 | 19 | SILVER 1 |
 | netvox | 1 | 34 | SILVER 1 |
@@ -323,7 +323,7 @@ Mean quality score 69.7% (PLATINUM 35, GOLD 40, SILVER 126, BRONZE 18, REJECTED 
 | `digital-matter/oyster` | 24 | 7 | ports | 100% | SILVER |
 | `dnt/dnt-lw-wsci-2-1-1` | 130 | 74 | fields | 81% | SILVER |
 | `dnt/dnt-lw-wsci` | 120 | 70 | fields | 81% | SILVER |
-| `dragino/laq4` | 14 | 5 | fields | 100% | SILVER |
+| `dragino/laq4` | 14 | 6 | fields | 100% | PLATINUM |
 | `elsys/ers` | 32 | 2 | fields | 71% | SILVER |
 | `hbi/mla20` | 108 | 19 | fields | 80% | SILVER |
 | `makerfabs/4-channel-adc` | 8 | 0 | fields | 16% | REJECTED |

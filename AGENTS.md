@@ -50,6 +50,8 @@ python3 tools/score_schema.py schemas/devices --all --report score-report.json
 
 # Generate a TS013 JavaScript codec (ChirpStack / TTN)
 python3 tools/generate_ts013_codec.py <schema.yaml> -o <output-dir>
+# ...decode-only and without commentary (about a quarter of the size)
+python3 tools/generate_ts013_codec.py <schema.yaml> -o <output-dir> --slim
 
 # First-pass conversion from a vendor codec - a starting point, not a finished
 # schema. See "Converting a vendor codec" below before trusting the output.
@@ -1222,8 +1224,9 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   codec is one of the five paths; Python's `repr` and Go's `FormatFloat` differ from it at
   both ends. A lookup value with a fraction matches no key: Go's `toInt`, Java's
   `intValue()` and C#'s `ToInt` all truncated 2.5 to key 2, unseen because no corpus vector
-  reaches it. The generated `encodeDownlink` reverses no lookup at all, so PS-409 is not
-  met on that path; that gap predates the CR. C has no lookup default of any kind.
+  reaches it. The generated `encodeDownlink` reverses lookups, `${value}` defaults
+  included, since its encoder became the runtime port described under "The generated
+  codec's encoder" below. C has no lookup default of any kind.
   `metadata.timestamps` gains `epoch`, `iso8601`/`unix_epoch` reporting rules and the
   `calendar` mode (PS-354 to PS-356, PS-410 to PS-413) in Python only, which PS-310
   permits; `metadata-epoch-calendar.yaml` holds the other four to decoding a schema that
@@ -1630,5 +1633,24 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   `bool` with `bit:` decode correctly in generated JavaScript, and
   `tools/vector-verdicts.py` holds both paths to every corpus vector. What remains is
   the generator reading a bit range's base in the schema's byte order where PS-059 says
-  big-endian (see SESSION-NOTES), and a field named `w` colliding with its `warnings`
-  array.
+  big-endian (see SESSION-NOTES). A field named like a codec variable (`d`, `w`, `pos`,
+  a helper's name or a reserved word) is staged as `name_` and reported under its own
+  name; `d` used to replace the output object, so decodeUplink returned `data: 0`.
+- **The generated codec's encoder is a runtime port of the reference's**, not code
+  unrolled per field. `ENCODER_RUNTIME_JS` in `tools/generate_ts013_codec.py` mirrors
+  `encode`/`_encode_field_list` function by function, each marked with the reference
+  function it ports, and walks the field list embedded beside it as JSON. The unrolled
+  encoder round-tripped 960 of the 1680 vectors the reference round-trips: it undid
+  modifiers in key order, never undid a stage, a lookup, an `encoding` or a sentinel,
+  wrote floats as integers and `s32` negatives wrong, wrote nothing for `match`,
+  `object` and `repeat`, and ignored the fPort it was asked for.
+  `tests/test_ts013_encode_parity.py` now holds `encodeDownlink(decodeUplink(p))` to
+  the reference's `encode(decode(p))` on every corpus decode vector - 1999 identical,
+  358 failing in both - so **a change to the reference's encoder needs the same change
+  in the runtime**, or that test fails. The cost is size: about 31 KB of runtime in every
+  codec, which took the median generated codec from 18 KB to roughly 50 KB. `--slim`
+  (`TS013Generator(schema, slim=True)`) leaves the encoder and the commentary out - median
+  about 12 KB - and its encodeDownlink reports that; a test holds its decode to the full
+  codec's over the corpus. The generated codec is chiefly a way to test and verify a
+  schema: the deployment target is the interpreted schema, which replaces a device's JS
+  codec rather than generating another one.

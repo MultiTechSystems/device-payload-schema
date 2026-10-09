@@ -183,7 +183,9 @@ class TestARangeCaseKey:
                               default="skip")
         assert decode(schema, "017F").data == {"kind": 1}
         js = TS013Generator(schema).generate()
-        assert "unreachable_case" not in js
+        # The decoder only: the encoder carries the field list as data, names and all.
+        decoder = js[js.index("function decodePayload("):js.index("var ENC_VARS")]
+        assert "unreachable_case" not in decoder
 
 
 class TestTheDefault:
