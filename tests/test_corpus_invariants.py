@@ -163,6 +163,11 @@ INTENTIONAL_UNCONSUMED: Dict[str, Tuple[int, str]] = {
         "`default: skip` with no case for 9: the construct's byte 7F is deliberately "
         "not read and decoding carries on",
     ),
+    "_language-conformance/leftover-bytes.yaml::two_bytes_more": (
+        2,
+        "PS-472's fixture: two bytes after the last field, reported by a warning and "
+        "otherwise decoded around",
+    ),
     "_language-conformance/unknown-tlv-tag-skip.yaml::undescribed_tag_stops_the_decode": (
         2,
         "undescribed tag 0x09 with no length_size: `unknown: skip` abandons the rest "

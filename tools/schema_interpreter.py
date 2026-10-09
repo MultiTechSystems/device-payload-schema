@@ -1482,6 +1482,9 @@ class SchemaInterpreter:
             self._load_errors.extend(optional_errors(group, f"ports[{port}].fields"))
         self._load_errors.extend(internal_name_errors(schema))
         self.schema = schema
+        self._pre_lookup = {}           # PS-475, reset by decode
+        self._guard_else = set()
+        self._leftover_reported = False
         self.endian = Endian(schema.get('endian', 'big'))
         self.name = schema.get('name', 'unknown')
         self.version = schema.get('version', 1)
@@ -2354,9 +2357,27 @@ class SchemaInterpreter:
                 raw, _ = self._read_int(buf, start, size, False)
         return (isinstance(raw, int) and not isinstance(raw, bool)) and raw in sentinels
 
+    def _range_value(self, field_def: Dict[str, Any], value: Any) -> Tuple[bool, Any]:
+        """(checked, value): the value `valid_range` compares, or (False, _) for none.
+
+        PS-475 puts the comparison after the arithmetic and before the lookup, so a
+        looked-up field is compared on the number its label stands for - compared after,
+        a label was never a number and every one read "good". A guard's `else` ends the
+        sequence (PS-443) and is not compared at all.
+        """
+        key = id(field_def)
+        if key in getattr(self, '_guard_else', ()):
+            return False, value
+        if field_def.get('lookup') is not None:
+            return key in self._pre_lookup, self._pre_lookup.get(key)
+        return True, value
+
     def _range_omits(self, field_def: Dict[str, Any], value: Any) -> bool:
         """PS-428: `out_of_range: omit` and a value outside `valid_range`."""
         if field_def.get('out_of_range') != 'omit':
+            return False
+        checked, value = self._range_value(field_def, value)
+        if not checked:
             return False
         bounds = field_def.get('valid_range')
         if not isinstance(bounds, (list, tuple)) or len(bounds) != 2:
@@ -2761,9 +2782,11 @@ class SchemaInterpreter:
             # Literal value
             return field_def.get('value')
 
+        self._guard_else.discard(id(field_def))
         if 'guard' in field_def:
             passed, fallback = self._evaluate_guard(field_def['guard'])
             if not passed:
+                self._guard_else.add(id(field_def))
                 return fallback if fallback is not None else float('nan')
 
         if field_def.get('ref'):
@@ -3254,9 +3277,15 @@ class SchemaInterpreter:
             # Where this entry begins, so PS-302 can count the bytes abandoned from the
             # unknown tag itself rather than from after it.
             entry_start = pos
-            # Read tag
-            if pos + tag_size > len(buf):
-                break
+            # PS-477: a tag is never partly read. Fewer bytes than the tag at the start of
+            # an entry is an error identifying the tlv; this used to stop the loop and
+            # report a complete decode. A composite tag's width is its tag_fields'.
+            width = (fixed_element_size(tag_fields) if tag_fields and tag_key else None) \
+                or tag_size
+            if pos + width > len(buf):
+                raise ValueError(
+                    f"tlv entry at offset {pos}: {len(buf) - pos} byte(s) remain, fewer "
+                    f"than its {width}-byte tag (PS-477)")
             
             if tag_fields and tag_key:
                 # Composite tag: read sub-fields
@@ -3291,6 +3320,9 @@ class SchemaInterpreter:
             data_length = None
             if length_size > 0:
                 if pos + length_size > len(buf):
+                    # No entry was decoded here: the bytes from its tag on are left over,
+                    # and PS-472 reports them from the tag's offset.
+                    pos = entry_start
                     break
                 if length_size == 1:
                     data_length = buf[pos]
@@ -3378,6 +3410,8 @@ class SchemaInterpreter:
                         f"unknown TLV tag ({tag_text}) at offset {entry_start}: "
                         f"{len(buf) - entry_start} of {len(buf)} byte(s) left undecoded"
                     )
+                # This warning is PS-472's for these bytes; no second one is reported.
+                self._leftover_reported = True
                 break
             
             # Decode fields for this tag
@@ -3450,6 +3484,9 @@ class SchemaInterpreter:
         """
         valid_range = field_def.get('valid_range')
         name = field_def.get('name', 'unknown')
+        checked, value = self._range_value(field_def, value)
+        if not checked:
+            return "good"
         
         if valid_range is None or not isinstance(value, (int, float)):
             return "good"
@@ -3494,11 +3531,32 @@ class SchemaInterpreter:
         if transform and isinstance(transform, list) and value is not OMITTED:
             value = self._apply_transform(float(value), transform)
         
+        # The value valid_range compares, before the lookup (PS-475).
+        if field_def.get('lookup') is not None and field_def.get('valid_range'):
+            self._pre_lookup[id(field_def)] = value
+            # An omitted value takes no further step (PS-443): it is not looked up, so
+            # an index the table lacks is no error when the field is dropped anyway.
+            if self._range_omits(field_def, value):
+                return value
         # Apply lookup table
         value = apply_lookup(value, field_def.get('lookup'))
         
         return value
     
+    def _report_leftover(self, payload: bytes, pos: int, result: DecodeResult) -> None:
+        """PS-472: bytes after the last field are reported, not silently dropped.
+
+        The decode is reported as it would be otherwise; this only warns, with the
+        offset of the first byte not decoded and the count to the end. A frame from newer
+        firmware and a frame decoded with the wrong layout both used to look complete.
+        """
+        left = len(payload) - pos
+        if left <= 0 or result.errors or self._leftover_reported:
+            return
+        result.warnings.append(
+            f"{left} byte(s) after the last field left undecoded, from offset {pos} "
+            f"(PS-472)")
+
     def decode(self, payload: bytes, fPort: int = None, input_metadata: Dict[str, Any] = None,
                direction: str = None) -> DecodeResult:
         """
@@ -3545,6 +3603,12 @@ class SchemaInterpreter:
         self._pending_absent = {}
         # `_quality` from match case bodies, which decode into a scratch result.
         self._case_quality = {}
+        # Set where a PS-302 warning has already reported the bytes left (PS-472).
+        self._leftover_reported = False
+        # PS-475: a looked-up field's pre-lookup value, and the guards that reported
+        # their `else`, by field definition.
+        self._pre_lookup = {}
+        self._guard_else = set()
         
         pos = 0
         fields = self._resolve_fields(fPort)
@@ -3552,6 +3616,7 @@ class SchemaInterpreter:
         pos = self._decode_field_list(fields, payload, 0, result)
         
         result.bytes_consumed = pos
+        self._report_leftover(payload, pos, result)
         
         # Metadata enrichment
         metadata_def = self.schema.get('metadata')

@@ -166,11 +166,13 @@ class TestTheCorpusUsesIt:
 
     def test_every_declared_expectation_names_a_tag(self):
         # A fragment weak enough to match any warning would assert nothing. Every entry
-        # in the corpus names the tag, which is what PS-301 requires a warning to carry.
+        # in the corpus names what the warning is about: the tag, which PS-301 requires
+        # a warning to carry, or for bytes left after the last field the offset, which
+        # PS-472 requires.
         for path, vector in self.vectors_with_the_key():
             for entry in vector["expected_warnings"]:
                 fragments = entry if isinstance(entry, list) else [entry]
-                assert any("0x" in fragment for fragment in fragments), (
+                assert any("0x" in f or "offset " in f for f in fragments), (
                     "%s/%s asserts nothing identifying" % (path.name, vector.get("name"))
                 )
 

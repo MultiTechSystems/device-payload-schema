@@ -1,0 +1,23 @@
+# PS-472 and PS-474 (CR-2026-085): bytes after the last field are decoded around, not
+# dropped in silence. The decode is reported as it would be otherwise, with a warning
+# giving the offset of the first byte not decoded and the count to the end; an encoder
+# writes nothing after the last field, so the second vector re-encodes to its first byte.
+name: probe_leftover_bytes
+endian: big
+fields:
+- name: reading
+  type: u8
+test_vectors:
+- name: exact_frame
+  source: spec-example
+  payload: "2A"
+  expected:
+    reading: 42
+  expected_warnings: []
+- name: two_bytes_more
+  source: spec-example
+  payload: "2A 01 02"
+  expected:
+    reading: 42
+  expected_warnings:
+    - ["2 byte", "offset 1"]
