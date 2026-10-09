@@ -617,6 +617,19 @@ public static class SchemaDecoder
     static object? ApplyPostRead(object? value, SchemaField field, DecodeContext ctx,
         bool fieldRules = false)
     {
+        // A failed guard's `else` is reported as declared: no modifier, stage or lookup
+        // (PS-444). The lookup used to index it, so `else: 7` came out as the eighth label.
+        bool asDeclared = false;
+        if (value is DeclaredElse declared)
+        {
+            value = declared.Value;
+            asDeclared = true;
+            // `type: integer` reports an integral else as an integer, as it did before.
+            if (field.IntegerResult && declared.Value == Math.Floor(declared.Value)
+                && !double.IsInfinity(declared.Value))
+                value = (long)declared.Value;
+        }
+
         // Apply modifiers, skipping a Number whose value came from a ref or a
         // compute - DecodeNumber already applied its stages, so doing it again here
         // doubles them. The ref case was already skipped; compute was not, so a
@@ -654,7 +667,7 @@ public static class SchemaDecoder
         // zero or be contiguous (PS-268). An unmatched value omits the field rather
         // than reporting the raw integer under a name that promises a label, unless
         // a default is declared (PS-269).
-        if (field.Lookup != null)
+        if (field.Lookup != null && !asDeclared)
         {
             var (ok, numVal) = Helpers.ToFloat64(value);
             if (ok)
@@ -663,6 +676,13 @@ public static class SchemaDecoder
                 // key 2. An integral double such as 7.0 is the key 7.
                 int intVal = (int)numVal;
                 bool integral = numVal == Math.Round(numVal) && !double.IsInfinity(numVal);
+                // A computed value reaches the lookup after its arithmetic (PS-443), so it
+                // may have a fraction. That is no index of a sequence, and an error
+                // (PS-105); it used to be truncated, reporting 1.5 as index 1.
+                if (!integral && field.LookupIsSequence)
+                    throw new InvalidOperationException(
+                        $"lookup index {numVal.ToString(CultureInfo.InvariantCulture)} is not an index "
+                        + $"of a {field.Lookup.Count}-entry sequence (PS-105)");
                 var template = Wave5.Template(field);
                 if (integral && field.Lookup.TryGetValue(intVal, out var lookupStr))
                     value = lookupStr;
@@ -699,10 +719,9 @@ public static class SchemaDecoder
     }
 
     /// <summary>
-    /// Applies a transform array in list order. A stage normally carries one
-    /// arithmetic op; where it carries several they run in the canonical order
-    /// mult, div, add, so a stage cannot mean different things in different
-    /// languages. A stage may instead name an operation, as {op: round, decimals: N}.
+    /// Applies a transform array in list order. Each stage carries exactly one
+    /// operation, which the parser enforces (PS-452); a stage may name one, as
+    /// {op: round, decimals: N}.
     /// </summary>
 
     /// <summary>
@@ -875,7 +894,6 @@ public static class SchemaDecoder
                 if (stage.Div.Value == 0) return double.NaN;   // PS-100: the field is absent
                 numVal /= stage.Div.Value;
             }
-            if (stage.Sub.HasValue) numVal -= stage.Sub.Value;
             if (stage.Add.HasValue) numVal += stage.Add.Value;
         }
         return numVal;
@@ -919,10 +937,39 @@ public static class SchemaDecoder
         return ApplyTransformStages(numVal, field.Transform);
     }
 
+    /// <summary>
+    /// A failed guard's `else`: the value as declared (PS-444), which ApplyPostRead
+    /// reports without passing it through the lookup.
+    /// </summary>
+    internal sealed class DeclaredElse
+    {
+        public double Value { get; }
+        public DeclaredElse(double value) => Value = value;
+    }
+
+    /// <summary>
+    /// A computed field's value (PS-443): its source - the `ref` value with its
+    /// `polynomial`, or the `compute` result - then the bare modifiers in the canonical
+    /// order (PS-101), then the transform stages. The lookup follows in ApplyPostRead, as
+    /// for a field read from the payload. The `compute` path used to take the stages and
+    /// drop the modifiers, so `mult: 10` on a compute of 2 reported 2.
+    ///
+    /// PS-444: the guard is evaluated before the source, so a failed one never resolves a
+    /// reference it was guarding, and its `else` is reported exactly as declared.
+    /// </summary>
     static object? DecodeNumber(SchemaField field, DecodeContext ctx)
     {
-        double numVal;
+        if (field.Ref == null && field.Compute == null)
+        {
+            // A literal (PS-357). PS-445 refuses a guard here at load.
+            var (ok, v) = Helpers.ToFloat64(field.Value);
+            return ok ? v : 0.0;
+        }
 
+        if (field.Guard != null && !EvaluateGuardConditions(field.Guard, ctx))
+            return new DeclaredElse(field.Guard.ElseValue);
+
+        double source;
         if (field.Ref != null)
         {
             var refName = field.Ref.TrimStart('$');
@@ -931,43 +978,21 @@ public static class SchemaDecoder
                 ctx.CheckUnbound(refName);    // PS-368
                 throw new InvalidOperationException($"Ref field not found: {refName}");
             }
-
             var (ok, rv) = Helpers.ToFloat64(refVal);
-            numVal = ok ? rv : 0;
-
+            source = ok ? rv : 0;
             if (field.Polynomial is { Length: > 0 })
-                numVal = Helpers.EvaluatePolynomial(field.Polynomial, numVal);
-
-            // Modifiers first, then the transform stages - the order the interpreter
-            // uses. Running the stages first made a field that scales with `mult` and
-            // then rounds with a stage round before it had scaled.
-            numVal = ApplyModifiers(numVal, field);
-        }
-        else if (field.Compute != null)
-        {
-            // Guard must be checked before compute to prevent e.g. div-by-zero
-            if (field.Guard != null && !EvaluateGuardConditions(field.Guard, ctx))
-                return field.Guard.ElseValue;
-            // A compute takes its transform stages and no bare modifiers, as the
-            // interpreter does. These were not applied at all, so a computed field
-            // asking to be rounded was reported unrounded.
-            var computed = EvaluateCompute(field.Compute, ctx);
-            // A zero divisor omits the field (PS-278), short-circuiting before the
-            // transform stages so they never see the sentinel.
-            if (IsComputeOmitted(computed)) return null;
-            numVal = ApplyTransformStages(computed, field.Transform);
+                source = Helpers.EvaluatePolynomial(field.Polynomial, source);
         }
         else
         {
-            var (ok, v) = Helpers.ToFloat64(field.Value);
-            numVal = ok ? v : 0;
+            source = EvaluateCompute(field.Compute!, ctx);
+            // A zero divisor omits the field (PS-278), short-circuiting before the
+            // arithmetic so it never sees the sentinel.
+            if (IsComputeOmitted(source)) return null;
         }
 
-        // Guard for non-compute fields (ref-based)
-        if (field.Guard != null && field.Compute == null)
-            numVal = EvaluateGuard(field.Guard, numVal, ctx);
-
-        return numVal;
+        // Applied here exactly once; ApplyPostRead skips a computed field's arithmetic.
+        return ApplyModifiers(source, field);
     }
 
     static double EvaluateCompute(ComputeDef cd, DecodeContext ctx)
@@ -1029,30 +1054,6 @@ public static class SchemaDecoder
             if (cond.Ne.HasValue && fv == cond.Ne.Value) return false;
         }
         return true;
-    }
-
-    static double EvaluateGuard(GuardDef gd, double value, DecodeContext ctx)
-    {
-        foreach (var cond in gd.When)
-        {
-            var fieldName = cond.Field.TrimStart('$');
-            if (!ctx.Variables.TryGetValue(fieldName, out var fieldVal))
-            {
-                ctx.CheckUnbound(fieldName);    // PS-368
-                return gd.ElseValue;
-            }
-
-            var (ok, fv) = Helpers.ToFloat64(fieldVal);
-            if (!ok) return gd.ElseValue;
-
-            if (cond.Gt.HasValue && !(fv > cond.Gt.Value)) return gd.ElseValue;
-            if (cond.Gte.HasValue && !(fv >= cond.Gte.Value)) return gd.ElseValue;
-            if (cond.Lt.HasValue && !(fv < cond.Lt.Value)) return gd.ElseValue;
-            if (cond.Lte.HasValue && !(fv <= cond.Lte.Value)) return gd.ElseValue;
-            if (cond.Eq.HasValue && fv != cond.Eq.Value) return gd.ElseValue;
-            if (cond.Ne.HasValue && fv == cond.Ne.Value) return gd.ElseValue;
-        }
-        return value;
     }
 
     static object? DecodeMatch(SchemaField field, DecodeContext ctx)
