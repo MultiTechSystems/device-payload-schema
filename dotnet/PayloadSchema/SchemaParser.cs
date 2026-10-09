@@ -133,6 +133,12 @@ public static partial class SchemaParser
         CheckIterator(root);
         CheckWave6b(root);    // PS-404, PS-433
         schema.RepeatOnlyNames = RepeatOnlyNames(root);
+        // PS-491 (CR-2026-096): one reported name's declarations in one field list agree
+        // on unit, senml and ipso, or `_meta` could not describe the name.
+        var metaErrors = Meta.DeclarationErrors(root);
+        if (metaErrors.Count > 0)
+            throw new InvalidOperationException(metaErrors[0]);
+        schema.Root = root;
 
         if (root.TryGetValue("definitions", out var defs) && defs is YamlMappingNode defsMap)
         {
@@ -475,7 +481,7 @@ public static partial class SchemaParser
 
     static SchemaField ParseField(YamlMappingNode fm)
     {
-        var f = new SchemaField();
+        var f = new SchemaField { Node = fm };
 
         if (fm.TryGetValue("name", out var name))
             f.Name = Scalar(name);

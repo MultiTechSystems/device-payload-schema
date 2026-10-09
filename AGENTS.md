@@ -196,7 +196,7 @@ the same vectors:
 |---|---|---|---|
 | Python | `tests/test_corpus_conformance.py` | every vector | 1698 |
 | Go | `go/schema/corpus_conformance_test.go` | 2371 | 1715 (plain API 1692) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2371 | 1698 |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2549 | 1744 |
 | Java | `bindings/java/.../CorpusConformanceTest.java` | 2371 | 1698 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 540 of 540 attempted | n/a |
 
@@ -757,7 +757,7 @@ exercised to the best-covered part of the project:
 | Python | `tests/test_encode_round_trip.py` | 1698 |
 | Go | `go/schema/corpus_encode_test.go` | 1715 (plain 1692) |
 | Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1698 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1698 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1744 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported

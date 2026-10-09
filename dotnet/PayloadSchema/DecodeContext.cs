@@ -32,6 +32,24 @@ public class DecodeContext
     internal int FlaggedDepth { get; set; }
 
     /// <summary>
+    /// PS-490: the declaration that wrote each top-level reported value, by output key.
+    /// The last one decoded is the one whose value is reported, so the last write wins.
+    /// Mirrors _producers in tools/schema_interpreter.py.
+    /// </summary>
+    internal Dictionary<string, SchemaField> Producers { get; } = new(StringComparer.Ordinal);
+    /// <summary>Above zero inside an object's members or a repeat's elements, which record nothing.</summary>
+    internal int MetaDepth { get; set; }
+
+    /// <summary>Records the declaration about to report <paramref name="key"/> (its name by default).</summary>
+    internal void Produced(SchemaField field, string? key = null)
+    {
+        if (MetaDepth > 0) return;
+        key ??= field.Name;
+        if (!string.IsNullOrEmpty(key) && !key.StartsWith('_'))
+            Producers[key] = field;
+    }
+
+    /// <summary>
     /// Records an omitted reading (PS-427, PS-428). A field declaring valid_range produces
     /// `_quality` itself, so its mark goes in at once; any other waits (PS-182). Mirrors
     /// _mark_absent in tools/schema_interpreter.py.

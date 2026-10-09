@@ -1,6 +1,8 @@
 // Copyright (c) 2024-2026 Multitech Systems, Inc.
 // SPDX-License-Identifier: MIT
 
+using YamlDotNet.RepresentationModel;
+
 namespace PayloadSchema;
 
 public enum FieldType
@@ -264,6 +266,12 @@ public class SchemaField
     public FlaggedDef? Flagged { get; set; }
     public SchemaField? TLVInline { get; set; }
     public SchemaField? MatchInline { get; set; }
+
+    /// <summary>
+    /// The mapping this field was parsed from, after `$ref` expansion. `_meta` describes a
+    /// field as declared (PS-493, PS-178), which the typed properties above no longer say.
+    /// </summary>
+    internal YamlMappingNode? Node { get; set; }
 }
 
 public class PortDef
@@ -304,4 +312,6 @@ public class PayloadSchemaDefinition
     public Dictionary<string, DefinitionDef>? Definitions { get; set; }
     /// <summary>Names declared only inside some repeat's elements (PS-368).</summary>
     internal HashSet<string> RepeatOnlyNames { get; set; } = new();
+    /// <summary>The document after `$ref` expansion, for `_meta` (PS-175).</summary>
+    internal YamlMappingNode? Root { get; set; }
 }

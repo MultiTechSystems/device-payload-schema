@@ -3,35 +3,14 @@
 
 using System.Globalization;
 using System.Text;
+using YamlDotNet.RepresentationModel;
 
 namespace PayloadSchema;
 
 public static class SchemaDecoder
 {
     public static Dictionary<string, object?> Decode(PayloadSchemaDefinition schema, byte[] data)
-    {
-        // PS-459, PS-460: a ports schema decoded with no FPort selects nothing. This
-        // decoded the empty top-level field list and returned {} with success.
-        if (schema.Ports is { Count: > 0 })
-            throw new InvalidOperationException(
-                $"no FPort was supplied, and schema '{schema.Name}' selects its fields by port (PS-459)");
-        var ctx = new DecodeContext(data, schema.Endian) { RepeatOnlyNames = schema.RepeatOnlyNames };
-        var result = new Dictionary<string, object?>();
-
-        MergeTo(result, DecodeFields(schema.Fields, ctx, schema));
-        ReportLeftover(ctx);
-
-        // PS-427, PS-428: an omitted reading joins `_quality` only where it is produced.
-        ctx.FinishQuality();
-        if (ctx.Quality.Count > 0)
-            result["_quality"] = new Dictionary<string, string>(ctx.Quality);
-        // Warnings were collected and never reported, so an unknown TLV tag had nowhere
-        // to surface (PS-301). Reported the way _quality is.
-        if (ctx.Warnings.Count > 0)
-            result["_warnings"] = new List<string>(ctx.Warnings);
-
-        return result;
-    }
+        => Run(schema, data, null, null).result;
 
     /// <summary>
     /// Decode with port-based schema selection.
@@ -45,10 +24,94 @@ public static class SchemaDecoder
     /// </summary>
     public static Dictionary<string, object?> DecodeWithPort(PayloadSchemaDefinition schema, byte[] data, int fPort,
         string? direction = null)
-    {
-        SchemaDirection.Check(schema, fPort, direction);
+        => Run(schema, data, fPort, direction).result;
 
-        var fields = ResolveFields(schema, fPort);
+    /// <summary>
+    /// The interpreter output: the decoded result with its `_meta` as the last key
+    /// (PS-174, PS-175, PS-180; CR-2026-096). <see cref="Decode"/> and
+    /// <see cref="DecodeWithPort"/> are unchanged and never carry it.
+    ///
+    /// The input context (PS-495) is the FPort - selecting the port as
+    /// <see cref="DecodeWithPort"/> does, null meaning none - the receive time and the
+    /// device EUI. A failed decode throws exactly as the decode does and produces no
+    /// `_meta` (PS-497); so does a devEUI or recvTime that is present but malformed.
+    /// Mirrors interpret in tools/schema_interpreter.py.
+    /// </summary>
+    public static Dictionary<string, object?> Interpret(PayloadSchemaDefinition schema, byte[] payload,
+        InputContext context, string? direction = null)
+    {
+        var (result, ctx, fields) = Run(schema, payload, context.FPort, direction);
+
+        var meta = new Dictionary<string, object?>();
+        var root = schema.Root;
+        if (root != null && Meta.FromYaml(FindKey(root, "name")) is { } schemaName)
+            meta["schema"] = schemaName;
+        if (root != null && FindKey(root, "version") is { } version)
+            meta["version"] = Meta.FromYaml(version);
+        // PS-496, PS-495: a context that is present but malformed is refused, not
+        // silently dropped - a missing device_eui would read as "not supplied".
+        if (context.DevEUI != null)
+        {
+            var eui = Meta.NormaliseDevEui(context.DevEUI)
+                ?? throw new InvalidOperationException(
+                    $"devEUI {Meta.PyRepr(context.DevEUI)} is not 16 hexadecimal digits (PS-496)");
+            meta["device_eui"] = eui;
+        }
+        if (context.RecvTime != null)
+        {
+            var rxTime = Meta.RxTimeSeconds(context.RecvTime)
+                ?? throw new InvalidOperationException(
+                    $"recvTime {Meta.PyRepr(context.RecvTime)} is not an "
+                    + "ISO 8601 time or a number of seconds (PS-495)");
+            meta["rx_time"] = rxTime;
+        }
+        if (context.FPort != null)
+            meta["fPort"] = (long)context.FPort.Value;                 // PS-340, PS-342: as supplied
+
+        var declared = Meta.Declarations(fields.Select(f => f.Node).OfType<YamlMappingNode>());
+        var entries = new Dictionary<string, object?>();
+        foreach (var key in result.Keys)
+        {
+            if (key.StartsWith('_')) continue;                          // `_quality`, `_warnings`
+            var source = ctx.Producers.TryGetValue(key, out var producer) && producer.Node != null
+                ? producer.Node
+                : declared.GetValueOrDefault(key);
+            entries[key] = source != null ? Meta.FieldMeta(source) : new Dictionary<string, object?>();
+        }
+        meta["fields"] = entries;
+
+        return new Dictionary<string, object?>(result) { ["_meta"] = meta };
+    }
+
+    static YamlNode? FindKey(YamlMappingNode map, string key)
+    {
+        foreach (var kv in map.Children)
+            if (kv.Key is YamlScalarNode s && s.Value == key)
+                return kv.Value;
+        return null;
+    }
+
+    /// <summary>
+    /// One decode: the result, the context it ran in (for `_meta`'s producers) and the
+    /// field list selected. With no FPort a ports schema selects nothing (PS-459, PS-460):
+    /// it used to decode the empty top-level list and return {} with success.
+    /// </summary>
+    static (Dictionary<string, object?> result, DecodeContext ctx, List<SchemaField> fields) Run(
+        PayloadSchemaDefinition schema, byte[] data, int? fPort, string? direction)
+    {
+        List<SchemaField> fields;
+        if (fPort == null)
+        {
+            if (schema.Ports is { Count: > 0 })
+                throw new InvalidOperationException(
+                    $"no FPort was supplied, and schema '{schema.Name}' selects its fields by port (PS-459)");
+            fields = schema.Fields;
+        }
+        else
+        {
+            SchemaDirection.Check(schema, fPort.Value, direction);
+            fields = ResolveFields(schema, fPort.Value);
+        }
         var ctx = new DecodeContext(data, schema.Endian) { RepeatOnlyNames = schema.RepeatOnlyNames };
         var result = new Dictionary<string, object?>();
 
@@ -64,7 +127,7 @@ public static class SchemaDecoder
         if (ctx.Warnings.Count > 0)
             result["_warnings"] = new List<string>(ctx.Warnings);
 
-        return result;
+        return (result, ctx, fields);
     }
 
     /// <summary>
@@ -227,7 +290,12 @@ public static class SchemaDecoder
                 // Without this an intermediate used to combine two words appeared
                 // in the decoded output.
                 if (!field.Name.StartsWith("_"))
-                    result[ResolveFieldName(field, ctx)] = value;
+                {
+                    var outputName = ResolveFieldName(field, ctx);
+                    if (outputName != field.Name)
+                        ctx.Produced(field, outputName);                      // PS-492
+                    result[outputName] = value;
+                }
                 // Keyed by the schema-level name in Variables so $references keep
                 // working when name_from is in play (PS-267).
                 ctx.Variables[field.Name] = value;
@@ -265,6 +333,7 @@ public static class SchemaDecoder
 
         foreach (var subfield in field.ByteGroup)
         {
+            ctx.Produced(subfield);                                            // PS-490
             object raw;
             var bitRange = Helpers.ParseBitRange(subfield.RawType);
             if (bitRange != null)
@@ -313,6 +382,19 @@ public static class SchemaDecoder
     }
 
     static object? DecodeField(SchemaField field, DecodeContext ctx, PayloadSchemaDefinition? schema)
+    {
+        // PS-490: recorded where the field is decoded, as _decode_field does. An object's
+        // members and a repeat's elements are another level of output, described by the
+        // declaration's nested entries (PS-371, PS-481), not by what they wrote.
+        ctx.Produced(field);
+        if (field.Type is not (FieldType.Object or FieldType.Repeat))
+            return DecodeFieldBody(field, ctx, schema);
+        ctx.MetaDepth++;
+        try { return DecodeFieldBody(field, ctx, schema); }
+        finally { ctx.MetaDepth--; }
+    }
+
+    static object? DecodeFieldBody(SchemaField field, DecodeContext ctx, PayloadSchemaDefinition? schema)
     {
         // A negative Length is the `remaining` sentinel and is passed through to
         // Read, which resolves it; only an absent length infers from the type.
@@ -1271,6 +1353,9 @@ public static class SchemaDecoder
                 var tagValues = new Dictionary<string, int>();
                 foreach (var tf in field.TagFields)
                 {
+                    // The reference reads a composite tag's components as fields, which
+                    // records them (PS-490); a case member of the same name overwrites it.
+                    if (field.TagKey != null) ctx.Produced(tf);
                     var data = ctx.Read(TagFieldWidth(tf));
                     int val = (int)Helpers.DecodeUint(data, ctx.Endian);
                     if (!string.IsNullOrEmpty(tf.Name))
