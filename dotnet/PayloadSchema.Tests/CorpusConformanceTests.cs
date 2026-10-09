@@ -42,7 +42,7 @@ public class CorpusConformanceTests
     // (4), and match-default-skip.yaml's skipped body now expects the PS-472 warning.
     // All six new vectors decode here, so the floor is the full 2371 (2382 vectors, 11
     // without a payload or an expected block).
-    const int CorpusFloor = 2373;   // dl-atm41g2's two vendor vectors (+2)
+    const int CorpusFloor = 2413;   // dl-atm41g2's two vendor vectors (+2)
 
     readonly ITestOutputHelper _output;
 
