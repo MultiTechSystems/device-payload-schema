@@ -1557,8 +1557,8 @@ _RECV_TIME = re.compile(
 
 def meta_type(field_def):
     """A `_meta` entry's `type` (PS-493): the declared type, an alias by its canonical
-    name, a bit range as written. A named `tlv` with `merge: false` reports its channels
-    and is `tlv`. A field with no type is never reported - PS-011 and PS-441 make it a
+    name, a bit range as written. A `tlv` with `merge: false` reports its entries under
+    `channels`, and that entry is `tlv` (PS-493). A field with no type is never reported - PS-011 and PS-441 make it a
     schema error - so no type is invented for one; None here leaves `type` out."""
     declared = field_def.get('type')
     if isinstance(declared, str):
@@ -1606,7 +1606,13 @@ def meta_declarations(fields):
                     if isinstance(body, list):
                         visit(body)
             tlv = f.get('tlv')
-            if isinstance(tlv, dict) and tlv.get('merge', True) is not False:
+            if isinstance(tlv, dict):
+                if tlv.get('merge', True) is False:
+                    # Its entries are reported as a list under the fixed key `channels`
+                    # (Clause 4), whose entry is `tlv` (PS-493). A tlv has no name of its
+                    # own (PS-448).
+                    found.setdefault('channels', f)
+                    continue
                 for body in (tlv.get('cases') if isinstance(tlv.get('cases'), dict) else {}).values():
                     if isinstance(body, list):
                         visit(body)

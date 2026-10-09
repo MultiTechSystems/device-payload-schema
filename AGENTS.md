@@ -1346,8 +1346,44 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   XML, not copied by hand. Measured on the corpus: 70 device-schema and 39 library fields
   declare a unit the registry lacks (`d`, `kPa`, `mg/m³`, `°C`, `bar`, ...) and now carry no
   `u` in SenML; 534 are re-expressed, most often `/100`, `ms`, `ppm`, `mm` and `mV`.
-- **`_meta` is not produced by any implementation**, so CR-2026-043 (`_meta.fPort`) and
-  the `_meta` parts of CR-2026-054 wait for their own change (decided 2026-10-05).
+- **`_meta` (CR-2026-096, with CR-2026-088's PS-480/481 and CR-2026-095's PS-489,
+  2026-10-09).**
+  - **Where:** Python, Go, Java and C# produce it through `interpret()` / `Interpret()`.
+    `decode()` is unchanged and never carries it: td-tools reads `decode()`, and a TS013
+    codec never carries `_meta` (PS-467). C will produce it on its gateway tier.
+  - **Input context (PS-495):** `fPort`, plus `input_metadata` with `recvTime` and `devEUI`.
+    A test vector supplies it the same way.
+  - **One rule decides most of the code, PS-490:** an entry comes from the declaration that
+    produced the value. Each language records it where a top-level field is decoded, last
+    write wins, never inside an object or repeat (a depth counter), and under the resolved
+    key for `name_from`. With nothing recorded, an entry falls back to the first declaration,
+    else `{}`. That happens for a Python-only `metadata` block key and a raw tlv's
+    `unknown_tags`. Nested entries are declared, not produced.
+  - **Read the declaration as written.** Go, Java and C# all read the field's raw YAML
+    mapping, not their typed model, because the typed model had already canonicalised the
+    type and dropped `unit`, `ipso` and `senml`. Go also recovers YAML key order from the
+    node tree, since a map has none and lookup labels are listed in schema order.
+  - **Guard: `make gate-verdicts` rule 3.** Every runner writes `CORPUS_META_REPORT`, and
+    every corpus vector's `_meta` must equal Python's exactly in Go, Java and C#. It
+    measured 2549 of 2549 identical on landing. `expected_meta` on a vector is compared
+    exactly by all four runners; the `meta-*.yaml` fixtures carry it.
+  - **Taken from the spec prototype where the text was silent** (CR-2026-097, proposed,
+    settles these):
+    - a malformed devEUI or recvTime is an error and produces no `_meta`;
+    - `rx_time` keeps milliseconds, rounded half to even in decimal;
+    - `version` only when declared;
+    - PS-491 compares ipso with its defaults filled in.
+  - **PS-491** (one name's declarations in one field list agree on unit, senml and ipso) is
+    checked at load everywhere and rejects no corpus schema. Go, Java and C# report only the
+    first violation; Python reports all.
+  - **Known gaps, not fixed here:**
+    - A named `tlv` with `merge: false` reports under `channels`, not its own name, so its
+      `_meta` entry is `{}`. No corpus schema uses it.
+    - Java decodes a field with no `type` as `u8` when it carries a construct key whose
+      value is malformed (`match: 3`), which slips past the PS-334 check.
+    - Go reads a typeless tlv `tag_fields` member, and an enum with no `base`, as one byte.
+    - PS-498 (enum `descriptions`, MAY) is not produced.
+  - CR-2026-043 (`_meta.fPort`) and the `_meta` parts of CR-2026-054 land with this.
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.

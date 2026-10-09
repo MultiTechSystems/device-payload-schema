@@ -39,11 +39,86 @@ An integral value is reported as an integer (`65`, not `65.0`), as a JavaScript 
 would (CR-2026-008). Keys beginning with `_` are the interpreter's own: `_quality` appears
 when a decoded field declares `valid_range` (Python, Go, C# and the TS013 codec; not Java),
 and Go, Java and C# add `_warnings` when the decode had something to report (Python returns
-those in `result.warnings` instead). No interpreter emits a `_meta` key: the
-`_meta`-annotated JSON the Integration Layer (`integration-layer-proto`) consumes is not
-produced by any decoder in this repository.
+those in `result.warnings` instead). `decode()` never adds `_meta`; `interpret()` does
+(section 1a).
 
 **Use case:** Direct application use, custom backends, simple integrations.
+
+---
+
+## 1a. Interpreter Output: decoded JSON and `_meta`
+
+`_meta` is the normative interface to the Integration Layer (PS-175, PS-180). It is the
+schema's semantic annotations and the uplink's context, beside the decoded values, so a
+converter downstream can name, type and route each value without reading the schema.
+
+`decode()` is unchanged and returns the decoded fields alone, because existing callers such
+as td-tools read it. `interpret()` returns the same decoded fields with `_meta` added last.
+A generated TS013 codec never carries `_meta` (PS-467), and the C interpreter does not
+produce it yet.
+
+```json
+{
+  "temperature": 23.1,
+  "humidity": 50,
+  "_meta": {
+    "schema": "meta_device_context",
+    "version": 2,
+    "device_eui": "00112233445566aa",
+    "rx_time": 1787745600.123,
+    "fPort": 7,
+    "fields": {
+      "temperature": {"type": "s16", "unit": "Cel",
+                      "ipso": {"object": 3303, "instance": 0, "resource": 5700},
+                      "senml": {"name": "temp"}, "description": "Air temperature"},
+      "humidity": {"type": "u8", "unit": "%RH"}
+    }
+  }
+}
+```
+
+**The input context (PS-495)** is the TS013 uplink input plus the device's EUI:
+- `fPort`;
+- `input_metadata`, carrying `recvTime` (ISO 8601 or seconds) and `devEUI`.
+
+A test vector supplies it the same way, through its `fPort` and `input_metadata`.
+
+| Language | Call |
+|---|---|
+| Python | `SchemaInterpreter(schema).interpret(payload, fPort=7, input_metadata={"recvTime": ..., "devEUI": ...})` |
+| Go | `s.Interpret(payload, schema.InputContext{FPort: &port, RecvTime: ..., DevEUI: ...})` |
+| Java | `schema.interpret(payload, new InputContext(7, recvTime, devEui))` |
+| C# | `SchemaDecoder.Interpret(schema, payload, new InputContext(7, recvTime, devEui))` |
+
+**Device level:**
+- `schema` and `version` come from the schema.
+- `device_eui` is 16 lower-case hex digits, with separators removed (PS-496).
+- `rx_time` is Unix seconds in UTC, keeping milliseconds (PS-177).
+- `fPort` is reported as supplied, even where selection fell through to `default` (PS-342).
+
+A key whose source is absent is omitted. A devEUI or recvTime that is present but malformed
+is an error, and a failed decode produces no `_meta` (PS-497).
+
+**`fields`** has exactly one entry per top-level reported key (PS-181). Each entry comes from
+the declaration that produced the value (PS-490), so a name declared in two cases is typed by
+the case that was taken. A `name_from` key gets its declaration's entry (PS-492). The entry's
+attributes are:
+- `type`: the declared type, an alias written canonically and a bit range as written (PS-493);
+- `unit`: `senml.unit`, else `unit`, never converted (PS-178);
+- `ipso`: with its defaults filled in;
+- `senml.name` (PS-480);
+- `description`.
+
+An object's `fields` and a repeat's `elements` list what is declared (PS-481, PS-371). No
+internal field has an entry at any depth (PS-494). A repeat element's per-element `unit`,
+`ipso.instance` and `identity` are listings, marked `open` where the field's lookup default
+carries `${value}` (PS-375, PS-489).
+
+**Schema rule (PS-491):** the declarations of one reported name in one field list must agree
+on `unit`, `senml` and `ipso`, or the schema is rejected at load. No corpus schema breaks it.
+
+`make gate-verdicts` compares every corpus vector's `_meta` across Python, Go, Java and C#
+(rule 3). A test vector may pin it with `expected_meta`, which is compared exactly.
 
 ---
 

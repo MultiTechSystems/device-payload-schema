@@ -40,7 +40,7 @@ Generated inventory of this repository: what lives where, what each document cov
 | [`INTEGRATION-LAYER.md`](INTEGRATION-LAYER.md) | How decoded payloads are transformed into WoT Thing Descriptions, SenML, IPSO, and other output... | 562 |
 | [`IPSO-REFERENCE.md`](IPSO-REFERENCE.md) | Complete reference for IPSO Smart Objects (OMA LwM2M) used in LoRaWAN payload schemas. | 126 |
 | [`LANGUAGE-ANALYSIS.md`](LANGUAGE-ANALYSIS.md) | This document explains the design decisions behind the Payload Schema language. | 390 |
-| [`OUTPUT-FORMATS.md`](OUTPUT-FORMATS.md) | The Payload Schema decoder can output data in multiple formats for different platforms and... | 527 |
+| [`OUTPUT-FORMATS.md`](OUTPUT-FORMATS.md) | The Payload Schema decoder can output data in multiple formats for different platforms and... | 602 |
 | [`SCHEMA-DEVELOPMENT-GUIDE.md`](SCHEMA-DEVELOPMENT-GUIDE.md) | Best practices for creating complete, validated payload schemas. | 215 |
 | [`SCHEMA-LANGUAGE-REFERENCE.md`](SCHEMA-LANGUAGE-REFERENCE.md) | Complete reference for the LoRa Alliance Payload Schema specification (v0.5.0). | 1599 |
 | [`SESSION-NOTES-2026-02-25.md`](SESSION-NOTES-2026-02-25.md) | The prototype tests were using a custom REQ-xxx-yyy numbering scheme that was inconsistent with the... | 78 |
@@ -61,7 +61,7 @@ Generated inventory of this repository: what lives where, what each document cov
 - **INTEGRATION-LAYER.md** — The Problem; Two-Layer Architecture; Decoder Output: The Integration Boundary; Integration Profile; Protocol Converters; Format Details; Context Layering; Where the Integration Layer Runs; Relationship to TS013; What Belongs Where; Version History
 - **IPSO-REFERENCE.md** — Common Sensor Objects (3300-3350); Usage in Schema; Adding New IPSO Objects; Keyword Detection; Complex Codec Examples (from TTN lorawan-devices); Version History
 - **LANGUAGE-ANALYSIS.md** — Design Goals; Type System Design; Conditional Parsing Design; Arithmetic Pipeline Design; Binary Format Design; Feature Exclusions; Compatibility Considerations; Future Considerations; Summary
-- **OUTPUT-FORMATS.md** — Example; 1. Raw Format (Default); 2. IPSO Smart Objects Format; 3. SenML Format (RFC 8428); 4. TTN Normalized Format; Format Comparison; Schema Definition; API Usage; Output JSON Schema; Format-Specific JSON Schemas
+- **OUTPUT-FORMATS.md** — Example; 1. Raw Format (Default); 1a. Interpreter Output: decoded JSON and `_meta`; 2. IPSO Smart Objects Format; 3. SenML Format (RFC 8428); 4. TTN Normalized Format; Format Comparison; Schema Definition; API Usage; Output JSON Schema; Format-Specific JSON Schemas
 - **SCHEMA-DEVELOPMENT-GUIDE.md** — Overview; Process: Converting an Existing Codec; Message Types; Edge Cases; Common Pitfalls; Tools; Checklist: Before Declaring "Complete"; Example: MClimate Vicki
 - **SCHEMA-LANGUAGE-REFERENCE.md** — Document Structure; Field Types; Arithmetic Modifiers; Lookup Tables; Computed Fields; Transform Operations; Conditional Parsing; Named Encodings; Bitfield String; Test Vectors; Enum Type; Repeat (Arrays) ...
 - **SESSION-NOTES-2026-02-25.md** — Requirement Numbering Alignment
@@ -122,15 +122,15 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Device schemas
 
-280 schemas under `schemas/devices/`.
-Mean quality score 76.0% (PLATINUM 37, GOLD 39, SILVER 160, BRONZE 24, REJECTED 20). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+281 schemas under `schemas/devices/`.
+Mean quality score 75.9% (PLATINUM 37, GOLD 39, SILVER 160, BRONZE 24, REJECTED 21). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
 | milesight | 84 | 1427 | PLATINUM 21, GOLD 33, SILVER 27, REJECTED 3 |
-| _language-conformance | 68 | 115 | SILVER 50, BRONZE 13, REJECTED 5 |
+| _language-conformance | 69 | 116 | SILVER 50, BRONZE 13, REJECTED 6 |
 | decentlab | 58 | 204 | PLATINUM 13, GOLD 6, SILVER 27, BRONZE 8, REJECTED 4 |
 | _library-composed | 49 | 57 | SILVER 48, BRONZE 1 |
 | makerfabs | 6 | 0 | REJECTED 6 |
@@ -187,6 +187,7 @@ Mean quality score 76.0% (PLATINUM 37, GOLD 39, SILVER 160, BRONZE 24, REJECTED 
 | `_language-conformance/meta-nested` | 9 | 2 | fields | 71% | SILVER |
 | `_language-conformance/meta-port-default` | 2 | 2 | ports | 65% | BRONZE |
 | `_language-conformance/meta-producer` | 3 | 2 | fields | 61% | BRONZE |
+| `_language-conformance/meta-tlv-channels` | 2 | 1 | fields | 54% | REJECTED |
 | `_language-conformance/metadata-enrichment` | 2 | 3 | fields | 75% | SILVER |
 | `_language-conformance/metadata-epoch-calendar` | 2 | 1 | fields | 71% | SILVER |
 | `_language-conformance/minifloat` | 7 | 1 | fields | 75% | SILVER |
