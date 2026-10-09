@@ -29,7 +29,8 @@ fields:
             - name: lightning_strike_count
               type: u16
               add: -32768
-              unit: "None"
+              # A count: no unit. The vendor decoder writes 'None' for that, which the
+              # converter copied as though it were a unit's name.
             - name: lightning_average_distance
               type: u16
               add: -32768
