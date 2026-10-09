@@ -185,6 +185,228 @@ def get_field_id(field: Dict) -> int:
     return (hash(name_bytes) & 0xFFFF) | 0x8000  # Set high bit for custom
 
 
+#: Limits of the reader, include/schema_interpreter.h's schema_load_binary(), which is
+#: what this format feeds. A table or schema past them is cut there without a word.
+C_MAX_FIELDS = 32        # SCHEMA_MAX_FIELDS
+C_MAX_LOOKUP = 16        # SCHEMA_MAX_LOOKUP
+MAX_LABEL_BYTES = 15     # this format's own cap on a lookup label
+
+#: Field keys that change a decoded value and that neither this format nor the C
+#: interpreter can carry. Each was dropped on the floor: the field encoded as though the
+#: key were absent, and the C interpreter then decoded a different value with success.
+#: PS-446 says an implementation that cannot apply one MUST reject the schema.
+C_UNSUPPORTED_KEYS = {
+    "transform": "the C interpreter has no transform pipeline",
+    "polynomial": "the C interpreter has no transform pipeline (polynomial)",
+    "compute": "the C interpreter has no computed fields",
+    "ref": "the C interpreter has no computed fields (ref)",
+    "formula": "the C interpreter has no formula",
+    "guard": "the C interpreter has no guard",
+    "encoding": "the C interpreter has no sign_magnitude/bcd/gray encodings",
+    "sentinel": "the C interpreter has no sentinel (PS-427)",
+    "out_of_range": "the C interpreter has no out_of_range: omit (PS-428)",
+    "default": "the C interpreter has no enum/lookup default",
+    "var": "this format has no variable names",
+    "optional": "the C interpreter has no optional fields (PS-402)",
+    # Constructs with no record in this format. A field carrying one and no `type` was
+    # read here as the default `u8`, one byte where the construct meant something else.
+    "tlv": "this format has no tlv record",
+    "flagged": "this format has no flagged record",
+    "byte_group": "this format has no byte_group record",
+    "repeat": "this format has no repeat record",
+    "fields": "this format has no nested object record",
+    "name_from": "this format has no name template",
+    # A bytes rendering other than lowercase hex (PS-079, PS-391); the C interpreter
+    # has neither key.
+    "format": "the C interpreter has no bytes format (PS-079)",
+    "separator": "the C interpreter has no bytes separator (PS-391)",
+}
+
+#: Wire types this format can name and the C loader maps back to the same type.
+#: `ascii`, `hex` and `string` all became TYPE_BYTES, which the C interpreter reports as
+#: raw bytes; `u64`/`s64` and every type not listed fell through to `u8`.
+C_REPRESENTABLE_TYPES = {
+    "u8", "u16", "u24", "u32", "s8", "s16", "s24", "s32",
+    "f16", "f32", "f64", "bool", "bytes", "enum",
+}
+# `skip` is not among them. TYPE_SKIP is 0x8, and the C loader reads the type code
+# as three bits because the type byte's high bit is the lookup flag: a skip of 2 went
+# out as 0x82 and came back as a u16 carrying a lookup table, which it then tried to
+# read from the following field's bytes. skip-type.yaml decoded `b` as 65535 that way.
+
+#: Non-decimal scale factors the C loader decodes (binary_exp_to_mult).
+C_BINARY_SCALES = {0.5: 0x81, 0.25: 0x82, 0.0625: 0x84}
+
+
+class UnrepresentableSchemaError(ValueError):
+    """A schema declares something this format, or the C interpreter, cannot carry."""
+
+
+def _exact_scale_exp(factor: float) -> Optional[int]:
+    """The exponent byte for `factor` where the C loader reproduces it, else None."""
+    if factor == 1.0:
+        return 0
+    if factor in C_BINARY_SCALES:
+        return C_BINARY_SCALES[factor]
+    if factor <= 0:
+        return None
+    import math
+    exp = round(math.log10(factor))
+    if not -127 <= exp <= 127 or exp == 0:
+        return None
+    if not math.isclose(10.0 ** exp, factor, rel_tol=1e-12):
+        return None
+    return exp & 0xFF
+
+
+def _scale_factor(field: Dict) -> float:
+    mult = field.get('mult', 1.0)
+    div = field.get('div', 1.0)
+    return mult / div if div not in (0, 1.0) else mult
+
+
+def field_errors(field: Dict, schema_endian: str = 'big') -> List[str]:
+    """Everything in `field` this format would drop or alter on its way to C (PS-446).
+
+    Empty where the field reaches the C interpreter decoding the value every other
+    implementation decodes. The binary form has no way to report "I could not carry
+    this", so the check has to happen here, before the bytes exist.
+    """
+    name = field.get('name', '?')
+    errors = []
+
+    def refuse(what: str, why: str, requirement: str = "PS-446") -> None:
+        errors.append(f"field {name!r}: {what} - {why}; refused rather than dropped "
+                      f"({requirement})")
+
+    for key, why in C_UNSUPPORTED_KEYS.items():
+        if key in field:
+            refuse(f"`{key}`", why)
+
+    if 'match' in field and not field.get('type'):
+        refuse("`match`", "this format has no inline match record")
+
+    ftype = str(field.get('type', ''))
+    if not field.get('type'):
+        if not errors:
+            refuse("no `type`", "this format would encode it as a u8")
+    elif re.match(r'^u8\[(\d+):(\d+)\]$', ftype):
+        start, end = map(int, re.match(r'^u8\[(\d+):(\d+)\]$', ftype).groups())
+        if not 0 <= start <= end <= 7:
+            refuse(f"type {ftype!r}", "not a bit range of one byte")
+    elif ftype not in C_REPRESENTABLE_TYPES:
+        refuse(f"type {ftype!r}", "this format has no such type, and wrote it as u8",
+               "PS-327")
+
+    if ftype == 'enum' and field.get('base', 'u8') != 'u8':
+        refuse(f"enum base {field.get('base')!r}", "this format's enum is one byte")
+    if ftype == 'bool' and field.get('bit', 0) not in (0, None):
+        refuse("`bit`", "this format has no bit position for a bool")
+    if ftype in ('bytes', 'skip'):
+        length = field.get('length', 0 if ftype == 'bytes' else 1)
+        if not isinstance(length, int) or not 0 <= length <= 15:
+            refuse(f"length {length!r}", "this format's size nibble holds 0-15")
+
+    field_endian = field.get('endian')
+    if field_endian and field_endian != schema_endian:
+        refuse(f"`endian: {field_endian}`",
+               "this format has only the schema's byte order")
+
+    for key in ('mult', 'div', 'add'):
+        if key in field and (isinstance(field[key], bool)
+                             or not isinstance(field[key], (int, float))):
+            refuse(f"`{key}: {field[key]!r}`", "not a number")
+    if not errors:
+        if field.get('div') == 0:
+            refuse("`div: 0`", "this format cannot carry a zero divisor (PS-100)")
+        elif _exact_scale_exp(_scale_factor(field)) is None:
+            refuse(f"scale {_scale_factor(field)!r} (mult/div)",
+                   "this format carries only a power of ten, 0.5, 0.25 or 0.0625")
+        add = field.get('add', 0)
+        if not isinstance(add, bool) and isinstance(add, (int, float)) and add:
+            hundredths = round(add * 100)
+            if abs(hundredths - add * 100) > 1e-9 or not -32768 <= hundredths <= 32767:
+                refuse(f"`add: {add!r}`",
+                       "this format carries an add as a signed 16-bit count of "
+                       "hundredths")
+
+    table = field.get('lookup') if 'lookup' in field else field.get('values')
+    if table is not None:
+        if isinstance(table, list):
+            items = list(enumerate(table))
+        elif isinstance(table, dict):
+            items = list(table.items())
+        else:
+            items = None
+            refuse("the lookup", "neither a sequence nor a mapping")
+        if items is not None:
+            if 'default' in (str(k) for k, _ in items):
+                refuse("the lookup's `default`",
+                       "the C interpreter has no lookup default")
+            if len(items) > C_MAX_LOOKUP:
+                refuse(f"a {len(items)}-entry lookup",
+                       f"the C interpreter keeps {C_MAX_LOOKUP} entries")
+            for key, label in items:
+                if str(key) == 'default':
+                    continue
+                try:
+                    number = int(str(key), 0)
+                except ValueError:
+                    number = None
+                if number is None or not 0 <= number <= 255:
+                    refuse(f"lookup key {key!r}", "this format's keys are 0-255")
+                if isinstance(label, dict):
+                    label = label.get('name', label)
+                if len(str(label).encode('utf-8')) > MAX_LABEL_BYTES:
+                    refuse(f"lookup label {label!r}",
+                           f"this format holds {MAX_LABEL_BYTES} bytes of a label")
+    return errors
+
+
+def schema_errors(schema: Dict) -> List[str]:
+    """Every field_errors() finding in a schema, plus what the C loader would cut."""
+    errors = []
+    endian = schema.get('endian', 'big')
+    if schema.get('ports'):
+        errors.append("`ports` - the C interpreter has no port selection; refused "
+                      "rather than dropped (PS-446)")
+    fields = schema.get('fields', [])
+    if len(fields) > C_MAX_FIELDS:
+        errors.append(f"{len(fields)} fields - the C interpreter keeps {C_MAX_FIELDS}")
+    previous = None
+    for field in fields:
+        if not isinstance(field, dict):
+            errors.append(f"field {field!r} is not a mapping")
+            continue
+        if field.get('type') == 'match':
+            # encode_schema() writes a match record, which schema_load_binary() does not
+            # parse: it reads the record's bytes as ordinary fields.
+            errors.append(f"field {field.get('name', '?')!r}: `type: match` - the C "
+                          "binary loader has no match record; refused rather than "
+                          "dropped (PS-446)")
+            continue
+        errors.extend(field_errors(field, endian))
+        # The consume marker after a bit range is the byte 0x01, which is also the
+        # type byte of a plain u8. A bit range that does not consume, followed by one,
+        # is read back as a bit range that does, with the u8 gone: every later field
+        # shifts.
+        if (previous is not None and _is_bit_range(previous)
+                and not previous.get('consume')
+                and field.get('type') == 'u8'
+                and not (field.get('lookup') or field.get('values'))):
+            errors.append(
+                f"field {field.get('name', '?')!r}: a plain u8 after the non-consuming "
+                f"bit range {previous.get('name', '?')!r} - its type byte 0x01 is this "
+                "format's consume marker, so the reader would take it as one; refused "
+                "rather than misread (PS-446)")
+        previous = field
+    return errors
+
+
+def _is_bit_range(field: Dict) -> bool:
+    return bool(re.match(r'^u8\[\d+:\d+\]$', str(field.get('type', ''))))
+
+
 def encode_field(field: Dict) -> bytes:
     """Encode a single field to binary."""
     result = bytearray()
@@ -208,12 +430,11 @@ def encode_field(field: Dict) -> bytes:
     
     result.append(type_byte)
     
-    # Multiplier exponent
-    mult = field.get('mult', 1.0)
-    div = field.get('div', 1.0)
-    if div != 1.0:
-        mult = mult / div
-    result.append(mult_to_exp(mult))
+    # Multiplier exponent. mult and div fold into one factor, which is the same
+    # arithmetic in the order PS-101 fixes; field_errors() has already refused a factor
+    # the C loader would not reproduce.
+    scale = _exact_scale_exp(_scale_factor(field))
+    result.append(mult_to_exp(_scale_factor(field)) if scale is None else scale)
     
     # Field ID (2 bytes, little-endian)
     field_id = get_field_id(field)
@@ -232,7 +453,8 @@ def encode_field(field: Dict) -> bytes:
     add = field.get('add', 0)
     if add != 0:
         result.append(0xA0)  # Add marker
-        result.extend(struct.pack('<h', int(add * 100)))  # Fixed point
+        # Rounded, not truncated: int(0.29 * 100) is 28.
+        result.extend(struct.pack('<h', round(add * 100)))  # Fixed point
     
     # Lookup table
     if has_lookup:
@@ -250,6 +472,10 @@ def encode_field(field: Dict) -> bytes:
         result.append(len(lookup) | (0x80 if is_sequence else 0x00))
         for key, value in lookup.items():
             result.append(int(key) & 0xFF)
+            # An enum's description form reports its name (PS-394); str() of the
+            # mapping went out as the label.
+            if isinstance(value, dict) and 'name' in value:
+                value = value['name']
             value_bytes = str(value).encode('utf-8')[:15]  # Max 15 chars
             result.append(len(value_bytes))
             result.extend(value_bytes)
@@ -258,7 +484,21 @@ def encode_field(field: Dict) -> bytes:
 
 
 def encode_schema(schema: Dict) -> bytes:
-    """Encode full schema to binary."""
+    """Encode full schema to binary, for include/schema_interpreter.h's
+    schema_load_binary().
+
+    Raises UnrepresentableSchemaError, naming every field and property, where the schema
+    declares something the format or the C interpreter cannot carry. This used to emit a
+    blob for any schema, with each such property dropped: `transform: [{add: 1}]`,
+    `encoding: bcd`, `sentinel`, `guard`, `compute` and `polynomial` all produced bytes
+    the C interpreter decoded, with success, as if the field had a plain type. PS-446
+    makes that a rejection.
+    """
+    errors = schema_errors(schema)
+    if errors:
+        raise UnrepresentableSchemaError(
+            f"schema {schema.get('name', '?')!r} cannot be carried by the binary "
+            f"schema format to the C interpreter:\n  " + "\n  ".join(errors))
     result = bytearray()
     
     # Header
@@ -575,7 +815,11 @@ def main():
     
     if args.command == 'encode':
         schema = yaml.safe_load(args.input.read_text())
-        binary = encode_schema(schema)
+        try:
+            binary = encode_schema(schema)
+        except UnrepresentableSchemaError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(1)
         
         if args.base64:
             import base64
