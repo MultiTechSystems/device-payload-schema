@@ -240,6 +240,15 @@ typedef struct {
      * treats a possible truncation as an error, so the buffer has to hold the worst
      * case rather than the typical one. */
     char error_msg[112];
+    /* PS-472: the bytes after the last field that nothing decoded. The other five
+     * implementations report these as a warning; this interpreter has no warning list
+     * (a fixed-size, allocation-free result has nowhere to keep text), so it reports the
+     * warning's two numbers instead: the offset of the first byte not decoded is
+     * `bytes_consumed` and the count to the end is this. Set only on a successful
+     * decode, and never changes what was decoded. It covers the bytes PS-302 leaves
+     * after an unknown, undelimited tlv tag too, counted from that tag as the other
+     * five count them. Last member, so existing initializers leave it zero. */
+    int bytes_unread;
 } decode_result_t;
 
 /* Variable storage for match conditions */
@@ -1158,14 +1167,31 @@ static inline int schema_decode_direction(
          * Bounded by the payload rather than by a case count: a tag no case describes ends
          * the loop under SCHEMA_TLV_UNKNOWN_SKIP where nothing delimits it, because there
          * is no length to step over (PS-302). This interpreter has no warning channel, so
-         * it cannot say so the way the other five now do - a real gap, recorded rather
-         * than papered over. */
+         * the position goes back to that tag and the bytes from it on are counted in
+         * `bytes_unread` (PS-472) - the one report it can make.
+         *
+         * PS-477: a tag is never partly read. Bytes left at the start of an entry but
+         * fewer than its tag are an error identifying the tlv; this used to stop the loop
+         * and report a complete decode, the fragment dropped in silence. The code is
+         * SCHEMA_ERR_BUFFER, what every other read past the payload's end returns, so no
+         * new one. Where the tag fits and its length does not, no entry is decoded and
+         * the bytes from its tag on are left over, as the reference leaves them; that
+         * returned SCHEMA_ERR_BUFFER with error_code unset and no message. */
         if (field->type == FIELD_TYPE_TLV) {
             const int parts = field->tlv_tag_parts ? field->tlv_tag_parts : 0;
             const int tag_bytes = parts ? parts : (field->tlv_tag_size ? field->tlv_tag_size : 1);
 
             while (pos < len) {
-                if (pos + tag_bytes > len) break;
+                const size_t entry_start = pos;
+                if (pos + tag_bytes > len) {   /* PS-477 */
+                    result->error_code = SCHEMA_ERR_BUFFER;
+                    snprintf(result->error_msg, sizeof(result->error_msg),
+                             "tlv %s: entry at offset %u: %u byte(s) remain, fewer than "
+                             "its %d-byte tag (PS-477)",
+                             field->name[0] ? field->name : "(unnamed)",
+                             (unsigned)pos, (unsigned)(len - pos), tag_bytes);
+                    return SCHEMA_ERR_BUFFER;
+                }
 
                 int packed = 0;
                 for (int b = 0; b < tag_bytes; b++) {
@@ -1175,7 +1201,10 @@ static inline int schema_decode_direction(
 
                 int entry_len = -1;
                 if (field->tlv_length_size) {
-                    if (pos + field->tlv_length_size > len) return SCHEMA_ERR_BUFFER;
+                    if (pos + field->tlv_length_size > len) {   /* PS-477, PS-472 */
+                        pos = entry_start;
+                        break;
+                    }
                     entry_len = 0;
                     for (int b = 0; b < field->tlv_length_size; b++) {
                         entry_len = (entry_len << 8) | buf[pos + b];
@@ -1202,7 +1231,8 @@ static inline int schema_decode_direction(
                         pos += entry_len;   /* delimited: step over it and carry on */
                         continue;
                     }
-                    break;                  /* nothing to skip over (PS-302) */
+                    pos = entry_start;      /* nothing to skip over (PS-302): the */
+                    break;                  /* bytes from the tag on are left over */
                 }
 
                 for (int f = 0; f < chosen->field_count; f++) {
@@ -1306,6 +1336,7 @@ static inline int schema_decode_direction(
     }
     
     result->bytes_consumed = (int)pos;
+    result->bytes_unread = (int)(len - pos);   /* PS-472 */
     return SCHEMA_OK;
 }
 

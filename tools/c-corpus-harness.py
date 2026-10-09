@@ -43,7 +43,11 @@ sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 import yaml  # noqa: E402
 
-from validate_schema import expected_fields_match, is_encode_vector  # noqa: E402
+from validate_schema import (  # noqa: E402
+    expected_fields_match,
+    is_encode_vector,
+    warnings_match,
+)
 from schema_interpreter import expand_refs  # noqa: E402
 
 CORPUS = REPO_ROOT / "schemas" / "devices"
@@ -473,6 +477,12 @@ static void emit(const char* schema, const char* vector,
         printf("E\\t%s\\n", r.error_msg);
         return;
     }
+    /* PS-472. The interpreter has no warning list; it reports the leftover bytes as two
+     * numbers, and this renders them as the warning the other five would give, so a
+     * vector's `expected_warnings` is checked here too. */
+    if (r.bytes_unread > 0)
+        printf("W\\t%d byte(s) after the last field left undecoded, from offset %d "
+               "(PS-472)\\n", r.bytes_unread, r.bytes_consumed);
     for (int i = 0; i < r.field_count; i++) {
         const decoded_field_t* d = &r.fields[i];
         if (!d->valid) continue;
@@ -525,6 +535,17 @@ static void emit(const char* schema, const char* vector,
 '''
 
 
+def schema_has_tlv(node):
+    """Whether a tlv appears anywhere in the schema - as a `tlv:` key or `type: tlv`."""
+    if isinstance(node, dict):
+        if "tlv" in node or node.get("type") == "tlv":
+            return True
+        return any(schema_has_tlv(v) for v in node.values())
+    if isinstance(node, list):
+        return any(schema_has_tlv(v) for v in node)
+    return False
+
+
 def build_program(entries):
     parts = [PROGRAM_HEAD]
     for index, (_, _, source, _) in entries:
@@ -543,14 +564,16 @@ def build_program(entries):
 
 
 def parse_output(text):
-    """The generated program's output, as {(schema, vector): (rc, {name: value})}."""
+    """The generated program's output, as {(schema, vector): (rc, {name: value}, [warning])}."""
     results = {}
     current = None
     for line in text.splitlines():
         parts = line.split("\t")
         if parts[0] == "V" and len(parts) >= 5:
             current = (parts[1], parts[2])
-            results[current] = (int(parts[3]), {})
+            results[current] = (int(parts[3]), {}, [])
+        elif current is not None and parts[0] == "W" and len(parts) >= 2:
+            results[current][2].append(parts[1])
         elif current is None or len(parts) < 3:
             continue
         elif parts[0] == "I":
@@ -623,11 +646,12 @@ def run():
             return 1
 
     produced = parse_output(ran.stdout)
-    passed, failures = 0, []
-    for _, (schema_name, vectors, _, _) in entries:
+    passed, failures, unreportable = 0, [], []
+    for _, (schema_name, vectors, _, schema) in entries:
+        has_tlv = schema_has_tlv(schema)
         for vector in vectors:
             key = (schema_name, vector.get("name", "?"))
-            rc, fields = produced.get(key, (None, {}))
+            rc, fields, warnings = produced.get(key, (None, {}, []))
             if rc is None:
                 failures.append((key, "the harness printed no result"))
                 continue
@@ -637,6 +661,18 @@ def run():
             # PS-043/PS-044, with a null expectation asserting absence (CR-2026-075).
             ok, detail = expected_fields_match(vector.get("expected") or {}, fields)
             problem = None if ok else detail
+            if problem is None:
+                # PS-305 to PS-308. The only warning this interpreter can give is PS-472's,
+                # rendered from `bytes_unread`.
+                ok, detail = warnings_match(vector.get("expected_warnings"), warnings)
+                if not ok and has_tlv:
+                    # A tlv's unknown-tag warning (PS-301/PS-302) names the tag, and the
+                    # result has no slot for it - a C gap, counted apart from a wrong
+                    # decode rather than hidden. The values were compared above.
+                    unreportable.append((key, detail))
+                    passed += 1
+                    continue
+                problem = None if ok else detail
             if problem:
                 failures.append((key, problem))
             else:
@@ -648,6 +684,8 @@ def run():
     print("=" * 74)
     print(f"  {passed:>5} of {attempted} attempted vectors decode as the corpus expects")
     print(f"  {len(failures):>5} differ")
+    print(f"  {len(unreportable):>5} of the passes expect a tlv unknown-tag warning, which "
+          "this interpreter has no slot to give")
     print(f"  {skipped_vectors:>5} not attempted, in {sum(skips.values())} schemas the "
           "struct API cannot build")
     print(f"  {vector_total:>5} vectors in the corpus altogether")
@@ -660,12 +698,19 @@ def run():
         print()
         for (schema_name, vector), detail in failures:
             print(f"  {schema_name}::{vector}: {detail}")
+    if unreportable and args.failures:
+        print()
+        print("  Warnings the C interpreter cannot give:")
+        for (schema_name, vector), detail in unreportable:
+            print(f"  {schema_name}::{vector}: {detail}")
 
     if args.json:
         pathlib.Path(args.json).write_text(json.dumps({
             "passed": passed, "attempted": attempted,
             "skipped_vectors": skipped_vectors, "corpus_vectors": vector_total,
             "skips": dict(skips),
+            "unreportable_warnings": [{"schema": s, "vector": v, "detail": d}
+                                      for (s, v), d in unreportable],
             "failures": [{"schema": s, "vector": v, "detail": d}
                          for (s, v), d in failures],
         }, indent=2) + "\n")
