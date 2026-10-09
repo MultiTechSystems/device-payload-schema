@@ -39,6 +39,7 @@ fields:
               type: u16
               div: 10
               unit: "mg⋅L⁻¹"
+              senml: {unit: mg/l}
         - bit: 1
           fields:
             - name: battery_voltage

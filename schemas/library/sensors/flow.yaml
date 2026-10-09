@@ -20,6 +20,7 @@ definitions:
         type: u32
         div: 1000
         unit: "m³"
+        senml: {unit: m3}
         valid_range: [0, 4294967]
         resolution: 0.001
         unece: "MTQ"
@@ -94,6 +95,7 @@ definitions:
         type: u16
         div: 100
         unit: "mg/L"
+        senml: {unit: mg/l}
         valid_range: [0, 20]
         resolution: 0.01
         description: "Dissolved oxygen"

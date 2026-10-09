@@ -22,6 +22,7 @@ fields:
                 - mult: 0.002670328831921874
                 - add: -45
               unit: "°C"
+              senml: {unit: Cel}
             - name: air_humidity
               type: u16
               transform:

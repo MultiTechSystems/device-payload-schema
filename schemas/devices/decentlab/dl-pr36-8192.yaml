@@ -28,6 +28,7 @@ fields:
                 - div: 256
                 - add: -128
               unit: "°C"
+              senml: {unit: Cel}
         - bit: 1
           fields:
             - name: battery_voltage

@@ -93,6 +93,7 @@ ports:
                     - name: AngleOfInclination
                       type: u8
                       unit: "°"
+                      senml: {unit: deg}
                 default:
                   - name: FillLevel
                     type: u8
@@ -202,6 +203,7 @@ ports:
                         type: u16
                         div: 10
                         unit: "°C"
+                        senml: {unit: Cel}
                         sensor: none
             132:  # GetOnDistanceThresholdRsp
               - name: OnDistanceThreshold

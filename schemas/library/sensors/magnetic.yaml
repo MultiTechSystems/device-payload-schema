@@ -97,6 +97,7 @@ definitions:
       - name: compass_heading
         type: u16
         unit: "°"
+        senml: {unit: deg}
         valid_range: [0, 360]
         resolution: 1
         description: "Compass heading (0=N)"
@@ -107,6 +108,7 @@ definitions:
         type: u16
         div: 10
         unit: "°"
+        senml: {unit: deg}
         valid_range: [0, 360]
         resolution: 0.1
         description: "Compass heading (0=N)"

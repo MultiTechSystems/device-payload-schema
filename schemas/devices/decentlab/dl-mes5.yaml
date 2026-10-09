@@ -35,6 +35,7 @@ fields:
               type: u16
               div: 100
               unit: "g⋅L⁻¹"
+              senml: {unit: g/l}
             - name: turbidity
               type: u16
               div: 10

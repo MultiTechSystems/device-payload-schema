@@ -18,3 +18,4 @@ fields:
     type: s16
     div: 10
     unit: "°C"
+    senml: {unit: Cel}

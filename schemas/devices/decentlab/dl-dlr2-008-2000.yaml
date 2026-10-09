@@ -60,6 +60,7 @@ fields:
               ref: $_resistance
               polynomial: [0.0010664, 2.3419, -244.83]
               unit: "°C"
+              senml: {unit: Cel}
         - bit: 1
           fields:
             - name: battery_voltage

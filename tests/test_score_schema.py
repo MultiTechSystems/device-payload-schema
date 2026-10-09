@@ -152,6 +152,29 @@ class TestAnnotationCorrectness:
         assert senml_ok
         assert not problems
 
+    @pytest.mark.parametrize("unit,senml", [
+        ("µg⋅m⁻³", "ug/m3"),   # particulate mass concentration
+        ("mg⋅L⁻¹", "mg/l"),    # dissolved oxygen
+    ])
+    def test_a_mass_concentration_is_a_concentration(self, unit, senml):
+        """ppm is a volume ratio; a mass per volume is registered too, and is not ppm."""
+        field = {"name": "pm2_5_mass_concentration", "unit": unit, "senml": {"unit": senml}}
+        _ipso_ok, senml_ok, problems = check_annotation_correctness(field, "concentration", 3325)
+        assert senml_ok and not problems, problems
+
+    @pytest.mark.parametrize("display,senml", [
+        ("m⋅s⁻¹", "m/s"), ("W/m²", "W/m2"), ("Ω", "Ohm"), ("m³", "m3"), ("VAR", "var"),
+    ])
+    def test_registered_names_match_their_display_spellings(self, display, senml):
+        field = {"name": "x", "unit": display, "senml": {"unit": senml}}
+        _ipso_ok, _senml_ok, problems = check_annotation_correctness(field, "x", 0)
+        assert not problems, problems
+
+    def test_latitude_written_in_degrees_is_lat(self):
+        field = {"name": "latitude", "unit": "degrees", "senml": {"unit": "lat"}}
+        _ipso_ok, senml_ok, problems = check_annotation_correctness(field, "latitude", 3336)
+        assert not problems, problems
+
     def test_annotations_on_undetectable_fields_earn_no_credit(self):
         """Otherwise semantic marks could be farmed from unrelated fields."""
         schema = temperature_schema(sensor="none")

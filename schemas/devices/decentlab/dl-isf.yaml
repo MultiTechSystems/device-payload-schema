@@ -70,6 +70,7 @@ fields:
                 - div: 100
                 - add: -327.68
               unit: "°C"
+              senml: {unit: Cel}
             - name: max_voltage
               type: u16
               transform:

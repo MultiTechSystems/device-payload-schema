@@ -22,6 +22,7 @@ fields:
                 - mult: 0.0026812744140625
                 - add: -46.85
               unit: "°C"
+              senml: {unit: Cel}
             - name: air_humidity
               type: u16
               transform:
@@ -36,6 +37,7 @@ fields:
                 - div: 100
                 - add: -50
               unit: "°C"
+              senml: {unit: Cel}
             - name: barometric_pressure
               type: u16
               mult: 2
@@ -56,6 +58,7 @@ fields:
                 - div: 100
                 - add: -327.68
               unit: "°C"
+              senml: {unit: Cel}
             - name: capacitor_voltage_1
               type: u16
               div: 1000

@@ -22,6 +22,7 @@ fields:
                 - div: 10
                 - add: -3276.8
               unit: "W⋅m⁻²"
+              senml: {unit: W/m2}
             - name: precipitation
               type: u16
               div: 1000
@@ -41,24 +42,28 @@ fields:
                 - div: 100
                 - add: -327.68
               unit: "m⋅s⁻¹"
+              senml: {unit: m/s}
             - name: wind_direction
               type: u16
               transform:
                 - div: 10
                 - add: -3276.8
               unit: "°"
+              senml: {unit: deg}
             - name: maximum_wind_speed
               type: u16
               transform:
                 - div: 100
                 - add: -327.68
               unit: "m⋅s⁻¹"
+              senml: {unit: m/s}
             - name: air_temperature
               type: u16
               transform:
                 - div: 10
                 - add: -3276.8
               unit: "°C"
+              senml: {unit: Cel}
             - name: vapor_pressure
               type: u16
               transform:
@@ -83,18 +88,21 @@ fields:
                 - div: 10
                 - add: -3276.8
               unit: "°C"
+              senml: {unit: Cel}
             - name: tilt_angle_x_orientation
               type: u16
               transform:
                 - div: 10
                 - add: -3276.8
               unit: "°"
+              senml: {unit: deg}
             - name: tilt_angle_y_orientation
               type: u16
               transform:
                 - div: 10
                 - add: -3276.8
               unit: "°"
+              senml: {unit: deg}
             - name: precipitation_electrical_conductivity
               type: u16
               add: -32768

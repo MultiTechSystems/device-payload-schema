@@ -26,18 +26,22 @@ fields:
               type: u16
               div: 10
               unit: "µg⋅m⁻³"
+              senml: {unit: ug/m3}
             - name: pm2_5_mass_concentration
               type: u16
               div: 10
               unit: "µg⋅m⁻³"
+              senml: {unit: ug/m3}
             - name: pm4_mass_concentration
               type: u16
               div: 10
               unit: "µg⋅m⁻³"
+              senml: {unit: ug/m3}
             - name: pm10_mass_concentration
               type: u16
               div: 10
               unit: "µg⋅m⁻³"
+              senml: {unit: ug/m3}
             - name: typical_particle_size
               type: u16
               unit: "nm"
@@ -69,6 +73,7 @@ fields:
                 - mult: 0.0026812744140625
                 - add: -46.85
               unit: "°C"
+              senml: {unit: Cel}
             - name: air_humidity
               type: u16
               transform:

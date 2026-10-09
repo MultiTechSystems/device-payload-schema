@@ -53,6 +53,7 @@ fields:
                 - div: 10
                 - add: -3276.8
               unit: "°C"
+              senml: {unit: Cel}
             - name: electrical_conductivity
               type: u16
               unit: "µS⋅cm⁻¹"

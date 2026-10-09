@@ -28,15 +28,18 @@ definitions:
         type: s32
         div: 10000000
         unit: "degrees"
+        senml: {unit: lat}
         description: "Latitude in degrees (7 decimal places)"
       - name: longitude
         type: s32
         div: 10000000
         unit: "degrees"
+        senml: {unit: lon}
         description: "Longitude in degrees (7 decimal places)"
       - name: radius
         type: u16
         unit: "meters"
+        senml: {unit: m}
         description: "Geofence radius in meters"
 
   set_geofence_ans:
@@ -153,11 +156,13 @@ definitions:
         type: s32
         div: 10000000
         unit: "degrees"
+        senml: {unit: lat}
         description: "Latitude (only if status=0)"
       - name: longitude
         type: s32
         div: 10000000
         unit: "degrees"
+        senml: {unit: lon}
         description: "Longitude (only if status=0)"
 
 test_vectors:

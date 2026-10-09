@@ -10,6 +10,7 @@ definitions:
         type: s32
         div: 1000000
         unit: "°"
+        senml: {unit: lat}
         valid_range: [-90, 90]
         resolution: 0.000001
         description: "Latitude in decimal degrees"
@@ -22,6 +23,7 @@ definitions:
         type: s32
         div: 1000000
         unit: "°"
+        senml: {unit: lon}
         valid_range: [-180, 180]
         resolution: 0.000001
         description: "Longitude in decimal degrees"
@@ -35,6 +37,7 @@ definitions:
         type: s24
         div: 10000
         unit: "°"
+        senml: {unit: lat}
         valid_range: [-90, 90]
         resolution: 0.0001
         description: "Latitude (3-byte compact)"
@@ -45,6 +48,7 @@ definitions:
         type: s24
         div: 10000
         unit: "°"
+        senml: {unit: lon}
         valid_range: [-180, 180]
         resolution: 0.0001
         description: "Longitude (3-byte compact)"
@@ -125,6 +129,7 @@ definitions:
       - name: heading
         type: u16
         unit: "°"
+        senml: {unit: deg}
         valid_range: [0, 360]
         resolution: 1
         description: "Compass heading"
@@ -135,5 +140,6 @@ definitions:
         type: u16
         div: 10
         unit: "°"
+        senml: {unit: deg}
         valid_range: [0, 360]
         resolution: 0.1

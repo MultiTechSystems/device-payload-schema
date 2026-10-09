@@ -25,3 +25,4 @@ fields:
   - name: temperature
     type: u8
     unit: "°C"
+    senml: {unit: Cel}

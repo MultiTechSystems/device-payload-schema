@@ -22,6 +22,7 @@ fields:
                 - mult: 0.457763671875
                 - add: -15000
               unit: "W⋅m⁻²"
+              senml: {unit: W/m2}
         - bit: 1
           fields:
             - name: battery_voltage

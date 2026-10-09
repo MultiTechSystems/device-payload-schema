@@ -40,6 +40,7 @@ definitions:
         type: s16
         div: 10
         unit: "°C"
+        senml: {unit: Cel}
         valid_range: [-40, 80]
         resolution: 0.1
         unece: "CEL"
@@ -94,6 +95,7 @@ definitions:
         type: s16
         div: 10
         unit: "°C"
+        senml: {unit: Cel}
         valid_range: [-20, 60]
         resolution: 0.1
         unece: "CEL"

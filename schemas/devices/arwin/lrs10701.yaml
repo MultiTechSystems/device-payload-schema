@@ -202,10 +202,12 @@ ports:
               - name: highTemperatureThreshold
                 type: s16
                 unit: "°C"
+                senml: {unit: Cel}
                 sensor: none
               - name: lowTemperatureThreshold
                 type: s16
                 unit: "°C"
+                senml: {unit: Cel}
                 sensor: none
               - name: highHumidityThreshold
                 type: u8

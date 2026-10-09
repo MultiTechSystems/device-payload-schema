@@ -28,12 +28,14 @@ fields:
                 - div: 256
                 - add: -128
               unit: "°C"
+              senml: {unit: Cel}
             - name: temperature_pt1000
               type: u16
               transform:
                 - div: 256
                 - add: -128
               unit: "°C"
+              senml: {unit: Cel}
             - name: electrical_conductivity
               type: u16
               transform:

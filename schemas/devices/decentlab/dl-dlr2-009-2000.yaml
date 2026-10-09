@@ -43,6 +43,7 @@ fields:
                 a: $_ratio_scaled
                 b: $_one_minus_ratio
               unit: "Ω"
+              senml: {unit: Ohm}
             # temperature is a quadratic in that resistance, so `polynomial` states
             # it directly: 0.0000104876 R^2 + 0.23469 R - 245.18.
             - name: temperature
@@ -50,6 +51,7 @@ fields:
               ref: $thermistor_resistance
               polynomial: [0.0000104876, 0.23469, -245.18]
               unit: "°C"
+              senml: {unit: Cel}
         - bit: 1
           fields:
             - name: battery_voltage

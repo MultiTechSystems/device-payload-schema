@@ -22,12 +22,14 @@ fields:
                 - div: 10
                 - add: -100
               unit: "°C"
+              senml: {unit: Cel}
             - name: temperature_head
               type: u16
               transform:
                 - div: 10
                 - add: -100
               unit: "°C"
+              senml: {unit: Cel}
         - bit: 1
           fields:
             - name: battery_voltage

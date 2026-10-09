@@ -58,36 +58,42 @@ fields:
                 - add: -32768
                 - div: 100
               unit: "°C"
+              senml: {unit: Cel}
             - name: temperature_at_level_1
               type: u16
               transform:
                 - add: -32768
                 - div: 100
               unit: "°C"
+              senml: {unit: Cel}
             - name: temperature_at_level_2
               type: u16
               transform:
                 - add: -32768
                 - div: 100
               unit: "°C"
+              senml: {unit: Cel}
             - name: temperature_at_level_3
               type: u16
               transform:
                 - add: -32768
                 - div: 100
               unit: "°C"
+              senml: {unit: Cel}
             - name: temperature_at_level_4
               type: u16
               transform:
                 - add: -32768
                 - div: 100
               unit: "°C"
+              senml: {unit: Cel}
             - name: temperature_at_level_5
               type: u16
               transform:
                 - add: -32768
                 - div: 100
               unit: "°C"
+              senml: {unit: Cel}
             - name: salinity_at_level_0
               type: u16
               add: -100
@@ -150,36 +156,42 @@ fields:
                 - div: 100
                 - add: -327.68
               unit: "°C"
+              senml: {unit: Cel}
             - name: temperature_at_level_7
               type: u16
               transform:
                 - div: 100
                 - add: -327.68
               unit: "°C"
+              senml: {unit: Cel}
             - name: temperature_at_level_8
               type: u16
               transform:
                 - div: 100
                 - add: -327.68
               unit: "°C"
+              senml: {unit: Cel}
             - name: temperature_at_level_9
               type: u16
               transform:
                 - div: 100
                 - add: -327.68
               unit: "°C"
+              senml: {unit: Cel}
             - name: temperature_at_level_10
               type: u16
               transform:
                 - div: 100
                 - add: -327.68
               unit: "°C"
+              senml: {unit: Cel}
             - name: temperature_at_level_11
               type: u16
               transform:
                 - div: 100
                 - add: -327.68
               unit: "°C"
+              senml: {unit: Cel}
             - name: salinity_at_level_6
               type: u16
               add: -100

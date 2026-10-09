@@ -86,11 +86,13 @@ fields:
         "[11, 125]":
           - name: pm2_5
             unit: "µg/m³"
+            senml: {unit: ug/m3}
             type: u16
         # PM10
         "[12, 125]":
           - name: pm10
             unit: "µg/m³"
+            senml: {unit: ug/m3}
             type: u16
         # O3
         "[13, 125]":

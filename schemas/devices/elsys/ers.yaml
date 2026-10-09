@@ -14,6 +14,7 @@ fields:
             type: s16
             div: 10
             unit: "°C"
+            senml: {unit: Cel}
         0x02:
           - name: humidity
             type: u8
@@ -29,6 +30,7 @@ fields:
           - name: light
             type: u16
             unit: "lux"
+            senml: {unit: lx}
         0x05:
           - name: motion
             type: u8
@@ -49,10 +51,12 @@ fields:
             type: s24
             div: 10000
             unit: "°"
+            senml: {unit: lat}
           - name: long
             type: s24
             div: 10000
             unit: "°"
+            senml: {unit: lon}
         0x0A:
           - name: pulse1
             type: u16
@@ -64,6 +68,7 @@ fields:
             type: s16
             div: 10
             unit: "°C"
+            senml: {unit: Cel}
         0x0D:
           - name: digital
             type: u8
@@ -79,10 +84,12 @@ fields:
             type: s16
             div: 10
             unit: "°C"
+            senml: {unit: Cel}
           - name: irExternalTemperature
             type: s16
             div: 10
             unit: "°C"
+            senml: {unit: Cel}
         0x11:
           - name: occupancy
             type: u8
@@ -114,6 +121,7 @@ fields:
             type: s16
             div: 10
             unit: "°C"
+            senml: {unit: Cel}
         0x1A:
           - name: digital2
             type: u8
