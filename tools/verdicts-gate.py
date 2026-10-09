@@ -295,6 +295,105 @@ def _corpus_report_module():
     return module
 
 
+def meta_report_path(report: str) -> str:
+    """Where a runner writes its `_meta` report beside its verdict report."""
+    return (
+        report[: -len(".json")] + ".meta.json"
+        if report.endswith(".json")
+        else report + ".meta"
+    )
+
+
+def python_meta_report(
+    root: Path, only: Optional[Set[str]]
+) -> Dict[Key, Optional[dict]]:
+    """The reference interpreter's `_meta` for every vector with a payload: the vector's
+    fPort and its input_metadata as the input context (PS-495), None where the decode
+    fails (PS-497)."""
+    sys.path.insert(0, str(REPO_ROOT / "tools"))
+    import yaml  # noqa: E402
+    from schema_interpreter import SchemaInterpreter  # noqa: E402
+
+    out = {}  # type: Dict[Key, Optional[dict]]
+    for path in sorted(root.rglob("*.yaml")):
+        rel = path.relative_to(root).as_posix()
+        if only is not None and rel not in only:
+            continue
+        try:
+            document = yaml.safe_load(path.read_text())
+        except yaml.YAMLError:
+            continue
+        if not isinstance(document, dict):
+            continue
+        interpreter = SchemaInterpreter(document)
+        for index, vector in enumerate(document.get("test_vectors") or []):
+            if not isinstance(vector, dict) or "payload" not in vector:
+                continue
+            try:
+                result = interpreter.interpret(
+                    bytes.fromhex(str(vector["payload"]).replace(" ", "")),
+                    fPort=vector.get("fPort", vector.get("fport")),
+                    input_metadata=vector.get("input_metadata"),
+                )
+            except Exception:  # noqa: BLE001 - a crash is a failed decode here
+                out[(rel, index)] = None
+                continue
+            out[(rel, index)] = result.data.get("_meta") if result.success else None
+    return out
+
+
+def load_meta_report(path: Path) -> Dict[Key, Optional[dict]]:
+    entries = json.loads(path.read_text())
+    return {(e["schema"], int(e["index"])): e.get("meta") for e in entries}
+
+
+def meta_differences(
+    reference: Dict[Key, Optional[dict]], other: Dict[Key, Optional[dict]]
+) -> List[Tuple[Key, str]]:
+    """Rule 3: every vector's `_meta`, compared exactly with the reference's.
+
+    One allowance: a key that only the reference reports, from the OPTIONAL `metadata`
+    block (PS-310), has an empty entry there and none elsewhere; it is set aside rather
+    than counted, since the other implementation does not produce the key at all.
+    """
+    sys.path.insert(0, str(REPO_ROOT / "tools"))
+    from validate_schema import meta_matches  # noqa: E402
+
+    problems = []
+    for key in sorted(set(reference) | set(other)):
+        want, got = reference.get(key, "missing"), other.get(key, "missing")
+        if want == "missing" or got == "missing":
+            problems.append(
+                (
+                    key,
+                    "no _meta entry in %s"
+                    % ("the reference" if want == "missing" else "this report"),
+                )
+            )
+            continue
+        if want is None or got is None:
+            if want is not got:
+                problems.append(
+                    (
+                        key,
+                        "reference %s, this %s"
+                        % (
+                            "failed" if want is None else "produced _meta",
+                            "failed" if got is None else "produced _meta",
+                        ),
+                    )
+                )
+            continue
+        want = dict(want, fields=dict(want.get("fields") or {}))
+        for name, entry in list(want["fields"].items()):
+            if entry == {} and name not in (got.get("fields") or {}):
+                del want["fields"][name]
+        ok, detail = meta_matches(want, got)
+        if not ok:
+            problems.append((key, detail))
+    return problems
+
+
 def docker_command(
     impl: str, report: str, only: Optional[str], corpus_root: Optional[Path]
 ) -> List[str]:
@@ -302,7 +401,8 @@ def docker_command(
     cache = REPO_ROOT / ".cache"
     docker = os.environ.get("DOCKER") or "docker"  # as the Makefile's DOCKER ?= docker
     command = [docker, "run", "--rm", "-v", "%s:/work" % REPO_ROOT]
-    env = {"CORPUS_REPORT": report}
+    # The same run also writes each vector's interpreter `_meta` (CR-2026-096), for rule 3.
+    env = {"CORPUS_REPORT": report, "CORPUS_META_REPORT": meta_report_path(report)}
     if only:
         env["CORPUS_ONLY"] = only
     if corpus_root is not None:
@@ -339,7 +439,12 @@ def docker_command(
         command += ["-e", "%s=%s" % (name, value)]
     # The container runs as root; hand the report back to whoever ran the gate.
     owner = "%d:%d" % (os.getuid(), os.getgid()) if hasattr(os, "getuid") else "0:0"
-    script = '%s; rc=$?; chown %s "%s" 2>/dev/null; exit $rc' % (test, owner, report)
+    script = '%s; rc=$?; chown %s "%s" "%s" 2>/dev/null; exit $rc' % (
+        test,
+        owner,
+        report,
+        meta_report_path(report),
+    )
     return command + [image, "sh", "-c", script]
 
 
@@ -362,8 +467,9 @@ def run_all(
         if impl not in DOCKER_IMPLS:
             continue
         target = out_dir / ("%s.json" % impl)
-        if target.exists():
-            target.unlink()
+        for stale in (target, out_dir / ("%s.meta.json" % impl)):
+            if stale.exists():
+                stale.unlink()
         log = (out_dir / ("%s.log" % impl)).open("w")
         command = docker_command(
             impl, "%s/%s.json" % (container_dir, impl), only_text, corpus_root
@@ -555,6 +661,38 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             " the Python corpus suite fails on these):" % len(reverse)
         )
         print_table(reports, reverse)
+
+    # Rule 3 (CR-2026-096): the interpreter output's `_meta`, vector by vector, is the
+    # reference's in every interpreter that produces it. No baseline: it starts at zero.
+    meta_impls = [i for i in impls if i in DOCKER_IMPLS]
+    if meta_impls:
+        meta_root = corpus_root if corpus_root is not None else CORPUS
+        reference_meta = python_meta_report(
+            meta_root, set(only) if only is not None else None
+        )
+        print("\n_meta (rule 3), %d vector(s):" % len(reference_meta))
+        for impl in meta_impls:
+            path = reports_dir / ("%s.meta.json" % impl)
+            if not path.exists():
+                ok = False
+                print("  FAIL: %s wrote no _meta report at %s" % (impl, path))
+                continue
+            other = load_meta_report(path)
+            if only is not None:
+                other = {k: v for k, v in other.items() if k[0] in only}
+            problems = meta_differences(reference_meta, other)
+            if problems:
+                ok = False
+                print(
+                    "  FAIL: %s differs from python on %d vector(s):"
+                    % (impl, len(problems))
+                )
+                for (schema, index), detail in problems[:20]:
+                    print("    %s [%d]: %s" % (schema, index, detail))
+            else:
+                print(
+                    "  %s: identical to python on all %d" % (impl, len(reference_meta))
+                )
 
     baseline_path = Path(args.baseline)
     previous = load_baseline(baseline_path)

@@ -260,3 +260,48 @@ def test_the_generated_codec_falls_through_to_a_default_port():
     decoded, encoded = json.loads(out.stdout)
     assert decoded == {"data": {"level": 90}, "warnings": [], "errors": []}
     assert encoded["bytes"] == [90] and encoded["fPort"] == 9 and not encoded["errors"]
+
+
+def _verdicts_gate():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "verdicts_gate", str(REPO_ROOT / "tools" / "verdicts-gate.py")
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_gate_compares_meta_exactly():
+    gate = _verdicts_gate()
+    key = ("a.yaml", 0)
+    reference = {key: {"schema": "a", "fields": {"x": {"type": "u8"}}}}
+    assert gate.meta_differences(reference, dict(reference)) == []
+    wrong = {key: {"schema": "a", "fields": {"x": {"type": "s8"}}}}
+    assert gate.meta_differences(reference, wrong)
+    assert gate.meta_differences(reference, {key: None})  # one failed
+    assert gate.meta_differences(reference, {})  # not reported
+    assert gate.meta_differences({key: None}, {key: None}) == []  # both failed
+
+
+def test_the_gate_sets_aside_only_metadata_block_keys():
+    # PS-310's enrichment is Python's alone: an empty entry the other lacks is set aside,
+    # but a real entry the other lacks is still a difference.
+    gate = _verdicts_gate()
+    key = ("a.yaml", 0)
+    other = {key: {"schema": "a", "fields": {"x": {"type": "u8"}}}}
+    enriched = {
+        key: {"schema": "a", "fields": {"x": {"type": "u8"}, "received_at": {}}}
+    }
+    assert gate.meta_differences(enriched, other) == []
+    extra = {key: {"schema": "a", "fields": {"x": {"type": "u8"}, "y": {"type": "u8"}}}}
+    assert gate.meta_differences(extra, other)
+
+
+def test_the_runners_are_asked_for_a_meta_report():
+    gate = _verdicts_gate()
+    command = " ".join(
+        gate.docker_command("go", "/work/build/verdicts/go.json", None, None)
+    )
+    assert "CORPUS_META_REPORT=/work/build/verdicts/go.meta.json" in command
