@@ -5,6 +5,8 @@ import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -22,6 +24,18 @@ public class DecodeContext {
      */
     private final List<String> warnings;
     /**
+     * Per-field reading quality, reported as {@code _quality}: {@code good} or
+     * {@code out_of_range} for a field declaring {@code valid_range} (PS-131), and the
+     * readings omitted under PS-427/PS-428. Nothing produced it, so a reading outside its
+     * declared range came back unmarked and without a warning where the other four
+     * implementations flag it. Mirrors Go's DecodeContext.Quality.
+     */
+    private final Map<String, String> quality = new LinkedHashMap<>();
+    /** Omitted readings waiting to learn whether {@code _quality} is produced (PS-182). */
+    private final Map<String, String> pendingAbsent = new LinkedHashMap<>();
+    /** Enclosing flagged groups; a mark made inside one always waits, as in the reference. */
+    private int inFlagged;
+    /**
      * Where the readable region ends. A repeat's or tlv's {@code reserve} stops its loop
      * short of the payload's end (PS-350, PS-471), so the region is narrowed while the
      * loop runs and nothing inside it can read the reserved bytes. Positions stay
@@ -32,6 +46,16 @@ public class DecodeContext {
     private Set<String> repeatOnlyNames = Set.of();
     /** The members of the element being decoded, or null outside any element (PS-368). */
     private Set<String> elementNames;
+    /**
+     * A looked-up field's value before its lookup, which is what {@code valid_range}
+     * compares (PS-475), by field definition. Compared after the lookup, a label is no
+     * number and every value read "good".
+     */
+    private final Map<Field, Object> preLookup = new IdentityHashMap<>();
+    /** Fields whose last decode reported a failed guard's {@code else} (PS-443). */
+    private final Map<Field, Boolean> guardElse = new IdentityHashMap<>();
+    /** A PS-302 warning has already reported the bytes left over (PS-472). */
+    private boolean leftoverReported;
 
     public DecodeContext(byte[] data, String endian) {
         this.data = data;
@@ -125,6 +149,96 @@ public class DecodeContext {
     public List<String> getWarnings() { return Collections.unmodifiableList(warnings); }
 
     public void addWarning(String warning) { warnings.add(warning); }
+
+    void setLeftoverReported() { leftoverReported = true; }
+
+    /**
+     * PS-472: bytes after the last field of the selected list are reported, not silently
+     * dropped. The decode is reported as it would be otherwise; this only warns, with the
+     * offset of the first byte not decoded and the count to the end. A PS-302 warning for
+     * the same bytes is this warning, so no second one is added.
+     */
+    void reportLeftover() {
+        int left = data.length - offset;
+        if (left <= 0 || leftoverReported) return;
+        warnings.add(left + " byte(s) after the last field left undecoded, from offset "
+                + offset + " (PS-472)");
+    }
+
+    /**
+     * Records what {@code valid_range} will compare for this decode of the field: the
+     * pre-lookup value (null where none was reached), and whether a guard reported its
+     * {@code else}, which ends the sequence and is not compared (PS-443, PS-475).
+     */
+    void recordRangeInputs(Field field, boolean fromGuardElse, boolean hasPreLookup, Object pre) {
+        if (fromGuardElse) guardElse.put(field, Boolean.TRUE); else guardElse.remove(field);
+        if (hasPreLookup) preLookup.put(field, pre); else preLookup.remove(field);
+    }
+
+    void enterFlagged() { inFlagged++; }
+    void exitFlagged() { inFlagged--; }
+    boolean inFlagged() { return inFlagged > 0; }
+
+    /**
+     * PS-131: a value outside the field's {@code valid_range} is reported, flagged
+     * {@code out_of_range} with a warning; one inside is {@code good}. A value that is not
+     * a number (a lookup label) is not checked. Mirrors Go's checkValidRange.
+     */
+    void checkValidRange(Object value, Field field) {
+        double[] range = field.getValidRange();
+        if (range == null) return;
+        // PS-443: a failed guard's `else` ends the sequence and is not compared. PS-475:
+        // a looked-up field is compared on its number, before the lookup, not its label.
+        if (guardElse.containsKey(field)) {
+            quality.put(field.getName(), "good");
+            return;
+        }
+        if (field.getLookup() != null) {
+            if (!preLookup.containsKey(field)) {
+                quality.put(field.getName(), "good");
+                return;
+            }
+            value = preLookup.get(field);
+        }
+        if (!(value instanceof Number n) || value instanceof Boolean) return;
+        double v = n.doubleValue();
+        if (v < range[0] || v > range[1]) {
+            warnings.add(field.getName() + ": value " + formatNumber(v) + " outside valid range ["
+                    + formatNumber(range[0]) + ", " + formatNumber(range[1]) + "]");
+            quality.put(field.getName(), "out_of_range");
+        } else {
+            quality.put(field.getName(), "good");
+        }
+    }
+
+    /**
+     * PS-427, PS-428: an omitted reading is recorded in {@code _quality} where that is
+     * produced. A field declaring {@code valid_range} produces it itself; any other mark
+     * waits for the end of the decode (PS-182), and so does one inside a flagged group.
+     */
+    void markAbsent(Field field, String why) {
+        if (field.getValidRange() != null && inFlagged == 0) {
+            quality.put(field.getName(), why);
+        } else {
+            pendingAbsent.put(field.getName(), why);
+        }
+    }
+
+    /** {@code _quality} as reported: the waiting marks join it only where it is produced. */
+    Map<String, String> settledQuality() {
+        if (quality.isEmpty()) return quality;
+        Map<String, String> out = new LinkedHashMap<>(quality);
+        for (Map.Entry<String, String> e : pendingAbsent.entrySet()) {
+            out.putIfAbsent(e.getKey(), e.getValue());
+        }
+        return out;
+    }
+
+    /** A number as Go's {@code %v} writes a float64 in the common case: 90, not 90.0. */
+    private static String formatNumber(double v) {
+        if (v == Math.rint(v) && Math.abs(v) < 1e15) return Long.toString((long) v);
+        return Double.toString(v);
+    }
     
     public void setVariable(String name, Object value) {
         variables.put(name, value);

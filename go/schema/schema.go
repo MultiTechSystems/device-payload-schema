@@ -127,9 +127,6 @@ type Field struct {
 	Add         *float64       `json:"add,omitempty" yaml:"add,omitempty"`
 	Mult        *float64       `json:"mult,omitempty" yaml:"mult,omitempty"`
 	Div         *float64       `json:"div,omitempty" yaml:"div,omitempty"`
-	// Deprecated: retained so existing callers still compile. Modifier order is
-	// fixed by PS-101 and this field is no longer read.
-	ModOrder []string `json:"-" yaml:"-"`
 	Transform   []Transform    `json:"transform,omitempty" yaml:"transform,omitempty"`
 	Modifiers   []Transform    `json:"modifiers,omitempty" yaml:"modifiers,omitempty"` // Legacy support
 	Lookup      map[int]string `json:"lookup,omitempty" yaml:"lookup,omitempty"`
@@ -230,7 +227,6 @@ type Field struct {
 // Transform represents a single transformation stage.
 type Transform struct {
 	Add  *float64 `json:"add,omitempty" yaml:"add,omitempty"`
-	Sub  *float64 `json:"sub,omitempty" yaml:"sub,omitempty"`
 	Mult *float64 `json:"mult,omitempty" yaml:"mult,omitempty"`
 	Div  *float64 `json:"div,omitempty" yaml:"div,omitempty"`
 	// Named operation form, e.g. {op: round, decimals: 2, ties: away}.
@@ -347,6 +343,11 @@ type DecodeContext struct {
 	// the reference always defers the mark (see markAbsent).
 	pendingAbsent map[string]string
 	inFlagged     int
+	// rangeStash is what valid_range compares for the field just decoded (PS-475); see
+	// rangeValue. leftoverReported is set where a PS-302 warning has already reported
+	// the bytes left, so PS-472 reports no second one.
+	rangeStash       rangeStash
+	leftoverReported bool
 }
 
 // EncodeContext maintains state during encoding.
@@ -454,7 +455,12 @@ func (ctx *DecodeContext) checkValidRange(value any, field Field) string {
 	if len(field.ValidRange) < 2 {
 		return "good"
 	}
-	
+	checked, value := ctx.rangeValue(field, value)
+	if !checked {
+		ctx.Quality[field.Name] = "good"
+		return "good"
+	}
+
 	numVal, ok := toFloat64(value)
 	if !ok {
 		return "good"
@@ -509,14 +515,6 @@ func (ctx *DecodeContext) Peek(n int, offset int) ([]byte, error) {
 	return ctx.Data[pos : pos+n], nil
 }
 
-// applyCanonicalModifiers applies the bare mult, div and add modifiers in the
-// canonical order defined by PS-101: mult, then div, then add, whatever order the
-// keys appear in the source document. An absent modifier is the identity.
-//
-// The previous implementation carried the YAML key order in a ModOrder field and
-// applied the modifiers in that order, which JSON input could not supply -- so
-// this path and the JSON fallback disagreed with each other and with the other
-// language implementations. Order-dependent arithmetic uses Transform instead.
 // isIntegerTyped reports whether the field's declared type selects `integer` in the
 // clause 1 table (PS-279): the fixed-width integer widths and their aliases.
 func isIntegerTyped(field Field) bool {
@@ -550,6 +548,14 @@ func reportsAsInteger(field Field) bool {
 	return isIntegerTyped(field) && !carriesModifier(field)
 }
 
+// applyCanonicalModifiers applies the bare mult, div and add modifiers in the
+// canonical order defined by PS-101: mult, then div, then add, whatever order the
+// keys appear in the source document. An absent modifier is the identity.
+//
+// An earlier implementation carried the YAML key order in a ModOrder field and
+// applied the modifiers in that order, which JSON input could not supply -- so
+// this path and the JSON fallback disagreed with each other and with the other
+// language implementations. Order-dependent arithmetic uses Transform instead.
 func applyCanonicalModifiers(value float64, field Field) float64 {
 	if field.Mult != nil {
 		value = value * *field.Mult
@@ -619,10 +625,10 @@ func roundHalfAwayDecimal(value float64, decimals int) float64 {
 	return out
 }
 
-// applyTransformStages applies a transform array in list order. A stage normally
-// carries one arithmetic op; where it carries several they apply in the canonical
-// order mult, div, add, so a stage cannot mean different things in different
-// languages. A stage may instead name an operation, as {op: round, decimals: N}.
+// applyTransformStages applies a transform array in list order. Each stage holds
+// exactly one operation (PS-452), which checkTransformStages enforces when the schema is
+// loaded: a stage holding two used to apply both here, mult before add, where Python
+// applied them in an order of its own and the generated codec only one of them.
 func applyTransformStages(value float64, stages []Transform) float64 {
 	for _, stage := range stages {
 		if stage.Op == "round" {
@@ -689,19 +695,15 @@ func applyTransformStages(value float64, stages []Transform) float64 {
 			value = math.Log(value)
 			continue
 		}
-		if stage.Mult != nil {
+		switch {
+		case stage.Mult != nil:
 			value = value * *stage.Mult
-		}
-		if stage.Div != nil {
+		case stage.Div != nil:
 			if *stage.Div == 0 {
 				return math.NaN() // PS-100: the field is absent
 			}
 			value = value / *stage.Div
-		}
-		if stage.Sub != nil {
-			value = value - *stage.Sub
-		}
-		if stage.Add != nil {
+		case stage.Add != nil:
 			value = value + *stage.Add
 		}
 	}
@@ -1055,12 +1057,6 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 				} else if add, ok := tm["add"].(int); ok {
 					a := float64(add)
 					t.Add = &a
-				}
-				if sub, ok := tm["sub"].(float64); ok {
-					t.Sub = &sub
-				} else if sub, ok := tm["sub"].(int); ok {
-					s := float64(sub)
-					t.Sub = &s
 				}
 				if mult, ok := tm["mult"].(float64); ok {
 					t.Mult = &mult
@@ -1820,6 +1816,9 @@ func (s *Schema) DecodeWithPortDirection(data []byte, fPort int, direction strin
 		result[k] = v
 	}
 
+	// PS-472: bytes after the last field of the selected list are reported.
+	ctx.reportLeftover()
+
 	// Add quality dict to output if any quality flags were set, with any reading
 	// omitted under PS-427/PS-428 joined to it.
 	ctx.settleQuality()
@@ -1865,6 +1864,9 @@ func (s *Schema) Decode(data []byte) (map[string]any, error) {
 	for k, v := range fieldsResult {
 		result[k] = v
 	}
+
+	// PS-472: bytes after the last field of the selected list are reported.
+	ctx.reportLeftover()
 
 	// Add quality dict to output if any quality flags were set, with any reading
 	// omitted under PS-427/PS-428 joined to it.
@@ -2004,6 +2006,7 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 			savedVar, hadVar = ctx.Variables[field.Var]
 		}
 
+		ctx.rangeStash = rangeStash{}
 		value, err := decodeField(field, ctx)
 		if err != nil {
 			return nil, err
@@ -2019,7 +2022,7 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 			}
 			continue
 		}
-		if value != omitted && rangeOmits(field, value) && (!internal || ctx.inFlagged > 0) {
+		if value != omitted && ctx.rangeOmitsDecoded(field, value) && (!internal || ctx.inFlagged > 0) {
 			// PS-428: outside the range is no reading, not a flagged one.
 			if field.Var != "" {
 				if hadVar {
@@ -2506,63 +2509,39 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		value = prefix + strings.Join(partStrs, delimiter)
 
 	case TypeNumber, "number":
-		// Computed field — reads no bytes
-		// Phase 2: ref with polynomial/transform, compute with guard
-		if field.Guard != nil {
-			// PS-368: a guard reading an element name out of scope is an error, not
-			// a failed condition.
-			if err := guardScopeError(field.Guard.When, ctx); err != nil {
+		// Computed field - reads no bytes. PS-443 (CR-2026-071): its value is its
+		// source - the ref value with its polynomial, or the compute result - and then
+		// the same pipeline as a field read from the payload: the bare modifiers, the
+		// transform stages and the lookup, all in applyLookupAndModifiers below. The
+		// modifiers used to be applied here for a ref and not at all for a compute, so
+		// `mult: 10` beside a compute was ignored with success.
+		if field.Ref != "" || field.Compute != nil {
+			// PS-444: a guard is evaluated before the source, and a failed one's
+			// `else` is the value as declared - not passed through the modifiers, the
+			// transform or the lookup. A ref guard used to be checked after the
+			// arithmetic and its `else` then looked up, so `else: 7` beside an
+			// eight-label lookup was reported as the eighth label.
+			if field.Guard != nil {
+				// PS-368: a guard reading an element name out of scope is an error,
+				// not a failed condition.
+				if err := guardScopeError(field.Guard.When, ctx); err != nil {
+					return nil, err
+				}
+				if !guardConditionsHold(field.Guard, ctx) {
+					// The `else` ends the sequence (PS-443): not compared with the range.
+					ctx.rangeStash = rangeStash{owner: field.Name, guardElse: true}
+					return finishComputedValue(field.Guard.Else, field, ctx)
+				}
+			}
+			source, err := computedSource(field, ctx)
+			if errors.Is(err, errComputeOmitted) {
+				// Zero divisor (PS-278): the field is absent and decoding of the rest
+				// of the payload carries on.
+				return omitted, nil
+			} else if err != nil {
 				return nil, err
 			}
-		}
-		if field.Ref != "" {
-			refName := strings.TrimPrefix(field.Ref, "$")
-			refVal, ok := ctx.Variables[refName]
-			if !ok {
-				if err := ctx.scopeError(refName); err != nil {
-					return nil, err
-				}
-				return nil, fmt.Errorf("ref field not found: %s", refName)
-			}
-			numVal, _ := toFloat64(refVal)
-
-			// Apply polynomial (Horner's method)
-			if len(field.Polynomial) > 0 {
-				numVal = evaluatePolynomial(field.Polynomial, numVal)
-			}
-
-			// Modifiers first, then the transform stages - the order the
-			// interpreter uses. Running the stages first made a field that scales
-			// with mult and then rounds with a stage round before it had scaled.
-			numVal = applyCanonicalModifiers(numVal, field)
-			numVal = applyTransformStages(numVal, field.Transform)
-
-			value = numVal
-		} else if field.Compute != nil {
-			// A guard exists to avoid an invalid computation, so its conditions are
-			// checked before evaluating one. Evaluating first made a guarded
-			// division by zero abort the whole payload - dl-alb and vicki guard
-			// exactly that case and decoded nothing here while other
-			// implementations returned the guard's else value.
-			if field.Guard != nil && !guardConditionsHold(field.Guard, ctx) {
-				value = field.Guard.Else
-			} else {
-				result, err := evaluateCompute(field.Compute, ctx)
-				if errors.Is(err, errComputeOmitted) {
-					// Zero divisor (PS-278): report the field absent and carry on
-					// with the payload, reusing the same `omitted` sentinel the
-					// unmatched-lookup path uses. Returning the error here used to
-					// abandon the whole decode.
-					value = omitted
-				} else if err != nil {
-					return nil, err
-				} else {
-					// A compute takes its transform stages and no bare modifiers,
-					// as the interpreter does. These were not applied at all, so a
-					// computed field asking to be rounded was reported unrounded.
-					value = applyTransformStages(result, field.Transform)
-				}
-			}
+			value = source
 		} else if field.Formula != "" {
 			// Legacy formula support
 			val, err := evaluateFormula(field.Formula, 0, ctx)
@@ -2572,24 +2551,6 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 			value = val
 		} else {
 			value = field.Value
-		}
-
-		// Apply guard if present (checks conditions on other fields, returns else if fail)
-		if field.Guard != nil {
-			if numVal, ok := toFloat64(value); ok {
-				value = evaluateGuard(field.Guard, numVal, ctx)
-			}
-		}
-
-		if field.IntegerResult && value != omitted {
-			if numVal, ok := toFloat64(value); ok && !math.IsNaN(numVal) && !math.IsInf(numVal, 0) {
-				// PS-388: a fractional part is an error, never truncated or rounded.
-				if numVal != math.Trunc(numVal) {
-					return nil, fmt.Errorf("%s: type integer but the computed value is %v; "+
-						"add `idiv` to truncate or a {op: round} transform stage", field.Name, numVal)
-				}
-				value = int64(numVal)
-			}
 		}
 
 	case TypeObject, TypeObjectLower:
@@ -2625,7 +2586,16 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 // applyLookupAndModifiers runs the shared post-decode pipeline: formula, modifiers,
 // transform, lookup and variable capture. Extracted so the bit-range path uses the
 // same tail as the type switch rather than duplicating it.
+//
+// A computed field (ref or compute) comes through here with its source value, exactly as
+// a read field does with its raw one (PS-443). Its modifiers and stages are applied here
+// and nowhere else: while the ref and compute paths applied their own, this function had
+// to skip them, and the compute path's copy forgot the bare modifiers - and before that,
+// the skip forgot compute and dl-blg's voltage_ratio had its stages applied twice.
 func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, error) {
+	if value == omitted {
+		return omitted, nil
+	}
 	// Formula takes precedence over top-level modifiers (per spec section 03)
 	// For TypeNumber with ref, transform is already applied in the ref block
 	if field.Formula != "" && field.Type != TypeNumber {
@@ -2636,15 +2606,6 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 			}
 			value = result
 		}
-	} else if (field.Type == TypeNumber || field.Type == "number") &&
-		(field.Ref != "" || field.Compute != nil) {
-		// A computed field's transform stages were already applied where the value
-		// was produced, so applying them again here doubles them. The ref case was
-		// already skipped; compute was not, so a compute field carrying a transform
-		// had it run twice - decentlab/dl-blg's voltage_ratio came out as
-		// -0.4999999996 where the vendor decoder says 0.0064094, because its
-		// `div: 16777216` and `add: -0.5` were each applied a second time. Nothing
-		// caught it: that schema had no test vectors at all.
 	} else if reportsAsInteger(field) {
 		// PS-293, PS-294: an integer-typed field with no modifier keeps the exact
 		// uint64 or int64 decodeUint/decodeSint produced. Falling through to the
@@ -2696,6 +2657,16 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 		return omitted, nil
 	}
 
+	// PS-475: valid_range compares the value here, after the arithmetic and before the
+	// lookup, and a value `out_of_range: omit` drops takes no further step - it is not
+	// looked up, so an index its sequence lacks is no error for a field dropped anyway.
+	if (field.Lookup != nil || field.LookupArray != nil) && len(field.ValidRange) >= 2 {
+		ctx.rangeStash = rangeStash{owner: field.Name, preLookup: value, hasPreLookup: true}
+		if rangeOmits(field, value) {
+			return value, nil
+		}
+	}
+
 	// Apply lookup. A mapping is matched on its keys, which need not start at
 	// zero or be contiguous (PS-268); an unmatched value omits the field rather
 	// than reporting the raw integer under a name that promises a label, unless a
@@ -2723,6 +2694,13 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 		}
 	}
 	if field.LookupArray != nil {
+		// A computed value reaches the lookup as a float (PS-443). An integral one is
+		// its index; one with a fraction is no index of the sequence, which PS-105 makes
+		// an error. toInt truncated it, so 1.5 was reported as the label at index 1.
+		if numVal, ok := value.(float64); ok && numVal != math.Trunc(numVal) {
+			return nil, fmt.Errorf("lookup index %v is not an index of a %d-entry sequence (PS-105)",
+				numVal, len(field.LookupArray))
+		}
 		if intVal, ok := toInt(value); ok {
 			if intVal >= 0 && intVal < len(field.LookupArray) {
 				value = field.LookupArray[intVal]
@@ -2733,11 +2711,51 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 		}
 	}
 
-	// Store variable
+	return finishComputedValue(value, field, ctx)
+}
+
+// computedSource is a computed field's source (PS-443): the referenced value with its
+// polynomial applied, or the compute result. Everything after it is
+// applyLookupAndModifiers' job.
+func computedSource(field Field, ctx *DecodeContext) (float64, error) {
+	if field.Ref == "" {
+		return evaluateCompute(field.Compute, ctx)
+	}
+	refName := strings.TrimPrefix(field.Ref, "$")
+	refVal, ok := ctx.Variables[refName]
+	if !ok {
+		if err := ctx.scopeError(refName); err != nil {
+			return 0, err
+		}
+		return 0, fmt.Errorf("ref field not found: %s", refName)
+	}
+	numVal, _ := toFloat64(refVal)
+	if len(field.Polynomial) > 0 {
+		numVal = evaluatePolynomial(field.Polynomial, numVal)
+	}
+	return numVal, nil
+}
+
+// finishComputedValue is the tail every decoded value shares, and the whole of what a
+// failed guard's `else` goes through (PS-444): absent where it is NaN (no `else`, PS-400),
+// the integer check of a `type: integer` field (PS-283, PS-388), and the variable capture.
+func finishComputedValue(value any, field Field, ctx *DecodeContext) (any, error) {
+	if f, ok := value.(float64); ok && (math.IsNaN(f) || math.IsInf(f, 0)) {
+		return omitted, nil
+	}
+	if field.IntegerResult {
+		if numVal, ok := toFloat64(value); ok {
+			// PS-388: a fractional part is an error, never truncated or rounded.
+			if numVal != math.Trunc(numVal) {
+				return nil, fmt.Errorf("%s: type integer but the computed value is %v; "+
+					"add `idiv` to truncate or a {op: round} transform stage", field.Name, numVal)
+			}
+			value = int64(numVal)
+		}
+	}
 	if field.Var != "" {
 		ctx.Variables[field.Var] = value
 	}
-
 	return value, nil
 }
 
@@ -3037,6 +3055,14 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 		// unknown tag itself rather than from after it (PS-302).
 		entryStart := ctx.Offset
 
+		// PS-477: a tag is never partly read. Fewer bytes than the tag at the start of an
+		// entry is an error identifying the tlv; this stopped the loop and reported a
+		// complete decode.
+		if width := tlvTagWidth(field, tagSize); ctx.Remaining() < width {
+			return nil, fmt.Errorf("tlv entry at offset %d: %d byte(s) remain, fewer than its %d-byte tag (PS-477)",
+				ctx.Offset, ctx.Remaining(), width)
+		}
+
 		var tag []int
 		var tagValues map[string]int
 
@@ -3044,11 +3070,7 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 			// Structured tag
 			tagValues = make(map[string]int)
 			for _, tf := range field.TagFields {
-				length := tf.Length
-				if length == 0 {
-					length = 1
-				}
-				data, err := ctx.Read(length)
+				data, err := ctx.Read(tagFieldWidth(tf))
 				if err != nil {
 					break
 				}
@@ -3092,6 +3114,9 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 		if lengthSize > 0 {
 			data, err := ctx.Read(lengthSize)
 			if err != nil {
+				// No entry was decoded here: the bytes from its tag on are left over,
+				// and PS-472 reports them from the tag's offset.
+				ctx.Offset = entryStart
 				break
 			}
 			dataLength = int(decodeUint(data, ctx.Endian))
@@ -3179,6 +3204,8 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 			ctx.Warnings = append(ctx.Warnings, fmt.Sprintf(
 				"unknown TLV tag (%s) at offset %d: %d of %d byte(s) left undecoded",
 				label, entryStart, len(ctx.Data)-entryStart, len(ctx.Data)))
+			// This warning is PS-472's for these bytes; no second one is reported.
+			ctx.leftoverReported = true
 			break
 		}
 	}
@@ -3813,24 +3840,42 @@ func rawForField(field Field, value any) (float64, bool) {
 	if !ok {
 		return 0, false
 	}
+	// Not invertible: the caller treats that as "this case did not write it".
+	raw, err := reverseArithmetic(num, field)
+	return raw, err == nil
+}
+
+// reverseArithmetic undoes a field's decode arithmetic for encoding. PS-443 fixes the
+// decode order at the bare modifiers (mult, div, add) and then the transform stages in
+// list order, so the inverse undoes the stages last-first and then the modifiers.
+//
+// encodeField had the stages and the bare modifiers as alternatives: with a `transform`
+// present it undid the stages and never the modifiers, so a u16 carrying `div: 10` and
+// `transform: [{add: -40}, {mult: 2}]` encoded 50 as 0x0041 (65) - the stages undone, the
+// division not - where the reading came from 0x028A (650).
+//
+// Rounding and bound stages are identity in reverse: the precision or range they
+// discarded is gone, and a value inside them is unchanged. sqrt, abs, pow and the logs do
+// not invert, and are reported rather than written as plausible bytes.
+func reverseArithmetic(num float64, field Field) (float64, error) {
 	for i := len(field.Transform) - 1; i >= 0; i-- {
 		stage := field.Transform[i]
 		switch {
 		case stage.Add != nil:
 			num -= *stage.Add
-		case stage.Mult != nil && *stage.Mult != 0:
+		case stage.Mult != nil:
+			if *stage.Mult == 0 {
+				return 0, fmt.Errorf("%s: cannot undo transform stage mult: 0", field.Name)
+			}
 			num /= *stage.Mult
 		case stage.Div != nil:
 			num *= *stage.Div
-		case stage.Op != "", stage.Sqrt, stage.Abs, stage.Log, stage.Log10, stage.Pow != nil:
-			// Rounding and clamping are identity in reverse; the rest are not
-			// invertible, which the caller treats as "this case did not write it".
-			if stage.Sqrt || stage.Abs || stage.Log || stage.Log10 || stage.Pow != nil {
-				return 0, false
-			}
+		case stage.Sqrt, stage.Abs, stage.Log, stage.Log10, stage.Pow != nil:
+			return 0, fmt.Errorf("%s: cannot undo transform stage %d (sqrt, abs, pow and "+
+				"log do not invert)", field.Name, i)
 		}
 	}
-	return reverseCanonicalModifiers(num, field), true
+	return reverseCanonicalModifiers(num, field), nil
 }
 
 // caseFidelity reports how well a candidate TLV case explains the data: how many of its
@@ -3982,18 +4027,7 @@ func encodeTLVTag(caseKey string, field Field, ctx *EncodeContext) ([]byte, erro
 			if !ok {
 				return nil, fmt.Errorf("tlv case %q gives no value for %q", caseKey, tf.Name)
 			}
-			width := 1
-			if lo, hi, known := integerRange(tf.Type); known {
-				_ = lo
-				switch {
-				case hi > 0xFFFFFF:
-					width = 4
-				case hi > 0xFFFF:
-					width = 3
-				case hi > 0xFF:
-					width = 2
-				}
-			}
+			width := tagFieldWidth(tf)
 			out = append(out, encodeUint(uint64(v), width, ctx.Endian)...)
 		}
 		return out, nil
@@ -4900,20 +4934,12 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 
 	// Reverse modifiers for numeric values
 	if numVal, ok := toFloat64(value); ok {
-		// Reverse stages in reverse order; within each stage, reverse ops
 		if len(field.Transform) > 0 {
-			for i := len(field.Transform) - 1; i >= 0; i-- {
-				stage := field.Transform[i]
-				if stage.Div != nil {
-					numVal = numVal * *stage.Div
-				}
-				if stage.Mult != nil {
-					numVal = numVal / *stage.Mult
-				}
-				if stage.Add != nil {
-					numVal = numVal - *stage.Add
-				}
+			raw, err := reverseArithmetic(numVal, field)
+			if err != nil {
+				return err
 			}
+			numVal = raw
 		} else if len(field.Modifiers) > 0 {
 			for i := len(field.Modifiers) - 1; i >= 0; i-- {
 				stage := field.Modifiers[i]
@@ -5667,7 +5693,6 @@ func resolveOperand(op string, ctx *DecodeContext) (float64, error) {
 	return strconv.ParseFloat(op, 64)
 }
 
-// evaluateGuard applies guard conditions, returning value if all pass or else.
 // guardConditionsHold reports whether every condition of a guard is satisfied.
 func guardConditionsHold(gd *GuardDef, ctx *DecodeContext) bool {
 	for _, cond := range gd.When {
@@ -5700,41 +5725,6 @@ func guardConditionsHold(gd *GuardDef, ctx *DecodeContext) bool {
 		}
 	}
 	return true
-}
-
-func evaluateGuard(gd *GuardDef, value float64, ctx *DecodeContext) float64 {
-	for _, cond := range gd.When {
-		fieldName := strings.TrimPrefix(cond.Field, "$")
-		fieldVal, ok := ctx.Variables[fieldName]
-		if !ok {
-			return gd.Else
-		}
-		fv, ok := toFloat64(fieldVal)
-		if !ok {
-			return gd.Else
-		}
-
-		// Check all conditions on this field
-		if cond.Gt != nil && !(fv > *cond.Gt) {
-			return gd.Else
-		}
-		if cond.Gte != nil && !(fv >= *cond.Gte) {
-			return gd.Else
-		}
-		if cond.Lt != nil && !(fv < *cond.Lt) {
-			return gd.Else
-		}
-		if cond.Lte != nil && !(fv <= *cond.Lte) {
-			return gd.Else
-		}
-		if cond.Eq != nil && fv != *cond.Eq {
-			return gd.Else
-		}
-		if cond.Ne != nil && fv == *cond.Ne {
-			return gd.Else
-		}
-	}
-	return value
 }
 
 // evaluateFormula (DEPRECATED - use polynomial/compute/guard instead)

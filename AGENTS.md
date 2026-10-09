@@ -187,18 +187,18 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2356 payload vectors in `schemas/devices/` (measured 2026-10-05 with
-`tools/check-floors.py`, after merging the mutation-survivor vectors into 0.5.2) are the shared
+The 2371 payload vectors in `schemas/devices/` (measured 2026-10-09 with
+`tools/check-floors.py`, after the CR-2026-071 to -087 fixtures) are the shared
 cross-language test set. Every implementation has a runner that reads the same YAML and
 the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1680 |
-| Go | `go/schema/corpus_conformance_test.go` | 2357 | 1698 (plain API 1675) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2357 | 1680 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2357 | 1680 |
-| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 487 of 487 attempted | n/a |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1698 |
+| Go | `go/schema/corpus_conformance_test.go` | 2371 | 1715 (plain API 1692) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2371 | 1698 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2371 | 1698 |
+| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 540 of 540 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
 its own implementation's actual; trust it over this table.
@@ -754,10 +754,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1680 |
-| Go | `go/schema/corpus_encode_test.go` | 1698 (plain 1675) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1680 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1680 |
+| Python | `tests/test_encode_round_trip.py` | 1698 |
+| Go | `go/schema/corpus_encode_test.go` | 1715 (plain 1692) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1698 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1698 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1113,8 +1113,11 @@ it adopted before the `_` fix; it can use `$_device_type` directly now.
   different branch in 19 schemas - 116 vectors as *successful* decodes of the wrong data
   (netvox r718x its `default:` on every report; dnt, mla20 and elsys every tlv channel as
   unknown). `_match_case_pattern` now compares a numeric-string key as a number.
-  The unread-tail list names real schema gaps (arwin port 12, am307/am308's copied
-  example, ws50x's padded vectors, r718x's zero padding); fixing one means removing its
+  The unread-tail list names real schema gaps - now only arwin port 12's byte 7, which
+  waits on a vendor document (am30x's copied example, ws50x's and em310-tilt's padded
+  vectors and r718x's documented reserved tail were settled on 2026-10-09; a padded
+  harvested vector can hide from it, since an undescribed tag counts as consumed, so
+  check a harvested vector's length against its case's width too); fixing one means removing its
   entry.
 - **`tools/schema-mutation.py`** mutates each schema one step at a time (byte order,
   sign, width, scale, offset, bit range, lookup label, case key, flagged bit, dropped
@@ -1167,7 +1170,7 @@ baseline - a regression fails, an improvement is reported and locked in with the
 | `gate-provenance` | a changed device schema has no independently sourced vector, or an added vector lacks `source:` | none: the diff against `BASE` |
 | `gate-crossval` | a schema stops agreeing with its vendor's own decoder (TTN declared examples + vendor JS, Decentlab decoders), or a new one does not agree | `tools/crossval-baseline.json`, oracle commits pinned |
 | `gate-mutation` | a schema's vectors notice fewer one-step mutations than before (score or killed count), or a new schema scores below 0.80 | `tools/mutation-baseline.json` |
-| `gate-verdicts` | a changed schema's vector fails in any of Python, Go, Java, C#, TS013, or a vector the reference passes fails elsewhere | `tools/verdicts-baseline.json` (empty: all five agree on 2356/2356) |
+| `gate-verdicts` | a changed schema's vector fails in any of Python, Go, Java, C#, TS013, or a vector the reference passes fails elsewhere | `tools/verdicts-baseline.json` (empty: all five agree on every vector) |
 
 The mutation gate ratchets the killed count as well as the score on purpose: deleting
 vectors makes the mutants only they reached "unreached", which *raises* the score.
@@ -1266,6 +1269,54 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   deliberately. A sentinel is compared on the bits before an `encoding` and written back
   as raw bits. Python's TLV case loop is still its own loop, so `optional` and `sentinel`
   inside a TLV case apply in Go, Java and C# and not in Python - no corpus vector reaches it.
+- **CR-2026-071/073: one arithmetic pipeline, one operation per stage.** Every numeric field,
+  computed or read, is source -> mult/div/add -> `transform` -> lookup (PS-443); a failed
+  guard's `else` is reported as declared, skipping all of it (PS-444). The load-time checks
+  are one function per language - `arithmetic_schema_errors` in Python (it walks *every*
+  field mapping, typed or not: a guard beside a `byte_group` is as invalid as one on a
+  `u8`), `checkFieldRules` in Go, `checkArithmetic`/`parseField` in Java, `CheckGuard`/
+  `CheckStage` in C# - and reject a guard off a computed field (PS-445) and a stage holding
+  other than one operation (PS-452; `decimals`/`ties` belong to an `op:` stage). Fixtures:
+  `arithmetic-order-computed`, `arithmetic-order-read`, `guard-else-as-declared`. What it
+  found, beyond the CRs' own table: Go encode dropped a bare `div` beside a `transform`
+  (`0041` for `028a`) and undid `log10` as the identity; Java reported no `_quality` for
+  `valid_range` at all (now does, PS-131); Go, Java and C# all looked up a failed guard's
+  `else`; C# still parsed and applied `sub:`; C applied the lookup before `add`, and its
+  f16/f32/f64 paths applied no modifiers. A computed value reaching a *sequence* lookup
+  with a fraction is an error (PS-105), not a truncated index. The dead `ModOrder` fields
+  are gone from Go, Java and C#.
+  **C and PS-446:** `tools/schema_binary.py` is the one host path that feeds
+  `schema_load_binary`, and it now refuses every property C cannot apply - transform,
+  polynomial, compute, guard, encoding, sentinel, `out_of_range`, a lookup `default`, scale
+  factors and adds the format cannot reproduce, types it would have turned into `u8` -
+  rather than emitting a blob that decodes without it. `binary_schema.py`, `_v2.py`,
+  `generate-c.py` and `generate_firmware_codec.py` feed no C reader and still drop such
+  properties silently; `generate_codec.py` crashes on every schema.
+  Open: Python's `_decode_enum` ignores `mult`/`div`/`add` on an enum (C now applies them;
+  no corpus vector has one); Go's `GuardDef.Else` is a `float64`, so a non-numeric `else`
+  is treated as none; Go alone still applies a legacy `modifiers:` array, a key the
+  specification does not define (left to the closed-vocabulary CR); Java reports a
+  byte_group bit-range member as a Double.
+- **CR-2026-085/086/087 (2026-10-09).** Bytes after the last field are reported with
+  their offset and count - one warning, and none beside a PS-302 one for the same bytes
+  (PS-472) - in all five and in the generated codec's warnings[] (PS-473); C gives the
+  count as `bytes_unread`. A tlv entry with fewer bytes than its tag is an error naming
+  the tlv in every implementation (PS-477): Python's plain `tag_size` path, Go and the
+  generated codec stopped silently. A length cut short decodes no entry and leaves the
+  bytes over from the tag. **`valid_range` compares before the lookup** (PS-475):
+  compared after it, every looked-up value read "good" and `out_of_range: omit` never
+  dropped one; omitted, a value is not looked up, so an index its table lacks is no error.
+  A failed guard's `else` is not compared. Go, Java and C# read a `tag_fields` component
+  as `length` bytes defaulting to 1, so a `u16` component was read as one byte and written
+  as two; every implementation now takes the type's width. The output schema declares
+  `_warnings` for every schema, since any payload can carry leftover bytes.
+  SenML (PS-478/479) is produced by Python and C# only: one record per reported field
+  wherever declared, `senml.name`/`senml.unit` else the reported name and `unit`, object
+  members as `object/member`. Python had ignored `senml:` and walked top-level fields only;
+  C# found no definition inside a port entry or a construct. Fixtures: `leftover-bytes`,
+  `range-before-lookup` (its field was first named `flagged`, which three encode harnesses'
+  text scan filed under that shape - keep construct names out of fixture field names too),
+  and `match-default-skip` now expects the PS-472 warning. PS-118 is withdrawn (PS-102).
 - **`_meta` is not produced by any implementation**, so CR-2026-043 (`_meta.fPort`) and
   the `_meta` parts of CR-2026-054 wait for their own change (decided 2026-10-05).
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
@@ -1474,7 +1525,7 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   (CR-2026-032).** `make test-c` builds the three previously-orphaned C test files and runs
   `tools/c-corpus-harness.py`, which generates C that builds each expressible corpus schema
   through the struct API, compiles it, and compares the decode against the vectors.
-  **488 of 488 attempted vectors pass** since CR-2026-033 added `tlv` and CR-2026-034
+  **540 of 540 attempted vectors pass** (2026-10-09) since CR-2026-033 added `tlv` and CR-2026-034
   `flagged` (it was 50 of 50 before either). 751 of 1239 are still in schemas the struct API
   cannot build - 26 use a `transform` chain, 24 a `bitfield_string`, 15 more cases than
   `SCHEMA_MAX_CASES` allows, 3 `repeat`, 3 a `u32le16` **the interpreter has and the harness
@@ -1498,8 +1549,11 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   makes the top-level loop decode each a second time, which its own test tolerates only
   because it asserts `field_count >= 2` rather than what was decoded. `merge: false` and
   `unknown: raw` are not represented - both need a channel `decode_result_t` does not
-  have - and this interpreter has no warning channel, so it cannot report what it could
-  not read the way the other five now do.
+  have - and this interpreter has no text warning channel. Since CR-2026-085,
+  `decode_result_t.bytes_unread` gives a caller the count PS-472 reports (from
+  `bytes_consumed`, which an unknown tag with no length now rewinds to the tag), and the
+  harness turns it into the warning; an unknown tag's own name has nowhere to go, so the
+  six vectors expecting one are counted and listed separately rather than hidden.
 
   **The fixed-size limits are the real boundary, not an oversight.** `sizeof(schema_t)` is
   51 KB because every `field_def` carries `cases[16]` and `lookup[16]` unconditionally.

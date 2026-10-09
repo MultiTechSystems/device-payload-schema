@@ -12,6 +12,18 @@ public class DecodeContext
     public Dictionary<string, string> Quality { get; } = new();
     public List<string> Warnings { get; } = new();
     /// <summary>
+    /// Set where a PS-302 warning has already reported the bytes left, so PS-472 reports
+    /// no second one for them.
+    /// </summary>
+    internal bool LeftoverReported { get; set; }
+    /// <summary>
+    /// PS-475: a looked-up field's value before its lookup, which `valid_range` compares,
+    /// by field definition. Mirrors _pre_lookup in tools/schema_interpreter.py.
+    /// </summary>
+    internal Dictionary<SchemaField, double> PreLookup { get; } = new(ReferenceEqualityComparer.Instance);
+    /// <summary>PS-443: fields whose failed guard reported its `else`, which ends the sequence.</summary>
+    internal HashSet<SchemaField> GuardElse { get; } = new(ReferenceEqualityComparer.Instance);
+    /// <summary>
     /// Readings omitted under PS-427/PS-428 that wait to learn whether `_quality` is
     /// produced at all; joined to it at the end of the decode only where it is.
     /// </summary>
@@ -108,8 +120,31 @@ public class DecodeContext
         if (field.ValidRange == null || field.ValidRange.Length < 2)
             return "good";
 
+        // PS-443 as amended: a failed guard's `else` ends the sequence and is not compared.
+        if (GuardElse.Contains(field))
+        {
+            Quality[field.Name] = "good";
+            return "good";
+        }
+        // PS-475: a looked-up field is compared on the number before its lookup; compared
+        // after it, a label is no number and every value read "good".
+        if (field.Lookup != null)
+        {
+            if (!PreLookup.TryGetValue(field, out var before))
+            {
+                Quality[field.Name] = "good";
+                return "good";
+            }
+            value = before;
+        }
+
         var (ok, numVal) = Helpers.ToFloat64(value);
-        if (!ok) return "good";
+        if (!ok)
+        {
+            // The reference records "good" for a value it cannot compare.
+            Quality[field.Name] = "good";
+            return "good";
+        }
 
         double min = field.ValidRange[0], max = field.ValidRange[1];
         if (numVal < min || numVal > max)

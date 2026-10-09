@@ -1171,8 +1171,12 @@ def condition_to_js(cond: Dict[str, Any]) -> str:
     return 'true'
 
 
-def guard_to_js(guard: Dict[str, Any], value_expr: str) -> str:
-    """Generate JS for guard conditional evaluation."""
+def guard_to_js(guard: Dict[str, Any], value_expr: str, else_hook: str = '') -> str:
+    """Generate JS for guard conditional evaluation.
+
+    `else_hook` is an expression evaluated before the `else` is reported, for a field
+    that has to know its guard failed (PS-475: an `else` is not compared with the range).
+    """
     when_conditions = guard.get('when', [])
     else_value = guard.get('else', 'NaN')
     
@@ -1201,6 +1205,8 @@ def guard_to_js(guard: Dict[str, Any], value_expr: str) -> str:
         return value_expr
     
     cond_js = ' && '.join(conditions)
+    if else_hook:
+        return f'({cond_js}) ? {value_expr} : ({else_hook}, {else_value})'
     return f'({cond_js}) ? {value_expr} : {else_value}'
 
 
@@ -1408,6 +1414,9 @@ class TS013Generator:
         for port_entry in (schema.get('ports') or {}).values():
             group = port_entry.get('fields') if isinstance(port_entry, dict) else port_entry
             iterator_problems += optional_errors(group)
+        # PS-445, PS-452: a guard only on a computed field, one operation per stage.
+        from schema_interpreter import arithmetic_schema_errors
+        iterator_problems += arithmetic_schema_errors(schema)
         if iterator_problems:
             raise ValueError(iterator_problems[0])
         self.schema = schema
@@ -2012,6 +2021,10 @@ function writeS(buf, pos, size, value, endian) {
         lines.append(f'  var pos = 0, d = {{}}, vars = {{}}, w = [];')
         # Readings omitted as "no reading" (PS-427, PS-428), for `_quality` if produced.
         lines.append('  var aqr = {}, aqp = {};')
+        # rv: a looked-up field's value before its lookup, which valid_range compares
+        # (PS-475); rvs: fields whose guard reported `else`, which it does not. _leftDone:
+        # a PS-302 warning already reported the bytes left over (PS-472).
+        lines.append('  var rv = {}, rvs = {}, _leftDone = false;')
         lines.append(f'  endian = endian || "{self.endian}";')
         self.indent = 1
         for field in self._expand_refs(fields):
@@ -2031,10 +2044,13 @@ function writeS(buf, pos, size, value, endian) {
             lines.append(f'  // TODO: {gap}')
         lines.append('  var q = {}, qn = 0;')
         for js_name, schema_name, lo, hi in ranges:
+            key = json.dumps(schema_name)
+            value = (f'(Object.prototype.hasOwnProperty.call(rv, {key}) ? rv[{key}] : '
+                     f'd.{js_name})')
             lines.append(
                 f'  if (Object.prototype.hasOwnProperty.call(d, {json.dumps(js_name)})) '
-                f'{{ checkRange(q, w, {json.dumps(schema_name)}, d.{js_name}, '
-                f'{json.dumps(lo)}, {json.dumps(hi)}); qn++; }}'
+                f'{{ if (rvs[{key}]) q[{key}] = "good"; else checkRange(q, w, {key}, '
+                f'{value}, {json.dumps(lo)}, {json.dumps(hi)}); qn++; }}'
             )
         # PS-427, PS-428: an omitted reading is recorded where `_quality` is produced: a
         # field that declares a range produces it, and then the others join it.
@@ -2042,6 +2058,10 @@ function writeS(buf, pos, size, value, endian) {
         lines.append('  if (qn) for (var _p in aqp) { if (!(_p in q)) q[_p] = aqp[_p]; }')
         # PS-182: `_quality` appears only when a field actually carried a range.
         lines.append('  if (qn) d._quality = q;')
+        # PS-472, PS-473: bytes after the last field are reported, not dropped.
+        lines.append('  if (!_leftDone && pos < buf.length) w.push((buf.length - pos) + '
+                     '" byte(s) after the last field left undecoded, from offset " + pos + '
+                     '" (PS-472)");')
         lines.append('  return { data: d, pos: pos, warnings: w };')
         lines.append('}')
         return '\n'.join(lines)
@@ -2376,43 +2396,31 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append(f'{i}  vars.{name} = {js_formula};')
                 return lines
             
-            # New: ref + polynomial/transform/modifiers
-            if 'ref' in field:
-                ref_expr = ref_to_js(field['ref'])
-                value_expr = ref_expr
-                
-                # Apply polynomial if present
-                if 'polynomial' in field:
-                    value_expr = polynomial_to_js(field['polynomial'], ref_expr)
-                
-                value_expr = canonical_modifiers_to_js(field, value_expr)
-                
-                # Apply transform array if present
-                if 'transform' in field:
-                    value_expr = transform_to_js(field['transform'], value_expr)
-                
-                # Apply guard if present
+            # ref or compute (PS-443): the source - the `ref` value with its `polynomial`,
+            # or the `compute` result - then the modifiers, the stages and the lookup, as
+            # for a field read from the payload. `compute` used to drop the modifiers,
+            # and both dropped the lookup. The guard wraps the whole chain, so a failed
+            # one reports its `else` as declared (PS-444).
+            if 'ref' in field or 'compute' in field:
+                if 'ref' in field:
+                    value_expr = ref_to_js(field['ref'])
+                    if 'polynomial' in field:
+                        value_expr = polynomial_to_js(field['polynomial'], value_expr)
+                else:
+                    value_expr = compute_to_js(field['compute'])
+                value_expr = self._apply_modifiers_expr(value_expr, field)
                 if 'guard' in field:
-                    value_expr = guard_to_js(field['guard'], value_expr)
+                    hook = ''
+                    if field.get('valid_range'):
+                        # A failed guard's `else` ends the sequence (PS-443): not compared.
+                        key = json.dumps(field.get('name', ''))
+                        hook = f'rvs[{key}] = 1'
+                        value_expr = f'(delete rvs[{key}], {value_expr})'
+                    value_expr = guard_to_js(field['guard'], value_expr, hook)
                 value_expr = integral(value_expr)
                 lines.extend(self._computed_tail(i, field, name, value_expr))
                 return lines
-            
-            # New: compute with optional guard and transform
-            if 'compute' in field:
-                value_expr = compute_to_js(field['compute'])
-                
-                # Apply transform if present
-                if 'transform' in field:
-                    value_expr = transform_to_js(field['transform'], value_expr)
-                
-                # Apply guard if present
-                if 'guard' in field:
-                    value_expr = guard_to_js(field['guard'], value_expr)
-                value_expr = integral(value_expr)
-                lines.extend(self._computed_tail(i, field, name, value_expr))
-                return lines
-            
+
             # Literal value. JSON, not Python's repr: `value: true` emitted `True`,
             # which is not JavaScript.
             if 'value' in field:
@@ -2703,8 +2711,11 @@ function writeS(buf, pos, size, value, endian) {
                 or len(bounds) != 2:
             return [f'{i}  d.{name} = {value_expr};', f'{i}  vars.{name} = {value_expr};']
         tmp = f'_c_{to_js_name(name)}'
+        key = json.dumps(name)
+        # PS-475: compared before the lookup; a guard's `else` is not compared at all.
+        v = f'rv[{key}]' if 'lookup' in field else tmp
         return [f'{i}  var {tmp} = {value_expr};',
-                f'{i}  if (typeof {tmp} === "number" && ({tmp} < {bounds[0]} || {tmp} > {bounds[1]})) '
+                f'{i}  if (!rvs[{key}] && typeof {v} === "number" && ({v} < {bounds[0]} || {v} > {bounds[1]})) '
                 f'{{ aqr[{json.dumps(name)}] = "out_of_range"; }}',
                 f'{i}  else {{ d.{name} = {tmp}; vars.{name} = {tmp}; }}']
 
@@ -2734,8 +2745,10 @@ function writeS(buf, pos, size, value, endian) {
         bounds = field.get('valid_range')
         if field.get('out_of_range') == 'omit' and isinstance(bounds, (list, tuple)) \
                 and len(bounds) == 2:
-            conditions.append((f'(typeof {js_name}_out === "number" && ({js_name}_out < '
-                               f'{bounds[0]} || {js_name}_out > {bounds[1]}))',
+            # PS-475: a looked-up field is compared before its lookup.
+            v = f'rv[{key}]' if 'lookup' in field else f'{js_name}_out'
+            conditions.append((f'(typeof {v} === "number" && ({v} < '
+                               f'{bounds[0]} || {v} > {bounds[1]}))',
                                '"out_of_range"'))
         if not conditions:
             lines.extend(f'{i}  {line}' for line in body)
@@ -2759,6 +2772,14 @@ function writeS(buf, pos, size, value, endian) {
         if 'transform' in field:
             expr = transform_to_js(field['transform'], expr)
         
+        # PS-475: valid_range compares the value before the lookup. The value is kept in
+        # `rv` as it passes - the comma operator keeps this an expression - and the range
+        # checks read it from there rather than the label.
+        stash = None
+        if 'lookup' in field and field.get('valid_range'):
+            stash = (json.dumps(field.get('name', '')), expr)
+            expr = f'rv[{stash[0]}]'
+
         if 'lookup' in field:
             lookup = field['lookup']
             if isinstance(lookup, dict):
@@ -2794,6 +2815,14 @@ function writeS(buf, pos, size, value, endian) {
                 # the index expression is evaluated once instead of up to three times.
                 lk = json.dumps(lookup)
                 expr = f'seqLookup({lk}, {expr})'
+        if stash:
+            bounds = field.get('valid_range')
+            if field.get('out_of_range') == 'omit' and isinstance(bounds, (list, tuple)) \
+                    and len(bounds) == 2:
+                # An omitted value is not looked up (PS-443): its index may be no entry.
+                v = f'rv[{stash[0]}]'
+                expr = f'(({v} < {bounds[0]} || {v} > {bounds[1]}) ? {v} : {expr})'
+            expr = f'(rv[{stash[0]}] = {stash[1]}, {expr})'
         return expr
 
     def _reverse_modifiers_expr(self, val_var: str, field: Dict) -> str:
@@ -2862,8 +2891,17 @@ function writeS(buf, pos, size, value, endian) {
         length_size = int(tlv.get('length_size', 0))
 
         lines.append(f'{i}  // TLV loop')
-        lines.append(f'{i}  while (pos + {tag_size + length_size} <= buf.length) {{')
+        # PS-477: a tag is never partly read - fewer bytes than the tag at the start of an
+        # entry is an error identifying the tlv. The loop used to require tag and length
+        # to fit and stop silently otherwise. A length cut short decodes no entry, and
+        # the bytes from its tag on are left over (PS-472).
+        lines.append(f'{i}  while (pos < buf.length) {{')
         lines.append(f'{i}    var _tlvStart = pos;')
+        lines.append(f'{i}    if (buf.length - pos < {tag_size}) throw new Error("tlv entry at '
+                     f'offset " + pos + ": " + (buf.length - pos) + " byte(s) remain, fewer '
+                     f'than its {tag_size}-byte tag (PS-477)");')
+        if length_size:
+            lines.append(f'{i}    if (buf.length - pos < {tag_size + length_size}) break;')
 
         # Read tag fields
         for tf in tag_fields:
@@ -2973,6 +3011,7 @@ function writeS(buf, pos, size, value, endian) {
             f'{i}      w.push("unknown TLV tag (" + _tlvLabel + ") at offset " + _tlvStart'
             f' + ": " + (buf.length - _tlvStart) + " of " + buf.length'
             f' + " byte(s) left undecoded");')
+        lines.append(f'{i}      _leftDone = true;')
         lines.append(f'{i}      break;')
         return lines
 

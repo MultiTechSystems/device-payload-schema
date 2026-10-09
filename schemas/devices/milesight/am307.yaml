@@ -99,17 +99,21 @@ fields:
             lookup: ["no", "yes"]
 
 test_vectors:
+  # TTN's declared example 1 (vendor/milesight-iot/am307-codec.yaml) ends with 05 6A 49 00,
+  # the AM10x `activity` channel (am103.js), which no AM30x has: am307.js breaks out of
+  # its loop on it and the example's own output omits it. Trimmed to the channels this
+  # device sends; the expected values are am307.js's output for the trimmed bytes, which
+  # equal the example's declared output.
   - name: vendor_reference
-    description: "Example declared by the vendor in the TTN device repository"
-    payload: "01755C03673401046865056A4900"
+    description: "TTN declared example 1 without the AM10x activity channel copied into it"
+    payload: "01755C03673401046865"
     fPort: 85
-    source: vendor-doc
+    source: vendor-codec
     expected:
       battery: 92
       temperature: 30.8
       humidity: 50.5
-    expected_warnings:
-      - ["0x05, 0x6A", "4 of 14 byte(s)"]
+    expected_warnings: []
   - name: vendor_reference_2
     description: "Example declared by the vendor in the TTN device repository"
     payload: "077DE704087D070009733F27"

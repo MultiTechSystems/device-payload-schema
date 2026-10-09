@@ -184,7 +184,7 @@ mappings:
     requirements:
       - PS-115  # Transform operations support
       - PS-116  # sqrt clamps negative to 0
-      - PS-118  # Transforms applied in order
+      - PS-102  # Transforms applied in order (PS-118 withdrawn by CR-2026-086)
 
   # ============================================================
   # Section 03: Compute

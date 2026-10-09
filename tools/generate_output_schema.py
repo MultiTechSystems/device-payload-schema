@@ -237,6 +237,22 @@ def field_to_json_schema(field_def: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         looked_up = lookup_json_schema(field_def['lookup'])
         if looked_up:
             schema = looked_up
+
+    # A failed guard reports its `else` as declared, not looked up (PS-444), so a guarded
+    # field with a lookup can report a number beside its labels.
+    guard = field_def.get('guard')
+    if isinstance(guard, dict) and guard.get('else') is not None:
+        fallback = guard['else']
+        if 'enum' in schema and fallback not in schema['enum']:
+            schema['enum'] = list(schema['enum']) + [fallback]
+        declared = schema.get('type')
+        if declared is not None:
+            current = declared if isinstance(declared, list) else [declared]
+            fallback_type = scalar_json_type(fallback)
+            covered = fallback_type in current or (
+                fallback_type == 'integer' and 'number' in current)
+            if not covered:
+                schema['type'] = list(current) + [fallback_type]
     
     # Add description from field
     if field_def.get('description'):
@@ -806,19 +822,19 @@ def warnings_property(yaml_schema: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     assertable, but nothing described it, so it survived only on
     `additionalProperties`.
 
-    Two things put a warning here, and both are visible in the schema: a `valid_range`
-    that a value can fall outside, and a `tlv` that meets a tag it does not describe.
-    Gated on them rather than declared unconditionally, so a schema that cannot warn
-    does not advertise a key it will never emit.
+    It was gated on the two things a schema could show - a `valid_range` a value can
+    fall outside, a `tlv` meeting a tag it does not describe - so that a schema that could
+    not warn did not advertise the key. PS-472 (CR-2026-085) removed that schema: any
+    payload can arrive with bytes after the last field, and that is reported here. So it
+    is declared for every schema.
     """
-    if not (collect_quality_fields(yaml_schema) or reports_unknown_tags(yaml_schema)):
-        return None
     return {
         "type": "array",
         "description": (
             "What the decode had to say that did not stop it - a value outside its "
-            "`valid_range`, or a TLV tag the schema does not describe (PS-301, "
-            "PS-302). Present only when something was reported."
+            "`valid_range`, a TLV tag the schema does not describe (PS-301, PS-302), "
+            "or bytes after the last field (PS-472). Present only when something was "
+            "reported."
         ),
         "items": {"type": "string"},
     }

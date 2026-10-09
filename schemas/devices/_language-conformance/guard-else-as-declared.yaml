@@ -1,0 +1,62 @@
+# PS-444 (CR-2026-071): a guard is evaluated before the field's source. Where it fails, the
+# value is its `else` exactly as declared - not passed through the modifiers, the
+# `transform` or the lookup. The reference passed it through the `transform` on the
+# `compute` path. Where it passes, the whole chain of PS-443 applies.
+name: probe_guard_else_as_declared
+endian: big
+fields:
+- name: g
+  type: u8
+# passes: (2 + 0) * 10 + 1. fails: -1, untouched.
+- name: computed
+  type: number
+  compute: {op: add, a: $g, b: 0}
+  guard:
+    when:
+    - field: $g
+      gt: 0
+    else: -1
+  mult: 10
+  transform:
+  - add: 1
+# passes: g - 1 indexes the table. fails: 7, as declared - looked up, 7 is no index of
+# a three-entry sequence and the decode would fail (PS-105).
+- name: referenced
+  type: number
+  ref: $g
+  guard:
+    when:
+    - field: $g
+      gt: 0
+    else: 7
+  add: -1
+  lookup: [a, b, c]
+test_vectors:
+- name: guard_passes_one
+  source: spec-example
+  payload: "01"
+  expected:
+    g: 1
+    computed: 11
+    referenced: a
+- name: guard_passes_two
+  source: spec-example
+  payload: "02"
+  expected:
+    g: 2
+    computed: 21
+    referenced: b
+- name: guard_passes_three
+  source: spec-example
+  payload: "03"
+  expected:
+    g: 3
+    computed: 31
+    referenced: c
+- name: guard_fails
+  source: spec-example
+  payload: "00"
+  expected:
+    g: 0
+    computed: -1
+    referenced: 7

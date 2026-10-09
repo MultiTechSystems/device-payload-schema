@@ -41,7 +41,6 @@ public enum FieldType
 public class TransformStage
 {
     public double? Add { get; set; }
-    public double? Sub { get; set; }
     public double? Mult { get; set; }
     public double? Div { get; set; }
     /// <summary>Named operation form, e.g. {op: round, decimals: 2}.</summary>
@@ -154,9 +153,6 @@ public class SchemaField
     public double? Add { get; set; }
     public double? Mult { get; set; }
     public double? Div { get; set; }
-    /// <summary>Modifier order is fixed by PS-101; this is no longer read.</summary>
-    [Obsolete("Modifier order is fixed by PS-101 (mult, div, add); no longer read.")]
-    public List<string> ModOrder { get; set; } = new();
     public List<TransformStage> Transform { get; set; } = new();
     public Dictionary<int, string>? Lookup { get; set; }
     /// <summary>True when `lookup` was written as a sequence, indexed from zero (PS-104).</summary>

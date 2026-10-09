@@ -19,6 +19,7 @@ public static class SchemaDecoder
         var result = new Dictionary<string, object?>();
 
         MergeTo(result, DecodeFields(schema.Fields, ctx, schema));
+        ReportLeftover(ctx);
 
         // PS-427, PS-428: an omitted reading joins `_quality` only where it is produced.
         ctx.FinishQuality();
@@ -52,6 +53,7 @@ public static class SchemaDecoder
         var result = new Dictionary<string, object?>();
 
         MergeTo(result, DecodeFields(fields, ctx, schema));
+        ReportLeftover(ctx);
 
         // PS-427, PS-428: an omitted reading joins `_quality` only where it is produced.
         ctx.FinishQuality();
@@ -63,6 +65,21 @@ public static class SchemaDecoder
             result["_warnings"] = new List<string>(ctx.Warnings);
 
         return result;
+    }
+
+    /// <summary>
+    /// PS-472: bytes after the last field of the selected list are reported, not dropped
+    /// in silence. The decode is reported as it would be otherwise; this only warns, with
+    /// the offset of the first byte not decoded and the count to the end. A frame from
+    /// newer firmware and a frame decoded with the wrong layout both used to look
+    /// complete. A failed decode throws before reaching here, and a PS-302 warning is
+    /// this warning for its bytes. Mirrors _report_leftover in tools/schema_interpreter.py.
+    /// </summary>
+    static void ReportLeftover(DecodeContext ctx)
+    {
+        var left = ctx.Data.Length - ctx.Offset;
+        if (left <= 0 || ctx.LeftoverReported) return;
+        ctx.Warnings.Add($"{left} byte(s) after the last field left undecoded, from offset {ctx.Offset} (PS-472)");
     }
 
     static List<SchemaField> ResolveFields(PayloadSchemaDefinition schema, int fPort)
@@ -617,6 +634,23 @@ public static class SchemaDecoder
     static object? ApplyPostRead(object? value, SchemaField field, DecodeContext ctx,
         bool fieldRules = false)
     {
+        // A failed guard's `else` is reported as declared: no modifier, stage or lookup
+        // (PS-444). The lookup used to index it, so `else: 7` came out as the eighth label.
+        bool asDeclared = false;
+        ctx.GuardElse.Remove(field);
+        ctx.PreLookup.Remove(field);
+        if (value is DeclaredElse declared)
+        {
+            value = declared.Value;
+            asDeclared = true;
+            // The `else` ends the sequence (PS-443): not compared with valid_range either.
+            ctx.GuardElse.Add(field);
+            // `type: integer` reports an integral else as an integer, as it did before.
+            if (field.IntegerResult && declared.Value == Math.Floor(declared.Value)
+                && !double.IsInfinity(declared.Value))
+                value = (long)declared.Value;
+        }
+
         // Apply modifiers, skipping a Number whose value came from a ref or a
         // compute - DecodeNumber already applied its stages, so doing it again here
         // doubles them. The ref case was already skipped; compute was not, so a
@@ -650,11 +684,32 @@ public static class SchemaDecoder
         if (value is double nd && (double.IsNaN(nd) || double.IsInfinity(nd)))
             return Omitted;
 
+        // PS-475: valid_range compares the value after the arithmetic and before the
+        // lookup. A looked-up field is compared on its number, so it is stashed for the
+        // quality check; and `out_of_range: omit` is decided here, because an omitted
+        // value takes no further step (PS-443) - it is not looked up, so an index its
+        // sequence lacks is no error. Compared after the lookup, a label was never a
+        // number: every looked-up value read "good" and none was ever omitted.
+        if (!asDeclared && field.ValidRange is { Length: >= 2 } bounds
+            && value is not bool && Helpers.ToFloat64(value) is (true, var rangeValue))
+        {
+            if (field.Lookup != null)
+                ctx.PreLookup[field] = rangeValue;
+            // PS-428: `out_of_range: omit` makes a value outside valid_range no reading -
+            // not reported, not bound. Applied on the field-list path, not to byte_group
+            // members, as in the reference; and to an internal field only where it is
+            // computed.
+            if (fieldRules && field.OutOfRangeOmit && bounds.Length == 2
+                && (field.Type == FieldType.Number || !field.Name.StartsWith("_"))
+                && !(bounds[0] <= rangeValue && rangeValue <= bounds[1]))
+                return AbsentReading.OutOfRange;
+        }
+
         // Apply lookup. A mapping is matched on its keys, which need not start at
         // zero or be contiguous (PS-268). An unmatched value omits the field rather
         // than reporting the raw integer under a name that promises a label, unless
         // a default is declared (PS-269).
-        if (field.Lookup != null)
+        if (field.Lookup != null && !asDeclared)
         {
             var (ok, numVal) = Helpers.ToFloat64(value);
             if (ok)
@@ -663,6 +718,13 @@ public static class SchemaDecoder
                 // key 2. An integral double such as 7.0 is the key 7.
                 int intVal = (int)numVal;
                 bool integral = numVal == Math.Round(numVal) && !double.IsInfinity(numVal);
+                // A computed value reaches the lookup after its arithmetic (PS-443), so it
+                // may have a fraction. That is no index of a sequence, and an error
+                // (PS-105); it used to be truncated, reporting 1.5 as index 1.
+                if (!integral && field.LookupIsSequence)
+                    throw new InvalidOperationException(
+                        $"lookup index {numVal.ToString(CultureInfo.InvariantCulture)} is not an index "
+                        + $"of a {field.Lookup.Count}-entry sequence (PS-105)");
                 var template = Wave5.Template(field);
                 if (integral && field.Lookup.TryGetValue(intVal, out var lookupStr))
                     value = lookupStr;
@@ -682,15 +744,6 @@ public static class SchemaDecoder
             }
         }
 
-        // PS-428: `out_of_range: omit` makes a value outside valid_range no reading - not
-        // reported, not bound. Applied on the field-list path, not to byte_group members,
-        // as in the reference; and to an internal field only where it is computed.
-        if (fieldRules && field.OutOfRangeOmit && field.ValidRange is { Length: 2 } bounds
-            && (field.Type == FieldType.Number || !field.Name.StartsWith("_"))
-            && value is not bool && Helpers.ToFloat64(value) is (true, var checkedValue)
-            && !(bounds[0] <= checkedValue && checkedValue <= bounds[1]))
-            return AbsentReading.OutOfRange;
-
         // Store variable
         if (field.Var != null)
             ctx.Variables[field.Var] = value;
@@ -699,10 +752,9 @@ public static class SchemaDecoder
     }
 
     /// <summary>
-    /// Applies a transform array in list order. A stage normally carries one
-    /// arithmetic op; where it carries several they run in the canonical order
-    /// mult, div, add, so a stage cannot mean different things in different
-    /// languages. A stage may instead name an operation, as {op: round, decimals: N}.
+    /// Applies a transform array in list order. Each stage carries exactly one
+    /// operation, which the parser enforces (PS-452); a stage may name one, as
+    /// {op: round, decimals: N}.
     /// </summary>
 
     /// <summary>
@@ -755,6 +807,14 @@ public static class SchemaDecoder
     /// 78.125 is a tie, while 2.355 is stored just below one.
     /// </summary>
     /// <summary>The bytes one element always takes, or 0 where it varies (PS-344a).</summary>
+    /// <summary>
+    /// The bytes one tag component takes: its <c>length</c> where declared, else its type's
+    /// width. This read <c>length</c> defaulting to 1, so a u16 component was read as one
+    /// byte where the encoder, Python and the generated codec take two.
+    /// </summary>
+    internal static int TagFieldWidth(SchemaField tf) =>
+        tf.Length > 0 ? tf.Length : Helpers.InferLengthFromType(tf.Type);
+
     internal static int FixedElementSize(List<SchemaField> fields)
     {
         int total = 0;
@@ -875,7 +935,6 @@ public static class SchemaDecoder
                 if (stage.Div.Value == 0) return double.NaN;   // PS-100: the field is absent
                 numVal /= stage.Div.Value;
             }
-            if (stage.Sub.HasValue) numVal -= stage.Sub.Value;
             if (stage.Add.HasValue) numVal += stage.Add.Value;
         }
         return numVal;
@@ -919,10 +978,39 @@ public static class SchemaDecoder
         return ApplyTransformStages(numVal, field.Transform);
     }
 
+    /// <summary>
+    /// A failed guard's `else`: the value as declared (PS-444), which ApplyPostRead
+    /// reports without passing it through the lookup.
+    /// </summary>
+    internal sealed class DeclaredElse
+    {
+        public double Value { get; }
+        public DeclaredElse(double value) => Value = value;
+    }
+
+    /// <summary>
+    /// A computed field's value (PS-443): its source - the `ref` value with its
+    /// `polynomial`, or the `compute` result - then the bare modifiers in the canonical
+    /// order (PS-101), then the transform stages. The lookup follows in ApplyPostRead, as
+    /// for a field read from the payload. The `compute` path used to take the stages and
+    /// drop the modifiers, so `mult: 10` on a compute of 2 reported 2.
+    ///
+    /// PS-444: the guard is evaluated before the source, so a failed one never resolves a
+    /// reference it was guarding, and its `else` is reported exactly as declared.
+    /// </summary>
     static object? DecodeNumber(SchemaField field, DecodeContext ctx)
     {
-        double numVal;
+        if (field.Ref == null && field.Compute == null)
+        {
+            // A literal (PS-357). PS-445 refuses a guard here at load.
+            var (ok, v) = Helpers.ToFloat64(field.Value);
+            return ok ? v : 0.0;
+        }
 
+        if (field.Guard != null && !EvaluateGuardConditions(field.Guard, ctx))
+            return new DeclaredElse(field.Guard.ElseValue);
+
+        double source;
         if (field.Ref != null)
         {
             var refName = field.Ref.TrimStart('$');
@@ -931,43 +1019,21 @@ public static class SchemaDecoder
                 ctx.CheckUnbound(refName);    // PS-368
                 throw new InvalidOperationException($"Ref field not found: {refName}");
             }
-
             var (ok, rv) = Helpers.ToFloat64(refVal);
-            numVal = ok ? rv : 0;
-
+            source = ok ? rv : 0;
             if (field.Polynomial is { Length: > 0 })
-                numVal = Helpers.EvaluatePolynomial(field.Polynomial, numVal);
-
-            // Modifiers first, then the transform stages - the order the interpreter
-            // uses. Running the stages first made a field that scales with `mult` and
-            // then rounds with a stage round before it had scaled.
-            numVal = ApplyModifiers(numVal, field);
-        }
-        else if (field.Compute != null)
-        {
-            // Guard must be checked before compute to prevent e.g. div-by-zero
-            if (field.Guard != null && !EvaluateGuardConditions(field.Guard, ctx))
-                return field.Guard.ElseValue;
-            // A compute takes its transform stages and no bare modifiers, as the
-            // interpreter does. These were not applied at all, so a computed field
-            // asking to be rounded was reported unrounded.
-            var computed = EvaluateCompute(field.Compute, ctx);
-            // A zero divisor omits the field (PS-278), short-circuiting before the
-            // transform stages so they never see the sentinel.
-            if (IsComputeOmitted(computed)) return null;
-            numVal = ApplyTransformStages(computed, field.Transform);
+                source = Helpers.EvaluatePolynomial(field.Polynomial, source);
         }
         else
         {
-            var (ok, v) = Helpers.ToFloat64(field.Value);
-            numVal = ok ? v : 0;
+            source = EvaluateCompute(field.Compute!, ctx);
+            // A zero divisor omits the field (PS-278), short-circuiting before the
+            // arithmetic so it never sees the sentinel.
+            if (IsComputeOmitted(source)) return null;
         }
 
-        // Guard for non-compute fields (ref-based)
-        if (field.Guard != null && field.Compute == null)
-            numVal = EvaluateGuard(field.Guard, numVal, ctx);
-
-        return numVal;
+        // Applied here exactly once; ApplyPostRead skips a computed field's arithmetic.
+        return ApplyModifiers(source, field);
     }
 
     static double EvaluateCompute(ComputeDef cd, DecodeContext ctx)
@@ -1029,30 +1095,6 @@ public static class SchemaDecoder
             if (cond.Ne.HasValue && fv == cond.Ne.Value) return false;
         }
         return true;
-    }
-
-    static double EvaluateGuard(GuardDef gd, double value, DecodeContext ctx)
-    {
-        foreach (var cond in gd.When)
-        {
-            var fieldName = cond.Field.TrimStart('$');
-            if (!ctx.Variables.TryGetValue(fieldName, out var fieldVal))
-            {
-                ctx.CheckUnbound(fieldName);    // PS-368
-                return gd.ElseValue;
-            }
-
-            var (ok, fv) = Helpers.ToFloat64(fieldVal);
-            if (!ok) return gd.ElseValue;
-
-            if (cond.Gt.HasValue && !(fv > cond.Gt.Value)) return gd.ElseValue;
-            if (cond.Gte.HasValue && !(fv >= cond.Gte.Value)) return gd.ElseValue;
-            if (cond.Lt.HasValue && !(fv < cond.Lt.Value)) return gd.ElseValue;
-            if (cond.Lte.HasValue && !(fv <= cond.Lte.Value)) return gd.ElseValue;
-            if (cond.Eq.HasValue && fv != cond.Eq.Value) return gd.ElseValue;
-            if (cond.Ne.HasValue && fv == cond.Ne.Value) return gd.ElseValue;
-        }
-        return value;
     }
 
     static object? DecodeMatch(SchemaField field, DecodeContext ctx)
@@ -1213,13 +1255,23 @@ public static class SchemaDecoder
 
             var tag = new List<int>();
 
+            // PS-477: a tag is never partly read. Fewer bytes than the tag at the start of
+            // an entry is an error identifying the tlv; the plain tag_size path threw a
+            // bare buffer underflow, naming neither the tlv nor the tag. A composite tag's
+            // width is its tag_fields', as they are read below.
+            var width = field.TagFields.Count > 0
+                ? field.TagFields.Sum(TagFieldWidth)
+                : tagSize;
+            if (ctx.Remaining < width)
+                throw new InvalidOperationException($"tlv entry at offset {ctx.Offset}: "
+                    + $"{ctx.Remaining} byte(s) remain, fewer than its {width}-byte tag (PS-477)");
+
             if (field.TagFields.Count > 0)
             {
                 var tagValues = new Dictionary<string, int>();
                 foreach (var tf in field.TagFields)
                 {
-                    int len = tf.Length > 0 ? tf.Length : 1;
-                    var data = ctx.Read(len);
+                    var data = ctx.Read(TagFieldWidth(tf));
                     int val = (int)Helpers.DecodeUint(data, ctx.Endian);
                     if (!string.IsNullOrEmpty(tf.Name))
                         tagValues[tf.Name] = val;
@@ -1251,6 +1303,14 @@ public static class SchemaDecoder
             int dataLength = -1;
             if (lengthSize > 0)
             {
+                if (ctx.Remaining < lengthSize)
+                {
+                    // No entry is decoded here: the bytes from its tag on are left over,
+                    // and PS-472 reports them from the tag's offset. This was a buffer
+                    // underflow failing the whole decode.
+                    ctx.Offset = entryStart;
+                    break;
+                }
                 var lenData = ctx.Read(lengthSize);
                 dataLength = (int)Helpers.DecodeUint(lenData, ctx.Endian);
             }
@@ -1343,6 +1403,8 @@ public static class SchemaDecoder
                 // onwards is lost (PS-302).
                 ctx.Warnings.Add($"unknown TLV tag ({label}) at offset {entryStart}: "
                                  + $"{ctx.Data.Length - entryStart} of {ctx.Data.Length} byte(s) left undecoded");
+                // This warning is PS-472's for these bytes; no second one is reported.
+                ctx.LeftoverReported = true;
                 break;
             }
         }
@@ -1653,26 +1715,52 @@ public static class SchemaDecoder
 public static class SemanticFormatter
 {
     /// <summary>
-    /// Convert decoded data to SenML format (RFC 8428).
+    /// Convert decoded data to SenML format (RFC 8428): one record per field the output
+    /// reports, wherever it is declared, named by its <c>senml.name</c> or else its
+    /// reported name, with <c>senml.unit</c> or else <c>unit</c> (PS-478). A member of an
+    /// object with no <c>senml.name</c> is named by the object's reported name and its own,
+    /// joined by <c>/</c> (PS-479). This looked fields up among the top-level list and the
+    /// plain nested lists only, so a port entry's, a case's or a group's fields had no
+    /// name or unit, and an object came out as one record holding the whole mapping.
+    /// <paramref name="fPort"/> selects a port entry's fields; without it every entry's
+    /// are searched.
     /// </summary>
     public static List<Dictionary<string, object?>> ToSenML(
-        PayloadSchemaDefinition schema, 
-        Dictionary<string, object?> decoded)
+        PayloadSchemaDefinition schema,
+        Dictionary<string, object?> decoded,
+        int? fPort = null)
     {
+        var fields = new List<SchemaField>(schema.Fields);
+        if (schema.Ports != null)
+        {
+            if (fPort.HasValue && schema.Ports.TryGetValue(fPort.Value.ToString(), out var port))
+                fields = new List<SchemaField>(port.Fields);
+            else
+                foreach (var entry in schema.Ports.Values) fields.AddRange(entry.Fields);
+        }
         var records = new List<Dictionary<string, object?>>();
-        var fields = GetAllFields(schema);
+        AddSenML(records, decoded, fields, "");
+        return records;
+    }
 
+    static void AddSenML(List<Dictionary<string, object?>> records,
+        Dictionary<string, object?> decoded, List<SchemaField> fields, string prefix)
+    {
+        var declared = ReportedFields(fields);
         foreach (var kv in decoded)
         {
-            if (kv.Key.StartsWith("_")) continue; // Skip internal fields
-            
-            var field = FindField(fields, kv.Key);
-            var record = new Dictionary<string, object?>();
-            
-            // Use SenML name if defined, otherwise field name
-            record["n"] = field?.Senml?.Name ?? kv.Key;
-            
-            // Set value based on type
+            if (kv.Key.StartsWith("_")) continue;   // `_quality`, `_warnings`: not fields
+            declared.TryGetValue(kv.Key, out var field);
+            var path = prefix.Length > 0 ? prefix + "/" + kv.Key : kv.Key;
+            if (kv.Value is Dictionary<string, object?> nested)
+            {
+                AddSenML(records, nested, field == null ? new() : Members(field), path);
+                continue;
+            }
+            var record = new Dictionary<string, object?>
+            {
+                ["n"] = string.IsNullOrEmpty(field?.Senml?.Name) ? path : field!.Senml!.Name
+            };
             if (kv.Value is bool b)
                 record["vb"] = b;
             else if (kv.Value is string s)
@@ -1680,17 +1768,52 @@ public static class SemanticFormatter
             else if (kv.Value is byte[] bytes)
                 record["vd"] = Convert.ToBase64String(bytes);
             else
-                record["v"] = kv.Value;
-            
-            // Set unit (prefer SenML unit, fall back to field unit)
-            var unit = field?.Senml?.Unit ?? field?.Unit;
+                record["v"] = kv.Value;     // a repeat's elements: PS-377, unchanged here
+            var unit = string.IsNullOrEmpty(field?.Senml?.Unit) ? field?.Unit : field!.Senml!.Unit;
             if (!string.IsNullOrEmpty(unit))
                 record["u"] = unit;
-            
             records.Add(record);
         }
-        
-        return records;
+    }
+
+    /// <summary>The fields one level of nested output holds: an object's, or a
+    /// <c>merge: false</c> tlv's cases'.</summary>
+    static List<SchemaField> Members(SchemaField field)
+    {
+        var tlv = field.TLVInline ?? field;
+        if (tlv.TLVCases != null && tlv.Merge == false)
+            return tlv.TLVCases.Values.SelectMany(c => c).ToList();
+        return field.Fields;
+    }
+
+    /// <summary>Reported key to declaring field for one level of output. A construct that
+    /// merges into its parent (PS-156, PS-163) contributes its fields at this level; an
+    /// object or repeat its own name. The first declaration of a name wins.</summary>
+    static Dictionary<string, SchemaField> ReportedFields(List<SchemaField> fields)
+    {
+        var found = new Dictionary<string, SchemaField>();
+        void Visit(IEnumerable<SchemaField> list)
+        {
+            foreach (var f in list)
+            {
+                Visit(f.ByteGroup);
+                if (f.Flagged != null)
+                    foreach (var g in f.Flagged.Groups) Visit(g.Fields);
+                foreach (var c in f.Cases) Visit(c.Fields);
+                if (f.MatchDefault is List<SchemaField> fallback) Visit(fallback);
+                if (f.MatchInline != null) Visit(new[] { f.MatchInline });
+                var tlv = f.TLVInline ?? f;
+                if (tlv.TLVCases != null && tlv.Merge != false)
+                    foreach (var body in tlv.TLVCases.Values) Visit(body);
+                if (f.TLVInline != null && f.TLVInline.Merge == false
+                    && !string.IsNullOrEmpty(f.TLVInline.Name))
+                    found.TryAdd(f.TLVInline.Name, f);
+                if (!string.IsNullOrEmpty(f.Name))
+                    found.TryAdd(f.Name, f);
+            }
+        }
+        Visit(fields);
+        return found;
     }
 
     /// <summary>

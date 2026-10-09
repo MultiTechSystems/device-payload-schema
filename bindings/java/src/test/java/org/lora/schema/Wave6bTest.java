@@ -150,8 +150,13 @@ public class Wave6bTest {
         Schema schema = Schema.fromYaml("name: p\nfields:\n"
             + "  - {name: h, type: u8, valid_range: [0, 100], out_of_range: omit}\n"
             + "  - {name: f, type: u8, valid_range: [0, 100]}\n");
-        assertEquals(Map.of("f", 200L), schema.decode(hex("C8 C8")));
-        assertEquals(Map.of("h", 50L, "f", 50L), schema.decode(hex("32 32")));
+        // `_quality` is produced by the fields declaring valid_range (PS-131), and the
+        // omitted reading joins it (PS-428), as the reference reports both.
+        assertEquals(Map.of("f", 200L, "_quality", Map.of("h", "out_of_range", "f", "out_of_range"),
+                "_warnings", List.of("f: value 200 outside valid range [0, 100]")),
+                schema.decode(hex("C8 C8")));
+        assertEquals(Map.of("h", 50L, "f", 50L, "_quality", Map.of("h", "good", "f", "good")),
+                schema.decode(hex("32 32")));
     }
 
     // PS-434 ---------------------------------------------------------------------------

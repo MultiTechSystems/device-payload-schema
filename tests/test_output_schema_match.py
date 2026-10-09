@@ -23,7 +23,11 @@ from generate_output_schema import generate_output_schema, match_branches  # noq
 
 
 def props(schema):
-    return generate_output_schema(schema).get("properties", {})
+    # `_warnings` is declared for every schema since PS-472 and describes the decoder,
+    # not a field; these tests are about the fields.
+    found = dict(generate_output_schema(schema).get("properties", {}))
+    found.pop("_warnings", None)
+    return found
 
 
 def option_b(body, extra_fields=""):

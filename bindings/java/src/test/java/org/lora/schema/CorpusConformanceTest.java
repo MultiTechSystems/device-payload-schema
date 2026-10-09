@@ -39,7 +39,15 @@ class CorpusConformanceTest {
     // fixtures pass everywhere and the full count is 1237.
     // CR-2026-031 added the name_from var-mismatch fixture, whose two vectors decode
     // everywhere, so the full count is 1239.
-    private static final int CORPUS_FLOOR = 2357;
+    // CR-2026-071/073 added six vectors in three _language-conformance fixtures; with
+    // modifiers and the lookup applied to computed fields and a failed guard's `else`
+    // reported as declared, all decode, and with laq4's vendor vector the full count of
+    // payload vectors is 2363.
+    // CR-2026-085/086 added six: leftover-bytes.yaml's two and range-before-lookup.yaml's
+    // four, and match-default-skip.yaml's skipped body now expects the PS-472 warning.
+    // With the leftover reported and valid_range compared before the lookup, all decode;
+    // the full count of payload vectors is 2371.
+    private static final int CORPUS_FLOOR = 2373;   // dl-atm41g2's two vendor vectors (+2)
 
     @Test
     void corpusVectorsDecodeAsExpected() throws IOException {

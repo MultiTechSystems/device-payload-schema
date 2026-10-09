@@ -24,7 +24,9 @@ from schema_interpreter import SchemaInterpreter  # noqa: E402
 
 
 def props(schema):
-    return set(generate_output_schema(schema).get("properties", {}))
+    # `_warnings` is declared for every schema since PS-472 and describes the decoder,
+    # not a field; these tests are about the fields.
+    return set(generate_output_schema(schema).get("properties", {})) - {"_warnings"}
 
 
 class TestExpandRefs:

@@ -314,6 +314,222 @@ static void test_a_u64_is_exact_at_the_top_of_its_range(void) {
     TCHECK(r.fields[0].value.u64 == UINT64_MAX);  /* PS-294 */
 }
 
+/* CR-2026-071, PS-443: the lookup sees the value after the modifiers.
+ *
+ * `u8` with `add: 1` and `lookup: [a, b, c]` - the arithmetic-order-read.yaml fixture's
+ * field. Raw 1 is 2 after the add and indexes "c"; the lookup used to be keyed on the raw
+ * value and gave "b", the one answer no other implementation gives. */
+static void build_add_then_sequence(schema_t* s) {
+    memset(s, 0, sizeof(*s));
+    s->endian = ENDIAN_BIG;
+    field_def_t f = field_u8("lookup_after_arithmetic");
+    field_set_add(&f, 1.0);
+    field_add_lookup(&f, 0, "a");
+    field_add_lookup(&f, 1, "b");
+    field_add_lookup(&f, 2, "c");
+    f.lookup_is_sequence = true;
+    schema_add_field(s, &f);
+}
+
+static void test_the_lookup_follows_the_modifiers(void) {
+    schema_t s;
+    decode_result_t r;
+    uint8_t one[] = {0x01};
+    uint8_t zero[] = {0x00};
+    uint8_t two[] = {0x02};
+
+    build_add_then_sequence(&s);
+    TCHECK(schema_decode(&s, one, sizeof(one), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 1);
+    TCHECK(strcmp(r.fields[0].value.str, "c") == 0);
+
+    TCHECK(schema_decode(&s, zero, sizeof(zero), &r) == SCHEMA_OK);
+    TCHECK(strcmp(r.fields[0].value.str, "b") == 0);
+
+    /* Raw 2 is index 3, which a three-entry sequence does not have (PS-105). Keyed on
+     * the raw value it would have decoded as "c". */
+    TCHECK(schema_decode(&s, two, sizeof(two), &r) == SCHEMA_ERR_LOOKUP);
+}
+
+/* The same field through the binary form, as tools/schema_binary.py emits it for
+ * `{type: u8, add: 1, lookup: [a, b, c]}`: the add marker 0xA0 carrying 100 hundredths,
+ * then the sequence-flagged table. The order is the interpreter's, so it holds whichever
+ * way the schema arrives. */
+static void test_the_lookup_follows_the_modifiers_from_binary(void) {
+    static const uint8_t blob[] = {
+        'P', 'S', 0x01, 0x00, 0x01,              /* header: v1, big-endian, 1 field */
+        0x81, 0x00, 0xE7, 0x0C,                  /* u8 + lookup, no scale, id 3303 */
+        0xA0, 0x64, 0x00,                        /* add: 1.00 */
+        0x83, 0x00, 0x01, 'a', 0x01, 0x01, 'b', 0x02, 0x01, 'c',
+    };
+    schema_t s;
+    decode_result_t r;
+    uint8_t one[] = {0x01};
+
+    TCHECK(schema_load_binary(&s, blob, sizeof(blob)) == SCHEMA_OK);
+    TCHECK(s.fields[0].has_add && s.fields[0].lookup_is_sequence);
+    TCHECK(schema_decode(&s, one, sizeof(one), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 1);
+    TCHECK(strcmp(r.fields[0].value.str, "c") == 0);
+}
+
+/* A value the modifiers leave with a fraction is no key of a mapping (PS-107), so the
+ * field is omitted (PS-269) rather than truncated onto a neighbouring key. */
+static void test_a_fractional_value_matches_no_key(void) {
+    schema_t s;
+    decode_result_t r;
+    uint8_t three[] = {0x03};
+    uint8_t two[] = {0x02};
+
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t f = field_u8("half");
+    field_set_mult(&f, 0.5);
+    field_add_lookup(&f, 1, "one");
+    schema_add_field(&s, &f);
+
+    TCHECK(schema_decode(&s, two, sizeof(two), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 1);
+    TCHECK(strcmp(r.fields[0].value.str, "one") == 0);
+
+    TCHECK(schema_decode(&s, three, sizeof(three), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 0);
+}
+
+/* The enum path applies its table through the same step, so an enum and an integer
+ * field with the same modifiers and table agree. The enum path used to drop the
+ * modifiers entirely (PS-446). */
+static void test_an_enum_applies_its_modifiers_first(void) {
+    schema_t s;
+    decode_result_t r;
+    uint8_t one[] = {0x01};
+
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t f = field_enum("state", 1);
+    field_set_add(&f, 1.0);
+    field_add_lookup(&f, 1, "idle");
+    field_add_lookup(&f, 2, "running");
+    schema_add_field(&s, &f);
+
+    TCHECK(schema_decode(&s, one, sizeof(one), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 1);
+    TCHECK(strcmp(r.fields[0].value.str, "running") == 0);
+}
+
+/* PS-446: a float's modifiers are applied. f16/f32/f64 returned straight after the read,
+ * so `mult: 0.5` on an f32 of 10.0 reported 10.0 - while the encoder reversed the
+ * modifier, so the field did not round-trip either. */
+static void test_a_float_applies_its_modifiers(void) {
+    schema_t s;
+    decode_result_t r;
+    uint8_t ten[] = {0x41, 0x20, 0x00, 0x00};   /* 10.0f, big-endian */
+
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t f = field_f32("v", ENDIAN_BIG);
+    field_set_mult(&f, 0.5);
+    field_set_add(&f, 1.0);
+    schema_add_field(&s, &f);
+
+    TCHECK(schema_decode(&s, ten, sizeof(ten), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 1);
+    TCHECK(r.fields[0].value.f64 == 6.0);
+}
+
+/* A tlv of single-byte tags (or two-component tags), each case one u8 `v`, its body
+ * placed above field_count as a tlv's always is. */
+static void build_tlv(schema_t* s, field_def_t t, int packed_tag) {
+    memset(s, 0, sizeof(*s));
+    s->endian = ENDIAN_BIG;
+    strcpy(t.name, "channels");
+    field_add_tlv_case(&t, packed_tag, 10, 1);
+    schema_add_field(s, &t);
+    field_def_t v = field_u8("v");
+    schema_place_field(s, 10, &v);
+}
+
+/* PS-477: one byte left where a two-component tag starts is an error naming the tlv.
+ * The loop used to stop there and report a complete decode with the byte dropped. */
+static void test_a_partial_composite_tag_is_an_error(void) {
+    schema_t s;
+    decode_result_t r;
+    const int parts[2] = {1, 2};
+    uint8_t payload[] = {0x01, 0x02, 0x05, 0x01};
+
+    build_tlv(&s, field_tlv_composite(2, 0), schema_tlv_tag(parts, 2));
+    TCHECK(schema_decode(&s, payload, sizeof(payload), &r) == SCHEMA_ERR_BUFFER);
+    TCHECK(r.error_code == SCHEMA_ERR_BUFFER);
+    TCHECK(strstr(r.error_msg, "channels") != NULL);
+    TCHECK(strstr(r.error_msg, "offset 3") != NULL);
+
+    /* The whole tag present: decodes, nothing left over. */
+    TCHECK(schema_decode(&s, payload, 3, &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 1 && r.fields[0].value.i64 == 5);
+    TCHECK(r.bytes_unread == 0);
+}
+
+/* PS-477 for a tag that is one integer: `tag_size: 2` with one byte left. */
+static void test_a_partial_tag_size_tag_is_an_error(void) {
+    schema_t s;
+    decode_result_t r;
+    uint8_t payload[] = {0x01, 0x02, 0x05, 0x01};
+
+    build_tlv(&s, field_tlv(2, 0), 0x0102);
+    TCHECK(schema_decode(&s, payload, sizeof(payload), &r) == SCHEMA_ERR_BUFFER);
+    TCHECK(r.error_code == SCHEMA_ERR_BUFFER);
+    TCHECK(strstr(r.error_msg, "PS-477") != NULL);
+}
+
+/* PS-477: the tag fits and its length does not, so no entry is decoded; the bytes from
+ * that tag on are left over (PS-472). This returned SCHEMA_ERR_BUFFER with error_code
+ * still 0 and no message. */
+static void test_a_cut_length_leaves_the_entry_over(void) {
+    schema_t s;
+    decode_result_t r;
+    uint8_t payload[] = {0x01, 0x00, 0x01, 0x05, 0x01, 0x00};
+
+    build_tlv(&s, field_tlv(1, 2), 1);
+    TCHECK(schema_decode(&s, payload, sizeof(payload), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 1 && r.fields[0].value.i64 == 5);
+    TCHECK(r.bytes_consumed == 4);
+    TCHECK(r.bytes_unread == 2);
+}
+
+/* PS-472: bytes after the last field are reported - offset bytes_consumed, count
+ * bytes_unread - and the decode is otherwise unchanged. */
+static void test_leftover_bytes_are_reported(void) {
+    schema_t s;
+    decode_result_t r;
+    uint8_t payload[] = {0x2A, 0x01, 0x02};
+
+    memset(&s, 0, sizeof(s));
+    field_def_t f = field_u8("reading");
+    schema_add_field(&s, &f);
+
+    TCHECK(schema_decode(&s, payload, 1, &r) == SCHEMA_OK);
+    TCHECK(r.bytes_consumed == 1 && r.bytes_unread == 0);
+
+    TCHECK(schema_decode(&s, payload, sizeof(payload), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 1 && r.fields[0].value.i64 == 42);
+    TCHECK(r.bytes_consumed == 1);
+    TCHECK(r.bytes_unread == 2);
+}
+
+/* PS-302 with PS-472: an unknown, undelimited tag ends the loop, and the bytes left are
+ * counted from the tag itself, as the other five count them - not from after it. */
+static void test_an_unknown_tag_is_left_over_from_the_tag(void) {
+    schema_t s;
+    decode_result_t r;
+    uint8_t payload[] = {0x01, 0x05, 0x09, 0xAA};
+
+    build_tlv(&s, field_tlv(1, 0), 1);
+    TCHECK(schema_decode(&s, payload, sizeof(payload), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 1);
+    TCHECK(r.bytes_consumed == 2);
+    TCHECK(r.bytes_unread == 2);
+}
+
 /*
  * Main test entry point
  */
@@ -334,6 +550,16 @@ void selftest_schema(void) {
     test_a_modifier_makes_the_field_a_number();
     test_a_zero_divisor_omits_the_field();
     test_a_u64_is_exact_at_the_top_of_its_range();
+    test_the_lookup_follows_the_modifiers();
+    test_the_lookup_follows_the_modifiers_from_binary();
+    test_a_fractional_value_matches_no_key();
+    test_an_enum_applies_its_modifiers_first();
+    test_a_float_applies_its_modifiers();
+    test_a_partial_composite_tag_is_an_error();
+    test_a_partial_tag_size_tag_is_an_error();
+    test_a_cut_length_leaves_the_entry_over();
+    test_leftover_bytes_are_reported();
+    test_an_unknown_tag_is_left_over_from_the_tag();
 
     LOG(LOG_INFO, MOD, "Schema interpreter self-tests complete");
 }

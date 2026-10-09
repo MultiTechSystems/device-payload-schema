@@ -240,6 +240,15 @@ typedef struct {
      * treats a possible truncation as an error, so the buffer has to hold the worst
      * case rather than the typical one. */
     char error_msg[112];
+    /* PS-472: the bytes after the last field that nothing decoded. The other five
+     * implementations report these as a warning; this interpreter has no warning list
+     * (a fixed-size, allocation-free result has nowhere to keep text), so it reports the
+     * warning's two numbers instead: the offset of the first byte not decoded is
+     * `bytes_consumed` and the count to the end is this. Set only on a successful
+     * decode, and never changes what was decoded. It covers the bytes PS-302 leaves
+     * after an unknown, undelimited tlv tag too, counted from that tag as the other
+     * five count them. Last member, so existing initializers leave it zero. */
+    int bytes_unread;
 } decode_result_t;
 
 /* Variable storage for match conditions */
@@ -668,6 +677,66 @@ static inline bool field_reports_as_integer(const field_def_t* field) {
     return !field->has_mult && !field->has_div && !field->has_add;
 }
 
+/* Everything after a numeric field's source, in the order PS-443 fixes: the modifiers
+ * mult, div, add (PS-101), then the lookup. This interpreter has no `transform` stage, so
+ * nothing sits between the two; a schema declaring one must be refused before it gets
+ * here (PS-446) - tools/schema_binary.py does that for the binary form.
+ *
+ * Returns true where it settled the field: a zero divisor omits it (PS-100), a lookup hit
+ * writes the label into `.str`, a mapping gap omits it (PS-269), and an index a sequence
+ * does not have is SCHEMA_ERR_LOOKUP (PS-105), in `*rc`. False means the caller stores
+ * `*value`, already modified, in whichever member its type uses.
+ *
+ * This is the one place a lookup is applied. There were two - the ordinary-field path and
+ * the enum path - and the ordinary one keyed the table on the *raw* value while the
+ * modifiers it had just computed went unused, so `u8` with `add: 1` and
+ * `lookup: [a, b, c]` decoded raw 1 as "b" where every other implementation gives "c".
+ * The float, u64, udec/sdec and enum paths each returned early with only part of this
+ * (the floats with no modifiers at all, the enum with none, udec/sdec with no lookup),
+ * which PS-446 forbids: a declared modifier or lookup is applied, or the schema is
+ * rejected, never skipped. */
+static inline bool finish_numeric(
+    const field_def_t* field,
+    double* value,
+    decoded_field_t* out,
+    int* rc
+) {
+    *rc = SCHEMA_OK;
+    if (field->has_mult) *value *= field->mult;
+    if (field->has_div) {
+        if (field->div == 0) {
+            /* A zero divisor omits the field (PS-100). */
+            out->valid = false;
+            return true;
+        }
+        *value /= field->div;
+    }
+    if (field->has_add) *value += field->add;
+
+    if (field->lookup_count == 0) return false;
+
+    /* The key is the value after the arithmetic. An integral one is its key; one with a
+     * fraction is no key of any table (PS-107), so it falls to the miss below. */
+    bool integral = *value >= -2147483648.0 && *value <= 2147483647.0
+                    && (double)(int64_t)*value == *value;
+    if (integral) {
+        int key = (int)(int64_t)*value;
+        for (int i = 0; i < field->lookup_count; i++) {
+            if (field->lookup[i].key == key) {
+                strncpy(out->value.str, field->lookup[i].value, SCHEMA_MAX_NAME_LEN - 1);
+                out->value.str[SCHEMA_MAX_NAME_LEN - 1] = '\0';
+                out->valid = true;
+                return true;
+            }
+        }
+    }
+    /* An index a sequence does not have is an error (PS-105); a mapping gap omits the
+     * field (PS-269). */
+    out->valid = false;
+    if (field->lookup_is_sequence) *rc = SCHEMA_ERR_LOOKUP;
+    return true;
+}
+
 static inline int decode_field(
     const field_def_t* field,
     const uint8_t* buf,
@@ -763,7 +832,7 @@ static inline int decode_field(
                 read_u64_be(buf + *pos) : read_u64_le(buf + *pos);
             *pos += 8;
             if (field->var_name[0]) var_set(vars, field->var_name, (int64_t)out->value.u64);
-            if (field_reports_as_integer(field)) {
+            if (field_reports_as_integer(field) && field->lookup_count == 0) {
                 /* PS-294: the exact value is already in value.u64. It used to be
                  * overwritten with (double)value.u64 four lines further on, which is how
                  * a u64 of 2^64-1 came back as 18446744073709551616. */
@@ -772,15 +841,10 @@ static inline int decode_field(
             }
             /* Carrying a modifier makes the field a `number` (PS-279). */
             final_value = (double)out->value.u64;
-            if (field->has_mult) final_value *= field->mult;
-            if (field->has_div && field->div == 0) {
-                /* A zero divisor omits the field (PS-100). This skipped the division and
-                 * reported the undivided value. */
-                out->valid = false;
-                return SCHEMA_OK;
+            {
+                int rc;
+                if (finish_numeric(field, &final_value, out, &rc)) return rc;
             }
-            if (field->has_div) final_value /= field->div;
-            if (field->has_add) final_value += field->add;
             out->value.f64 = final_value;
             out->type = FIELD_TYPE_F64;
             out->valid = true;
@@ -793,29 +857,36 @@ static inline int decode_field(
             *pos += 8;
             break;
             
+        /* A float's modifiers and lookup apply as an integer's do (PS-443). These three
+         * returned straight after the read, so `f32` with `mult: 0.1` reported the
+         * unscaled reading - while encode_field, below, did reverse the modifiers, so a
+         * float field did not even round-trip. */
         case FIELD_TYPE_F16:
             if (*pos + 2 > len) return SCHEMA_ERR_BUFFER;
-            out->value.f64 = endian == ENDIAN_BIG ?
+            final_value = endian == ENDIAN_BIG ?
                 read_f16_be(buf + *pos) : read_f16_le(buf + *pos);
             *pos += 2;
-            out->valid = true;
-            return SCHEMA_OK;
-            
+            goto finish_float;
+
         case FIELD_TYPE_F32:
             if (*pos + 4 > len) return SCHEMA_ERR_BUFFER;
-            out->value.f64 = endian == ENDIAN_BIG ? 
+            final_value = endian == ENDIAN_BIG ?
                 read_f32_be(buf + *pos) : read_f32_le(buf + *pos);
             *pos += 4;
-            out->valid = true;
-            return SCHEMA_OK;
-            
+            goto finish_float;
+
         case FIELD_TYPE_F64:
             if (*pos + 8 > len) return SCHEMA_ERR_BUFFER;
-            out->value.f64 = endian == ENDIAN_BIG ?
+            final_value = endian == ENDIAN_BIG ?
                 read_f64_be(buf + *pos) : read_f64_le(buf + *pos);
             *pos += 8;
+        finish_float: {
+            int rc;
+            if (finish_numeric(field, &final_value, out, &rc)) return rc;
+            out->value.f64 = final_value;
             out->valid = true;
             return SCHEMA_OK;
+        }
             
         case FIELD_TYPE_BOOL:
             if (*pos + 1 > len) return SCHEMA_ERR_BUFFER;
@@ -914,31 +985,18 @@ static inline int decode_field(
                 }
                 *pos += esize;
             }
-            /* Apply lookup */
+            /* The table goes through finish_numeric like any other lookup, so an enum
+             * and an integer field carrying the same table and modifiers agree - the two
+             * sites used to be separate copies and disagreed twice. A sequence index out
+             * of bounds is an error (PS-105); a mapping gap omits the field rather than
+             * reporting "unknown(N)" (PS-269). The variable is recorded either way, so
+             * $references keep working. */
+            if (field->var_name[0]) var_set(vars, field->var_name, raw_value);
             if (field->lookup_count > 0) {
-                for (int li = 0; li < field->lookup_count; li++) {
-                    if (field->lookup[li].key == (int)raw_value) {
-                        strncpy(out->value.str, field->lookup[li].value, SCHEMA_MAX_NAME_LEN - 1);
-                        out->valid = true;
-                        if (field->var_name[0]) var_set(vars, field->var_name, raw_value);
-                        return SCHEMA_OK;
-                    }
-                }
-                /* No entry for this value. A sequence index out of bounds is an
-                 * error (PS-105): the payload does not match the schema's shape, and
-                 * reporting the raw index under a name that promises a label let such
-                 * a payload decode as though it did. */
-                if (field->lookup_is_sequence) {
-                    out->valid = false;
-                    return SCHEMA_ERR_LOOKUP;
-                }
-                /* A mapping gap is the other case: omit the field rather than
-                 * reporting a placeholder (PS-269). This emitted "unknown(N)", a
-                 * fourth behaviour on top of the three the other interpreters each
-                 * had. The variable is still recorded so $references keep working. */
-                out->valid = false;
-                if (field->var_name[0]) var_set(vars, field->var_name, raw_value);
-                return SCHEMA_OK;
+                int rc;
+                final_value = (double)raw_value;
+                finish_numeric(field, &final_value, out, &rc);
+                return rc;
             }
             break;
             
@@ -950,13 +1008,7 @@ static inline int decode_field(
                 final_value = (byte >> 4) + (byte & 0x0F) * 0.1;
             }
             *pos += 1;
-            /* Apply modifiers and store directly (raw_value not used) */
-            if (field->has_mult) final_value *= field->mult;
-            if (field->has_div) final_value /= field->div;
-            if (field->has_add) final_value += field->add;
-            out->value.f64 = final_value;
-            out->valid = true;
-            return SCHEMA_OK;
+            goto finish_float;
             
         case FIELD_TYPE_SDEC:
             /* Signed nibble-decimal: sign-extend upper nibble */
@@ -968,13 +1020,7 @@ static inline int decode_field(
                 final_value = whole + (byte & 0x0F) * 0.1;
             }
             *pos += 1;
-            /* Apply modifiers and store directly */
-            if (field->has_mult) final_value *= field->mult;
-            if (field->has_div) final_value /= field->div;
-            if (field->has_add) final_value += field->add;
-            out->value.f64 = final_value;
-            out->valid = true;
-            return SCHEMA_OK;
+            goto finish_float;
             
         default:
             return SCHEMA_ERR_TYPE;
@@ -985,38 +1031,14 @@ static inline int decode_field(
         var_set(vars, field->var_name, raw_value);
     }
     
-    /* Apply modifiers */
+    /* The modifiers, then the lookup on the modified value (PS-443). A zero divisor
+     * omits the field (PS-100); see finish_numeric for the lookup's two misses. */
     final_value = (double)raw_value;
-    if (field->has_mult) final_value *= field->mult;
-    if (field->has_div && field->div == 0) {
-        /* A zero divisor omits the field (PS-100). This skipped the division and
-         * reported the undivided value. */
-        out->valid = false;
-        return SCHEMA_OK;
+    {
+        int rc;
+        if (finish_numeric(field, &final_value, out, &rc)) return rc;
     }
-    if (field->has_div) final_value /= field->div;
-    if (field->has_add) final_value += field->add;
-    
-    /* Apply lookup if present */
-    if (field->lookup_count > 0) {
-        for (int i = 0; i < field->lookup_count; i++) {
-            if (field->lookup[i].key == (int)raw_value) {
-                strncpy(out->value.str, field->lookup[i].value, SCHEMA_MAX_NAME_LEN - 1);
-                out->valid = true;
-                return SCHEMA_OK;
-            }
-        }
-        /* No match. An out-of-bounds index into a sequence is an error (PS-105); a
-         * mapping gap omits the field (PS-269). This path did neither - it stored the
-         * raw integer under a name that promises a label, which is the behaviour the
-         * enum path above had already been corrected away from. The two sites had
-         * disagreed with each other since. */
-        out->valid = false;
-        if (field->lookup_is_sequence) {
-            return SCHEMA_ERR_LOOKUP;
-        }
-        return SCHEMA_OK;
-    } else if (field_reports_as_integer(field)) {
+    if (field_reports_as_integer(field)) {
         /* PS-293: an integer-typed field is delivered through the integer member, so the
          * type tag and the value channel agree. */
         out->value.i64 = raw_value;
@@ -1145,14 +1167,31 @@ static inline int schema_decode_direction(
          * Bounded by the payload rather than by a case count: a tag no case describes ends
          * the loop under SCHEMA_TLV_UNKNOWN_SKIP where nothing delimits it, because there
          * is no length to step over (PS-302). This interpreter has no warning channel, so
-         * it cannot say so the way the other five now do - a real gap, recorded rather
-         * than papered over. */
+         * the position goes back to that tag and the bytes from it on are counted in
+         * `bytes_unread` (PS-472) - the one report it can make.
+         *
+         * PS-477: a tag is never partly read. Bytes left at the start of an entry but
+         * fewer than its tag are an error identifying the tlv; this used to stop the loop
+         * and report a complete decode, the fragment dropped in silence. The code is
+         * SCHEMA_ERR_BUFFER, what every other read past the payload's end returns, so no
+         * new one. Where the tag fits and its length does not, no entry is decoded and
+         * the bytes from its tag on are left over, as the reference leaves them; that
+         * returned SCHEMA_ERR_BUFFER with error_code unset and no message. */
         if (field->type == FIELD_TYPE_TLV) {
             const int parts = field->tlv_tag_parts ? field->tlv_tag_parts : 0;
             const int tag_bytes = parts ? parts : (field->tlv_tag_size ? field->tlv_tag_size : 1);
 
             while (pos < len) {
-                if (pos + tag_bytes > len) break;
+                const size_t entry_start = pos;
+                if (pos + tag_bytes > len) {   /* PS-477 */
+                    result->error_code = SCHEMA_ERR_BUFFER;
+                    snprintf(result->error_msg, sizeof(result->error_msg),
+                             "tlv %s: entry at offset %u: %u byte(s) remain, fewer than "
+                             "its %d-byte tag (PS-477)",
+                             field->name[0] ? field->name : "(unnamed)",
+                             (unsigned)pos, (unsigned)(len - pos), tag_bytes);
+                    return SCHEMA_ERR_BUFFER;
+                }
 
                 int packed = 0;
                 for (int b = 0; b < tag_bytes; b++) {
@@ -1162,7 +1201,10 @@ static inline int schema_decode_direction(
 
                 int entry_len = -1;
                 if (field->tlv_length_size) {
-                    if (pos + field->tlv_length_size > len) return SCHEMA_ERR_BUFFER;
+                    if (pos + field->tlv_length_size > len) {   /* PS-477, PS-472 */
+                        pos = entry_start;
+                        break;
+                    }
                     entry_len = 0;
                     for (int b = 0; b < field->tlv_length_size; b++) {
                         entry_len = (entry_len << 8) | buf[pos + b];
@@ -1189,7 +1231,8 @@ static inline int schema_decode_direction(
                         pos += entry_len;   /* delimited: step over it and carry on */
                         continue;
                     }
-                    break;                  /* nothing to skip over (PS-302) */
+                    pos = entry_start;      /* nothing to skip over (PS-302): the */
+                    break;                  /* bytes from the tag on are left over */
                 }
 
                 for (int f = 0; f < chosen->field_count; f++) {
@@ -1293,6 +1336,7 @@ static inline int schema_decode_direction(
     }
     
     result->bytes_consumed = (int)pos;
+    result->bytes_unread = (int)(len - pos);   /* PS-472 */
     return SCHEMA_OK;
 }
 

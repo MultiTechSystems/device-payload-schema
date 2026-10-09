@@ -343,31 +343,69 @@ public static partial class SchemaParser
                 throw new InvalidOperationException($"Field '{name}': a literal must not declare {key} (PS-358)");
     }
 
-    /// <summary>The stages PS-098 and the PS-115 table define; `op` names one instead.</summary>
+    /// <summary>
+    /// The operations a stage may hold: PS-098's arithmetic, the PS-115 table, and an
+    /// `op:` stage. `decimals` and `ties` are parameters of an `op:` stage, part of its one
+    /// operation rather than operations of their own (PS-452).
+    /// </summary>
     static readonly string[] TransformOperations =
-        { "add", "mult", "div", "sqrt", "abs", "pow", "log10", "log", "floor", "ceiling", "clamp", "op" };
+        { "add", "mult", "div", "sqrt", "abs", "pow", "floor", "ceiling", "clamp", "log10", "log", "op" };
+    static readonly string[] TransformOpParameters = { "decimals", "ties" };
 
     /// <summary>
-    /// PS-390: a stage naming an operation outside the PS-115 table is rejected, not
-    /// skipped. `{round: n}` and `{sub: n}` were accepted - the first doing nothing, the
-    /// second read by C# alone - and `round` is the `op:` form only.
+    /// PS-390 and PS-452: each stage holds exactly one operation the language defines.
+    /// `{round: n}` and `{sub: n}` were accepted - the first doing nothing, the second
+    /// read by C# alone. A stage holding two operations was decoded, each implementation
+    /// in its own reading: here `{add: 1, mult: 2}` ran mult then add, and
+    /// `{op: round, add: 1}` rounded and dropped the add. Refused at load instead.
     /// </summary>
-    static void CheckStage(YamlMappingNode stage, string fieldName)
+    static void CheckStage(YamlNode node, int index, string fieldName)
     {
-        var at = $"Field '{fieldName}' transform stage: ";
-        bool Has(string key) => stage.Children.ContainsKey(new YamlScalarNode(key));
-        if (Has("round"))
-            throw new InvalidOperationException(at + "`{round: n}` is not a transform stage; "
+        var at = $"Field '{fieldName}': transform stage {index}";
+        if (node is not YamlMappingNode stage)
+            throw new InvalidOperationException($"{at} is {Scalar(node)}, not a mapping holding one operation (PS-452)");
+        var keys = stage.Children.Keys.Select(Scalar).ToList();
+        if (keys.Contains("round"))
+            throw new InvalidOperationException(at + ": `{round: n}` is not a transform stage; "
                 + "write {op: round, decimals: n} (PS-390)");
+        var unknown = keys.Where(k => !TransformOperations.Contains(k) && !TransformOpParameters.Contains(k)).ToList();
+        if (unknown.Count > 0)
+            throw new InvalidOperationException(
+                $"{at} names no operation of the PS-115 table: {string.Join(", ", unknown)} (PS-390)");
+        var operations = keys.Where(TransformOperations.Contains).ToList();
+        if (operations.Count != 1)
+            throw new InvalidOperationException($"{at} must hold exactly one operation, and holds "
+                + (operations.Count == 0 ? "none" : string.Join(", ", operations)) + " (PS-452)");
         if (stage.TryGetValue("op", out var op))
         {
             if (Scalar(op) != "round")
-                throw new InvalidOperationException(at + $"names an unknown operation {Scalar(op)} (PS-390)");
+                throw new InvalidOperationException($"{at} names an unknown operation {Scalar(op)} (PS-390)");
             if (stage.TryGetValue("ties", out var ties) && Scalar(ties) is not ("even" or "away"))
-                throw new InvalidOperationException(at + "round `ties` must be even or away (PS-390)");
+                throw new InvalidOperationException(at + ": round `ties` must be even or away (PS-390)");
         }
-        if (!TransformOperations.Any(Has))
-            throw new InvalidOperationException(at + "names no operation of the PS-115 table (PS-390)");
+        else if (keys.Any(TransformOpParameters.Contains))
+            throw new InvalidOperationException(at + ": `decimals` and `ties` belong to an `op:` stage (PS-452)");
+    }
+
+    /// <summary>
+    /// PS-445: a `guard` belongs to a computed field - `type: number` or `integer` with
+    /// `ref` or `compute`. On a field read from the payload it was ignored with success,
+    /// so a schema meaning "no reading below this" decoded every value; on a literal it
+    /// replaced the constant. `sentinel` and `out_of_range: omit` say that for a read value.
+    /// Checked on list members, so it reaches every construct body's fields.
+    /// </summary>
+    static void CheckGuard(YamlMappingNode fm)
+    {
+        if (!fm.Children.ContainsKey(new YamlScalarNode("guard"))) return;
+        var type = fm.TryGetValue("type", out var t) ? Scalar(t) : "";
+        bool computed = type is "number" or "integer"
+            && (fm.Children.ContainsKey(new YamlScalarNode("ref"))
+                || fm.Children.ContainsKey(new YamlScalarNode("compute")));
+        if (computed) return;
+        var name = fm.TryGetValue("name", out var n) ? Scalar(n) : "?";
+        throw new InvalidOperationException($"Field '{name}': a guard is declared only on a computed "
+            + "field (ref or compute); for a value read from the payload use sentinel or "
+            + "out_of_range: omit (PS-445)");
     }
 
     /// <summary>The keys that make a field a construct, declaring no type of its own.</summary>
@@ -429,6 +467,7 @@ public static partial class SchemaParser
                     throw new InvalidOperationException("a match's remaining must be true (PS-414)");
             }
             CheckFieldRules(fieldMap);    // PS-427, PS-428
+            CheckGuard(fieldMap);         // PS-445
             fields.Add(ParseField(fieldMap));
         }
         return fields;
@@ -519,15 +558,19 @@ public static partial class SchemaParser
             f.Div = Double(divV);
 
         // Transform array
-        if (fm.TryGetValue("transform", out var transformNode) && transformNode is YamlSequenceNode transformSeq)
+        if (fm.TryGetValue("transform", out var transformNode))
         {
-            foreach (var tItem in transformSeq.Children)
+            if (transformNode is not YamlSequenceNode transformSeq)
+                throw new InvalidOperationException(
+                    $"Field '{f.Name}': `transform` must be a list of stages (PS-102)");
+            for (int index = 0; index < transformSeq.Children.Count; index++)
             {
-                if (tItem is YamlMappingNode tMap)
+                // Every stage holds exactly one operation (PS-452), checked before it is read.
+                CheckStage(transformSeq.Children[index], index, f.Name);
+                if (transformSeq.Children[index] is YamlMappingNode tMap)
                 {
                     var stage = new TransformStage();
                     if (tMap.TryGetValue("add", out var ta)) stage.Add = Double(ta);
-                    if (tMap.TryGetValue("sub", out var ts)) stage.Sub = Double(ts);
                     if (tMap.TryGetValue("mult", out var tm)) stage.Mult = Double(tm);
                     if (tMap.TryGetValue("div", out var td)) stage.Div = Double(td);
                     // {op: round, decimals: N}. Unparsed until now, so a schema
@@ -547,7 +590,6 @@ public static partial class SchemaParser
                         && clampSeq.Children.Count == 2)
                         stage.Clamp = new[] { Double(clampSeq.Children[0]), Double(clampSeq.Children[1]) };
                     if (tMap.TryGetValue("ties", out var tties)) stage.Ties = Scalar(tties);
-                    CheckStage(tMap, f.Name);
                     f.Transform.Add(stage);
                 }
             }

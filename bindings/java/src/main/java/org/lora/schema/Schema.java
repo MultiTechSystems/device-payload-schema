@@ -171,6 +171,7 @@ public class Schema {
             // PS-399, PS-414, PS-416, PS-427, PS-428: the match's discriminator source,
             // sentinel and out_of_range.
             Wave6b.checkField(fm);
+            checkArithmetic(fm);               // PS-445, PS-452
             fields.add(parseField(fm));
         }
         return fields;
@@ -381,6 +382,18 @@ public class Schema {
     }
 
     /** The bytes one element always takes, or 0 where it varies (PS-344a). */
+    /**
+     * The bytes one tag component takes: its {@code length} where declared, else its type's
+     * width. This read {@code length} defaulting to 1, so a u16 component was read as one
+     * byte where Python and the generated codec take two.
+     */
+    static int tagFieldWidth(Field tf) {
+        if (tf.getLength() > 0) return tf.getLength();
+        FieldType t = tf.getType();
+        if (t != null && t.isInteger() && t.defaultLength() > 0) return t.defaultLength();
+        return 1;
+    }
+
     private static int fixedElementSize(List<Field> fields) {
         int total = 0;
         for (Field f : fields) {
@@ -488,17 +501,75 @@ public class Schema {
     /** The stages PS-098 and the PS-115 table define, by name; {@code op} names one instead. */
     private static final List<String> TRANSFORM_OPERATIONS = List.of("add", "mult", "div",
             "sqrt", "abs", "pow", "log10", "log", "floor", "ceiling", "clamp", "op");
+    /** Parameters of an {@code op:} stage, part of its one operation (PS-452). */
+    private static final List<String> TRANSFORM_OP_PARAMETERS = List.of("decimals", "ties");
+
+    /**
+     * CR-2026-071/073, on list members, so a construct body parsed as a synthetic field is
+     * not mistaken for a field read from the payload. Mirrors arithmetic_errors in
+     * tools/schema_interpreter.py.
+     *
+     * <p>PS-445: a guard belongs to a computed field. On a field read from the payload, or
+     * a literal, it was ignored with success - {@code guard} on a {@code u8} decoded every
+     * value - so a schema meaning "no reading below this" reported them all.
+     */
+    private static void checkArithmetic(Map<String, Object> fm) {
+        if (fm.containsKey("guard")) {
+            Object type = fm.get("type");
+            boolean computed = ("number".equals(type) || "integer".equals(type))
+                    && (fm.get("ref") != null || fm.get("compute") != null);
+            if (!computed) {
+                throw new SchemaException("Field '" + fm.get("name") + "': a guard is declared "
+                        + "only on a computed field (ref or compute); for a value read from the "
+                        + "payload use sentinel or out_of_range: omit (PS-445)");
+            }
+        }
+        if (fm.containsKey("transform") && !(fm.get("transform") instanceof List)) {
+            throw new SchemaException("Field '" + fm.get("name")
+                    + "': `transform` must be a list of stages (PS-102)");
+        }
+    }
 
     /**
      * PS-390: a stage naming an operation outside the PS-115 table is rejected, not
      * skipped. {@code {round: n}} was accepted and did nothing, so the field was reported
      * unrounded with success; {@code round} is the {@code op:} form only.
+     *
+     * <p>PS-452: a stage holds exactly one operation. {@code {add: 1, mult: 2}} decoded
+     * here as mult-then-add (1 to 3) where Python gave 7 and the generated codec 4;
+     * {@code {op: round, add: 1}} rounded and dropped the add. A stage with none, such as
+     * {@code {decimals: 2}}, was rejected but as PS-390.
      */
-    private static void checkStage(Map<String, Object> stage, Object fieldName) {
+    private static void checkStage(Object raw, Object fieldName) {
+        if (!(raw instanceof Map<?, ?> rawStage)) {
+            // Skipped before, so a malformed stage applied nothing with success.
+            throw new SchemaException("Field '" + fieldName + "' transform stage " + raw
+                    + " is not a mapping holding one operation (PS-452)");
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> stage = (Map<String, Object>) rawStage;
         String at = "Field '" + fieldName + "' transform stage " + stage + ": ";
         if (stage.containsKey("round")) {
             throw new SchemaException(at + "`{round: n}` is not a transform stage; write "
                     + "{op: round, decimals: n} (PS-390)");
+        }
+        List<String> unknown = new ArrayList<>();
+        List<String> operations = new ArrayList<>();
+        for (Object rawKey : rawStage.keySet()) {
+            String key = String.valueOf(rawKey);
+            if (TRANSFORM_OPERATIONS.contains(key)) operations.add(key);
+            else if (!TRANSFORM_OP_PARAMETERS.contains(key)) unknown.add(key);
+        }
+        if (!unknown.isEmpty()) {
+            throw new SchemaException(at + "names no operation of the PS-115 table: "
+                    + String.join(", ", unknown) + " (PS-390)");
+        }
+        if (operations.size() != 1) {
+            throw new SchemaException(at + "must hold exactly one operation, and holds "
+                    + (operations.isEmpty() ? "none" : String.join(", ", operations)) + " (PS-452)");
+        }
+        if (!stage.containsKey("op") && TRANSFORM_OP_PARAMETERS.stream().anyMatch(stage::containsKey)) {
+            throw new SchemaException(at + "`decimals` and `ties` belong to an `op:` stage (PS-452)");
         }
         if (stage.containsKey("op")) {
             if (!"round".equals(stage.get("op"))) {
@@ -508,9 +579,6 @@ public class Schema {
             if (ties != null && !"even".equals(ties) && !"away".equals(ties)) {
                 throw new SchemaException(at + "round `ties` must be even or away (PS-390)");
             }
-        }
-        if (TRANSFORM_OPERATIONS.stream().noneMatch(stage::containsKey)) {
-            throw new SchemaException(at + "names no operation of the PS-115 table (PS-390)");
         }
     }
 
@@ -570,6 +638,10 @@ public class Schema {
         if ("omit".equals(fm.get("out_of_range")) && fm.get("valid_range") instanceof List<?> bounds
                 && bounds.size() == 2 && bounds.get(0) instanceof Number lo && bounds.get(1) instanceof Number hi) {
             f.setOmitOutside(new double[] {lo.doubleValue(), hi.doubleValue()});
+        }
+        if (fm.get("valid_range") instanceof List<?> range && range.size() == 2
+                && range.get(0) instanceof Number lo && range.get(1) instanceof Number hi) {
+            f.setValidRange(new double[] {lo.doubleValue(), hi.doubleValue()});
         }
         f.setByteOffset(toInt(fm.get("byte_offset"), 0));
         f.setBitOffset(toInt(fm.get("bit_offset"), 0));
@@ -666,6 +738,7 @@ public class Schema {
         if (transformRaw instanceof List) {
             List<Field.Transform> transforms = new ArrayList<>();
             for (Object tr : (List<?>) transformRaw) {
+                checkStage(tr, fm.get("name"));
                 if (tr instanceof Map) {
                     Map<String, Object> tm = (Map<String, Object>) tr;
                     Field.Transform t = new Field.Transform();
@@ -689,7 +762,6 @@ public class Schema {
                         t.setClamp(new double[] {toDouble(bounds.get(0)), toDouble(bounds.get(1))});
                     }
                     if (tm.containsKey("ties")) t.setTies(String.valueOf(tm.get("ties")));
-                    checkStage(tm, fm.get("name"));
                     transforms.add(t);
                 }
             }
@@ -942,6 +1014,7 @@ public class Schema {
         // Decode main fields
         Map<String, Object> fieldsResult = decodeFields(fields, ctx);
         result.putAll(fieldsResult);
+        ctx.reportLeftover();       // PS-472
         reportWarnings(result, ctx);
 
         return result;
@@ -972,17 +1045,24 @@ public class Schema {
         // Decode resolved fields
         Map<String, Object> fieldsResult = decodeFields(resolvedFields, ctx);
         result.putAll(fieldsResult);
+        ctx.reportLeftover();       // PS-472
         reportWarnings(result, ctx);
 
         return result;
     }
 
     /**
-     * Copies anything the decode wanted to say into the result under {@code _warnings}.
+     * Copies anything the decode wanted to say into the result: per-field quality under
+     * {@code _quality} and warnings under {@code _warnings}.
      *
-     * <p>Absent unless something was collected, so a clean decode carries no extra key.
+     * <p>Each is absent unless something was collected, so a clean decode carries no extra key.
      */
     private static void reportWarnings(Map<String, Object> result, DecodeContext ctx) {
+        // `_quality` first, as Go and C# order the two (PS-131, PS-427, PS-428).
+        Map<String, String> quality = ctx.settledQuality();
+        if (!quality.isEmpty()) {
+            result.put("_quality", new LinkedHashMap<>(quality));
+        }
         if (!ctx.getWarnings().isEmpty()) {
             result.put("_warnings", new ArrayList<>(ctx.getWarnings()));
         }
@@ -1179,6 +1259,17 @@ public class Schema {
             
             Object value = decodeField(field, ctx);
 
+            // PS-427, PS-428: no reading, recorded in `_quality` where it is produced. An
+            // internal field is only left unbound, except inside a flagged group, where
+            // the reference marks it as well (as Go's decodeFields does).
+            if (value == SENTINEL_ABSENT || value == RANGE_ABSENT) {
+                boolean internal = field.getName() != null && field.getName().startsWith("_");
+                if (field.getName() != null && (!internal || ctx.inFlagged())) {
+                    ctx.markAbsent(field, value == SENTINEL_ABSENT ? "absent" : "out_of_range");
+                }
+                continue;
+            }
+
             if (value == OMITTED) {
                 // A mapping lookup with no entry and no default (PS-269).
                 continue;
@@ -1197,6 +1288,7 @@ public class Schema {
                 // Variables are keyed by the schema-level name so $references keep
                 // working when name_from is in play (PS-267).
                 ctx.setVariable(field.getName(), value);
+                ctx.checkValidRange(value, field);     // PS-131
             }
         }
         
@@ -1234,12 +1326,17 @@ public class Schema {
         
         Map<String, Object> result = new LinkedHashMap<>();
         
-        for (Field.FlaggedGroup group : fd.getGroups()) {
-            int isPresent = (flags >> group.getBit()) & 1;
-            if (isPresent != 0) {
-                Map<String, Object> groupResult = decodeFields(group.getFields(), ctx);
-                result.putAll(groupResult);
+        ctx.enterFlagged();
+        try {
+            for (Field.FlaggedGroup group : fd.getGroups()) {
+                int isPresent = (flags >> group.getBit()) & 1;
+                if (isPresent != 0) {
+                    Map<String, Object> groupResult = decodeFields(group.getFields(), ctx);
+                    result.putAll(groupResult);
+                }
             }
+        } finally {
+            ctx.exitFlagged();
         }
         
         return result;
@@ -1269,6 +1366,8 @@ public class Schema {
         Object value = null;
         // The integer read before an `encoding` decoded it, for the sentinel (PS-427).
         Object preEncoding = null;
+        // A failed guard's `else`, which no lookup reaches (PS-444).
+        boolean asDeclared = false;
         
         switch (field.getType()) {
             // The type fixes both orders, so fieldEndian is deliberately not consulted
@@ -1293,7 +1392,7 @@ public class Schema {
                     preEncoding = raw;
                     // A sentinel is a bit pattern, which need not be a valid code: 0xFF is
                     // no BCD number, and must be absent rather than an error (PS-427).
-                    if (fieldRules && Wave6b.sentinelHit(field, raw)) return OMITTED;
+                    if (fieldRules && Wave6b.sentinelHit(field, raw)) return SENTINEL_ABSENT;
                     // Applied to the integer read, before the modifiers (PS-422).
                     value = Wave4.decodeEncoding(raw, field.getEncoding(), length, field.getName());
                 } else if (length >= 8 && raw < 0) {
@@ -1421,6 +1520,10 @@ public class Schema {
             
             case NUMBER -> {
                 value = decodeComputed(field, ctx);
+                if (value instanceof GuardElse fallback) {
+                    value = fallback.value();
+                    asDeclared = true;
+                }
                 if (field.isIntegerResult() && value instanceof Number n
                         && !Double.isNaN(n.doubleValue()) && !Double.isInfinite(n.doubleValue())) {
                     double d = n.doubleValue();
@@ -1474,10 +1577,10 @@ public class Schema {
         // before an encoding is decoded: it is a bit pattern, not a quantity.
         if (fieldRules && field.getType() != FieldType.NUMBER
                 && Wave6b.sentinelHit(field, preEncoding != null ? preEncoding : value)) {
-            return OMITTED;
+            return SENTINEL_ABSENT;
         }
         
-        return applyGroupMember(value, field, ctx, fieldRules);
+        return applyGroupMember(value, field, ctx, fieldRules, asDeclared);
     }
 
     /**
@@ -1486,10 +1589,16 @@ public class Schema {
      * group's assembled bytes (PS-364), runs the same pipeline.
      */
     private Object applyGroupMember(Object value, Field field, DecodeContext ctx) {
-        return applyGroupMember(value, field, ctx, false);
+        return applyGroupMember(value, field, ctx, false, false);
     }
 
-    private Object applyGroupMember(Object value, Field field, DecodeContext ctx, boolean fieldRules) {
+    /**
+     * @param asDeclared the value is a failed guard's {@code else}, which the lookup does
+     *                   not reach (PS-444): {@code else: 7} beside a lookup reported the
+     *                   label at index 7.
+     */
+    private Object applyGroupMember(Object value, Field field, DecodeContext ctx, boolean fieldRules,
+            boolean asDeclared) {
         // Apply formula if present (takes precedence). A computed field has already
         // had its own arithmetic applied by decodeComputed, in the order the
         // interpreter uses: polynomial, then modifiers, then transform. Running the
@@ -1514,15 +1623,27 @@ public class Schema {
             return OMITTED;
         }
 
+        // PS-475: valid_range compares the value after the arithmetic and before the
+        // lookup, so a looked-up field is compared on its number, not its label. A value
+        // omitted by `out_of_range: omit` takes no further step: it is not looked up, so
+        // an index the sequence lacks is no error when the field is dropped anyway. A
+        // failed guard's `else` ends the sequence and is compared with nothing (PS-443).
+        boolean lookedUp = field.getLookup() != null && value instanceof Number && !asDeclared;
+        ctx.recordRangeInputs(field, asDeclared, lookedUp, value);
+        if (lookedUp && fieldRules && Wave6b.rangeOmits(field, value)) {
+            return RANGE_ABSENT;
+        }
+
         // Apply lookup. A mapping's keys need not start at zero or be contiguous
         // (PS-268); an unmatched value omits the field rather than reporting the raw
         // integer under a name that promises a label, unless a default is declared
         // (PS-269). A sequence is indexed from zero (PS-104) and an out-of-bounds
         // index is an error (PS-105), not the raw value: the payload does not match
         // the schema's shape at all.
-        if (field.getLookup() != null && value instanceof Number) {
+        if (field.getLookup() != null && value instanceof Number && !asDeclared) {
             // A value with a fraction matches no key: intValue() would truncate 2.5 to
-            // the key 2. An integral double such as 7.0 is the key 7.
+            // the key 2. An integral double such as 7.0 is the key 7. A computed value
+            // reaches the lookup after its arithmetic (PS-443), so it is often a double.
             double numVal = ((Number) value).doubleValue();
             int intVal = (int) numVal;
             boolean integral = numVal == Math.rint(numVal) && !Double.isInfinite(numVal);
@@ -1534,6 +1655,12 @@ public class Schema {
                 value = template.replace(Wave5.VALUE_TOKEN, Wave5.formatLookupValue(numVal));
             } else if (field.getLookupDefault() != null) {
                 value = field.getLookupDefault();
+            } else if (field.isLookupSequence() && !integral) {
+                // PS-105: a value with a fraction is no index of the sequence. Reported
+                // as the index it truncated to, which read as an out-of-bounds integer.
+                throw new SchemaException.DecodeException(String.format(
+                    "lookup index %s is not an index of a %d-entry sequence (PS-105)",
+                    Wave5.formatLookupValue(numVal), field.getLookup().size()));
             } else if (field.isLookupSequence()) {
                 throw new SchemaException.DecodeException(String.format(
                     "lookup index %d out of bounds for %d entries",
@@ -1545,8 +1672,8 @@ public class Schema {
         
         // PS-428: outside the range is no reading, not a flagged one, so the field is
         // absent - neither reported nor bound.
-        if (fieldRules && Wave6b.rangeOmits(field, value)) {
-            return OMITTED;
+        if (fieldRules && !asDeclared && !lookedUp && Wave6b.rangeOmits(field, value)) {
+            return RANGE_ABSENT;
         }
 
         // Store variable
@@ -1742,15 +1869,30 @@ public class Schema {
         Map<String, Object> result = new LinkedHashMap<>();
         List<Map<String, Object>> channels = new ArrayList<>();
         
+        // A composite tag's width is its tag_fields' summed widths.
+        int tagWidth = tagSize;
+        if (field.getTagFields() != null && !field.getTagFields().isEmpty()) {
+            tagWidth = 0;
+            for (Field tf : field.getTagFields()) {
+                tagWidth += tagFieldWidth(tf);
+            }
+        }
+
         while (ctx.remaining() > 0) {
             int entryStart = ctx.getOffset();
+            // PS-477: a tag is never partly read. Fewer bytes than the tag at the start of
+            // an entry is an error identifying the tlv, not the end of the loop.
+            if (ctx.remaining() < tagWidth) {
+                throw new SchemaException.DecodeException(String.format(
+                        "tlv entry at offset %d: %d byte(s) remain, fewer than its %d-byte tag (PS-477)",
+                        entryStart, ctx.remaining(), tagWidth));
+            }
             List<Integer> tag = new ArrayList<>();
             Map<String, Integer> tagValues = new HashMap<>();
             
             if (field.getTagFields() != null && !field.getTagFields().isEmpty()) {
                 for (Field tf : field.getTagFields()) {
-                    int tfLength = tf.getLength() > 0 ? tf.getLength() : 1;
-                    byte[] data = ctx.read(tfLength);
+                    byte[] data = ctx.read(tagFieldWidth(tf));
                     int val = (int) ctx.decodeUnsigned(data, ctx.getEndian());
                     if (tf.getName() != null) {
                         tagValues.put(tf.getName(), val);
@@ -1776,6 +1918,12 @@ public class Schema {
             
             int dataLength = -1;
             if (lengthSize > 0) {
+                if (ctx.remaining() < lengthSize) {
+                    // No entry was decoded here: the bytes from its tag on are left over,
+                    // and PS-472 reports them from the tag's offset.
+                    ctx.setOffset(entryStart);
+                    break;
+                }
                 byte[] data = ctx.read(lengthSize);
                 dataLength = (int) ctx.decodeUnsigned(data, ctx.getEndian());
             }
@@ -1862,6 +2010,8 @@ public class Schema {
                         "unknown TLV tag (%s) at offset %d: %d of %d byte(s) left undecoded",
                         label, entryStart, ctx.getLimit() - entryStart,
                         ctx.getLimit()));
+                    // This warning is PS-472's for these bytes; no second one is reported.
+                    ctx.setLeftoverReported();
                     break;
                 }
             }
@@ -1906,6 +2056,13 @@ public class Schema {
 
     /** Sentinel for a field that produced no value and is left out of the output. */
     private static final Object OMITTED = new Object();
+    /**
+     * Omitted as no reading, returned only to a field list (fieldRules): a sentinel
+     * (PS-427) and {@code out_of_range: omit} (PS-428). Distinct from OMITTED because
+     * the field list records them in {@code _quality} where it is produced.
+     */
+    private static final Object SENTINEL_ABSENT = new Object();
+    private static final Object RANGE_ABSENT = new Object();
 
     private static final java.util.regex.Pattern NAME_FROM_PATTERN =
             java.util.regex.Pattern.compile("\\$\\{(\\w+)\\}");
@@ -2433,12 +2590,17 @@ public class Schema {
 
         boolean computed = field.getRef() != null || field.getCompute() != null;
         if (computed && field.getGuard() != null && !guardPasses(field.getGuard(), ctx)) {
-            // A failing guard reports the declared fallback untouched - no modifiers,
-            // no transform. Checking the guard first is also what keeps a guarded
-            // division by zero from ever running.
-            return field.getGuard().hasElse() ? field.getGuard().getElseValue() : Double.NaN;
+            // PS-444: a failing guard reports the declared fallback untouched - no
+            // modifiers, no transform, no lookup; the wrapper is what keeps the lookup
+            // in applyGroupMember off it. Checking the guard first is also what keeps a
+            // guarded division by zero from ever running.
+            return field.getGuard().hasElse() ? new GuardElse(field.getGuard().getElseValue()) : Double.NaN;
         }
 
+        // PS-443: the source - the ref value with its polynomial, or the compute result -
+        // then the modifiers and the transform stages here, and the lookup after, in
+        // applyGroupMember. The compute path ran the stages alone, so `mult: 10` beside a
+        // `compute` was dropped with success.
         if (field.getRef() != null) {
             double value = resolveOperand(field.getRef(), ctx);
             if (field.getPolynomial() != null && !field.getPolynomial().isEmpty()) {
@@ -2450,15 +2612,18 @@ public class Schema {
         if (field.getCompute() != null) {
             double value = evaluateCompute(field.getCompute(), ctx);
             // A zero divisor omits the field (PS-278). Short-circuit before the
-            // transform stages, which would otherwise operate on the sentinel.
+            // arithmetic, which would otherwise operate on the sentinel.
             if (isComputeOmitted(value)) {
                 return null;
             }
-            return applyTransform(value, field.getTransform());
+            return applyArithmetic(value, field);
         }
 
         return field.getValue();
     }
+
+    /** A failed guard's {@code else}, reported exactly as declared (PS-444). */
+    private record GuardElse(Object value) { }
 
     /**
      * Apply a field's bare modifiers and then its transform stages. Both run when both

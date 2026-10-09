@@ -1,0 +1,59 @@
+# PS-475 (CR-2026-086): `valid_range` compares the value after the modifiers and the
+# `transform` and before the lookup. Compared after it, a label is no number and every
+# value read "good"; omitted after it, a label could never be out of range. The `_quality`
+# entry is required wherever a field declares a range (PS-131, PS-182).
+#
+# Each field reads one byte, applies `add: -1`, compares the result with [0, 2], then looks
+# it up. `omitted`'s table stops at index 2: an implementation looking up before it compares
+# would find no entry for 3 and fail the decode (PS-105) instead of omitting the field.
+name: probe_range_before_lookup
+endian: big
+fields:
+- name: reported
+  type: u8
+  add: -1
+  valid_range: [0, 2]
+  lookup: [zero, one, two, three]
+- name: omitted
+  type: u8
+  add: -1
+  valid_range: [0, 2]
+  out_of_range: omit
+  lookup: [zero, one, two]
+test_vectors:
+- name: low_end
+  source: spec-example
+  payload: "01 01"
+  expected:
+    reported: zero
+    omitted: zero
+    _quality:
+      reported: good
+      omitted: good
+- name: middle
+  source: spec-example
+  payload: "02 02"
+  expected:
+    reported: one
+    omitted: one
+    _quality:
+      reported: good
+      omitted: good
+- name: high_end
+  source: spec-example
+  payload: "03 03"
+  expected:
+    reported: two
+    omitted: two
+    _quality:
+      reported: good
+      omitted: good
+- name: out_of_range
+  source: spec-example
+  payload: "04 04"
+  expected:
+    reported: three
+    omitted: null
+    _quality:
+      reported: out_of_range
+      omitted: out_of_range

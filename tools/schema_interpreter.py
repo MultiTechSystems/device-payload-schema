@@ -679,6 +679,95 @@ def typed_field_dicts(node, _top=True):
             yield from typed_field_dicts(item, False)
 
 
+#: The operations a `transform` stage may hold: PS-098's arithmetic, the PS-115 table, and
+#: an `op:` stage (PS-390). `decimals` and `ties` are parameters of an `op:` stage and are
+#: part of that one operation, not operations of their own (PS-452).
+TRANSFORM_OPERATIONS = ('add', 'mult', 'div', 'sqrt', 'abs', 'pow', 'floor', 'ceiling',
+                        'clamp', 'log10', 'log', 'op')
+TRANSFORM_OP_PARAMETERS = ('decimals', 'ties')
+
+
+def transform_stage_errors(stages, where):
+    """PS-390 and PS-452: each stage holds exactly one operation the language defines.
+
+    A stage holding two - `{add: 1, mult: 2}` - was decoded by every implementation, in
+    whichever order each chose: Python applied mult then add, the generated codec only
+    one of them. Rejected when the schema is loaded, never applied in part.
+    """
+    if not isinstance(stages, list):
+        return [f"{where}: `transform` must be a list of stages (PS-102)"]
+    errors = []
+    for index, stage in enumerate(stages):
+        at = f"{where}: transform stage {index}"
+        if not isinstance(stage, dict):
+            errors.append(f"{at} is {stage!r}, not a mapping holding one operation (PS-452)")
+            continue
+        if 'round' in stage:
+            errors.append(f"{at}: `{{round: n}}` is not a transform stage; write "
+                          f"{{op: round, decimals: n}} (PS-390)")
+            continue
+        unknown = [k for k in stage
+                   if k not in TRANSFORM_OPERATIONS and k not in TRANSFORM_OP_PARAMETERS]
+        if unknown:
+            errors.append(f"{at} names no operation of the PS-115 table: "
+                          f"{', '.join(map(str, unknown))} (PS-390)")
+            continue
+        operations = [k for k in stage if k in TRANSFORM_OPERATIONS]
+        if len(operations) != 1:
+            held = ', '.join(operations) if operations else 'none'
+            errors.append(f"{at} must hold exactly one operation, and holds {held} (PS-452)")
+            continue
+        if 'op' not in stage and any(k in stage for k in TRANSFORM_OP_PARAMETERS):
+            errors.append(f"{at}: `decimals` and `ties` belong to an `op:` stage (PS-452)")
+    return errors
+
+
+def arithmetic_errors(field_def):
+    """CR-2026-071/073: the arithmetic a field declares is one it can carry.
+
+    PS-445: a `guard` belongs to a computed field. On a field read from the payload it was
+    ignored by every implementation, so a schema meaning "no reading below this" decoded
+    every value; `sentinel` and `out_of_range: omit` say that for a read value.
+    PS-452: one operation per transform stage.
+    """
+    if not isinstance(field_def, dict):
+        return []
+    name = field_def.get('name', '?')
+    errors = []
+    if 'guard' in field_def and not (
+            field_def.get('type') in COMPUTED_TYPES
+            and ('ref' in field_def or 'compute' in field_def)):
+        errors.append(f"Field '{name}': a guard is declared only on a computed field (ref "
+                      f"or compute); for a value read from the payload use sentinel or "
+                      f"out_of_range: omit (PS-445)")
+    if 'transform' in field_def:
+        errors.extend(transform_stage_errors(field_def['transform'], f"Field '{name}'"))
+    return errors
+
+
+def arithmetic_schema_errors(node, _top=True):
+    """arithmetic_errors() for every field mapping declaring a guard or a transform.
+
+    Walked separately from typed_field_dicts(): a guard on a mapping with no `type` - a
+    byte_group entry, a match - is as invalid as one on a `u8` (PS-445), and a walk that
+    only visits typed fields let it through with success.
+    """
+    errors = []
+    if isinstance(node, dict):
+        if not _top and ('guard' in node or 'transform' in node):
+            errors.extend(arithmetic_errors(node))
+        for key, value in node.items():
+            if _top and key in ('test_vectors', 'definitions'):
+                continue
+            if key in ('guard', 'transform'):
+                continue        # their own contents are not fields
+            errors.extend(arithmetic_schema_errors(value, False))
+    elif isinstance(node, list):
+        for item in node:
+            errors.extend(arithmetic_schema_errors(item, False))
+    return errors
+
+
 def is_literal(field_def):
     """A `string` or `number` field declaring `value`: a constant read from no bytes (PS-357)."""
     return (isinstance(field_def, dict) and field_def.get('type') in ('string', 'number')
@@ -1176,8 +1265,15 @@ def apply_lookup(value, lookup):
                 return template.replace(LOOKUP_VALUE_TOKEN, format_lookup_value(value))
             return lookup['default']
         return OMITTED
-    if not isinstance(value, int):
-        return value
+    # A computed field's value arrives as a float (PS-443 puts the lookup after its
+    # arithmetic). An integral one is its index; one with a fraction indexes no entry,
+    # which PS-105 makes an error. Both used to pass through unlooked-up, with success.
+    if isinstance(value, float):
+        if not value.is_integer():
+            raise LookupIndexError(
+                f"lookup index {value} is not an index of a {len(lookup)}-entry sequence "
+                f"(PS-105)")
+        value = int(value)
     if 0 <= value < len(lookup):
         return lookup[value]
     raise LookupIndexError(
@@ -1376,6 +1472,7 @@ class SchemaInterpreter:
             self._load_errors.extend(literal_errors(field_def))
             self._load_errors.extend(encoding_errors(field_def))
             self._load_errors.extend(lookup_template_errors(field_def))
+        self._load_errors.extend(arithmetic_schema_errors(schema))    # PS-445, PS-452
         self._load_errors.extend(timestamp_errors(schema.get('metadata')))
         self._load_errors.extend(schema_iterator_errors(schema))
         self._repeat_only_names = repeat_only_names(schema)
@@ -1385,6 +1482,9 @@ class SchemaInterpreter:
             self._load_errors.extend(optional_errors(group, f"ports[{port}].fields"))
         self._load_errors.extend(internal_name_errors(schema))
         self.schema = schema
+        self._pre_lookup = {}           # PS-475, reset by decode
+        self._guard_else = set()
+        self._leftover_reported = False
         self.endian = Endian(schema.get('endian', 'big'))
         self.name = schema.get('name', 'unknown')
         self.version = schema.get('version', 1)
@@ -2257,9 +2357,27 @@ class SchemaInterpreter:
                 raw, _ = self._read_int(buf, start, size, False)
         return (isinstance(raw, int) and not isinstance(raw, bool)) and raw in sentinels
 
+    def _range_value(self, field_def: Dict[str, Any], value: Any) -> Tuple[bool, Any]:
+        """(checked, value): the value `valid_range` compares, or (False, _) for none.
+
+        PS-475 puts the comparison after the arithmetic and before the lookup, so a
+        looked-up field is compared on the number its label stands for - compared after,
+        a label was never a number and every one read "good". A guard's `else` ends the
+        sequence (PS-443) and is not compared at all.
+        """
+        key = id(field_def)
+        if key in getattr(self, '_guard_else', ()):
+            return False, value
+        if field_def.get('lookup') is not None:
+            return key in self._pre_lookup, self._pre_lookup.get(key)
+        return True, value
+
     def _range_omits(self, field_def: Dict[str, Any], value: Any) -> bool:
         """PS-428: `out_of_range: omit` and a value outside `valid_range`."""
         if field_def.get('out_of_range') != 'omit':
+            return False
+        checked, value = self._range_value(field_def, value)
+        if not checked:
             return False
         bounds = field_def.get('valid_range')
         if not isinstance(bounds, (list, tuple)) or len(bounds) != 2:
@@ -2643,49 +2761,42 @@ class SchemaInterpreter:
         return result, pos
     
     def _decode_computed_field(self, field_def: Dict[str, Any]) -> Optional[float]:
-        """Decode a computed field (type: number) - ref, polynomial, compute, guard."""
-        value = None
-        
+        """Decode a computed field (type: number) - ref, polynomial, compute, guard.
+
+        PS-443: the source - the `ref` value with its `polynomial`, or the `compute`
+        result - then the top-level modifiers, the `transform` stages and the lookup, as
+        for a field read from the payload. The modifiers and the lookup used to be
+        dropped on `compute`, and the lookup on `ref` too, with success.
+
+        PS-444: a guard is evaluated first, and a failed one's `else` is the value as
+        declared. The `compute` path passed it through the `transform`, so
+        `transform: [{mult: 10}]` turned `else: 5` into 50.
+        """
         # Deprecated: formula field
         if field_def.get('formula'):
             import warnings
             warnings.warn(f"Field '{field_def.get('name', 'unknown')}': 'formula' is deprecated.", DeprecationWarning)
-            value = self._evaluate_formula(field_def['formula'], None)
-        
-        # ref + polynomial/transform
-        elif field_def.get('ref'):
-            if 'guard' in field_def:
-                passed, fallback = self._evaluate_guard(field_def['guard'])
-                if not passed:
-                    value = fallback if fallback is not None else float('nan')
-                else:
-                    value = self._resolve_ref_value(field_def)
-            else:
-                value = self._resolve_ref_value(field_def)
-        
-        # compute (cross-field binary operation)
-        elif field_def.get('compute'):
-            if 'guard' in field_def:
-                passed, fallback = self._evaluate_guard(field_def['guard'])
-                if not passed:
-                    value = fallback if fallback is not None else float('nan')
-                else:
-                    value = self._evaluate_compute(field_def['compute'])
-            else:
-                value = self._evaluate_compute(field_def['compute'])
-            
-            # Apply transform after compute. An omitted compute short-circuits:
-            # there is no value to transform, and float(OMITTED) would raise.
-            if value is OMITTED:
-                return OMITTED
-            if value is not None and 'transform' in field_def:
-                value = self._apply_transform(float(value), field_def['transform'])
-        
-        # Literal value
-        elif 'value' in field_def:
-            value = field_def['value']
-        
-        return value
+            return self._evaluate_formula(field_def['formula'], None)
+
+        if not (field_def.get('ref') or field_def.get('compute')):
+            # Literal value
+            return field_def.get('value')
+
+        self._guard_else.discard(id(field_def))
+        if 'guard' in field_def:
+            passed, fallback = self._evaluate_guard(field_def['guard'])
+            if not passed:
+                self._guard_else.add(id(field_def))
+                return fallback if fallback is not None else float('nan')
+
+        if field_def.get('ref'):
+            value = self._ref_source(field_def)
+        else:
+            value = self._evaluate_compute(field_def['compute'])
+        # An omitted source short-circuits: there is no value to carry on with.
+        if value is OMITTED or value is None:
+            return value
+        return self._apply_modifiers(value, field_def)
     
     def _decode_bitfield_string(self, field_def: Dict[str, Any], buf: bytes, pos: int) -> Tuple[str, int]:
         """Decode a bitfield_string field (e.g., firmware version)."""
@@ -2891,33 +3002,17 @@ class SchemaInterpreter:
         
         return (True, else_value)
     
-    def _resolve_ref_value(self, field_def: Dict[str, Any]) -> float:
-        """
-        Resolve a ref field and apply modifiers/polynomial/transform.
-        
-        field_def must have 'ref' key.
-        """
+    def _ref_source(self, field_def: Dict[str, Any]) -> float:
+        """A `ref` field's source: the referenced value with its `polynomial` (PS-443)."""
         ref_field = field_def['ref']
         if isinstance(ref_field, str) and ref_field.startswith('$'):
-            ref_name = ref_field[1:]
-            value = float(self._ref(ref_name))
+            value = float(self._ref(ref_field[1:]))
         else:
             value = float(ref_field)
-        
-        # Apply polynomial if present
-        if 'polynomial' in field_def:
-            coeffs = field_def['polynomial']
-            if isinstance(coeffs, list) and len(coeffs) >= 2:
-                value = self._evaluate_polynomial(coeffs, value)
-        
-        value = apply_canonical_modifiers(value, field_def)
-
-        # Apply transform array if present
-        if 'transform' in field_def:
-            value = self._apply_transform(value, field_def['transform'])
-        
+        coeffs = field_def.get('polynomial')
+        if isinstance(coeffs, list) and len(coeffs) >= 2:
+            value = self._evaluate_polynomial(coeffs, value)
         return value
-    
 
     def _resolve_encode_name(self, field_def: Dict[str, Any], name: str,
                              data: Dict[str, Any]) -> Optional[str]:
@@ -3182,9 +3277,15 @@ class SchemaInterpreter:
             # Where this entry begins, so PS-302 can count the bytes abandoned from the
             # unknown tag itself rather than from after it.
             entry_start = pos
-            # Read tag
-            if pos + tag_size > len(buf):
-                break
+            # PS-477: a tag is never partly read. Fewer bytes than the tag at the start of
+            # an entry is an error identifying the tlv; this used to stop the loop and
+            # report a complete decode. A composite tag's width is its tag_fields'.
+            width = (fixed_element_size(tag_fields) if tag_fields and tag_key else None) \
+                or tag_size
+            if pos + width > len(buf):
+                raise ValueError(
+                    f"tlv entry at offset {pos}: {len(buf) - pos} byte(s) remain, fewer "
+                    f"than its {width}-byte tag (PS-477)")
             
             if tag_fields and tag_key:
                 # Composite tag: read sub-fields
@@ -3219,6 +3320,9 @@ class SchemaInterpreter:
             data_length = None
             if length_size > 0:
                 if pos + length_size > len(buf):
+                    # No entry was decoded here: the bytes from its tag on are left over,
+                    # and PS-472 reports them from the tag's offset.
+                    pos = entry_start
                     break
                 if length_size == 1:
                     data_length = buf[pos]
@@ -3306,6 +3410,8 @@ class SchemaInterpreter:
                         f"unknown TLV tag ({tag_text}) at offset {entry_start}: "
                         f"{len(buf) - entry_start} of {len(buf)} byte(s) left undecoded"
                     )
+                # This warning is PS-472's for these bytes; no second one is reported.
+                self._leftover_reported = True
                 break
             
             # Decode fields for this tag
@@ -3378,6 +3484,9 @@ class SchemaInterpreter:
         """
         valid_range = field_def.get('valid_range')
         name = field_def.get('name', 'unknown')
+        checked, value = self._range_value(field_def, value)
+        if not checked:
+            return "good"
         
         if valid_range is None or not isinstance(value, (int, float)):
             return "good"
@@ -3422,11 +3531,32 @@ class SchemaInterpreter:
         if transform and isinstance(transform, list) and value is not OMITTED:
             value = self._apply_transform(float(value), transform)
         
+        # The value valid_range compares, before the lookup (PS-475).
+        if field_def.get('lookup') is not None and field_def.get('valid_range'):
+            self._pre_lookup[id(field_def)] = value
+            # An omitted value takes no further step (PS-443): it is not looked up, so
+            # an index the table lacks is no error when the field is dropped anyway.
+            if self._range_omits(field_def, value):
+                return value
         # Apply lookup table
         value = apply_lookup(value, field_def.get('lookup'))
         
         return value
     
+    def _report_leftover(self, payload: bytes, pos: int, result: DecodeResult) -> None:
+        """PS-472: bytes after the last field are reported, not silently dropped.
+
+        The decode is reported as it would be otherwise; this only warns, with the
+        offset of the first byte not decoded and the count to the end. A frame from newer
+        firmware and a frame decoded with the wrong layout both used to look complete.
+        """
+        left = len(payload) - pos
+        if left <= 0 or result.errors or self._leftover_reported:
+            return
+        result.warnings.append(
+            f"{left} byte(s) after the last field left undecoded, from offset {pos} "
+            f"(PS-472)")
+
     def decode(self, payload: bytes, fPort: int = None, input_metadata: Dict[str, Any] = None,
                direction: str = None) -> DecodeResult:
         """
@@ -3473,6 +3603,12 @@ class SchemaInterpreter:
         self._pending_absent = {}
         # `_quality` from match case bodies, which decode into a scratch result.
         self._case_quality = {}
+        # Set where a PS-302 warning has already reported the bytes left (PS-472).
+        self._leftover_reported = False
+        # PS-475: a looked-up field's pre-lookup value, and the guards that reported
+        # their `else`, by field definition.
+        self._pre_lookup = {}
+        self._guard_else = set()
         
         pos = 0
         fields = self._resolve_fields(fPort)
@@ -3480,6 +3616,7 @@ class SchemaInterpreter:
         pos = self._decode_field_list(fields, payload, 0, result)
         
         result.bytes_consumed = pos
+        self._report_leftover(payload, pos, result)
         
         # Metadata enrichment
         metadata_def = self.schema.get('metadata')
@@ -5138,7 +5275,7 @@ class SchemaInterpreter:
         def extract_metadata(field_def: Dict[str, Any]) -> Dict[str, Any]:
             meta = {}
             for key in ('unit', 'valid_range', 'resolution', 'unece', 
-                       'description', 'semantic', 'ipso', 'senml_unit'):
+                       'description', 'semantic', 'ipso', 'senml', 'senml_unit'):
                 if key in field_def:
                     meta[key] = field_def[key]
             # Flatten semantic sub-dict
@@ -5168,18 +5305,27 @@ class SchemaInterpreter:
         return all_metadata
     
     def get_semantic_output(self, decoded: Dict[str, Any], 
-                           format: str = 'ipso') -> Dict[str, Any]:
+                           format: str = 'ipso', fPort: int = None) -> Dict[str, Any]:
         """
         Convert decoded data to semantic format.
         
         Args:
             decoded: Decoded field values
             format: 'ipso', 'senml', or 'ttn'
+            fPort: the port the payload arrived on, for a schema that selects its
+                fields by port; its entry's fields are the ones reported (PS-478).
             
         Returns:
             Semantically formatted output
         """
-        fields = self.schema.get('fields', [])
+        if fPort is not None or not self.schema.get('ports'):
+            fields = self._resolve_fields(fPort)
+        else:
+            # No port given: every entry's fields are searched, first declaration first.
+            fields = list(self.schema.get('fields') or [])
+            for entry in self.schema['ports'].values():
+                group = entry.get('fields') if isinstance(entry, dict) else entry
+                fields.extend(group or [])
         
         if format == 'ipso':
             return self._to_ipso(decoded, fields)
@@ -5217,19 +5363,79 @@ class SchemaInterpreter:
         
         return result
     
-    def _to_senml(self, decoded: Dict[str, Any], 
-                  fields: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Convert to SenML format."""
+    @staticmethod
+    def _reported_fields(fields: List[Any]) -> Dict[str, Dict[str, Any]]:
+        """Reported key -> declaring field, for one level of decoded output.
+
+        A construct that merges its fields into its parent (PS-156, PS-163) contributes
+        them at this level: a match case, a byte_group, a flagged group, a tlv case
+        unless `merge: false`. An object or repeat contributes its own name; its members
+        are another level. The first declaration of a name wins, as the first case to
+        report it would.
+        """
+        found: Dict[str, Dict[str, Any]] = {}
+
+        def visit(field_list):
+            for f in field_list or []:
+                if not isinstance(f, dict):
+                    continue
+                if 'byte_group' in f:
+                    group = f['byte_group']
+                    visit(group.get('fields') if isinstance(group, dict) else group)
+                if isinstance(f.get('flagged'), dict):
+                    for g in f['flagged'].get('groups') or []:
+                        visit(g.get('fields'))
+                match = f.get('match')
+                if isinstance(match, dict):
+                    for body in (match.get('cases') or {}).values():
+                        if isinstance(body, list):
+                            visit(body)
+                    if isinstance(match.get('default'), list):
+                        visit(match['default'])
+                    if match.get('name'):
+                        found.setdefault(match['name'], {'name': match['name']})
+                tlv = f.get('tlv')
+                if isinstance(tlv, dict):
+                    if tlv.get('merge', True) is False and f.get('name'):
+                        found.setdefault(f['name'], dict(f, type='object'))
+                    else:
+                        for body in (tlv.get('cases') or {}).values():
+                            if isinstance(body, list):
+                                visit(body)
+                if f.get('name'):
+                    found.setdefault(f['name'], f)
+
+        visit(fields)
+        return found
+
+    def _to_senml(self, decoded: Dict[str, Any],
+                  fields: List[Dict[str, Any]], prefix: str = '') -> List[Dict[str, Any]]:
+        """Convert to SenML format (PS-478, PS-479).
+
+        One record per field the output reports, wherever it is declared, named by its
+        `senml.name` or else its reported name, with `senml.unit` or else `unit`. This
+        used to walk the top-level field list only and ignore the `senml` block: a
+        schema's `{name: temp, unit: Cel}` came out as `temperature` in `°C`, and a
+        field inside a port entry, a case or a group had no record. A member of an
+        object with no `senml.name` is named by the object's reported name and its own,
+        joined by `/` (PS-479). Internal fields and omitted ones are not reported, so
+        they have no record.
+        """
         records = []
-        
-        for field_def in fields:
-            name = field_def.get('name')
-            if name not in decoded:
+        declared = self._reported_fields(fields)
+
+        for name, value in decoded.items():
+            if str(name).startswith('_'):
+                continue        # `_quality`, `_warnings`: not fields
+            field_def = declared.get(name, {})
+            path = f"{prefix}/{name}" if prefix else str(name)
+            if isinstance(value, dict):
+                # A nested object: its members are records of their own (PS-479).
+                records.extend(self._to_senml(value, field_def.get('fields') or [], path))
                 continue
-            
-            record = {'n': name}
-            value = decoded[name]
-            
+            senml = field_def.get('senml') if isinstance(field_def.get('senml'), dict) else {}
+            record = {'n': senml.get('name') or path}
+
             if isinstance(value, bool):
                 record['vb'] = value
             elif isinstance(value, (int, float)):
@@ -5239,14 +5445,14 @@ class SchemaInterpreter:
             elif isinstance(value, bytes):
                 record['vd'] = value.hex()
             else:
-                record['v'] = value
-            
-            unit = field_def.get('unit')
+                record['v'] = value     # a repeat's elements: PS-377, unchanged here
+
+            unit = senml.get('unit') or field_def.get('unit')
             if unit:
                 record['u'] = unit
-            
+
             records.append(record)
-        
+
         return records
     
     def _to_ttn(self, decoded: Dict[str, Any], 

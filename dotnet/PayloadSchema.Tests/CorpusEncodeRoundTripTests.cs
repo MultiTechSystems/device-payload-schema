@@ -42,7 +42,17 @@ public class CorpusEncodeRoundTripTests
     // round-trips: `plain fixed` rises from 58 to 59 and the total to 1162.
     // CR-2026-031's name_from var-mismatch fixture round-trips here too, so
     // `plain fixed` rises from 59 to 61 and the total to 1164.
-    const int EncodeFloorTotal = 1680;
+    // CR-2026-071/073's six arithmetic-order vectors round-trip (a computed field writes
+    // nothing, and the read fields' arithmetic was already undone in reverse), so
+    // `plain fixed` rises from 88 to 94; with one `match` vector the floor had not
+    // caught up with, 122 to 123, the total rises to 1686.
+    // CR-2026-085/086: measured 1692 with the floor at 1688. range-before-lookup.yaml's
+    // three in-range vectors and leftover-bytes.yaml's exact frame round-trip, all under
+    // `plain fixed` (96 -> 100) - the range fixture's field was renamed from `flagged`,
+    // which the raw-YAML classifier had filed under that shape. Its out_of_range vector
+    // omits a field and cannot (bytes differ), and leftover-bytes' second vector
+    // re-encodes to its first byte only (PS-474): both by design.
+    const int EncodeFloorTotal = 1700;   // +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
 
     /// <summary>
     /// Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -51,9 +61,9 @@ public class CorpusEncodeRoundTripTests
     static readonly Dictionary<string, int> EncodeFloorByShape = new()
     {
         // 1283 -> 1281 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped only because their internal byte halves were all zero, which the encoder wrote for an internal field with no value. It now reports such a field instead.
-        ["tlv"] = 1281,
-        ["flagged"] = 157,
-        ["plain fixed"] = 88,
+        ["tlv"] = 1287,   // +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
+        ["flagged"] = 159,
+        ["plain fixed"] = 100,
         ["match"] = 123,
         ["byte_group"] = 19,
         // 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now

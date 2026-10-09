@@ -29,7 +29,8 @@ fields:
             - name: lightning_strike_count
               type: u16
               add: -32768
-              unit: "None"
+              # A count: no unit. The vendor decoder writes 'None' for that, which the
+              # converter copied as though it were a unit's name.
             - name: lightning_average_distance
               type: u16
               add: -32768
@@ -145,3 +146,37 @@ test_vectors:
       tilt_angle_y_orientation: -2776.8
       precipitation_electrical_conductivity: -27768
       cumulative_precipitation: 20228.605
+  # The vendor's own examples: main() in DL-ATM41G2.js (decentlab-decoders 045ec68),
+  # decoded by that decoder. It does not report `flags`.
+  - name: vendor_reference_1
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "025EF80003805C000080008000803484B3803680E78086A60181D680ED81C9809F8000117000010ADC"
+    expected:
+      protocol_version: 2
+      device_id: 24312
+      solar_radiation: 9.2
+      precipitation: 0
+      lightning_strike_count: 0
+      lightning_average_distance: 0
+      wind_speed: 0.52
+      wind_direction: 120.3
+      maximum_wind_speed: 0.54
+      air_temperature: 23.1
+      vapor_pressure: 1.34
+      barometric_pressure: 97.29
+      relative_humidity: 47
+      internal_temperature: 23.7
+      tilt_angle_x_orientation: 45.7
+      tilt_angle_y_orientation: 15.9
+      precipitation_electrical_conductivity: 0
+      cumulative_precipitation: 70
+      battery_voltage: 2.78
+  - name: vendor_reference_2
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "025EF800020ADC"
+    expected:
+      protocol_version: 2
+      device_id: 24312
+      battery_voltage: 2.78

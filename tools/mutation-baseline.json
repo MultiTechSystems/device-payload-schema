@@ -3,15 +3,35 @@
   "min_score_new": 0.8,
   "include_library_composed": false,
   "distribution": {
-    "100%": 162,
-    "95-99%": 6,
+    "100%": 165,
+    "95-99%": 7,
     "90-94%": 1,
-    "80-89%": 5,
+    "80-89%": 6,
     "70-79%": 1,
     "<70%": 1,
     "unscored": 5
   },
   "schemas": {
+    "_language-conformance/arithmetic-order-computed.yaml": {
+      "score": 0.8205,
+      "killed": 32,
+      "survived": 7,
+      "unreached": 0,
+      "generated": 47,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/arithmetic-order-read.yaml": {
+      "score": 0.9714,
+      "killed": 34,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 42,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "_language-conformance/bit-range-order.yaml": {
       "score": 0.875,
       "killed": 7,
@@ -132,6 +152,16 @@
       "provenance": "independent",
       "failing_original": 0
     },
+    "_language-conformance/guard-else-as-declared.yaml": {
+      "score": 1.0,
+      "killed": 12,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 15,
+      "vectors": 4,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "_language-conformance/internal-discriminator.yaml": {
       "score": 1.0,
       "killed": 13,
@@ -149,6 +179,16 @@
       "unreached": 0,
       "generated": 10,
       "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/leftover-bytes.yaml": {
+      "score": 1.0,
+      "killed": 2,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 3,
+      "vectors": 2,
       "provenance": "independent",
       "failing_original": 0
     },
@@ -339,6 +379,16 @@
       "unreached": 0,
       "generated": 7,
       "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/range-before-lookup.yaml": {
+      "score": 1.0,
+      "killed": 15,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 18,
+      "vectors": 4,
       "provenance": "independent",
       "failing_original": 0
     },
@@ -998,8 +1048,8 @@
       "survived": 0,
       "unreached": 0,
       "generated": 71,
-      "vectors": 5,
-      "provenance": "unsourced",
+      "vectors": 6,
+      "provenance": "independent",
       "failing_original": 0
     },
     "elsys/ers.yaml": {
@@ -1787,7 +1837,7 @@
       "killed": 123,
       "survived": 0,
       "unreached": 0,
-      "generated": 157,
+      "generated": 159,
       "vectors": 34,
       "provenance": "independent",
       "failing_original": 0
@@ -1813,10 +1863,10 @@
       "failing_original": 0
     },
     "volley-boast/vobo.yaml": {
-      "score": 0.9885,
+      "score": 0.9842,
       "killed": 20024,
-      "survived": 232,
-      "unreached": 955,
+      "survived": 322,
+      "unreached": 865,
       "generated": 24943,
       "vectors": 315,
       "provenance": "independent",

@@ -48,7 +48,20 @@ import (
 // round-trips: `plain fixed` rises from 58 to 59 and the total to 1171.
 // CR-2026-031's name_from var-mismatch fixture round-trips on every path, so
 // `plain fixed` rises from 59 to 61 and the total to 1173.
-const encodeFloorTotal = 1698
+// CR-2026-071: the encoder undoes the bare modifiers beside a transform, so both
+// arithmetic-order-read.yaml vectors round-trip. log-of-non-positive's zero_is_absent
+// stops round-tripping, deliberately: it did only because a `log10` stage was undone as
+// the identity, and a stage that does not invert is now reported, as the reference
+// reports it. `plain fixed` reads 94 and the total 1703, and 96 and 1705 with the two
+// vectors guard-else-as-declared gained for the mutation gate.
+// CR-2026-085/086's fixtures add four round trips, all `plain fixed` (96 -> 100):
+// leftover-bytes' exact frame and range-before-lookup's three in-range vectors. (Its
+// field was first named `flagged`, which this harness's text scan filed under that shape;
+// it was renamed so the bucket reflects the fields.) The other
+// two do not round-trip, by design: the leftover vector re-encodes without its leftover
+// bytes (PS-474), and the omitted out-of-range reading has no value to write back.
+// `match` was already reading 123 against a floor of 122. Total 1709.
+const encodeFloorTotal = 1717 // +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip; +2: dl-atm41g2's two vendor vectors (+2)
 
 // encodeFloorByShape guards each layout separately, so a regression in one that works
 // cannot hide behind the mass of one that does not. It has earned that: raising the total
@@ -63,9 +76,9 @@ const encodeFloorTotal = 1698
 // keys, which cannot tell those two cases apart, and pick the first.
 var encodeFloorByShape = map[string]int{
 	// 1300 -> 1298 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped only because their internal byte halves were all zero, which the encoder wrote for an internal field with no value. It now reports such a field instead.
-	"tlv":         1298,
-	"flagged":     157,
-	"plain fixed": 89,
+	"tlv":         1304, // +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
+	"flagged":     159,
+	"plain fixed": 100,
 	"match":       123,
 	"byte_group":  19,
 	// 6 -> 5 with plain fixed 66 -> 67: a bucket move, not a regression. Composed
@@ -204,7 +217,9 @@ func TestCorpusEncodeRoundTrip(t *testing.T) {
 // plain API documents a weaker contract - it assumes ascending tag order, which is how most
 // devices in this corpus lay their channels out and not how ws515 and wt101 do - so its
 // failures are not all defects, and this floor is lower than the ordered one on purpose.
-const encodePlainFloorTotal = 1675
+// CR-2026-071 raised it to 1680, for the reasons given at encodeFloorTotal, and
+// CR-2026-085/086's fixtures to 1686.
+const encodePlainFloorTotal = 1694 // +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip; +2: dl-atm41g2's two vendor vectors (+2)
 
 // TestCorpusEncodePlainRoundTrip measures the unordered pair, so the two contracts are
 // ratcheted separately and neither can be mistaken for the other.

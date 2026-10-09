@@ -24,7 +24,9 @@ test_vectors:
     source: generated
     expected:
       kind: 9
-    expected_warnings: []
+    # Nothing after the match reads the skipped byte, so it is left over (PS-472).
+    expected_warnings:
+      - ["1 byte", "offset 1"]
   - name: a_matched_value_still_decodes
     description: "1 has a case"
     payload: "017F"

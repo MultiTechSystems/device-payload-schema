@@ -1122,7 +1122,6 @@ public static class SchemaEncoder
             {
                 var stage = stages[i];
                 if (stage.Add != null) value -= stage.Add.Value;
-                else if (stage.Sub != null) value += stage.Sub.Value;
                 else if (stage.Mult != null)
                 {
                     if (stage.Mult.Value == 0)
