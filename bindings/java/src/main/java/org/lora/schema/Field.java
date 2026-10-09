@@ -138,6 +138,16 @@ public class Field {
     public boolean isMatchRemaining() { return matchRemaining; }
     public void setMatchRemaining(boolean matchRemaining) { this.matchRemaining = matchRemaining; }
 
+    /**
+     * The declaration this field was parsed from, after {@code $ref} splicing, or null for
+     * a field built by hand or from the binary format. {@code _meta} is derived from what
+     * was declared (PS-493), which the typed fields above no longer carry: an alias is
+     * canonicalised and a bit range is parsed into offsets.
+     */
+    private Map<String, Object> raw;
+    public Map<String, Object> getRaw() { return raw; }
+    public void setRaw(Map<String, Object> raw) { this.raw = raw; }
+
     public Field() {
     }
 

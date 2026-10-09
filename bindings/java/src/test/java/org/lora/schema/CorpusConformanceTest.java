@@ -47,7 +47,9 @@ class CorpusConformanceTest {
     // four, and match-default-skip.yaml's skipped body now expects the PS-472 warning.
     // With the leftover reported and valid_range compared before the lookup, all decode;
     // the full count of payload vectors is 2371.
-    private static final int CORPUS_FLOOR = 2540;   // dl-atm41g2's two vendor vectors (+2); +121: vendor-codec vectors that kill vobo's mutation survivors
+    // CR-2026-096 added nine vectors (the meta-* fixtures); with _meta compared exactly
+    // where a vector carries expected_meta, all pass: 2549.
+    private static final int CORPUS_FLOOR = 2549;   // dl-atm41g2's two vendor vectors (+2); +121: vendor-codec vectors that kill vobo's mutation survivors
 
     @Test
     void corpusVectorsDecodeAsExpected() throws IOException {
@@ -92,6 +94,7 @@ class CorpusConformanceTest {
                         report.add(rel, index, vector.get("name"), "skip", "no payload (encode vector)");
                     } else {
                         report.add(rel, index, vector.get("name"), "error", "parse: " + e.getMessage());
+                        report.addMeta(rel, index, vector.get("name"), null);
                     }
                 }
                 continue;
@@ -109,6 +112,20 @@ class CorpusConformanceTest {
                     continue;
                 }
                 String payloadHex = String.valueOf(vector.get("payload")).replace(" ", "");
+                // CR-2026-096: the interpreter output's `_meta`, for every vector with a
+                // payload when CORPUS_META_REPORT asks, and compared exactly where the
+                // vector carries `expected_meta`. Null where the interpret fails (PS-497).
+                Object expectedMeta = vector.get("expected_meta");
+                Object meta = null;
+                String metaError = null;
+                if (expectedMeta != null || report.wantsMeta()) {
+                    try {
+                        meta = schema.interpret(hexToBytes(payloadHex), inputContext(vector)).get("_meta");
+                    } catch (RuntimeException e) {
+                        metaError = e.getClass().getSimpleName() + ": " + e.getMessage();
+                    }
+                    report.addMeta(rel, index, vectorName, meta);
+                }
                 Object expectedRaw = vector.get("expected");
                 if (!(expectedRaw instanceof Map<?, ?> expected)) {
                     report.add(rel, index, vectorName, "skip", "no expected block");
@@ -126,6 +143,11 @@ class CorpusConformanceTest {
                             ? schema.decodeWithPort(payload, n.intValue())
                             : schema.decode(payload);
                     String mismatch = warningsMismatch(vector, out);
+                    if (mismatch == null && expectedMeta != null) {
+                        mismatch = metaError != null
+                                ? "_meta: interpret failed: " + metaError
+                                : metaMismatch(expectedMeta, meta, "_meta");
+                    }
                     for (Map.Entry<?, ?> entry : expected.entrySet()) {
                         if (mismatch != null) break;
                         String key = String.valueOf(entry.getKey());
@@ -179,6 +201,78 @@ class CorpusConformanceTest {
         } else if (passed < CORPUS_FLOOR) {
             throw new AssertionError("only " + passed + " corpus vectors pass, floor is " + CORPUS_FLOOR);
         }
+    }
+
+    /**
+     * A vector's input context (PS-495): its {@code fPort} or {@code fport}, and its
+     * {@code input_metadata}'s {@code recvTime} and {@code devEUI} - and that block's
+     * {@code fPort} where the vector gives none, as the reference's interpret() reads it.
+     */
+    static InputContext inputContext(Map<?, ?> vector) {
+        Object fport = vector.get("fPort");
+        if (fport == null) fport = vector.get("fport");
+        Map<?, ?> metadata = vector.get("input_metadata") instanceof Map<?, ?> m ? m : Map.of();
+        if (fport == null && isInteger(metadata.get("fPort"))) fport = metadata.get("fPort");
+        Object devEUI = metadata.get("devEUI");
+        return new InputContext(fport instanceof Number n ? Integer.valueOf(n.intValue()) : null,
+                metadata.get("recvTime"), devEUI == null ? null : String.valueOf(devEUI));
+    }
+
+    private static boolean isInteger(Object value) {
+        return value instanceof Integer || value instanceof Long || value instanceof Short
+                || value instanceof Byte || value instanceof java.math.BigInteger;
+    }
+
+    /**
+     * How {@code _meta} differs from {@code expected_meta}, or null where it is exactly
+     * that (validate_schema.meta_matches): the same keys at every level and no others,
+     * numbers by value ({@code 5} equals {@code 5.0}), a boolean never a number, and lists
+     * element by element in order.
+     */
+    static String metaMismatch(Object want, Object got, String path) {
+        if (want instanceof Map<?, ?> wantMap) {
+            if (!(got instanceof Map<?, ?> gotMap)) {
+                return path + ": expected an object, got " + got;
+            }
+            List<String> missing = new ArrayList<>();
+            List<String> extra = new ArrayList<>();
+            Set<String> wantKeys = new LinkedHashSet<>();
+            for (Object k : wantMap.keySet()) wantKeys.add(String.valueOf(k));
+            Map<String, Object> gotByKey = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> e : gotMap.entrySet()) gotByKey.put(String.valueOf(e.getKey()), e.getValue());
+            for (String k : wantKeys) if (!gotByKey.containsKey(k)) missing.add(k);
+            for (String k : gotByKey.keySet()) if (!wantKeys.contains(k)) extra.add(k);
+            if (!missing.isEmpty() || !extra.isEmpty()) {
+                return path + ": missing " + missing + ", unexpected " + extra;
+            }
+            for (Map.Entry<?, ?> e : wantMap.entrySet()) {
+                String key = String.valueOf(e.getKey());
+                String detail = metaMismatch(e.getValue(), gotByKey.get(key), path + "." + key);
+                if (detail != null) return detail;
+            }
+            return null;
+        }
+        if (want instanceof List<?> wantList) {
+            if (!(got instanceof List<?> gotList) || gotList.size() != wantList.size()) {
+                return path + ": expected " + want + ", got " + got;
+            }
+            for (int i = 0; i < wantList.size(); i++) {
+                String detail = metaMismatch(wantList.get(i), gotList.get(i), path + "[" + i + "]");
+                if (detail != null) return detail;
+            }
+            return null;
+        }
+        boolean ok;
+        if (want instanceof Boolean || got instanceof Boolean) {
+            ok = want != null && want.equals(got);
+        } else if (want instanceof Number a && got instanceof Number b) {
+            ok = isInteger(a) && isInteger(b)
+                    ? new java.math.BigInteger(a.toString()).equals(new java.math.BigInteger(b.toString()))
+                    : a.doubleValue() == b.doubleValue();
+        } else {
+            ok = Objects.equals(want, got);
+        }
+        return ok ? null : path + ": expected " + want + ", got " + got;
     }
 
     /**
