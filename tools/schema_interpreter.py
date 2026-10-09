@@ -679,6 +679,72 @@ def typed_field_dicts(node, _top=True):
             yield from typed_field_dicts(item, False)
 
 
+#: The operations a `transform` stage may hold: PS-098's arithmetic, the PS-115 table, and
+#: an `op:` stage (PS-390). `decimals` and `ties` are parameters of an `op:` stage and are
+#: part of that one operation, not operations of their own (PS-452).
+TRANSFORM_OPERATIONS = ('add', 'mult', 'div', 'sqrt', 'abs', 'pow', 'floor', 'ceiling',
+                        'clamp', 'log10', 'log', 'op')
+TRANSFORM_OP_PARAMETERS = ('decimals', 'ties')
+
+
+def transform_stage_errors(stages, where):
+    """PS-390 and PS-452: each stage holds exactly one operation the language defines.
+
+    A stage holding two - `{add: 1, mult: 2}` - was decoded by every implementation, in
+    whichever order each chose: Python applied mult then add, the generated codec only
+    one of them. Rejected when the schema is loaded, never applied in part.
+    """
+    if not isinstance(stages, list):
+        return [f"{where}: `transform` must be a list of stages (PS-102)"]
+    errors = []
+    for index, stage in enumerate(stages):
+        at = f"{where}: transform stage {index}"
+        if not isinstance(stage, dict):
+            errors.append(f"{at} is {stage!r}, not a mapping holding one operation (PS-452)")
+            continue
+        if 'round' in stage:
+            errors.append(f"{at}: `{{round: n}}` is not a transform stage; write "
+                          f"{{op: round, decimals: n}} (PS-390)")
+            continue
+        unknown = [k for k in stage
+                   if k not in TRANSFORM_OPERATIONS and k not in TRANSFORM_OP_PARAMETERS]
+        if unknown:
+            errors.append(f"{at} names no operation of the PS-115 table: "
+                          f"{', '.join(map(str, unknown))} (PS-390)")
+            continue
+        operations = [k for k in stage if k in TRANSFORM_OPERATIONS]
+        if len(operations) != 1:
+            held = ', '.join(operations) if operations else 'none'
+            errors.append(f"{at} must hold exactly one operation, and holds {held} (PS-452)")
+            continue
+        if 'op' not in stage and any(k in stage for k in TRANSFORM_OP_PARAMETERS):
+            errors.append(f"{at}: `decimals` and `ties` belong to an `op:` stage (PS-452)")
+    return errors
+
+
+def arithmetic_errors(field_def):
+    """CR-2026-071/073: the arithmetic a field declares is one it can carry.
+
+    PS-445: a `guard` belongs to a computed field. On a field read from the payload it was
+    ignored by every implementation, so a schema meaning "no reading below this" decoded
+    every value; `sentinel` and `out_of_range: omit` say that for a read value.
+    PS-452: one operation per transform stage.
+    """
+    if not isinstance(field_def, dict):
+        return []
+    name = field_def.get('name', '?')
+    errors = []
+    if 'guard' in field_def and not (
+            field_def.get('type') in COMPUTED_TYPES
+            and ('ref' in field_def or 'compute' in field_def)):
+        errors.append(f"Field '{name}': a guard is declared only on a computed field (ref "
+                      f"or compute); for a value read from the payload use sentinel or "
+                      f"out_of_range: omit (PS-445)")
+    if 'transform' in field_def:
+        errors.extend(transform_stage_errors(field_def['transform'], f"Field '{name}'"))
+    return errors
+
+
 def is_literal(field_def):
     """A `string` or `number` field declaring `value`: a constant read from no bytes (PS-357)."""
     return (isinstance(field_def, dict) and field_def.get('type') in ('string', 'number')
@@ -1176,8 +1242,15 @@ def apply_lookup(value, lookup):
                 return template.replace(LOOKUP_VALUE_TOKEN, format_lookup_value(value))
             return lookup['default']
         return OMITTED
-    if not isinstance(value, int):
-        return value
+    # A computed field's value arrives as a float (PS-443 puts the lookup after its
+    # arithmetic). An integral one is its index; one with a fraction indexes no entry,
+    # which PS-105 makes an error. Both used to pass through unlooked-up, with success.
+    if isinstance(value, float):
+        if not value.is_integer():
+            raise LookupIndexError(
+                f"lookup index {value} is not an index of a {len(lookup)}-entry sequence "
+                f"(PS-105)")
+        value = int(value)
     if 0 <= value < len(lookup):
         return lookup[value]
     raise LookupIndexError(
@@ -1375,6 +1448,7 @@ class SchemaInterpreter:
         for field_def in typed_field_dicts(schema):
             self._load_errors.extend(literal_errors(field_def))
             self._load_errors.extend(encoding_errors(field_def))
+            self._load_errors.extend(arithmetic_errors(field_def))     # PS-445, PS-452
             self._load_errors.extend(lookup_template_errors(field_def))
         self._load_errors.extend(timestamp_errors(schema.get('metadata')))
         self._load_errors.extend(schema_iterator_errors(schema))
@@ -2643,49 +2717,40 @@ class SchemaInterpreter:
         return result, pos
     
     def _decode_computed_field(self, field_def: Dict[str, Any]) -> Optional[float]:
-        """Decode a computed field (type: number) - ref, polynomial, compute, guard."""
-        value = None
-        
+        """Decode a computed field (type: number) - ref, polynomial, compute, guard.
+
+        PS-443: the source - the `ref` value with its `polynomial`, or the `compute`
+        result - then the top-level modifiers, the `transform` stages and the lookup, as
+        for a field read from the payload. The modifiers and the lookup used to be
+        dropped on `compute`, and the lookup on `ref` too, with success.
+
+        PS-444: a guard is evaluated first, and a failed one's `else` is the value as
+        declared. The `compute` path passed it through the `transform`, so
+        `transform: [{mult: 10}]` turned `else: 5` into 50.
+        """
         # Deprecated: formula field
         if field_def.get('formula'):
             import warnings
             warnings.warn(f"Field '{field_def.get('name', 'unknown')}': 'formula' is deprecated.", DeprecationWarning)
-            value = self._evaluate_formula(field_def['formula'], None)
-        
-        # ref + polynomial/transform
-        elif field_def.get('ref'):
-            if 'guard' in field_def:
-                passed, fallback = self._evaluate_guard(field_def['guard'])
-                if not passed:
-                    value = fallback if fallback is not None else float('nan')
-                else:
-                    value = self._resolve_ref_value(field_def)
-            else:
-                value = self._resolve_ref_value(field_def)
-        
-        # compute (cross-field binary operation)
-        elif field_def.get('compute'):
-            if 'guard' in field_def:
-                passed, fallback = self._evaluate_guard(field_def['guard'])
-                if not passed:
-                    value = fallback if fallback is not None else float('nan')
-                else:
-                    value = self._evaluate_compute(field_def['compute'])
-            else:
-                value = self._evaluate_compute(field_def['compute'])
-            
-            # Apply transform after compute. An omitted compute short-circuits:
-            # there is no value to transform, and float(OMITTED) would raise.
-            if value is OMITTED:
-                return OMITTED
-            if value is not None and 'transform' in field_def:
-                value = self._apply_transform(float(value), field_def['transform'])
-        
-        # Literal value
-        elif 'value' in field_def:
-            value = field_def['value']
-        
-        return value
+            return self._evaluate_formula(field_def['formula'], None)
+
+        if not (field_def.get('ref') or field_def.get('compute')):
+            # Literal value
+            return field_def.get('value')
+
+        if 'guard' in field_def:
+            passed, fallback = self._evaluate_guard(field_def['guard'])
+            if not passed:
+                return fallback if fallback is not None else float('nan')
+
+        if field_def.get('ref'):
+            value = self._ref_source(field_def)
+        else:
+            value = self._evaluate_compute(field_def['compute'])
+        # An omitted source short-circuits: there is no value to carry on with.
+        if value is OMITTED or value is None:
+            return value
+        return self._apply_modifiers(value, field_def)
     
     def _decode_bitfield_string(self, field_def: Dict[str, Any], buf: bytes, pos: int) -> Tuple[str, int]:
         """Decode a bitfield_string field (e.g., firmware version)."""
@@ -2891,33 +2956,17 @@ class SchemaInterpreter:
         
         return (True, else_value)
     
-    def _resolve_ref_value(self, field_def: Dict[str, Any]) -> float:
-        """
-        Resolve a ref field and apply modifiers/polynomial/transform.
-        
-        field_def must have 'ref' key.
-        """
+    def _ref_source(self, field_def: Dict[str, Any]) -> float:
+        """A `ref` field's source: the referenced value with its `polynomial` (PS-443)."""
         ref_field = field_def['ref']
         if isinstance(ref_field, str) and ref_field.startswith('$'):
-            ref_name = ref_field[1:]
-            value = float(self._ref(ref_name))
+            value = float(self._ref(ref_field[1:]))
         else:
             value = float(ref_field)
-        
-        # Apply polynomial if present
-        if 'polynomial' in field_def:
-            coeffs = field_def['polynomial']
-            if isinstance(coeffs, list) and len(coeffs) >= 2:
-                value = self._evaluate_polynomial(coeffs, value)
-        
-        value = apply_canonical_modifiers(value, field_def)
-
-        # Apply transform array if present
-        if 'transform' in field_def:
-            value = self._apply_transform(value, field_def['transform'])
-        
+        coeffs = field_def.get('polynomial')
+        if isinstance(coeffs, list) and len(coeffs) >= 2:
+            value = self._evaluate_polynomial(coeffs, value)
         return value
-    
 
     def _resolve_encode_name(self, field_def: Dict[str, Any], name: str,
                              data: Dict[str, Any]) -> Optional[str]:

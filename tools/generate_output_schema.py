@@ -237,6 +237,22 @@ def field_to_json_schema(field_def: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         looked_up = lookup_json_schema(field_def['lookup'])
         if looked_up:
             schema = looked_up
+
+    # A failed guard reports its `else` as declared, not looked up (PS-444), so a guarded
+    # field with a lookup can report a number beside its labels.
+    guard = field_def.get('guard')
+    if isinstance(guard, dict) and guard.get('else') is not None:
+        fallback = guard['else']
+        if 'enum' in schema and fallback not in schema['enum']:
+            schema['enum'] = list(schema['enum']) + [fallback]
+        declared = schema.get('type')
+        if declared is not None:
+            current = declared if isinstance(declared, list) else [declared]
+            fallback_type = scalar_json_type(fallback)
+            covered = fallback_type in current or (
+                fallback_type == 'integer' and 'number' in current)
+            if not covered:
+                schema['type'] = list(current) + [fallback_type]
     
     # Add description from field
     if field_def.get('description'):

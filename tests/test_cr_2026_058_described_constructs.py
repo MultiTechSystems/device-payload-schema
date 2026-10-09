@@ -46,7 +46,8 @@ REJECTED_STAGES = [
     ({"op": "ceil"}, "unknown operation"),
     ({"op": "round", "ties": "up"}, "ties"),
     ({"sub": 3}, "no operation"),
-    ({}, "no operation"),
+    # `{}` holds no operation at all, which CR-2026-073 made its own rule (PS-452);
+    # tests/test_cr_2026_071_073.py has it.
 ]
 
 

@@ -1408,6 +1408,10 @@ class TS013Generator:
         for port_entry in (schema.get('ports') or {}).values():
             group = port_entry.get('fields') if isinstance(port_entry, dict) else port_entry
             iterator_problems += optional_errors(group)
+        # PS-445, PS-452: a guard only on a computed field, one operation per stage.
+        from schema_interpreter import arithmetic_errors, typed_field_dicts
+        for field_def in typed_field_dicts(schema):
+            iterator_problems += arithmetic_errors(field_def)
         if iterator_problems:
             raise ValueError(iterator_problems[0])
         self.schema = schema
@@ -2376,43 +2380,25 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append(f'{i}  vars.{name} = {js_formula};')
                 return lines
             
-            # New: ref + polynomial/transform/modifiers
-            if 'ref' in field:
-                ref_expr = ref_to_js(field['ref'])
-                value_expr = ref_expr
-                
-                # Apply polynomial if present
-                if 'polynomial' in field:
-                    value_expr = polynomial_to_js(field['polynomial'], ref_expr)
-                
-                value_expr = canonical_modifiers_to_js(field, value_expr)
-                
-                # Apply transform array if present
-                if 'transform' in field:
-                    value_expr = transform_to_js(field['transform'], value_expr)
-                
-                # Apply guard if present
+            # ref or compute (PS-443): the source - the `ref` value with its `polynomial`,
+            # or the `compute` result - then the modifiers, the stages and the lookup, as
+            # for a field read from the payload. `compute` used to drop the modifiers,
+            # and both dropped the lookup. The guard wraps the whole chain, so a failed
+            # one reports its `else` as declared (PS-444).
+            if 'ref' in field or 'compute' in field:
+                if 'ref' in field:
+                    value_expr = ref_to_js(field['ref'])
+                    if 'polynomial' in field:
+                        value_expr = polynomial_to_js(field['polynomial'], value_expr)
+                else:
+                    value_expr = compute_to_js(field['compute'])
+                value_expr = self._apply_modifiers_expr(value_expr, field)
                 if 'guard' in field:
                     value_expr = guard_to_js(field['guard'], value_expr)
                 value_expr = integral(value_expr)
                 lines.extend(self._computed_tail(i, field, name, value_expr))
                 return lines
-            
-            # New: compute with optional guard and transform
-            if 'compute' in field:
-                value_expr = compute_to_js(field['compute'])
-                
-                # Apply transform if present
-                if 'transform' in field:
-                    value_expr = transform_to_js(field['transform'], value_expr)
-                
-                # Apply guard if present
-                if 'guard' in field:
-                    value_expr = guard_to_js(field['guard'], value_expr)
-                value_expr = integral(value_expr)
-                lines.extend(self._computed_tail(i, field, name, value_expr))
-                return lines
-            
+
             # Literal value. JSON, not Python's repr: `value: true` emitted `True`,
             # which is not JavaScript.
             if 'value' in field:

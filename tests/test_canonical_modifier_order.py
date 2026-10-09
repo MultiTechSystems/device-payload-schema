@@ -79,10 +79,17 @@ def test_bare_keys_cannot_express_offset_first():
     assert decode("    add: -32768\n    div: 100\n", "8009") != pytest.approx(0.09)
 
 
-def test_multi_op_transform_stage_applies_every_operation():
-    """A stage with several ops used to drop all but the first."""
-    value = decode("    transform:\n      - {add: 10, mult: 2}\n", "0064")
-    assert value == pytest.approx(210.0)
+def test_multi_op_transform_stage_is_rejected():
+    """A stage with several ops used to drop all but the first, then to apply them all in
+    canonical order. CR-2026-073 settles it: one operation per stage, and a schema with
+    more is rejected when it is loaded, not decoded in part (PS-452)."""
+    schema = yaml.safe_load(
+        "name: t\nendian: big\nfields:\n  - name: v\n    type: u16\n"
+        "    transform:\n      - {add: 10, mult: 2}\n"
+    )
+    result = SchemaInterpreter(schema).decode(bytes.fromhex("0064"))
+    assert not result.success and result.data == {}
+    assert any("PS-452" in e for e in result.errors), result.errors
 
 
 @pytest.mark.parametrize(

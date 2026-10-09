@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from schema_interpreter import (SchemaInterpreter, DecodeResult, check_byte_group_overlap,
                                 byte_group_endian,
                                 encoding_errors, expand_refs, fport_declaration_errors,
-                                internal_name_errors, literal_errors,
+                                arithmetic_errors, internal_name_errors, literal_errors,
                                 lookup_template_errors, optional_errors,
                                 schema_iterator_errors,
                                 timestamp_errors,
@@ -1193,6 +1193,7 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
             errors.extend(literal_errors(field_def))
             errors.extend(encoding_errors(field_def))
             errors.extend(lookup_template_errors(field_def))      # PS-407
+            errors.extend(arithmetic_errors(field_def))          # PS-445, PS-452
         # PS-350, PS-366 to PS-387, PS-471: the repeat iterator and reserve.
         errors.extend(schema_iterator_errors(schema))
         # PS-014, PS-015, PS-464, PS-465: what `length` may be. Checked only on the

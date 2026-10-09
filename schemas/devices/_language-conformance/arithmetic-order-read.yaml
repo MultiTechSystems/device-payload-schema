@@ -1,0 +1,54 @@
+# PS-443 and PS-101 for fields read from the payload, in both directions: the decode
+# order is fixed, and an encoder undoes it in reverse. The round trip is asserted by
+# every corpus encode runner, so the generated codec's encoder - which undid the
+# modifiers in key order and the stages not at all - and Go's, which dropped the bare
+# `div` beside a `transform`, are held to it here.
+name: probe_arithmetic_order_read
+endian: big
+fields:
+# keys written add-first; applied mult, div, add: 650 / 10 - 40
+- name: keys_add_first
+  type: u16
+  add: -40
+  div: 10
+# the bare modifier, then the stages: (650 / 10 - 40) * 2
+- name: modifiers_then_transform
+  type: u16
+  div: 10
+  transform:
+  - add: -40
+  - mult: 2
+# the encoding is part of the source (PS-422): BCD 0x25 is 25, then * 2
+- name: encoding_then_modifiers
+  type: u8
+  encoding: bcd
+  mult: 2
+# arithmetic before the lookup: 1 + 1 indexes "c"
+- name: lookup_after_arithmetic
+  type: u8
+  add: 1
+  lookup: [a, b, c]
+# the sentinel is compared on the raw bits, before the modifiers (PS-427)
+- name: sentinel_before_modifiers
+  type: u16
+  sentinel: [65535]
+  div: 10
+test_vectors:
+- name: each_step
+  source: spec-example
+  payload: "028A 028A 25 01 FFFF"
+  expected:
+    keys_add_first: 25
+    modifiers_then_transform: 50
+    encoding_then_modifiers: 50
+    lookup_after_arithmetic: c
+    sentinel_before_modifiers: null
+- name: a_reading
+  source: spec-example
+  payload: "0190 01F4 09 00 0064"
+  expected:
+    keys_add_first: 0
+    modifiers_then_transform: 20
+    encoding_then_modifiers: 18
+    lookup_after_arithmetic: b
+    sentinel_before_modifiers: 10

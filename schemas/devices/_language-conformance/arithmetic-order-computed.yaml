@@ -1,0 +1,85 @@
+# PS-443 (CR-2026-071): a computed field's value is its source - the `ref` value with its
+# `polynomial`, or the `compute` result - then the top-level modifiers in the canonical
+# order of PS-101, then the `transform` stages, then the lookup. Exactly as for a field
+# read from the payload. Every implementation dropped the modifiers on `compute`, and
+# the reference dropped the lookup on both.
+#
+# x = 3. Each field states the arithmetic its expected value follows.
+name: probe_arithmetic_order_computed
+endian: big
+fields:
+- name: x
+  type: u8
+# 3 * 10, then + 1
+- name: ref_modifiers_then_transform
+  type: number
+  ref: $x
+  mult: 10
+  transform:
+  - add: 1
+# (3 + 0) * 10
+- name: compute_modifiers
+  type: number
+  compute: {op: add, a: $x, b: 0}
+  mult: 10
+# (3 + 0) * 10, then + 1
+- name: compute_modifiers_then_transform
+  type: number
+  compute: {op: add, a: $x, b: 0}
+  mult: 10
+  transform:
+  - add: 1
+# mult, div, add whatever order the keys are written in: (3 * 2) / 4 + 1
+- name: compute_canonical_order
+  type: number
+  compute: {op: add, a: $x, b: 0}
+  add: 1
+  div: 4
+  mult: 2
+# polynomial first: (2 * 3 + 1) * 10 + 1
+- name: ref_polynomial_then_modifiers
+  type: number
+  ref: $x
+  polynomial: [2, 1]
+  mult: 10
+  add: 1
+# the lookup indexes the arithmetic's result: 3 * 2 + 1 = 7
+- name: ref_lookup_after_arithmetic
+  type: number
+  ref: $x
+  mult: 2
+  add: 1
+  lookup: [zero, one, two, three, four, five, six, seven]
+# the lookup keys the compute result: 3 + 1 = 4
+- name: compute_lookup_after_arithmetic
+  type: number
+  compute: {op: add, a: $x, b: 1}
+  lookup:
+    3: three
+    4: four
+test_vectors:
+- name: three
+  source: spec-example
+  payload: "03"
+  expected:
+    x: 3
+    ref_modifiers_then_transform: 31
+    compute_modifiers: 30
+    compute_modifiers_then_transform: 31
+    compute_canonical_order: 2.5
+    ref_polynomial_then_modifiers: 71
+    ref_lookup_after_arithmetic: seven
+    compute_lookup_after_arithmetic: four
+# x = 0: the mapping has no key 1, so that field is absent (PS-269).
+- name: zero
+  source: spec-example
+  payload: "00"
+  expected:
+    x: 0
+    ref_modifiers_then_transform: 1
+    compute_modifiers: 0
+    compute_modifiers_then_transform: 1
+    compute_canonical_order: 1
+    ref_polynomial_then_modifiers: 11
+    ref_lookup_after_arithmetic: one
+    compute_lookup_after_arithmetic: null
