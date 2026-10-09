@@ -19,6 +19,7 @@ public static class SchemaDecoder
         var result = new Dictionary<string, object?>();
 
         MergeTo(result, DecodeFields(schema.Fields, ctx, schema));
+        ReportLeftover(ctx);
 
         // PS-427, PS-428: an omitted reading joins `_quality` only where it is produced.
         ctx.FinishQuality();
@@ -52,6 +53,7 @@ public static class SchemaDecoder
         var result = new Dictionary<string, object?>();
 
         MergeTo(result, DecodeFields(fields, ctx, schema));
+        ReportLeftover(ctx);
 
         // PS-427, PS-428: an omitted reading joins `_quality` only where it is produced.
         ctx.FinishQuality();
@@ -63,6 +65,21 @@ public static class SchemaDecoder
             result["_warnings"] = new List<string>(ctx.Warnings);
 
         return result;
+    }
+
+    /// <summary>
+    /// PS-472: bytes after the last field of the selected list are reported, not dropped
+    /// in silence. The decode is reported as it would be otherwise; this only warns, with
+    /// the offset of the first byte not decoded and the count to the end. A frame from
+    /// newer firmware and a frame decoded with the wrong layout both used to look
+    /// complete. A failed decode throws before reaching here, and a PS-302 warning is
+    /// this warning for its bytes. Mirrors _report_leftover in tools/schema_interpreter.py.
+    /// </summary>
+    static void ReportLeftover(DecodeContext ctx)
+    {
+        var left = ctx.Data.Length - ctx.Offset;
+        if (left <= 0 || ctx.LeftoverReported) return;
+        ctx.Warnings.Add($"{left} byte(s) after the last field left undecoded, from offset {ctx.Offset} (PS-472)");
     }
 
     static List<SchemaField> ResolveFields(PayloadSchemaDefinition schema, int fPort)
@@ -620,10 +637,14 @@ public static class SchemaDecoder
         // A failed guard's `else` is reported as declared: no modifier, stage or lookup
         // (PS-444). The lookup used to index it, so `else: 7` came out as the eighth label.
         bool asDeclared = false;
+        ctx.GuardElse.Remove(field);
+        ctx.PreLookup.Remove(field);
         if (value is DeclaredElse declared)
         {
             value = declared.Value;
             asDeclared = true;
+            // The `else` ends the sequence (PS-443): not compared with valid_range either.
+            ctx.GuardElse.Add(field);
             // `type: integer` reports an integral else as an integer, as it did before.
             if (field.IntegerResult && declared.Value == Math.Floor(declared.Value)
                 && !double.IsInfinity(declared.Value))
@@ -663,6 +684,27 @@ public static class SchemaDecoder
         if (value is double nd && (double.IsNaN(nd) || double.IsInfinity(nd)))
             return Omitted;
 
+        // PS-475: valid_range compares the value after the arithmetic and before the
+        // lookup. A looked-up field is compared on its number, so it is stashed for the
+        // quality check; and `out_of_range: omit` is decided here, because an omitted
+        // value takes no further step (PS-443) - it is not looked up, so an index its
+        // sequence lacks is no error. Compared after the lookup, a label was never a
+        // number: every looked-up value read "good" and none was ever omitted.
+        if (!asDeclared && field.ValidRange is { Length: >= 2 } bounds
+            && value is not bool && Helpers.ToFloat64(value) is (true, var rangeValue))
+        {
+            if (field.Lookup != null)
+                ctx.PreLookup[field] = rangeValue;
+            // PS-428: `out_of_range: omit` makes a value outside valid_range no reading -
+            // not reported, not bound. Applied on the field-list path, not to byte_group
+            // members, as in the reference; and to an internal field only where it is
+            // computed.
+            if (fieldRules && field.OutOfRangeOmit && bounds.Length == 2
+                && (field.Type == FieldType.Number || !field.Name.StartsWith("_"))
+                && !(bounds[0] <= rangeValue && rangeValue <= bounds[1]))
+                return AbsentReading.OutOfRange;
+        }
+
         // Apply lookup. A mapping is matched on its keys, which need not start at
         // zero or be contiguous (PS-268). An unmatched value omits the field rather
         // than reporting the raw integer under a name that promises a label, unless
@@ -701,15 +743,6 @@ public static class SchemaDecoder
                     return Omitted;
             }
         }
-
-        // PS-428: `out_of_range: omit` makes a value outside valid_range no reading - not
-        // reported, not bound. Applied on the field-list path, not to byte_group members,
-        // as in the reference; and to an internal field only where it is computed.
-        if (fieldRules && field.OutOfRangeOmit && field.ValidRange is { Length: 2 } bounds
-            && (field.Type == FieldType.Number || !field.Name.StartsWith("_"))
-            && value is not bool && Helpers.ToFloat64(value) is (true, var checkedValue)
-            && !(bounds[0] <= checkedValue && checkedValue <= bounds[1]))
-            return AbsentReading.OutOfRange;
 
         // Store variable
         if (field.Var != null)
@@ -1214,6 +1247,17 @@ public static class SchemaDecoder
 
             var tag = new List<int>();
 
+            // PS-477: a tag is never partly read. Fewer bytes than the tag at the start of
+            // an entry is an error identifying the tlv; the plain tag_size path threw a
+            // bare buffer underflow, naming neither the tlv nor the tag. A composite tag's
+            // width is its tag_fields', as they are read below.
+            var width = field.TagFields.Count > 0
+                ? field.TagFields.Sum(tf => tf.Length > 0 ? tf.Length : 1)
+                : tagSize;
+            if (ctx.Remaining < width)
+                throw new InvalidOperationException($"tlv entry at offset {ctx.Offset}: "
+                    + $"{ctx.Remaining} byte(s) remain, fewer than its {width}-byte tag (PS-477)");
+
             if (field.TagFields.Count > 0)
             {
                 var tagValues = new Dictionary<string, int>();
@@ -1252,6 +1296,14 @@ public static class SchemaDecoder
             int dataLength = -1;
             if (lengthSize > 0)
             {
+                if (ctx.Remaining < lengthSize)
+                {
+                    // No entry is decoded here: the bytes from its tag on are left over,
+                    // and PS-472 reports them from the tag's offset. This was a buffer
+                    // underflow failing the whole decode.
+                    ctx.Offset = entryStart;
+                    break;
+                }
                 var lenData = ctx.Read(lengthSize);
                 dataLength = (int)Helpers.DecodeUint(lenData, ctx.Endian);
             }
@@ -1344,6 +1396,8 @@ public static class SchemaDecoder
                 // onwards is lost (PS-302).
                 ctx.Warnings.Add($"unknown TLV tag ({label}) at offset {entryStart}: "
                                  + $"{ctx.Data.Length - entryStart} of {ctx.Data.Length} byte(s) left undecoded");
+                // This warning is PS-472's for these bytes; no second one is reported.
+                ctx.LeftoverReported = true;
                 break;
             }
         }

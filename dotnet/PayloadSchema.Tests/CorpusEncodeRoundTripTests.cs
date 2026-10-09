@@ -46,7 +46,13 @@ public class CorpusEncodeRoundTripTests
     // nothing, and the read fields' arithmetic was already undone in reverse), so
     // `plain fixed` rises from 88 to 94; with one `match` vector the floor had not
     // caught up with, 122 to 123, the total rises to 1686.
-    const int EncodeFloorTotal = 1688;   // + guard-else-as-declared's two label vectors
+    // CR-2026-085/086: measured 1692 with the floor at 1688. range-before-lookup.yaml's
+    // three in-range vectors round-trip and sit in `flagged` (157 -> 160) because the
+    // classifier finds a field *named* `flagged` in the raw YAML; its out_of_range vector
+    // omits a field and cannot (bytes differ, by design). leftover-bytes.yaml's exact
+    // frame round-trips (`plain fixed` 96 -> 97); its second vector re-encodes to its
+    // first byte only (PS-474), so it differs in length by design.
+    const int EncodeFloorTotal = 1692;
 
     /// <summary>
     /// Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -56,8 +62,8 @@ public class CorpusEncodeRoundTripTests
     {
         // 1283 -> 1281 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped only because their internal byte halves were all zero, which the encoder wrote for an internal field with no value. It now reports such a field instead.
         ["tlv"] = 1281,
-        ["flagged"] = 157,
-        ["plain fixed"] = 96,
+        ["flagged"] = 160,
+        ["plain fixed"] = 97,
         ["match"] = 123,
         ["byte_group"] = 19,
         // 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now
