@@ -187,18 +187,18 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2365 payload vectors in `schemas/devices/` (measured 2026-10-09 with
-`tools/check-floors.py`, after CR-2026-071/073's fixtures) are the shared
+The 2371 payload vectors in `schemas/devices/` (measured 2026-10-09 with
+`tools/check-floors.py`, after the CR-2026-071 to -087 fixtures) are the shared
 cross-language test set. Every implementation has a runner that reads the same YAML and
 the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1688 |
-| Go | `go/schema/corpus_conformance_test.go` | 2365 | 1705 (plain API 1682) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2365 | 1688 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2365 | 1688 |
-| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 538 of 538 attempted | n/a |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1692 |
+| Go | `go/schema/corpus_conformance_test.go` | 2371 | 1709 (plain API 1686) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2371 | 1692 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2371 | 1692 |
+| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 540 of 540 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
 its own implementation's actual; trust it over this table.
@@ -754,10 +754,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1688 |
-| Go | `go/schema/corpus_encode_test.go` | 1705 (plain 1682) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1688 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1688 |
+| Python | `tests/test_encode_round_trip.py` | 1692 |
+| Go | `go/schema/corpus_encode_test.go` | 1709 (plain 1686) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1692 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1692 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1294,6 +1294,26 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   is treated as none; Go alone still applies a legacy `modifiers:` array, a key the
   specification does not define (left to the closed-vocabulary CR); Java reports a
   byte_group bit-range member as a Double.
+- **CR-2026-085/086/087 (2026-10-09).** Bytes after the last field are reported with
+  their offset and count - one warning, and none beside a PS-302 one for the same bytes
+  (PS-472) - in all five and in the generated codec's warnings[] (PS-473); C gives the
+  count as `bytes_unread`. A tlv entry with fewer bytes than its tag is an error naming
+  the tlv in every implementation (PS-477): Python's plain `tag_size` path, Go and the
+  generated codec stopped silently. A length cut short decodes no entry and leaves the
+  bytes over from the tag. **`valid_range` compares before the lookup** (PS-475):
+  compared after it, every looked-up value read "good" and `out_of_range: omit` never
+  dropped one; omitted, a value is not looked up, so an index its table lacks is no error.
+  A failed guard's `else` is not compared. Go, Java and C# read a `tag_fields` component
+  as `length` bytes defaulting to 1, so a `u16` component was read as one byte and written
+  as two; every implementation now takes the type's width. The output schema declares
+  `_warnings` for every schema, since any payload can carry leftover bytes.
+  SenML (PS-478/479) is produced by Python and C# only: one record per reported field
+  wherever declared, `senml.name`/`senml.unit` else the reported name and `unit`, object
+  members as `object/member`. Python had ignored `senml:` and walked top-level fields only;
+  C# found no definition inside a port entry or a construct. Fixtures: `leftover-bytes`,
+  `range-before-lookup` (its field was first named `flagged`, which three encode harnesses'
+  text scan filed under that shape - keep construct names out of fixture field names too),
+  and `match-default-skip` now expects the PS-472 warning. PS-118 is withdrawn (PS-102).
 - **`_meta` is not produced by any implementation**, so CR-2026-043 (`_meta.fPort`) and
   the `_meta` parts of CR-2026-054 wait for their own change (decided 2026-10-05).
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
@@ -1502,7 +1522,7 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   (CR-2026-032).** `make test-c` builds the three previously-orphaned C test files and runs
   `tools/c-corpus-harness.py`, which generates C that builds each expressible corpus schema
   through the struct API, compiles it, and compares the decode against the vectors.
-  **538 of 538 attempted vectors pass** (2026-10-09) since CR-2026-033 added `tlv` and CR-2026-034
+  **540 of 540 attempted vectors pass** (2026-10-09) since CR-2026-033 added `tlv` and CR-2026-034
   `flagged` (it was 50 of 50 before either). 751 of 1239 are still in schemas the struct API
   cannot build - 26 use a `transform` chain, 24 a `bitfield_string`, 15 more cases than
   `SCHEMA_MAX_CASES` allows, 3 `repeat`, 3 a `u32le16` **the interpreter has and the harness
@@ -1526,8 +1546,11 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   makes the top-level loop decode each a second time, which its own test tolerates only
   because it asserts `field_count >= 2` rather than what was decoded. `merge: false` and
   `unknown: raw` are not represented - both need a channel `decode_result_t` does not
-  have - and this interpreter has no warning channel, so it cannot report what it could
-  not read the way the other five now do.
+  have - and this interpreter has no text warning channel. Since CR-2026-085,
+  `decode_result_t.bytes_unread` gives a caller the count PS-472 reports (from
+  `bytes_consumed`, which an unknown tag with no length now rewinds to the tag), and the
+  harness turns it into the warning; an unknown tag's own name has nowhere to go, so the
+  six vectors expecting one are counted and listed separately rather than hidden.
 
   **The fixed-size limits are the real boundary, not an oversight.** `sizeof(schema_t)` is
   51 KB because every `field_def` carries `cases[16]` and `lookup[16]` unconditionally.

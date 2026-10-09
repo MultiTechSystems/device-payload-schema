@@ -71,13 +71,14 @@ class TestWarningsIsDescribed:
     def test_the_reporting_modes_declare_it(self, mode):
         assert warnings_of(tlv_schema(mode)) is not None
 
-    def test_error_mode_alone_does_not(self):
-        # It fails the decode rather than reporting, so there is no warning to describe.
-        assert warnings_of(tlv_schema("error")) is None
-
-    def test_a_schema_that_cannot_warn_does_not_declare_it(self):
+    def test_every_schema_declares_it_since_ps_472(self):
+        # `unknown: error` fails the decode rather than reporting, and a plain field list
+        # has nothing to warn about - but either can meet bytes after its last field,
+        # which PS-472 (CR-2026-085) reports. No schema is now unable to warn.
+        assert warnings_of(tlv_schema("error")) is not None
         plain = {"name": "p", "fields": [{"name": "t", "type": "u8"}]}
-        assert warnings_of(plain) is None
+        assert warnings_of(plain) is not None
+        assert SchemaInterpreter(plain).decode(b"\x01\x02").warnings
 
     def test_it_is_an_array_of_strings(self):
         declared = warnings_of(tlv_schema())

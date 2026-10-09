@@ -122,15 +122,15 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Device schemas
 
-274 schemas under `schemas/devices/`.
-Mean quality score 69.5% (PLATINUM 36, GOLD 40, SILVER 126, BRONZE 18, REJECTED 54). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+276 schemas under `schemas/devices/`.
+Mean quality score 69.4% (PLATINUM 36, GOLD 40, SILVER 127, BRONZE 18, REJECTED 55). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
 | milesight | 84 | 1421 | PLATINUM 21, GOLD 33, SILVER 21, REJECTED 9 |
-| _language-conformance | 62 | 100 | SILVER 40, BRONZE 9, REJECTED 13 |
+| _language-conformance | 64 | 106 | SILVER 41, BRONZE 9, REJECTED 14 |
 | decentlab | 58 | 164 | PLATINUM 12, GOLD 7, SILVER 9, BRONZE 7, REJECTED 23 |
 | _library-composed | 49 | 57 | SILVER 48, BRONZE 1 |
 | makerfabs | 6 | 0 | REJECTED 6 |
@@ -170,6 +170,7 @@ Mean quality score 69.5% (PLATINUM 36, GOLD 40, SILVER 126, BRONZE 18, REJECTED 
 | `_language-conformance/guard-else-as-declared` | 3 | 4 | fields | 75% | SILVER |
 | `_language-conformance/internal-discriminator` | 3 | 2 | fields | 57% | REJECTED |
 | `_language-conformance/internal-field-value` | 2 | 1 | fields | 59% | REJECTED |
+| `_language-conformance/leftover-bytes` | 1 | 2 | fields | 71% | SILVER |
 | `_language-conformance/literal-types` | 3 | 1 | fields | 69% | BRONZE |
 | `_language-conformance/log-of-non-positive` | 3 | 2 | fields | 36% | REJECTED |
 | `_language-conformance/lookup-default-template` | 2 | 4 | fields | 75% | SILVER |
@@ -189,6 +190,7 @@ Mean quality score 69.5% (PLATINUM 36, GOLD 40, SILVER 126, BRONZE 18, REJECTED 
 | `_language-conformance/name-from` | 2 | 1 | fields | 71% | SILVER |
 | `_language-conformance/optional-trailing` | 3 | 3 | fields | 38% | REJECTED |
 | `_language-conformance/out-of-range-omit` | 2 | 2 | fields | 36% | REJECTED |
+| `_language-conformance/range-before-lookup` | 2 | 4 | fields | 36% | REJECTED |
 | `_language-conformance/ref-everywhere` | 3 | 1 | fields | 71% | SILVER |
 | `_language-conformance/ref-header` | 1 | 1 | fields | 71% | SILVER |
 | `_language-conformance/repeat-byte-length-span` | 4 | 1 | fields | 73% | SILVER |
