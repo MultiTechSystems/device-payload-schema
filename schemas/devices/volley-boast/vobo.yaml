@@ -3460,6 +3460,7 @@ test_vectors:
     fPort: 1
     payload: "00000000000000000000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       DIN1: 0
       DIN2: 0
@@ -3479,6 +3480,7 @@ test_vectors:
     fPort: 1
     payload: "FFFFFFFFFFFFFFFFFFFF"
     source: vendor-codec
+    expected_warnings: []
     expected:
       DIN1: 1
       DIN2: 1
@@ -3498,6 +3500,7 @@ test_vectors:
     fPort: 1
     payload: "55AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       DIN1: 1
       DIN2: 0
@@ -3517,6 +3520,7 @@ test_vectors:
     fPort: 1
     payload: "AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       DIN1: 0
       DIN2: 1
@@ -3536,6 +3540,7 @@ test_vectors:
     fPort: 1
     payload: "0A0000000000800C0000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       DIN1: 0
       DIN2: 1
@@ -3555,6 +3560,7 @@ test_vectors:
     fPort: 1
     payload: "05000000000000EC0000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       DIN1: 1
       DIN2: 0
@@ -3574,6 +3580,7 @@ test_vectors:
     fPort: 1
     payload: "8F106D30E3B464AB10EC"
     source: vendor-codec
+    expected_warnings: []
     expected:
       DIN1: 1
       DIN2: 1
@@ -3593,6 +3600,7 @@ test_vectors:
     fPort: 1
     payload: "0E85CD321D608A0C79F6"
     source: vendor-codec
+    expected_warnings: []
     expected:
       DIN1: 0
       DIN2: 1
@@ -3612,6 +3620,7 @@ test_vectors:
     fPort: 1
     payload: "93AB586A5B70337B55B6"
     source: vendor-codec
+    expected_warnings: []
     expected:
       DIN1: 1
       DIN2: 1
@@ -3631,6 +3640,7 @@ test_vectors:
     fPort: 2
     payload: "80D90004B218777C00F4"
     source: vendor-codec
+    expected_warnings: []
     expected:
       Modbus1: 55680
       Modbus2: 1024
@@ -3645,6 +3655,7 @@ test_vectors:
     fPort: 3
     payload: "D8DB082EB9A556412E20"
     source: vendor-codec
+    expected_warnings: []
     expected:
       Modbus6: 56280
       Modbus7: 11784
@@ -3659,6 +3670,7 @@ test_vectors:
     fPort: 4
     payload: "B6BD362E6A088E4432E9"
     source: vendor-codec
+    expected_warnings: []
     expected:
       Modbus11: 48566
       Modbus12: 11830
@@ -3673,6 +3685,7 @@ test_vectors:
     fPort: 5
     payload: "1751AE33503151AB2E5E"
     source: vendor-codec
+    expected_warnings: []
     expected:
       Modbus16: 20759
       Modbus17: 13230
@@ -3687,6 +3700,7 @@ test_vectors:
     fPort: 6
     payload: "BEB387826C730067DE84"
     source: vendor-codec
+    expected_warnings: []
     expected:
       Modbus21: 46014
       Modbus22: 33415
@@ -3701,6 +3715,7 @@ test_vectors:
     fPort: 7
     payload: "0ACB097268CB3DFDDDBE"
     source: vendor-codec
+    expected_warnings: []
     expected:
       Modbus26: 51978
       Modbus27: 29193
@@ -3715,6 +3730,7 @@ test_vectors:
     fPort: 8
     payload: "209E970548F6D6CCC7DC"
     source: vendor-codec
+    expected_warnings: []
     expected:
       Modbus31: 40480
       Modbus32: 1431
@@ -3729,6 +3745,7 @@ test_vectors:
     fPort: 9
     payload: "3BC304C35AED9C208CCE"
     source: vendor-codec
+    expected_warnings: []
     expected:
       Modbus36: 49979
       Modbus37: 49924
@@ -3743,6 +3760,7 @@ test_vectors:
     fPort: 2
     payload: "FFFFFFFFFFFFFFFFFFFF"
     source: vendor-codec
+    expected_warnings: []
     expected:
       Modbus1: 65535
       Modbus2: 65535
@@ -3757,6 +3775,7 @@ test_vectors:
     fPort: 2
     payload: "55AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       Modbus1: 43605
       Modbus2: 43605
@@ -3771,6 +3790,7 @@ test_vectors:
     fPort: 10
     payload: "0000000000000000000000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevelMV: 0
       fwVersionMajor: 0
@@ -3794,6 +3814,7 @@ test_vectors:
     fPort: 10
     payload: "FFFFFFFFFFFFFFFFFFFFFF"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevelMV: 16380
       fwVersionMajor: 15
@@ -3817,6 +3838,7 @@ test_vectors:
     fPort: 10
     payload: "55AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevelMV: 10580
       fwVersionMajor: 15
@@ -3840,6 +3862,7 @@ test_vectors:
     fPort: 10
     payload: "AA55AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevelMV: 5800
       fwVersionMajor: 15
@@ -3863,6 +3886,7 @@ test_vectors:
     fPort: 10
     payload: "105A639C03400BA15C3D19"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevelMV: 10304
       fwVersionMajor: 7
@@ -3886,6 +3910,7 @@ test_vectors:
     fPort: 10
     payload: "987B1E3CBB9B0903EF4DE6"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevelMV: 11872
       fwVersionMajor: 15
@@ -3909,6 +3934,7 @@ test_vectors:
     fPort: 10
     payload: "B8BA6C5D8209F529E7F571"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevelMV: 10976
       fwVersionMajor: 15
@@ -3932,6 +3958,7 @@ test_vectors:
     fPort: 10
     payload: "D5AFA836E04B2D4EC364CA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevelMV: 16212
       fwVersionMajor: 10
@@ -3955,6 +3982,7 @@ test_vectors:
     fPort: 10
     payload: "3FF3A346552392C3D8F78A"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevelMV: 3324
       fwVersionMajor: 15
@@ -3978,6 +4006,7 @@ test_vectors:
     fPort: 10
     payload: "0010111000000000000000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevelMV: 0
       fwVersionMajor: 1
@@ -4001,6 +4030,7 @@ test_vectors:
     fPort: 10
     payload: "0020222000000000000000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevelMV: 0
       fwVersionMajor: 2
@@ -4024,6 +4054,7 @@ test_vectors:
     fPort: 10
     payload: "0040444000000000000000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevelMV: 0
       fwVersionMajor: 4
@@ -4047,6 +4078,7 @@ test_vectors:
     fPort: 10
     payload: "0080888000000000000000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevelMV: 0
       fwVersionMajor: 8
@@ -4070,6 +4102,7 @@ test_vectors:
     fPort: 20
     payload: "0000000000000000000000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevel: 0
       fatalErrorsTotal: 0
@@ -4091,6 +4124,7 @@ test_vectors:
     fPort: 20
     payload: "FFFFFFFFFFFFFFFFFFFFFF"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevel: 4095
       fatalErrorsTotal: 15
@@ -4112,6 +4146,7 @@ test_vectors:
     fPort: 20
     payload: "55AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevel: 2645
       fatalErrorsTotal: 10
@@ -4133,6 +4168,7 @@ test_vectors:
     fPort: 20
     payload: "AA55AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevel: 1450
       fatalErrorsTotal: 5
@@ -4154,6 +4190,7 @@ test_vectors:
     fPort: 20
     payload: "4C73DEF433C0DFA0404E7B"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevel: 844
       fatalErrorsTotal: 7
@@ -4175,6 +4212,7 @@ test_vectors:
     fPort: 21
     payload: "A35F28CE39405A899937DA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevel: 4003
       fatalErrorsTotal: 5
@@ -4196,6 +4234,7 @@ test_vectors:
     fPort: 22
     payload: "192E1B92DBAE01361EF6F5"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevel: 3609
       fatalErrorsTotal: 2
@@ -4217,6 +4256,7 @@ test_vectors:
     fPort: 23
     payload: "318AA57350095BD3AAF6D8"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevel: 2609
       fatalErrorsTotal: 8
@@ -4238,6 +4278,7 @@ test_vectors:
     fPort: 24
     payload: "3AC39E2EC7133B72351FBE"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevel: 826
       fatalErrorsTotal: 12
@@ -4259,6 +4300,7 @@ test_vectors:
     fPort: 25
     payload: "81978609154423788AD75B"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevel: 1921
       fatalErrorsTotal: 9
@@ -4280,6 +4322,7 @@ test_vectors:
     fPort: 26
     payload: "059968F53A798687E99CBB"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevel: 2309
       fatalErrorsTotal: 9
@@ -4301,6 +4344,7 @@ test_vectors:
     fPort: 27
     payload: "C03D63AB98EE7CD04FEF82"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevel: 3520
       fatalErrorsTotal: 3
@@ -4322,6 +4366,7 @@ test_vectors:
     fPort: 28
     payload: "C2DDCE0BFAFDFBE8B7FD98"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevel: 3522
       fatalErrorsTotal: 13
@@ -4343,6 +4388,7 @@ test_vectors:
     fPort: 29
     payload: "7503EA22DB8FAA155A29D4"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevel: 885
       fatalErrorsTotal: 0
@@ -4364,6 +4410,7 @@ test_vectors:
     fPort: 21
     payload: "55AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevel: 2645
       fatalErrorsTotal: 10
@@ -4385,6 +4432,7 @@ test_vectors:
     fPort: 22
     payload: "AA55AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevel: 1450
       fatalErrorsTotal: 5
@@ -4406,6 +4454,7 @@ test_vectors:
     fPort: 23
     payload: "55AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevel: 2645
       fatalErrorsTotal: 10
@@ -4427,6 +4476,7 @@ test_vectors:
     fPort: 24
     payload: "AA55AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevel: 1450
       fatalErrorsTotal: 5
@@ -4448,6 +4498,7 @@ test_vectors:
     fPort: 25
     payload: "55AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevel: 2645
       fatalErrorsTotal: 10
@@ -4469,6 +4520,7 @@ test_vectors:
     fPort: 26
     payload: "AA55AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevel: 1450
       fatalErrorsTotal: 5
@@ -4490,6 +4542,7 @@ test_vectors:
     fPort: 27
     payload: "55AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevel: 2645
       fatalErrorsTotal: 10
@@ -4511,6 +4564,7 @@ test_vectors:
     fPort: 28
     payload: "AA55AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevel: 1450
       fatalErrorsTotal: 5
@@ -4532,6 +4586,7 @@ test_vectors:
     fPort: 29
     payload: "55AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       batteryLevel: 2645
       fatalErrorsTotal: 10
@@ -4553,6 +4608,7 @@ test_vectors:
     fPort: 50
     payload: "80808000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorValid0: 32896
       sensorData0: 128
@@ -4566,6 +4622,7 @@ test_vectors:
     fPort: 51
     payload: "80808000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorValid0: 32896
       sensorData0: 128
@@ -4579,6 +4636,7 @@ test_vectors:
     fPort: 52
     payload: "80808000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorValid0: 32896
       sensorData0: 128
@@ -4592,6 +4650,7 @@ test_vectors:
     fPort: 30
     payload: "003A40533333"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorNum0: 0
       sensorUnits0: 58
@@ -4606,6 +4665,7 @@ test_vectors:
     fPort: 30
     payload: "0F20C2210000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorNum0: 15
       sensorUnits0: 32
@@ -4620,6 +4680,7 @@ test_vectors:
     fPort: 30
     payload: "07C800000000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorNum0: 7
       sensorUnits0: 200
@@ -4634,6 +4695,7 @@ test_vectors:
     fPort: 30
     payload: "FFFF477FFF00"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorNum0: 255
       sensorUnits0: 255
@@ -4648,6 +4710,7 @@ test_vectors:
     fPort: 30
     payload: "01064640E600"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorNum0: 1
       sensorUnits0: 6
@@ -4662,6 +4725,7 @@ test_vectors:
     fPort: 31
     payload: "0C21447D5000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorNum0: 12
       sensorUnits0: 33
@@ -4676,6 +4740,7 @@ test_vectors:
     fPort: 31
     payload: "0D23C3889333"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorNum0: 13
       sensorUnits0: 35
@@ -4690,6 +4755,7 @@ test_vectors:
     fPort: 31
     payload: "0E013E000000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorNum0: 14
       sensorUnits0: 1
@@ -4704,6 +4770,7 @@ test_vectors:
     fPort: 31
     payload: "002440533333"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorNum0: 0
       sensorUnits0: 36
@@ -4718,6 +4785,7 @@ test_vectors:
     fPort: 32
     payload: "483A40800000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorNum0: 72
       sensorUnits0: 58
@@ -4732,6 +4800,7 @@ test_vectors:
     fPort: 32
     payload: "85FDBF000000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorNum0: 133
       sensorUnits0: 253
@@ -4746,6 +4815,7 @@ test_vectors:
     fPort: 32
     payload: "D1AA3A83126F"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorNum0: 209
       sensorUnits0: 170
@@ -4760,6 +4830,7 @@ test_vectors:
     fPort: 32
     payload: "3F0041BC0000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorNum0: 63
       sensorUnits0: 0
@@ -4774,6 +4845,7 @@ test_vectors:
     fPort: 32
     payload: "0E2740800000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorNum0: 14
       sensorUnits0: 39
@@ -4788,6 +4860,7 @@ test_vectors:
     fPort: 32
     payload: "003A40533333"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorNum0: 0
       sensorUnits0: 58
@@ -4802,6 +4875,7 @@ test_vectors:
     fPort: 40
     payload: "123A4053333324447D5000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorNum0: 1
       sensorUnits0: 58
@@ -4821,6 +4895,7 @@ test_vectors:
     fPort: 40
     payload: "F020C2210000FF00000000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorNum0: 15
       sensorUnits0: 32
@@ -4840,6 +4915,7 @@ test_vectors:
     fPort: 40
     payload: "47B43E000000ABBF000000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorNum0: 4
       sensorUnits0: 180
@@ -4859,6 +4935,7 @@ test_vectors:
     fPort: 40
     payload: "3127408000003941BC0000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorNum0: 3
       sensorUnits0: 39
@@ -4878,6 +4955,7 @@ test_vectors:
     fPort: 41
     payload: "1D2041BC000021C3889333"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorNum0: 1
       sensorUnits0: 32
@@ -4897,6 +4975,7 @@ test_vectors:
     fPort: 41
     payload: "EF234640E6002240800000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorNum0: 14
       sensorUnits0: 35
@@ -4916,6 +4995,7 @@ test_vectors:
     fPort: 41
     payload: "0C2440533333203E000000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorNum0: 0
       sensorUnits0: 36
@@ -4935,6 +5015,7 @@ test_vectors:
     fPort: 42
     payload: "5CFD477FFF003A40533333"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorNum0: 5
       sensorUnits0: 253
@@ -4954,6 +5035,7 @@ test_vectors:
     fPort: 42
     payload: "9F393A83126F3300000000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorNum0: 9
       sensorUnits0: 57
@@ -4973,6 +5055,7 @@ test_vectors:
     fPort: 42
     payload: "0E3A405333333A40800000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorNum0: 0
       sensorUnits0: 58
@@ -4992,6 +5075,7 @@ test_vectors:
     fPort: 50
     payload: "FFFF55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorValid0: 65535
       sensorData0: 43605
@@ -5019,6 +5103,7 @@ test_vectors:
     fPort: 50
     payload: "FFFFAA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorValid0: 65535
       sensorData0: 21930
@@ -5046,6 +5131,7 @@ test_vectors:
     fPort: 50
     payload: "55AA9A08"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorValid0: 43605
       sensorData0: 2202
@@ -5065,6 +5151,7 @@ test_vectors:
     fPort: 50
     payload: "AA55E485"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorValid0: 21930
       sensorData0: 34276
@@ -5084,6 +5171,7 @@ test_vectors:
     fPort: 50
     payload: "0000FFFF"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorValid0: 0
       sensorData0: 65535
@@ -5095,6 +5183,7 @@ test_vectors:
     fPort: 51
     payload: "FFFF55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorValid0: 65535
       sensorData0: 43605
@@ -5122,6 +5211,7 @@ test_vectors:
     fPort: 51
     payload: "FFFFAA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorValid0: 65535
       sensorData0: 21930
@@ -5149,6 +5239,7 @@ test_vectors:
     fPort: 51
     payload: "55AADFA2"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorValid0: 43605
       sensorData0: 41695
@@ -5168,6 +5259,7 @@ test_vectors:
     fPort: 51
     payload: "AA55B672"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorValid0: 21930
       sensorData0: 29366
@@ -5187,6 +5279,7 @@ test_vectors:
     fPort: 51
     payload: "0000FFFF"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorValid0: 0
       sensorData0: 65535
@@ -5198,6 +5291,7 @@ test_vectors:
     fPort: 52
     payload: "FFFF55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorValid0: 65535
       sensorData0: 43605
@@ -5225,6 +5319,7 @@ test_vectors:
     fPort: 52
     payload: "FFFFAA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorValid0: 65535
       sensorData0: 21930
@@ -5252,6 +5347,7 @@ test_vectors:
     fPort: 52
     payload: "55AAA5D8"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorValid0: 43605
       sensorData0: 55461
@@ -5271,6 +5367,7 @@ test_vectors:
     fPort: 52
     payload: "AA559C43"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorValid0: 21930
       sensorData0: 17308
@@ -5290,6 +5387,7 @@ test_vectors:
     fPort: 52
     payload: "0000FFFF"
     source: vendor-codec
+    expected_warnings: []
     expected:
       sensorValid0: 0
       sensorData0: 65535
@@ -5301,6 +5399,7 @@ test_vectors:
     fPort: 60
     payload: "0C6BBCA5179B1D3D5DF84D"
     source: vendor-codec
+    expected_warnings: []
     expected:
       eventTimestamp: 2780588812
       eventCode: 39703
@@ -5313,6 +5412,7 @@ test_vectors:
     fPort: 61
     payload: "9099BDFD04595CF0B6F9FB"
     source: vendor-codec
+    expected_warnings: []
     expected:
       eventTimestamp: 4257061264
       eventCode: 22788
@@ -5325,6 +5425,7 @@ test_vectors:
     fPort: 62
     payload: "15356A2DA07541467A76B1"
     source: vendor-codec
+    expected_warnings: []
     expected:
       eventTimestamp: 761935125
       eventCode: 30112
@@ -5337,6 +5438,7 @@ test_vectors:
     fPort: 63
     payload: "640ABBFD8A362259D1C73C"
     source: vendor-codec
+    expected_warnings: []
     expected:
       eventTimestamp: 4256893540
       eventCode: 13962
@@ -5349,6 +5451,7 @@ test_vectors:
     fPort: 64
     payload: "2EAE35F8C14E339E27D715"
     source: vendor-codec
+    expected_warnings: []
     expected:
       eventTimestamp: 4164267566
       eventCode: 20161
@@ -5361,6 +5464,7 @@ test_vectors:
     fPort: 65
     payload: "075C590FFC7BD011A08B93"
     source: vendor-codec
+    expected_warnings: []
     expected:
       eventTimestamp: 257514503
       eventCode: 31740
@@ -5373,6 +5477,7 @@ test_vectors:
     fPort: 66
     payload: "7E983BBFDD3A70FCEEB004"
     source: vendor-codec
+    expected_warnings: []
     expected:
       eventTimestamp: 3208353918
       eventCode: 15069
@@ -5385,6 +5490,7 @@ test_vectors:
     fPort: 67
     payload: "58D138A0BA482BD748D1B5"
     source: vendor-codec
+    expected_warnings: []
     expected:
       eventTimestamp: 2688078168
       eventCode: 18618
@@ -5397,6 +5503,7 @@ test_vectors:
     fPort: 68
     payload: "6C090F72C6F97B6FFFE560"
     source: vendor-codec
+    expected_warnings: []
     expected:
       eventTimestamp: 1913588076
       eventCode: 63942
@@ -5409,6 +5516,7 @@ test_vectors:
     fPort: 69
     payload: "CB623D11630F20CF60CABE"
     source: vendor-codec
+    expected_warnings: []
     expected:
       eventTimestamp: 289235659
       eventCode: 3939
@@ -5421,6 +5529,7 @@ test_vectors:
     fPort: 80
     payload: "D262E412816DA915A27AA8"
     source: vendor-codec
+    expected_warnings: []
     expected:
       eventTimestamp: 316957394
       eventCode: 28033
@@ -5433,6 +5542,7 @@ test_vectors:
     fPort: 81
     payload: "FCB9E6454BF001651AAC4E"
     source: vendor-codec
+    expected_warnings: []
     expected:
       eventTimestamp: 1172748796
       eventCode: 61515
@@ -5445,6 +5555,7 @@ test_vectors:
     fPort: 82
     payload: "6F0F3DA898579F09CD0DA7"
     source: vendor-codec
+    expected_warnings: []
     expected:
       eventTimestamp: 2822573935
       eventCode: 22424
@@ -5457,6 +5568,7 @@ test_vectors:
     fPort: 83
     payload: "F7BB40D29FE9A1592343E3"
     source: vendor-codec
+    expected_warnings: []
     expected:
       eventTimestamp: 3527457783
       eventCode: 59807
@@ -5469,6 +5581,7 @@ test_vectors:
     fPort: 84
     payload: "6B92CC4DC1EAFB2CE307BF"
     source: vendor-codec
+    expected_warnings: []
     expected:
       eventTimestamp: 1305252459
       eventCode: 60097
@@ -5481,6 +5594,7 @@ test_vectors:
     fPort: 85
     payload: "DD5D85E6DF4E66071DC29A"
     source: vendor-codec
+    expected_warnings: []
     expected:
       eventTimestamp: 3867499997
       eventCode: 20191
@@ -5493,6 +5607,7 @@ test_vectors:
     fPort: 86
     payload: "C0FCEBA34408BD9381A3B8"
     source: vendor-codec
+    expected_warnings: []
     expected:
       eventTimestamp: 2750151872
       eventCode: 2116
@@ -5505,6 +5620,7 @@ test_vectors:
     fPort: 87
     payload: "4EDB77716D8C1B75DC62CB"
     source: vendor-codec
+    expected_warnings: []
     expected:
       eventTimestamp: 1903680334
       eventCode: 35949
@@ -5517,6 +5633,7 @@ test_vectors:
     fPort: 88
     payload: "2CF174AAEF1E6CC23CD74E"
     source: vendor-codec
+    expected_warnings: []
     expected:
       eventTimestamp: 2859790636
       eventCode: 7919
@@ -5529,6 +5646,7 @@ test_vectors:
     fPort: 89
     payload: "2D51691B3DE87E30EDCD2C"
     source: vendor-codec
+    expected_warnings: []
     expected:
       eventTimestamp: 459886893
       eventCode: 59453
@@ -5541,6 +5659,7 @@ test_vectors:
     fPort: 60
     payload: "0000000000000000000000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       eventTimestamp: 0
       eventCode: 0
@@ -5553,6 +5672,7 @@ test_vectors:
     fPort: 60
     payload: "FFFFFFFFFFFFFFFFFFFFFF"
     source: vendor-codec
+    expected_warnings: []
     expected:
       eventTimestamp: 4294967295
       eventCode: 65535
@@ -5565,6 +5685,7 @@ test_vectors:
     fPort: 60
     payload: "55AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       eventTimestamp: 2857740885
       eventCode: 43605
@@ -5577,6 +5698,7 @@ test_vectors:
     fPort: 70
     payload: "00003DB2A66F466C83"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 0
@@ -5605,6 +5727,7 @@ test_vectors:
     fPort: 70
     payload: "1045988D9D873EE1FFAA37"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 1
@@ -5621,6 +5744,7 @@ test_vectors:
     fPort: 71
     payload: "00454830B0574EF6B8"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 0
@@ -5649,6 +5773,7 @@ test_vectors:
     fPort: 71
     payload: "10D5C54836A2888FA3BC77"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 1
@@ -5665,6 +5790,7 @@ test_vectors:
     fPort: 72
     payload: "00A309F19AFE7C31DA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 0
@@ -5693,6 +5819,7 @@ test_vectors:
     fPort: 72
     payload: "10B8F1E3D1408F1A4D1405"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 1
@@ -5709,6 +5836,7 @@ test_vectors:
     fPort: 73
     payload: "00E0BFA7034D228433"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 0
@@ -5736,6 +5864,7 @@ test_vectors:
     fPort: 73
     payload: "10949C97DFCDEE89090DAC"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 1
@@ -5752,6 +5881,7 @@ test_vectors:
     fPort: 74
     payload: "00C16B6D210E61CD97"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 0
@@ -5779,6 +5909,7 @@ test_vectors:
     fPort: 74
     payload: "1040C9A2C8907819F18C58"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 1
@@ -5795,6 +5926,7 @@ test_vectors:
     fPort: 75
     payload: "00505DC3A87012A19C"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 0
@@ -5822,6 +5954,7 @@ test_vectors:
     fPort: 75
     payload: "106552B0EC834ED6141E32"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 1
@@ -5838,6 +5971,7 @@ test_vectors:
     fPort: 76
     payload: "00C3E167EF8BD17425"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 0
@@ -5865,6 +5999,7 @@ test_vectors:
     fPort: 76
     payload: "10438888B5A9AE79B6743F"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 1
@@ -5881,6 +6016,7 @@ test_vectors:
     fPort: 77
     payload: "009FEDF92383B070AE"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 0
@@ -5908,6 +6044,7 @@ test_vectors:
     fPort: 77
     payload: "10FF7D746872BAD88C1E4B"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 1
@@ -5924,6 +6061,7 @@ test_vectors:
     fPort: 78
     payload: "0056F712E59D0545F4"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 0
@@ -5951,6 +6089,7 @@ test_vectors:
     fPort: 78
     payload: "104610BCABA210A6AA40E3"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 1
@@ -5967,6 +6106,7 @@ test_vectors:
     fPort: 79
     payload: "007C3587B3FE3D46F0"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 0
@@ -5994,6 +6134,7 @@ test_vectors:
     fPort: 79
     payload: "100A16151B988A577F7B1D"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 1
@@ -6010,6 +6151,7 @@ test_vectors:
     fPort: 70
     payload: "000000000000000000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 0
@@ -6038,6 +6180,7 @@ test_vectors:
     fPort: 70
     payload: "00FFFFFFFFFFFFFFFF"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 0
@@ -6066,6 +6209,7 @@ test_vectors:
     fPort: 70
     payload: "0055AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 0
@@ -6094,6 +6238,7 @@ test_vectors:
     fPort: 70
     payload: "00AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 0
@@ -6122,6 +6267,7 @@ test_vectors:
     fPort: 72
     payload: "0055AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 0
@@ -6150,6 +6296,7 @@ test_vectors:
     fPort: 72
     payload: "00AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 0
@@ -6178,6 +6325,7 @@ test_vectors:
     fPort: 74
     payload: "0055AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 0
@@ -6205,6 +6353,7 @@ test_vectors:
     fPort: 74
     payload: "00AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 0
@@ -6232,6 +6381,7 @@ test_vectors:
     fPort: 70
     payload: "1055AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 1
@@ -6248,6 +6398,7 @@ test_vectors:
     fPort: 70
     payload: "10AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 1
@@ -6264,6 +6415,7 @@ test_vectors:
     fPort: 70
     payload: "20"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 0
       sequenceNumber: 2
@@ -6275,6 +6427,7 @@ test_vectors:
     fPort: 70
     payload: "0151A555B75A4A0BE794"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 1
       sequenceNumber: 0
@@ -6296,6 +6449,7 @@ test_vectors:
     fPort: 70
     payload: "0155AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 1
       sequenceNumber: 0
@@ -6317,6 +6471,7 @@ test_vectors:
     fPort: 70
     payload: "01AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 1
       sequenceNumber: 0
@@ -6338,6 +6493,7 @@ test_vectors:
     fPort: 70
     payload: "11842B"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 1
       sequenceNumber: 1
@@ -6353,6 +6509,7 @@ test_vectors:
     fPort: 71
     payload: "11A939"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 1
       sequenceNumber: 1
@@ -6368,6 +6525,7 @@ test_vectors:
     fPort: 72
     payload: "117472"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 1
       sequenceNumber: 1
@@ -6383,6 +6541,7 @@ test_vectors:
     fPort: 75
     payload: "11BA71"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 1
       sequenceNumber: 1
@@ -6398,6 +6557,7 @@ test_vectors:
     fPort: 70
     payload: "1155AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 1
       sequenceNumber: 1
@@ -6413,6 +6573,7 @@ test_vectors:
     fPort: 70
     payload: "11AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 1
       sequenceNumber: 1
@@ -6428,6 +6589,7 @@ test_vectors:
     fPort: 70
     payload: "31"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 1
       sequenceNumber: 3
@@ -6439,6 +6601,7 @@ test_vectors:
     fPort: 70
     payload: "94014A3F41"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 4
       sequenceNumber: 9
@@ -6468,6 +6631,7 @@ test_vectors:
     fPort: 70
     payload: "6455AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 4
       sequenceNumber: 6
@@ -6497,6 +6661,7 @@ test_vectors:
     fPort: 70
     payload: "64AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 4
       sequenceNumber: 6
@@ -6526,6 +6691,7 @@ test_vectors:
     fPort: 70
     payload: "3552211EBF"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 5
       sequenceNumber: 3
@@ -6543,6 +6709,7 @@ test_vectors:
     fPort: 72
     payload: "359FABF2AF"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 5
       sequenceNumber: 3
@@ -6560,6 +6727,7 @@ test_vectors:
     fPort: 70
     payload: "A555AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 5
       sequenceNumber: 10
@@ -6577,6 +6745,7 @@ test_vectors:
     fPort: 70
     payload: "A5AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 5
       sequenceNumber: 10
@@ -6594,6 +6763,7 @@ test_vectors:
     fPort: 70
     payload: "562021CFBF2B20"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 6
       sequenceNumber: 5
@@ -6647,6 +6817,7 @@ test_vectors:
     fPort: 70
     payload: "970B34866CDF93"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 7
       sequenceNumber: 9
@@ -6700,6 +6871,7 @@ test_vectors:
     fPort: 72
     payload: "36DC72EC2FA0DF"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 6
       sequenceNumber: 3
@@ -6753,6 +6925,7 @@ test_vectors:
     fPort: 72
     payload: "F7EFA238A0E575"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 7
       sequenceNumber: 15
@@ -6806,6 +6979,7 @@ test_vectors:
     fPort: 70
     payload: "5655AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 6
       sequenceNumber: 5
@@ -6859,6 +7033,7 @@ test_vectors:
     fPort: 70
     payload: "56AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 6
       sequenceNumber: 5
@@ -6912,6 +7087,7 @@ test_vectors:
     fPort: 70
     payload: "5755AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 7
       sequenceNumber: 5
@@ -6965,6 +7141,7 @@ test_vectors:
     fPort: 70
     payload: "57AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 7
       sequenceNumber: 5
@@ -7018,6 +7195,7 @@ test_vectors:
     fPort: 70
     payload: "0855AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 8
       sequenceNumber: 0
@@ -7042,6 +7220,7 @@ test_vectors:
     fPort: 70
     payload: "18AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 8
       sequenceNumber: 1
@@ -7066,6 +7245,7 @@ test_vectors:
     fPort: 70
     payload: "2855AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 8
       sequenceNumber: 2
@@ -7090,6 +7270,7 @@ test_vectors:
     fPort: 70
     payload: "38AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 8
       sequenceNumber: 3
@@ -7114,6 +7295,7 @@ test_vectors:
     fPort: 70
     payload: "4855AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 8
       sequenceNumber: 4
@@ -7138,6 +7320,7 @@ test_vectors:
     fPort: 70
     payload: "58AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 8
       sequenceNumber: 5
@@ -7162,6 +7345,7 @@ test_vectors:
     fPort: 70
     payload: "6855AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 8
       sequenceNumber: 6
@@ -7186,6 +7370,7 @@ test_vectors:
     fPort: 70
     payload: "78AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 8
       sequenceNumber: 7
@@ -7210,6 +7395,7 @@ test_vectors:
     fPort: 70
     payload: "8855AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 8
       sequenceNumber: 8
@@ -7234,6 +7420,7 @@ test_vectors:
     fPort: 70
     payload: "98AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 8
       sequenceNumber: 9
@@ -7258,6 +7445,7 @@ test_vectors:
     fPort: 70
     payload: "A855AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 8
       sequenceNumber: 10
@@ -7282,6 +7470,7 @@ test_vectors:
     fPort: 70
     payload: "B8AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 8
       sequenceNumber: 11
@@ -7306,6 +7495,7 @@ test_vectors:
     fPort: 70
     payload: "C855AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 8
       sequenceNumber: 12
@@ -7330,6 +7520,7 @@ test_vectors:
     fPort: 70
     payload: "D8AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 8
       sequenceNumber: 13
@@ -7354,6 +7545,7 @@ test_vectors:
     fPort: 70
     payload: "E855AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 8
       sequenceNumber: 14
@@ -7378,6 +7570,7 @@ test_vectors:
     fPort: 70
     payload: "F8AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 8
       sequenceNumber: 15
@@ -7402,6 +7595,7 @@ test_vectors:
     fPort: 72
     payload: "F8B1952F789CB4DF09739C"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 8
       sequenceNumber: 15
@@ -7426,6 +7620,7 @@ test_vectors:
     fPort: 70
     payload: "09AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 9
       sequenceNumber: 0
@@ -7450,6 +7645,7 @@ test_vectors:
     fPort: 70
     payload: "1955AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 9
       sequenceNumber: 1
@@ -7474,6 +7670,7 @@ test_vectors:
     fPort: 70
     payload: "29AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 9
       sequenceNumber: 2
@@ -7498,6 +7695,7 @@ test_vectors:
     fPort: 70
     payload: "3955AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 9
       sequenceNumber: 3
@@ -7522,6 +7720,7 @@ test_vectors:
     fPort: 70
     payload: "49AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 9
       sequenceNumber: 4
@@ -7546,6 +7745,7 @@ test_vectors:
     fPort: 70
     payload: "5955AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 9
       sequenceNumber: 5
@@ -7570,6 +7770,7 @@ test_vectors:
     fPort: 70
     payload: "69AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 9
       sequenceNumber: 6
@@ -7594,6 +7795,7 @@ test_vectors:
     fPort: 70
     payload: "7955AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 9
       sequenceNumber: 7
@@ -7618,6 +7820,7 @@ test_vectors:
     fPort: 70
     payload: "89AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 9
       sequenceNumber: 8
@@ -7642,6 +7845,7 @@ test_vectors:
     fPort: 70
     payload: "9955AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 9
       sequenceNumber: 9
@@ -7666,6 +7870,7 @@ test_vectors:
     fPort: 70
     payload: "A9AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 9
       sequenceNumber: 10
@@ -7690,6 +7895,7 @@ test_vectors:
     fPort: 70
     payload: "B955AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 9
       sequenceNumber: 11
@@ -7714,6 +7920,7 @@ test_vectors:
     fPort: 70
     payload: "C9AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 9
       sequenceNumber: 12
@@ -7738,6 +7945,7 @@ test_vectors:
     fPort: 70
     payload: "D955AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 9
       sequenceNumber: 13
@@ -7762,6 +7970,7 @@ test_vectors:
     fPort: 70
     payload: "E9AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 9
       sequenceNumber: 14
@@ -7786,6 +7995,7 @@ test_vectors:
     fPort: 70
     payload: "F955AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 9
       sequenceNumber: 15
@@ -7810,6 +8020,7 @@ test_vectors:
     fPort: 72
     payload: "D9542288836EE08B41B3BF"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 9
       sequenceNumber: 13
@@ -7834,6 +8045,7 @@ test_vectors:
     fPort: 70
     payload: "0A55AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 10
       sequenceNumber: 0
@@ -7858,6 +8070,7 @@ test_vectors:
     fPort: 70
     payload: "1AAA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 10
       sequenceNumber: 1
@@ -7882,6 +8095,7 @@ test_vectors:
     fPort: 70
     payload: "2A55AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 10
       sequenceNumber: 2
@@ -7906,6 +8120,7 @@ test_vectors:
     fPort: 70
     payload: "3AAA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 10
       sequenceNumber: 3
@@ -7930,6 +8145,7 @@ test_vectors:
     fPort: 70
     payload: "4A55AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 10
       sequenceNumber: 4
@@ -7954,6 +8170,7 @@ test_vectors:
     fPort: 70
     payload: "5AAA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 10
       sequenceNumber: 5
@@ -7978,6 +8195,7 @@ test_vectors:
     fPort: 70
     payload: "6A55AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 10
       sequenceNumber: 6
@@ -8002,6 +8220,7 @@ test_vectors:
     fPort: 70
     payload: "7AAA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 10
       sequenceNumber: 7
@@ -8026,6 +8245,7 @@ test_vectors:
     fPort: 70
     payload: "8A55AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 10
       sequenceNumber: 8
@@ -8050,6 +8270,7 @@ test_vectors:
     fPort: 70
     payload: "9AAA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 10
       sequenceNumber: 9
@@ -8074,6 +8295,7 @@ test_vectors:
     fPort: 70
     payload: "AA55AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 10
       sequenceNumber: 10
@@ -8098,6 +8320,7 @@ test_vectors:
     fPort: 70
     payload: "BAAA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 10
       sequenceNumber: 11
@@ -8122,6 +8345,7 @@ test_vectors:
     fPort: 70
     payload: "CA55AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 10
       sequenceNumber: 12
@@ -8146,6 +8370,7 @@ test_vectors:
     fPort: 70
     payload: "DAAA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 10
       sequenceNumber: 13
@@ -8170,6 +8395,7 @@ test_vectors:
     fPort: 70
     payload: "EA55AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 10
       sequenceNumber: 14
@@ -8194,6 +8420,7 @@ test_vectors:
     fPort: 70
     payload: "FAAA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 10
       sequenceNumber: 15
@@ -8218,6 +8445,7 @@ test_vectors:
     fPort: 72
     payload: "5A27FA4B862DBB73013577"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 10
       sequenceNumber: 5
@@ -8242,6 +8470,7 @@ test_vectors:
     fPort: 70
     payload: "08ED3CFCEAAAD291B21499"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 8
       sequenceNumber: 0
@@ -8266,6 +8495,7 @@ test_vectors:
     fPort: 70
     payload: "0BD4630A040E5576197F05"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 11
       sequenceNumber: 0
@@ -8287,6 +8517,7 @@ test_vectors:
     fPort: 70
     payload: "1B49996688B3AB29B2986D"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 11
       sequenceNumber: 1
@@ -8308,6 +8539,7 @@ test_vectors:
     fPort: 70
     payload: "2B866664A013F5AB92FF83"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 11
       sequenceNumber: 2
@@ -8329,6 +8561,7 @@ test_vectors:
     fPort: 70
     payload: "3B61ED34269CA363C7E989"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 11
       sequenceNumber: 3
@@ -8350,6 +8583,7 @@ test_vectors:
     fPort: 70
     payload: "4B4E60C88AC7BAC04B8C51"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 11
       sequenceNumber: 4
@@ -8371,6 +8605,7 @@ test_vectors:
     fPort: 70
     payload: "5B4EFBB7136F055872F1E2"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 11
       sequenceNumber: 5
@@ -8392,6 +8627,7 @@ test_vectors:
     fPort: 70
     payload: "6B0C1A92AD2FAB2E47528F"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 11
       sequenceNumber: 6
@@ -8413,6 +8649,7 @@ test_vectors:
     fPort: 70
     payload: "7B9DEE4C51B170E49C32E5"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 11
       sequenceNumber: 7
@@ -8434,6 +8671,7 @@ test_vectors:
     fPort: 70
     payload: "8B90C7"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 11
       sequenceNumber: 8
@@ -8447,6 +8685,7 @@ test_vectors:
     fPort: 70
     payload: "9B"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 11
       sequenceNumber: 9
@@ -8458,6 +8697,7 @@ test_vectors:
     fPort: 72
     payload: "3B2BD624BCAD18F7B3D57A"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 11
       sequenceNumber: 3
@@ -8479,6 +8719,7 @@ test_vectors:
     fPort: 70
     payload: "0CAD447D50003A83126F7C"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 12
       sequenceNumber: 0
@@ -8495,6 +8736,7 @@ test_vectors:
     fPort: 70
     payload: "1C00000000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 12
       sequenceNumber: 1
@@ -8507,6 +8749,7 @@ test_vectors:
     fPort: 70
     payload: "2C4640E6004640E600"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 12
       sequenceNumber: 2
@@ -8520,6 +8763,7 @@ test_vectors:
     fPort: 70
     payload: "3C28C2210000C388933337"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 12
       sequenceNumber: 3
@@ -8536,6 +8780,7 @@ test_vectors:
     fPort: 70
     payload: "4CC2210000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 12
       sequenceNumber: 4
@@ -8548,6 +8793,7 @@ test_vectors:
     fPort: 70
     payload: "5C3E000000BF000000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 12
       sequenceNumber: 5
@@ -8561,6 +8807,7 @@ test_vectors:
     fPort: 70
     payload: "6C2B408000003E00000047"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 12
       sequenceNumber: 6
@@ -8577,6 +8824,7 @@ test_vectors:
     fPort: 70
     payload: "7CC3889333"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 12
       sequenceNumber: 7
@@ -8589,6 +8837,7 @@ test_vectors:
     fPort: 70
     payload: "8C477FFF0000000000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 12
       sequenceNumber: 8
@@ -8602,6 +8851,7 @@ test_vectors:
     fPort: 70
     payload: "9C"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 12
       sequenceNumber: 9
@@ -8613,6 +8863,7 @@ test_vectors:
     fPort: 72
     payload: "0C390000000042C80000FE"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 12
       sequenceNumber: 0
@@ -8629,6 +8880,7 @@ test_vectors:
     fPort: 70
     payload: "3C55C2210000447D5000AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 12
       sequenceNumber: 3
@@ -8645,6 +8897,7 @@ test_vectors:
     fPort: 70
     payload: "6CAA408000004640E60055"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 12
       sequenceNumber: 6
@@ -8661,6 +8914,7 @@ test_vectors:
     fPort: 71
     payload: "04A8ACDC82702E3DBC"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 4
       sequenceNumber: 0
@@ -8712,6 +8966,7 @@ test_vectors:
     fPort: 71
     payload: "0455AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 4
       sequenceNumber: 0
@@ -8763,6 +9018,7 @@ test_vectors:
     fPort: 71
     payload: "04AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 4
       sequenceNumber: 0
@@ -8814,6 +9070,7 @@ test_vectors:
     fPort: 71
     payload: "14F2D0574058E019EA75E5"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 4
       sequenceNumber: 1
@@ -8868,6 +9125,7 @@ test_vectors:
     fPort: 71
     payload: "1455AA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 4
       sequenceNumber: 1
@@ -8922,6 +9180,7 @@ test_vectors:
     fPort: 71
     payload: "14AA55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 4
       sequenceNumber: 1
@@ -8976,6 +9235,7 @@ test_vectors:
     fPort: 71
     payload: "24"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 4
       sequenceNumber: 2
@@ -8987,7 +9247,9 @@ test_vectors:
     fPort: 71
     payload: "051CB1024E48687B6C"
     source: vendor-codec
+    expected_warnings: []
     expected:
+      cycleTime: null   # the vendor omits it for this sequence; a mask bit set in error reports it
       subgroupID: 5
       sequenceNumber: 0
       gain1: 0.284
@@ -9006,6 +9268,7 @@ test_vectors:
     fPort: 71
     payload: "05AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 5
       sequenceNumber: 0
@@ -9025,7 +9288,9 @@ test_vectors:
     fPort: 71
     payload: "159276B365D9B149D2"
     source: vendor-codec
+    expected_warnings: []
     expected:
+      cycleTime: null   # the vendor omits it for this sequence; a mask bit set in error reports it
       subgroupID: 5
       sequenceNumber: 1
       gain3: 1.682
@@ -9044,6 +9309,7 @@ test_vectors:
     fPort: 71
     payload: "1555AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 5
       sequenceNumber: 1
@@ -9063,7 +9329,9 @@ test_vectors:
     fPort: 71
     payload: "259CFC0E708BCAD582"
     source: vendor-codec
+    expected_warnings: []
     expected:
+      cycleTime: null   # the vendor omits it for this sequence; a mask bit set in error reports it
       subgroupID: 5
       sequenceNumber: 2
       gain5: 1.18
@@ -9082,6 +9350,7 @@ test_vectors:
     fPort: 71
     payload: "25AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 5
       sequenceNumber: 2
@@ -9101,7 +9370,9 @@ test_vectors:
     fPort: 71
     payload: "35A732DA6BA86B2084"
     source: vendor-codec
+    expected_warnings: []
     expected:
+      cycleTime: null   # the vendor omits it for this sequence; a mask bit set in error reports it
       subgroupID: 5
       sequenceNumber: 3
       gain7: 0.679
@@ -9120,6 +9391,7 @@ test_vectors:
     fPort: 71
     payload: "3555AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 5
       sequenceNumber: 3
@@ -9139,7 +9411,9 @@ test_vectors:
     fPort: 71
     payload: "45FBCC0DE1B86E4473"
     source: vendor-codec
+    expected_warnings: []
     expected:
+      cycleTime: null   # the vendor omits it for this sequence; a mask bit set in error reports it
       subgroupID: 5
       sequenceNumber: 4
       gain9: 1.275
@@ -9158,6 +9432,7 @@ test_vectors:
     fPort: 71
     payload: "45AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 5
       sequenceNumber: 4
@@ -9177,7 +9452,9 @@ test_vectors:
     fPort: 71
     payload: "55A7ACBF16D99EA4A1"
     source: vendor-codec
+    expected_warnings: []
     expected:
+      cycleTime: null   # the vendor omits it for this sequence; a mask bit set in error reports it
       subgroupID: 5
       sequenceNumber: 5
       gain11: 1.191
@@ -9196,6 +9473,7 @@ test_vectors:
     fPort: 71
     payload: "5555AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 5
       sequenceNumber: 5
@@ -9215,6 +9493,7 @@ test_vectors:
     fPort: 71
     payload: "65"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 5
       sequenceNumber: 6
@@ -9226,6 +9505,7 @@ test_vectors:
     fPort: 71
     payload: "050000000000000000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 5
       sequenceNumber: 0
@@ -9245,6 +9525,7 @@ test_vectors:
     fPort: 71
     payload: "05FFFFFFFFFFFFFFFF"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 5
       sequenceNumber: 0
@@ -9264,6 +9545,7 @@ test_vectors:
     fPort: 72
     payload: "0442C47B0EFCD5"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 4
       sequenceNumber: 0
@@ -9286,6 +9568,7 @@ test_vectors:
     fPort: 72
     payload: "0455AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 4
       sequenceNumber: 0
@@ -9308,6 +9591,7 @@ test_vectors:
     fPort: 72
     payload: "04AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 4
       sequenceNumber: 0
@@ -9330,6 +9614,7 @@ test_vectors:
     fPort: 72
     payload: "14992E4AAC483E0C"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 4
       sequenceNumber: 1
@@ -9367,6 +9652,7 @@ test_vectors:
     fPort: 72
     payload: "1455AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 4
       sequenceNumber: 1
@@ -9404,6 +9690,7 @@ test_vectors:
     fPort: 72
     payload: "14AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 4
       sequenceNumber: 1
@@ -9441,6 +9728,7 @@ test_vectors:
     fPort: 72
     payload: "24"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 4
       sequenceNumber: 2
@@ -9452,6 +9740,7 @@ test_vectors:
     fPort: 72
     payload: "7D8A3C491125FB73204F"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 13
       sequenceNumber: 7
@@ -9482,6 +9771,7 @@ test_vectors:
     fPort: 72
     payload: "CD55AA55AA55AA55AA55"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 13
       sequenceNumber: 12
@@ -9512,6 +9802,7 @@ test_vectors:
     fPort: 72
     payload: "CDAA55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 13
       sequenceNumber: 12
@@ -9542,6 +9833,7 @@ test_vectors:
     fPort: 72
     payload: "0E91EA5181320A16D8"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 14
       sequenceNumber: 0
@@ -9557,6 +9849,7 @@ test_vectors:
     fPort: 72
     payload: "0E55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 14
       sequenceNumber: 0
@@ -9572,6 +9865,7 @@ test_vectors:
     fPort: 72
     payload: "1E4A497B82A70A157D"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 14
       sequenceNumber: 1
@@ -9587,6 +9881,7 @@ test_vectors:
     fPort: 72
     payload: "1E55AA55AA55AA55AA"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 14
       sequenceNumber: 1
@@ -9602,6 +9897,7 @@ test_vectors:
     fPort: 72
     payload: "2E"
     source: vendor-codec
+    expected_warnings: []
     expected:
       subgroupID: 14
       sequenceNumber: 2
@@ -9613,6 +9909,7 @@ test_vectors:
     fPort: 70
     payload: "02"
     source: vendor-codec
+    expected_warnings: []
     expected:
       fport: 70
       voboType: "VoBoXX"
@@ -9622,6 +9919,7 @@ test_vectors:
     fPort: 70
     payload: "0D"
     source: vendor-codec
+    expected_warnings: []
     expected:
       fport: 70
       voboType: "VoBoXX"
@@ -9631,6 +9929,7 @@ test_vectors:
     fPort: 71
     payload: "06"
     source: vendor-codec
+    expected_warnings: []
     expected:
       fport: 71
       voboType: "VoBoTC"
@@ -9640,6 +9939,7 @@ test_vectors:
     fPort: 73
     payload: "04"
     source: vendor-codec
+    expected_warnings: []
     expected:
       fport: 73
       voboType: ""
@@ -10046,6 +10346,7 @@ test_vectors:
     fPort: 110
     payload: "013A40533333"
     source: vendor-codec
+    expected_warnings: []
     expected:
       ainPayloads:
         - {sensorNum0: 1, sensorUnits0: 58, sensorData0: 3.299999952316284, analogSensorString0: "AIN1", engUnitsString0: "V"}
@@ -10057,6 +10358,7 @@ test_vectors:
     fPort: 110
     payload: "003A408000000F20C221000009DE00000000"
     source: vendor-codec
+    expected_warnings: []
     expected:
       ainPayloads:
         - {sensorNum0: 0, sensorUnits0: 58, sensorData0: 4, analogSensorString0: "Battery Voltage", engUnitsString0: "V"}
@@ -10070,6 +10372,7 @@ test_vectors:
     fPort: 111
     payload: "0D2041BC00000521447D5000002440533333"
     source: vendor-codec
+    expected_warnings: []
     expected:
       ainPayloads:
         - {sensorNum0: 13, sensorUnits0: 32, sensorData0: 23.5, analogSensorString0: "Cold Joint Temperature", engUnitsString0: "C"}
@@ -10083,6 +10386,7 @@ test_vectors:
     fPort: 112
     payload: "4F20BF00000090FD4640E600CC3A3E000000003A40533333"
     source: vendor-codec
+    expected_warnings: []
     expected:
       ainPayloads:
         - {sensorNum0: 79, sensorUnits0: 32, sensorData0: -0.5, analogSensorString0: "ADC Temperature (Max)", engUnitsString0: "C"}
@@ -10092,3 +10396,1953 @@ test_vectors:
       fport: 112
       voboType: "VoBoXP"
       payloadType: "Analog Input Variable Length"
+  # Crafted to separate surviving one-step mutants (tools/schema-mutation.py) from the
+  # schema: each payload decodes differently under the mutants it lists, and its
+  # expected values are vobo-decoder.js 2.2.1's output, in this schema's shape where
+  # the header documents a deviation (digital inputs, analog variable length).
+  - name: mutant_p30_01
+    description: "Separates 1 mutant(s): analogSensorString0 lookup[36] 'AnalogSensor36' -> 'AnalogSensor36_mutant'"
+    fPort: 30
+    payload: "243A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 30
+      voboType: "VoBoXX"
+      payloadType: "One Analog Input"
+      sensorNum0: 36
+      analogSensorString0: "AnalogSensor36"
+      sensorUnits0: 58
+      engUnitsString0: "V"
+      sensorData0: 3.299999952316284
+  - name: mutant_p30_02
+    description: "Separates 1 mutant(s): analogSensorString0 lookup[73] 'AnalogSensor73' -> 'AnalogSensor73_mutant'"
+    fPort: 30
+    payload: "493A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 30
+      voboType: "VoBoXX"
+      payloadType: "One Analog Input"
+      sensorNum0: 73
+      analogSensorString0: "AnalogSensor73"
+      sensorUnits0: 58
+      engUnitsString0: "V"
+      sensorData0: 3.299999952316284
+  - name: mutant_p30_03
+    description: "Separates 1 mutant(s): analogSensorString0 lookup[109] 'AnalogSensor109' -> 'AnalogSensor109_mutant'"
+    fPort: 30
+    payload: "6D3A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 30
+      voboType: "VoBoXX"
+      payloadType: "One Analog Input"
+      sensorNum0: 109
+      analogSensorString0: "AnalogSensor109"
+      sensorUnits0: 58
+      engUnitsString0: "V"
+      sensorData0: 3.299999952316284
+  - name: mutant_p30_04
+    description: "Separates 1 mutant(s): analogSensorString0 lookup[146] 'AnalogSensor146' -> 'AnalogSensor146_mutant'"
+    fPort: 30
+    payload: "923A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 30
+      voboType: "VoBoXX"
+      payloadType: "One Analog Input"
+      sensorNum0: 146
+      analogSensorString0: "AnalogSensor146"
+      sensorUnits0: 58
+      engUnitsString0: "V"
+      sensorData0: 3.299999952316284
+  - name: mutant_p30_05
+    description: "Separates 1 mutant(s): analogSensorString0 lookup[182] 'AnalogSensor182' -> 'AnalogSensor182_mutant'"
+    fPort: 30
+    payload: "B63A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 30
+      voboType: "VoBoXX"
+      payloadType: "One Analog Input"
+      sensorNum0: 182
+      analogSensorString0: "AnalogSensor182"
+      sensorUnits0: 58
+      engUnitsString0: "V"
+      sensorData0: 3.299999952316284
+  - name: mutant_p30_06
+    description: "Separates 1 mutant(s): analogSensorString0 lookup[219] 'AnalogSensor219' -> 'AnalogSensor219_mutant'"
+    fPort: 30
+    payload: "DB3A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 30
+      voboType: "VoBoXX"
+      payloadType: "One Analog Input"
+      sensorNum0: 219
+      analogSensorString0: "AnalogSensor219"
+      sensorUnits0: 58
+      engUnitsString0: "V"
+      sensorData0: 3.299999952316284
+  - name: mutant_p30_07
+    description: "Separates 1 mutant(s): engUnitsString0 lookup[27] 'ft^3/d' -> 'ft^3/d_mutant'"
+    fPort: 30
+    payload: "001B40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 30
+      voboType: "VoBoXX"
+      payloadType: "One Analog Input"
+      sensorNum0: 0
+      analogSensorString0: "Battery Voltage"
+      sensorUnits0: 27
+      engUnitsString0: "ft^3/d"
+      sensorData0: 3.299999952316284
+  - name: mutant_p30_08
+    description: "Separates 1 mutant(s): engUnitsString0 lookup[52] 'h' -> 'h_mutant'"
+    fPort: 30
+    payload: "003440533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 30
+      voboType: "VoBoXX"
+      payloadType: "One Analog Input"
+      sensorNum0: 0
+      analogSensorString0: "Battery Voltage"
+      sensorUnits0: 52
+      engUnitsString0: "h"
+      sensorData0: 3.299999952316284
+  - name: mutant_p30_09
+    description: "Separates 1 mutant(s): engUnitsString0 lookup[78] 't/h' -> 't/h_mutant'"
+    fPort: 30
+    payload: "004E40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 30
+      voboType: "VoBoXX"
+      payloadType: "One Analog Input"
+      sensorNum0: 0
+      analogSensorString0: "Battery Voltage"
+      sensorUnits0: 78
+      engUnitsString0: "t/h"
+      sensorData0: 3.299999952316284
+  - name: mutant_p30_10
+    description: "Separates 1 mutant(s): engUnitsString0 lookup[103] 'BL' -> 'BL_mutant'"
+    fPort: 30
+    payload: "006740533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 30
+      voboType: "VoBoXX"
+      payloadType: "One Analog Input"
+      sensorNum0: 0
+      analogSensorString0: "Battery Voltage"
+      sensorUnits0: 103
+      engUnitsString0: "BL"
+      sensorData0: 3.299999952316284
+  - name: mutant_p30_11
+    description: "Separates 1 mutant(s): engUnitsString0 lookup[129] 'hp' -> 'hp_mutant'"
+    fPort: 30
+    payload: "008140533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 30
+      voboType: "VoBoXX"
+      payloadType: "One Analog Input"
+      sensorNum0: 0
+      analogSensorString0: "Battery Voltage"
+      sensorUnits0: 129
+      engUnitsString0: "hp"
+      sensorData0: 3.299999952316284
+  - name: mutant_p30_12
+    description: "Separates 1 mutant(s): engUnitsString0 lookup[154] 'mL/L' -> 'mL/L_mutant'"
+    fPort: 30
+    payload: "009A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 30
+      voboType: "VoBoXX"
+      payloadType: "One Analog Input"
+      sensorNum0: 0
+      analogSensorString0: "Battery Voltage"
+      sensorUnits0: 154
+      engUnitsString0: "mL/L"
+      sensorData0: 3.299999952316284
+  - name: mutant_p31_01
+    description: "Separates 1 mutant(s): analogSensorString0 lookup[36] 'AnalogSensor36' -> 'AnalogSensor36_mutant'"
+    fPort: 31
+    payload: "2421447D5000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 31
+      voboType: "VoBoTC"
+      payloadType: "One Analog Input"
+      sensorNum0: 36
+      analogSensorString0: "AnalogSensor36"
+      sensorUnits0: 33
+      engUnitsString0: "F"
+      sensorData0: 1013.25
+  - name: mutant_p31_02
+    description: "Separates 1 mutant(s): analogSensorString0 lookup[73] 'AnalogSensor73' -> 'AnalogSensor73_mutant'"
+    fPort: 31
+    payload: "4921447D5000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 31
+      voboType: "VoBoTC"
+      payloadType: "One Analog Input"
+      sensorNum0: 73
+      analogSensorString0: "AnalogSensor73"
+      sensorUnits0: 33
+      engUnitsString0: "F"
+      sensorData0: 1013.25
+  - name: mutant_p31_03
+    description: "Separates 1 mutant(s): analogSensorString0 lookup[109] 'AnalogSensor109' -> 'AnalogSensor109_mutant'"
+    fPort: 31
+    payload: "6D21447D5000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 31
+      voboType: "VoBoTC"
+      payloadType: "One Analog Input"
+      sensorNum0: 109
+      analogSensorString0: "AnalogSensor109"
+      sensorUnits0: 33
+      engUnitsString0: "F"
+      sensorData0: 1013.25
+  - name: mutant_p31_04
+    description: "Separates 1 mutant(s): analogSensorString0 lookup[146] 'AnalogSensor146' -> 'AnalogSensor146_mutant'"
+    fPort: 31
+    payload: "9221447D5000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 31
+      voboType: "VoBoTC"
+      payloadType: "One Analog Input"
+      sensorNum0: 146
+      analogSensorString0: "AnalogSensor146"
+      sensorUnits0: 33
+      engUnitsString0: "F"
+      sensorData0: 1013.25
+  - name: mutant_p31_05
+    description: "Separates 1 mutant(s): analogSensorString0 lookup[182] 'AnalogSensor182' -> 'AnalogSensor182_mutant'"
+    fPort: 31
+    payload: "B621447D5000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 31
+      voboType: "VoBoTC"
+      payloadType: "One Analog Input"
+      sensorNum0: 182
+      analogSensorString0: "AnalogSensor182"
+      sensorUnits0: 33
+      engUnitsString0: "F"
+      sensorData0: 1013.25
+  - name: mutant_p31_06
+    description: "Separates 1 mutant(s): analogSensorString0 lookup[219] 'AnalogSensor219' -> 'AnalogSensor219_mutant'"
+    fPort: 31
+    payload: "DB21447D5000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 31
+      voboType: "VoBoTC"
+      payloadType: "One Analog Input"
+      sensorNum0: 219
+      analogSensorString0: "AnalogSensor219"
+      sensorUnits0: 33
+      engUnitsString0: "F"
+      sensorData0: 1013.25
+  - name: mutant_p31_07
+    description: "Separates 1 mutant(s): analogSensorString0 lookup[255] 'AnalogSensor255' -> 'AnalogSensor255_mutant'"
+    fPort: 31
+    payload: "FF21447D5000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 31
+      voboType: "VoBoTC"
+      payloadType: "One Analog Input"
+      sensorNum0: 255
+      analogSensorString0: "AnalogSensor255"
+      sensorUnits0: 33
+      engUnitsString0: "F"
+      sensorData0: 1013.25
+  - name: mutant_p31_08
+    description: "Separates 1 mutant(s): engUnitsString0 lookup[27] 'ft^3/d' -> 'ft^3/d_mutant'"
+    fPort: 31
+    payload: "0C1B447D5000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 31
+      voboType: "VoBoTC"
+      payloadType: "One Analog Input"
+      sensorNum0: 12
+      analogSensorString0: "TC12"
+      sensorUnits0: 27
+      engUnitsString0: "ft^3/d"
+      sensorData0: 1013.25
+  - name: mutant_p31_09
+    description: "Separates 1 mutant(s): engUnitsString0 lookup[52] 'h' -> 'h_mutant'"
+    fPort: 31
+    payload: "0C34447D5000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 31
+      voboType: "VoBoTC"
+      payloadType: "One Analog Input"
+      sensorNum0: 12
+      analogSensorString0: "TC12"
+      sensorUnits0: 52
+      engUnitsString0: "h"
+      sensorData0: 1013.25
+  - name: mutant_p31_10
+    description: "Separates 1 mutant(s): engUnitsString0 lookup[78] 't/h' -> 't/h_mutant'"
+    fPort: 31
+    payload: "0C4E447D5000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 31
+      voboType: "VoBoTC"
+      payloadType: "One Analog Input"
+      sensorNum0: 12
+      analogSensorString0: "TC12"
+      sensorUnits0: 78
+      engUnitsString0: "t/h"
+      sensorData0: 1013.25
+  - name: mutant_p31_11
+    description: "Separates 1 mutant(s): engUnitsString0 lookup[103] 'BL' -> 'BL_mutant'"
+    fPort: 31
+    payload: "0C67447D5000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 31
+      voboType: "VoBoTC"
+      payloadType: "One Analog Input"
+      sensorNum0: 12
+      analogSensorString0: "TC12"
+      sensorUnits0: 103
+      engUnitsString0: "BL"
+      sensorData0: 1013.25
+  - name: mutant_p31_12
+    description: "Separates 1 mutant(s): engUnitsString0 lookup[129] 'hp' -> 'hp_mutant'"
+    fPort: 31
+    payload: "0C81447D5000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 31
+      voboType: "VoBoTC"
+      payloadType: "One Analog Input"
+      sensorNum0: 12
+      analogSensorString0: "TC12"
+      sensorUnits0: 129
+      engUnitsString0: "hp"
+      sensorData0: 1013.25
+  - name: mutant_p31_13
+    description: "Separates 1 mutant(s): engUnitsString0 lookup[154] 'mL/L' -> 'mL/L_mutant'"
+    fPort: 31
+    payload: "0C9A447D5000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 31
+      voboType: "VoBoTC"
+      payloadType: "One Analog Input"
+      sensorNum0: 12
+      analogSensorString0: "TC12"
+      sensorUnits0: 154
+      engUnitsString0: "mL/L"
+      sensorData0: 1013.25
+  - name: mutant_p32_01
+    description: "Separates 1 mutant(s): analogSensorString0 lookup[36] 'AnalogSensor36' -> 'AnalogSensor36_mutant'"
+    fPort: 32
+    payload: "243A40800000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 32
+      voboType: "VoBoXP"
+      payloadType: "One Analog Input"
+      sensorNum0: 36
+      analogSensorString0: "AnalogSensor36"
+      sensorUnits0: 58
+      engUnitsString0: "V"
+      sensorData0: 4
+  - name: mutant_p32_02
+    description: "Separates 1 mutant(s): analogSensorString0 lookup[73] 'RLY2 Voltage (Max)' -> 'RLY2 Voltage (Max)_mutant'"
+    fPort: 32
+    payload: "493A40800000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 32
+      voboType: "VoBoXP"
+      payloadType: "One Analog Input"
+      sensorNum0: 73
+      analogSensorString0: "RLY2 Voltage (Max)"
+      sensorUnits0: 58
+      engUnitsString0: "V"
+      sensorData0: 4
+  - name: mutant_p32_03
+    description: "Separates 1 mutant(s): analogSensorString0 lookup[109] 'AnalogSensor45' -> 'AnalogSensor45_mutant'"
+    fPort: 32
+    payload: "6D3A40800000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 32
+      voboType: "VoBoXP"
+      payloadType: "One Analog Input"
+      sensorNum0: 109
+      analogSensorString0: "AnalogSensor45"
+      sensorUnits0: 58
+      engUnitsString0: "V"
+      sensorData0: 4
+  - name: mutant_p32_04
+    description: "Separates 1 mutant(s): analogSensorString0 lookup[146] 'AnalogSensor18' -> 'AnalogSensor18_mutant'"
+    fPort: 32
+    payload: "923A40800000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 32
+      voboType: "VoBoXP"
+      payloadType: "One Analog Input"
+      sensorNum0: 146
+      analogSensorString0: "AnalogSensor18"
+      sensorUnits0: 58
+      engUnitsString0: "V"
+      sensorData0: 4
+  - name: mutant_p32_05
+    description: "Separates 1 mutant(s): analogSensorString0 lookup[182] 'AnalogSensor54' -> 'AnalogSensor54_mutant'"
+    fPort: 32
+    payload: "B63A40800000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 32
+      voboType: "VoBoXP"
+      payloadType: "One Analog Input"
+      sensorNum0: 182
+      analogSensorString0: "AnalogSensor54"
+      sensorUnits0: 58
+      engUnitsString0: "V"
+      sensorData0: 4
+  - name: mutant_p32_06
+    description: "Separates 1 mutant(s): analogSensorString0 lookup[219] 'AnalogSensor27' -> 'AnalogSensor27_mutant'"
+    fPort: 32
+    payload: "DB3A40800000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 32
+      voboType: "VoBoXP"
+      payloadType: "One Analog Input"
+      sensorNum0: 219
+      analogSensorString0: "AnalogSensor27"
+      sensorUnits0: 58
+      engUnitsString0: "V"
+      sensorData0: 4
+  - name: mutant_p32_07
+    description: "Separates 1 mutant(s): analogSensorString0 lookup[255] 'AnalogSensor63' -> 'AnalogSensor63_mutant'"
+    fPort: 32
+    payload: "FF3A40800000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 32
+      voboType: "VoBoXP"
+      payloadType: "One Analog Input"
+      sensorNum0: 255
+      analogSensorString0: "AnalogSensor63"
+      sensorUnits0: 58
+      engUnitsString0: "V"
+      sensorData0: 4
+  - name: mutant_p32_08
+    description: "Separates 1 mutant(s): engUnitsString0 lookup[27] 'ft^3/d' -> 'ft^3/d_mutant'"
+    fPort: 32
+    payload: "481B40800000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 32
+      voboType: "VoBoXP"
+      payloadType: "One Analog Input"
+      sensorNum0: 72
+      analogSensorString0: "RLY1 Voltage (Max)"
+      sensorUnits0: 27
+      engUnitsString0: "ft^3/d"
+      sensorData0: 4
+  - name: mutant_p32_09
+    description: "Separates 1 mutant(s): engUnitsString0 lookup[52] 'h' -> 'h_mutant'"
+    fPort: 32
+    payload: "483440800000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 32
+      voboType: "VoBoXP"
+      payloadType: "One Analog Input"
+      sensorNum0: 72
+      analogSensorString0: "RLY1 Voltage (Max)"
+      sensorUnits0: 52
+      engUnitsString0: "h"
+      sensorData0: 4
+  - name: mutant_p32_10
+    description: "Separates 1 mutant(s): engUnitsString0 lookup[78] 't/h' -> 't/h_mutant'"
+    fPort: 32
+    payload: "484E40800000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 32
+      voboType: "VoBoXP"
+      payloadType: "One Analog Input"
+      sensorNum0: 72
+      analogSensorString0: "RLY1 Voltage (Max)"
+      sensorUnits0: 78
+      engUnitsString0: "t/h"
+      sensorData0: 4
+  - name: mutant_p32_11
+    description: "Separates 1 mutant(s): engUnitsString0 lookup[103] 'BL' -> 'BL_mutant'"
+    fPort: 32
+    payload: "486740800000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 32
+      voboType: "VoBoXP"
+      payloadType: "One Analog Input"
+      sensorNum0: 72
+      analogSensorString0: "RLY1 Voltage (Max)"
+      sensorUnits0: 103
+      engUnitsString0: "BL"
+      sensorData0: 4
+  - name: mutant_p32_12
+    description: "Separates 1 mutant(s): engUnitsString0 lookup[129] 'hp' -> 'hp_mutant'"
+    fPort: 32
+    payload: "488140800000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 32
+      voboType: "VoBoXP"
+      payloadType: "One Analog Input"
+      sensorNum0: 72
+      analogSensorString0: "RLY1 Voltage (Max)"
+      sensorUnits0: 129
+      engUnitsString0: "hp"
+      sensorData0: 4
+  - name: mutant_p32_13
+    description: "Separates 1 mutant(s): engUnitsString0 lookup[154] 'mL/L' -> 'mL/L_mutant'"
+    fPort: 32
+    payload: "489A40800000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 32
+      voboType: "VoBoXP"
+      payloadType: "One Analog Input"
+      sensorNum0: 72
+      analogSensorString0: "RLY1 Voltage (Max)"
+      sensorUnits0: 154
+      engUnitsString0: "mL/L"
+      sensorData0: 4
+  - name: mutant_p40_01
+    description: "Separates 2 mutant(s): analogSensorString0 lookup[6] 'AnalogSensor6' -> 'AnalogSensor6_mutant' ..."
+    fPort: 40
+    payload: "063A4053333324447D5000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 40
+      voboType: "VoBoXX"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 0
+      analogSensorString0: "Battery Voltage"
+      sensorNum1: 6
+      analogSensorString1: "AnalogSensor6"
+      sensorUnits0: 58
+      engUnitsString0: "V"
+      sensorData0: 3.299999952316284
+      sensorUnits1: 36
+      engUnitsString1: "mV"
+      sensorData1: 1013.25
+  - name: mutant_p40_02
+    description: "Separates 2 mutant(s): analogSensorString0 lookup[9] 'AnalogSensor9' -> 'AnalogSensor9_mutant' ..."
+    fPort: 40
+    payload: "093A4053333324447D5000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 40
+      voboType: "VoBoXX"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 0
+      analogSensorString0: "Battery Voltage"
+      sensorNum1: 9
+      analogSensorString1: "AnalogSensor9"
+      sensorUnits0: 58
+      engUnitsString0: "V"
+      sensorData0: 3.299999952316284
+      sensorUnits1: 36
+      engUnitsString1: "mV"
+      sensorData1: 1013.25
+  - name: mutant_p40_03
+    description: "Separates 2 mutant(s): analogSensorString0 lookup[11] 'AnalogSensor11' -> 'AnalogSensor11_mutant' ..."
+    fPort: 40
+    payload: "0B3A4053333324447D5000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 40
+      voboType: "VoBoXX"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 0
+      analogSensorString0: "Battery Voltage"
+      sensorNum1: 11
+      analogSensorString1: "AnalogSensor11"
+      sensorUnits0: 58
+      engUnitsString0: "V"
+      sensorData0: 3.299999952316284
+      sensorUnits1: 36
+      engUnitsString1: "mV"
+      sensorData1: 1013.25
+  - name: mutant_p40_04
+    description: "Separates 2 mutant(s): analogSensorString0 lookup[13] 'AnalogSensor13' -> 'AnalogSensor13_mutant' ..."
+    fPort: 40
+    payload: "0D3A4053333324447D5000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 40
+      voboType: "VoBoXX"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 0
+      analogSensorString0: "Battery Voltage"
+      sensorNum1: 13
+      analogSensorString1: "AnalogSensor13"
+      sensorUnits0: 58
+      engUnitsString0: "V"
+      sensorData0: 3.299999952316284
+      sensorUnits1: 36
+      engUnitsString1: "mV"
+      sensorData1: 1013.25
+  - name: mutant_p40_05
+    description: "Separates 2 mutant(s): engUnitsString0 lookup[27] 'ft^3/d' -> 'ft^3/d_mutant' ..."
+    fPort: 40
+    payload: "121B4053333324447D5000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 40
+      voboType: "VoBoXX"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 1
+      analogSensorString0: "AIN1"
+      sensorNum1: 2
+      analogSensorString1: "AIN2"
+      sensorUnits0: 27
+      engUnitsString0: "ft^3/d"
+      sensorData0: 3.299999952316284
+      sensorUnits1: 36
+      engUnitsString1: "mV"
+      sensorData1: 1013.25
+  - name: mutant_p40_06
+    description: "Separates 2 mutant(s): engUnitsString0 lookup[52] 'h' -> 'h_mutant' ..."
+    fPort: 40
+    payload: "12344053333324447D5000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 40
+      voboType: "VoBoXX"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 1
+      analogSensorString0: "AIN1"
+      sensorNum1: 2
+      analogSensorString1: "AIN2"
+      sensorUnits0: 52
+      engUnitsString0: "h"
+      sensorData0: 3.299999952316284
+      sensorUnits1: 36
+      engUnitsString1: "mV"
+      sensorData1: 1013.25
+  - name: mutant_p40_07
+    description: "Separates 2 mutant(s): engUnitsString0 lookup[78] 't/h' -> 't/h_mutant' ..."
+    fPort: 40
+    payload: "124E4053333324447D5000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 40
+      voboType: "VoBoXX"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 1
+      analogSensorString0: "AIN1"
+      sensorNum1: 2
+      analogSensorString1: "AIN2"
+      sensorUnits0: 78
+      engUnitsString0: "t/h"
+      sensorData0: 3.299999952316284
+      sensorUnits1: 36
+      engUnitsString1: "mV"
+      sensorData1: 1013.25
+  - name: mutant_p40_08
+    description: "Separates 2 mutant(s): engUnitsString0 lookup[103] 'BL' -> 'BL_mutant' ..."
+    fPort: 40
+    payload: "12674053333324447D5000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 40
+      voboType: "VoBoXX"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 1
+      analogSensorString0: "AIN1"
+      sensorNum1: 2
+      analogSensorString1: "AIN2"
+      sensorUnits0: 103
+      engUnitsString0: "BL"
+      sensorData0: 3.299999952316284
+      sensorUnits1: 36
+      engUnitsString1: "mV"
+      sensorData1: 1013.25
+  - name: mutant_p40_09
+    description: "Separates 2 mutant(s): engUnitsString0 lookup[129] 'hp' -> 'hp_mutant' ..."
+    fPort: 40
+    payload: "12814053333324447D5000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 40
+      voboType: "VoBoXX"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 1
+      analogSensorString0: "AIN1"
+      sensorNum1: 2
+      analogSensorString1: "AIN2"
+      sensorUnits0: 129
+      engUnitsString0: "hp"
+      sensorData0: 3.299999952316284
+      sensorUnits1: 36
+      engUnitsString1: "mV"
+      sensorData1: 1013.25
+  - name: mutant_p40_10
+    description: "Separates 2 mutant(s): engUnitsString0 lookup[154] 'mL/L' -> 'mL/L_mutant' ..."
+    fPort: 40
+    payload: "129A4053333324447D5000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 40
+      voboType: "VoBoXX"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 1
+      analogSensorString0: "AIN1"
+      sensorNum1: 2
+      analogSensorString1: "AIN2"
+      sensorUnits0: 154
+      engUnitsString0: "mL/L"
+      sensorData0: 3.299999952316284
+      sensorUnits1: 36
+      engUnitsString1: "mV"
+      sensorData1: 1013.25
+  - name: mutant_p41_01
+    description: "Separates 2 mutant(s): analogSensorString0 lookup[2] 'TC2' -> 'TC2_mutant' ..."
+    fPort: 41
+    payload: "022041BC000021C3889333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 41
+      voboType: "VoBoTC"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 0
+      analogSensorString0: "Battery Voltage"
+      sensorNum1: 2
+      analogSensorString1: "TC2"
+      sensorUnits0: 32
+      engUnitsString0: "C"
+      sensorData0: 23.5
+      sensorUnits1: 33
+      engUnitsString1: "F"
+      sensorData1: -273.1499938964844
+  - name: mutant_p41_02
+    description: "Separates 2 mutant(s): analogSensorString0 lookup[4] 'TC4' -> 'TC4_mutant' ..."
+    fPort: 41
+    payload: "042041BC000021C3889333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 41
+      voboType: "VoBoTC"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 0
+      analogSensorString0: "Battery Voltage"
+      sensorNum1: 4
+      analogSensorString1: "TC4"
+      sensorUnits0: 32
+      engUnitsString0: "C"
+      sensorData0: 23.5
+      sensorUnits1: 33
+      engUnitsString1: "F"
+      sensorData1: -273.1499938964844
+  - name: mutant_p41_03
+    description: "Separates 2 mutant(s): analogSensorString0 lookup[6] 'TC6' -> 'TC6_mutant' ..."
+    fPort: 41
+    payload: "062041BC000021C3889333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 41
+      voboType: "VoBoTC"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 0
+      analogSensorString0: "Battery Voltage"
+      sensorNum1: 6
+      analogSensorString1: "TC6"
+      sensorUnits0: 32
+      engUnitsString0: "C"
+      sensorData0: 23.5
+      sensorUnits1: 33
+      engUnitsString1: "F"
+      sensorData1: -273.1499938964844
+  - name: mutant_p41_04
+    description: "Separates 2 mutant(s): analogSensorString0 lookup[9] 'TC9' -> 'TC9_mutant' ..."
+    fPort: 41
+    payload: "092041BC000021C3889333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 41
+      voboType: "VoBoTC"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 0
+      analogSensorString0: "Battery Voltage"
+      sensorNum1: 9
+      analogSensorString1: "TC9"
+      sensorUnits0: 32
+      engUnitsString0: "C"
+      sensorData0: 23.5
+      sensorUnits1: 33
+      engUnitsString1: "F"
+      sensorData1: -273.1499938964844
+  - name: mutant_p41_05
+    description: "Separates 2 mutant(s): analogSensorString0 lookup[11] 'TC11' -> 'TC11_mutant' ..."
+    fPort: 41
+    payload: "0B2041BC000021C3889333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 41
+      voboType: "VoBoTC"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 0
+      analogSensorString0: "Battery Voltage"
+      sensorNum1: 11
+      analogSensorString1: "TC11"
+      sensorUnits0: 32
+      engUnitsString0: "C"
+      sensorData0: 23.5
+      sensorUnits1: 33
+      engUnitsString1: "F"
+      sensorData1: -273.1499938964844
+  - name: mutant_p41_06
+    description: "Separates 2 mutant(s): engUnitsString0 lookup[27] 'ft^3/d' -> 'ft^3/d_mutant' ..."
+    fPort: 41
+    payload: "1D1B41BC000021C3889333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 41
+      voboType: "VoBoTC"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 1
+      analogSensorString0: "TC1"
+      sensorNum1: 13
+      analogSensorString1: "Cold Joint Temperature"
+      sensorUnits0: 27
+      engUnitsString0: "ft^3/d"
+      sensorData0: 23.5
+      sensorUnits1: 33
+      engUnitsString1: "F"
+      sensorData1: -273.1499938964844
+  - name: mutant_p41_07
+    description: "Separates 2 mutant(s): engUnitsString0 lookup[52] 'h' -> 'h_mutant' ..."
+    fPort: 41
+    payload: "1D3441BC000021C3889333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 41
+      voboType: "VoBoTC"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 1
+      analogSensorString0: "TC1"
+      sensorNum1: 13
+      analogSensorString1: "Cold Joint Temperature"
+      sensorUnits0: 52
+      engUnitsString0: "h"
+      sensorData0: 23.5
+      sensorUnits1: 33
+      engUnitsString1: "F"
+      sensorData1: -273.1499938964844
+  - name: mutant_p41_08
+    description: "Separates 2 mutant(s): engUnitsString0 lookup[78] 't/h' -> 't/h_mutant' ..."
+    fPort: 41
+    payload: "1D4E41BC000021C3889333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 41
+      voboType: "VoBoTC"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 1
+      analogSensorString0: "TC1"
+      sensorNum1: 13
+      analogSensorString1: "Cold Joint Temperature"
+      sensorUnits0: 78
+      engUnitsString0: "t/h"
+      sensorData0: 23.5
+      sensorUnits1: 33
+      engUnitsString1: "F"
+      sensorData1: -273.1499938964844
+  - name: mutant_p41_09
+    description: "Separates 2 mutant(s): engUnitsString0 lookup[103] 'BL' -> 'BL_mutant' ..."
+    fPort: 41
+    payload: "1D6741BC000021C3889333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 41
+      voboType: "VoBoTC"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 1
+      analogSensorString0: "TC1"
+      sensorNum1: 13
+      analogSensorString1: "Cold Joint Temperature"
+      sensorUnits0: 103
+      engUnitsString0: "BL"
+      sensorData0: 23.5
+      sensorUnits1: 33
+      engUnitsString1: "F"
+      sensorData1: -273.1499938964844
+  - name: mutant_p41_10
+    description: "Separates 2 mutant(s): engUnitsString0 lookup[129] 'hp' -> 'hp_mutant' ..."
+    fPort: 41
+    payload: "1D8141BC000021C3889333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 41
+      voboType: "VoBoTC"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 1
+      analogSensorString0: "TC1"
+      sensorNum1: 13
+      analogSensorString1: "Cold Joint Temperature"
+      sensorUnits0: 129
+      engUnitsString0: "hp"
+      sensorData0: 23.5
+      sensorUnits1: 33
+      engUnitsString1: "F"
+      sensorData1: -273.1499938964844
+  - name: mutant_p41_11
+    description: "Separates 2 mutant(s): engUnitsString0 lookup[154] 'mL/L' -> 'mL/L_mutant' ..."
+    fPort: 41
+    payload: "1D9A41BC000021C3889333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 41
+      voboType: "VoBoTC"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 1
+      analogSensorString0: "TC1"
+      sensorNum1: 13
+      analogSensorString1: "Cold Joint Temperature"
+      sensorUnits0: 154
+      engUnitsString0: "mL/L"
+      sensorData0: 23.5
+      sensorUnits1: 33
+      engUnitsString1: "F"
+      sensorData1: -273.1499938964844
+  - name: mutant_p42_01
+    description: "Separates 2 mutant(s): analogSensorString0 lookup[2] 'AIN2' -> 'AIN2_mutant' ..."
+    fPort: 42
+    payload: "02FD477FFF003A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 42
+      voboType: "VoBoXP"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 0
+      analogSensorString0: "3.3V Supply Voltage"
+      sensorNum1: 2
+      analogSensorString1: "AIN2"
+      sensorUnits0: 253
+      engUnitsString0: "counts"
+      sensorData0: 65535
+      sensorUnits1: 58
+      engUnitsString1: "V"
+      sensorData1: 3.299999952316284
+  - name: mutant_p42_02
+    description: "Separates 2 mutant(s): analogSensorString0 lookup[4] 'DIN1' -> 'DIN1_mutant' ..."
+    fPort: 42
+    payload: "04FD477FFF003A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 42
+      voboType: "VoBoXP"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 0
+      analogSensorString0: "3.3V Supply Voltage"
+      sensorNum1: 4
+      analogSensorString1: "DIN1"
+      sensorUnits0: 253
+      engUnitsString0: "counts"
+      sensorData0: 65535
+      sensorUnits1: 58
+      engUnitsString1: "V"
+      sensorData1: 3.299999952316284
+  - name: mutant_p42_03
+    description: "Separates 2 mutant(s): analogSensorString0 lookup[6] 'DIN2' -> 'DIN2_mutant' ..."
+    fPort: 42
+    payload: "06FD477FFF003A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 42
+      voboType: "VoBoXP"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 0
+      analogSensorString0: "3.3V Supply Voltage"
+      sensorNum1: 6
+      analogSensorString1: "DIN2"
+      sensorUnits0: 253
+      engUnitsString0: "counts"
+      sensorData0: 65535
+      sensorUnits1: 58
+      engUnitsString1: "V"
+      sensorData1: 3.299999952316284
+  - name: mutant_p42_04
+    description: "Separates 2 mutant(s): analogSensorString0 lookup[11] 'RLY4 Voltage' -> 'RLY4 Voltage_mutant' ..."
+    fPort: 42
+    payload: "0BFD477FFF003A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 42
+      voboType: "VoBoXP"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 0
+      analogSensorString0: "3.3V Supply Voltage"
+      sensorNum1: 11
+      analogSensorString1: "RLY4 Voltage"
+      sensorUnits0: 253
+      engUnitsString0: "counts"
+      sensorData0: 65535
+      sensorUnits1: 58
+      engUnitsString1: "V"
+      sensorData1: 3.299999952316284
+  - name: mutant_p42_05
+    description: "Separates 2 mutant(s): analogSensorString0 lookup[13] 'VPP Voltage' -> 'VPP Voltage_mutant' ..."
+    fPort: 42
+    payload: "0DFD477FFF003A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 42
+      voboType: "VoBoXP"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 0
+      analogSensorString0: "3.3V Supply Voltage"
+      sensorNum1: 13
+      analogSensorString1: "VPP Voltage"
+      sensorUnits0: 253
+      engUnitsString0: "counts"
+      sensorData0: 65535
+      sensorUnits1: 58
+      engUnitsString1: "V"
+      sensorData1: 3.299999952316284
+  - name: mutant_p42_06
+    description: "Separates 2 mutant(s): engUnitsString0 lookup[27] 'ft^3/d' -> 'ft^3/d_mutant' ..."
+    fPort: 42
+    payload: "5C1B477FFF003A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 42
+      voboType: "VoBoXP"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 5
+      analogSensorString0: "DIN1 Pulse Count"
+      sensorNum1: 12
+      analogSensorString1: "WKUP"
+      sensorUnits0: 27
+      engUnitsString0: "ft^3/d"
+      sensorData0: 65535
+      sensorUnits1: 58
+      engUnitsString1: "V"
+      sensorData1: 3.299999952316284
+  - name: mutant_p42_07
+    description: "Separates 2 mutant(s): engUnitsString0 lookup[52] 'h' -> 'h_mutant' ..."
+    fPort: 42
+    payload: "5C34477FFF003A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 42
+      voboType: "VoBoXP"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 5
+      analogSensorString0: "DIN1 Pulse Count"
+      sensorNum1: 12
+      analogSensorString1: "WKUP"
+      sensorUnits0: 52
+      engUnitsString0: "h"
+      sensorData0: 65535
+      sensorUnits1: 58
+      engUnitsString1: "V"
+      sensorData1: 3.299999952316284
+  - name: mutant_p42_08
+    description: "Separates 2 mutant(s): engUnitsString0 lookup[78] 't/h' -> 't/h_mutant' ..."
+    fPort: 42
+    payload: "5C4E477FFF003A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 42
+      voboType: "VoBoXP"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 5
+      analogSensorString0: "DIN1 Pulse Count"
+      sensorNum1: 12
+      analogSensorString1: "WKUP"
+      sensorUnits0: 78
+      engUnitsString0: "t/h"
+      sensorData0: 65535
+      sensorUnits1: 58
+      engUnitsString1: "V"
+      sensorData1: 3.299999952316284
+  - name: mutant_p42_09
+    description: "Separates 2 mutant(s): engUnitsString0 lookup[103] 'BL' -> 'BL_mutant' ..."
+    fPort: 42
+    payload: "5C67477FFF003A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 42
+      voboType: "VoBoXP"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 5
+      analogSensorString0: "DIN1 Pulse Count"
+      sensorNum1: 12
+      analogSensorString1: "WKUP"
+      sensorUnits0: 103
+      engUnitsString0: "BL"
+      sensorData0: 65535
+      sensorUnits1: 58
+      engUnitsString1: "V"
+      sensorData1: 3.299999952316284
+  - name: mutant_p42_10
+    description: "Separates 2 mutant(s): engUnitsString0 lookup[129] 'hp' -> 'hp_mutant' ..."
+    fPort: 42
+    payload: "5C81477FFF003A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 42
+      voboType: "VoBoXP"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 5
+      analogSensorString0: "DIN1 Pulse Count"
+      sensorNum1: 12
+      analogSensorString1: "WKUP"
+      sensorUnits0: 129
+      engUnitsString0: "hp"
+      sensorData0: 65535
+      sensorUnits1: 58
+      engUnitsString1: "V"
+      sensorData1: 3.299999952316284
+  - name: mutant_p42_11
+    description: "Separates 2 mutant(s): engUnitsString0 lookup[154] 'mL/L' -> 'mL/L_mutant' ..."
+    fPort: 42
+    payload: "5C9A477FFF003A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 42
+      voboType: "VoBoXP"
+      payloadType: "Two Analog Inputs"
+      sensorNum0: 5
+      analogSensorString0: "DIN1 Pulse Count"
+      sensorNum1: 12
+      analogSensorString1: "WKUP"
+      sensorUnits0: 154
+      engUnitsString0: "mL/L"
+      sensorData0: 65535
+      sensorUnits1: 58
+      engUnitsString1: "V"
+      sensorData1: 3.299999952316284
+  - name: mutant_p71_01
+    description: "Separates 1 mutant(s): match[0x05]/match[0x00]/_cfg_mask add 2 -> 3"
+    fPort: 71
+    payload: "05454830B0574EF6B8"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 71
+      voboType: "VoBoTC"
+      payloadType: "Configuration"
+      subgroupID: 5
+      sequenceNumber: 0
+      reserved1: 9
+      reserved2: 1
+      reserved3: 9
+      reserved4: 1
+      gain1: 0.069
+      offset1: 2.336
+      gain2: 1.623
+      offset2: 4.582
+  - name: mutant_p71_02
+    description: "Separates 1 mutant(s): match[0x05]/match[0x01]/_cfg_mask add 4 -> 5"
+    fPort: 71
+    payload: "15454830B0574EF6B8"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 71
+      voboType: "VoBoTC"
+      payloadType: "Configuration"
+      subgroupID: 5
+      sequenceNumber: 1
+      reserved1: 9
+      reserved2: 1
+      reserved3: 9
+      reserved4: 1
+      gain3: 0.069
+      offset3: 2.336
+      gain4: 1.623
+      offset4: 4.582
+  - name: mutant_p71_03
+    description: "Separates 1 mutant(s): match[0x05]/match[0x02]/_cfg_mask add 8 -> 9"
+    fPort: 71
+    payload: "25454830B0574EF6B8"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 71
+      voboType: "VoBoTC"
+      payloadType: "Configuration"
+      subgroupID: 5
+      sequenceNumber: 2
+      reserved1: 9
+      reserved2: 1
+      reserved3: 9
+      reserved4: 1
+      gain5: 0.069
+      offset5: 2.336
+      gain6: 1.623
+      offset6: 4.582
+  - name: mutant_p71_04
+    description: "Separates 1 mutant(s): match[0x05]/match[0x03]/_cfg_mask add 16 -> 17"
+    fPort: 71
+    payload: "35454830B0574EF6B8"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 71
+      voboType: "VoBoTC"
+      payloadType: "Configuration"
+      subgroupID: 5
+      sequenceNumber: 3
+      reserved1: 9
+      reserved2: 1
+      reserved3: 9
+      reserved4: 1
+      gain7: 0.069
+      offset7: 2.336
+      gain8: 1.623
+      offset8: 4.582
+  - name: mutant_p71_05
+    description: "Separates 5 mutant(s): match[0x05]/match[0x04]/_cfg_mask add 32 -> 33 ..."
+    fPort: 71
+    payload: "45454830B0574EF6B8"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 71
+      voboType: "VoBoTC"
+      payloadType: "Configuration"
+      subgroupID: 5
+      sequenceNumber: 4
+      reserved1: 9
+      reserved2: 1
+      reserved3: 9
+      reserved4: 1
+      gain9: 0.069
+      offset9: 2.336
+      gain10: 1.623
+      offset10: 4.582
+  - name: mutant_p71_06
+    description: "Separates 1 mutant(s): match[0x05]/match[0x05]/_cfg_mask add 64 -> 65"
+    fPort: 71
+    payload: "55454830B0574EF6B8"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 71
+      voboType: "VoBoTC"
+      payloadType: "Configuration"
+      subgroupID: 5
+      sequenceNumber: 5
+      reserved1: 9
+      reserved2: 1
+      reserved3: 9
+      reserved4: 1
+      gain11: 0.069
+      offset11: 2.336
+      gain12: 1.623
+      offset12: 4.582
+  - name: mutant_p72_01
+    description: "Separates 1 mutant(s): match[0x0C]/match[0x01]/ain1SeriesResistance big -> little"
+    fPort: 72
+    payload: "1C9FABF2AF"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 72
+      voboType: "VoBoXP"
+      payloadType: "Configuration"
+      subgroupID: 12
+      sequenceNumber: 1
+      ain1SeriesResistance: -7.282280331771207e-20
+  - name: mutant_p72_02
+    description: "Separates 1 mutant(s): match[0x0C]/match[0x08]/ain3Offset big -> little"
+    fPort: 72
+    payload: "8CA309F19AFE7C31DA"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 72
+      voboType: "VoBoXP"
+      payloadType: "Configuration"
+      subgroupID: 12
+      sequenceNumber: 8
+      ain3Gain: -7.47794600241211e-18
+      ain3Offset: -83806074762290150647427448502889742336
+  - name: mutant_p50_01
+    description: "Separates 1 mutant(s): flagged[bit 15]/DigitalSensor15 u16[7:7] -> u16[8:8]"
+    fPort: 50
+    payload: "80800100"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 50
+      voboType: "VoBoXX"
+      payloadType: "Digital Inputs"
+      sensorValid0: 32896
+      DigitalSensor7: 0
+      DigitalSensor15: 0
+      sensorData0: 1
+  - name: mutant_p51_01
+    description: "Separates 1 mutant(s): flagged[bit 15]/DigitalSensor15 u16[7:7] -> u16[8:8]"
+    fPort: 51
+    payload: "80800100"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 51
+      voboType: "VoBoTC"
+      payloadType: "Digital Inputs"
+      sensorValid0: 32896
+      DigitalSensor7: 0
+      DigitalSensor15: 0
+      sensorData0: 1
+  - name: mutant_p52_01
+    description: "Separates 1 mutant(s): flagged[bit 15]/DigitalSensor15 u16[7:7] -> u16[8:8]"
+    fPort: 52
+    payload: "80800100"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 52
+      voboType: "VoBoXP"
+      payloadType: "Digital Inputs"
+      sensorValid0: 32896
+      DigitalSensor7: 0
+      DigitalSensor15: 0
+      sensorData0: 1
+  - name: mutant_p110_01
+    description: "Separates 1 mutant(s): ainPayloads/analogSensorString0 lookup[36] 'AnalogSensor36' -> 'AnalogSensor36_mutant'"
+    fPort: 110
+    payload: "243A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 110
+      voboType: "VoBoXX"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 36, analogSensorString0: "AnalogSensor36", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 3.299999952316284}
+  - name: mutant_p110_02
+    description: "Separates 1 mutant(s): ainPayloads/analogSensorString0 lookup[73] 'AnalogSensor73' -> 'AnalogSensor73_mutant'"
+    fPort: 110
+    payload: "493A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 110
+      voboType: "VoBoXX"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 73, analogSensorString0: "AnalogSensor73", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 3.299999952316284}
+  - name: mutant_p110_03
+    description: "Separates 1 mutant(s): ainPayloads/analogSensorString0 lookup[109] 'AnalogSensor109' -> 'AnalogSensor109_mutant'"
+    fPort: 110
+    payload: "6D3A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 110
+      voboType: "VoBoXX"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 109, analogSensorString0: "AnalogSensor109", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 3.299999952316284}
+  - name: mutant_p110_04
+    description: "Separates 1 mutant(s): ainPayloads/analogSensorString0 lookup[146] 'AnalogSensor146' -> 'AnalogSensor146_mutant'"
+    fPort: 110
+    payload: "923A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 110
+      voboType: "VoBoXX"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 146, analogSensorString0: "AnalogSensor146", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 3.299999952316284}
+  - name: mutant_p110_05
+    description: "Separates 1 mutant(s): ainPayloads/analogSensorString0 lookup[182] 'AnalogSensor182' -> 'AnalogSensor182_mutant'"
+    fPort: 110
+    payload: "B63A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 110
+      voboType: "VoBoXX"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 182, analogSensorString0: "AnalogSensor182", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 3.299999952316284}
+  - name: mutant_p110_06
+    description: "Separates 1 mutant(s): ainPayloads/analogSensorString0 lookup[219] 'AnalogSensor219' -> 'AnalogSensor219_mutant'"
+    fPort: 110
+    payload: "DB3A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 110
+      voboType: "VoBoXX"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 219, analogSensorString0: "AnalogSensor219", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 3.299999952316284}
+  - name: mutant_p110_07
+    description: "Separates 1 mutant(s): ainPayloads/engUnitsString0 lookup[27] 'ft^3/d' -> 'ft^3/d_mutant'"
+    fPort: 110
+    payload: "011B40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 110
+      voboType: "VoBoXX"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 1, analogSensorString0: "AIN1", sensorUnits0: 27, engUnitsString0: "ft^3/d", sensorData0: 3.299999952316284}
+  - name: mutant_p110_08
+    description: "Separates 1 mutant(s): ainPayloads/engUnitsString0 lookup[52] 'h' -> 'h_mutant'"
+    fPort: 110
+    payload: "013440533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 110
+      voboType: "VoBoXX"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 1, analogSensorString0: "AIN1", sensorUnits0: 52, engUnitsString0: "h", sensorData0: 3.299999952316284}
+  - name: mutant_p110_09
+    description: "Separates 1 mutant(s): ainPayloads/engUnitsString0 lookup[78] 't/h' -> 't/h_mutant'"
+    fPort: 110
+    payload: "014E40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 110
+      voboType: "VoBoXX"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 1, analogSensorString0: "AIN1", sensorUnits0: 78, engUnitsString0: "t/h", sensorData0: 3.299999952316284}
+  - name: mutant_p110_10
+    description: "Separates 1 mutant(s): ainPayloads/engUnitsString0 lookup[103] 'BL' -> 'BL_mutant'"
+    fPort: 110
+    payload: "016740533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 110
+      voboType: "VoBoXX"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 1, analogSensorString0: "AIN1", sensorUnits0: 103, engUnitsString0: "BL", sensorData0: 3.299999952316284}
+  - name: mutant_p110_11
+    description: "Separates 1 mutant(s): ainPayloads/engUnitsString0 lookup[129] 'hp' -> 'hp_mutant'"
+    fPort: 110
+    payload: "018140533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 110
+      voboType: "VoBoXX"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 1, analogSensorString0: "AIN1", sensorUnits0: 129, engUnitsString0: "hp", sensorData0: 3.299999952316284}
+  - name: mutant_p110_12
+    description: "Separates 1 mutant(s): ainPayloads/engUnitsString0 lookup[154] 'mL/L' -> 'mL/L_mutant'"
+    fPort: 110
+    payload: "019A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 110
+      voboType: "VoBoXX"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 1, analogSensorString0: "AIN1", sensorUnits0: 154, engUnitsString0: "mL/L", sensorData0: 3.299999952316284}
+  - name: mutant_p111_01
+    description: "Separates 1 mutant(s): ainPayloads/analogSensorString0 lookup[36] 'AnalogSensor36' -> 'AnalogSensor36_mutant'"
+    fPort: 111
+    payload: "242041BC00000521447D5000002440533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 111
+      voboType: "VoBoTC"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 36, analogSensorString0: "AnalogSensor36", sensorUnits0: 32, engUnitsString0: "C", sensorData0: 23.5}
+        - {sensorNum0: 5, analogSensorString0: "TC5", sensorUnits0: 33, engUnitsString0: "F", sensorData0: 1013.25}
+        - {sensorNum0: 0, analogSensorString0: "Battery Voltage", sensorUnits0: 36, engUnitsString0: "mV", sensorData0: 3.299999952316284}
+  - name: mutant_p111_02
+    description: "Separates 1 mutant(s): ainPayloads/analogSensorString0 lookup[73] 'AnalogSensor73' -> 'AnalogSensor73_mutant'"
+    fPort: 111
+    payload: "492041BC00000521447D5000002440533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 111
+      voboType: "VoBoTC"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 73, analogSensorString0: "AnalogSensor73", sensorUnits0: 32, engUnitsString0: "C", sensorData0: 23.5}
+        - {sensorNum0: 5, analogSensorString0: "TC5", sensorUnits0: 33, engUnitsString0: "F", sensorData0: 1013.25}
+        - {sensorNum0: 0, analogSensorString0: "Battery Voltage", sensorUnits0: 36, engUnitsString0: "mV", sensorData0: 3.299999952316284}
+  - name: mutant_p111_03
+    description: "Separates 1 mutant(s): ainPayloads/analogSensorString0 lookup[109] 'AnalogSensor109' -> 'AnalogSensor109_mutant'"
+    fPort: 111
+    payload: "6D2041BC00000521447D5000002440533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 111
+      voboType: "VoBoTC"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 109, analogSensorString0: "AnalogSensor109", sensorUnits0: 32, engUnitsString0: "C", sensorData0: 23.5}
+        - {sensorNum0: 5, analogSensorString0: "TC5", sensorUnits0: 33, engUnitsString0: "F", sensorData0: 1013.25}
+        - {sensorNum0: 0, analogSensorString0: "Battery Voltage", sensorUnits0: 36, engUnitsString0: "mV", sensorData0: 3.299999952316284}
+  - name: mutant_p111_04
+    description: "Separates 1 mutant(s): ainPayloads/analogSensorString0 lookup[146] 'AnalogSensor146' -> 'AnalogSensor146_mutant'"
+    fPort: 111
+    payload: "922041BC00000521447D5000002440533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 111
+      voboType: "VoBoTC"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 146, analogSensorString0: "AnalogSensor146", sensorUnits0: 32, engUnitsString0: "C", sensorData0: 23.5}
+        - {sensorNum0: 5, analogSensorString0: "TC5", sensorUnits0: 33, engUnitsString0: "F", sensorData0: 1013.25}
+        - {sensorNum0: 0, analogSensorString0: "Battery Voltage", sensorUnits0: 36, engUnitsString0: "mV", sensorData0: 3.299999952316284}
+  - name: mutant_p111_05
+    description: "Separates 1 mutant(s): ainPayloads/analogSensorString0 lookup[182] 'AnalogSensor182' -> 'AnalogSensor182_mutant'"
+    fPort: 111
+    payload: "B62041BC00000521447D5000002440533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 111
+      voboType: "VoBoTC"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 182, analogSensorString0: "AnalogSensor182", sensorUnits0: 32, engUnitsString0: "C", sensorData0: 23.5}
+        - {sensorNum0: 5, analogSensorString0: "TC5", sensorUnits0: 33, engUnitsString0: "F", sensorData0: 1013.25}
+        - {sensorNum0: 0, analogSensorString0: "Battery Voltage", sensorUnits0: 36, engUnitsString0: "mV", sensorData0: 3.299999952316284}
+  - name: mutant_p111_06
+    description: "Separates 1 mutant(s): ainPayloads/analogSensorString0 lookup[219] 'AnalogSensor219' -> 'AnalogSensor219_mutant'"
+    fPort: 111
+    payload: "DB2041BC00000521447D5000002440533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 111
+      voboType: "VoBoTC"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 219, analogSensorString0: "AnalogSensor219", sensorUnits0: 32, engUnitsString0: "C", sensorData0: 23.5}
+        - {sensorNum0: 5, analogSensorString0: "TC5", sensorUnits0: 33, engUnitsString0: "F", sensorData0: 1013.25}
+        - {sensorNum0: 0, analogSensorString0: "Battery Voltage", sensorUnits0: 36, engUnitsString0: "mV", sensorData0: 3.299999952316284}
+  - name: mutant_p111_07
+    description: "Separates 1 mutant(s): ainPayloads/analogSensorString0 lookup[255] 'AnalogSensor255' -> 'AnalogSensor255_mutant'"
+    fPort: 111
+    payload: "FF2041BC00000521447D5000002440533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 111
+      voboType: "VoBoTC"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 255, analogSensorString0: "AnalogSensor255", sensorUnits0: 32, engUnitsString0: "C", sensorData0: 23.5}
+        - {sensorNum0: 5, analogSensorString0: "TC5", sensorUnits0: 33, engUnitsString0: "F", sensorData0: 1013.25}
+        - {sensorNum0: 0, analogSensorString0: "Battery Voltage", sensorUnits0: 36, engUnitsString0: "mV", sensorData0: 3.299999952316284}
+  - name: mutant_p111_08
+    description: "Separates 1 mutant(s): ainPayloads/engUnitsString0 lookup[27] 'ft^3/d' -> 'ft^3/d_mutant'"
+    fPort: 111
+    payload: "0D1B41BC00000521447D5000002440533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 111
+      voboType: "VoBoTC"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 13, analogSensorString0: "Cold Joint Temperature", sensorUnits0: 27, engUnitsString0: "ft^3/d", sensorData0: 23.5}
+        - {sensorNum0: 5, analogSensorString0: "TC5", sensorUnits0: 33, engUnitsString0: "F", sensorData0: 1013.25}
+        - {sensorNum0: 0, analogSensorString0: "Battery Voltage", sensorUnits0: 36, engUnitsString0: "mV", sensorData0: 3.299999952316284}
+  - name: mutant_p111_09
+    description: "Separates 1 mutant(s): ainPayloads/engUnitsString0 lookup[52] 'h' -> 'h_mutant'"
+    fPort: 111
+    payload: "0D3441BC00000521447D5000002440533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 111
+      voboType: "VoBoTC"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 13, analogSensorString0: "Cold Joint Temperature", sensorUnits0: 52, engUnitsString0: "h", sensorData0: 23.5}
+        - {sensorNum0: 5, analogSensorString0: "TC5", sensorUnits0: 33, engUnitsString0: "F", sensorData0: 1013.25}
+        - {sensorNum0: 0, analogSensorString0: "Battery Voltage", sensorUnits0: 36, engUnitsString0: "mV", sensorData0: 3.299999952316284}
+  - name: mutant_p111_10
+    description: "Separates 1 mutant(s): ainPayloads/engUnitsString0 lookup[78] 't/h' -> 't/h_mutant'"
+    fPort: 111
+    payload: "0D4E41BC00000521447D5000002440533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 111
+      voboType: "VoBoTC"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 13, analogSensorString0: "Cold Joint Temperature", sensorUnits0: 78, engUnitsString0: "t/h", sensorData0: 23.5}
+        - {sensorNum0: 5, analogSensorString0: "TC5", sensorUnits0: 33, engUnitsString0: "F", sensorData0: 1013.25}
+        - {sensorNum0: 0, analogSensorString0: "Battery Voltage", sensorUnits0: 36, engUnitsString0: "mV", sensorData0: 3.299999952316284}
+  - name: mutant_p111_11
+    description: "Separates 1 mutant(s): ainPayloads/engUnitsString0 lookup[103] 'BL' -> 'BL_mutant'"
+    fPort: 111
+    payload: "0D6741BC00000521447D5000002440533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 111
+      voboType: "VoBoTC"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 13, analogSensorString0: "Cold Joint Temperature", sensorUnits0: 103, engUnitsString0: "BL", sensorData0: 23.5}
+        - {sensorNum0: 5, analogSensorString0: "TC5", sensorUnits0: 33, engUnitsString0: "F", sensorData0: 1013.25}
+        - {sensorNum0: 0, analogSensorString0: "Battery Voltage", sensorUnits0: 36, engUnitsString0: "mV", sensorData0: 3.299999952316284}
+  - name: mutant_p111_12
+    description: "Separates 1 mutant(s): ainPayloads/engUnitsString0 lookup[129] 'hp' -> 'hp_mutant'"
+    fPort: 111
+    payload: "0D8141BC00000521447D5000002440533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 111
+      voboType: "VoBoTC"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 13, analogSensorString0: "Cold Joint Temperature", sensorUnits0: 129, engUnitsString0: "hp", sensorData0: 23.5}
+        - {sensorNum0: 5, analogSensorString0: "TC5", sensorUnits0: 33, engUnitsString0: "F", sensorData0: 1013.25}
+        - {sensorNum0: 0, analogSensorString0: "Battery Voltage", sensorUnits0: 36, engUnitsString0: "mV", sensorData0: 3.299999952316284}
+  - name: mutant_p111_13
+    description: "Separates 1 mutant(s): ainPayloads/engUnitsString0 lookup[154] 'mL/L' -> 'mL/L_mutant'"
+    fPort: 111
+    payload: "0D9A41BC00000521447D5000002440533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 111
+      voboType: "VoBoTC"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 13, analogSensorString0: "Cold Joint Temperature", sensorUnits0: 154, engUnitsString0: "mL/L", sensorData0: 23.5}
+        - {sensorNum0: 5, analogSensorString0: "TC5", sensorUnits0: 33, engUnitsString0: "F", sensorData0: 1013.25}
+        - {sensorNum0: 0, analogSensorString0: "Battery Voltage", sensorUnits0: 36, engUnitsString0: "mV", sensorData0: 3.299999952316284}
+  - name: mutant_p112_01
+    description: "Separates 1 mutant(s): ainPayloads/analogSensorString0 lookup[36] 'AnalogSensor36' -> 'AnalogSensor36_mutant'"
+    fPort: 112
+    payload: "2420BF00000090FD4640E600CC3A3E000000003A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 112
+      voboType: "VoBoXP"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 36, analogSensorString0: "AnalogSensor36", sensorUnits0: 32, engUnitsString0: "C", sensorData0: -0.5}
+        - {sensorNum0: 144, analogSensorString0: "Cont Meas Period (Min)", sensorUnits0: 253, engUnitsString0: "counts", sensorData0: 12345.5}
+        - {sensorNum0: 204, analogSensorString0: "WKUP (Avg)", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 0.125}
+        - {sensorNum0: 0, analogSensorString0: "3.3V Supply Voltage", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 3.299999952316284}
+  - name: mutant_p112_02
+    description: "Separates 1 mutant(s): ainPayloads/analogSensorString0 lookup[73] 'RLY2 Voltage (Max)' -> 'RLY2 Voltage (Max)_mutant'"
+    fPort: 112
+    payload: "4920BF00000090FD4640E600CC3A3E000000003A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 112
+      voboType: "VoBoXP"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 73, analogSensorString0: "RLY2 Voltage (Max)", sensorUnits0: 32, engUnitsString0: "C", sensorData0: -0.5}
+        - {sensorNum0: 144, analogSensorString0: "Cont Meas Period (Min)", sensorUnits0: 253, engUnitsString0: "counts", sensorData0: 12345.5}
+        - {sensorNum0: 204, analogSensorString0: "WKUP (Avg)", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 0.125}
+        - {sensorNum0: 0, analogSensorString0: "3.3V Supply Voltage", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 3.299999952316284}
+  - name: mutant_p112_03
+    description: "Separates 1 mutant(s): ainPayloads/analogSensorString0 lookup[109] 'AnalogSensor45' -> 'AnalogSensor45_mutant'"
+    fPort: 112
+    payload: "6D20BF00000090FD4640E600CC3A3E000000003A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 112
+      voboType: "VoBoXP"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 109, analogSensorString0: "AnalogSensor45", sensorUnits0: 32, engUnitsString0: "C", sensorData0: -0.5}
+        - {sensorNum0: 144, analogSensorString0: "Cont Meas Period (Min)", sensorUnits0: 253, engUnitsString0: "counts", sensorData0: 12345.5}
+        - {sensorNum0: 204, analogSensorString0: "WKUP (Avg)", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 0.125}
+        - {sensorNum0: 0, analogSensorString0: "3.3V Supply Voltage", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 3.299999952316284}
+  - name: mutant_p112_04
+    description: "Separates 1 mutant(s): ainPayloads/analogSensorString0 lookup[146] 'AnalogSensor18' -> 'AnalogSensor18_mutant'"
+    fPort: 112
+    payload: "9220BF00000090FD4640E600CC3A3E000000003A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 112
+      voboType: "VoBoXP"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 146, analogSensorString0: "AnalogSensor18", sensorUnits0: 32, engUnitsString0: "C", sensorData0: -0.5}
+        - {sensorNum0: 144, analogSensorString0: "Cont Meas Period (Min)", sensorUnits0: 253, engUnitsString0: "counts", sensorData0: 12345.5}
+        - {sensorNum0: 204, analogSensorString0: "WKUP (Avg)", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 0.125}
+        - {sensorNum0: 0, analogSensorString0: "3.3V Supply Voltage", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 3.299999952316284}
+  - name: mutant_p112_05
+    description: "Separates 1 mutant(s): ainPayloads/analogSensorString0 lookup[182] 'AnalogSensor54' -> 'AnalogSensor54_mutant'"
+    fPort: 112
+    payload: "B620BF00000090FD4640E600CC3A3E000000003A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 112
+      voboType: "VoBoXP"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 182, analogSensorString0: "AnalogSensor54", sensorUnits0: 32, engUnitsString0: "C", sensorData0: -0.5}
+        - {sensorNum0: 144, analogSensorString0: "Cont Meas Period (Min)", sensorUnits0: 253, engUnitsString0: "counts", sensorData0: 12345.5}
+        - {sensorNum0: 204, analogSensorString0: "WKUP (Avg)", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 0.125}
+        - {sensorNum0: 0, analogSensorString0: "3.3V Supply Voltage", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 3.299999952316284}
+  - name: mutant_p112_06
+    description: "Separates 1 mutant(s): ainPayloads/analogSensorString0 lookup[219] 'AnalogSensor27' -> 'AnalogSensor27_mutant'"
+    fPort: 112
+    payload: "DB20BF00000090FD4640E600CC3A3E000000003A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 112
+      voboType: "VoBoXP"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 219, analogSensorString0: "AnalogSensor27", sensorUnits0: 32, engUnitsString0: "C", sensorData0: -0.5}
+        - {sensorNum0: 144, analogSensorString0: "Cont Meas Period (Min)", sensorUnits0: 253, engUnitsString0: "counts", sensorData0: 12345.5}
+        - {sensorNum0: 204, analogSensorString0: "WKUP (Avg)", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 0.125}
+        - {sensorNum0: 0, analogSensorString0: "3.3V Supply Voltage", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 3.299999952316284}
+  - name: mutant_p112_07
+    description: "Separates 1 mutant(s): ainPayloads/analogSensorString0 lookup[255] 'AnalogSensor63' -> 'AnalogSensor63_mutant'"
+    fPort: 112
+    payload: "FF20BF00000090FD4640E600CC3A3E000000003A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 112
+      voboType: "VoBoXP"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 255, analogSensorString0: "AnalogSensor63", sensorUnits0: 32, engUnitsString0: "C", sensorData0: -0.5}
+        - {sensorNum0: 144, analogSensorString0: "Cont Meas Period (Min)", sensorUnits0: 253, engUnitsString0: "counts", sensorData0: 12345.5}
+        - {sensorNum0: 204, analogSensorString0: "WKUP (Avg)", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 0.125}
+        - {sensorNum0: 0, analogSensorString0: "3.3V Supply Voltage", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 3.299999952316284}
+  - name: mutant_p112_08
+    description: "Separates 1 mutant(s): ainPayloads/engUnitsString0 lookup[27] 'ft^3/d' -> 'ft^3/d_mutant'"
+    fPort: 112
+    payload: "4F1BBF00000090FD4640E600CC3A3E000000003A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 112
+      voboType: "VoBoXP"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 79, analogSensorString0: "ADC Temperature (Max)", sensorUnits0: 27, engUnitsString0: "ft^3/d", sensorData0: -0.5}
+        - {sensorNum0: 144, analogSensorString0: "Cont Meas Period (Min)", sensorUnits0: 253, engUnitsString0: "counts", sensorData0: 12345.5}
+        - {sensorNum0: 204, analogSensorString0: "WKUP (Avg)", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 0.125}
+        - {sensorNum0: 0, analogSensorString0: "3.3V Supply Voltage", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 3.299999952316284}
+  - name: mutant_p112_09
+    description: "Separates 1 mutant(s): ainPayloads/engUnitsString0 lookup[52] 'h' -> 'h_mutant'"
+    fPort: 112
+    payload: "4F34BF00000090FD4640E600CC3A3E000000003A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 112
+      voboType: "VoBoXP"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 79, analogSensorString0: "ADC Temperature (Max)", sensorUnits0: 52, engUnitsString0: "h", sensorData0: -0.5}
+        - {sensorNum0: 144, analogSensorString0: "Cont Meas Period (Min)", sensorUnits0: 253, engUnitsString0: "counts", sensorData0: 12345.5}
+        - {sensorNum0: 204, analogSensorString0: "WKUP (Avg)", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 0.125}
+        - {sensorNum0: 0, analogSensorString0: "3.3V Supply Voltage", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 3.299999952316284}
+  - name: mutant_p112_10
+    description: "Separates 1 mutant(s): ainPayloads/engUnitsString0 lookup[78] 't/h' -> 't/h_mutant'"
+    fPort: 112
+    payload: "4F4EBF00000090FD4640E600CC3A3E000000003A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 112
+      voboType: "VoBoXP"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 79, analogSensorString0: "ADC Temperature (Max)", sensorUnits0: 78, engUnitsString0: "t/h", sensorData0: -0.5}
+        - {sensorNum0: 144, analogSensorString0: "Cont Meas Period (Min)", sensorUnits0: 253, engUnitsString0: "counts", sensorData0: 12345.5}
+        - {sensorNum0: 204, analogSensorString0: "WKUP (Avg)", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 0.125}
+        - {sensorNum0: 0, analogSensorString0: "3.3V Supply Voltage", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 3.299999952316284}
+  - name: mutant_p112_11
+    description: "Separates 1 mutant(s): ainPayloads/engUnitsString0 lookup[103] 'BL' -> 'BL_mutant'"
+    fPort: 112
+    payload: "4F67BF00000090FD4640E600CC3A3E000000003A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 112
+      voboType: "VoBoXP"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 79, analogSensorString0: "ADC Temperature (Max)", sensorUnits0: 103, engUnitsString0: "BL", sensorData0: -0.5}
+        - {sensorNum0: 144, analogSensorString0: "Cont Meas Period (Min)", sensorUnits0: 253, engUnitsString0: "counts", sensorData0: 12345.5}
+        - {sensorNum0: 204, analogSensorString0: "WKUP (Avg)", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 0.125}
+        - {sensorNum0: 0, analogSensorString0: "3.3V Supply Voltage", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 3.299999952316284}
+  - name: mutant_p112_12
+    description: "Separates 1 mutant(s): ainPayloads/engUnitsString0 lookup[129] 'hp' -> 'hp_mutant'"
+    fPort: 112
+    payload: "4F81BF00000090FD4640E600CC3A3E000000003A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 112
+      voboType: "VoBoXP"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 79, analogSensorString0: "ADC Temperature (Max)", sensorUnits0: 129, engUnitsString0: "hp", sensorData0: -0.5}
+        - {sensorNum0: 144, analogSensorString0: "Cont Meas Period (Min)", sensorUnits0: 253, engUnitsString0: "counts", sensorData0: 12345.5}
+        - {sensorNum0: 204, analogSensorString0: "WKUP (Avg)", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 0.125}
+        - {sensorNum0: 0, analogSensorString0: "3.3V Supply Voltage", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 3.299999952316284}
+  - name: mutant_p112_13
+    description: "Separates 1 mutant(s): ainPayloads/engUnitsString0 lookup[154] 'mL/L' -> 'mL/L_mutant'"
+    fPort: 112
+    payload: "4F9ABF00000090FD4640E600CC3A3E000000003A40533333"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 112
+      voboType: "VoBoXP"
+      payloadType: "Analog Input Variable Length"
+      ainPayloads:
+        - {sensorNum0: 79, analogSensorString0: "ADC Temperature (Max)", sensorUnits0: 154, engUnitsString0: "mL/L", sensorData0: -0.5}
+        - {sensorNum0: 144, analogSensorString0: "Cont Meas Period (Min)", sensorUnits0: 253, engUnitsString0: "counts", sensorData0: 12345.5}
+        - {sensorNum0: 204, analogSensorString0: "WKUP (Avg)", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 0.125}
+        - {sensorNum0: 0, analogSensorString0: "3.3V Supply Voltage", sensorUnits0: 58, engUnitsString0: "V", sensorData0: 3.299999952316284}
+  - name: mutant_p70_endian
+    description: "ain1SeriesResistance 1000.0: big- and little-endian reads differ beyond tolerance"
+    fPort: 70
+    payload: "1C447A0000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 70
+      voboType: "VoBoXX"
+      payloadType: "Configuration"
+      subgroupID: 12
+      sequenceNumber: 1
+      ain1SeriesResistance: 1000
+  - name: mutant_p72_endian
+    description: "ain1SeriesResistance 1000.0: big- and little-endian reads differ beyond tolerance"
+    fPort: 72
+    payload: "1C447A0000"
+    source: vendor-codec
+    expected_warnings: []
+    expected:
+      fport: 72
+      voboType: "VoBoXP"
+      payloadType: "Configuration"
+      subgroupID: 12
+      sequenceNumber: 1
+      ain1SeriesResistance: 1000
