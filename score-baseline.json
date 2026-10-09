@@ -13588,6 +13588,83 @@
         "  \u2192 co2: add senml: {unit: \"ppm\"}",
         "  \u2192 battery: add senml: {unit: \"V\"}"
       ]
+    },
+    {
+      "schema_path": "schemas/devices/volley-boast/vobo.yaml",
+      "timestamp": "2026-10-09T11:25:19.993778-05:00",
+      "score": 92.0,
+      "tier": "SILVER",
+      "details": {
+        "schema_valid": true,
+        "schema_errors": [],
+        "has_test_vectors": true,
+        "test_count": 436,
+        "vector_issues": [],
+        "python_tests_pass": true,
+        "python_passed": 436,
+        "python_failed": 0,
+        "python_errors": [],
+        "js_status": "pass",
+        "js_tests_pass": true,
+        "js_errors": [],
+        "branch_coverage": 0.9448818897637795,
+        "coverage_issues": [
+          "flagged _cfg_mask[0] untested",
+          "flagged _cfg_mask[1] untested",
+          "flagged _cfg_mask[2] untested",
+          "flagged _cfg_mask[3] untested",
+          "flagged _cfg_mask[4] untested",
+          "flagged _cfg_mask[5] untested",
+          "flagged _cfg_mask[6] untested"
+        ],
+        "edge_cases_covered": [
+          "zero",
+          "max",
+          "negative",
+          "min_payload"
+        ],
+        "edge_cases_missing": [],
+        "semantic_annotations": {
+          "total_fields": 2496,
+          "ipso_mapped": 53,
+          "ipso_missing": [],
+          "senml_mapped": 1,
+          "senml_missing": [
+            "port1.Battery: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating",
+            "port10.batteryLevelMV: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating",
+            "port20.batteryLevel: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating",
+            "port21.batteryLevel: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating",
+            "port22.batteryLevel: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating",
+            "port23.batteryLevel: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating",
+            "port24.batteryLevel: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating",
+            "port25.batteryLevel: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating",
+            "port26.batteryLevel: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating",
+            "port27.batteryLevel: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating",
+            "port28.batteryLevel: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating",
+            "port29.batteryLevel: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating"
+          ],
+          "semantic_mapped": 53,
+          "detectable_sensors": 53,
+          "annotation_errors": []
+        },
+        "provenance": {
+          "counts": {
+            "vendor-codec": 436
+          },
+          "independent_vectors": 436,
+          "verification": "independent",
+          "issues": []
+        },
+        "tier_capped_by": [
+          "not all conditional branches covered (PS-239)"
+        ]
+      },
+      "recommendations": [
+        "Tier capped: not all conditional branches covered (PS-239)",
+        "Add SenML units for standard sensors (12 fields)",
+        "  \u2192 port1.Battery: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating",
+        "  \u2192 port10.batteryLevelMV: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating"
+      ]
     }
   ]
 }

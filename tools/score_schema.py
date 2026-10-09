@@ -235,6 +235,13 @@ def run_python_tests(
             all_match = True
             for key, exp_val in expected.items():
                 actual_val = result.data.get(key)
+                if exp_val is None:
+                    # PS-043 (CR-2026-075): a null expectation asserts the key is
+                    # absent. Read as "missing", it failed every such vector.
+                    if key in result.data:
+                        all_match = False
+                        errors.append(f"{tv_name}: '{key}' expected absent")
+                    continue
                 if actual_val is None:
                     all_match = False
                     errors.append(f"{tv_name}: missing field '{key}'")
@@ -371,7 +378,13 @@ for (const t of tests) {{
         let allMatch = true;
         for (const [key, expVal] of Object.entries(t.expected)) {{
             const actVal = result.data[key];
-            if (actVal === undefined) {{
+            if (expVal === null) {{
+                // PS-043: a null expectation asserts the key is absent.
+                if (actVal !== undefined) {{
+                    allMatch = false;
+                    errors.push(t.name + ': ' + key + ' expected absent, got ' + show(actVal));
+                }}
+            }} else if (actVal === undefined) {{
                 allMatch = false;
                 errors.push(t.name + ': missing ' + key);
             }} else if (!deepMatch(expVal, actVal, {CONFORMANCE_TOLERANCE})) {{

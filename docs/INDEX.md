@@ -123,14 +123,14 @@ Generated inventory of this repository: what lives where, what each document cov
 ## Device schemas
 
 276 schemas under `schemas/devices/`.
-Mean quality score 73.6% (PLATINUM 37, GOLD 39, SILVER 145, BRONZE 20, REJECTED 35). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+Mean quality score 74.9% (PLATINUM 37, GOLD 39, SILVER 152, BRONZE 22, REJECTED 26). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
 | milesight | 84 | 1421 | PLATINUM 21, GOLD 33, SILVER 21, REJECTED 9 |
-| _language-conformance | 64 | 106 | SILVER 41, BRONZE 9, REJECTED 14 |
+| _language-conformance | 64 | 106 | SILVER 48, BRONZE 11, REJECTED 5 |
 | decentlab | 58 | 204 | PLATINUM 13, GOLD 6, SILVER 27, BRONZE 8, REJECTED 4 |
 | _library-composed | 49 | 57 | SILVER 48, BRONZE 1 |
 | makerfabs | 6 | 0 | REJECTED 6 |
@@ -145,7 +145,7 @@ Mean quality score 73.6% (PLATINUM 37, GOLD 39, SILVER 145, BRONZE 20, REJECTED 
 | radio-bridge | 1 | 71 | BRONZE 1 |
 | radionode | 1 | 0 | REJECTED 1 |
 | rakwireless | 1 | 1 | SILVER 1 |
-| volley-boast | 1 | 315 | SILVER 1 |
+| volley-boast | 1 | 436 | SILVER 1 |
 
 ### By device
 
@@ -153,8 +153,8 @@ Mean quality score 73.6% (PLATINUM 37, GOLD 39, SILVER 145, BRONZE 20, REJECTED 
 
 | Schema | Fields | Vectors | Constructs | Score | Tier |
 |---|---|---|---|---|---|
-| `_language-conformance/arithmetic-order-computed` | 8 | 2 | fields | 36% | REJECTED |
-| `_language-conformance/arithmetic-order-read` | 5 | 2 | fields | 38% | REJECTED |
+| `_language-conformance/arithmetic-order-computed` | 8 | 2 | fields | 71% | SILVER |
+| `_language-conformance/arithmetic-order-read` | 5 | 2 | fields | 73% | SILVER |
 | `_language-conformance/bit-range-order` | 6 | 1 | fields | 71% | SILVER |
 | `_language-conformance/bitfield-string-hex-case` | 2 | 1 | fields | 71% | SILVER |
 | `_language-conformance/bitfield-string` | 1 | 1 | fields | 71% | SILVER |
@@ -172,7 +172,7 @@ Mean quality score 73.6% (PLATINUM 37, GOLD 39, SILVER 145, BRONZE 20, REJECTED 
 | `_language-conformance/internal-field-value` | 2 | 1 | fields | 59% | REJECTED |
 | `_language-conformance/leftover-bytes` | 1 | 2 | fields | 71% | SILVER |
 | `_language-conformance/literal-types` | 3 | 1 | fields | 69% | BRONZE |
-| `_language-conformance/log-of-non-positive` | 3 | 2 | fields | 36% | REJECTED |
+| `_language-conformance/log-of-non-positive` | 3 | 2 | fields | 71% | SILVER |
 | `_language-conformance/lookup-default-template` | 2 | 4 | fields | 75% | SILVER |
 | `_language-conformance/lookup-default` | 1 | 1 | fields | 71% | SILVER |
 | `_language-conformance/match-case-range` | 3 | 3 | fields | 67% | BRONZE |
@@ -181,16 +181,16 @@ Mean quality score 73.6% (PLATINUM 37, GOLD 39, SILVER 145, BRONZE 20, REJECTED 
 | `_language-conformance/match-default-skip` | 2 | 2 | fields | 71% | SILVER |
 | `_language-conformance/match-inline-discriminator` | 2 | 1 | fields | 59% | REJECTED |
 | `_language-conformance/match-list-key` | 4 | 3 | fields | 65% | BRONZE |
-| `_language-conformance/match-remaining` | 3 | 2 | fields | 24% | REJECTED |
+| `_language-conformance/match-remaining` | 3 | 2 | fields | 59% | REJECTED |
 | `_language-conformance/match-var` | 2 | 1 | fields | 57% | REJECTED |
 | `_language-conformance/metadata-enrichment` | 2 | 3 | fields | 75% | SILVER |
 | `_language-conformance/metadata-epoch-calendar` | 2 | 1 | fields | 71% | SILVER |
-| `_language-conformance/minifloat` | 7 | 1 | fields | 36% | REJECTED |
+| `_language-conformance/minifloat` | 7 | 1 | fields | 75% | SILVER |
 | `_language-conformance/name-from-var` | 2 | 2 | fields | 71% | SILVER |
 | `_language-conformance/name-from` | 2 | 1 | fields | 71% | SILVER |
-| `_language-conformance/optional-trailing` | 3 | 3 | fields | 38% | REJECTED |
-| `_language-conformance/out-of-range-omit` | 2 | 2 | fields | 36% | REJECTED |
-| `_language-conformance/range-before-lookup` | 2 | 4 | fields | 36% | REJECTED |
+| `_language-conformance/optional-trailing` | 3 | 3 | fields | 73% | SILVER |
+| `_language-conformance/out-of-range-omit` | 2 | 2 | fields | 71% | SILVER |
+| `_language-conformance/range-before-lookup` | 2 | 4 | fields | 71% | SILVER |
 | `_language-conformance/ref-everywhere` | 3 | 1 | fields | 71% | SILVER |
 | `_language-conformance/ref-header` | 1 | 1 | fields | 71% | SILVER |
 | `_language-conformance/repeat-byte-length-span` | 4 | 1 | fields | 73% | SILVER |
@@ -206,7 +206,7 @@ Mean quality score 73.6% (PLATINUM 37, GOLD 39, SILVER 145, BRONZE 20, REJECTED 
 | `_language-conformance/repeat-trailer` | 4 | 1 | fields | 69% | BRONZE |
 | `_language-conformance/round-half-to-even` | 5 | 1 | fields | 71% | SILVER |
 | `_language-conformance/round-ties-away` | 4 | 1 | fields | 71% | SILVER |
-| `_language-conformance/sentinel` | 2 | 2 | fields | 34% | REJECTED |
+| `_language-conformance/sentinel` | 2 | 2 | fields | 69% | BRONZE |
 | `_language-conformance/skip-type` | 3 | 1 | fields | 71% | SILVER |
 | `_language-conformance/tlv-nameless-case` | 2 | 1 | fields | 71% | SILVER |
 | `_language-conformance/tlv-reserve` | 3 | 2 | fields | 71% | SILVER |
@@ -215,7 +215,7 @@ Mean quality score 73.6% (PLATINUM 37, GOLD 39, SILVER 145, BRONZE 20, REJECTED 
 | `_language-conformance/unknown-tlv-tag-raw` | 1 | 1 | fields | 71% | SILVER |
 | `_language-conformance/unknown-tlv-tag-skip-delimited` | 2 | 1 | fields | 73% | SILVER |
 | `_language-conformance/unknown-tlv-tag-skip` | 2 | 2 | fields | 71% | SILVER |
-| `_language-conformance/value-absent` | 4 | 2 | fields | 34% | REJECTED |
+| `_language-conformance/value-absent` | 4 | 2 | fields | 69% | BRONZE |
 | `_language-conformance/word-ordered` | 4 | 1 | fields | 73% | SILVER |
 | `_library-composed/alarm_config__set_delta_threshold` | 4 | 2 | fields | 71% | SILVER |
 | `_library-composed/alarm_config__set_temp_alarm` | 5 | 2 | fields | 71% | SILVER |
@@ -428,7 +428,7 @@ Mean quality score 73.6% (PLATINUM 37, GOLD 39, SILVER 145, BRONZE 20, REJECTED 
 | `radio-bridge/rbs30x` | 52 | 71 | fields | 68% | BRONZE |
 | `radionode/rn320bth` | 13 | 0 | fields | 14% | REJECTED |
 | `rakwireless/qingping` | 11 | 1 | fields | 81% | SILVER |
-| `volley-boast/vobo` | 5066 | 315 | ports, tlv, match | 92% | SILVER |
+| `volley-boast/vobo` | 5066 | 436 | ports, tlv, match | 92% | SILVER |
 
 ## Other schema files
 

@@ -115,6 +115,15 @@ def test_scale_add_and_drop_mod():
     assert remaining == [("add",), ("mult",)]
 
 
+def test_scaling_a_zero_multiplier_is_equivalent_not_generated():
+    # vobo sets a mask bit with a non-consuming read scaled to a constant (mult: 0,
+    # add: N). Ten times 0 is 0, so the mutant was the schema itself and was reported
+    # as a survivor no vector could ever kill.
+    schema = one_field(type="u8", mult=0, add=1)
+    scale, equivalent = mutants_of(schema, "SCALE")
+    assert scale == [] and equivalent == {"SCALE": 1}
+
+
 def test_add_is_inserted_on_a_numeric_field_without_one():
     schema = one_field(type="u8")
     (mutant,), _ = mutants_of(schema, "ADD")

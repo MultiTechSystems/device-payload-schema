@@ -449,6 +449,10 @@ def field_mutants(site: Site, field: Dict[str, Any], equivalent: Dict[str, int])
                 "add %s -> %s" % (value, value + 1),
                 _set_key(path, key, value + 1),
             )
+        elif value * 10 == value:
+            # `mult: 0` scaled by ten is still 0: the mutant is the schema itself, and
+            # counting it as a survivor asked for a vector no payload could supply.
+            equivalent["SCALE"] = equivalent.get("SCALE", 0) + 1
         else:
             add(
                 "SCALE",

@@ -3,10 +3,10 @@
   "min_score_new": 0.8,
   "include_library_composed": false,
   "distribution": {
-    "100%": 165,
-    "95-99%": 7,
-    "90-94%": 1,
-    "80-89%": 6,
+    "100%": 171,
+    "95-99%": 19,
+    "90-94%": 2,
+    "80-89%": 7,
     "70-79%": 1,
     "<70%": 1,
     "unscored": 5
@@ -704,12 +704,12 @@
     },
     "decentlab/dl-atm41g2.yaml": {
       "score": 1.0,
-      "killed": 123,
+      "killed": 144,
       "survived": 0,
-      "unreached": 8,
+      "unreached": 0,
       "generated": 168,
-      "vectors": 1,
-      "provenance": "generated-only",
+      "vectors": 3,
+      "provenance": "independent",
       "failing_original": 0
     },
     "decentlab/dl-blg.yaml": {
@@ -729,6 +729,26 @@
       "unreached": 0,
       "generated": 53,
       "vectors": 6,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-cws.yaml": {
+      "score": 1.0,
+      "killed": 70,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 82,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-cws2.yaml": {
+      "score": 0.9773,
+      "killed": 86,
+      "survived": 2,
+      "unreached": 0,
+      "generated": 102,
+      "vectors": 2,
       "provenance": "independent",
       "failing_original": 0
     },
@@ -768,6 +788,26 @@
       "survived": 0,
       "unreached": 0,
       "generated": 31,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-dlr2-008-2000.yaml": {
+      "score": 0.9706,
+      "killed": 33,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 50,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-dlr2-009-2000.yaml": {
+      "score": 0.963,
+      "killed": 26,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 39,
       "vectors": 2,
       "provenance": "independent",
       "failing_original": 0
@@ -872,6 +912,16 @@
       "provenance": "independent",
       "failing_original": 0
     },
+    "decentlab/dl-itst.yaml": {
+      "score": 1.0,
+      "killed": 34,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 44,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "decentlab/dl-lid.yaml": {
       "score": 1.0,
       "killed": 76,
@@ -879,6 +929,16 @@
       "unreached": 0,
       "generated": 92,
       "vectors": 6,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-lp8p.yaml": {
+      "score": 0.9804,
+      "killed": 50,
+      "survived": 1,
+      "unreached": 50,
+      "generated": 120,
+      "vectors": 2,
       "provenance": "independent",
       "failing_original": 0
     },
@@ -952,6 +1012,66 @@
       "provenance": "independent",
       "failing_original": 0
     },
+    "decentlab/dl-pm.yaml": {
+      "score": 0.9767,
+      "killed": 42,
+      "survived": 1,
+      "unreached": 68,
+      "generated": 130,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-pr21-1-10.yaml": {
+      "score": 0.9706,
+      "killed": 33,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 44,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-pr26-0-1.yaml": {
+      "score": 0.9706,
+      "killed": 33,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 44,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-pr36-8192.yaml": {
+      "score": 0.9722,
+      "killed": 35,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 44,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-pr36ctd-8192-1024.yaml": {
+      "score": 0.963,
+      "killed": 52,
+      "survived": 2,
+      "unreached": 0,
+      "generated": 64,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-pyr.yaml": {
+      "score": 1.0,
+      "killed": 27,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 34,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "decentlab/dl-rad.yaml": {
       "score": 1.0,
       "killed": 47,
@@ -964,12 +1084,42 @@
     },
     "decentlab/dl-rhc.yaml": {
       "score": 1.0,
-      "killed": 26,
+      "killed": 34,
       "survived": 0,
-      "unreached": 8,
+      "unreached": 0,
       "generated": 45,
-      "vectors": 1,
-      "provenance": "generated-only",
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-sdd.yaml": {
+      "score": 0.8917,
+      "killed": 140,
+      "survived": 17,
+      "unreached": 144,
+      "generated": 348,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-sht35.yaml": {
+      "score": 0.9706,
+      "killed": 33,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 44,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-smtp.yaml": {
+      "score": 0.9211,
+      "killed": 140,
+      "survived": 12,
+      "unreached": 0,
+      "generated": 184,
+      "vectors": 2,
+      "provenance": "independent",
       "failing_original": 0
     },
     "decentlab/dl-tbrg-01.yaml": {
@@ -989,6 +1139,46 @@
       "unreached": 0,
       "generated": 184,
       "vectors": 6,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-trs11.yaml": {
+      "score": 0.95,
+      "killed": 38,
+      "survived": 2,
+      "unreached": 0,
+      "generated": 53,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-trs12.yaml": {
+      "score": 0.9545,
+      "killed": 42,
+      "survived": 2,
+      "unreached": 0,
+      "generated": 59,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-trs21.yaml": {
+      "score": 1.0,
+      "killed": 33,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 42,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "decentlab/dl-wrm.yaml": {
+      "score": 0.9608,
+      "killed": 49,
+      "survived": 2,
+      "unreached": 0,
+      "generated": 64,
+      "vectors": 2,
       "provenance": "independent",
       "failing_original": 0
     },
@@ -1054,12 +1244,12 @@
     },
     "elsys/ers.yaml": {
       "score": 1.0,
-      "killed": 25,
+      "killed": 35,
       "survived": 0,
-      "unreached": 172,
+      "unreached": 160,
       "generated": 206,
-      "vectors": 2,
-      "provenance": "unsourced",
+      "vectors": 3,
+      "provenance": "independent",
       "failing_original": 0
     },
     "hbi/mla20.yaml": {
@@ -1069,6 +1259,16 @@
       "unreached": 0,
       "generated": 415,
       "vectors": 19,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "mclimate/flood-sensor.yaml": {
+      "score": 1.0,
+      "killed": 10,
+      "survived": 0,
+      "unreached": 8,
+      "generated": 22,
+      "vectors": 1,
       "provenance": "independent",
       "failing_original": 0
     },
@@ -1863,12 +2063,12 @@
       "failing_original": 0
     },
     "volley-boast/vobo.yaml": {
-      "score": 0.9842,
-      "killed": 20024,
-      "survived": 322,
-      "unreached": 865,
-      "generated": 24943,
-      "vectors": 315,
+      "score": 1.0,
+      "killed": 20351,
+      "survived": 0,
+      "unreached": 854,
+      "generated": 24927,
+      "vectors": 436,
       "provenance": "independent",
       "failing_original": 0
     }
