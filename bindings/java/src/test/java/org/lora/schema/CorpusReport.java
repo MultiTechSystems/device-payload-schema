@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -35,6 +36,14 @@ import java.util.Set;
  */
 final class CorpusReport {
     private final String path = System.getenv("CORPUS_REPORT");
+    /**
+     * {@code CORPUS_META_REPORT=/path/file.json} also writes each vector's interpreter
+     * {@code _meta} (CR-2026-096), for rule 3 of tools/verdicts-gate.py: one
+     * {@code {schema, index, vector, meta}} entry per vector with a payload, {@code meta}
+     * null where the interpret failed (PS-497).
+     */
+    private final String metaPath = System.getenv("CORPUS_META_REPORT");
+    private final List<String> metaEntries = new ArrayList<>();
     private final Set<String> only;
     private final List<String> entries = new ArrayList<>();
 
@@ -80,7 +89,51 @@ final class CorpusReport {
                 + ", \"detail\": " + quote(text) + "}");
     }
 
+    /** Whether CORPUS_META_REPORT asks for each vector's {@code _meta}. */
+    boolean wantsMeta() {
+        return metaPath != null && !metaPath.isEmpty();
+    }
+
+    void addMeta(String schema, int index, Object vector, Object meta) {
+        if (!wantsMeta()) return;
+        String name = vector == null ? "" : String.valueOf(vector);
+        metaEntries.add("{\"schema\": " + quote(schema) + ", \"index\": " + index
+                + ", \"vector\": " + quote(name) + ", \"meta\": " + json(meta) + "}");
+    }
+
+    /** A decoded value as JSON: maps, lists, strings, numbers, booleans and null. */
+    static String json(Object value) {
+        if (value == null) return "null";
+        if (value instanceof Boolean b) return b ? "true" : "false";
+        if (value instanceof Double || value instanceof Float) {
+            double d = ((Number) value).doubleValue();
+            if (Double.isNaN(d) || Double.isInfinite(d)) return "null";
+            return String.valueOf(d);
+        }
+        if (value instanceof Number n) return n.toString();
+        if (value instanceof Map<?, ?> map) {
+            List<String> parts = new ArrayList<>();
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                parts.add(quote(String.valueOf(e.getKey())) + ": " + json(e.getValue()));
+            }
+            return "{" + String.join(", ", parts) + "}";
+        }
+        if (value instanceof List<?> list) {
+            List<String> parts = new ArrayList<>();
+            for (Object item : list) parts.add(json(item));
+            return "[" + String.join(", ", parts) + "]";
+        }
+        return quote(String.valueOf(value));
+    }
+
     void write() throws IOException {
+        if (wantsMeta()) {
+            String body = "[\n" + String.join(",\n", metaEntries)
+                    + (metaEntries.isEmpty() ? "" : "\n") + "]\n";
+            Files.writeString(Path.of(metaPath), body, StandardCharsets.UTF_8);
+            System.out.printf("corpus _meta report: %d vectors written to %s%n",
+                    metaEntries.size(), metaPath);
+        }
         if (path == null || path.isEmpty()) return;
         String body = "[\n" + String.join(",\n", entries) + (entries.isEmpty() ? "" : "\n") + "]\n";
         Files.writeString(Path.of(path), body, StandardCharsets.UTF_8);
