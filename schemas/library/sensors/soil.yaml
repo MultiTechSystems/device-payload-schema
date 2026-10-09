@@ -9,6 +9,7 @@ definitions:
       - name: soil_moisture
         type: u8
         unit: "%"
+        senml: {unit: "/100"}
         valid_range: [0, 100]
         resolution: 1
         unece: "P1"
@@ -85,6 +86,7 @@ definitions:
       - name: leaf_wetness
         type: u8
         unit: "%"
+        senml: {unit: "/100"}
         valid_range: [0, 100]
         resolution: 1
         description: "Leaf wetness percentage"

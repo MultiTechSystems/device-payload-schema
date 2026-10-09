@@ -29,6 +29,7 @@ fields:
                 - mult: 0.0015259021896696424
                 - add: -2.220446049250313e-16
               unit: "%"
+              senml: {unit: "/100"}
         - bit: 1
           fields:
             - name: battery_voltage

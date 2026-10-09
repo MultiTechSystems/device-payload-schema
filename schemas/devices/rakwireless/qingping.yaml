@@ -63,7 +63,9 @@ fields:
     semantic: "gas.co2"
   - name: battery
     type: u8
+    sensor: percentage   # a charge level, not the voltage the name suggests
     unit: "%"
+    senml: {unit: "/100"}
     valid_range: [0, 100]
 
 test_vectors:

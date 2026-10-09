@@ -33,6 +33,7 @@ fields:
                 - add: -32768
                 - div: 100
               unit: "%"
+              senml: {unit: "/100"}
             - name: oxygen_concentration
               type: u16
               transform:

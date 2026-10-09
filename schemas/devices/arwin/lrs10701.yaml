@@ -117,7 +117,7 @@ ports:
         unit: "%"
         description: "Battery level in percent (not a voltage)"
         ipso: {object: 3320, instance: 0, resource: 5700}
-        senml: {name: "battery", unit: "%"}
+        senml: {name: "battery", unit: "/100"}
         semantic: "battery.level"
 
   11:

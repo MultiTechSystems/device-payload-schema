@@ -715,6 +715,10 @@ SENML_UNIT_EQUIVALENTS = {
     'ug/m3': {'ug/m3', 'µg/m³', 'µg⋅m⁻³'},
     'mg/l': {'mg/l', 'mg/L', 'mg⋅L⁻¹'},
     'g/l': {'g/l', 'g/L', 'g⋅L⁻¹'},
+    # Percent is the secondary unit /100 (RFC 8798); `%` is registered as the ratio unit,
+    # the same as `/` (CR-2026-090). A field displayed as `%` and annotated /100 says
+    # exactly what it reports.
+    '/100': {'/100', '%'},
 }
 
 #: Registered SenML units that measure the same quantity as a sensor type's usual unit
@@ -724,6 +728,10 @@ SENML_UNIT_EQUIVALENTS = {
 #: reports is correctly annotated.
 SENML_UNIT_ALTERNATIVES = {
     'ppm': {'ppb', 'ppt', 'ug/m3', 'mg/l', 'ug/l', 'g/l'},
+    # A percentage reported in percent: /100 is SenML's percent (CR-2026-090). For
+    # relative humidity %RH stays the more specific registered name.
+    '%': {'/100'},
+    '%RH': {'/100'},
 }
 
 #: Units that measure the right quantity in the wrong scale. These are reported

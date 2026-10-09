@@ -98,6 +98,7 @@ definitions:
       - name: radar_motion_energy
         type: u8
         unit: "%"
+        senml: {unit: "/100"}
         valid_range: [0, 100]
         resolution: 1
         description: "Radar motion energy level"

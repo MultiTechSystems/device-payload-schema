@@ -235,7 +235,7 @@ fields:
     transform:
       - op: round
     unit: "%"
-    senml: {unit: "%"}
+    senml: {unit: "/100"}
     ipso: 3337
     semantic: "valve.position"
     valid_range: [0, 100]

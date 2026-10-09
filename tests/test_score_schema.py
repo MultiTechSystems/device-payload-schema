@@ -184,6 +184,13 @@ class TestAnnotationCorrectness:
         assert run_python_tests(absent)[0] is True
         assert run_python_tests(present)[0] is False
 
+    @pytest.mark.parametrize("keyword,unit", [("percentage", "%"), ("humidity", "%")])
+    def test_percent_is_slash_100(self, keyword, unit):
+        """CR-2026-090: SenML's percent is /100; `%` is the ratio unit."""
+        field = {"name": "x", "unit": unit, "senml": {"unit": "/100"}}
+        _ipso_ok, senml_ok, problems = check_annotation_correctness(field, keyword, 0)
+        assert senml_ok and not problems, problems
+
     def test_annotations_on_undetectable_fields_earn_no_credit(self):
         """Otherwise semantic marks could be farmed from unrelated fields."""
         schema = temperature_schema(sensor="none")

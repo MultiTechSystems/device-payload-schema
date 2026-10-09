@@ -46,6 +46,7 @@ definitions:
       - name: level
         type: u8
         unit: "%"
+        senml: {unit: "/100"}
         valid_range: [0, 100]
         resolution: 1
         unece: "P1"

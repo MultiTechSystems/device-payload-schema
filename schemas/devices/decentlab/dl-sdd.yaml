@@ -17,41 +17,53 @@ fields:
         - bit: 0
           fields:
             - name: moisture_at_level_0
+              sensor: percentage   # volumetric moisture; "level" is the probe depth
               type: u16
               transform:
                 - add: -32768
                 - div: 100
               unit: "%"
+              senml: {unit: "/100"}
             - name: moisture_at_level_1
+              sensor: percentage   # volumetric moisture; "level" is the probe depth
               type: u16
               transform:
                 - add: -32768
                 - div: 100
               unit: "%"
+              senml: {unit: "/100"}
             - name: moisture_at_level_2
+              sensor: percentage   # volumetric moisture; "level" is the probe depth
               type: u16
               transform:
                 - add: -32768
                 - div: 100
               unit: "%"
+              senml: {unit: "/100"}
             - name: moisture_at_level_3
+              sensor: percentage   # volumetric moisture; "level" is the probe depth
               type: u16
               transform:
                 - add: -32768
                 - div: 100
               unit: "%"
+              senml: {unit: "/100"}
             - name: moisture_at_level_4
+              sensor: percentage   # volumetric moisture; "level" is the probe depth
               type: u16
               transform:
                 - add: -32768
                 - div: 100
               unit: "%"
+              senml: {unit: "/100"}
             - name: moisture_at_level_5
+              sensor: percentage   # volumetric moisture; "level" is the probe depth
               type: u16
               transform:
                 - add: -32768
                 - div: 100
               unit: "%"
+              senml: {unit: "/100"}
             - name: temperature_at_level_0
               type: u16
               transform:
@@ -115,41 +127,53 @@ fields:
         - bit: 1
           fields:
             - name: moisture_at_level_6
+              sensor: percentage   # volumetric moisture; "level" is the probe depth
               type: u16
               transform:
                 - div: 100
                 - add: -327.68
               unit: "%"
+              senml: {unit: "/100"}
             - name: moisture_at_level_7
+              sensor: percentage   # volumetric moisture; "level" is the probe depth
               type: u16
               transform:
                 - div: 100
                 - add: -327.68
               unit: "%"
+              senml: {unit: "/100"}
             - name: moisture_at_level_8
+              sensor: percentage   # volumetric moisture; "level" is the probe depth
               type: u16
               transform:
                 - div: 100
                 - add: -327.68
               unit: "%"
+              senml: {unit: "/100"}
             - name: moisture_at_level_9
+              sensor: percentage   # volumetric moisture; "level" is the probe depth
               type: u16
               transform:
                 - div: 100
                 - add: -327.68
               unit: "%"
+              senml: {unit: "/100"}
             - name: moisture_at_level_10
+              sensor: percentage   # volumetric moisture; "level" is the probe depth
               type: u16
               transform:
                 - div: 100
                 - add: -327.68
               unit: "%"
+              senml: {unit: "/100"}
             - name: moisture_at_level_11
+              sensor: percentage   # volumetric moisture; "level" is the probe depth
               type: u16
               transform:
                 - div: 100
                 - add: -327.68
               unit: "%"
+              senml: {unit: "/100"}
             - name: temperature_at_level_6
               type: u16
               transform:

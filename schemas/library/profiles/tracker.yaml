@@ -81,6 +81,7 @@ definitions:
       - name: battery_percent
         type: u8
         unit: "%"
+        senml: {unit: "/100"}
 
   # Compact GPS (reduced precision, smaller payload)
   gps_compact:
@@ -121,3 +122,4 @@ definitions:
       - name: battery_percent
         type: u8
         unit: "%"
+        senml: {unit: "/100"}

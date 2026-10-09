@@ -10,6 +10,7 @@ definitions:
       - name: battery
         type: u8
         unit: "%"
+        senml: {unit: "/100"}
         valid_range: [0, 100]
         resolution: 1
         unece: "P1"
@@ -63,6 +64,7 @@ definitions:
           - add: -1800
           - div: 12
         unit: "%"
+        senml: {unit: "/100"}
         valid_range: [0, 100]
         description: "Battery percentage computed from mV (1800-3000mV = 0-100%)"
 

@@ -88,7 +88,7 @@ ports:
                       unit: "%"
                       sensor: percentage
                       ipso: {object: 3320, instance: 0, resource: 5700}
-                      senml: {name: "fill_level", unit: "%"}
+                      senml: {name: "fill_level", unit: "/100"}
                       semantic: "fill.level"
                     - name: AngleOfInclination
                       type: u8
@@ -100,7 +100,7 @@ ports:
                     unit: "%"
                     sensor: percentage
                     ipso: {object: 3320, instance: 0, resource: 5700}
-                    senml: {name: "fill_level", unit: "%"}
+                    senml: {name: "fill_level", unit: "/100"}
                     semantic: "fill.level"
       # Netvox frames are fixed at 11 bytes: Version, DeviceType, ReportType and an
       # 8-byte payload whose unused tail is "Reserved (Fixed 0x00)" - the version
