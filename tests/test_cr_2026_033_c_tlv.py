@@ -64,6 +64,22 @@ def report(tmp_path_factory):
     return json.loads(out.read_text())
 
 
+def tlv_block(text):
+    """The decode loop's TLV branch, up to the MATCH branch that follows it.
+
+    Bounded by the code rather than by a character count: a fixed window broke as soon as
+    CR-2026-093 added two checks inside the loop and the text it looked for moved past it.
+    """
+    start = text.index("if (field->type == FIELD_TYPE_TLV) {")
+    return text[start:text.index("if (field->type == FIELD_TYPE_MATCH) {", start)]
+
+
+def tlv_comment(text):
+    """The comment block that introduces the TLV branch."""
+    start = text.index("if (field->type == FIELD_TYPE_TLV) {")
+    return text[text.rindex("/*", 0, start):start]
+
+
 class TestTheInterpreterDecodesTlv:
     def test_the_field_type_exists(self):
         assert "FIELD_TYPE_TLV" in HEADER.read_text()
@@ -95,9 +111,7 @@ class TestTheInterpreterDecodesTlv:
     def test_an_undelimited_unknown_tag_ends_the_loop(self):
         """PS-302: with no length there is nothing to step over."""
         text = HEADER.read_text()
-        start = text.index("if (field->type == FIELD_TYPE_TLV) {")
-        window = text[start:start + 3000]
-        assert "PS-302" in window
+        assert "PS-302" in tlv_block(text)
 
     def test_unknown_error_mode_is_supported_and_raw_is_not(self):
         text = HEADER.read_text()
@@ -110,8 +124,7 @@ class TestTheInterpreterDecodesTlv:
     def test_the_missing_warning_channel_is_recorded(self):
         """The other five report what they could not read; this one cannot."""
         text = HEADER.read_text()
-        start = text.index("if (field->type == FIELD_TYPE_TLV) {")
-        assert "no warning channel" in text[max(0, start - 900):start]
+        assert "no warning channel" in tlv_comment(text)
 
 
 class TestCaseBodiesLiveAboveFieldCount:
@@ -134,15 +147,13 @@ class TestCaseBodiesLiveAboveFieldCount:
     def test_the_case_loop_is_bounded_by_the_array_not_field_count(self):
         """Copying the match block's `>= field_count` guard rejected every body."""
         text = HEADER.read_text()
-        start = text.index("if (field->type == FIELD_TYPE_TLV) {")
-        window = text[start:start + 3500]
+        window = tlv_block(text)
         assert "field_idx >= SCHEMA_MAX_FIELDS" in window
         assert "field_idx >= schema->field_count" not in window
 
     def test_the_reason_is_written_down_where_it_bit(self):
         text = HEADER.read_text()
-        start = text.index("if (field->type == FIELD_TYPE_TLV) {")
-        assert "decoded nothing at all" in text[start:start + 3500]
+        assert "decoded nothing at all" in tlv_block(text)
 
 
 class TestTheHarnessBuildsTlvInStep:
