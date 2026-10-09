@@ -178,7 +178,7 @@ var metaTypeAliases = func() map[string]string {
 }()
 
 // metaType is an entry's `type` (PS-493): the declared type, an alias by its canonical
-// name, a bit range as written. A named `tlv` with `merge: false` is `tlv`. A field with
+// name, a bit range as written. A `tlv` with `merge: false` is `tlv` (its `channels` key). A field with
 // no type is a schema error (PS-011, PS-441), so none is invented: "" leaves it out.
 func metaType(decl map[string]any) string {
 	if declared, ok := decl["type"].(string); ok {
@@ -270,7 +270,14 @@ func (s *Schema) metaDeclarations(fields any) *declarations {
 			if t, _ := f["type"].(string); t == "match" {
 				visitCases(f["cases"])
 			}
-			if tlv := asStringMap(f["tlv"]); tlv != nil && tlv["merge"] != false {
+			if tlv := asStringMap(f["tlv"]); tlv != nil {
+				if tlv["merge"] == false {
+					// Its entries are reported as a list under the fixed key `channels`
+					// (Clause 4), whose entry is `tlv` (CR-2026-097, PS-493). A tlv has
+					// no name of its own (PS-448).
+					found.setDefault("channels", f)
+					continue
+				}
 				visitCases(tlv["cases"])
 				continue
 			}
