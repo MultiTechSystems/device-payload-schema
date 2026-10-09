@@ -1715,26 +1715,52 @@ public static class SchemaDecoder
 public static class SemanticFormatter
 {
     /// <summary>
-    /// Convert decoded data to SenML format (RFC 8428).
+    /// Convert decoded data to SenML format (RFC 8428): one record per field the output
+    /// reports, wherever it is declared, named by its <c>senml.name</c> or else its
+    /// reported name, with <c>senml.unit</c> or else <c>unit</c> (PS-478). A member of an
+    /// object with no <c>senml.name</c> is named by the object's reported name and its own,
+    /// joined by <c>/</c> (PS-479). This looked fields up among the top-level list and the
+    /// plain nested lists only, so a port entry's, a case's or a group's fields had no
+    /// name or unit, and an object came out as one record holding the whole mapping.
+    /// <paramref name="fPort"/> selects a port entry's fields; without it every entry's
+    /// are searched.
     /// </summary>
     public static List<Dictionary<string, object?>> ToSenML(
-        PayloadSchemaDefinition schema, 
-        Dictionary<string, object?> decoded)
+        PayloadSchemaDefinition schema,
+        Dictionary<string, object?> decoded,
+        int? fPort = null)
     {
+        var fields = new List<SchemaField>(schema.Fields);
+        if (schema.Ports != null)
+        {
+            if (fPort.HasValue && schema.Ports.TryGetValue(fPort.Value.ToString(), out var port))
+                fields = new List<SchemaField>(port.Fields);
+            else
+                foreach (var entry in schema.Ports.Values) fields.AddRange(entry.Fields);
+        }
         var records = new List<Dictionary<string, object?>>();
-        var fields = GetAllFields(schema);
+        AddSenML(records, decoded, fields, "");
+        return records;
+    }
 
+    static void AddSenML(List<Dictionary<string, object?>> records,
+        Dictionary<string, object?> decoded, List<SchemaField> fields, string prefix)
+    {
+        var declared = ReportedFields(fields);
         foreach (var kv in decoded)
         {
-            if (kv.Key.StartsWith("_")) continue; // Skip internal fields
-            
-            var field = FindField(fields, kv.Key);
-            var record = new Dictionary<string, object?>();
-            
-            // Use SenML name if defined, otherwise field name
-            record["n"] = field?.Senml?.Name ?? kv.Key;
-            
-            // Set value based on type
+            if (kv.Key.StartsWith("_")) continue;   // `_quality`, `_warnings`: not fields
+            declared.TryGetValue(kv.Key, out var field);
+            var path = prefix.Length > 0 ? prefix + "/" + kv.Key : kv.Key;
+            if (kv.Value is Dictionary<string, object?> nested)
+            {
+                AddSenML(records, nested, field == null ? new() : Members(field), path);
+                continue;
+            }
+            var record = new Dictionary<string, object?>
+            {
+                ["n"] = string.IsNullOrEmpty(field?.Senml?.Name) ? path : field!.Senml!.Name
+            };
             if (kv.Value is bool b)
                 record["vb"] = b;
             else if (kv.Value is string s)
@@ -1742,17 +1768,52 @@ public static class SemanticFormatter
             else if (kv.Value is byte[] bytes)
                 record["vd"] = Convert.ToBase64String(bytes);
             else
-                record["v"] = kv.Value;
-            
-            // Set unit (prefer SenML unit, fall back to field unit)
-            var unit = field?.Senml?.Unit ?? field?.Unit;
+                record["v"] = kv.Value;     // a repeat's elements: PS-377, unchanged here
+            var unit = string.IsNullOrEmpty(field?.Senml?.Unit) ? field?.Unit : field!.Senml!.Unit;
             if (!string.IsNullOrEmpty(unit))
                 record["u"] = unit;
-            
             records.Add(record);
         }
-        
-        return records;
+    }
+
+    /// <summary>The fields one level of nested output holds: an object's, or a
+    /// <c>merge: false</c> tlv's cases'.</summary>
+    static List<SchemaField> Members(SchemaField field)
+    {
+        var tlv = field.TLVInline ?? field;
+        if (tlv.TLVCases != null && tlv.Merge == false)
+            return tlv.TLVCases.Values.SelectMany(c => c).ToList();
+        return field.Fields;
+    }
+
+    /// <summary>Reported key to declaring field for one level of output. A construct that
+    /// merges into its parent (PS-156, PS-163) contributes its fields at this level; an
+    /// object or repeat its own name. The first declaration of a name wins.</summary>
+    static Dictionary<string, SchemaField> ReportedFields(List<SchemaField> fields)
+    {
+        var found = new Dictionary<string, SchemaField>();
+        void Visit(IEnumerable<SchemaField> list)
+        {
+            foreach (var f in list)
+            {
+                Visit(f.ByteGroup);
+                if (f.Flagged != null)
+                    foreach (var g in f.Flagged.Groups) Visit(g.Fields);
+                foreach (var c in f.Cases) Visit(c.Fields);
+                if (f.MatchDefault is List<SchemaField> fallback) Visit(fallback);
+                if (f.MatchInline != null) Visit(new[] { f.MatchInline });
+                var tlv = f.TLVInline ?? f;
+                if (tlv.TLVCases != null && tlv.Merge != false)
+                    foreach (var body in tlv.TLVCases.Values) Visit(body);
+                if (f.TLVInline != null && f.TLVInline.Merge == false
+                    && !string.IsNullOrEmpty(f.TLVInline.Name))
+                    found.TryAdd(f.TLVInline.Name, f);
+                if (!string.IsNullOrEmpty(f.Name))
+                    found.TryAdd(f.Name, f);
+            }
+        }
+        Visit(fields);
+        return found;
     }
 
     /// <summary>

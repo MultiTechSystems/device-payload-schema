@@ -5275,7 +5275,7 @@ class SchemaInterpreter:
         def extract_metadata(field_def: Dict[str, Any]) -> Dict[str, Any]:
             meta = {}
             for key in ('unit', 'valid_range', 'resolution', 'unece', 
-                       'description', 'semantic', 'ipso', 'senml_unit'):
+                       'description', 'semantic', 'ipso', 'senml', 'senml_unit'):
                 if key in field_def:
                     meta[key] = field_def[key]
             # Flatten semantic sub-dict
@@ -5305,18 +5305,27 @@ class SchemaInterpreter:
         return all_metadata
     
     def get_semantic_output(self, decoded: Dict[str, Any], 
-                           format: str = 'ipso') -> Dict[str, Any]:
+                           format: str = 'ipso', fPort: int = None) -> Dict[str, Any]:
         """
         Convert decoded data to semantic format.
         
         Args:
             decoded: Decoded field values
             format: 'ipso', 'senml', or 'ttn'
+            fPort: the port the payload arrived on, for a schema that selects its
+                fields by port; its entry's fields are the ones reported (PS-478).
             
         Returns:
             Semantically formatted output
         """
-        fields = self.schema.get('fields', [])
+        if fPort is not None or not self.schema.get('ports'):
+            fields = self._resolve_fields(fPort)
+        else:
+            # No port given: every entry's fields are searched, first declaration first.
+            fields = list(self.schema.get('fields') or [])
+            for entry in self.schema['ports'].values():
+                group = entry.get('fields') if isinstance(entry, dict) else entry
+                fields.extend(group or [])
         
         if format == 'ipso':
             return self._to_ipso(decoded, fields)
@@ -5354,19 +5363,79 @@ class SchemaInterpreter:
         
         return result
     
-    def _to_senml(self, decoded: Dict[str, Any], 
-                  fields: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Convert to SenML format."""
+    @staticmethod
+    def _reported_fields(fields: List[Any]) -> Dict[str, Dict[str, Any]]:
+        """Reported key -> declaring field, for one level of decoded output.
+
+        A construct that merges its fields into its parent (PS-156, PS-163) contributes
+        them at this level: a match case, a byte_group, a flagged group, a tlv case
+        unless `merge: false`. An object or repeat contributes its own name; its members
+        are another level. The first declaration of a name wins, as the first case to
+        report it would.
+        """
+        found: Dict[str, Dict[str, Any]] = {}
+
+        def visit(field_list):
+            for f in field_list or []:
+                if not isinstance(f, dict):
+                    continue
+                if 'byte_group' in f:
+                    group = f['byte_group']
+                    visit(group.get('fields') if isinstance(group, dict) else group)
+                if isinstance(f.get('flagged'), dict):
+                    for g in f['flagged'].get('groups') or []:
+                        visit(g.get('fields'))
+                match = f.get('match')
+                if isinstance(match, dict):
+                    for body in (match.get('cases') or {}).values():
+                        if isinstance(body, list):
+                            visit(body)
+                    if isinstance(match.get('default'), list):
+                        visit(match['default'])
+                    if match.get('name'):
+                        found.setdefault(match['name'], {'name': match['name']})
+                tlv = f.get('tlv')
+                if isinstance(tlv, dict):
+                    if tlv.get('merge', True) is False and f.get('name'):
+                        found.setdefault(f['name'], dict(f, type='object'))
+                    else:
+                        for body in (tlv.get('cases') or {}).values():
+                            if isinstance(body, list):
+                                visit(body)
+                if f.get('name'):
+                    found.setdefault(f['name'], f)
+
+        visit(fields)
+        return found
+
+    def _to_senml(self, decoded: Dict[str, Any],
+                  fields: List[Dict[str, Any]], prefix: str = '') -> List[Dict[str, Any]]:
+        """Convert to SenML format (PS-478, PS-479).
+
+        One record per field the output reports, wherever it is declared, named by its
+        `senml.name` or else its reported name, with `senml.unit` or else `unit`. This
+        used to walk the top-level field list only and ignore the `senml` block: a
+        schema's `{name: temp, unit: Cel}` came out as `temperature` in `°C`, and a
+        field inside a port entry, a case or a group had no record. A member of an
+        object with no `senml.name` is named by the object's reported name and its own,
+        joined by `/` (PS-479). Internal fields and omitted ones are not reported, so
+        they have no record.
+        """
         records = []
-        
-        for field_def in fields:
-            name = field_def.get('name')
-            if name not in decoded:
+        declared = self._reported_fields(fields)
+
+        for name, value in decoded.items():
+            if str(name).startswith('_'):
+                continue        # `_quality`, `_warnings`: not fields
+            field_def = declared.get(name, {})
+            path = f"{prefix}/{name}" if prefix else str(name)
+            if isinstance(value, dict):
+                # A nested object: its members are records of their own (PS-479).
+                records.extend(self._to_senml(value, field_def.get('fields') or [], path))
                 continue
-            
-            record = {'n': name}
-            value = decoded[name]
-            
+            senml = field_def.get('senml') if isinstance(field_def.get('senml'), dict) else {}
+            record = {'n': senml.get('name') or path}
+
             if isinstance(value, bool):
                 record['vb'] = value
             elif isinstance(value, (int, float)):
@@ -5376,14 +5445,14 @@ class SchemaInterpreter:
             elif isinstance(value, bytes):
                 record['vd'] = value.hex()
             else:
-                record['v'] = value
-            
-            unit = field_def.get('unit')
+                record['v'] = value     # a repeat's elements: PS-377, unchanged here
+
+            unit = senml.get('unit') or field_def.get('unit')
             if unit:
                 record['u'] = unit
-            
+
             records.append(record)
-        
+
         return records
     
     def _to_ttn(self, decoded: Dict[str, Any], 
