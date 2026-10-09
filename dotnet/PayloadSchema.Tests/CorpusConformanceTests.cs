@@ -38,7 +38,7 @@ public class CorpusConformanceTests
     // CR-2026-071/073 brought a computed field's arithmetic onto PS-443/PS-444, so the
     // three arithmetic-order fixtures decode here: the full count of payload vectors
     // is 2363 (2374 vectors, 11 without a payload or an expected block).
-    const int CorpusFloor = 2363;
+    const int CorpusFloor = 2365;   // + guard-else-as-declared's two label vectors
 
     readonly ITestOutputHelper _output;
 

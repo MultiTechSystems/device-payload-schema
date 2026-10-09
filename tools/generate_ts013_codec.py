@@ -1409,9 +1409,8 @@ class TS013Generator:
             group = port_entry.get('fields') if isinstance(port_entry, dict) else port_entry
             iterator_problems += optional_errors(group)
         # PS-445, PS-452: a guard only on a computed field, one operation per stage.
-        from schema_interpreter import arithmetic_errors, typed_field_dicts
-        for field_def in typed_field_dicts(schema):
-            iterator_problems += arithmetic_errors(field_def)
+        from schema_interpreter import arithmetic_schema_errors
+        iterator_problems += arithmetic_schema_errors(schema)
         if iterator_problems:
             raise ValueError(iterator_problems[0])
         self.schema = schema

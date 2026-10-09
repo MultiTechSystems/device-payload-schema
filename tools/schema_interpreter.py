@@ -745,6 +745,29 @@ def arithmetic_errors(field_def):
     return errors
 
 
+def arithmetic_schema_errors(node, _top=True):
+    """arithmetic_errors() for every field mapping declaring a guard or a transform.
+
+    Walked separately from typed_field_dicts(): a guard on a mapping with no `type` - a
+    byte_group entry, a match - is as invalid as one on a `u8` (PS-445), and a walk that
+    only visits typed fields let it through with success.
+    """
+    errors = []
+    if isinstance(node, dict):
+        if not _top and ('guard' in node or 'transform' in node):
+            errors.extend(arithmetic_errors(node))
+        for key, value in node.items():
+            if _top and key in ('test_vectors', 'definitions'):
+                continue
+            if key in ('guard', 'transform'):
+                continue        # their own contents are not fields
+            errors.extend(arithmetic_schema_errors(value, False))
+    elif isinstance(node, list):
+        for item in node:
+            errors.extend(arithmetic_schema_errors(item, False))
+    return errors
+
+
 def is_literal(field_def):
     """A `string` or `number` field declaring `value`: a constant read from no bytes (PS-357)."""
     return (isinstance(field_def, dict) and field_def.get('type') in ('string', 'number')
@@ -1448,8 +1471,8 @@ class SchemaInterpreter:
         for field_def in typed_field_dicts(schema):
             self._load_errors.extend(literal_errors(field_def))
             self._load_errors.extend(encoding_errors(field_def))
-            self._load_errors.extend(arithmetic_errors(field_def))     # PS-445, PS-452
             self._load_errors.extend(lookup_template_errors(field_def))
+        self._load_errors.extend(arithmetic_schema_errors(schema))    # PS-445, PS-452
         self._load_errors.extend(timestamp_errors(schema.get('metadata')))
         self._load_errors.extend(schema_iterator_errors(schema))
         self._repeat_only_names = repeat_only_names(schema)

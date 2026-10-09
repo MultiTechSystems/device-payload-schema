@@ -43,7 +43,7 @@ class CorpusConformanceTest {
     // modifiers and the lookup applied to computed fields and a failed guard's `else`
     // reported as declared, all decode, and with laq4's vendor vector the full count of
     // payload vectors is 2363.
-    private static final int CORPUS_FLOOR = 2363;
+    private static final int CORPUS_FLOOR = 2365;   // + guard-else-as-declared's two label vectors
 
     @Test
     void corpusVectorsDecodeAsExpected() throws IOException {

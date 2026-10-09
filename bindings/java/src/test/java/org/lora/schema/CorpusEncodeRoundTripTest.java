@@ -57,7 +57,7 @@ class CorpusEncodeRoundTripTest {
     // (88 -> 94), and laq4's vendor vector under `match` (122 -> 123): the total rises
     // from 1679 to 1686. Measured equal before and after the CR's decode changes - a
     // computed field reads no bytes, so its value never reached the encoder's output.
-    private static final int ENCODE_FLOOR_TOTAL = 1686;
+    private static final int ENCODE_FLOOR_TOTAL = 1688;   // + guard-else-as-declared's two label vectors
 
     /**
      * Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -67,7 +67,7 @@ class CorpusEncodeRoundTripTest {
             // 1283 -> 1281 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped only because their internal byte halves were all zero, which the encoder wrote for an internal field with no value. It now reports such a field instead.
             "tlv", 1281,
             "flagged", 157,
-            "plain fixed", 94,
+            "plain fixed", 96,
             "match", 123,
             "byte_group", 19,
             // 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas

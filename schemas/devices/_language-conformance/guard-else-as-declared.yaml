@@ -19,7 +19,8 @@ fields:
   mult: 10
   transform:
   - add: 1
-# passes: index 2. fails: 7, not the label at index 7.
+# passes: g - 1 indexes the table. fails: 7, as declared - looked up, 7 is no index of
+# a three-entry sequence and the decode would fail (PS-105).
 - name: referenced
   type: number
   ref: $g
@@ -28,14 +29,29 @@ fields:
     - field: $g
       gt: 0
     else: 7
-  lookup: [a, b, c, d, e, f, g, h]
+  add: -1
+  lookup: [a, b, c]
 test_vectors:
-- name: guard_passes
+- name: guard_passes_one
+  source: spec-example
+  payload: "01"
+  expected:
+    g: 1
+    computed: 11
+    referenced: a
+- name: guard_passes_two
   source: spec-example
   payload: "02"
   expected:
     g: 2
     computed: 21
+    referenced: b
+- name: guard_passes_three
+  source: spec-example
+  payload: "03"
+  expected:
+    g: 3
+    computed: 31
     referenced: c
 - name: guard_fails
   source: spec-example

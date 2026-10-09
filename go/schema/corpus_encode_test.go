@@ -52,8 +52,9 @@ import (
 // arithmetic-order-read.yaml vectors round-trip. log-of-non-positive's zero_is_absent
 // stops round-tripping, deliberately: it did only because a `log10` stage was undone as
 // the identity, and a stage that does not invert is now reported, as the reference
-// reports it. `plain fixed` reads 94 and the total 1703.
-const encodeFloorTotal = 1703
+// reports it. `plain fixed` reads 94 and the total 1703, and 96 and 1705 with the two
+// vectors guard-else-as-declared gained for the mutation gate.
+const encodeFloorTotal = 1705
 
 // encodeFloorByShape guards each layout separately, so a regression in one that works
 // cannot hide behind the mass of one that does not. It has earned that: raising the total
@@ -70,7 +71,7 @@ var encodeFloorByShape = map[string]int{
 	// 1300 -> 1298 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped only because their internal byte halves were all zero, which the encoder wrote for an internal field with no value. It now reports such a field instead.
 	"tlv":         1298,
 	"flagged":     157,
-	"plain fixed": 94,
+	"plain fixed": 96,
 	"match":       122,
 	"byte_group":  19,
 	// 6 -> 5 with plain fixed 66 -> 67: a bucket move, not a regression. Composed
@@ -210,7 +211,7 @@ func TestCorpusEncodeRoundTrip(t *testing.T) {
 // devices in this corpus lay their channels out and not how ws515 and wt101 do - so its
 // failures are not all defects, and this floor is lower than the ordered one on purpose.
 // CR-2026-071 raised it to 1680, for the reasons given at encodeFloorTotal.
-const encodePlainFloorTotal = 1680
+const encodePlainFloorTotal = 1682
 
 // TestCorpusEncodePlainRoundTrip measures the unordered pair, so the two contracts are
 // ratcheted separately and neither can be mistaken for the other.

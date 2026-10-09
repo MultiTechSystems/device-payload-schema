@@ -120,3 +120,17 @@ def test_a_fractional_value_indexes_no_entry_of_a_sequence():
     assert SchemaInterpreter(schema_of(whole)).decode(b"\x04").data["v"] == "c"
     result = SchemaInterpreter(schema_of(whole)).decode(b"\x03")
     assert not result.success and any("PS-105" in e for e in result.errors)
+
+
+def test_a_guard_on_a_mapping_with_no_type_is_rejected():
+    # PS-445 walked typed fields only, so a guard beside a byte_group passed.
+    schema = {
+        "name": "probe",
+        "fields": [
+            {
+                "byte_group": [{"name": "hi", "type": "u8[4:7]", "consume": 1}],
+                "guard": {"when": [{"field": "$hi", "gt": 0}], "else": 0},
+            }
+        ],
+    }
+    assert_rejected(schema, "PS-445")

@@ -40,8 +40,9 @@ import (
 // everywhere, so the full count is 1239.
 // CR-2026-071's three fixtures (arithmetic-order-computed, arithmetic-order-read,
 // guard-else-as-declared) decode now that a compute takes its bare modifiers and a failed
-// guard's `else` skips the lookup, so the full count is 2363.
-const corpusFloor = 2363
+// guard's `else` skips the lookup, so the full count is 2363; guard-else-as-declared's two
+// further vectors (one per lookup label, for the mutation gate) make it 2365.
+const corpusFloor = 2365
 
 type corpusVector struct {
 	Name    string `yaml:"name"`

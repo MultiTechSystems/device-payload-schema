@@ -46,7 +46,7 @@ public class CorpusEncodeRoundTripTests
     // nothing, and the read fields' arithmetic was already undone in reverse), so
     // `plain fixed` rises from 88 to 94; with one `match` vector the floor had not
     // caught up with, 122 to 123, the total rises to 1686.
-    const int EncodeFloorTotal = 1686;
+    const int EncodeFloorTotal = 1688;   // + guard-else-as-declared's two label vectors
 
     /// <summary>
     /// Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -57,7 +57,7 @@ public class CorpusEncodeRoundTripTests
         // 1283 -> 1281 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped only because their internal byte halves were all zero, which the encoder wrote for an internal field with no value. It now reports such a field instead.
         ["tlv"] = 1281,
         ["flagged"] = 157,
-        ["plain fixed"] = 94,
+        ["plain fixed"] = 96,
         ["match"] = 123,
         ["byte_group"] = 19,
         // 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now
