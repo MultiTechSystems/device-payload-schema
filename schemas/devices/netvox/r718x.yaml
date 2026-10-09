@@ -101,6 +101,14 @@ ports:
                     ipso: {object: 3320, instance: 0, resource: 5700}
                     senml: {name: "fill_level", unit: "%"}
                     semantic: "fill.level"
+      # Netvox frames are fixed at 11 bytes: Version, DeviceType, ReportType and an
+      # 8-byte payload whose unused tail is "Reserved (Fixed 0x00)" - the version
+      # packet's last 2 bytes, for one (R718X user manual, netvox.com.tw/um/R718X).
+      # The reserved count differs by report and device, so the span runs to the end.
+      - name: _reserved
+        type: bytes
+        length: remaining
+        value: ""      # an encoder writes no padding (PS-434)
 
   7:
     description: "Configuration command responses (and echoed requests)"
@@ -210,6 +218,14 @@ ports:
                 type: u16
                 unit: "mm"
                 sensor: none
+      # Command frames are fixed at 11 bytes too: CmdID, DeviceType and a 9-byte payload
+      # whose unused tail is "Reserved (n Bytes, Fixed 0x00)" - 8 after a response's
+      # Status, 7 after a 2-byte value, 9 for a request with no body (R718X and R718PE
+      # user manuals, netvox.com.tw/um/). The span runs to the end of the frame.
+      - name: _reserved
+        type: bytes
+        length: remaining
+        value: ""      # an encoder writes no padding (PS-434)
 
 # Every expected value below is the vendor decoder's output (r718x.js under
 # node), or a TTN declared example in r718x-codec.yaml, never our own decode.

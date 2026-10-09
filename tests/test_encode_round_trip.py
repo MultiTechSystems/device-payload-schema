@@ -54,7 +54,7 @@ from validate_schema import is_encode_vector  # noqa: E402
 DEVICES = REPO_ROOT / "schemas" / "devices"
 
 #: Exact round-trips required overall. Raise as encoding improves.
-FLOOR_TOTAL = 1692
+FLOOR_TOTAL = 1698
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -62,7 +62,7 @@ FLOOR_BY_SHAPE = {
     # 1283 -> 1281 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped
     # only because their internal byte halves were all zero, which the encoder wrote
     # for an internal field with no value. It now reports such a field instead.
-    "tlv": 1281,
+    "tlv": 1287,
     "flagged": 157,
     "plain fixed": 100,
     "match": 123,

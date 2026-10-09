@@ -175,49 +175,18 @@ INTENTIONAL_UNCONSUMED: Dict[str, Tuple[int, str]] = {
     ),
 }
 
-_NETVOX_PADDING = (
-    "Netvox frames are zero-padded to a fixed 11 bytes (4 for an R718PE short "
-    "response); payload/r718x.js reads only the leading bytes of this command/report, "
-    "and the schema declares no trailing reserved span, so the padding is never read"
-)
-_AM30X_EXAMPLE = (
-    "TTN's declared example ends with channel 05 6A 49 00 - the AM10x PIR `activity` "
-    "u16le (am103.js) - which am30x.js has no case for and breaks out on; the schema "
-    "agrees with the vendor, and the example was evidently copied from another model. "
-    "The tag is consumed, the 2-byte value is not"
-)
-_WS50X_PADDING = (
-    "vector defect, not schema: the harvester padded the FF 29 switch channel to 6 value "
-    "bytes where it takes 1, so the next 2 bytes read as an unknown tag (ws50x.js also "
-    "breaks out) and the remaining 3 are unread"
-)
-
 #: A real gap. Each reason says what the unread bytes are, found in the vendor decoder
 #: under ~/Workspace/lora/tools/lorawan-devices/vendor/.
 KNOWN_DEFECT_UNCONSUMED: Dict[str, Tuple[int, str]] = {
     "arwin/lrs10701.yaml::ttn_device_settings": (
         1,
         "byte 7 of the TTN example: lrs10701.js `case 12` reads bytes 0-6 only, and the "
-        "schema's port 12 declares no trailing reserved byte",
+        "schema's port 12 declares no trailing reserved byte. Undetermined until a vendor "
+        "document says whether it is a firmware field (an `optional: true` candidate)",
     ),
-    "milesight/am307.yaml::vendor_reference": (2, _AM30X_EXAMPLE),
-    "milesight/am307l.yaml::vendor_reference": (2, _AM30X_EXAMPLE),
-    "milesight/am308.yaml::vendor_reference": (2, _AM30X_EXAMPLE),
-    "milesight/am308l.yaml::vendor_reference": (2, _AM30X_EXAMPLE),
-    "milesight/ws50x.yaml::ch255_type41_midscale": (3, _WS50X_PADDING),
-    "milesight/ws50x.yaml::ch255_type41_zero_values": (3, _WS50X_PADDING),
-    "netvox/r718x.yaml::startup_version_report": (2, _NETVOX_PADDING),
-    "netvox/r718x.yaml::config_report_response": (8, _NETVOX_PADDING),
-    "netvox/r718x.yaml::set_on_distance_threshold_response": (8, _NETVOX_PADDING),
-    "netvox/r718x.yaml::get_on_distance_threshold_response": (7, _NETVOX_PADDING),
-    "netvox/r718x.yaml::set_fill_max_distance_response": (8, _NETVOX_PADDING),
-    "netvox/r718x.yaml::get_fill_max_distance_response": (7, _NETVOX_PADDING),
-    "netvox/r718x.yaml::set_dead_zone_distance_response": (8, _NETVOX_PADDING),
-    "netvox/r718x.yaml::get_dead_zone_distance_response": (7, _NETVOX_PADDING),
-    "netvox/r718x.yaml::config_report_failure": (8, _NETVOX_PADDING),
-    "netvox/r718x.yaml::r718pe_set_dead_zone_distance_response": (1, _NETVOX_PADDING),
-    "netvox/r718x.yaml::echoed_request_has_no_body": (9, _NETVOX_PADDING),
-    "netvox/r718x.yaml::unknown_command": (9, _NETVOX_PADDING),
+    # Settled 2026-10-09: netvox/r718x declares its documented reserved tail; the
+    # am307/am307l/am308/am308l example carried an AM10x channel and is trimmed; ws50x's
+    # and em310-tilt's harvested vectors were padded past their channel and are trimmed.
 }
 
 
