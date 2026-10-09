@@ -190,6 +190,12 @@ def field_source(field, schema_endian):
 
     lookup = field.get("lookup")
     if isinstance(lookup, dict):
+        # Every non-integer lookup key in the corpus is `default` (PS-406), which this
+        # read as "lookup key is not an integer" - a schema problem, when it is the
+        # interpreter's: lookup_entry_t has no slot for a default. Building the table
+        # without it would drop it silently, which PS-446 forbids.
+        if "default" in lookup:
+            return None, UNREACHABLE_KEYS["default"]
         for key, label in lookup.items():
             try:
                 number = int(str(key), 0)
@@ -564,11 +570,14 @@ def run():
                         help="list every vector whose decode differs")
     parser.add_argument("--json", metavar="PATH", help="write the full result as JSON")
     parser.add_argument("--cc", default="cc", help="compiler to use (default cc)")
+    parser.add_argument("--corpus", metavar="DIR", type=pathlib.Path, default=CORPUS,
+                        help="walk this directory instead of schemas/devices - for "
+                             "probing one construct with a trimmed copy of a fixture")
     args = parser.parse_args()
 
     entries, skips, vector_total = [], collections.Counter(), 0
     skipped_vectors = 0
-    for path in sorted(CORPUS.rglob("*.yaml")):
+    for path in sorted(args.corpus.rglob("*.yaml")):
         try:
             schema = yaml.safe_load(path.read_text())
         except yaml.YAMLError:
