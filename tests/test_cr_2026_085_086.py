@@ -110,27 +110,6 @@ def test_a_tag_cut_off_at_the_end_is_an_error(tlv, payload):
     assert js["data"] == {} and any("PS-477" in e for e in js["errors"]), js
 
 
-def test_a_length_cut_off_leaves_the_entry_over_from_its_tag():
-    schema = {
-        "name": "probe",
-        "fields": [
-            {
-                "tlv": {
-                    "tag_size": 1,
-                    "length_size": 2,
-                    "cases": {1: [{"name": "a", "type": "u8"}]},
-                }
-            }
-        ],
-    }
-    raw = bytes.fromhex("0100012a" + "01" + "00")
-    for warnings in (
-        SchemaInterpreter(schema).decode(raw).warnings,
-        decode_js(schema, raw)["warnings"],
-    ):
-        assert any("offset 4" in w and "2 byte" in w for w in leftover(warnings))
-
-
 def test_an_encoder_writes_nothing_after_the_last_field():
     # PS-474: the leftover bytes were never data, so they are not re-encoded.
     raw = bytes.fromhex("2a0102")

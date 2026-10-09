@@ -234,12 +234,13 @@ typedef struct {
     int field_count;
     int bytes_consumed;
     int error_code;
-    /* 112 rather than 64: the PS-288 message names the schema and both directions, and
-     * the point of a shared message text is that every implementation reports the same
-     * string. A SCHEMA_MAX_NAME_LEN name puts the longest at 103 bytes, and the build
-     * treats a possible truncation as an error, so the buffer has to hold the worst
-     * case rather than the typical one. */
-    char error_msg[112];
+    /* 152 rather than 64: the point of a shared message text is that every
+     * implementation reports the same string, and the build treats a possible
+     * truncation as an error, so the buffer has to hold the worst case rather than the
+     * typical one. The longest is PS-486's length cut short, at 146 bytes with a
+     * SCHEMA_MAX_NAME_LEN tlv name and three full-width numbers; PS-288's, which names
+     * the schema and both directions, is 103. */
+    char error_msg[152];
     /* PS-472: the bytes after the last field that nothing decoded. The other five
      * implementations report these as a warning; this interpreter has no warning list
      * (a fixed-size, allocation-free result has nowhere to keep text), so it reports the
@@ -1174,9 +1175,11 @@ static inline int schema_decode_direction(
          * fewer than its tag are an error identifying the tlv; this used to stop the loop
          * and report a complete decode, the fragment dropped in silence. The code is
          * SCHEMA_ERR_BUFFER, what every other read past the payload's end returns, so no
-         * new one. Where the tag fits and its length does not, no entry is decoded and
-         * the bytes from its tag on are left over, as the reference leaves them; that
-         * returned SCHEMA_ERR_BUFFER with error_code unset and no message. */
+         * new one. PS-486 extends it to the rest of the entry: a length cut short, or a
+         * length declaring more bytes than remain, is the same error, for a known tag
+         * and for an unknown one that would be skipped. Before it, a length cut short
+         * rewound to the tag and left the bytes over, and a value cut short was read
+         * from what was there and reported as a complete decode. */
         if (field->type == FIELD_TYPE_TLV) {
             const int parts = field->tlv_tag_parts ? field->tlv_tag_parts : 0;
             const int tag_bytes = parts ? parts : (field->tlv_tag_size ? field->tlv_tag_size : 1);
@@ -1201,15 +1204,30 @@ static inline int schema_decode_direction(
 
                 int entry_len = -1;
                 if (field->tlv_length_size) {
-                    if (pos + field->tlv_length_size > len) {   /* PS-477, PS-472 */
-                        pos = entry_start;
-                        break;
+                    if (pos + field->tlv_length_size > len) {   /* PS-486 */
+                        result->error_code = SCHEMA_ERR_BUFFER;
+                        snprintf(result->error_msg, sizeof(result->error_msg),
+                                 "tlv %s: entry at offset %u: %u byte(s) remain after its "
+                                 "tag, fewer than its %d-byte length (PS-486)",
+                                 field->name[0] ? field->name : "(unnamed)",
+                                 (unsigned)entry_start, (unsigned)(len - pos),
+                                 (int)field->tlv_length_size);
+                        return SCHEMA_ERR_BUFFER;
                     }
                     entry_len = 0;
                     for (int b = 0; b < field->tlv_length_size; b++) {
                         entry_len = (entry_len << 8) | buf[pos + b];
                     }
                     pos += field->tlv_length_size;
+                    if ((size_t)entry_len > len - pos) {   /* PS-486 */
+                        result->error_code = SCHEMA_ERR_BUFFER;
+                        snprintf(result->error_msg, sizeof(result->error_msg),
+                                 "tlv %s: entry at offset %u: its length declares %d "
+                                 "byte(s), %u remain (PS-486)",
+                                 field->name[0] ? field->name : "(unnamed)",
+                                 (unsigned)entry_start, entry_len, (unsigned)(len - pos));
+                        return SCHEMA_ERR_BUFFER;
+                    }
                 }
 
                 const case_def_t* chosen = NULL;

@@ -101,16 +101,6 @@ public class CR2026085086Test {
     }
 
     @Test
-    public void aLengthCutOffLeavesTheEntryOverFromItsTag() {
-        String yaml = "name: probe\nfields:\n- tlv:\n    tag_size: 1\n    length_size: 2\n"
-                + "    cases:\n      1: [{name: a, type: u8}]\n";
-        Map<String, Object> out = decode(yaml, "0100012a0100");
-        assertEquals(42L, ((Number) out.get("a")).longValue());
-        assertEquals(List.of("2 byte(s) after the last field left undecoded, from offset 4 (PS-472)"),
-                leftover(out));
-    }
-
-    @Test
     public void anEncoderWritesNothingAfterTheLastField() {
         // PS-474: the leftover bytes were never data, so they are not re-encoded.
         Schema schema = Schema.fromYaml(ONE);

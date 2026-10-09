@@ -1918,14 +1918,23 @@ public class Schema {
             
             int dataLength = -1;
             if (lengthSize > 0) {
+                // PS-486: an entry is never partly read. A length cut short is an error,
+                // not leftover bytes for PS-472: the schema describes them.
                 if (ctx.remaining() < lengthSize) {
-                    // No entry was decoded here: the bytes from its tag on are left over,
-                    // and PS-472 reports them from the tag's offset.
-                    ctx.setOffset(entryStart);
-                    break;
+                    throw new SchemaException.DecodeException(String.format(
+                            "tlv entry at offset %d: %d byte(s) remain after its tag, fewer than its %d-byte length (PS-486)",
+                            entryStart, ctx.remaining(), lengthSize));
                 }
                 byte[] data = ctx.read(lengthSize);
                 dataLength = (int) ctx.decodeUnsigned(data, ctx.getEndian());
+                // Nor may its value run past the end (the context already stops at a
+                // `reserve`), known tag or skipped: a known one read what was there and
+                // reported success, a skipped one failed with a bare underflow.
+                if (dataLength > ctx.remaining()) {
+                    throw new SchemaException.DecodeException(String.format(
+                            "tlv entry at offset %d: its length declares %d byte(s), %d remain (PS-486)",
+                            entryStart, dataLength, ctx.remaining()));
+                }
             }
             
             String caseKey = findTLVCaseKey(field.getTlvCases(), tag);

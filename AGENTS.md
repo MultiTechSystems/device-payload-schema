@@ -1302,8 +1302,8 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   (PS-472) - in all five and in the generated codec's warnings[] (PS-473); C gives the
   count as `bytes_unread`. A tlv entry with fewer bytes than its tag is an error naming
   the tlv in every implementation (PS-477): Python's plain `tag_size` path, Go and the
-  generated codec stopped silently. A length cut short decodes no entry and leaves the
-  bytes over from the tag. **`valid_range` compares before the lookup** (PS-475):
+  generated codec stopped silently. CR-2026-093 extends it to the rest of the entry (see
+  below). **`valid_range` compares before the lookup** (PS-475):
   compared after it, every looked-up value read "good" and `out_of_range: omit` never
   dropped one; omitted, a value is not looked up, so an index its table lacks is no error.
   A failed guard's `else` is not compared. Go, Java and C# read a `tag_fields` component
@@ -1317,6 +1317,22 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   `range-before-lookup` (its field was first named `flagged`, which three encode harnesses'
   text scan filed under that shape - keep construct names out of fixture field names too),
   and `match-default-skip` now expects the PS-472 warning. PS-118 is withdrawn (PS-102).
+- **CR-2026-093 (PS-486): a tlv entry is never partly read.** Where an entry declares a
+  length, a length cut short, or a length declaring more bytes than remain (less any
+  `reserve`), is an error naming the tlv and the entry's offset, for a known tag and for an
+  unknown one that would be skipped. All six implementations give the same text:
+  `tlv entry at offset {p}: {n} byte(s) remain after its tag, fewer than its {w}-byte
+  length (PS-486)` and `tlv entry at offset {p}: its length declares {n} byte(s), {r}
+  remain (PS-486)`; C prefixes its tlv's name as it does for PS-477. Before it, a cut
+  length rewound to the tag and warned under PS-472, and **no implementation checked a
+  declared length against the payload on the known-tag path**: a case reading `length:
+  remaining` took the two bytes present as the whole of five. An unknown tag split three
+  ways: Python and TS013 stepped past the payload's end (10 bytes consumed of 7), Go read
+  the tail as a new entry (a second "unknown tag (0xAA), 187 bytes" warning), and Java and
+  C# failed with a bare underflow. No corpus vector reaches either cut (484 vectors over
+  the 8 schemas with a `length_size`, probed), so no floor moves. C's `error_msg` grew from
+  112 to 152 bytes to hold the length message's worst case, since the build treats a
+  possible truncation as an error.
 - **`_meta` is not produced by any implementation**, so CR-2026-043 (`_meta.fPort`) and
   the `_meta` parts of CR-2026-054 wait for their own change (decided 2026-10-05).
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,

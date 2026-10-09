@@ -98,18 +98,6 @@ public class CR2026_085_086Tests
             thrown.Message);
     }
 
-    // The tag fits and the length does not: no entry is decoded, and the bytes are left
-    // over from the tag's offset. This was a buffer underflow failing the decode.
-    [Fact]
-    public void ALengthCutOffLeavesTheEntryOverFromItsTag()
-    {
-        var result = Decode("- tlv: {tag_size: 1, length_size: 2, cases: {1: [{name: a, type: u8}]}}\n",
-            "0100012A0100");
-        Assert.Equal(42L, Convert.ToInt64(result["a"]));
-        Assert.Equal("2 byte(s) after the last field left undecoded, from offset 4 (PS-472)",
-            Assert.Single(Leftover(result)));
-    }
-
     // PS-474: the leftover bytes were never data, so they are not re-encoded.
     [Fact]
     public void AnEncoderWritesNothingAfterTheLastField()
