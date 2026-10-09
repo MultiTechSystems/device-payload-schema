@@ -35,7 +35,10 @@ public class CorpusConformanceTests
     // fixtures pass everywhere and the full count is 1237.
     // CR-2026-031 added the name_from var-mismatch fixture, whose two vectors decode
     // everywhere, so the full count is 1239.
-    const int CorpusFloor = 2356;
+    // CR-2026-071/073 brought a computed field's arithmetic onto PS-443/PS-444, so the
+    // three arithmetic-order fixtures decode here: the full count of payload vectors
+    // is 2363 (2374 vectors, 11 without a payload or an expected block).
+    const int CorpusFloor = 2363;
 
     readonly ITestOutputHelper _output;
 
