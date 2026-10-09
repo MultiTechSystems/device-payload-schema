@@ -54,7 +54,13 @@ import (
 // the identity, and a stage that does not invert is now reported, as the reference
 // reports it. `plain fixed` reads 94 and the total 1703, and 96 and 1705 with the two
 // vectors guard-else-as-declared gained for the mutation gate.
-const encodeFloorTotal = 1705
+// CR-2026-085/086's fixtures add four round trips: leftover-bytes' exact frame (`plain
+// fixed` 96 -> 97) and range-before-lookup's three in-range vectors, which this harness
+// files under `flagged` (157 -> 160) because a field there is named `flagged`. The other
+// two do not round-trip, by design: the leftover vector re-encodes without its leftover
+// bytes (PS-474), and the omitted out-of-range reading has no value to write back.
+// `match` was already reading 123 against a floor of 122. Total 1709.
+const encodeFloorTotal = 1709
 
 // encodeFloorByShape guards each layout separately, so a regression in one that works
 // cannot hide behind the mass of one that does not. It has earned that: raising the total
@@ -70,9 +76,9 @@ const encodeFloorTotal = 1705
 var encodeFloorByShape = map[string]int{
 	// 1300 -> 1298 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped only because their internal byte halves were all zero, which the encoder wrote for an internal field with no value. It now reports such a field instead.
 	"tlv":         1298,
-	"flagged":     157,
-	"plain fixed": 96,
-	"match":       122,
+	"flagged":     160,
+	"plain fixed": 97,
+	"match":       123,
 	"byte_group":  19,
 	// 6 -> 5 with plain fixed 66 -> 67: a bucket move, not a regression. Composed
 	// library schemas now carry only the definitions they reach, so one no longer
@@ -210,8 +216,9 @@ func TestCorpusEncodeRoundTrip(t *testing.T) {
 // plain API documents a weaker contract - it assumes ascending tag order, which is how most
 // devices in this corpus lay their channels out and not how ws515 and wt101 do - so its
 // failures are not all defects, and this floor is lower than the ordered one on purpose.
-// CR-2026-071 raised it to 1680, for the reasons given at encodeFloorTotal.
-const encodePlainFloorTotal = 1682
+// CR-2026-071 raised it to 1680, for the reasons given at encodeFloorTotal, and
+// CR-2026-085/086's fixtures to 1686.
+const encodePlainFloorTotal = 1686
 
 // TestCorpusEncodePlainRoundTrip measures the unordered pair, so the two contracts are
 // ratcheted separately and neither can be mistaken for the other.
