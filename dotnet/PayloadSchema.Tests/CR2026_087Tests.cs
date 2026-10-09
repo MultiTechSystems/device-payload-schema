@@ -84,7 +84,9 @@ ports:
     public void WithoutTheBlockTheReportedNameAndUnitAreUsed()
     {
         var bare = System.Text.RegularExpressions.Regex.Replace(Environmental, @", senml: \{[^}]*\}", "");
-        Assert.Equal(new[] { ("temperature", (string?)"°C"), ("humidity", "%RH"), ("battery_voltage", "V") },
+        // `°C` is not a registered SenML unit, so that record has no `u` (PS-488,
+        // CR-2026-094); CR2026_094Tests covers the warning.
+        Assert.Equal(new[] { ("temperature", (string?)null), ("humidity", "%RH"), ("battery_voltage", "V") },
             Records(bare, "00FF820CCC", null, null).Select(r => (r.n, r.u)).ToArray());
     }
 

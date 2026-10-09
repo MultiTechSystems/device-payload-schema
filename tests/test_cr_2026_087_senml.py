@@ -95,8 +95,10 @@ def test_clause_7_example_is_named_by_its_senml_block():
 
 def test_without_the_block_the_reported_name_and_unit_are_used():
     records = senml(ENVIRONMENTAL, "00FF820CCC", drop_senml=True)
-    assert [(r["n"], r["u"]) for r in records] == [
-        ("temperature", "°C"),
+    # `°C` is not a registered SenML unit, so that record has no `u` (PS-488,
+    # CR-2026-094); test_cr_2026_094_senml_units.py covers the warning.
+    assert [(r["n"], r.get("u")) for r in records] == [
+        ("temperature", None),
         ("humidity", "%RH"),
         ("battery_voltage", "V"),
     ]

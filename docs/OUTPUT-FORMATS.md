@@ -117,36 +117,35 @@ IETF Sensor Measurement Lists standard.
 
 ```json
 [
-  {
-    "n": "temperature",
-    "v": 23.45,
-    "u": "°C"
-  },
-  {
-    "n": "humidity",
-    "v": 65,
-    "u": "%RH"
-  },
-  {
-    "n": "pressure",
-    "v": 1013.2,
-    "u": "hPa"
-  },
-  {
-    "n": "co2",
-    "v": 850,
-    "u": "ppm"
-  },
-  {
-    "n": "battery",
-    "v": 3.3,
-    "u": "V"
-  }
+  {"n": "temperature", "v": 23.45, "u": "Cel"},
+  {"n": "humidity", "v": 65, "u": "%RH"},
+  {"n": "pressure", "v": 101320, "u": "Pa"},
+  {"n": "co2", "v": 0.00085, "u": "/"},
+  {"n": "battery", "v": 3.3, "u": "V"}
 ]
 ```
 
-Records are built from the field's `name` and its `unit:` string verbatim (`°C`, not
-the SenML unit `Cel`); the `senml: {name, unit}` annotation is not used.
+One record per field the decoded output reports, wherever it is declared - a port
+entry, a `match` or `tlv` case, a `byte_group`, a `flagged` group - and an object's
+members as `object/member` (PS-478, PS-479). A record is named by the field's
+`senml.name`, else its reported name.
+
+Its unit comes from `senml.unit`, else `unit`, and is always a unit of the IANA SenML
+Units registry (CR-2026-094):
+
+- **A registered unit** is used as it is: `Cel`, `%RH`, `V`.
+- **A secondary unit** is re-expressed in its primary unit by the registry's scale and
+  offset, computed in decimal (PS-487): 1013.2 `hPa` is 101320 `Pa`, 850 `ppm` is
+  0.00085 `/`, 3284 `mV` is 3.284 `V` (not 3.2840000000000003), -97 `dBm` is -127 `dBW`.
+  `%` is written by its preferred name `/`, with no change of value.
+- **A unit the registry does not have** (`°C`, `kPa`, `bar`) is left out of the record,
+  the value kept, with a warning naming the field and the unit (PS-488). Python reports
+  it in `interpreter.semantic_warnings` after `get_semantic_output()`; C# adds it to the
+  optional `warnings` list passed to `SemanticFormatter.ToSenML()`.
+
+The decoded output and `_meta` keep the author's unit; only the SenML view converts.
+The registry tables are `SENML_UNITS` and `SENML_SECONDARY_UNITS` in
+`tools/schema_interpreter.py` and `SenmlUnits` in C#.
 
 **SenML Fields:**
 - `n` - name
@@ -443,8 +442,7 @@ For each device schema, the following artifacts SHOULD be generated:
 ## Format-Specific JSON Schemas
 
 Different output formats have different validation schemas. The examples below use
-SenML unit symbols (`Cel`); `get_semantic_output()` currently emits the field's `unit:`
-string (`°C`) instead, as shown in sections 2-4.
+SenML unit symbols (`Cel`), as SenML output does (section 3).
 
 | Format | Schema | Scope |
 |--------|--------|-------|
