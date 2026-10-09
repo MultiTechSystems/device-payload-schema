@@ -49,7 +49,8 @@ class CorpusConformanceTest {
     // the full count of payload vectors is 2371.
     // CR-2026-096 added nine vectors (the meta-* fixtures); with _meta compared exactly
     // where a vector carries expected_meta, all pass: 2549.
-    private static final int CORPUS_FLOOR = 2549;   // dl-atm41g2's two vendor vectors (+2); +121: vendor-codec vectors that kill vobo's mutation survivors
+    // CR-2026-097 added meta-tlv-channels.yaml: 2550.
+    private static final int CORPUS_FLOOR = 2550;   // dl-atm41g2's two vendor vectors (+2); +121: vendor-codec vectors that kill vobo's mutation survivors
 
     @Test
     void corpusVectorsDecodeAsExpected() throws IOException {
