@@ -2,6 +2,7 @@ package schema
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -385,33 +386,103 @@ func checkFieldRules(field map[string]any, at string) error {
 			return fmt.Errorf("%s: `separator` applies only to the hex formats, not %v (PS-391)", at, format)
 		}
 	}
-	if stages, ok := field["transform"].([]any); ok {
-		for i, raw := range stages {
-			stage := asStringMap(raw)
-			where := fmt.Sprintf("%s.transform[%d]", at, i)
-			if stage == nil {
-				return fmt.Errorf("%s: a transform stage must be a mapping", where)
-			}
-			// PS-390: `{round: n}` is not a stage. Go accepted it and did nothing,
-			// reporting the unrounded value with success.
-			if _, ok := stage["round"]; ok {
-				return fmt.Errorf("%s: `{round: n}` is not a transform stage; write "+
-					"{op: round, decimals: n} (PS-390)", where)
-			}
-			if op, ok := stage["op"]; ok {
-				if op != "round" {
-					return fmt.Errorf("%s: transform stage names an unknown operation %v (PS-390)", where, op)
-				}
-				if ties, ok := stage["ties"]; ok && ties != "even" && ties != "away" {
-					return fmt.Errorf("%s: round `ties` must be even or away, got %v (PS-390)", where, ties)
-				}
-			}
-			if !hasAnyKey(stage, transformOperations) {
-				return fmt.Errorf("%s: transform stage names no operation of the PS-115 table (PS-390)", where)
-			}
+	// PS-445 (CR-2026-071): a guard belongs to a computed field. On a field read from the
+	// payload, or a literal, it was ignored with success - a schema meaning "no reading
+	// below this" decoded every value. `sentinel` and `out_of_range: omit` say that for
+	// a read value.
+	if _, ok := field["guard"]; ok {
+		typ, _ := field["type"].(string)
+		if (typ != "number" && typ != "integer") || !hasAnyKey(field, []string{"ref", "compute"}) {
+			return fmt.Errorf("%s: a guard is declared only on a computed field (ref or "+
+				"compute); for a value read from the payload use sentinel or "+
+				"out_of_range: omit (PS-445)", at)
+		}
+	}
+	if transform, ok := field["transform"]; ok {
+		if err := checkTransformStages(transform, at); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// transformOpParameters are the keys of an `op:` stage that are parameters of its one
+// operation rather than operations of their own (PS-452).
+var transformOpParameters = []string{"decimals", "ties"}
+
+// checkTransformStages holds PS-390 and PS-452 (CR-2026-073): each stage is a mapping
+// holding exactly one operation the language defines, checked on the raw map.
+//
+// It has to be the raw map. The parser builds a Transform from a stage by hand, one key
+// at a time, so `{add: 1, mult: 2}` became a struct with both set and
+// applyTransformStages ran mult then add - 1 decoded as 3, where Python gave 7 by its own
+// order and the generated codec applied only one. And `{add: 1, sub: 2}` passed the old
+// "names some operation" check on its `add` while `sub`, which no implementation is to
+// read, was applied too.
+func checkTransformStages(transform any, at string) error {
+	stages, ok := transform.([]any)
+	if !ok {
+		return fmt.Errorf("%s: `transform` must be a list of stages (PS-102)", at)
+	}
+	for i, raw := range stages {
+		stage := asStringMap(raw)
+		where := fmt.Sprintf("%s.transform[%d]", at, i)
+		if stage == nil {
+			return fmt.Errorf("%s: a transform stage must be a mapping holding one operation (PS-452)", where)
+		}
+		// PS-390: `{round: n}` is not a stage. Go accepted it and did nothing,
+		// reporting the unrounded value with success.
+		if _, ok := stage["round"]; ok {
+			return fmt.Errorf("%s: `{round: n}` is not a transform stage; write "+
+				"{op: round, decimals: n} (PS-390)", where)
+		}
+		var unknown, operations []string
+		for _, key := range sortedKeys(stage) {
+			switch {
+			case containsString(transformOperations, key):
+				operations = append(operations, key)
+			case !containsString(transformOpParameters, key):
+				unknown = append(unknown, key)
+			}
+		}
+		if len(unknown) > 0 {
+			return fmt.Errorf("%s: transform stage names no operation of the PS-115 table: %s (PS-390)",
+				where, strings.Join(unknown, ", "))
+		}
+		if len(operations) != 1 {
+			held := "none"
+			if len(operations) > 0 {
+				held = strings.Join(operations, ", ")
+			}
+			return fmt.Errorf("%s: a transform stage must hold exactly one operation, and holds %s (PS-452)",
+				where, held)
+		}
+		op, isOp := stage["op"]
+		if !isOp {
+			if hasAnyKey(stage, transformOpParameters) {
+				return fmt.Errorf("%s: `decimals` and `ties` belong to an `op:` stage (PS-452)", where)
+			}
+			continue
+		}
+		if op != "round" {
+			return fmt.Errorf("%s: transform stage names an unknown operation %v (PS-390)", where, op)
+		}
+		if ties, ok := stage["ties"]; ok && ties != "even" && ties != "away" {
+			return fmt.Errorf("%s: round `ties` must be even or away, got %v (PS-390)", where, ties)
+		}
+	}
+	return nil
+}
+
+// sortedKeys returns a map's keys in a fixed order, so an error naming several reads
+// the same on every run.
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // checkPortDeclarations holds PS-018 (a port key is 1 to 255, CR-2026-041) and PS-335 and
