@@ -167,8 +167,8 @@ public static class Meta
 
     /// <summary>
     /// A `_meta` entry's `type` (PS-493): the declared type, an alias by its canonical
-    /// name, a bit range as written. A named `tlv` with `merge: false` reports its
-    /// channels and is `tlv`. A field with no type is a schema error (PS-011, PS-441), so
+    /// name, a bit range as written. A `tlv` with `merge: false` reports its entries under
+    /// `channels`, and that entry is `tlv`. A field with no type is a schema error (PS-011, PS-441), so
     /// none is invented: null leaves `type` out.
     /// </summary>
     public static string? MetaType(YamlMappingNode field)
@@ -234,8 +234,15 @@ public static class Meta
                 if (Value(f, "type") is "match" && Get(f, "cases") is YamlMappingNode legacy)
                     foreach (var body in legacy.Children.Values)
                         Visit(Items(body));
-                if (Get(f, "tlv") is YamlMappingNode tlv && !MergeIsFalse(tlv))
+                if (Get(f, "tlv") is YamlMappingNode tlv)
                 {
+                    if (MergeIsFalse(tlv))
+                    {
+                        // Its entries are reported as a list under the fixed key `channels`
+                        // (Clause 4), whose entry is `tlv` (PS-493); a tlv has no name (PS-448).
+                        found.TryAdd("channels", f);
+                        continue;
+                    }
                     foreach (var body in CaseBodies(Get(tlv, "cases")))
                         Visit(Items(body));
                     continue;

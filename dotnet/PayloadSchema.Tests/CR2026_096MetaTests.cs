@@ -278,7 +278,7 @@ public class CR2026_096MetaTests
     public void AFieldWithNoTypeHasNoTypeInItsEntry()
     {
         // PS-011, PS-441: no type is invented. A field with no type is refused at load, so
-        // this reaches FieldMeta directly; a named merge:false tlv is still `tlv`.
+        // this reaches FieldMeta directly; a merge:false tlv is `tlv` (its `channels` key).
         var entry = Meta.FieldMeta((YamlDotNet.RepresentationModel.YamlMappingNode)Node("{name: r, unit: V}"));
         Assert.False(entry.ContainsKey("type"));
         Assert.Equal("tlv", Meta.MetaType((YamlDotNet.RepresentationModel.YamlMappingNode)Node(

@@ -196,7 +196,7 @@ the same vectors:
 |---|---|---|---|
 | Python | `tests/test_corpus_conformance.py` | every vector | 1744 |
 | Go | `go/schema/corpus_conformance_test.go` | 2550 | 1761 (plain API 1738) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2549 | 1744 |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2550 | 1744 |
 | Java | `bindings/java/.../CorpusConformanceTest.java` | 2550 | 1744 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 540 of 540 attempted | n/a |
 
@@ -1382,6 +1382,9 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
       value is malformed (`match: 3`), which slips past the PS-334 check.
     - Go reads a typeless tlv `tag_fields` member, and an enum with no `base`, as one byte.
     - PS-498 (enum `descriptions`, MAY) is not produced.
+    - Encoding a `merge: false` tlv's decoded output writes an empty payload with no error
+      or warning in Python (found porting `_meta` to Java). That is the silent-write-of-
+      nothing shape above, in the encoder, and is not part of this change.
   - CR-2026-043 (`_meta.fPort`) and the `_meta` parts of CR-2026-054 land with this.
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
