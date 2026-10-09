@@ -53,7 +53,7 @@ class CorpusEncodeRoundTripTest {
     // round-trips: `plain fixed` rises from 58 to 59 and the total to 1161.
     // CR-2026-031's name_from var-mismatch fixture round-trips here too, so
     // `plain fixed` rises from 59 to 61 and the total to 1163.
-    private static final int ENCODE_FLOOR_TOTAL = 1679;
+    private static final int ENCODE_FLOOR_TOTAL = 1680;
 
     /**
      * Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -64,7 +64,7 @@ class CorpusEncodeRoundTripTest {
             "tlv", 1281,
             "flagged", 157,
             "plain fixed", 88,
-            "match", 122,
+            "match", 123,
             "byte_group", 19,
             // 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas
             // now carry only the definitions they reach, so one no longer contains an
