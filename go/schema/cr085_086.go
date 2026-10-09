@@ -63,11 +63,28 @@ func tlvTagWidth(field Field, tagSize int) int {
 	}
 	width := 0
 	for _, tf := range field.TagFields {
-		if tf.Length == 0 {
-			width++
-		} else {
-			width += tf.Length
-		}
+		width += tagFieldWidth(tf)
 	}
 	return width
+}
+
+// tagFieldWidth is the bytes one tag component takes: its `length` where declared, else
+// its type's width. Decoding read `length` defaulting to 1 while encoding took the type's
+// width, so a `u16` component was read as one byte and written as two; every other
+// implementation reads it by its type.
+func tagFieldWidth(tf Field) int {
+	if tf.Length > 0 {
+		return tf.Length
+	}
+	if _, hi, known := integerRange(tf.Type); known {
+		switch {
+		case hi > 0xFFFFFF:
+			return 4
+		case hi > 0xFFFF:
+			return 3
+		case hi > 0xFF:
+			return 2
+		}
+	}
+	return 1
 }

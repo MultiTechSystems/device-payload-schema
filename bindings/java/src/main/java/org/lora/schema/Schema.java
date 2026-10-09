@@ -382,6 +382,18 @@ public class Schema {
     }
 
     /** The bytes one element always takes, or 0 where it varies (PS-344a). */
+    /**
+     * The bytes one tag component takes: its {@code length} where declared, else its type's
+     * width. This read {@code length} defaulting to 1, so a u16 component was read as one
+     * byte where Python and the generated codec take two.
+     */
+    static int tagFieldWidth(Field tf) {
+        if (tf.getLength() > 0) return tf.getLength();
+        FieldType t = tf.getType();
+        if (t != null && t.isInteger() && t.defaultLength() > 0) return t.defaultLength();
+        return 1;
+    }
+
     private static int fixedElementSize(List<Field> fields) {
         int total = 0;
         for (Field f : fields) {
@@ -1862,7 +1874,7 @@ public class Schema {
         if (field.getTagFields() != null && !field.getTagFields().isEmpty()) {
             tagWidth = 0;
             for (Field tf : field.getTagFields()) {
-                tagWidth += tf.getLength() > 0 ? tf.getLength() : 1;
+                tagWidth += tagFieldWidth(tf);
             }
         }
 
@@ -1880,8 +1892,7 @@ public class Schema {
             
             if (field.getTagFields() != null && !field.getTagFields().isEmpty()) {
                 for (Field tf : field.getTagFields()) {
-                    int tfLength = tf.getLength() > 0 ? tf.getLength() : 1;
-                    byte[] data = ctx.read(tfLength);
+                    byte[] data = ctx.read(tagFieldWidth(tf));
                     int val = (int) ctx.decodeUnsigned(data, ctx.getEndian());
                     if (tf.getName() != null) {
                         tagValues.put(tf.getName(), val);

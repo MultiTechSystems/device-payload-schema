@@ -166,4 +166,16 @@ public class CR2026_085_086Tests
         Assert.False(result.ContainsKey("f"));
         Assert.Equal("out_of_range", Quality(result)["f"]);
     }
+
+    // A tag component is as wide as its type: a u16 was read as one byte, written as two.
+    [Fact]
+    public void ATagComponentIsReadAtItsTypeWidth()
+    {
+        var schema = Load("- tlv:\n    tag_fields:\n    - {name: ch, type: u16}\n"
+            + "    tag_key: [ch]\n    cases:\n      \"[258]\":\n      - {name: a, type: u8}\n");
+        var result = SchemaDecoder.Decode(schema, Convert.FromHexString("01022A"));
+        Assert.Equal(42L, Convert.ToInt64(result["a"]));
+        var encoded = SchemaEncoder.Encode(schema, new Dictionary<string, object?> { ["a"] = 42 });
+        Assert.Equal("01022A", Convert.ToHexString(encoded.Payload));
+    }
 }

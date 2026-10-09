@@ -3070,11 +3070,7 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 			// Structured tag
 			tagValues = make(map[string]int)
 			for _, tf := range field.TagFields {
-				length := tf.Length
-				if length == 0 {
-					length = 1
-				}
-				data, err := ctx.Read(length)
+				data, err := ctx.Read(tagFieldWidth(tf))
 				if err != nil {
 					break
 				}
@@ -4031,18 +4027,7 @@ func encodeTLVTag(caseKey string, field Field, ctx *EncodeContext) ([]byte, erro
 			if !ok {
 				return nil, fmt.Errorf("tlv case %q gives no value for %q", caseKey, tf.Name)
 			}
-			width := 1
-			if lo, hi, known := integerRange(tf.Type); known {
-				_ = lo
-				switch {
-				case hi > 0xFFFFFF:
-					width = 4
-				case hi > 0xFFFF:
-					width = 3
-				case hi > 0xFF:
-					width = 2
-				}
-			}
+			width := tagFieldWidth(tf)
 			out = append(out, encodeUint(uint64(v), width, ctx.Endian)...)
 		}
 		return out, nil

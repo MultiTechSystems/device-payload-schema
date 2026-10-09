@@ -5,6 +5,7 @@ package schema
 
 import (
 	"encoding/hex"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -212,5 +213,36 @@ func TestCR086RangeBeforeLookup(t *testing.T) {
 	}
 	if out["s"] != "y" || q["s"] != "out_of_range" {
 		t.Errorf("s: %v, quality %v", out["s"], q)
+	}
+}
+
+// A tag component is as wide as its type: a u16 component was read as one byte (the
+// decoder took `length`, defaulting to 1) and written as two.
+func TestTagFieldIsReadAtItsTypeWidth(t *testing.T) {
+	s, err := ParseSchema(`
+name: probe
+fields:
+  - tlv:
+      tag_fields:
+        - {name: ch, type: u16}
+      tag_key: [ch]
+      cases:
+        "[258]":
+          - {name: a, type: u8}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte{0x01, 0x02, 0x2a}
+	got, err := s.Decode(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(got["a"]) != "42" {
+		t.Fatalf("a = %#v (%T), want 42", got["a"], got["a"])
+	}
+	out, err := s.Encode(map[string]any{"a": 42})
+	if err != nil || string(out) != string(payload) {
+		t.Fatalf("encode = %x, %v; want %x", out, err, payload)
 	}
 }

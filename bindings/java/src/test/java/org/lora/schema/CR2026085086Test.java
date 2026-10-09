@@ -167,4 +167,16 @@ public class CR2026085086Test {
         assertEquals("three", out.get("v"));
         assertArrayEquals(new byte[] {1}, schema.encode(Map.of("v", "three")).getPayload());
     }
+
+    /** A tag component is as wide as its type: a u16 was read as one byte, written as two. */
+    @Test
+    void aTagComponentIsReadAtItsTypeWidth() {
+        String yaml = "name: probe\nfields:\n- tlv:\n    tag_fields:\n    - {name: ch, type: u16}\n"
+                + "    tag_key: [ch]\n    cases:\n      \"[258]\":\n      - {name: a, type: u8}\n";
+        Schema schema = Schema.fromYaml(yaml);
+        Map<String, Object> out = schema.decode(HexFormat.of().parseHex("01022a"));
+        assertEquals(42L, ((Number) out.get("a")).longValue(), String.valueOf(out));
+        assertArrayEquals(HexFormat.of().parseHex("01022a"),
+                schema.encode(Map.of("a", 42)).getPayload());
+    }
 }

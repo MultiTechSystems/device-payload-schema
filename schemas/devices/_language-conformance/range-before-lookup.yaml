@@ -9,7 +9,7 @@
 name: probe_range_before_lookup
 endian: big
 fields:
-- name: flagged
+- name: reported
   type: u8
   add: -1
   valid_range: [0, 2]
@@ -25,35 +25,35 @@ test_vectors:
   source: spec-example
   payload: "01 01"
   expected:
-    flagged: zero
+    reported: zero
     omitted: zero
     _quality:
-      flagged: good
+      reported: good
       omitted: good
 - name: middle
   source: spec-example
   payload: "02 02"
   expected:
-    flagged: one
+    reported: one
     omitted: one
     _quality:
-      flagged: good
+      reported: good
       omitted: good
 - name: high_end
   source: spec-example
   payload: "03 03"
   expected:
-    flagged: two
+    reported: two
     omitted: two
     _quality:
-      flagged: good
+      reported: good
       omitted: good
 - name: out_of_range
   source: spec-example
   payload: "04 04"
   expected:
-    flagged: three
+    reported: three
     omitted: null
     _quality:
-      flagged: out_of_range
+      reported: out_of_range
       omitted: out_of_range

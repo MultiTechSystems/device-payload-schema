@@ -807,6 +807,14 @@ public static class SchemaDecoder
     /// 78.125 is a tie, while 2.355 is stored just below one.
     /// </summary>
     /// <summary>The bytes one element always takes, or 0 where it varies (PS-344a).</summary>
+    /// <summary>
+    /// The bytes one tag component takes: its <c>length</c> where declared, else its type's
+    /// width. This read <c>length</c> defaulting to 1, so a u16 component was read as one
+    /// byte where the encoder, Python and the generated codec take two.
+    /// </summary>
+    internal static int TagFieldWidth(SchemaField tf) =>
+        tf.Length > 0 ? tf.Length : Helpers.InferLengthFromType(tf.Type);
+
     internal static int FixedElementSize(List<SchemaField> fields)
     {
         int total = 0;
@@ -1252,7 +1260,7 @@ public static class SchemaDecoder
             // bare buffer underflow, naming neither the tlv nor the tag. A composite tag's
             // width is its tag_fields', as they are read below.
             var width = field.TagFields.Count > 0
-                ? field.TagFields.Sum(tf => tf.Length > 0 ? tf.Length : 1)
+                ? field.TagFields.Sum(TagFieldWidth)
                 : tagSize;
             if (ctx.Remaining < width)
                 throw new InvalidOperationException($"tlv entry at offset {ctx.Offset}: "
@@ -1263,8 +1271,7 @@ public static class SchemaDecoder
                 var tagValues = new Dictionary<string, int>();
                 foreach (var tf in field.TagFields)
                 {
-                    int len = tf.Length > 0 ? tf.Length : 1;
-                    var data = ctx.Read(len);
+                    var data = ctx.Read(TagFieldWidth(tf));
                     int val = (int)Helpers.DecodeUint(data, ctx.Endian);
                     if (!string.IsNullOrEmpty(tf.Name))
                         tagValues[tf.Name] = val;

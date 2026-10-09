@@ -54,9 +54,10 @@ import (
 // the identity, and a stage that does not invert is now reported, as the reference
 // reports it. `plain fixed` reads 94 and the total 1703, and 96 and 1705 with the two
 // vectors guard-else-as-declared gained for the mutation gate.
-// CR-2026-085/086's fixtures add four round trips: leftover-bytes' exact frame (`plain
-// fixed` 96 -> 97) and range-before-lookup's three in-range vectors, which this harness
-// files under `flagged` (157 -> 160) because a field there is named `flagged`. The other
+// CR-2026-085/086's fixtures add four round trips, all `plain fixed` (96 -> 100):
+// leftover-bytes' exact frame and range-before-lookup's three in-range vectors. (Its
+// field was first named `flagged`, which this harness's text scan filed under that shape;
+// it was renamed so the bucket reflects the fields.) The other
 // two do not round-trip, by design: the leftover vector re-encodes without its leftover
 // bytes (PS-474), and the omitted out-of-range reading has no value to write back.
 // `match` was already reading 123 against a floor of 122. Total 1709.
@@ -76,8 +77,8 @@ const encodeFloorTotal = 1709
 var encodeFloorByShape = map[string]int{
 	// 1300 -> 1298 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped only because their internal byte halves were all zero, which the encoder wrote for an internal field with no value. It now reports such a field instead.
 	"tlv":         1298,
-	"flagged":     160,
-	"plain fixed": 97,
+	"flagged":     157,
+	"plain fixed": 100,
 	"match":       123,
 	"byte_group":  19,
 	// 6 -> 5 with plain fixed 66 -> 67: a bucket move, not a regression. Composed
