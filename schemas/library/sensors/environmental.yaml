@@ -246,6 +246,7 @@ definitions:
         type: u8
         mult: 0.1
         unit: "%"
+        senml: {unit: "/100"}
         valid_range: [0, 25]
         resolution: 0.1
         description: "Oxygen concentration"

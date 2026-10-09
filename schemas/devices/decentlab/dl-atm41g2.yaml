@@ -82,6 +82,7 @@ fields:
                 - div: 10
                 - add: -3276.8
               unit: "%"
+              senml: {unit: "/100"}
             - name: internal_temperature
               type: u16
               transform:

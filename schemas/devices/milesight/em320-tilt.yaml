@@ -18,7 +18,7 @@ fields:
             unit: "%"
             sensor: percentage
             ipso: {object: 3320, instance: 0, resource: 5700}
-            senml: {name: "battery", unit: "%"}
+            senml: {name: "battery", unit: "/100"}
             semantic: "battery"
             type: u8
         # ANGLE
@@ -41,3 +41,12 @@ fields:
           - name: threshold_z
             type: u8
             # raw: (bytes[i + 4] & 0x01) === 0x01 ? "trigger" : "normal"
+test_vectors:
+  # Battery channel 01 75, decoded by the vendor decoder (em320-tilt.js).
+  - name: vendor_battery_channel
+    description: "Battery channel, decoded by the vendor's own decoder"
+    source: vendor-codec
+    fPort: 85
+    payload: "01755A"
+    expected:
+      battery: 90

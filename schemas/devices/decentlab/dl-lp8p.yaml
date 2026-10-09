@@ -29,6 +29,7 @@ fields:
                 - mult: 0.0019073486328125
                 - add: -6
               unit: "%"
+              senml: {unit: "/100"}
         - bit: 1
           fields:
             - name: barometer_temperature

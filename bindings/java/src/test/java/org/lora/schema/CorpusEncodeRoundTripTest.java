@@ -62,7 +62,7 @@ class CorpusEncodeRoundTripTest {
     // in-range vectors (whose field, first named `flagged`, was renamed after this
     // classifier filed it under that shape). The leftover vector re-encodes to its first byte only
     // (PS-474) and the omitted out-of-range one has no value to write, both by design.
-    private static final int ENCODE_FLOOR_TOTAL = 1736;   // +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
+    private static final int ENCODE_FLOOR_TOTAL = 1742;   // +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
 
     /**
      * Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -70,7 +70,7 @@ class CorpusEncodeRoundTripTest {
      */
     private static final Map<String, Integer> ENCODE_FLOOR_BY_SHAPE = Map.of(
             // 1283 -> 1281 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped only because their internal byte halves were all zero, which the encoder wrote for an internal field with no value. It now reports such a field instead.
-            "tlv", 1288,   // +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
+            "tlv", 1294,   // +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
             "flagged", 193,
             "plain fixed", 100,
             "match", 123,

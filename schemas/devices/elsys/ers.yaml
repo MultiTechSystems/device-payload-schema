@@ -19,6 +19,7 @@ fields:
           - name: humidity
             type: u8
             unit: "%"
+            senml: {unit: "/100"}
         0x03:
           - name: x
             type: s8

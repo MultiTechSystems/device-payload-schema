@@ -36,6 +36,7 @@ fields:
                 - div: 100
                 - add: -327.68
               unit: "%"
+              senml: {unit: "/100"}
             - name: dew_point
               type: u16
               transform:

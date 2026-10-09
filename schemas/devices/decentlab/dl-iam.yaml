@@ -39,6 +39,7 @@ fields:
                 - mult: 100
                 - div: 65535
               unit: "%"
+              senml: {unit: "/100"}
         - bit: 2
           fields:
             - name: barometric_pressure

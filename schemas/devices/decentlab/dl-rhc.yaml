@@ -27,6 +27,7 @@ fields:
               type: u16
               div: 100
               unit: "%"
+              senml: {unit: "/100"}
             - name: air_temperature
               type: u16
               transform:
