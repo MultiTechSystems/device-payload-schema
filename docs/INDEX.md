@@ -424,7 +424,7 @@ Mean quality score 69.4% (PLATINUM 36, GOLD 40, SILVER 127, BRONZE 18, REJECTED 
 | `milesight/wts305` | 13 | 16 | fields | 91% | GOLD |
 | `milesight/wts505` | 13 | 16 | fields | 91% | GOLD |
 | `milesight/wts506` | 13 | 15 | fields | 91% | GOLD |
-| `netvox/r718x` | 31 | 34 | ports | 70% | SILVER |
+| `netvox/r718x` | 33 | 34 | ports | 70% | SILVER |
 | `radio-bridge/rbs30x` | 52 | 71 | fields | 68% | BRONZE |
 | `radionode/rn320bth` | 13 | 0 | fields | 14% | REJECTED |
 | `rakwireless/qingping` | 11 | 1 | fields | 81% | SILVER |

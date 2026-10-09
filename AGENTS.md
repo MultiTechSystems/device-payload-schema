@@ -194,10 +194,10 @@ the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1692 |
-| Go | `go/schema/corpus_conformance_test.go` | 2371 | 1709 (plain API 1686) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2371 | 1692 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2371 | 1692 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1698 |
+| Go | `go/schema/corpus_conformance_test.go` | 2371 | 1715 (plain API 1692) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2371 | 1698 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2371 | 1698 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 540 of 540 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -754,10 +754,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1692 |
-| Go | `go/schema/corpus_encode_test.go` | 1709 (plain 1686) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1692 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1692 |
+| Python | `tests/test_encode_round_trip.py` | 1698 |
+| Go | `go/schema/corpus_encode_test.go` | 1715 (plain 1692) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1698 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1698 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1113,8 +1113,11 @@ it adopted before the `_` fix; it can use `$_device_type` directly now.
   different branch in 19 schemas - 116 vectors as *successful* decodes of the wrong data
   (netvox r718x its `default:` on every report; dnt, mla20 and elsys every tlv channel as
   unknown). `_match_case_pattern` now compares a numeric-string key as a number.
-  The unread-tail list names real schema gaps (arwin port 12, am307/am308's copied
-  example, ws50x's padded vectors, r718x's zero padding); fixing one means removing its
+  The unread-tail list names real schema gaps - now only arwin port 12's byte 7, which
+  waits on a vendor document (am30x's copied example, ws50x's and em310-tilt's padded
+  vectors and r718x's documented reserved tail were settled on 2026-10-09; a padded
+  harvested vector can hide from it, since an undescribed tag counts as consumed, so
+  check a harvested vector's length against its case's width too); fixing one means removing its
   entry.
 - **`tools/schema-mutation.py`** mutates each schema one step at a time (byte order,
   sign, width, scale, offset, bit range, lookup label, case key, flagged bit, dropped
