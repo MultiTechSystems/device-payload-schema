@@ -42,7 +42,7 @@ public class CorpusEncodeRoundTripTests
     // round-trips: `plain fixed` rises from 58 to 59 and the total to 1162.
     // CR-2026-031's name_from var-mismatch fixture round-trips here too, so
     // `plain fixed` rises from 59 to 61 and the total to 1164.
-    const int EncodeFloorTotal = 1670;
+    const int EncodeFloorTotal = 1680;
 
     /// <summary>
     /// Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -50,10 +50,11 @@ public class CorpusEncodeRoundTripTests
     /// </summary>
     static readonly Dictionary<string, int> EncodeFloorByShape = new()
     {
-        ["tlv"] = 1283,
+        // 1283 -> 1281 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped only because their internal byte halves were all zero, which the encoder wrote for an internal field with no value. It now reports such a field instead.
+        ["tlv"] = 1281,
         ["flagged"] = 157,
-        ["plain fixed"] = 80,
-        ["match"] = 119,
+        ["plain fixed"] = 88,
+        ["match"] = 123,
         ["byte_group"] = 19,
         // 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now
         // carry only the definitions they reach, so one no longer contains an
@@ -95,6 +96,11 @@ public class CorpusEncodeRoundTripTests
         var byShape = new SortedDictionary<string, Dictionary<string, int>>();
         var errorDetail = new Dictionary<string, int>();
         int decoded = 0;
+        // ENCODE_REPORT=/path/file.txt writes one "schema<TAB>vector<TAB>status" line per
+        // decoded vector, so the vectors that start or stop round-tripping can be named
+        // rather than inferred from a count.
+        var reportPath = Environment.GetEnvironmentVariable("ENCODE_REPORT");
+        var reportLines = new List<string>();
 
         foreach (var file in Directory.GetFiles(corpus, "*.yaml", SearchOption.AllDirectories)
                      .OrderBy(f => f))
@@ -152,6 +158,9 @@ public class CorpusEncodeRoundTripTests
                     continue;   // a decode gap is CorpusConformanceTests' business
                 }
                 decoded++;
+                var vectorName = Text(vector, "name");
+                var rel = Path.GetRelativePath(corpus, file).Replace('\\', '/');
+                void Report(string status) => reportLines.Add($"{rel}\t{vectorName}\t{status}");
 
                 EncodeResult result;
                 try
@@ -164,28 +173,34 @@ public class CorpusEncodeRoundTripTests
                 {
                     Bump(counts, "error");
                     Bump(errorDetail, $"{Path.GetFileName(file)}: {e.GetType().Name}: {e.Message}");
+                    Report("error");
                     continue;
                 }
 
+                string status;
                 if (!result.Success)
                 {
-                    Bump(counts, "error");
+                    Bump(counts, status = "error");
                     Bump(errorDetail, $"{Path.GetFileName(file)}: {result.Errors[0]}");
                 }
                 else if (result.Payload.AsSpan().SequenceEqual(payload))
                 {
-                    Bump(counts, "round-trips");
+                    Bump(counts, status = "round-trips");
                 }
                 else if (result.Payload.Length != payload.Length)
                 {
-                    Bump(counts, "length differs");
+                    Bump(counts, status = "length differs");
                 }
                 else
                 {
-                    Bump(counts, "bytes differ");
+                    Bump(counts, status = "bytes differ");
                 }
+                Report(status);
             }
         }
+
+        if (!string.IsNullOrEmpty(reportPath))
+            File.WriteAllLines(reportPath, reportLines);
 
         int exact = 0;
         foreach (var (shape, counts) in byShape)

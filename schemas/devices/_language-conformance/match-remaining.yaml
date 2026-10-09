@@ -1,0 +1,38 @@
+# A match may dispatch on the number of bytes remaining (PS-414 to PS-416,
+# CR-2026-062): some devices tell their layouts apart by length alone, with no type byte
+# and the same FPort.
+#
+# After a one-byte status, two bytes left is a short reading and four or more a long
+# one; the range key is how "at least" is written. Evaluating it reads nothing.
+#
+# Both vectors round-trip: the encoder picks the case by the fields the data carries,
+# and writes no discriminator, because none was read.
+name: probe_match_remaining
+endian: big
+fields:
+- name: status
+  type: u8
+- match:
+    remaining: true
+    cases:
+      2:
+      - name: short_reading
+        type: u16
+      4..255:
+      - name: long_reading
+        type: u32
+test_vectors:
+- name: two_bytes_left
+  source: spec-example
+  payload: "01 0102"
+  expected:
+    status: 1
+    short_reading: 258
+    long_reading: null
+- name: four_bytes_left
+  source: spec-example
+  payload: "01 01020304"
+  expected:
+    status: 1
+    long_reading: 16909060
+    short_reading: null

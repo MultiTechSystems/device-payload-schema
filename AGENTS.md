@@ -185,17 +185,17 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2344 payload vectors in `schemas/devices/` (measured 2026-10-05 with
+The 2356 payload vectors in `schemas/devices/` (measured 2026-10-05 with
 `tools/check-floors.py`, after merging the mutation-survivor vectors into 0.5.2) are the shared
 cross-language test set. Every implementation has a runner that reads the same YAML and
 the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1672 |
-| Go | `go/schema/corpus_conformance_test.go` | 2344 | 1688 (plain API 1665) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2344 | 1670 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2344 | 1670 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1680 |
+| Go | `go/schema/corpus_conformance_test.go` | 2357 | 1698 (plain API 1675) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2357 | 1680 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2357 | 1680 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 487 of 487 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -752,10 +752,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1672 |
-| Go | `go/schema/corpus_encode_test.go` | 1688 (plain 1665) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1670 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1670 |
+| Python | `tests/test_encode_round_trip.py` | 1680 |
+| Go | `go/schema/corpus_encode_test.go` | 1698 (plain 1675) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1680 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1680 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1165,7 +1165,7 @@ baseline - a regression fails, an improvement is reported and locked in with the
 | `gate-provenance` | a changed device schema has no independently sourced vector, or an added vector lacks `source:` | none: the diff against `BASE` |
 | `gate-crossval` | a schema stops agreeing with its vendor's own decoder (TTN declared examples + vendor JS, Decentlab decoders), or a new one does not agree | `tools/crossval-baseline.json`, oracle commits pinned |
 | `gate-mutation` | a schema's vectors notice fewer one-step mutations than before (score or killed count), or a new schema scores below 0.80 | `tools/mutation-baseline.json` |
-| `gate-verdicts` | a changed schema's vector fails in any of Python, Go, Java, C#, TS013, or a vector the reference passes fails elsewhere | `tools/verdicts-baseline.json` (empty: all five agree on 2344/2344) |
+| `gate-verdicts` | a changed schema's vector fails in any of Python, Go, Java, C#, TS013, or a vector the reference passes fails elsewhere | `tools/verdicts-baseline.json` (empty: all five agree on 2356/2356) |
 
 The mutation gate ratchets the killed count as well as the score on purpose: deleting
 vectors makes the mutants only they reached "unreached", which *raises* the score.
@@ -1247,6 +1247,22 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   whose `field` lacks `$` loads and keeps every element; `var:` names and `count: $name`
   are outside the PS-368 check; Java runs a zero-progress `until: end` loop to `max` where
   the others stop.
+- **Wave 6b (CR-2026-056, -059, -062, -065, -067).** A `length` may name a preceding
+  field; `optional` trailing fields; `match: {remaining: true}`; `sentinel` and
+  `out_of_range: omit`; internal-field rules. All in Python, Go, Java, C# and the TS013
+  decoder (`wave6b.go`, Java and C# `Wave6b`). A match case body now goes through the
+  field-list decoder too, so it has computed fields and every per-field rule - and its
+  `_quality` belongs to the decode, as Go and C# already kept it.
+  **PS-434 changed encoding**: an internal field that reads bytes writes its `value`, else
+  the input's, else it is an error naming the field. Encoders wrote its `default` or 0 -
+  and Python alone inferred a match's internal discriminator from the case the data fit;
+  that is gone pending the spec's answer (internal-discriminator.yaml no longer
+  round-trips). laq4's reserved bit and encode-padding's reserved byte declare `value: 0`.
+  Two vobo vectors (`standard_zero`, `heartbeat2_zero`) round-tripped only because their
+  internal byte halves were all zero, so the tlv floors dropped by 2 in every language,
+  deliberately. A sentinel is compared on the bits before an `encoding` and written back
+  as raw bits. Python's TLV case loop is still its own loop, so `optional` and `sentinel`
+  inside a TLV case apply in Go, Java and C# and not in Python - no corpus vector reaches it.
 - **`_meta` is not produced by any implementation**, so CR-2026-043 (`_meta.fPort`) and
   the `_meta` parts of CR-2026-054 wait for their own change (decided 2026-10-05).
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,

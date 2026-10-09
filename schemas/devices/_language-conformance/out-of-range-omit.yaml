@@ -1,0 +1,31 @@
+# valid_range with out_of_range: omit drops a value outside the range rather than
+# reporting it with a flag (PS-428, CR-2026-065). A humidity of 200 % is not a reading.
+#
+# Without the key the value is reported and flagged, as before (PS-131, PS-132); that is
+# `flagged_value`, which shows the default is unchanged.
+#
+# The in-range vector round-trips. The out-of-range one cannot: the omitted value is not
+# in the output to write back.
+name: probe_out_of_range_omit
+endian: big
+fields:
+- name: humidity
+  type: u8
+  valid_range: [0, 100]
+  out_of_range: omit
+- name: flagged_value
+  type: u8
+  valid_range: [0, 100]
+test_vectors:
+- name: in_range
+  source: spec-example
+  payload: "32 32"
+  expected:
+    humidity: 50
+    flagged_value: 50
+- name: out_of_range
+  source: spec-example
+  payload: "C8 C8"
+  expected:
+    humidity: null
+    flagged_value: 200

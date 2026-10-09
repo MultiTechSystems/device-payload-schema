@@ -23,6 +23,7 @@ fields:
           description: "Alarm triggered (1=TRUE, 0=FALSE)"
         - name: _reserved
           type: u8[1:1]
+          value: 0             # what an encoder writes for the reserved bit (PS-434)
         - name: mode
           type: u8[2:6]
           description: "Work mode: 1=CO2, 31=ALARM config"
@@ -157,3 +158,19 @@ test_vectors:
       humidity_max: 90
       co2_min: 200
       co2_max: 2500
+
+  # The vendor's own declared example (TTN lorawan-devices vendor/dragino/laq4-codec.yaml,
+  # "Air Quality Sensor"). Only the keys whose value the vendor reports as this schema does
+  # are listed: it reports Alarm_status "TRUE" and Work_mode "CO2" where this schema reports
+  # the codes 1 and 1, so those two are left out rather than translated.
+  - name: vendor_declared_example
+    description: "TTN declared example: CO2 mode, alarm set"
+    source: vendor-codec
+    port: 2
+    payload: "0D 07 05 00 12 02 0B 00 FB 01 B3"
+    expected:
+      battery: 3.335
+      tvoc: 18
+      co2: 523
+      temperature: 25.1
+      humidity: 43.5

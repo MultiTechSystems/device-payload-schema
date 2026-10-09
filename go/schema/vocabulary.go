@@ -348,14 +348,12 @@ func checkFieldRules(field map[string]any, at string) error {
 			}
 		}
 	}
-	// PS-399: a match declares exactly one discriminator source. With both, `field` won
-	// and the `length` byte was left unread, misaligning every later field.
-	if match := asStringMap(field["match"]); match != nil {
-		_, hasField := match["field"]
-		_, hasLength := match["length"]
-		if hasField == hasLength {
-			return fmt.Errorf("%s.match: a match must declare exactly one of 'field' and 'length' (PS-399)", at)
-		}
+	// PS-399, PS-416: a match declares exactly one discriminator source - `field`,
+	// `length` or `remaining`. With both of the first two, `field` won and the `length`
+	// byte was left unread, misaligning every later field. The same check holds the
+	// sentinel and out_of_range forms (PS-427, PS-428); see wave6b.go.
+	if err := checkWave6bFieldRules(field, at); err != nil {
+		return err
 	}
 	if group, ok := field["byte_group"]; ok {
 		if err := checkByteGroupOverlap(group, at); err != nil {

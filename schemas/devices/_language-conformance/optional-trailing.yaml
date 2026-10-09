@@ -1,0 +1,43 @@
+# An optional field is decoded where its bytes remain and is absent where none do
+# (PS-402 to PS-404, CR-2026-059). Later firmware appends fields; earlier firmware does
+# not send them.
+#
+# This is abeeway's heartbeat shape: a firmware version, then a BLE firmware version,
+# each present only where the frame is long enough. Optional fields form the tail of
+# their list, so an absent one never leaves a later field reading the wrong bytes.
+#
+# Every vector round-trips: the encoder writes an optional field only where the input
+# has it (PS-405).
+name: probe_optional_trailing
+endian: big
+fields:
+- name: reset_cause
+  type: u8
+- name: firmware
+  type: u16
+  optional: true
+- name: ble_firmware
+  type: u16
+  optional: true
+test_vectors:
+- name: old_firmware_neither
+  source: spec-example
+  payload: "05"
+  expected:
+    reset_cause: 5
+    firmware: null
+    ble_firmware: null
+- name: newer_firmware_one
+  source: spec-example
+  payload: "05 0102"
+  expected:
+    reset_cause: 5
+    firmware: 258
+    ble_firmware: null
+- name: newest_firmware_both
+  source: spec-example
+  payload: "05 0102 0304"
+  expected:
+    reset_cause: 5
+    firmware: 258
+    ble_firmware: 772

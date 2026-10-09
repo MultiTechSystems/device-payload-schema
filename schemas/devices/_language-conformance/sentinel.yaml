@@ -1,0 +1,31 @@
+# A reserved raw value means no reading, and the field is absent (PS-427, PS-429,
+# CR-2026-065). SenseCAP sends 0x8000 for "no sensor"; reported as a number it reads
+# -3276.8 degrees.
+#
+# The sentinel is compared with the integer read, before the division: it is a bit
+# pattern the firmware writes, not a quantity.
+#
+# Both vectors round-trip: an encoder given no value for a field with a sentinel writes
+# the sentinel back.
+name: probe_sentinel
+endian: big
+fields:
+- name: temperature
+  type: s16
+  div: 10
+  sentinel: [-32768]
+- name: battery
+  type: u8
+test_vectors:
+- name: no_sensor
+  source: spec-example
+  payload: "8000 5A"
+  expected:
+    temperature: null
+    battery: 90
+- name: reading
+  source: spec-example
+  payload: "00E7 5A"
+  expected:
+    temperature: 23.1
+    battery: 90

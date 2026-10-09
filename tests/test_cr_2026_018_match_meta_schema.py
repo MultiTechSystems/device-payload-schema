@@ -48,7 +48,8 @@ MATCH = META["definitions"]["match"]
 UNIVERSAL = {"field", "cases"}
 WAS_THREE_OF_FIVE = {"length", "name"}
 WAS_PYTHON_ONLY = {"var", "default"}
-DESCRIBED = UNIVERSAL | WAS_THREE_OF_FIVE | WAS_PYTHON_ONLY
+#: CR-2026-062 added `remaining`, the third discriminator source (PS-414).
+DESCRIBED = UNIVERSAL | WAS_THREE_OF_FIVE | WAS_PYTHON_ONLY | {"remaining"}
 
 
 def every_match():
@@ -103,7 +104,8 @@ class TestTheDescriptionExists:
         assert set(MATCH["properties"]) == DESCRIBED
 
     def test_a_discriminator_is_required_one_way_or_the_other(self):
-        assert MATCH["anyOf"] == [{"required": ["field"]}, {"required": ["length"]}]
+        assert MATCH["anyOf"] == [{"required": ["field"]}, {"required": ["length"]},
+                                  {"required": ["remaining"]}]
 
     def test_cases_is_not_required(self):
         """A block carrying only `default: [fields]` decodes those fields."""
@@ -250,7 +252,8 @@ class TestTheCorpusConforms:
     def test_every_block_has_a_discriminator(self):
         missing = [
             path.name for match, path in every_match()
-            if "field" not in match and "length" not in match
+            # `remaining: true` is the third source (PS-414, CR-2026-062).
+            if "field" not in match and "length" not in match and "remaining" not in match
         ]
         assert not missing, missing
 

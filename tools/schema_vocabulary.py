@@ -133,6 +133,9 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "present_if": (_DECODERS, "drops an element whose condition is false (PS-386)"),
         "carry": (_DECODERS, "a computed field's value from the previous element (PS-378)"),
         "identity": (("py", "go", "java", "cs"), "what identifies a repeat element's metric (PS-372)"),
+        "optional": (_DECODERS, "present where its bytes remain, else absent (PS-402)"),
+        "sentinel": (_DECODERS, "raw values meaning no reading (PS-427)"),
+        "out_of_range": (_DECODERS, "omit or flag a value outside valid_range (PS-428)"),
         "match": (_DECODERS, "inline discriminated union (Option B)"),
         "tlv": (_DECODERS, "tag dispatch"),
         "flagged": (_DECODERS, "bitmask-gated groups"),
@@ -174,6 +177,7 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "var": (_DECODERS, "binds the inline discriminator"),
         "cases": (_DECODERS, "case bodies"),
         "default": (_DECODERS, "error | skip | fields"),
+        "remaining": (_DECODERS, "dispatch on the bytes left (PS-414)"),
     },
     "tlv": {
         "cases": (_DECODERS, "case bodies"),
@@ -356,10 +360,6 @@ HINTS: Dict[Tuple[str, str], str] = {
     ("field", "conditional"): (
         "nothing evaluates `conditional:`, so the field always decodes. Express the "
         "condition with `match` (on a value) or `flagged` (on a bit)"
-    ),
-    ("field", "optional"): (
-        "no implementation honours `optional:`; a short payload errors. Put the field "
-        "under a `match` or `flagged` branch, or a `repeat` with `until: end`"
     ),
     ("field", "max_length"): "no implementation enforces `max_length:`",
     ("field", "items"): "`type: array` + `items:` do not exist; use `type: repeat`",

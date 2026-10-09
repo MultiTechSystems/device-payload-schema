@@ -241,7 +241,7 @@ def encode_length(field_def, natural: int) -> int:
         return max(0, int(natural))
 
 
-def resolve_length(field_def, buf, pos, default=1):
+def resolve_length(field_def, buf, pos, default=1, variables=None):
     """Resolve a field's byte count, honouring `length: remaining` (PS-014).
 
     `remaining` consumes every byte from the read position to the end of the
@@ -257,15 +257,20 @@ def resolve_length(field_def, buf, pos, default=1):
         text = raw.strip()
         if text.lower() == 'remaining':
             return max(0, len(buf) - pos)
-        if text.startswith('$'):
-            # The specification also allows a `$variable` reference here. No
-            # implementation has it, and `int()` would fail with "invalid literal for
-            # int() with base 10: '$len'", which does not say that. `repeat` supports
-            # the reference on its own `byte_length` key if that is what was meant.
-            raise ValueError(
-                f"length: {raw} - a $variable reference is not implemented for "
-                "'length'; use an integer or the keyword 'remaining'"
-            )
+        if not re.fullmatch(r'-?\d+', text):
+            # PS-464, PS-465: the name of a preceding field, with or without `$`, whose
+            # decoded value is the count - resolved as `repeat`'s byte_length is. An
+            # unresolved name is an error naming it.
+            name = text[1:] if text.startswith('$') else text
+            if variables is None or name not in variables:
+                raise ValueError(f"length names {name!r}, which is not a field decoded "
+                                 f"before this one (PS-465)")
+            value = variables[name]
+            if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                    or value < 0 or int(value) != value:
+                raise ValueError(f"length names {name!r}, whose value {value!r} is not a "
+                                 f"byte count (PS-464)")
+            return int(value)
         raw = int(text)
     if raw < 0:
         return max(0, len(buf) - pos)
@@ -390,6 +395,78 @@ def fixed_element_size(fields):
         else:
             return None
     return total or None
+
+
+#: Names clause 7 reserves for interpreter metadata (PS-176, PS-433).
+RESERVED_OUTPUT_NAMES = ('_meta', '_quality', '_warnings')
+
+
+def internal_name_errors(schema):
+    """PS-433: no field may take a name reserved for interpreter metadata."""
+    errors = []
+
+    def walk(node, path):
+        if isinstance(node, dict):
+            name = node.get('name')
+            if name in RESERVED_OUTPUT_NAMES and ('type' in node or 'fields' in node):
+                errors.append(f"{path}: {name!r} is reserved for interpreter metadata and "
+                              f"cannot name a field (PS-433)")
+            for key, value in node.items():
+                if key not in ('test_vectors', 'definitions'):
+                    walk(value, f"{path}.{key}" if path else str(key))
+        elif isinstance(node, list):
+            for i, item in enumerate(node):
+                walk(item, f"{path}[{i}]")
+
+    walk(schema, '')
+    return errors
+
+
+def raw_bits_field(field_def):
+    """The field without its `encoding`: a sentinel is written as the bits it is (PS-427)."""
+    return {k: v for k, v in field_def.items() if k != 'encoding'}
+
+
+def optional_field_size(field_def):
+    """The bytes an optional field takes, or None where its size depends on the payload.
+
+    An `object` is sized as its fields sum (CR-2026-059). A field whose length depends on
+    the payload is present where at least one byte remains.
+    """
+    if field_def.get('type') == 'object':
+        return fixed_element_size(field_def.get('fields'))
+    return fixed_element_size([field_def])
+
+
+def optional_errors(fields, where='fields'):
+    """PS-404: in any field list, every field after an optional field is optional too."""
+    errors = []
+    seen = None
+    for i, f in enumerate(fields or []):
+        if not isinstance(f, dict):
+            continue
+        if f.get('optional') is True:
+            seen = seen or f.get('name', '?')
+        elif seen is not None:
+            errors.append(f"{where}[{i}] ({f.get('name', '?')}): follows optional field "
+                          f"{seen!r}, so it must be optional too (PS-404)")
+        for key, value in f.items():
+            if key in ('fields', 'trailer', 'default') and isinstance(value, list):
+                errors.extend(optional_errors(value, f"{where}[{i}].{key}"))
+            elif key in ('match', 'tlv') and isinstance(value, dict):
+                cases = value.get('cases')
+                for ck, body in (cases.items() if isinstance(cases, dict) else []):
+                    if isinstance(body, list):
+                        errors.extend(optional_errors(body, f"{where}[{i}].{key}[{ck}]"))
+                if isinstance(value.get('default'), list):
+                    errors.extend(optional_errors(value['default'],
+                                                  f"{where}[{i}].{key}.default"))
+            elif key == 'flagged' and isinstance(value, dict):
+                for g, group in enumerate(value.get('groups') or []):
+                    if isinstance(group, dict):
+                        errors.extend(optional_errors(group.get('fields'),
+                                                      f"{where}[{i}].flagged[{g}]"))
+    return errors
 
 
 def ragged_tail_message(field_def, remaining, element_size, offset):
@@ -1302,6 +1379,11 @@ class SchemaInterpreter:
         self._load_errors.extend(timestamp_errors(schema.get('metadata')))
         self._load_errors.extend(schema_iterator_errors(schema))
         self._repeat_only_names = repeat_only_names(schema)
+        self._load_errors.extend(optional_errors(schema.get('fields')))
+        for port, entry in (schema.get('ports') or {}).items():
+            group = entry.get('fields') if isinstance(entry, dict) else entry
+            self._load_errors.extend(optional_errors(group, f"ports[{port}].fields"))
+        self._load_errors.extend(internal_name_errors(schema))
         self.schema = schema
         self.endian = Endian(schema.get('endian', 'big'))
         self.name = schema.get('name', 'unknown')
@@ -1798,6 +1880,11 @@ class SchemaInterpreter:
                 # For encoded values, read as unsigned first
                 if signed:
                     value, _ = self._read_int(buf, pos, size, False)
+                # PS-427: a sentinel is the bit pattern, compared before the code. Left
+                # undecoded here, so a sentinel no code can represent - BCD 0xFF - is "no
+                # reading" rather than an invalid-digit error.
+                if value in (field_def.get('sentinel') or ()):
+                    return value, new_pos
                 value = self._decode_encoding(value, encoding, size)
             return value, new_pos
         
@@ -1848,7 +1935,7 @@ class SchemaInterpreter:
             return value, pos
         
         if field_type == 'bytes':
-            length = resolve_length(field_def, buf, pos)
+            length = resolve_length(field_def, buf, pos, variables=self._variables)
             if pos + length > len(buf):
                 raise ValueError("Buffer too short for bytes")
             return format_bytes(field_def, buf[pos:pos + length]), pos + length
@@ -1867,7 +1954,7 @@ class SchemaInterpreter:
                 f"string read from the payload is type ascii (PS-361)")
         
         if field_type == 'ascii':
-            length = resolve_length(field_def, buf, pos)
+            length = resolve_length(field_def, buf, pos, variables=self._variables)
             if pos + length > len(buf):
                 raise ValueError("Buffer too short for ascii")
             value = buf[pos:pos + length].decode('ascii', errors='replace').rstrip('\x00')
@@ -1876,7 +1963,7 @@ class SchemaInterpreter:
         # `hex:upper` is a `bytes` format (PS-079), not a type (CR-2026-037), so it
         # falls through to the unknown-type error below.
         if field_type == 'hex':
-            length = resolve_length(field_def, buf, pos)
+            length = resolve_length(field_def, buf, pos, variables=self._variables)
             if pos + length > len(buf):
                 raise ValueError("Buffer too short for hex")
             # PS-074: `hex` output MUST be lowercase without separators. This
@@ -1887,7 +1974,7 @@ class SchemaInterpreter:
         
         if field_type == 'base64':
             import base64 as b64
-            length = resolve_length(field_def, buf, pos)
+            length = resolve_length(field_def, buf, pos, variables=self._variables)
             if pos + length > len(buf):
                 raise ValueError("Buffer too short for base64")
             value = b64.b64encode(buf[pos:pos + length]).decode('ascii')
@@ -1895,7 +1982,7 @@ class SchemaInterpreter:
         
         if field_type == 'skip':
             # Padding/reserved bytes - advance position but don't output
-            length = resolve_length(field_def, buf, pos)
+            length = resolve_length(field_def, buf, pos, variables=self._variables)
             return None, pos + length
         
         if field_type == 'object':
@@ -2157,6 +2244,58 @@ class SchemaInterpreter:
                              f"has no value here (PS-368)")
         return 0
 
+    def _sentinel_hit(self, field_def: Dict[str, Any], raw: Any, buf: bytes,
+                      start: int) -> bool:
+        """PS-427: the integer read, before any modifier or encoding, is a sentinel."""
+        sentinels = field_def.get('sentinel')
+        if not sentinels:
+            return False
+        if field_def.get('encoding'):
+            # `raw` already went through the code; the sentinel is the bit pattern.
+            size = INTEGER_TYPE_INFO.get(str(field_def.get('type')), (None,))[0]
+            if size:
+                raw, _ = self._read_int(buf, start, size, False)
+        return (isinstance(raw, int) and not isinstance(raw, bool)) and raw in sentinels
+
+    def _range_omits(self, field_def: Dict[str, Any], value: Any) -> bool:
+        """PS-428: `out_of_range: omit` and a value outside `valid_range`."""
+        if field_def.get('out_of_range') != 'omit':
+            return False
+        bounds = field_def.get('valid_range')
+        if not isinstance(bounds, (list, tuple)) or len(bounds) != 2:
+            return False
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return False
+        return not (bounds[0] <= value <= bounds[1])
+
+    def _mark_absent(self, field_def: Dict[str, Any], name: str, result: Any,
+                     why: str) -> None:
+        """Record an omitted reading in `_quality`, where `_quality` is produced.
+
+        PS-427, PS-428: a field that declares `valid_range` produces `_quality` itself;
+        otherwise the mark waits for `decode` to learn whether anything else did (PS-182).
+        """
+        if field_def.get('valid_range') and hasattr(result, 'quality'):
+            result.quality[name] = why
+        else:
+            self._pending_absent[name] = why
+
+    def _internal_encode_value(self, field_def: Dict[str, Any], data: Dict[str, Any]) -> Any:
+        """What an encoder writes for an internal field that reads bytes (PS-434).
+
+        Its `value` (PS-360); else the input's value under its name; else an error naming
+        it. This used to write the field's `default` or 0, which reads back as a value
+        the device never sent wherever the field was not padding - and Python alone also
+        inferred a discriminator from the case the data fit.
+        """
+        if 'value' in field_def:
+            return field_def['value']
+        name = field_def.get('name')
+        if name in data:
+            return data[name]
+        raise ValueError(f"internal field {name!r} reads payload bytes and declares no "
+                         f"value, and the input does not supply it (PS-434)")
+
     def _carry_initial(self, field_def: Dict[str, Any]) -> Any:
         """A carried field's value before the first element (PS-378)."""
         carry = field_def['carry']
@@ -2292,9 +2431,9 @@ class SchemaInterpreter:
         result = {}
         # PS-399: exactly one discriminator source. With both, `field` won and the
         # `length` byte was left unread, so every later field came from the wrong offset.
-        if ('field' in match_def) == ('length' in match_def):
-            raise ValueError(
-                "a match must declare exactly one of 'field' and 'length' (PS-399)")
+        if sum(key in match_def for key in ('field', 'length', 'remaining')) != 1:
+            raise ValueError("a match must declare exactly one of 'field', 'length' and "
+                             "'remaining' (PS-399, PS-416)")
         field_ref = match_def.get('field')
         length = match_def.get('length')
         match_name = match_def.get('name')
@@ -2303,8 +2442,14 @@ class SchemaInterpreter:
         default = match_def.get('default', 'error')
         
         discriminator = None
-        
-        if field_ref:
+
+        if match_def.get('remaining') is True:
+            # PS-414: the bytes from here to the end, less any enclosing repeat's reserve
+            # - which the region-limited buffer already excludes. Nothing is read.
+            discriminator = len(buf) - pos
+        elif 'remaining' in match_def:
+            raise ValueError("a match's remaining must be true (PS-414)")
+        elif field_ref:
             # Variable-based: look up stored variable
             var_name = field_ref.lstrip('$')
             if hasattr(self, '_variables') and var_name in self._variables:
@@ -2373,35 +2518,25 @@ class SchemaInterpreter:
             else:
                 return result, pos
         
-        # Decode matched case fields (handling nested Option B constructs)
-        for cf in matched_fields:
-            # Option B: nested match: inside case
-            if 'match' in cf and not cf.get('type'):
-                nested_result, pos = self._decode_match(cf, buf, pos)
-                result.update(nested_result)
-                if hasattr(self, '_current_data'):
-                    self._current_data.update(nested_result)
-                continue
-            
-            if 'object' in cf and not cf.get('type'):
-                raise ValueError(object_key_withdrawn(cf))
-            
-            name = cf.get('name', 'unknown')
-            if name.startswith('_'):
-                value, pos = self._decode_field(cf, buf, pos)
-                self._bind_internal(cf, name, value)
-            else:
-                value, pos = self._decode_field(cf, buf, pos)
-                value = self._apply_modifiers(value, cf)
-                result[name] = value
-                if hasattr(self, '_current_data'):
-                    self._current_data[name] = value
-                # Check for var on nested fields
-                if cf.get('var'):
-                    if not hasattr(self, '_variables'):
-                        self._variables = {}
-                    self._variables[cf['var']] = value
-        
+        # A case body is a field list like any other, decoded by the same decoder as the
+        # top level and repeat elements, so it has computed fields, constructs and the
+        # per-field rules (optional, sentinel, out_of_range). It used to have its own
+        # loop of plain reads. Its fields join the enclosing output and scope.
+        scratch = DecodeResult(data={}, bytes_consumed=0)
+        saved_current = getattr(self, '_current_data', None)
+        self._current_data = scratch.data
+        try:
+            pos = self._decode_field_list(matched_fields, buf, pos, scratch)
+        finally:
+            self._current_data = saved_current
+        if scratch.errors:
+            raise ValueError(scratch.errors[0])
+        result.update(scratch.data)
+        if saved_current is not None:
+            saved_current.update(scratch.data)
+        # A case body's `_quality` belongs to the decode, as it does in Go and C#, which
+        # keep one quality table per decode.
+        self._case_quality.update(scratch.quality)
         return result, pos
     
     def _match_case_pattern(self, value: Any, pattern: Any) -> bool:
@@ -2486,7 +2621,11 @@ class SchemaInterpreter:
                             self._variables[gf_name] = value
                         continue
 
+                    start = pos
                     value, pos = self._decode_field(gf, buf, pos)
+                    if value is not None and self._sentinel_hit(gf, value, buf, start):
+                        self._pending_absent[gf_name] = 'absent'          # PS-427
+                        continue
                     if value is not None:
                         if gf.get('formula'):
                             import warnings
@@ -2494,6 +2633,9 @@ class SchemaInterpreter:
                             value = self._evaluate_formula(gf['formula'], value)
                         else:
                             value = self._apply_modifiers(value, gf)
+                        if self._range_omits(gf, value):
+                            self._pending_absent[gf_name] = 'out_of_range'    # PS-428
+                            continue
                         if not internal:
                             result[gf_name] = value
                         self._variables[gf_name] = value
@@ -3327,6 +3469,10 @@ class SchemaInterpreter:
         self._current_data = result.data
         # Variable storage for Option B match references
         self._variables = {}
+        # Readings omitted under PS-427/PS-428, for `_quality` if it is produced.
+        self._pending_absent = {}
+        # `_quality` from match case bodies, which decode into a scratch result.
+        self._case_quality = {}
         
         pos = 0
         fields = self._resolve_fields(fPort)
@@ -3341,6 +3487,13 @@ class SchemaInterpreter:
             self._enrich_metadata(result.data, metadata_def, input_metadata,
                                   result.warnings)
         
+        for case_name, flag in self._case_quality.items():
+            result.quality.setdefault(case_name, flag)
+        # PS-427, PS-428: an omitted reading is recorded where `_quality` is produced -
+        # which a field declaring `valid_range` does (PS-182) - and only there.
+        if result.quality:
+            for omitted_name, why in self._pending_absent.items():
+                result.quality.setdefault(omitted_name, why)
         # Add quality dict to output if any quality flags were set
         if result.quality:
             result.data['_quality'] = dict(result.quality)
@@ -3384,6 +3537,20 @@ class SchemaInterpreter:
                 self._decode_field_list(field_def['trailer'], payload,
                                         len(payload) - reserve, result)
                 if result.errors:
+                    break
+            # PS-402, PS-403: an optional field is decoded where its bytes remain and is
+            # absent where none do. Every later field is optional too (PS-404), so once
+            # one is absent the list ends. Some bytes but too few is an error: an optional
+            # field is never partly read.
+            if field_def.get('optional') is True:
+                remaining = len(payload) - pos
+                if remaining <= 0:
+                    break
+                size = optional_field_size(field_def)
+                if size and remaining < size:
+                    result.errors.append(
+                        f"Error decoding {field_def.get('name', '?')}: optional field takes "
+                        f"{size} byte(s) but {remaining} remain at offset {pos} (PS-403)")
                     break
             # Handle $ref - inline the referenced definition
             if '$ref' in field_def:
@@ -3500,6 +3667,9 @@ class SchemaInterpreter:
                                 % (name, value)
                             )
                             continue
+                    if value is not None and self._range_omits(field_def, value):
+                        self._mark_absent(field_def, name, result, 'out_of_range')
+                        continue
                     if value is not None:
                         # A leading underscore marks an internal field: it becomes a
                         # variable later fields can reference, but is not reported.
@@ -3537,14 +3707,21 @@ class SchemaInterpreter:
             # convention pending a CR, not specified behaviour.
             if name.startswith('_'):
                 try:
+                    start = pos
                     value, pos = self._decode_field(field_def, payload, pos)
-                    self._bind_internal(field_def, name, value)
+                    if not self._sentinel_hit(field_def, value, payload, start):
+                        self._bind_internal(field_def, name, value)
                 except Exception as e:
                     result.errors.append(f"Error in internal field: {e}")
                 continue
             
             try:
+                start = pos
                 value, pos = self._decode_field(field_def, payload, pos)
+                if value is not None and self._sentinel_hit(field_def, value, payload, start):
+                    # PS-427: a reserved value means no reading; the field is absent.
+                    self._mark_absent(field_def, name, result, 'absent')
+                    continue
                 # Skip type returns None - don't add to output
                 if value is not None:
                     # Formula takes precedence over mult/add/div modifiers
@@ -3552,6 +3729,10 @@ class SchemaInterpreter:
                         value = self._evaluate_formula(field_def['formula'], value)
                     else:
                         value = self._apply_modifiers(value, field_def)
+                    if value is not OMITTED and self._range_omits(field_def, value):
+                        # PS-428: outside the range is no reading, not a flagged one.
+                        self._mark_absent(field_def, name, result, 'out_of_range')
+                        continue
                     if value is OMITTED:
                         # A lookup with no entry for this value: the device did not
                         # report anything the schema can name, so the field is left
@@ -3774,12 +3955,7 @@ class SchemaInterpreter:
                         flags |= (1 << bit)
                 flags_patches[field_name] = flags
 
-        # An internal field that a later `match` dispatches on is not in the data - it
-        # is internal - so it used to be written as zero while the match went on to
-        # emit the fields of whichever case the data fits. The bytes then disagreed
-        # with themselves: 0107 came back as 0007, silently. The case the data fits
-        # names the discriminator, so write that.
-        internal_patches = self._internal_discriminators(fields, data)
+        omitted_optional = None     # the first optional field the input left out (PS-405)
 
         for _kind, _item in self._bitfield_runs(fields):
             # A run of bit ranges shares one span of bytes, so it is packed once rather
@@ -3793,6 +3969,18 @@ class SchemaInterpreter:
                     result.errors.append(f"Error encoding bit range(s) {names}: {e}")
                 continue
             field_def = _item
+            # PS-405, before any construct: an optional object or repeat the input omits
+            # writes nothing, as a plain field does. The object branch ran first and wrote
+            # its members as zeros.
+            if field_def.get('optional') is True and field_def.get('name'):
+                if data.get(field_def['name']) is None:
+                    omitted_optional = omitted_optional or field_def['name']
+                    continue
+                if omitted_optional:
+                    result.errors.append(
+                        f"Error encoding {field_def['name']}: optional field supplied while "
+                        f"the earlier optional field {omitted_optional!r} is not (PS-405)")
+                    continue
             if '$ref' in field_def:
                 # Decoding splices the referenced definition's fields in place; encoding
                 # never did, so the whole header collapsed to one zero byte -
@@ -3893,12 +4081,14 @@ class SchemaInterpreter:
                     result.errors.append(f"Error encoding {name}: {e}")
                 continue
 
-            # Internal fields: the value a later match needs, else default or 0
+            # PS-434: an internal field that reads bytes writes its value, else the
+            # input's, else it is an error naming the field.
             if name.startswith('_'):
-                if name in internal_patches:
-                    value = internal_patches[name]
-                else:
-                    value = field_def.get('default', 0)
+                try:
+                    value = self._internal_encode_value(field_def, data)
+                except ValueError as e:
+                    result.errors.append(f"Error encoding {name}: {e}")
+                    continue
             elif name in flags_patches:
                 value = flags_patches[name]
             else:
@@ -3912,6 +4102,25 @@ class SchemaInterpreter:
                         "not carry, so its output key cannot be rebuilt")
                     continue
                 value = data.get(lookup_name)
+                if value is None and field_def.get('optional') is True:
+                    # PS-405: an optional field is written only where the input has it.
+                    omitted_optional = omitted_optional or name
+                    continue
+                if value is not None and field_def.get('optional') is True \
+                        and omitted_optional:
+                    result.errors.append(
+                        f"Error encoding {name}: optional field supplied while the earlier "
+                        f"optional field {omitted_optional!r} is not (PS-405)")
+                    continue
+                if value is None and field_def.get('sentinel'):
+                    # A reading the decode omitted as "no reading" (PS-427) goes back as
+                    # the sentinel it was, not as zero.
+                    try:
+                        output.extend(self._encode_field(raw_bits_field(field_def),
+                                                         field_def['sentinel'][0]))
+                    except Exception as e:
+                        result.errors.append(f"Error encoding {name}: {e}")
+                    continue
                 if value is None:
                     result.warnings.append(f"Missing field: {lookup_name}")
                     value = 0
@@ -3942,7 +4151,7 @@ class SchemaInterpreter:
             for gf in group_fields:
                 gf_name = gf.get('name', '')
                 gf_type = gf.get('type', 'u8')
-                if not gf_name or gf_name.startswith('_'):
+                if not gf_name:
                     continue
                 if gf_type in COMPUTED_TYPES:
                     # A derived value: computed from other fields, so it has no bytes of
@@ -3950,7 +4159,15 @@ class SchemaInterpreter:
                     # field using `ref`, `compute`, `polynomial` or `guard` was encoded
                     # as though it were on the wire.
                     continue
-                value = data.get(gf_name, 0)
+                if gf_name.startswith('_'):
+                    # PS-434. An internal member was skipped outright, writing none of
+                    # the bytes the decoder reads, so every later member was misplaced.
+                    value = self._internal_encode_value(gf, data)
+                elif gf_name not in data and gf.get('sentinel'):
+                    output.extend(self._encode_field(raw_bits_field(gf), gf['sentinel'][0]))   # PS-427
+                    continue
+                else:
+                    value = data.get(gf_name, 0)
                 value = self._reverse_modifiers(value, gf)
                 output.extend(self._encode_field(gf, value))
         
@@ -4007,8 +4224,10 @@ class SchemaInterpreter:
                 continue
             name = gf.get('name', '')
             gtype = str(gf.get('type', ''))
-            if not name or str(name).startswith('_'):
+            if not name:
                 value = gf.get('default', 0)
+            elif str(name).startswith('_'):
+                value = self._internal_encode_value(gf, data)          # PS-434
             else:
                 value = data.get(name, gf.get('default', 0))
             value = self._reverse_modifiers(value, gf)
@@ -4103,8 +4322,10 @@ class SchemaInterpreter:
         for field_def in run:
             name = field_def.get('name', '')
             ftype = str(field_def.get('type', ''))
-            if not name or str(name).startswith('_'):
+            if not name:
                 value = field_def.get('default', 0)
+            elif str(name).startswith('_'):
+                value = self._internal_encode_value(field_def, data)   # PS-434
             else:
                 value = data.get(name, field_def.get('default', 0))
             value = self._reverse_modifiers(value, field_def)
@@ -4173,41 +4394,6 @@ class SchemaInterpreter:
             if hits > best_hits:
                 best_key, best_fields, best_hits = case_key, case_fields, hits
         return best_key, best_fields
-
-    def _internal_discriminators(self, fields: List[Dict[str, Any]],
-                                 data: Dict[str, Any]) -> Dict[str, Any]:
-        """Values for internal fields that a `match` in the same list dispatches on.
-
-        Only a case keyed by one exact value can supply one; a range or pattern key
-        names no single value, and the field keeps its default.
-        """
-        internal = {}
-        for f in fields:
-            fname = f.get('name')
-            if isinstance(fname, str) and fname.startswith('_'):
-                internal[fname] = fname
-                if f.get('var'):
-                    internal[f['var']] = fname
-        patches: Dict[str, Any] = {}
-        for f in fields:
-            match_def = f.get('match')
-            if not isinstance(match_def, dict):
-                continue
-            ref = str(match_def.get('field') or '').lstrip('$')
-            target = internal.get(ref)
-            if not target or target in patches or ref in data:
-                continue
-            key, _fields = self._case_fields_present(match_def.get('cases') or {}, data)
-            if isinstance(key, bool):
-                continue
-            if isinstance(key, int):
-                patches[target] = key
-            elif isinstance(key, str):
-                try:
-                    patches[target] = int(key, 0)
-                except ValueError:
-                    pass
-        return patches
 
     def _encode_match(self, field_def: Dict[str, Any], data: Dict[str, Any]) -> bytes:
         """Rebuild a ``match`` construct's bytes from decoded output.
@@ -4315,6 +4501,7 @@ class SchemaInterpreter:
     def _encode_field_list(self, fields: List[Dict[str, Any]], data: Dict[str, Any]) -> bytes:
         """Encode a list of plain fields - a TLV case's value bytes."""
         out = bytearray()
+        omitted_optional = None     # the first optional field the input left out (PS-405)
         for kind, item in self._bitfield_runs(fields):
             # A run of bit ranges shares one span of bytes, so it is packed once rather
             # than a byte per field (CR-2026-023).
@@ -4364,11 +4551,27 @@ class SchemaInterpreter:
                 # PS-360: the constant is written whatever the input says.
                 out.extend(self._encode_field(f, f['value']))
                 continue
-            if not name or name.startswith('_'):
+            if not name:
                 value = f.get('default', 0)
+            elif name.startswith('_'):
+                if f.get('type') in COMPUTED_TYPES:
+                    continue                    # a computed field writes no bytes
+                value = self._internal_encode_value(f, data)           # PS-434
             else:
                 # As in the top-level loop: a templated key is where the value lives.
                 lookup_name = self._resolve_encode_name(f, name, data) or name
+                if data.get(lookup_name) is None:
+                    if f.get('optional') is True:
+                        omitted_optional = omitted_optional or name    # PS-405
+                        continue
+                    if f.get('sentinel'):
+                        # A reading the decode omitted as "no reading" (PS-427) goes back
+                        # as the sentinel it was, not as zero.
+                        out.extend(self._encode_field(raw_bits_field(f), f['sentinel'][0]))
+                        continue
+                elif f.get('optional') is True and omitted_optional:
+                    raise ValueError(f"optional field {name!r} is supplied while the earlier "
+                                     f"optional field {omitted_optional!r} is not (PS-405)")
                 value = data.get(lookup_name, f.get('default', 0))
             value = self._reverse_modifiers(value, f)
             out.extend(self._encode_field(f, value))

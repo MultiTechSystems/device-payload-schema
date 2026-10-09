@@ -9,6 +9,10 @@
 # The padding is zero here on purpose, unlike skip-type.yaml's FF FF: it makes the
 # vector round-trip, so `encode(decode(payload)) == payload` fails the moment a
 # field like this stops contributing its bytes.
+#
+# `_reserved` declares `value: 0`: an internal field that reads bytes writes its
+# value, and with none the encoder must report an error rather than invent one
+# (PS-434, CR-2026-067).
 name: probe_encode_padding
 endian: big
 fields:
@@ -18,6 +22,7 @@ fields:
   length: 2
 - name: _reserved
   type: u8
+  value: 0
 - name: b
   type: u8
 test_vectors:

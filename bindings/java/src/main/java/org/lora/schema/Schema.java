@@ -87,6 +87,9 @@ public class Schema {
         // schema rules, over the whole document, since PS-369 and PS-381 depend on which
         // repeats enclose a field.
         Wave6a.checkSchema(raw);
+        // Wave 6b (CR-2026-059, -067): optional fields form the tail of their list (PS-404)
+        // and no field takes a name reserved for interpreter metadata (PS-433).
+        Wave6b.checkSchema(raw);
         Schema schema = new Schema();
         schema.repeatOnlyNames = Wave6a.repeatOnlyNames(raw);
 
@@ -165,13 +168,9 @@ public class Schema {
             checkLiteral(fm);
             checkWave4(fm);
             Wave5.checkLookupTemplate(fm);     // PS-407
-            // PS-399: exactly one discriminator source. With both, `field` won and the
-            // `length` byte was left unread, misaligning every later field.
-            if (fm.get("match") instanceof Map<?, ?> match
-                    && match.containsKey("field") == match.containsKey("length")) {
-                throw new SchemaException("Field '" + fm.get("name")
-                        + "': a match must declare exactly one of 'field' and 'length' (PS-399)");
-            }
+            // PS-399, PS-414, PS-416, PS-427, PS-428: the match's discriminator source,
+            // sentinel and out_of_range.
+            Wave6b.checkField(fm);
             fields.add(parseField(fm));
         }
         return fields;
@@ -552,8 +551,25 @@ public class Schema {
         Object lengthSpec = fm.get("length");
         if (lengthSpec instanceof String s && s.trim().equalsIgnoreCase("remaining")) {
             f.setLength(-1);
+        } else if (Wave6b.lengthRef(lengthSpec) != null) {
+            // PS-464: the name of a preceding field, with or without `$`, whose value is
+            // the count. toInt read it as 0, so the type's default length was read.
+            f.setLengthRef(Wave6b.lengthRef(lengthSpec));
         } else {
             f.setLength(toInt(lengthSpec, 0));
+        }
+        // Wave 6b: optional (PS-402), sentinel (PS-427), out_of_range: omit (PS-428).
+        f.setOptional(Boolean.TRUE.equals(fm.get("optional")));
+        if (fm.get("sentinel") instanceof List<?> sentinels) {
+            List<Long> parsed = new ArrayList<>();
+            for (Object s : sentinels) {
+                if (s instanceof Number n) parsed.add(n.longValue());
+            }
+            f.setSentinel(parsed);
+        }
+        if ("omit".equals(fm.get("out_of_range")) && fm.get("valid_range") instanceof List<?> bounds
+                && bounds.size() == 2 && bounds.get(0) instanceof Number lo && bounds.get(1) instanceof Number hi) {
+            f.setOmitOutside(new double[] {lo.doubleValue(), hi.doubleValue()});
         }
         f.setByteOffset(toInt(fm.get("byte_offset"), 0));
         f.setBitOffset(toInt(fm.get("bit_offset"), 0));
@@ -879,6 +895,8 @@ public class Schema {
             if (matchMap.get("length") != null) {
                 matchField.setLength(toInt(matchMap.get("length"), 0));
             }
+            // PS-414: the discriminator is the bytes remaining, and nothing is read.
+            matchField.setMatchRemaining(Boolean.TRUE.equals(matchMap.get("remaining")));
             if (matchMap.get("var") instanceof String matchVar) {
                 matchField.setVar(matchVar);
             }
@@ -1090,6 +1108,21 @@ public class Schema {
         Map<String, Object> result = new LinkedHashMap<>();
         
         for (Field field : fieldList) {
+            // PS-402, PS-403: an optional field is decoded where its bytes remain and is
+            // absent where none do. Every later field is optional too (PS-404), so once one
+            // is absent the list ends. Some bytes but too few is an error: an optional
+            // field is never partly read.
+            if (field.isOptional()) {
+                int remaining = ctx.remaining();
+                if (remaining <= 0) break;
+                int size = Wave6b.optionalFieldSize(field, Schema::fixedElementSize);
+                if (size > 0 && remaining < size) {
+                    throw new SchemaException.DecodeException(String.format(
+                            "Error decoding %s: optional field takes %d byte(s) but %d remain at offset %d (PS-403)",
+                            field.getName() == null ? "?" : field.getName(), size, remaining, ctx.getOffset()));
+                }
+            }
+
             // PS-383: a repeat's trailer is decoded from the reserved bytes before its
             // first element, so its names are bound for the elements, and it is reported
             // beside the repeat.
@@ -1213,10 +1246,29 @@ public class Schema {
     }
 
     private Object decodeField(Field field, DecodeContext ctx) {
+        return decodeField(field, ctx, true);
+    }
+
+    /**
+     * @param fieldRules whether the per-field rules of wave 6b apply - {@code sentinel}
+     *                   (PS-427) and {@code out_of_range: omit} (PS-428). They do in a field
+     *                   list and not to a byte_group member, as in the reference.
+     */
+    private Object decodeField(Field field, DecodeContext ctx, boolean fieldRules) {
         int length = field.getEffectiveLength();
+        if (field.getLengthRef() != null) {
+            switch (field.getType()) {
+                // PS-464, PS-465: a length naming a preceding field, resolved from the
+                // variables as a repeat's byte_length is.
+                case BYTES, ASCII, HEX, BASE64, SKIP -> length = Wave6b.resolveLength(field, ctx);
+                default -> { }
+            }
+        }
         String fieldEndian = field.getEffectiveEndian(ctx.getEndian());
         
         Object value = null;
+        // The integer read before an `encoding` decoded it, for the sentinel (PS-427).
+        Object preEncoding = null;
         
         switch (field.getType()) {
             // The type fixes both orders, so fieldEndian is deliberately not consulted
@@ -1238,6 +1290,10 @@ public class Schema {
                 byte[] data = ctx.read(length);
                 long raw = ctx.decodeUnsigned(data, fieldEndian);
                 if (field.getEncoding() != null) {
+                    preEncoding = raw;
+                    // A sentinel is a bit pattern, which need not be a valid code: 0xFF is
+                    // no BCD number, and must be absent rather than an error (PS-427).
+                    if (fieldRules && Wave6b.sentinelHit(field, raw)) return OMITTED;
                     // Applied to the integer read, before the modifiers (PS-422).
                     value = Wave4.decodeEncoding(raw, field.getEncoding(), length, field.getName());
                 } else if (length >= 8 && raw < 0) {
@@ -1412,8 +1468,16 @@ public class Schema {
             
             default -> throw new SchemaException.DecodeException("Unknown field type: " + field.getType());
         }
+
+        // PS-427: a reserved raw value means no reading, so the field is absent - neither
+        // reported nor bound. Compared with the integer read, before any modifier and
+        // before an encoding is decoded: it is a bit pattern, not a quantity.
+        if (fieldRules && field.getType() != FieldType.NUMBER
+                && Wave6b.sentinelHit(field, preEncoding != null ? preEncoding : value)) {
+            return OMITTED;
+        }
         
-        return applyGroupMember(value, field, ctx);
+        return applyGroupMember(value, field, ctx, fieldRules);
     }
 
     /**
@@ -1422,6 +1486,10 @@ public class Schema {
      * group's assembled bytes (PS-364), runs the same pipeline.
      */
     private Object applyGroupMember(Object value, Field field, DecodeContext ctx) {
+        return applyGroupMember(value, field, ctx, false);
+    }
+
+    private Object applyGroupMember(Object value, Field field, DecodeContext ctx, boolean fieldRules) {
         // Apply formula if present (takes precedence). A computed field has already
         // had its own arithmetic applied by decodeComputed, in the order the
         // interpreter uses: polynomial, then modifiers, then transform. Running the
@@ -1475,6 +1543,12 @@ public class Schema {
             }
         }
         
+        // PS-428: outside the range is no reading, not a flagged one, so the field is
+        // absent - neither reported nor bound.
+        if (fieldRules && Wave6b.rangeOmits(field, value)) {
+            return OMITTED;
+        }
+
         // Store variable
         if (field.getVar() != null && !field.getVar().isEmpty()) {
             ctx.setVariable(field.getVar(), value);
@@ -1508,7 +1582,11 @@ public class Schema {
         // where it was read here and named. Null where there is nothing to report.
         Map<String, Object> inline = null;
         
-        if (field.getOn() != null && !field.getOn().isEmpty()) {
+        if (field.isMatchRemaining()) {
+            // PS-414: the bytes from here to the end of the region, which a reserving
+            // repeat or tlv has already narrowed. Nothing is read.
+            matchValue = ctx.remaining();
+        } else if (field.getOn() != null && !field.getOn().isEmpty()) {
             String varName = field.getOn().startsWith("$") ? field.getOn().substring(1) : field.getOn();
             Object val = ctx.getVariable(varName);
             if (val == null) {
@@ -2214,7 +2292,7 @@ public class Schema {
                     int bit = Math.max(0, member.getBoolBit());
                     value = ((groupValue >>> bit) & 1) == 1;
                 } else {
-                    value = decodeField(member, ctx);
+                    value = decodeField(member, ctx, false);
                 }
                 if (value == OMITTED || value == null) continue;
                 ctx.setVariable(name, value);

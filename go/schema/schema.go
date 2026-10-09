@@ -214,6 +214,17 @@ type Field struct {
 	// Carry is a computed element field's value before the first element: a number or a
 	// `$name` (PS-378). nil when the field carries nothing.
 	Carry any `json:"-" yaml:"-"`
+
+	// The field-level rules of 0.5.2 wave 6b (see wave6b.go). LengthRef is a `length`
+	// naming a preceding field, without its `$` (PS-464). Optional fields end a list
+	// where the payload does (PS-402). Sentinel lists the raw readings that mean no
+	// reading (PS-427), and OutOfRangeOmit is `out_of_range: omit` (PS-428).
+	// MatchRemaining is a match on the bytes remaining (PS-414).
+	LengthRef      string  `json:"-" yaml:"-"`
+	Optional       bool    `json:"-" yaml:"-"`
+	Sentinel       []int64 `json:"-" yaml:"-"`
+	OutOfRangeOmit bool    `json:"-" yaml:"-"`
+	MatchRemaining bool    `json:"-" yaml:"-"`
 }
 
 // Transform represents a single transformation stage.
@@ -331,6 +342,11 @@ type DecodeContext struct {
 	// consulted only when a reference is unbound; see scopeError.
 	elementNames map[string]bool
 	repeatOnly   map[string]bool
+	// pendingAbsent holds readings omitted under PS-427/PS-428 until the decode knows
+	// whether `_quality` is produced; inFlagged counts enclosing flagged groups, where
+	// the reference always defers the mark (see markAbsent).
+	pendingAbsent map[string]string
+	inFlagged     int
 }
 
 // EncodeContext maintains state during encoding.
@@ -408,8 +424,10 @@ func inferLengthFromType(t FieldType) int {
 		return 4
 	case TypeU64, TypeS64, TypeI64, TypeF64:
 		return 8
-	case TypeF16:
+	case TypeF16, TypeUFlt16, TypeSFlt16:
 		return 2
+	case TypeSFlt24:
+		return 3
 	default:
 		return 1
 	}
@@ -816,6 +834,11 @@ func ParseSchema(data string) (*Schema, error) {
 	if err := checkIteratorRules(raw); err != nil {
 		return nil, err
 	}
+	// 0.5.2 wave 6b: optional fields end their list (PS-404), and the names reserved
+	// for interpreter metadata name no field (PS-433).
+	if err := checkWave6bRules(raw); err != nil {
+		return nil, err
+	}
 
 	schema := &Schema{repeatOnly: repeatOnlyNames(raw)}
 	
@@ -992,9 +1015,10 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 		f.Length = int(length)
 	}
 	// `length: remaining` consumes to the end of the payload (PS-014). It is stored
-	// as the negative sentinel Read already resolves, so Length can stay an int.
-	if length, ok := fm["length"].(string); ok && strings.EqualFold(strings.TrimSpace(length), "remaining") {
-		f.Length = -1
+	// as the negative sentinel Read already resolves, so Length can stay an int. Any
+	// other word names a preceding field (PS-464).
+	if length, ok := fm["length"].(string); ok {
+		parseLengthText(&f, length)
 	}
 	if endian, ok := fm["endian"].(string); ok {
 		f.Endian = endian
@@ -1279,6 +1303,7 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	}
 
 	parseIteratorKeys(&f, fm)
+	parseWave6bKeys(&f, fm)
 
 	// Bytes format options
 	if format, ok := fm["format"].(string); ok {
@@ -1599,6 +1624,8 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 		if fallback, present := matchRaw["default"]; present {
 			matchField.MatchDefault = fallback
 		}
+		// PS-414: the discriminator is the count of bytes remaining.
+		matchField.MatchRemaining = matchRaw["remaining"] == true
 		matchField.Cases = parseMatchCases(matchRaw["cases"])
 		f.MatchInline = &matchField
 	}
@@ -1793,7 +1820,9 @@ func (s *Schema) DecodeWithPortDirection(data []byte, fPort int, direction strin
 		result[k] = v
 	}
 
-	// Add quality dict to output if any quality flags were set
+	// Add quality dict to output if any quality flags were set, with any reading
+	// omitted under PS-427/PS-428 joined to it.
+	ctx.settleQuality()
 	if len(ctx.Quality) > 0 {
 		result["_quality"] = ctx.Quality
 	}
@@ -1837,7 +1866,9 @@ func (s *Schema) Decode(data []byte) (map[string]any, error) {
 		result[k] = v
 	}
 
-	// Add quality dict to output if any quality flags were set
+	// Add quality dict to output if any quality flags were set, with any reading
+	// omitted under PS-427/PS-428 joined to it.
+	ctx.settleQuality()
 	if len(ctx.Quality) > 0 {
 		result["_quality"] = ctx.Quality
 	}
@@ -1868,6 +1899,21 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 			}
 			for k, v := range trailer {
 				result[k] = v
+			}
+		}
+
+		// PS-402, PS-403: an optional field is decoded where its bytes remain and is
+		// absent where none do. Every later field is optional too (PS-404), so once one
+		// is absent the list ends. Some bytes but too few is an error: an optional field
+		// is never partly read.
+		if field.Optional {
+			remaining := ctx.Remaining()
+			if remaining <= 0 {
+				break
+			}
+			if size := optionalFieldSize(field); size > 0 && remaining < size {
+				return nil, fmt.Errorf("field '%s': optional field takes %d byte(s) but %d remain at offset %d (PS-403)",
+					field.Name, size, remaining, ctx.Offset)
 			}
 		}
 
@@ -1949,9 +1995,41 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 			continue
 		}
 
+		// PS-428 omits a reading outside its range, and an omitted reading is not bound
+		// (PS-429) - but a `var` is bound where the value is produced, so the earlier
+		// binding is kept to be put back.
+		var savedVar any
+		var hadVar bool
+		if field.OutOfRangeOmit && field.Var != "" {
+			savedVar, hadVar = ctx.Variables[field.Var]
+		}
+
 		value, err := decodeField(field, ctx)
 		if err != nil {
 			return nil, err
+		}
+
+		internal := strings.HasPrefix(field.Name, "_")
+		if value == absentSentinel {
+			// PS-427: a reserved reading means no reading; the field is absent, not
+			// reported and not bound. An internal field is only left unbound, except
+			// inside a flagged group, where the reference marks it as well.
+			if !internal || ctx.inFlagged > 0 {
+				ctx.markAbsent(field, "absent")
+			}
+			continue
+		}
+		if value != omitted && rangeOmits(field, value) && (!internal || ctx.inFlagged > 0) {
+			// PS-428: outside the range is no reading, not a flagged one.
+			if field.Var != "" {
+				if hadVar {
+					ctx.Variables[field.Var] = savedVar
+				} else {
+					delete(ctx.Variables, field.Var)
+				}
+			}
+			ctx.markAbsent(field, "out_of_range")
+			continue
 		}
 
 		if value == omitted {
@@ -2080,6 +2158,10 @@ func decodeFlagged(fd *FlaggedDef, ctx *DecodeContext) (map[string]any, error) {
 
 	result := make(map[string]any)
 
+	// A reading omitted inside a group joins `_quality` only where it is produced
+	// (markAbsent), as the reference's flagged path records it.
+	ctx.inFlagged++
+	defer func() { ctx.inFlagged-- }()
 	for _, group := range fd.Groups {
 		isPresent := (flags >> group.Bit) & 1
 		if isPresent != 0 {
@@ -2164,11 +2246,21 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 				return nil, err
 			}
 		}
+		if sentinelHit(field, value) {
+			return absentSentinel, nil // PS-427
+		}
 		return applyLookupAndModifiers(value, field, ctx)
 	}
 
 	length := field.Length
-	if length == 0 {
+	if field.LengthRef != "" {
+		// PS-464: the count is a preceding field's value, and may be zero.
+		n, err := resolveLengthRef(field, ctx)
+		if err != nil {
+			return nil, err
+		}
+		length = n
+	} else if length == 0 {
 		// Infer length from shorthand type names
 		length = inferLengthFromType(field.Type)
 	}
@@ -2210,6 +2302,11 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		}
 		value = decodeUint(data, endian)
 		if field.Encoding != "" {
+			// The sentinel is compared on the bits read, before the code is decoded
+			// (PS-427) - a sentinel need not be a valid code word at all.
+			if sentinelHit(field, value) {
+				return absentSentinel, nil
+			}
 			// Applied to the integer read, before the modifiers (PS-422).
 			decoded, err := decodeEncoding(decodeUint(data, endian), field.Encoding, length)
 			if err != nil {
@@ -2515,6 +2612,13 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		return nil, fmt.Errorf("unknown field type: %s", field.Type)
 	}
 
+	if len(field.Sentinel) > 0 {
+		// Only an integer read can be a sentinel; a float or nibble-decimal is not one.
+		// A field with an `encoding` was compared before its code was decoded.
+		if _, isFloat := value.(float64); !isFloat && field.Encoding == "" && sentinelHit(field, value) {
+			return absentSentinel, nil // PS-427
+		}
+	}
 	return applyLookupAndModifiers(value, field, ctx)
 }
 
@@ -2795,7 +2899,11 @@ func decodeMatch(field Field, ctx *DecodeContext) (any, error) {
 	// it was read here and named. nil where there is nothing to report.
 	var inline map[string]any
 
-	if field.On != "" {
+	if field.MatchRemaining {
+		// PS-414: the bytes from here to the end, less any enclosing repeat's reserve -
+		// which the region-limited buffer already excludes. Nothing is read.
+		matchValue = ctx.Remaining()
+	} else if field.On != "" {
 		// Variable-based match
 		varName := strings.TrimPrefix(field.On, "$")
 		val, ok := ctx.Variables[varName]
@@ -4157,7 +4265,14 @@ func encodeByteGroup(field Field, data map[string]any, ctx *EncodeContext) error
 	packed := uint64(0)
 	for _, gf := range field.ByteGroup {
 		var value any = 0
-		if gf.Name != "" && !strings.HasPrefix(gf.Name, "_") {
+		if strings.HasPrefix(gf.Name, "_") {
+			// PS-434: an internal member writes its value, else the input's.
+			v, err := internalEncodeValue(gf, data)
+			if err != nil {
+				return err
+			}
+			value = v
+		} else if gf.Name != "" {
 			if v, ok := data[gf.Name]; ok {
 				value = v
 			}
@@ -4306,7 +4421,14 @@ func encodeBitfieldRun(run []Field, data map[string]any, ctx *EncodeContext) err
 	size := 1
 	for _, gf := range run {
 		var value any = 0
-		if gf.Name != "" && !strings.HasPrefix(gf.Name, "_") {
+		if strings.HasPrefix(gf.Name, "_") {
+			// PS-434: an internal bit range writes its value, else the input's.
+			v, err := internalEncodeValue(gf, data)
+			if err != nil {
+				return err
+			}
+			value = v
+		} else if gf.Name != "" {
 			if v, ok := data[gf.Name]; ok {
 				value = v
 			}
@@ -4379,6 +4501,8 @@ func encodeFields(fields []Field, data map[string]any, ctx *EncodeContext) error
 			flagsPatches[field.Flagged.Field] = flags
 		}
 	}
+	// The first optional field the input left out (PS-405).
+	omittedOptional := ""
 
 	for i := 0; i < len(fields); i++ {
 		field := fields[i]
@@ -4468,10 +4592,13 @@ func encodeFields(fields []Field, data map[string]any, ctx *EncodeContext) error
 		// the lowercase one, so a `type: Skip` in a tlv case wrote nothing.
 		if field.Type == TypeSkip || field.Type == TypeSkipLower {
 			length := field.Length
-			if length <= 0 {
+			switch {
+			case length < 0 || field.LengthRef != "":
+				// `remaining` and a length naming a field give no count to pad on
+				// encode, and the reference pads them to nothing (PS-014, PS-464).
+				length = 0
+			case length == 0:
 				// An absent length is one byte, as in Python's f.get('length', 1).
-				// Go cannot tell an absent length from `length: remaining`, which
-				// Python pads to nothing (PS-014); both arrive here as zero.
 				length = 1
 			}
 			ctx.Write(make([]byte, length))
@@ -4500,8 +4627,23 @@ func encodeFields(fields []Field, data map[string]any, ctx *EncodeContext) error
 		//
 		// encodeField writes `length` zeros for a `skip` and the zero value for
 		// anything else, which is what encodeFieldList and Python both do.
-		if field.Name == "" || strings.HasPrefix(field.Name, "_") {
+		//
+		// PS-434 narrows that for an internal field: it writes its `value` (handled
+		// above), else the input's value under its name, else it is an error naming the
+		// field. Writing zero read back as a value the device never sent wherever the
+		// field was not padding. Unnamed padding still writes zeros.
+		if field.Name == "" {
 			if err := encodeField(field, 0, ctx); err != nil {
+				return err
+			}
+			continue
+		}
+		if strings.HasPrefix(field.Name, "_") {
+			value, err := internalEncodeValue(field, data)
+			if err != nil {
+				return err
+			}
+			if err := encodeField(field, value, ctx); err != nil {
 				return err
 			}
 			continue
@@ -4530,6 +4672,25 @@ func encodeFields(fields []Field, data map[string]any, ctx *EncodeContext) error
 			}
 			var exists bool
 			value, exists = data[lookupName]
+			if field.Optional && (!exists || value == nil) {
+				// PS-405: an optional field is written only where the input has it.
+				if omittedOptional == "" {
+					omittedOptional = field.Name
+				}
+				continue
+			}
+			if field.Optional && omittedOptional != "" {
+				return fmt.Errorf("field '%s': optional field supplied while the earlier optional field '%s' is not (PS-405)",
+					field.Name, omittedOptional)
+			}
+			if (!exists || value == nil) && len(field.Sentinel) > 0 {
+				// A reading the decode omitted as "no reading" (PS-427) goes back as
+				// the sentinel it was, not as zero.
+				if err := encodeSentinel(field, ctx); err != nil {
+					return err
+				}
+				continue
+			}
 			if !exists {
 				// A field the input omits is written as zero and reported, which
 				// is what Python, Java and C# all do. Skipping it wrote no bytes
@@ -4582,7 +4743,10 @@ func encodeFlagged(fd *FlaggedDef, data map[string]any, ctx *EncodeContext) erro
 			return encodeBitfieldRun(pending, data, ctx)
 		}
 		for _, gf := range group.Fields {
-			if gf.Name == "" || strings.HasPrefix(gf.Name, "_") {
+			// Unnamed and computed members are skipped. An internal member that reads
+			// bytes follows PS-434 below; it used to be skipped too, so its bytes went
+			// missing from the group and every later member landed at the wrong offset.
+			if gf.Name == "" {
 				continue
 			}
 			// A derived value is computed from other fields and occupies no bytes of
@@ -4607,9 +4771,27 @@ func encodeFlagged(fd *FlaggedDef, data map[string]any, ctx *EncodeContext) erro
 			if err := flush(); err != nil {
 				return err
 			}
-			value, ok := data[gf.Name]
-			if !ok {
-				continue
+			var value any
+			if strings.HasPrefix(gf.Name, "_") {
+				// PS-434: its value, else the input's, else an error naming it.
+				v, err := internalEncodeValue(gf, data)
+				if err != nil {
+					return err
+				}
+				value = v
+			} else {
+				v, ok := data[gf.Name]
+				if !ok || v == nil {
+					if len(gf.Sentinel) > 0 {
+						// A reading omitted as "no reading" (PS-427) goes back as the
+						// sentinel's raw bits.
+						if err := encodeSentinel(gf, ctx); err != nil {
+							return err
+						}
+					}
+					continue
+				}
+				value = v
 			}
 			if err := encodeField(gf, value, ctx); err != nil {
 				return err
@@ -4696,7 +4878,11 @@ func notANumber(field Field, value any) error {
 
 func encodeField(field Field, value any, ctx *EncodeContext) error {
 	length := field.Length
-	if length == 0 {
+	if field.LengthRef != "" {
+		// A length naming a field (PS-464): the value supplies its own count, and the
+		// named field writes it from its own value.
+		length = -1
+	} else if length == 0 {
 		length = inferLengthFromType(field.Type)
 	}
 	endian := field.Endian
@@ -4992,6 +5178,11 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 		}
 
 	case TypeSkip, TypeSkipLower:
+		// `remaining` and a named length give no count to pad on encode (PS-014,
+		// PS-464), as the reference writes them.
+		if length < 0 {
+			length = 0
+		}
 		ctx.Write(make([]byte, length))
 
 	default:

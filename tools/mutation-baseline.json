@@ -3,7 +3,7 @@
   "min_score_new": 0.8,
   "include_library_composed": false,
   "distribution": {
-    "100%": 156,
+    "100%": 162,
     "95-99%": 6,
     "90-94%": 1,
     "80-89%": 5,
@@ -49,6 +49,16 @@
       "unreached": 0,
       "generated": 3,
       "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/bytes-length-field.yaml": {
+      "score": 1.0,
+      "killed": 6,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 13,
+      "vectors": 2,
       "provenance": "independent",
       "failing_original": 0
     },
@@ -130,6 +140,16 @@
       "generated": 17,
       "vectors": 2,
       "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/internal-field-value.yaml": {
+      "score": 1.0,
+      "killed": 7,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 10,
+      "vectors": 1,
+      "provenance": "independent",
       "failing_original": 0
     },
     "_language-conformance/literal-types.yaml": {
@@ -232,6 +252,16 @@
       "provenance": "independent",
       "failing_original": 0
     },
+    "_language-conformance/match-remaining.yaml": {
+      "score": 1.0,
+      "killed": 12,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 16,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "_language-conformance/match-var.yaml": {
       "score": 1.0,
       "killed": 4,
@@ -290,6 +320,26 @@
       "generated": 7,
       "vectors": 1,
       "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/optional-trailing.yaml": {
+      "score": 1.0,
+      "killed": 10,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 15,
+      "vectors": 3,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/out-of-range-omit.yaml": {
+      "score": 1.0,
+      "killed": 5,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 7,
+      "vectors": 2,
+      "provenance": "independent",
       "failing_original": 0
     },
     "_language-conformance/ref-everywhere.yaml": {
@@ -439,6 +489,16 @@
       "unreached": 0,
       "generated": 33,
       "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/sentinel.yaml": {
+      "score": 1.0,
+      "killed": 9,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 11,
+      "vectors": 2,
       "provenance": "independent",
       "failing_original": 0
     },
