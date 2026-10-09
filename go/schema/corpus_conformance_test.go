@@ -45,7 +45,7 @@ import (
 // CR-2026-085/086's fixtures decode now that bytes after the last field are reported
 // (leftover-bytes, match-default-skip's skipped body) and valid_range is compared before
 // the lookup (range-before-lookup's four vectors), so the full count is 2371.
-const corpusFloor = 2371
+const corpusFloor = 2373 // dl-atm41g2's two vendor vectors (+2)
 
 type corpusVector struct {
 	Name    string `yaml:"name"`

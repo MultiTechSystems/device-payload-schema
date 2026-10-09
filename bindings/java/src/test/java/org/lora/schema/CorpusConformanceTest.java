@@ -47,7 +47,7 @@ class CorpusConformanceTest {
     // four, and match-default-skip.yaml's skipped body now expects the PS-472 warning.
     // With the leftover reported and valid_range compared before the lookup, all decode;
     // the full count of payload vectors is 2371.
-    private static final int CORPUS_FLOOR = 2371;
+    private static final int CORPUS_FLOOR = 2373;   // dl-atm41g2's two vendor vectors (+2)
 
     @Test
     void corpusVectorsDecodeAsExpected() throws IOException {
