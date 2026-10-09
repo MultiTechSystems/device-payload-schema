@@ -314,6 +314,129 @@ static void test_a_u64_is_exact_at_the_top_of_its_range(void) {
     TCHECK(r.fields[0].value.u64 == UINT64_MAX);  /* PS-294 */
 }
 
+/* CR-2026-071, PS-443: the lookup sees the value after the modifiers.
+ *
+ * `u8` with `add: 1` and `lookup: [a, b, c]` - the arithmetic-order-read.yaml fixture's
+ * field. Raw 1 is 2 after the add and indexes "c"; the lookup used to be keyed on the raw
+ * value and gave "b", the one answer no other implementation gives. */
+static void build_add_then_sequence(schema_t* s) {
+    memset(s, 0, sizeof(*s));
+    s->endian = ENDIAN_BIG;
+    field_def_t f = field_u8("lookup_after_arithmetic");
+    field_set_add(&f, 1.0);
+    field_add_lookup(&f, 0, "a");
+    field_add_lookup(&f, 1, "b");
+    field_add_lookup(&f, 2, "c");
+    f.lookup_is_sequence = true;
+    schema_add_field(s, &f);
+}
+
+static void test_the_lookup_follows_the_modifiers(void) {
+    schema_t s;
+    decode_result_t r;
+    uint8_t one[] = {0x01};
+    uint8_t zero[] = {0x00};
+    uint8_t two[] = {0x02};
+
+    build_add_then_sequence(&s);
+    TCHECK(schema_decode(&s, one, sizeof(one), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 1);
+    TCHECK(strcmp(r.fields[0].value.str, "c") == 0);
+
+    TCHECK(schema_decode(&s, zero, sizeof(zero), &r) == SCHEMA_OK);
+    TCHECK(strcmp(r.fields[0].value.str, "b") == 0);
+
+    /* Raw 2 is index 3, which a three-entry sequence does not have (PS-105). Keyed on
+     * the raw value it would have decoded as "c". */
+    TCHECK(schema_decode(&s, two, sizeof(two), &r) == SCHEMA_ERR_LOOKUP);
+}
+
+/* The same field through the binary form, as tools/schema_binary.py emits it for
+ * `{type: u8, add: 1, lookup: [a, b, c]}`: the add marker 0xA0 carrying 100 hundredths,
+ * then the sequence-flagged table. The order is the interpreter's, so it holds whichever
+ * way the schema arrives. */
+static void test_the_lookup_follows_the_modifiers_from_binary(void) {
+    static const uint8_t blob[] = {
+        'P', 'S', 0x01, 0x00, 0x01,              /* header: v1, big-endian, 1 field */
+        0x81, 0x00, 0xE7, 0x0C,                  /* u8 + lookup, no scale, id 3303 */
+        0xA0, 0x64, 0x00,                        /* add: 1.00 */
+        0x83, 0x00, 0x01, 'a', 0x01, 0x01, 'b', 0x02, 0x01, 'c',
+    };
+    schema_t s;
+    decode_result_t r;
+    uint8_t one[] = {0x01};
+
+    TCHECK(schema_load_binary(&s, blob, sizeof(blob)) == SCHEMA_OK);
+    TCHECK(s.fields[0].has_add && s.fields[0].lookup_is_sequence);
+    TCHECK(schema_decode(&s, one, sizeof(one), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 1);
+    TCHECK(strcmp(r.fields[0].value.str, "c") == 0);
+}
+
+/* A value the modifiers leave with a fraction is no key of a mapping (PS-107), so the
+ * field is omitted (PS-269) rather than truncated onto a neighbouring key. */
+static void test_a_fractional_value_matches_no_key(void) {
+    schema_t s;
+    decode_result_t r;
+    uint8_t three[] = {0x03};
+    uint8_t two[] = {0x02};
+
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t f = field_u8("half");
+    field_set_mult(&f, 0.5);
+    field_add_lookup(&f, 1, "one");
+    schema_add_field(&s, &f);
+
+    TCHECK(schema_decode(&s, two, sizeof(two), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 1);
+    TCHECK(strcmp(r.fields[0].value.str, "one") == 0);
+
+    TCHECK(schema_decode(&s, three, sizeof(three), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 0);
+}
+
+/* The enum path applies its table through the same step, so an enum and an integer
+ * field with the same modifiers and table agree. The enum path used to drop the
+ * modifiers entirely (PS-446). */
+static void test_an_enum_applies_its_modifiers_first(void) {
+    schema_t s;
+    decode_result_t r;
+    uint8_t one[] = {0x01};
+
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t f = field_enum("state", 1);
+    field_set_add(&f, 1.0);
+    field_add_lookup(&f, 1, "idle");
+    field_add_lookup(&f, 2, "running");
+    schema_add_field(&s, &f);
+
+    TCHECK(schema_decode(&s, one, sizeof(one), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 1);
+    TCHECK(strcmp(r.fields[0].value.str, "running") == 0);
+}
+
+/* PS-446: a float's modifiers are applied. f16/f32/f64 returned straight after the read,
+ * so `mult: 0.5` on an f32 of 10.0 reported 10.0 - while the encoder reversed the
+ * modifier, so the field did not round-trip either. */
+static void test_a_float_applies_its_modifiers(void) {
+    schema_t s;
+    decode_result_t r;
+    uint8_t ten[] = {0x41, 0x20, 0x00, 0x00};   /* 10.0f, big-endian */
+
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t f = field_f32("v", ENDIAN_BIG);
+    field_set_mult(&f, 0.5);
+    field_set_add(&f, 1.0);
+    schema_add_field(&s, &f);
+
+    TCHECK(schema_decode(&s, ten, sizeof(ten), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 1);
+    TCHECK(r.fields[0].value.f64 == 6.0);
+}
+
 /*
  * Main test entry point
  */
@@ -334,6 +457,11 @@ void selftest_schema(void) {
     test_a_modifier_makes_the_field_a_number();
     test_a_zero_divisor_omits_the_field();
     test_a_u64_is_exact_at_the_top_of_its_range();
+    test_the_lookup_follows_the_modifiers();
+    test_the_lookup_follows_the_modifiers_from_binary();
+    test_a_fractional_value_matches_no_key();
+    test_an_enum_applies_its_modifiers_first();
+    test_a_float_applies_its_modifiers();
 
     LOG(LOG_INFO, MOD, "Schema interpreter self-tests complete");
 }
