@@ -93,3 +93,49 @@ func (r *corpusReport) write(t *testing.T) {
 	}
 	t.Logf("corpus report: %d vectors written to %s", len(r.entries), r.path)
 }
+
+// CORPUS_META_REPORT=/path/file.json (CR-2026-096) also writes, for every vector with a
+// payload, {schema, index, vector, meta}: the interpreter output's `_meta` for the
+// vector's input context, or null where the decode failed. tools/verdicts-gate.py
+// compares it with the reference's. CORPUS_ONLY and CORPUS_ROOT apply as above.
+
+type corpusMetaEntry struct {
+	Schema string `json:"schema"`
+	Index  int    `json:"index"`
+	Vector string `json:"vector"`
+	Meta   any    `json:"meta"`
+}
+
+type corpusMetaReport struct {
+	path    string
+	entries []corpusMetaEntry
+}
+
+func newCorpusMetaReport() *corpusMetaReport {
+	return &corpusMetaReport{path: os.Getenv("CORPUS_META_REPORT"), entries: []corpusMetaEntry{}}
+}
+
+func (r *corpusMetaReport) enabled() bool { return r.path != "" }
+
+func (r *corpusMetaReport) add(schema string, index int, vector string, meta any) {
+	if r.path == "" {
+		return
+	}
+	r.entries = append(r.entries, corpusMetaEntry{schema, index, vector, meta})
+}
+
+func (r *corpusMetaReport) write(t *testing.T) {
+	if r.path == "" {
+		return
+	}
+	data, err := json.MarshalIndent(r.entries, "", " ")
+	if err != nil {
+		t.Errorf("CORPUS_META_REPORT: %v", err)
+		return
+	}
+	if err := os.WriteFile(r.path, append(data, '\n'), 0o644); err != nil {
+		t.Errorf("CORPUS_META_REPORT: %v", err)
+		return
+	}
+	t.Logf("corpus _meta report: %d vectors written to %s", len(r.entries), r.path)
+}
