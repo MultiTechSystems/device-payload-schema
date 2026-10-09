@@ -39,7 +39,11 @@ class CorpusConformanceTest {
     // fixtures pass everywhere and the full count is 1237.
     // CR-2026-031 added the name_from var-mismatch fixture, whose two vectors decode
     // everywhere, so the full count is 1239.
-    private static final int CORPUS_FLOOR = 2356;
+    // CR-2026-071/073 added six vectors in three _language-conformance fixtures; with
+    // modifiers and the lookup applied to computed fields and a failed guard's `else`
+    // reported as declared, all decode, and with laq4's vendor vector the full count of
+    // payload vectors is 2363.
+    private static final int CORPUS_FLOOR = 2363;
 
     @Test
     void corpusVectorsDecodeAsExpected() throws IOException {

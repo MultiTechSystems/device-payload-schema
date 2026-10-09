@@ -37,7 +37,6 @@ public class Field {
     private Double add;
     private Double mult;
     private Double div;
-    private List<String> modOrder;
     private List<Transform> transform;
     private Map<Integer, String> lookup;
     /** True when `lookup` was written as a sequence, indexed from zero (PS-104). */
@@ -121,6 +120,8 @@ public class Field {
     private List<Long> sentinel;
     /** {@code valid_range} where {@code out_of_range: omit} drops a value outside it (PS-428). */
     private double[] omitOutside;
+    /** {@code valid_range}, checked into {@code _quality} with a warning (PS-131). */
+    private double[] validRange;
     /** A match on the bytes remaining (PS-414). */
     private boolean matchRemaining;
 
@@ -132,11 +133,12 @@ public class Field {
     public void setSentinel(List<Long> sentinel) { this.sentinel = sentinel; }
     public double[] getOmitOutside() { return omitOutside; }
     public void setOmitOutside(double[] omitOutside) { this.omitOutside = omitOutside; }
+    public double[] getValidRange() { return validRange; }
+    public void setValidRange(double[] validRange) { this.validRange = validRange; }
     public boolean isMatchRemaining() { return matchRemaining; }
     public void setMatchRemaining(boolean matchRemaining) { this.matchRemaining = matchRemaining; }
 
     public Field() {
-        this.modOrder = new ArrayList<>();
     }
 
     // Getters and setters
@@ -185,13 +187,6 @@ public class Field {
     
     public Double getDiv() { return div; }
     public void setDiv(Double div) { this.div = div; }
-    
-    /** @deprecated Modifier order is fixed by PS-101; no longer read. */
-    @Deprecated
-    public List<String> getModOrder() { return modOrder; }
-    /** @deprecated Modifier order is fixed by PS-101; no longer read. */
-    @Deprecated
-    public void setModOrder(List<String> modOrder) { this.modOrder = modOrder; }
     
     public List<Transform> getTransform() { return transform; }
     public void setTransform(List<Transform> transform) { this.transform = transform; }
