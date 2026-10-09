@@ -1002,6 +1002,7 @@ public class Schema {
         // Decode main fields
         Map<String, Object> fieldsResult = decodeFields(fields, ctx);
         result.putAll(fieldsResult);
+        ctx.reportLeftover();       // PS-472
         reportWarnings(result, ctx);
 
         return result;
@@ -1032,6 +1033,7 @@ public class Schema {
         // Decode resolved fields
         Map<String, Object> fieldsResult = decodeFields(resolvedFields, ctx);
         result.putAll(fieldsResult);
+        ctx.reportLeftover();       // PS-472
         reportWarnings(result, ctx);
 
         return result;
@@ -1609,6 +1611,17 @@ public class Schema {
             return OMITTED;
         }
 
+        // PS-475: valid_range compares the value after the arithmetic and before the
+        // lookup, so a looked-up field is compared on its number, not its label. A value
+        // omitted by `out_of_range: omit` takes no further step: it is not looked up, so
+        // an index the sequence lacks is no error when the field is dropped anyway. A
+        // failed guard's `else` ends the sequence and is compared with nothing (PS-443).
+        boolean lookedUp = field.getLookup() != null && value instanceof Number && !asDeclared;
+        ctx.recordRangeInputs(field, asDeclared, lookedUp, value);
+        if (lookedUp && fieldRules && Wave6b.rangeOmits(field, value)) {
+            return RANGE_ABSENT;
+        }
+
         // Apply lookup. A mapping's keys need not start at zero or be contiguous
         // (PS-268); an unmatched value omits the field rather than reporting the raw
         // integer under a name that promises a label, unless a default is declared
@@ -1647,7 +1660,7 @@ public class Schema {
         
         // PS-428: outside the range is no reading, not a flagged one, so the field is
         // absent - neither reported nor bound.
-        if (fieldRules && Wave6b.rangeOmits(field, value)) {
+        if (fieldRules && !asDeclared && !lookedUp && Wave6b.rangeOmits(field, value)) {
             return RANGE_ABSENT;
         }
 
@@ -1844,8 +1857,24 @@ public class Schema {
         Map<String, Object> result = new LinkedHashMap<>();
         List<Map<String, Object>> channels = new ArrayList<>();
         
+        // A composite tag's width is its tag_fields' summed widths.
+        int tagWidth = tagSize;
+        if (field.getTagFields() != null && !field.getTagFields().isEmpty()) {
+            tagWidth = 0;
+            for (Field tf : field.getTagFields()) {
+                tagWidth += tf.getLength() > 0 ? tf.getLength() : 1;
+            }
+        }
+
         while (ctx.remaining() > 0) {
             int entryStart = ctx.getOffset();
+            // PS-477: a tag is never partly read. Fewer bytes than the tag at the start of
+            // an entry is an error identifying the tlv, not the end of the loop.
+            if (ctx.remaining() < tagWidth) {
+                throw new SchemaException.DecodeException(String.format(
+                        "tlv entry at offset %d: %d byte(s) remain, fewer than its %d-byte tag (PS-477)",
+                        entryStart, ctx.remaining(), tagWidth));
+            }
             List<Integer> tag = new ArrayList<>();
             Map<String, Integer> tagValues = new HashMap<>();
             
@@ -1878,6 +1907,12 @@ public class Schema {
             
             int dataLength = -1;
             if (lengthSize > 0) {
+                if (ctx.remaining() < lengthSize) {
+                    // No entry was decoded here: the bytes from its tag on are left over,
+                    // and PS-472 reports them from the tag's offset.
+                    ctx.setOffset(entryStart);
+                    break;
+                }
                 byte[] data = ctx.read(lengthSize);
                 dataLength = (int) ctx.decodeUnsigned(data, ctx.getEndian());
             }
@@ -1964,6 +1999,8 @@ public class Schema {
                         "unknown TLV tag (%s) at offset %d: %d of %d byte(s) left undecoded",
                         label, entryStart, ctx.getLimit() - entryStart,
                         ctx.getLimit()));
+                    // This warning is PS-472's for these bytes; no second one is reported.
+                    ctx.setLeftoverReported();
                     break;
                 }
             }

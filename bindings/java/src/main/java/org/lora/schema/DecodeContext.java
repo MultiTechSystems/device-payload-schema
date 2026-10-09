@@ -5,6 +5,7 @@ import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,6 +46,16 @@ public class DecodeContext {
     private Set<String> repeatOnlyNames = Set.of();
     /** The members of the element being decoded, or null outside any element (PS-368). */
     private Set<String> elementNames;
+    /**
+     * A looked-up field's value before its lookup, which is what {@code valid_range}
+     * compares (PS-475), by field definition. Compared after the lookup, a label is no
+     * number and every value read "good".
+     */
+    private final Map<Field, Object> preLookup = new IdentityHashMap<>();
+    /** Fields whose last decode reported a failed guard's {@code else} (PS-443). */
+    private final Map<Field, Boolean> guardElse = new IdentityHashMap<>();
+    /** A PS-302 warning has already reported the bytes left over (PS-472). */
+    private boolean leftoverReported;
 
     public DecodeContext(byte[] data, String endian) {
         this.data = data;
@@ -139,6 +150,31 @@ public class DecodeContext {
 
     public void addWarning(String warning) { warnings.add(warning); }
 
+    void setLeftoverReported() { leftoverReported = true; }
+
+    /**
+     * PS-472: bytes after the last field of the selected list are reported, not silently
+     * dropped. The decode is reported as it would be otherwise; this only warns, with the
+     * offset of the first byte not decoded and the count to the end. A PS-302 warning for
+     * the same bytes is this warning, so no second one is added.
+     */
+    void reportLeftover() {
+        int left = data.length - offset;
+        if (left <= 0 || leftoverReported) return;
+        warnings.add(left + " byte(s) after the last field left undecoded, from offset "
+                + offset + " (PS-472)");
+    }
+
+    /**
+     * Records what {@code valid_range} will compare for this decode of the field: the
+     * pre-lookup value (null where none was reached), and whether a guard reported its
+     * {@code else}, which ends the sequence and is not compared (PS-443, PS-475).
+     */
+    void recordRangeInputs(Field field, boolean fromGuardElse, boolean hasPreLookup, Object pre) {
+        if (fromGuardElse) guardElse.put(field, Boolean.TRUE); else guardElse.remove(field);
+        if (hasPreLookup) preLookup.put(field, pre); else preLookup.remove(field);
+    }
+
     void enterFlagged() { inFlagged++; }
     void exitFlagged() { inFlagged--; }
     boolean inFlagged() { return inFlagged > 0; }
@@ -150,7 +186,21 @@ public class DecodeContext {
      */
     void checkValidRange(Object value, Field field) {
         double[] range = field.getValidRange();
-        if (range == null || !(value instanceof Number n) || value instanceof Boolean) return;
+        if (range == null) return;
+        // PS-443: a failed guard's `else` ends the sequence and is not compared. PS-475:
+        // a looked-up field is compared on its number, before the lookup, not its label.
+        if (guardElse.containsKey(field)) {
+            quality.put(field.getName(), "good");
+            return;
+        }
+        if (field.getLookup() != null) {
+            if (!preLookup.containsKey(field)) {
+                quality.put(field.getName(), "good");
+                return;
+            }
+            value = preLookup.get(field);
+        }
+        if (!(value instanceof Number n) || value instanceof Boolean) return;
         double v = n.doubleValue();
         if (v < range[0] || v > range[1]) {
             warnings.add(field.getName() + ": value " + formatNumber(v) + " outside valid range ["
