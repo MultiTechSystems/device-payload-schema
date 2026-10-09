@@ -22,6 +22,7 @@ fields:
                 - mult: 0.002670328831921874
                 - add: -45
               unit: "°C"
+              senml: {unit: Cel}
             - name: air_humidity_radiation_shield
               type: u16
               transform:
@@ -36,12 +37,14 @@ fields:
                 - div: 100
                 - add: -327.68
               unit: "°C"
+              senml: {unit: Cel}
             - name: air_temperature
               type: u16
               transform:
                 - div: 100
                 - add: -327.68
               unit: "°C"
+              senml: {unit: Cel}
             - name: air_humidity
               type: u16
               transform:
@@ -54,20 +57,48 @@ fields:
                 - div: 100
                 - add: -327.68
               unit: "°C"
+              senml: {unit: Cel}
             - name: angle
               type: u16
               transform:
                 - add: -32768
               unit: "°"
+              senml: {unit: deg}
             - name: sensor_temperature
               type: u16
               transform:
                 - div: 100
                 - add: -327.68
               unit: "°C"
+              senml: {unit: Cel}
         - bit: 2
           fields:
             - name: battery_voltage
               type: u16
               div: 1000
               unit: "V"
+test_vectors:
+  - name: vendor_reference_1
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "0258C000040B91"
+    expected:
+      device_id: 22720
+      protocol_version: 2
+      battery_voltage: 2.961
+  - name: vendor_reference_2
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "0258C000074676FA0A81C9813FA6D88137802581300B91"
+    expected:
+      device_id: 22720
+      protocol_version: 2
+      air_temperature_radiation_shield: 3.167391470206759
+      air_humidity_radiation_shield: 97.67299916075379
+      surface_temperature: 4.57
+      air_temperature: 3.19
+      air_humidity: 99.44
+      dew_point: 3.11
+      angle: 37
+      sensor_temperature: 3.04
+      battery_voltage: 2.961

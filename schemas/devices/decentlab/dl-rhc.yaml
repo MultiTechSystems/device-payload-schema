@@ -33,6 +33,7 @@ fields:
                 - div: 100
                 - add: -327.68
               unit: "°C"
+              senml: {unit: Cel}
         - bit: 1
           fields:
             - name: battery_voltage
@@ -58,3 +59,14 @@ test_vectors:
       sensor_id: 20228605
       air_humidity: 50
       air_temperature: -277.68
+  - name: vendor_reference_1
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "0202E00003A9FD01341CA285F30C60"
+    expected:
+      device_id: 736
+      protocol_version: 2
+      sensor_id: 20228605
+      air_humidity: 73.3
+      air_temperature: 15.23
+      battery_voltage: 3.168

@@ -22,6 +22,21 @@ fields:
     type: u8
     mult: 0.016
     unit: "V"
+  # The vendor decoder (flood-sensor.js) reads a third byte only where the frame has
+  # one: a 2-byte frame is the short package, with no temperature (PS-402).
   - name: temperature
     type: u8
+    optional: true
     unit: "°C"
+    senml: {unit: Cel}
+test_vectors:
+  - name: vendor_reference_1
+    description: "Example declared by the vendor in the TTN device repository"
+    source: vendor-doc
+    fPort: 2
+    payload: "08C9"
+    expected:
+      reason: "keepalive"
+      boxTamper: true
+      flood: false
+      battery: 3.216

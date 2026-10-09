@@ -28,12 +28,14 @@ fields:
                 - div: 256
                 - add: -128
               unit: "°C"
+              senml: {unit: Cel}
             - name: temperature_pt1000
               type: u16
               transform:
                 - div: 256
                 - add: -128
               unit: "°C"
+              senml: {unit: Cel}
             - name: electrical_conductivity
               type: u16
               transform:
@@ -46,3 +48,24 @@ fields:
               type: u16
               div: 1000
               unit: "V"
+test_vectors:
+  - name: vendor_reference_1
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "020A1700020C2B"
+    expected:
+      device_id: 2583
+      protocol_version: 2
+      battery_voltage: 3.115
+  - name: vendor_reference_2
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "020A17000380079786978180060C2B"
+    expected:
+      device_id: 2583
+      protocol_version: 2
+      pressure: 0.0008544921875
+      temperature_electronics: 23.5234375
+      temperature_pt1000: 23.50390625
+      electrical_conductivity: 0.005859375
+      battery_voltage: 3.115

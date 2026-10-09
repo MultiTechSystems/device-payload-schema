@@ -78,6 +78,7 @@ definitions:
       - name: rotary_position
         type: u16
         unit: "°"
+        senml: {unit: deg}
         valid_range: [0, 360]
         resolution: 1
         description: "Rotary encoder position"

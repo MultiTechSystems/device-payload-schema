@@ -43,6 +43,7 @@ fields:
                 a: $_ratio_scaled
                 b: $_one_minus_ratio
               unit: "Ω"
+              senml: {unit: Ohm}
             # temperature is a quadratic in that resistance, so `polynomial` states
             # it directly: 0.0000104876 R^2 + 0.23469 R - 245.18.
             - name: temperature
@@ -50,9 +51,29 @@ fields:
               ref: $thermistor_resistance
               polynomial: [0.0000104876, 0.23469, -245.18]
               unit: "°C"
+              senml: {unit: Cel}
         - bit: 1
           fields:
             - name: battery_voltage
               type: u16
               div: 1000
               unit: "V"
+test_vectors:
+  - name: vendor_reference_1
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "024C6200020AE1"
+    expected:
+      device_id: 19554
+      protocol_version: 2
+      battery_voltage: 2.785
+  - name: vendor_reference_2
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "024C620003573400AD0AE1"
+    expected:
+      device_id: 19554
+      protocol_version: 2
+      thermistor_resistance: 1097.0478279778865
+      temperature: 24.908127512458456
+      battery_voltage: 2.785

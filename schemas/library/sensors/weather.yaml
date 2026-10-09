@@ -33,6 +33,7 @@ definitions:
       - name: wind_direction
         type: u16
         unit: "°"
+        senml: {unit: deg}
         valid_range: [0, 360]
         resolution: 1
         description: "Wind direction (0=N, 90=E, 180=S, 270=W)"
@@ -91,6 +92,7 @@ definitions:
       - name: solar_radiation
         type: u16
         unit: "W/m²"
+        senml: {unit: W/m2}
         valid_range: [0, 1500]
         resolution: 1
         description: "Global solar radiation"
@@ -132,6 +134,7 @@ definitions:
         type: s16
         div: 10
         unit: "°C"
+        senml: {unit: Cel}
         valid_range: [-40, 60]
         resolution: 0.1
         unece: "CEL"
@@ -143,6 +146,7 @@ definitions:
         type: s16
         div: 10
         unit: "°C"
+        senml: {unit: Cel}
         valid_range: [-40, 60]
         resolution: 0.1
         unece: "CEL"

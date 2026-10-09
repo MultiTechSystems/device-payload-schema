@@ -46,6 +46,7 @@ definitions:
         type: s32
         div: 10
         unit: "VAR"
+        senml: {unit: var}
         valid_range: [-100000, 100000]
         resolution: 0.1
         description: "Reactive power"
@@ -98,6 +99,7 @@ definitions:
         type: u32
         div: 1000
         unit: "m³"
+        senml: {unit: m3}
         valid_range: [0, 4294967]
         resolution: 0.001
         unece: "MTQ"
@@ -121,6 +123,7 @@ definitions:
         type: u32
         div: 1000
         unit: "m³"
+        senml: {unit: m3}
         valid_range: [0, 4294967]
         resolution: 0.001
         unece: "MTQ"

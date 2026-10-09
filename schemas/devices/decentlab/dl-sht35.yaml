@@ -22,6 +22,7 @@ fields:
                 - mult: 0.002670328831921874
                 - add: -45
               unit: "°C"
+              senml: {unit: Cel}
             - name: air_humidity
               type: u16
               transform:
@@ -34,3 +35,22 @@ fields:
               type: u16
               div: 1000
               unit: "V"
+test_vectors:
+  - name: vendor_reference_1
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "02030E00020C60"
+    expected:
+      device_id: 782
+      protocol_version: 2
+      battery_voltage: 3.168
+  - name: vendor_reference_2
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "02030E000364A079B10C60"
+    expected:
+      device_id: 782
+      protocol_version: 2
+      air_temperature: 23.787670710307466
+      air_humidity: 47.536430914778364
+      battery_voltage: 3.168

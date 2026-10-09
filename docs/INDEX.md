@@ -123,7 +123,7 @@ Generated inventory of this repository: what lives where, what each document cov
 ## Device schemas
 
 276 schemas under `schemas/devices/`.
-Mean quality score 69.4% (PLATINUM 36, GOLD 40, SILVER 128, BRONZE 17, REJECTED 55). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+Mean quality score 73.6% (PLATINUM 37, GOLD 39, SILVER 145, BRONZE 20, REJECTED 35). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
@@ -131,15 +131,15 @@ Mean quality score 69.4% (PLATINUM 36, GOLD 40, SILVER 128, BRONZE 17, REJECTED 
 |---|---|---|---|
 | milesight | 84 | 1421 | PLATINUM 21, GOLD 33, SILVER 21, REJECTED 9 |
 | _language-conformance | 64 | 106 | SILVER 41, BRONZE 9, REJECTED 14 |
-| decentlab | 58 | 166 | PLATINUM 12, GOLD 7, SILVER 10, BRONZE 6, REJECTED 23 |
+| decentlab | 58 | 204 | PLATINUM 13, GOLD 6, SILVER 27, BRONZE 8, REJECTED 4 |
 | _library-composed | 49 | 57 | SILVER 48, BRONZE 1 |
 | makerfabs | 6 | 0 | REJECTED 6 |
-| mclimate | 3 | 13 | PLATINUM 1, REJECTED 2 |
+| mclimate | 3 | 14 | PLATINUM 1, BRONZE 1, REJECTED 1 |
 | dnt | 2 | 144 | SILVER 2 |
 | arwin | 1 | 22 | PLATINUM 1 |
 | digital-matter | 1 | 7 | SILVER 1 |
 | dragino | 1 | 6 | PLATINUM 1 |
-| elsys | 1 | 2 | SILVER 1 |
+| elsys | 1 | 3 | SILVER 1 |
 | hbi | 1 | 19 | SILVER 1 |
 | netvox | 1 | 34 | SILVER 1 |
 | radio-bridge | 1 | 71 | BRONZE 1 |
@@ -227,7 +227,7 @@ Mean quality score 69.4% (PLATINUM 36, GOLD 40, SILVER 128, BRONZE 17, REJECTED 
 | `_library-composed/device_management__reboot_immediate` | 3 | 2 | fields | 73% | SILVER |
 | `_library-composed/gps_tracker__clear_all_geofences` | 3 | 1 | fields | 73% | SILVER |
 | `_library-composed/gps_tracker__request_position` | 3 | 1 | fields | 71% | SILVER |
-| `_library-composed/gps_tracker__set_geofence` | 6 | 1 | fields | 75% | SILVER |
+| `_library-composed/gps_tracker__set_geofence` | 6 | 1 | fields | 82% | SILVER |
 | `_library-composed/lorawan_frames__fctrl_uplink_adr_ack` | 5 | 1 | fields | 73% | SILVER |
 | `_library-composed/lorawan_frames__join_request` | 3 | 1 | fields | 71% | SILVER |
 | `_library-composed/lorawan_frames__mhdr_confirmed_down` | 3 | 1 | fields | 73% | SILVER |
@@ -271,18 +271,18 @@ Mean quality score 69.4% (PLATINUM 36, GOLD 40, SILVER 128, BRONZE 17, REJECTED 
 | `decentlab/dl-alb` | 11 | 6 | fields | 100% | PLATINUM |
 | `decentlab/dl-atm22` | 15 | 6 | fields | 100% | PLATINUM |
 | `decentlab/dl-atm41` | 27 | 7 | fields | 92% | GOLD |
-| `decentlab/dl-atm41g2` | 20 | 3 | fields | 75% | SILVER |
-| `decentlab/dl-blg` | 9 | 3 | fields | 71% | SILVER |
+| `decentlab/dl-atm41g2` | 20 | 3 | fields | 77% | SILVER |
+| `decentlab/dl-blg` | 9 | 3 | fields | 73% | SILVER |
 | `decentlab/dl-ctd10` | 10 | 6 | fields | 89% | GOLD |
-| `decentlab/dl-cws` | 10 | 0 | fields | 14% | REJECTED |
-| `decentlab/dl-cws2` | 12 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-cws` | 10 | 2 | fields | 73% | SILVER |
+| `decentlab/dl-cws2` | 12 | 2 | fields | 73% | SILVER |
 | `decentlab/dl-dlr2-002` | 7 | 1 | fields | 65% | BRONZE |
 | `decentlab/dl-dlr2-003` | 6 | 5 | fields | 100% | PLATINUM |
 | `decentlab/dl-dlr2-004-10` | 5 | 0 | fields | 14% | REJECTED |
 | `decentlab/dl-dlr2-005` | 5 | 2 | fields | 71% | SILVER |
 | `decentlab/dl-dlr2-006` | 5 | 2 | fields | 71% | SILVER |
-| `decentlab/dl-dlr2-008-2000` | 12 | 0 | fields | 14% | REJECTED |
-| `decentlab/dl-dlr2-009-2000` | 9 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-dlr2-008-2000` | 12 | 2 | fields | 72% | SILVER |
+| `decentlab/dl-dlr2-009-2000` | 9 | 2 | fields | 72% | SILVER |
 | `decentlab/dl-dlr2-010` | 10 | 1 | fields | 63% | BRONZE |
 | `decentlab/dl-dlr2-011` | 7 | 7 | fields | 100% | PLATINUM |
 | `decentlab/dl-dlr2-012` | 5 | 1 | fields | 63% | BRONZE |
@@ -293,43 +293,43 @@ Mean quality score 69.4% (PLATINUM 36, GOLD 40, SILVER 128, BRONZE 17, REJECTED 
 | `decentlab/dl-ifd` | 6 | 6 | fields | 100% | PLATINUM |
 | `decentlab/dl-ilt` | 7 | 6 | fields | 100% | PLATINUM |
 | `decentlab/dl-isd` | 6 | 6 | fields | 100% | PLATINUM |
-| `decentlab/dl-isf` | 19 | 2 | fields | 73% | SILVER |
-| `decentlab/dl-itst` | 6 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-isf` | 19 | 2 | fields | 74% | SILVER |
+| `decentlab/dl-itst` | 6 | 2 | fields | 73% | SILVER |
 | `decentlab/dl-kl66-1538372-464859` | 13 | 0 | fields | 14% | REJECTED |
 | `decentlab/dl-lid` | 16 | 6 | fields | 80% | SILVER |
-| `decentlab/dl-lp8p` | 16 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-lp8p` | 16 | 2 | fields | 67% | BRONZE |
 | `decentlab/dl-lpw` | 5 | 2 | fields | 71% | SILVER |
 | `decentlab/dl-lws` | 5 | 2 | fields | 71% | SILVER |
 | `decentlab/dl-mbx` | 7 | 6 | fields | 89% | GOLD |
 | `decentlab/dl-mes5` | 11 | 6 | fields | 100% | PLATINUM |
 | `decentlab/dl-ntu` | 11 | 6 | fields | 100% | PLATINUM |
-| `decentlab/dl-optod` | 12 | 6 | fields | 94% | GOLD |
+| `decentlab/dl-optod` | 12 | 6 | fields | 96% | PLATINUM |
 | `decentlab/dl-par` | 5 | 0 | fields | 14% | REJECTED |
 | `decentlab/dl-pheht` | 11 | 6 | fields | 89% | GOLD |
-| `decentlab/dl-pm` | 17 | 0 | fields | 14% | REJECTED |
-| `decentlab/dl-pr21-1-10` | 6 | 0 | fields | 14% | REJECTED |
-| `decentlab/dl-pr26-0-1` | 6 | 0 | fields | 14% | REJECTED |
-| `decentlab/dl-pr36-8192` | 6 | 0 | fields | 14% | REJECTED |
-| `decentlab/dl-pr36ctd-8192-1024` | 8 | 0 | fields | 14% | REJECTED |
-| `decentlab/dl-pyr` | 5 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-pm` | 17 | 2 | fields | 68% | BRONZE |
+| `decentlab/dl-pr21-1-10` | 6 | 2 | fields | 71% | SILVER |
+| `decentlab/dl-pr26-0-1` | 6 | 2 | fields | 73% | SILVER |
+| `decentlab/dl-pr36-8192` | 6 | 2 | fields | 71% | SILVER |
+| `decentlab/dl-pr36ctd-8192-1024` | 8 | 2 | fields | 71% | SILVER |
+| `decentlab/dl-pyr` | 5 | 2 | fields | 69% | BRONZE |
 | `decentlab/dl-rad` | 10 | 6 | fields | 92% | GOLD |
-| `decentlab/dl-rhc` | 7 | 1 | fields | 65% | BRONZE |
-| `decentlab/dl-sdd` | 40 | 0 | fields | 14% | REJECTED |
-| `decentlab/dl-sht35` | 6 | 0 | fields | 14% | REJECTED |
-| `decentlab/dl-smtp` | 20 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-rhc` | 7 | 2 | fields | 73% | SILVER |
+| `decentlab/dl-sdd` | 40 | 2 | fields | 71% | SILVER |
+| `decentlab/dl-sht35` | 6 | 2 | fields | 71% | SILVER |
+| `decentlab/dl-smtp` | 20 | 2 | fields | 74% | SILVER |
 | `decentlab/dl-tbrg-01` | 7 | 1 | fields | 65% | BRONZE |
 | `decentlab/dl-tp` | 37 | 6 | fields | 100% | PLATINUM |
-| `decentlab/dl-trs11` | 10 | 0 | fields | 14% | REJECTED |
-| `decentlab/dl-trs12` | 11 | 0 | fields | 14% | REJECTED |
-| `decentlab/dl-trs21` | 6 | 0 | fields | 14% | REJECTED |
-| `decentlab/dl-wrm` | 8 | 0 | fields | 14% | REJECTED |
+| `decentlab/dl-trs11` | 10 | 1 | fields | 72% | SILVER |
+| `decentlab/dl-trs12` | 11 | 2 | fields | 73% | SILVER |
+| `decentlab/dl-trs21` | 6 | 2 | fields | 74% | SILVER |
+| `decentlab/dl-wrm` | 8 | 2 | fields | 73% | SILVER |
 | `decentlab/dl-zn1` | 5 | 1 | fields | 63% | BRONZE |
 | `decentlab/dl-zn2` | 8 | 7 | fields | 80% | SILVER |
 | `digital-matter/oyster` | 24 | 7 | ports | 100% | SILVER |
 | `dnt/dnt-lw-wsci-2-1-1` | 130 | 74 | fields | 81% | SILVER |
 | `dnt/dnt-lw-wsci` | 120 | 70 | fields | 81% | SILVER |
 | `dragino/laq4` | 14 | 6 | fields | 100% | PLATINUM |
-| `elsys/ers` | 32 | 2 | fields | 71% | SILVER |
+| `elsys/ers` | 32 | 3 | fields | 75% | SILVER |
 | `hbi/mla20` | 108 | 19 | fields | 80% | SILVER |
 | `makerfabs/4-channel-adc` | 8 | 0 | fields | 16% | REJECTED |
 | `makerfabs/ath20` | 4 | 0 | fields | 14% | REJECTED |
@@ -337,7 +337,7 @@ Mean quality score 69.4% (PLATINUM 36, GOLD 40, SILVER 128, BRONZE 17, REJECTED 
 | `makerfabs/leaf-moisture-sn-3001` | 6 | 0 | fields | 14% | REJECTED |
 | `makerfabs/pipe-pressure` | 3 | 0 | fields | 16% | REJECTED |
 | `makerfabs/soil-monitor` | 8 | 0 | fields | 14% | REJECTED |
-| `mclimate/flood-sensor` | 5 | 0 | fields | 16% | REJECTED |
+| `mclimate/flood-sensor` | 5 | 1 | fields | 61% | BRONZE |
 | `mclimate/t-valve` | 11 | 0 | fields | 16% | REJECTED |
 | `mclimate/vicki` | 31 | 13 | fields | 100% | PLATINUM |
 | `milesight/am102` | 22 | 21 | fields | 100% | PLATINUM |
@@ -421,9 +421,9 @@ Mean quality score 69.4% (PLATINUM 36, GOLD 40, SILVER 128, BRONZE 17, REJECTED 
 | `milesight/wt101` | 30 | 24 | fields | 89% | GOLD |
 | `milesight/wt201v1` | 47 | 47 | fields | 94% | GOLD |
 | `milesight/wt201v2` | 48 | 49 | fields | 91% | GOLD |
-| `milesight/wts305` | 13 | 16 | fields | 91% | GOLD |
-| `milesight/wts505` | 13 | 16 | fields | 91% | GOLD |
-| `milesight/wts506` | 13 | 15 | fields | 91% | GOLD |
+| `milesight/wts305` | 13 | 16 | fields | 92% | GOLD |
+| `milesight/wts505` | 13 | 16 | fields | 92% | GOLD |
+| `milesight/wts506` | 13 | 15 | fields | 92% | GOLD |
 | `netvox/r718x` | 33 | 34 | ports | 70% | SILVER |
 | `radio-bridge/rbs30x` | 52 | 71 | fields | 68% | BRONZE |
 | `radionode/rn320bth` | 13 | 0 | fields | 14% | REJECTED |

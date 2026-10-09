@@ -133,6 +133,7 @@ fields:
           - name: temperature
             type: s8
             unit: "°C"
+            senml: {unit: Cel}
           - name: raw_measurement
             type: s8
 
@@ -148,6 +149,7 @@ fields:
           - name: tilt_angle
             type: u8
             unit: "°"
+            senml: {unit: deg}
 
         # AIR TEMPERATURE & HUMIDITY (0x0D)
         # Temperature: whole in byte[0], tenths in upper nibble of byte[1]
@@ -201,6 +203,7 @@ fields:
           - name: temperature
             type: s8
             unit: "°C"
+            senml: {unit: Cel}
 
         # ULTRASONIC LEVEL (0x10)
         0x10:
@@ -245,6 +248,7 @@ fields:
             type: s16
             div: 16
             unit: "°C"
+            senml: {unit: Cel}
           # faults bits: [7]=cold_outside_range [6]=hot_outside_range
           #   [5]=cold_above_thresh [4]=cold_below_thresh [3]=tc_too_high
           #   [2]=tc_too_low [1]=voltage_outside_range [0]=open_circuit

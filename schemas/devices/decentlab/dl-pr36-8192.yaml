@@ -28,9 +28,29 @@ fields:
                 - div: 256
                 - add: -128
               unit: "°C"
+              senml: {unit: Cel}
         - bit: 1
           fields:
             - name: battery_voltage
               type: u16
               div: 1000
               unit: "V"
+test_vectors:
+  - name: vendor_reference_1
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "02032B00020C2B"
+    expected:
+      device_id: 811
+      protocol_version: 2
+      battery_voltage: 3.115
+  - name: vendor_reference_2
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "02032B0003806797810C2B"
+    expected:
+      device_id: 811
+      protocol_version: 2
+      pressure: 0.0125732421875
+      temperature: 23.50390625
+      battery_voltage: 3.115

@@ -30,6 +30,7 @@ fields:
                 - div: 65535
                 - add: -45
               unit: "°C"
+              senml: {unit: Cel}
             - name: air_humidity
               type: u16
               transform:

@@ -52,7 +52,7 @@ public class CorpusEncodeRoundTripTests
     // which the raw-YAML classifier had filed under that shape. Its out_of_range vector
     // omits a field and cannot (bytes differ), and leftover-bytes' second vector
     // re-encodes to its first byte only (PS-474): both by design.
-    const int EncodeFloorTotal = 1700;   // +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
+    const int EncodeFloorTotal = 1736;   // +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
 
     /// <summary>
     /// Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -61,11 +61,11 @@ public class CorpusEncodeRoundTripTests
     static readonly Dictionary<string, int> EncodeFloorByShape = new()
     {
         // 1283 -> 1281 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped only because their internal byte halves were all zero, which the encoder wrote for an internal field with no value. It now reports such a field instead.
-        ["tlv"] = 1287,   // +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
-        ["flagged"] = 159,
+        ["tlv"] = 1288,   // +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
+        ["flagged"] = 193,
         ["plain fixed"] = 100,
         ["match"] = 123,
-        ["byte_group"] = 19,
+        ["byte_group"] = 20,
         // 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now
         // carry only the definitions they reach, so one no longer contains an
         // unreferenced definition's `repeat` text for the classifier to find.

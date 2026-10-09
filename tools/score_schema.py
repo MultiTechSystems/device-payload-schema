@@ -679,7 +679,7 @@ SENML_UNIT_EQUIVALENTS = {
     'V': {'V', 'volt'},
     '%RH': {'%', '%RH', 'RH'},
     'ppm': {'ppm'},
-    'm': {'m', 'meter'},
+    'm': {'m', 'meter', 'meters'},
     'deg': {'°', 'deg', 'degree'},
     'lx': {'lx', 'lux'},
     'Pa': {'Pa', 'pascal'},
@@ -690,8 +690,27 @@ SENML_UNIT_EQUIVALENTS = {
     'kg': {'kg'},
     '%': {'%'},
     'dB': {'dB'},
-    'lat': {'lat', '°'},
-    'lon': {'lon', '°'},
+    'lat': {'lat', '°', 'degrees'},
+    'lon': {'lon', '°', 'degrees'},
+    # Registered SenML names (IANA SenML Units and Secondary Units) for the typographic
+    # spellings device schemas carry as their display `unit` (CR-2026-089).
+    'm/s': {'m/s', 'm⋅s⁻¹'},
+    'W/m2': {'W/m2', 'W/m²', 'W⋅m⁻²'},
+    'Ohm': {'Ohm', 'Ω'},
+    'm3': {'m3', 'm³'},
+    'var': {'var', 'VAR'},
+    'ug/m3': {'ug/m3', 'µg/m³', 'µg⋅m⁻³'},
+    'mg/l': {'mg/l', 'mg/L', 'mg⋅L⁻¹'},
+    'g/l': {'g/l', 'g/L', 'g⋅L⁻¹'},
+}
+
+#: Registered SenML units that measure the same quantity as a sensor type's usual unit
+#: in another, equally valid form. A concentration is a volume ratio (ppm) for a gas but
+#: a mass per volume for particulates (ug/m3) or a dissolved substance (mg/l); none of
+#: them is a scaled version of another, so a schema that names the one its device
+#: reports is correctly annotated.
+SENML_UNIT_ALTERNATIVES = {
+    'ppm': {'ppb', 'ppt', 'ug/m3', 'mg/l', 'ug/l', 'g/l'},
 }
 
 #: Units that measure the right quantity in the wrong scale. These are reported
@@ -821,7 +840,7 @@ def check_annotation_correctness(
             problems.append("%s: senml annotation has no unit" % name)
         elif expected_unit and unit not in SENML_UNIT_EQUIVALENTS.get(
             expected_unit, {expected_unit}
-        ):
+        ) and unit not in SENML_UNIT_ALTERNATIVES.get(expected_unit, set()):
             problems.append(
                 "%s: senml unit %r is not the SenML unit for %s (expected %r)"
                 % (name, unit, keyword, expected_unit)

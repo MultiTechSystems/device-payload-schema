@@ -39,6 +39,7 @@ fields:
                 - add: -32768
                 - div: 100
               unit: "mg⋅L⁻¹"
+              senml: {unit: mg/l}
             - name: oxygen_concentration_alt
               type: u16
               transform:

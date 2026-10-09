@@ -16,15 +16,21 @@
   'type': 's32'
   'div': 10000000
   'unit': 'degrees'
+  'senml':
+    'unit': 'lat'
   'description': 'Latitude in degrees (7 decimal places)'
 - 'name': 'longitude'
   'type': 's32'
   'div': 10000000
   'unit': 'degrees'
+  'senml':
+    'unit': 'lon'
   'description': 'Longitude in degrees (7 decimal places)'
 - 'name': 'radius'
   'type': 'u16'
   'unit': 'meters'
+  'senml':
+    'unit': 'm'
   'description': 'Geofence radius in meters'
 'test_vectors':
 - 'name': 'set_geofence'

@@ -45,6 +45,7 @@ fields:
         "[5, 132]":
           - name: wind_direction
             unit: "°"
+            senml: {unit: deg}
             type: s16
             div: 10
         # Barometric Pressure, unit hPa

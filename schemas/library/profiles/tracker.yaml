@@ -14,11 +14,13 @@ definitions:
         type: s32
         div: 10000000
         unit: "°"
+        senml: {unit: lat}
         ipso: {object: 3336, resource: 5514}
       - name: longitude
         type: s32
         div: 10000000
         unit: "°"
+        senml: {unit: lon}
         ipso: {object: 3336, resource: 5515}
       - name: altitude
         type: s16
@@ -32,11 +34,13 @@ definitions:
         type: s32
         div: 10000000
         unit: "°"
+        senml: {unit: lat}
         ipso: {object: 3336, resource: 5514}
       - name: longitude
         type: s32
         div: 10000000
         unit: "°"
+        senml: {unit: lon}
         ipso: {object: 3336, resource: 5515}
       - name: altitude
         type: s16
@@ -53,11 +57,13 @@ definitions:
         type: s32
         div: 10000000
         unit: "°"
+        senml: {unit: lat}
         ipso: {object: 3336, resource: 5514}
       - name: longitude
         type: s32
         div: 10000000
         unit: "°"
+        senml: {unit: lon}
         ipso: {object: 3336, resource: 5515}
       - name: altitude
         type: s16
@@ -71,6 +77,7 @@ definitions:
         type: u16
         div: 10
         unit: "°"
+        senml: {unit: deg}
       - name: battery_percent
         type: u8
         unit: "%"
@@ -82,11 +89,13 @@ definitions:
         type: s24
         div: 10000
         unit: "°"
+        senml: {unit: lat}
         ipso: {object: 3336, resource: 5514}
       - name: longitude
         type: s24
         div: 10000
         unit: "°"
+        senml: {unit: lon}
         ipso: {object: 3336, resource: 5515}
 
   # Asset tracker (GPS + motion + geofence)
@@ -96,11 +105,13 @@ definitions:
         type: s32
         div: 10000000
         unit: "°"
+        senml: {unit: lat}
         ipso: {object: 3336, resource: 5514}
       - name: longitude
         type: s32
         div: 10000000
         unit: "°"
+        senml: {unit: lon}
         ipso: {object: 3336, resource: 5515}
       - name: in_motion
         type: bool

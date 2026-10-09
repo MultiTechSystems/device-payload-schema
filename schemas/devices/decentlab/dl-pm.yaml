@@ -26,18 +26,22 @@ fields:
               type: u16
               div: 10
               unit: "µg⋅m⁻³"
+              senml: {unit: ug/m3}
             - name: pm2_5_mass_concentration
               type: u16
               div: 10
               unit: "µg⋅m⁻³"
+              senml: {unit: ug/m3}
             - name: pm4_mass_concentration
               type: u16
               div: 10
               unit: "µg⋅m⁻³"
+              senml: {unit: ug/m3}
             - name: pm10_mass_concentration
               type: u16
               div: 10
               unit: "µg⋅m⁻³"
+              senml: {unit: ug/m3}
             - name: typical_particle_size
               type: u16
               unit: "nm"
@@ -69,6 +73,7 @@ fields:
                 - mult: 0.0026812744140625
                 - add: -46.85
               unit: "°C"
+              senml: {unit: Cel}
             - name: air_humidity
               type: u16
               transform:
@@ -81,3 +86,23 @@ fields:
               type: u16
               mult: 2
               unit: "Pa"
+test_vectors:
+  - name: vendor_reference_1
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "021B5000010C25"
+    expected:
+      device_id: 6992
+      protocol_version: 2
+      battery_voltage: 3.109
+  - name: vendor_reference_2
+    description: "Vendor-published test payload, decoded by the vendor's own decoder"
+    source: vendor-codec
+    payload: "021B50000D0C2567BD618DBD10"
+    expected:
+      device_id: 6992
+      protocol_version: 2
+      battery_voltage: 3.109
+      air_temperature: 24.35660461425781
+      air_humidity: 41.63221740722656
+      barometric_pressure: 96800

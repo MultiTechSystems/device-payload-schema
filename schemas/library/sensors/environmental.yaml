@@ -12,6 +12,7 @@ definitions:
         type: s16
         div: 10
         unit: "°C"
+        senml: {unit: Cel}
         valid_range: [-40, 125]
         resolution: 0.1
         unece: "CEL"
@@ -25,6 +26,7 @@ definitions:
         type: s16
         div: 100
         unit: "°C"
+        senml: {unit: Cel}
         valid_range: [-40, 85]
         resolution: 0.01
         unece: "CEL"
@@ -149,6 +151,7 @@ definitions:
       - name: pm1_0
         type: u16
         unit: "µg/m³"
+        senml: {unit: ug/m3}
         valid_range: [0, 1000]
         resolution: 1
         description: "PM1.0 particulate matter"
@@ -158,6 +161,7 @@ definitions:
       - name: pm2_5
         type: u16
         unit: "µg/m³"
+        senml: {unit: ug/m3}
         valid_range: [0, 1000]
         resolution: 1
         description: "PM2.5 particulate matter"
@@ -169,6 +173,7 @@ definitions:
       - name: pm10
         type: u16
         unit: "µg/m³"
+        senml: {unit: ug/m3}
         valid_range: [0, 1000]
         resolution: 1
         description: "PM10 particulate matter"
@@ -180,6 +185,7 @@ definitions:
       - name: illuminance
         type: u16
         unit: "lux"
+        senml: {unit: lx}
         valid_range: [0, 65535]
         resolution: 1
         unece: "LUX"
@@ -192,6 +198,7 @@ definitions:
       - name: illuminance
         type: u32
         unit: "lux"
+        senml: {unit: lx}
         valid_range: [0, 200000]
         resolution: 1
         unece: "LUX"

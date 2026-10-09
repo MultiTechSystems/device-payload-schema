@@ -67,10 +67,12 @@ fields:
           - name: temp_min
             type: s8
             unit: "°C"
+            senml: {unit: Cel}
             description: "Temperature alarm minimum threshold"
           - name: temp_max
             type: s8
             unit: "°C"
+            senml: {unit: Cel}
             description: "Temperature alarm maximum threshold"
           - name: humidity_min
             type: u8
