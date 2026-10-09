@@ -50,8 +50,8 @@ final class Meta {
 
     /**
      * A {@code _meta} entry's {@code type} (PS-493): the declared type, an alias by its
-     * canonical name, a bit range as written. A named {@code tlv} with {@code merge: false}
-     * is {@code tlv}. A field with no type is a schema error (PS-011, PS-441), so none is
+     * canonical name, a bit range as written. A {@code tlv} with {@code merge: false},
+     * reported under {@code channels}, is {@code tlv} (CR-2026-097). A field with no type is a schema error (PS-011, PS-441), so none is
      * invented: null leaves {@code type} out.
      */
     static String metaType(Map<?, ?> fieldDef) {
@@ -112,7 +112,14 @@ final class Meta {
                     if (body instanceof List) visitDeclarations(body, found);
                 }
             }
-            if (f.get("tlv") instanceof Map<?, ?> tlv && !Boolean.FALSE.equals(mergeOf(tlv))) {
+            if (f.get("tlv") instanceof Map<?, ?> tlv) {
+                if (Boolean.FALSE.equals(mergeOf(tlv))) {
+                    // Its entries are reported as a list under the fixed key `channels`
+                    // (Clause 4), whose entry is `tlv` (PS-493). A tlv has no name of its
+                    // own (PS-448). CR-2026-097.
+                    found.putIfAbsent("channels", f);
+                    continue;
+                }
                 if (tlv.get("cases") instanceof Map<?, ?> cases) {
                     for (Object body : cases.values()) {
                         if (body instanceof List) visitDeclarations(body, found);
