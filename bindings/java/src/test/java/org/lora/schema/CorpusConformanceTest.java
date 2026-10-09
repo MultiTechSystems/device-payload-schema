@@ -43,7 +43,11 @@ class CorpusConformanceTest {
     // modifiers and the lookup applied to computed fields and a failed guard's `else`
     // reported as declared, all decode, and with laq4's vendor vector the full count of
     // payload vectors is 2363.
-    private static final int CORPUS_FLOOR = 2365;   // + guard-else-as-declared's two label vectors
+    // CR-2026-085/086 added six: leftover-bytes.yaml's two and range-before-lookup.yaml's
+    // four, and match-default-skip.yaml's skipped body now expects the PS-472 warning.
+    // With the leftover reported and valid_range compared before the lookup, all decode;
+    // the full count of payload vectors is 2371.
+    private static final int CORPUS_FLOOR = 2371;
 
     @Test
     void corpusVectorsDecodeAsExpected() throws IOException {
