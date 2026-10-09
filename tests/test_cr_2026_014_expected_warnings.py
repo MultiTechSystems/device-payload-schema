@@ -157,12 +157,17 @@ class TestTheCorpusUsesIt:
                     found.append((path, vector))
         return found
 
-    def test_the_seven_vendor_vectors_carry_it(self):
+    def test_a_decode_that_stops_short_carries_it(self):
+        # There were seven, all vendor vectors: am307, am307l, am308 and am308l, whose
+        # TTN example ends in an AM10x channel, and ws50x and em310-tilt vectors padded
+        # past their channel. CR-2026-085's count found that those bytes were never the
+        # device's, and the vectors were trimmed to what the device sends. The key is
+        # still how the corpus states a decode that stops short; the fixtures carry it.
         stopping_short = [
             (path, vector) for path, vector in self.vectors_with_the_key()
             if any("byte(s)" in str(entry) for entry in vector["expected_warnings"])
         ]
-        assert len(stopping_short) >= 7
+        assert len(stopping_short) >= 1
 
     def test_every_declared_expectation_names_a_tag(self):
         # A fragment weak enough to match any warning would assert nothing. Every entry
