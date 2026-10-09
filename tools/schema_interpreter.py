@@ -1558,13 +1558,14 @@ _RECV_TIME = re.compile(
 def meta_type(field_def):
     """A `_meta` entry's `type` (PS-493): the declared type, an alias by its canonical
     name, a bit range as written. A named `tlv` with `merge: false` reports its channels
-    and is `tlv`; a field declaring no type is read as `u8`."""
+    and is `tlv`. A field with no type is never reported - PS-011 and PS-441 make it a
+    schema error - so no type is invented for one; None here leaves `type` out."""
     declared = field_def.get('type')
     if isinstance(declared, str):
         return _META_TYPE_ALIASES.get(declared, declared)
     if isinstance(field_def.get('tlv'), dict):
         return 'tlv'
-    return 'u8'
+    return None
 
 
 def meta_declarations(fields):
@@ -1659,7 +1660,10 @@ def field_meta(field_def, repeat=None):
     """One `_meta.fields` entry, derived from one declaration (PS-178, PS-493, PS-480,
     PS-371, PS-481). `repeat` is the repeat whose elements the field belongs to, for the
     per-element references of PS-373 and PS-375."""
-    entry = {'type': meta_type(field_def)}
+    entry = {}
+    declared_type = meta_type(field_def)
+    if declared_type is not None:
+        entry['type'] = declared_type
     senml = field_def.get('senml') if isinstance(field_def.get('senml'), dict) else {}
     unit = senml.get('unit') or field_def.get('unit')          # PS-178, no conversion
     if unit is not None:
@@ -1673,13 +1677,13 @@ def field_meta(field_def, repeat=None):
         entry['senml'] = {'name': senml['name']}               # PS-480; a template, PS-373
     if field_def.get('description'):
         entry['description'] = field_def['description']
-    if entry['type'] == 'repeat':
+    if declared_type == 'repeat':
         entry['elements'] = {name: field_meta(member, field_def)            # PS-371
                              for name, member in meta_declarations(
                                  field_def.get('fields')).items()}
         if 'identity' in field_def:
             entry['identity'] = meta_reference(field_def['identity'], field_def, bare=True)
-    elif entry['type'] == 'object':
+    elif declared_type == 'object':
         entry['fields'] = {name: field_meta(member)                          # PS-481
                            for name, member in meta_declarations(
                                field_def.get('fields')).items()}
