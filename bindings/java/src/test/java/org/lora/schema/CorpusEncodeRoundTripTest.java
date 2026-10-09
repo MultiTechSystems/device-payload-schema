@@ -53,7 +53,11 @@ class CorpusEncodeRoundTripTest {
     // round-trips: `plain fixed` rises from 58 to 59 and the total to 1161.
     // CR-2026-031's name_from var-mismatch fixture round-trips here too, so
     // `plain fixed` rises from 59 to 61 and the total to 1163.
-    private static final int ENCODE_FLOOR_TOTAL = 1679;
+    // CR-2026-071/073's three fixtures round-trip, all six vectors under `plain fixed`
+    // (88 -> 94), and laq4's vendor vector under `match` (122 -> 123): the total rises
+    // from 1679 to 1686. Measured equal before and after the CR's decode changes - a
+    // computed field reads no bytes, so its value never reached the encoder's output.
+    private static final int ENCODE_FLOOR_TOTAL = 1686;
 
     /**
      * Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -63,8 +67,8 @@ class CorpusEncodeRoundTripTest {
             // 1283 -> 1281 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped only because their internal byte halves were all zero, which the encoder wrote for an internal field with no value. It now reports such a field instead.
             "tlv", 1281,
             "flagged", 157,
-            "plain fixed", 88,
-            "match", 122,
+            "plain fixed", 94,
+            "match", 123,
             "byte_group", 19,
             // 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas
             // now carry only the definitions they reach, so one no longer contains an
