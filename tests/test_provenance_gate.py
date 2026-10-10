@@ -226,3 +226,53 @@ def test_all_mode_runs_on_this_repository(capsys):
     assert gate.main(["--all"]) == 0
     out = capsys.readouterr().out
     assert "device schemas (fixtures excluded)" in out
+
+
+# --- an annotation-only edit to a schema with no independent vector -----------------
+
+ANNOTATED = textwrap.dedent("""\
+    name: x
+    fields:
+      - name: t
+        type: s16
+        div: 10
+        unit: "°C"
+        ipso: 3303
+        lookup: {0: off, 1: on, default: other}
+    test_vectors:
+      - name: a
+        source: generated
+        payload: "00E7"
+        expected: {t: 23.1}
+    """)
+
+
+def test_an_annotation_only_edit_is_admitted():
+    # oyster had `ipso: N` and no vendor vector, so the gate refused even rewriting it as
+    # {object: N}. Annotations are read by no decode, so the edit cannot have been made
+    # wrong by our decoder; the missing vector is a condition the schema already had.
+    new = ANNOTATED.replace("ipso: 3303", "ipso: {object: 3303}").replace(
+        'unit: "°C"', 'unit: "°C"\n    senml: {unit: Cel}\n    description: d'
+    )
+    report = gate.check_schema("schemas/devices/v/x.yaml", new, ANNOTATED)
+    assert report.status != "FAIL", report.failures
+    assert any("only annotations" in w for w in report.warnings)
+
+
+def test_an_edit_that_changes_decoding_still_fails():
+    report = gate.check_schema(
+        "schemas/devices/v/x.yaml", ANNOTATED.replace("div: 10", "div: 100"), ANNOTATED
+    )
+    assert report.status == "FAIL"
+
+
+def test_a_changed_expected_value_is_not_an_annotation():
+    # Vectors are compared as they are: an expected key may itself be named `unit`.
+    new = ANNOTATED.replace("expected: {t: 23.1}", "expected: {t: 23.1, unit: x}")
+    report = gate.check_schema("schemas/devices/v/x.yaml", new, ANNOTATED)
+    assert report.status == "FAIL"
+
+
+def test_a_new_schema_is_never_annotation_only():
+    report = gate.check_schema("schemas/devices/v/x.yaml", ANNOTATED, None)
+    assert report.status == "FAIL"

@@ -120,8 +120,16 @@ for (const req of REQUESTS) {
 }
 console.log(JSON.stringify(out));
 """
+    code = js_path.read_text(encoding="utf-8", errors="replace")
+    if "\n" not in code and code.count("\\n") > 3:
+        # Some TTN files hold the whole decoder on one line with literal `\n` escapes
+        # (dragino's -LB codecs), which no engine loads as written. The intent is plain, so
+        # the escapes are undone, as the registry's oracle does; otherwise the vendor
+        # decoder silently never ran for these units.
+        code = (code.replace("\\r\\n", "\n").replace("\\n", "\n")
+                .replace("\\t", "\t").replace('\\"', '"'))
     script = "%s\nconst REQUESTS = %s;\n%s" % (
-        js_path.read_text(encoding="utf-8", errors="replace"),
+        code,
         json.dumps(requests),
         driver,
     )
