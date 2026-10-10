@@ -770,6 +770,46 @@ def arithmetic_schema_errors(node, _top=True):
     return errors
 
 
+def annotation_errors(field_def):
+    """PS-510 (CR-2026-102): a field's `ipso` is a mapping carrying `object`, and its
+    `senml` a mapping. `ipso: 3303` loaded and every implementation dropped it, so the
+    author believed the field annotated and no consumer saw an annotation. The wording
+    is the spec prototype's, and Go, Java and C# give it identically."""
+    if not isinstance(field_def, dict):
+        return []
+    name = field_def.get('name', '?')
+    errors = []
+    if 'ipso' in field_def and not (isinstance(field_def['ipso'], dict)
+                                    and 'object' in field_def['ipso']):
+        errors.append(f"The ipso of '{name}' is a mapping that carries `object`, such as "
+                      f"{{object: 3303}}; a bare object number is not a shorthand (PS-510)")
+    if 'senml' in field_def and not isinstance(field_def['senml'], dict):
+        errors.append(f"The senml of '{name}' is a mapping, such as {{unit: Cel}} (PS-510)")
+    return errors
+
+
+def annotation_schema_errors(node, _top=True):
+    """annotation_errors() for every field mapping, wherever it sits: a port list, a case
+    body, an object's or repeat's members, a byte_group or flagged group. Walked like
+    arithmetic_schema_errors(), over the schema after its `$ref`s are spliced, and over
+    `definitions` too, referenced or not, as Go and C# parse them. The legacy
+    `semantic: {ipso: N}` is a different key, outside PS-510, and is not descended into."""
+    errors = []
+    if isinstance(node, dict):
+        if not _top:
+            errors.extend(annotation_errors(node))
+        for key, value in node.items():
+            if _top and key == 'test_vectors':
+                continue
+            if key in ('ipso', 'senml', 'semantic'):
+                continue        # their own contents are not fields
+            errors.extend(annotation_schema_errors(value, False))
+    elif isinstance(node, list):
+        for item in node:
+            errors.extend(annotation_schema_errors(item, False))
+    return errors
+
+
 #: The literal types (PS-357). `boolean` is a literal type only (PS-519): it is not
 #: an alias of `bool`, which reads a bit (PS-065).
 LITERAL_TYPES = ('string', 'number', 'boolean')
@@ -1923,6 +1963,7 @@ class SchemaInterpreter:
             self._load_errors.extend(encoding_errors(field_def))
             self._load_errors.extend(lookup_template_errors(field_def))
         self._load_errors.extend(arithmetic_schema_errors(schema))    # PS-445, PS-452
+        self._load_errors.extend(annotation_schema_errors(schema))    # PS-510
         self._load_errors.extend(meta_declaration_errors(schema))      # PS-491
         self._load_errors.extend(timestamp_errors(schema.get('metadata')))
         self._load_errors.extend(schema_iterator_errors(schema))

@@ -1471,6 +1471,9 @@ class TS013Generator:
         # PS-445, PS-452: a guard only on a computed field, one operation per stage.
         from schema_interpreter import arithmetic_schema_errors, meta_declaration_errors
         iterator_problems += arithmetic_schema_errors(schema)
+        # PS-510: ipso and senml are mappings, and ipso carries `object`.
+        from schema_interpreter import annotation_schema_errors
+        iterator_problems += annotation_schema_errors(schema)
         iterator_problems += meta_declaration_errors(schema)    # PS-491
         # PS-358, PS-519, PS-520: a malformed literal, as the interpreter refuses it.
         from schema_interpreter import literal_errors, typed_field_dicts
