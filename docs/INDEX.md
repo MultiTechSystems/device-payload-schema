@@ -122,15 +122,15 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Device schemas
 
-282 schemas under `schemas/devices/`.
-Mean quality score 76.0% (PLATINUM 37, GOLD 39, SILVER 161, BRONZE 25, REJECTED 20). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+283 schemas under `schemas/devices/`.
+Mean quality score 75.9% (PLATINUM 37, GOLD 39, SILVER 162, BRONZE 25, REJECTED 20). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
 | milesight | 84 | 1427 | PLATINUM 21, GOLD 33, SILVER 27, REJECTED 3 |
-| _language-conformance | 70 | 121 | SILVER 51, BRONZE 14, REJECTED 5 |
+| _language-conformance | 71 | 124 | SILVER 52, BRONZE 14, REJECTED 5 |
 | decentlab | 58 | 204 | PLATINUM 13, GOLD 6, SILVER 27, BRONZE 8, REJECTED 4 |
 | _library-composed | 49 | 57 | SILVER 48, BRONZE 1 |
 | makerfabs | 6 | 0 | REJECTED 6 |
@@ -158,6 +158,7 @@ Mean quality score 76.0% (PLATINUM 37, GOLD 39, SILVER 161, BRONZE 25, REJECTED 
 | `_language-conformance/bit-range-order` | 6 | 1 | fields | 71% | SILVER |
 | `_language-conformance/bitfield-string-hex-case` | 2 | 1 | fields | 71% | SILVER |
 | `_language-conformance/bitfield-string` | 1 | 1 | fields | 71% | SILVER |
+| `_language-conformance/byte-group-bool` | 4 | 3 | fields | 75% | SILVER |
 | `_language-conformance/bytes-format` | 4 | 1 | fields | 71% | SILVER |
 | `_language-conformance/bytes-length-field` | 5 | 2 | fields | 73% | SILVER |
 | `_language-conformance/compute-negative-idiv-mod` | 5 | 8 | fields | 76% | SILVER |
