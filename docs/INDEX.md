@@ -123,7 +123,7 @@ Generated inventory of this repository: what lives where, what each document cov
 ## Device schemas
 
 282 schemas under `schemas/devices/`.
-Mean quality score 76.0% (PLATINUM 37, GOLD 39, SILVER 161, BRONZE 25, REJECTED 20). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+Mean quality score 75.9% (PLATINUM 37, GOLD 39, SILVER 161, BRONZE 25, REJECTED 20). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
