@@ -59,7 +59,8 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # ascii-nul-padding, digit-leading-name, wide-bit-range, wide-group,
 # object-unnamed-skip, repeat-count-zero-width (tlv-tag-bit-range does not round-trip).
 # +3: byte-group-bool.
-FLOOR_TOTAL = 1770
+# +3: tlv-case-field-list.
+FLOOR_TOTAL = 1773
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -67,7 +68,7 @@ FLOOR_BY_SHAPE = {
     # 1283 -> 1281 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped
     # only because their internal byte halves were all zero, which the encoder wrote
     # for an internal field with no value. It now reports such a field instead.
-    "tlv": 1296,
+    "tlv": 1299,
     "flagged": 193,
     "plain fixed": 119,
     "match": 123,

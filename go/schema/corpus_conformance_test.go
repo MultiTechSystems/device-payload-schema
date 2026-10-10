@@ -45,7 +45,7 @@ import (
 // CR-2026-085/086's fixtures decode now that bytes after the last field are reported
 // (leftover-bytes, match-default-skip's skipped body) and valid_range is compared before
 // the lookup (range-before-lookup's four vectors), so the full count is 2371.
-const corpusFloor = 2580 // +8: CR-2026-104 lookup-boolean-labels and lookup-number-labels; +3: byte-group-bool; +14: the nine TS013-defect fixtures (bitfield-string-wide, wide-bit-range, ...); +5: tlv-case-key-patterns; +1: meta-tlv-channels (CR-2026-097); +9: the CR-2026-096 _meta fixtures (meta-device-context, meta-port-default, meta-producer, meta-nested); dl-atm41g2's two vendor vectors (+2); +40: vendor vectors for the schemas the unit cleanup touches; +121: vendor-codec vectors that kill vobo's mutation survivors; +6: Milesight battery-channel vendor vectors (percent units)
+const corpusFloor = 2591 // +14: the nine TS013-defect fixtures (bitfield-string-wide, wide-bit-range, ...); +8: CR-2026-104 lookup-boolean-labels and lookup-number-labels; +3: byte-group-bool; +11: tlv-case-field-list, object-member-field-list, tlv-tag-var-name-from; +5: tlv-case-key-patterns; +1: meta-tlv-channels (CR-2026-097); +9: the CR-2026-096 _meta fixtures (meta-device-context, meta-port-default, meta-producer, meta-nested); dl-atm41g2's two vendor vectors (+2); +40: vendor vectors for the schemas the unit cleanup touches; +121: vendor-codec vectors that kill vobo's mutation survivors; +6: Milesight battery-channel vendor vectors (percent units)
 
 type corpusVector struct {
 	Name    string `yaml:"name"`
@@ -306,7 +306,43 @@ func TestCorpusConformance(t *testing.T) {
 // corpusValuesMatch is the comparison the conformance tolerance defines: numeric
 // within tolerance, hex literals read as numbers, booleans as 0 and 1. Without this
 // the runner reported its own formatting differences as decode failures.
+//
+// A mapping or list is compared member by member (PS-044, PS-045), as the Python, Java and
+// C# runners do: a nested null asserts absence (PS-043) and unlisted keys are not checked.
+// Nested values used to be compared by their printed form, so a nested null expectation
+// could not pass and a nested float had no tolerance.
 func corpusValuesMatch(want, got any) bool {
+	if wantMap, ok := want.(map[string]any); ok {
+		gotMap, ok := got.(map[string]any)
+		if !ok {
+			return fmt.Sprintf("%v", want) == fmt.Sprintf("%v", got)
+		}
+		for key, member := range wantMap {
+			value, present := gotMap[key]
+			if member == nil {
+				if present {
+					return false
+				}
+				continue
+			}
+			if !present || !corpusValuesMatch(member, value) {
+				return false
+			}
+		}
+		return true
+	}
+	if wantList, ok := want.([]any); ok {
+		gotList, ok := got.([]any)
+		if !ok || len(gotList) != len(wantList) {
+			return fmt.Sprintf("%v", want) == fmt.Sprintf("%v", got)
+		}
+		for i := range wantList {
+			if !corpusValuesMatch(wantList[i], gotList[i]) {
+				return false
+			}
+		}
+		return true
+	}
 	wantNum, wantOK := corpusAsNumber(want)
 	gotNum, gotOK := corpusAsNumber(got)
 	if wantOK && gotOK {

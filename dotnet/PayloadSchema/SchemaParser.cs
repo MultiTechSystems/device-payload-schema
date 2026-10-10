@@ -417,6 +417,28 @@ public static partial class SchemaParser
     /// <summary>The keys that make a field a construct, declaring no type of its own.</summary>
     static readonly string[] ConstructKeys = { "$ref", "flagged", "tlv", "byte_group", "match" };
 
+    /// <summary>
+    /// PS-347, PS-441: a <c>match</c> or <c>tlv</c> case body is a field list, <c>[]</c> for a
+    /// case that reads nothing. A bare string such as <c>5: skip</c> parsed as an empty case,
+    /// so a match decoded nothing for that value and reported success.
+    /// </summary>
+    static void CheckCaseBodies(YamlMappingNode fieldMap)
+    {
+        foreach (var construct in new[] { "match", "tlv" })
+        {
+            if (!fieldMap.TryGetValue(construct, out var body) || body is not YamlMappingNode bodyMap)
+                continue;
+            if (!bodyMap.TryGetValue("cases", out var cases) || cases is not YamlMappingNode caseMap)
+                continue;
+            foreach (var kv in caseMap.Children)
+            {
+                if (kv.Value is not YamlSequenceNode)
+                    throw new InvalidOperationException($"{construct}.cases[{Scalar(kv.Key)}]: a case "
+                        + "body is a field list; write [] for a case that reads nothing (PS-441)");
+            }
+        }
+    }
+
     static List<SchemaField> ParseFields(YamlSequenceNode seq)
     {
         var fields = new List<SchemaField>();
@@ -452,6 +474,7 @@ public static partial class SchemaParser
                 }
             }
             CheckBytesFormat(fieldMap);
+            CheckCaseBodies(fieldMap);        // PS-441
             CheckLiteral(fieldMap);
             CheckWave4(fieldMap);
             CheckLookupTemplate(fieldMap);    // PS-407

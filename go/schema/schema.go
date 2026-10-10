@@ -3162,6 +3162,12 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 				if tf.Name != "" {
 					tagValues[tf.Name] = val
 				}
+				// A component's `var:` binds for the case body, as a field's does - a
+				// `name_from` template such as "temperature_${ch}" reads it. It bound
+				// nothing, so every such case failed.
+				if tf.Var != "" {
+					ctx.Variables[tf.Var] = int64(val)
+				}
 			}
 
 			// Build tag key

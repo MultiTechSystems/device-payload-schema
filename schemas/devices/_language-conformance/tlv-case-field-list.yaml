@@ -1,0 +1,94 @@
+# A case body here is a field list (PS-347, PS-441), decoded as the top level is: a
+# number literal, a var: binding read by a computed field, an internal field read by a
+# computed field, a nested group whose members share one byte, and a reserved "no
+# reading" value (PS-427) all work in a case.
+name: probe_tlv_case_field_list
+endian: big
+fields:
+- tlv:
+    tag_size: 1
+    cases:
+      0x01:
+      - name: echo
+        type: number
+        value: 0
+      0x02:
+      - name: level
+        type: u8
+        var: lvl
+      - name: level_scaled
+        type: number
+        ref: $lvl
+        mult: 2
+      0x03:
+      - name: _raw
+        type: u8
+      - name: raw_plus_one
+        type: number
+        ref: $_raw
+        add: 1
+      0x04:
+      - name: status
+        type: object
+        fields:
+        - byte_group:
+            size: 1
+            fields:
+            - name: mode
+              type: u8[0:3]
+            - name: state
+              type: u8[4:7]
+        - name: count
+          type: u8
+      0x05:
+      - name: reading
+        type: u16
+        div: 10
+        sentinel: [65535]
+test_vectors:
+- name: literal_only
+  payload: "01"
+  source: spec-example
+  expected:
+    echo: 0
+- name: var_then_computed
+  payload: 02 07
+  source: spec-example
+  expected:
+    level: 7
+    level_scaled: 14
+- name: internal_then_computed
+  payload: 03 09
+  source: spec-example
+  expected:
+    raw_plus_one: 10
+- name: nested_group
+  payload: 04 52 03
+  source: spec-example
+  expected:
+    status:
+      mode: 2
+      state: 5
+      count: 3
+- name: all_four
+  payload: 01 02 07 03 09 04 52 03
+  source: spec-example
+  expected:
+    echo: 0
+    level: 7
+    level_scaled: 14
+    raw_plus_one: 10
+    status:
+      mode: 2
+      state: 5
+      count: 3
+- name: reserved_value_is_absent
+  payload: 05 FFFF
+  source: spec-example
+  expected:
+    reading: null
+- name: ordinary_value_is_read
+  payload: 05 00FA
+  source: spec-example
+  expected:
+    reading: 25

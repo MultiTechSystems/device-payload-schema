@@ -1379,6 +1379,10 @@ public static class SchemaDecoder
                     }
                     if (!string.IsNullOrEmpty(tf.Name))
                         tagValues[tf.Name] = val;
+                    // A component's `var:` binds for the case body, as a field's does; a
+                    // name_from template such as "temperature_${ch}" reads it.
+                    if (!string.IsNullOrEmpty(tf.Var))
+                        ctx.Variables[tf.Var] = (long)val;
                 }
 
                 if (field.TagKey is List<object?> tkList)

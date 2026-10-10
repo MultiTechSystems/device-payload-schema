@@ -1459,8 +1459,10 @@ class TS013Generator:
         if ref_errors:
             raise ValueError(ref_errors[0])
         # The repeat iterator's and reserve's schema rules (PS-350 to PS-387, PS-471).
-        from schema_interpreter import schema_iterator_errors
-        iterator_problems = schema_iterator_errors(schema)
+        from schema_interpreter import case_body_errors, schema_iterator_errors
+        # PS-441: a case body is a field list; a bare string was iterated by character.
+        iterator_problems = case_body_errors(schema)
+        iterator_problems += schema_iterator_errors(schema)
         from schema_interpreter import internal_name_errors, optional_errors
         iterator_problems += optional_errors(schema.get('fields')) + internal_name_errors(schema)
         for port_entry in (schema.get('ports') or {}).values():
@@ -2513,13 +2515,15 @@ function writeS(buf, pos, size, value, endian) {
             # beside an object with a `value` member.
             outer = f'{obj_name}_outer{id(field) % 100000}'
             lines.append(f'{i}  var {outer} = d; d = {{}};')
-            # Every member, unnamed ones included: a nameless `skip` was filtered out
-            # here, so it consumed no bytes and every field after it, inside the object
-            # and after it, read from the wrong offset (dnt-lw-dis `device_info`).
+            # The members are a field list (PS-347, PS-441), so a nameless construct -
+            # a `match` or a group of bit ranges - is a member like any other. Members
+            # without a name were skipped, so neither was decoded: a match's fields were
+            # missing and a group's byte was never consumed, shifting every later field.
             for member in field['fields']:
-                if not isinstance(member, dict):
-                    continue
-                lines.extend(self._gen_decode_field(member))
+                if isinstance(member, dict):
+                    lines.extend(self._gen_decode_field(member))
+            # An internal member is bound in `vars` and not reported, as at the top level.
+            lines.append(f"{i}  for (var _k in d) {{ if (_k.charAt(0) === '_') delete d[_k]; }}")
             lines.append(f'{i}  {outer}.{obj_name} = d; d = {outer};')
             return lines
 
@@ -2699,7 +2703,11 @@ function writeS(buf, pos, size, value, endian) {
 
         # skip
         if ftype == 'skip':
-            lines.append(f'{i}  pos += {length_to_js(field)};')
+            # A skip past the end is a short read, as in every interpreter; the codec
+            # advanced past the payload and reported success.
+            lines.append(f'{i}  var _skipN = {length_to_js(field)};')
+            lines.append(f'{i}  if (pos + _skipN > buf.length) throw new Error("Buffer too short for skip");')
+            lines.append(f'{i}  pos += _skipN;')
             return lines
 
         # base64 (clause 2 string types): this had no case and fell through to the
