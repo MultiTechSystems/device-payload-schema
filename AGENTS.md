@@ -199,7 +199,7 @@ the same vectors:
 | Go | `go/schema/corpus_conformance_test.go` | 2611 | 1806 (plain API 1783) |
 | C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2611 | 1789 |
 | Java | `bindings/java/.../CorpusConformanceTest.java` | 2611 | 1789 |
-| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 546 of 546 attempted | n/a |
+| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 550 of 550 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
 its own implementation's actual; trust it over this table.
@@ -1729,7 +1729,7 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   (CR-2026-032).** `make test-c` builds the three previously-orphaned C test files and runs
   `tools/c-corpus-harness.py`, which generates C that builds each expressible corpus schema
   through the struct API, compiles it, and compares the decode against the vectors.
-  **546 of 546 attempted vectors pass** (2026-10-10) since CR-2026-033 added `tlv` and CR-2026-034
+  **550 of 550 attempted vectors pass** (2026-10-10) since CR-2026-033 added `tlv` and CR-2026-034
   `flagged` (it was 50 of 50 before either). 751 of 1239 are still in schemas the struct API
   cannot build - 26 use a `transform` chain, 24 a `bitfield_string`, 15 more cases than
   `SCHEMA_MAX_CASES` allows, 3 `repeat`, 3 a `u32le16` **the interpreter has and the harness
