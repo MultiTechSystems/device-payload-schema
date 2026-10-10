@@ -4374,6 +4374,12 @@ class SchemaInterpreter:
                             _, pos = self._decode_field(rf, payload, pos)
                 except Exception as e:
                     result.errors.append(f"Error resolving $ref: {e}")
+                    # A construct that fails to read stops the decode, as a plain field's error
+                    # does. These went on from wherever the failed read left the position, so a
+                    # following field was read from the wrong offset and reported beside the error
+                    # (a trailer after a failed tlv came back as the tlv's own bytes). Go, Java and
+                    # C# stop at the first error.
+                    break
                 continue
             
             # Handle byte_group construct
@@ -4394,6 +4400,7 @@ class SchemaInterpreter:
                     result.data.update(match_result)
                 except Exception as e:
                     result.errors.append(f"Error in match: {e}")
+                    break
                 continue
             
             # The `object:` key is withdrawn (PS-466, CR-2026-074): a nested group is
@@ -4410,6 +4417,7 @@ class SchemaInterpreter:
                     result.data.update(tlv_result)
                 except Exception as e:
                     result.errors.append(f"Error in tlv: {e}")
+                    break
                 continue
             
             # Phase 2: flagged: construct (bitmask field presence)
@@ -4422,6 +4430,7 @@ class SchemaInterpreter:
                     # decoder that read them.
                 except Exception as e:
                     result.errors.append(f"Error in flagged: {e}")
+                    break
                 continue
             
             name = field_def.get('name', 'unknown')
@@ -4435,6 +4444,7 @@ class SchemaInterpreter:
                     self._variables[name] = value
                 except Exception as e:
                     result.errors.append(f"Error decoding {name}: {e}")
+                    break
                 continue
             
             # Computed field - supports formula, ref, polynomial, compute, guard.
@@ -4493,6 +4503,7 @@ class SchemaInterpreter:
                     result.data.update(match_result)
                 except Exception as e:
                     result.errors.append(f"Error in match: {e}")
+                    break
                 continue
             
             # An internal field is read and bound, but not reported. It used to be
