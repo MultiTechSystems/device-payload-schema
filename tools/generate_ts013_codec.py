@@ -56,7 +56,9 @@ function encRint(v) {
 }
 
 function encReverseLookup(v, lookup, name) {          // reverse_lookup
-  if (!lookup || typeof v !== "string") return v;
+  // PS-513 (same_label): === never matches true to 1 or "true" to true. Only a string
+  // was looked up, so a boolean passed through and wrote its own 0 or 1.
+  if (!lookup || v === null || v === undefined) return v;
   if (Array.isArray(lookup)) {
     var at = lookup.indexOf(v);
     return at >= 0 ? at : v;
@@ -73,7 +75,7 @@ function encReverseLookup(v, lookup, name) {          // reverse_lookup
       return isFinite(n) && String(k).trim() !== "" ? n : v;
     }
   }
-  if (template !== null) {
+  if (template !== null && typeof v === "string") {
     var cut = template.indexOf("${value}");
     var head = template.slice(0, cut), tail = template.slice(cut + 8);
     if (v.length > head.length + tail.length && v.indexOf(head) === 0 &&
@@ -115,6 +117,11 @@ var ENC_FLOAT_TYPES = ["f16", "f32", "f64", "udec", "sdec", "f32le16", "f32be16l
 
 function encReverseModifiers(v, f) {                  // _reverse_modifiers
   v = encReverseLookup(v, f.lookup, f.name);
+  if (typeof v === "boolean" && f.lookup) {
+    encFail(v + " is not a label with a key of its own in the lookup for " +
+            JSON.stringify(f.name) + "; a boolean matches only a boolean label, and a " +
+            "`default` label has no value to recover (PS-409, PS-513)");
+  }
   if (typeof v === "string" && f.lookup) {
     encFail(JSON.stringify(v) + " is not a label in the lookup for " + JSON.stringify(f.name) +
             "; a `default` label matches any unmapped value, so the value that produced " +

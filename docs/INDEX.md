@@ -122,15 +122,15 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Device schemas
 
-282 schemas under `schemas/devices/`.
-Mean quality score 76.0% (PLATINUM 37, GOLD 39, SILVER 161, BRONZE 25, REJECTED 20). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+284 schemas under `schemas/devices/`.
+Mean quality score 75.9% (PLATINUM 37, GOLD 39, SILVER 163, BRONZE 25, REJECTED 20). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
 | milesight | 84 | 1427 | PLATINUM 21, GOLD 33, SILVER 27, REJECTED 3 |
-| _language-conformance | 70 | 121 | SILVER 51, BRONZE 14, REJECTED 5 |
+| _language-conformance | 72 | 129 | SILVER 53, BRONZE 14, REJECTED 5 |
 | decentlab | 58 | 204 | PLATINUM 13, GOLD 6, SILVER 27, BRONZE 8, REJECTED 4 |
 | _library-composed | 49 | 57 | SILVER 48, BRONZE 1 |
 | makerfabs | 6 | 0 | REJECTED 6 |
@@ -173,8 +173,10 @@ Mean quality score 76.0% (PLATINUM 37, GOLD 39, SILVER 161, BRONZE 25, REJECTED 
 | `_language-conformance/leftover-bytes` | 1 | 2 | fields | 71% | SILVER |
 | `_language-conformance/literal-types` | 3 | 1 | fields | 69% | BRONZE |
 | `_language-conformance/log-of-non-positive` | 3 | 2 | fields | 71% | SILVER |
+| `_language-conformance/lookup-boolean-labels` | 2 | 4 | fields | 75% | SILVER |
 | `_language-conformance/lookup-default-template` | 2 | 4 | fields | 75% | SILVER |
 | `_language-conformance/lookup-default` | 1 | 1 | fields | 71% | SILVER |
+| `_language-conformance/lookup-number-labels` | 2 | 4 | fields | 73% | SILVER |
 | `_language-conformance/match-case-range` | 3 | 3 | fields | 67% | BRONZE |
 | `_language-conformance/match-cases-default-key` | 3 | 2 | fields | 65% | BRONZE |
 | `_language-conformance/match-default-fields` | 3 | 2 | fields | 71% | SILVER |

@@ -193,6 +193,14 @@ def field_source(field, schema_endian):
         return None, f"no {ftype!r} field type"
 
     lookup = field.get("lookup")
+    labels = (list(lookup.values()) if isinstance(lookup, dict)
+              else lookup if isinstance(lookup, list) else [])
+    if any(not isinstance(label, str) for label in labels):
+        # lookup_entry_t holds a label as text, so a number or boolean label (PS-106,
+        # CR-2026-104) would decode as the string "5" or "True" - an interpreter gap, and
+        # tools/schema_binary.py refuses a boolean label for the same reason (PS-446).
+        return None, ("a number or boolean lookup label: the interpreter holds a label "
+                      "as text (PS-106, a known C gap)")
     if isinstance(lookup, dict):
         # Every non-integer lookup key in the corpus is `default` (PS-406), which this
         # read as "lookup key is not an integer" - a schema problem, when it is the

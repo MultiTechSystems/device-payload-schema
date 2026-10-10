@@ -1068,6 +1068,15 @@ public static class SchemaEncoder
         {
             var reversed = ReverseLookup(value, field.Lookup);
 
+            if (reversed is bool unmatched && field.Lookup is { Count: > 0 })
+                // PS-513: a boolean matches only a boolean label, and none has this one
+                // under a key of its own. Where only the `default` carries it, it stands
+                // for every unmapped value (PS-269, PS-409): there is nothing to write.
+                throw new InvalidOperationException(
+                    $"{(unmatched ? "true" : "false")} is not a label with a key of its own in "
+                    + $"the lookup for '{field.Name}'; a boolean matches only a boolean label, "
+                    + "and a `default` label has no value to recover (PS-409, PS-513)");
+
             // PS-409: a string matching the ${value} default carries the value it stands for.
             if (reversed is string text && Wave5.Template(field) is { } template)
                 reversed = Wave5.MatchTemplate(template, text) ?? throw new InvalidOperationException(
@@ -1101,12 +1110,16 @@ public static class SchemaEncoder
         }
 
         /// <summary>Map a label back to its integer.</summary>
-        static object? ReverseLookup(object? value, Dictionary<int, string>? lookup)
+        /// <remarks>
+        /// Labels are compared by <see cref="Helpers.SameLabel"/> (PS-513). Only a string
+        /// was looked up, so a boolean passed through and was written as its own 0 or 1 -
+        /// `false` through `[true, false]` wrote index 0 (CR-2026-104).
+        /// </remarks>
+        static object? ReverseLookup(object? value, Dictionary<int, object>? lookup)
         {
             if (lookup == null || lookup.Count == 0) return value;
-            if (value is not string label) return value;
             foreach (var (key, entry) in lookup)
-                if (entry == label)
+                if (Helpers.SameLabel(entry, value))
                     return (double)key;
             return value;
         }

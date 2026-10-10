@@ -1316,11 +1316,24 @@ def _match_composite_key(case_key: str, tag_tuple):
     return True, specificity
 
 
+def same_label(label, value):
+    """PS-513: a boolean label matches only a boolean input, and a boolean input only
+    a boolean label.
+
+    Python's ``True == 1`` (and ``hash(True) == hash(1)``) would otherwise match
+    ``true`` to a label of 1 and ``1`` to a label of ``true``, so the types are
+    compared before the values. ``"true"`` is a string and never equals ``True``.
+    """
+    return isinstance(label, bool) == isinstance(value, bool) and label == value
+
+
 def reverse_lookup(value, lookup):
     """Map a label back to its integer for encoding.
 
     A string that is no label but matches the mapping's `${value}` default yields the
-    value written into it (PS-409); the caller rejects any other string.
+    value written into it (PS-409); the caller rejects any other string. Labels are
+    compared with `same_label` (PS-513), so a boolean is never found as a number. A
+    boolean with no key of its own is returned unchanged, and the caller rejects it.
     """
     if not lookup:
         return value
@@ -1328,7 +1341,7 @@ def reverse_lookup(value, lookup):
         for key, label in lookup.items():
             if key == 'default':
                 continue
-            if label == value:
+            if same_label(label, value):
                 try:
                     return int(key)
                 except (TypeError, ValueError):
@@ -1339,10 +1352,11 @@ def reverse_lookup(value, lookup):
             if recovered is not None:
                 return recovered
         return value
-    try:
-        return lookup.index(value)
-    except (ValueError, AttributeError):
-        return value
+    if isinstance(lookup, (list, tuple)):
+        for index, label in enumerate(lookup):
+            if same_label(label, value):
+                return index
+    return value
 
 #: Order in which the bare `mult`, `div` and `add` modifiers are applied,
 #: irrespective of the order the keys appear in the source document (PS-101).
@@ -5403,6 +5417,16 @@ class SchemaInterpreter:
         # and the label then reached int() as "invalid literal for int() with base 10:
         # 'Class A'". 69 corpus vectors failed to encode on exactly that.
         value = reverse_lookup(value, field_def.get('lookup'))
+
+        if isinstance(value, bool) and field_def.get('lookup'):
+            # PS-513: a boolean matches only a boolean label, and none carries this one
+            # under a key of its own. Where only the mapping's `default` carries it, it
+            # stands for every unmapped value (PS-269, PS-409), so there is nothing to
+            # write. It used to reach int() below and be written as 1.
+            raise ValueError(
+                f"{value!r} is not a label with a key of its own in the lookup for "
+                f"{field_def.get('name')!r}; a boolean matches only a boolean label, "
+                "and a `default` label has no value to recover (PS-409, PS-513)")
 
         if isinstance(value, str) and field_def.get('lookup'):
             # The label is not in the table, so it came from the mapping's `default`,
