@@ -58,6 +58,31 @@ static class Wave5
         return sign + mantissa + "e" + (exponent < 0 ? "-" : "+") + Math.Abs(exponent);
     }
 
+    /// <summary>
+    /// A value written into a name_from key template (PS-532, CR-2026-112): a number as
+    /// <see cref="FormatLookupValue"/> writes it, a string as it is, a boolean as true or
+    /// false. The value is the one the field reports, its label where it has a lookup.
+    /// ToString() wrote True and 1E-07, so one schema reported different keys here than in
+    /// the generated codec. Null for an object or array, which has no text.
+    /// </summary>
+    public static string? RenderTemplateValue(object? value) => value switch
+    {
+        bool flag => flag ? "true" : "false",
+        string text => text,
+        double d => FormatLookupValue(d),
+        float f => FormatLookupValue(f),
+        decimal m => FormatLookupValue((double)m),
+        sbyte or byte or short or ushort or int or uint or long or ulong =>
+            Convert.ToString(value, CultureInfo.InvariantCulture),
+        System.Numerics.BigInteger big => big.ToString(CultureInfo.InvariantCulture),
+        _ => null,
+    };
+
+    /// <summary>The error for a template referencing a value with no text (PS-532).</summary>
+    public static string TemplateShapeError(string template, string reference) =>
+        $"template '{template}' references '{reference}', which is not a number, string or " +
+        "boolean and cannot be written into a key (PS-532)";
+
     /// <summary>The number a ${value} default wrote into <paramref name="text"/>, or null (PS-409).</summary>
     public static double? MatchTemplate(string template, string text)
     {

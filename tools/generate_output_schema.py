@@ -20,7 +20,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from schema_interpreter import lookup_template, lookup_template_pattern  # noqa: E402
+from schema_interpreter import (  # noqa: E402
+    lookup_template, lookup_template_pattern, render_template_value)
 
 
 def scalar_json_type(value: Any) -> str:
@@ -340,16 +341,15 @@ def reference_labels(field_def: Optional[Dict[str, Any]]) -> Optional[List[str]]
     labels: List[str] = []
     if lookup_template(lookup) is not None:
         return None          # a `${value}` default names every unmapped value (PS-406)
+    # A label is written into the key as PS-532 writes it: `true`, not `True`.
     if isinstance(lookup, dict):
-        for key, value in lookup.items():
-            if key == 'default':
-                # `lookup: default:` supplies a label for everything unmapped, so the
-                # set stays closed - it just gains one more member.
-                labels.append(str(value))
-            else:
-                labels.append(str(value))
+        # `lookup: default:` supplies a label for everything unmapped, so the set stays
+        # closed - it just gains one more member.
+        labels = [render_template_value(v, '', '') for v in lookup.values()
+                  if isinstance(v, (str, int, float))]
     elif isinstance(lookup, list):
-        labels = [str(v) for v in lookup]
+        labels = [render_template_value(v, '', '') for v in lookup
+                  if isinstance(v, (str, int, float))]
     elif field_def.get('type') in ('enum', 'Enum'):
         values = field_def.get('values')
         if isinstance(values, dict):
@@ -374,13 +374,14 @@ def reference_pattern(field_def: Optional[Dict[str, Any]]) -> str:
     if 'cases' in field_def:      # a match discriminator substitutes its value
         return r'-?\d+'
     field_type = str(field_def.get('type', ''))
+    if field_type in ('bool', 'boolean'):
+        return '(?:true|false)'     # PS-532
     if has_modifiers(field_def) or field_type.startswith(('f', 'number', 'udec', 'sdec')):
-        # A scaled or floating value renders as a decimal, and an integral one loses its
-        # trailing zero: `v_2.5_reading`, but `v_2_reading`.
-        return r'-?\d+(?:\.\d+)?'
-    if field_type == 'boolean':     # a literal; how a template renders it is open
-        return '.+'
-    if field_type.startswith(('u', 'byte', 'bool')):
+        # A scaled or floating value renders as PS-406 writes it (PS-532): an integral one
+        # loses its trailing zero and a small one takes an exponent - `v_2.5_reading`,
+        # `v_2_reading`, `v_1e-7_reading`.
+        return r'-?\d+(?:\.\d+)?(?:e[-+]\d+)?'
+    if field_type.startswith(('u', 'byte')):
         return r'\d+'
     if field_type.startswith(('s', 'i')) and field_type not in ('string',):
         return r'-?\d+'

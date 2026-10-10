@@ -967,6 +967,26 @@ def format_lookup_value(value):
     return f"{digits}e{sign}{exponent.lstrip('+-').lstrip('0') or '0'}"
 
 
+def render_template_value(value, reference, template):
+    """The text a key template writes for a referenced value (PS-532, CR-2026-112).
+
+    A number as a `${value}` default writes it (PS-406: JavaScript's String(number), so
+    `2` not `2.0` and `1e-7` not `1e-07`), a string as it is, a boolean as `true` or
+    `false`. Python's str() wrote `True` and `1e-07`, so one schema reported a different
+    key here than in the generated codec. An object or array has no text: it is an error
+    naming the reference and the template.
+    """
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    if isinstance(value, (int, float)):
+        return format_lookup_value(value)
+    if isinstance(value, str):
+        return value
+    raise ValueError(
+        "template %r references %r, which is not a number, string or boolean "
+        "and cannot be written into a key (PS-532)" % (template, reference))
+
+
 def lookup_template_pattern(template):
     """A regular expression for every string a `${value}` default can produce."""
     parts = template.split(LOOKUP_VALUE_TOKEN)
@@ -3568,18 +3588,18 @@ class SchemaInterpreter:
 
         def substitute(match):
             reference = match.group(1)
+            # The template wrote the value the field reports - its label where it has a
+            # lookup (PS-532) - and that is what the data carries, so it is used as is.
             if reference in data:
                 value = data[reference]
             else:
                 source = self._field_declaring_var(reference)
                 if source and source.get('name') in data:
-                    value = reverse_lookup(data[source['name']], source.get('lookup'))
+                    value = data[source['name']]
                 else:
                     missing.append(reference)
                     return ''
-            if isinstance(value, float) and value == int(value):
-                value = int(value)
-            return str(value)
+            return render_template_value(value, reference, template)
 
         resolved = re.sub(r'\$\{(\w+)\}', substitute, str(template))
         return None if missing else resolved
@@ -3600,10 +3620,8 @@ class SchemaInterpreter:
         def substitute(match):
             reference = match.group(1)
             if reference in self._variables:
-                value = self._variables[reference]
-                if isinstance(value, float) and value == int(value):
-                    value = int(value)
-                return str(value)
+                return render_template_value(
+                    self._variables[reference], reference, template)
             missing.append(reference)
             return ''
 
@@ -4808,7 +4826,11 @@ class SchemaInterpreter:
             else:
                 # `name_from` reports the value under a templated key, so that is the key
                 # to read it back from (CR-2026-030).
-                lookup_name = self._resolve_encode_name(field_def, name, data)
+                try:
+                    lookup_name = self._resolve_encode_name(field_def, name, data)
+                except ValueError as e:
+                    result.errors.append(f"Error encoding {name}: {e}")
+                    continue
                 if lookup_name is None:
                     result.errors.append(
                         f"Error encoding {name}: name_from "

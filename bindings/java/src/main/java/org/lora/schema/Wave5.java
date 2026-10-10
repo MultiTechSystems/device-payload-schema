@@ -45,6 +45,30 @@ final class Wave5 {
     }
 
     /**
+     * A value written into a name_from key template (PS-532, CR-2026-112): a number as
+     * {@link #formatLookupValue} writes it, a string as it is, a boolean as true or false.
+     * The value is the one the field reports, its label where it has a lookup.
+     * String.valueOf wrote 1e-7 as 1.0E-7, so one schema reported two different keys.
+     *
+     * @return the text, or null where the value is an object or array, which has none
+     */
+    static String renderTemplateValue(Object value) {
+        if (value instanceof Boolean flag) return flag ? "true" : "false";
+        if (value instanceof String text) return text;
+        if (value instanceof Double || value instanceof Float) {
+            return formatLookupValue(((Number) value).doubleValue());
+        }
+        if (value instanceof Number number) return number.toString();
+        return null;
+    }
+
+    /** The error for a template referencing a value with no text (PS-532). */
+    static String templateShapeError(String template, String reference) {
+        return "template '" + template + "' references '" + reference + "', which is not a "
+                + "number, string or boolean and cannot be written into a key (PS-532)";
+    }
+
+    /**
      * The fewest significant digits that read back as {@code v}, nearest the exact value -
      * ECMAScript's rule. Double.toString is not that: it writes Double.MIN_VALUE as
      * 4.9E-324 where JavaScript writes 5e-324, because it keeps at least two digits.

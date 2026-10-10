@@ -477,6 +477,9 @@ public static partial class SchemaParser
     static List<SchemaField> ParseFields(YamlSequenceNode seq)
     {
         var fields = new List<SchemaField>();
+        // Names (and variables) this list declared an object or repeat under: a key
+        // template cannot write one (PS-532).
+        var aggregates = new HashSet<string>();
         foreach (var item in seq.Children)
         {
             if (item is not YamlMappingNode fieldMap)
@@ -533,6 +536,27 @@ public static partial class SchemaParser
             }
             CheckFieldRules(fieldMap);    // PS-427, PS-428
             CheckGuard(fieldMap);         // PS-445
+            if (fieldMap.TryGetValue("name_from", out var templateNode))
+            {
+                var template = Scalar(templateNode);
+                foreach (System.Text.RegularExpressions.Match m in
+                         System.Text.RegularExpressions.Regex.Matches(template, @"\$\{(\w+)\}"))
+                {
+                    if (aggregates.Contains(m.Groups[1].Value))
+                    {
+                        var name = fieldMap.TryGetValue("name", out var n) ? Scalar(n) : "?";
+                        throw new InvalidOperationException(
+                            $"Field '{name}': " + Wave5.TemplateShapeError(template, m.Groups[1].Value));
+                    }
+                }
+            }
+            if (hasType && Scalar(typeNode!) is "object" or "repeat")
+            {
+                if (fieldMap.TryGetValue("name", out var aggName) && Scalar(aggName) != "")
+                    aggregates.Add(Scalar(aggName));
+                if (fieldMap.TryGetValue("var", out var aggVar) && Scalar(aggVar) != "")
+                    aggregates.Add(Scalar(aggVar));
+            }
             fields.Add(ParseField(fieldMap));
         }
         return fields;

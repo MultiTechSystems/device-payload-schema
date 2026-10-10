@@ -48,6 +48,31 @@ func formatLookupValue(v float64) string {
 	return mantissa + "e" + sign + digits
 }
 
+// renderTemplateValue writes a value into a name_from key template (PS-532,
+// CR-2026-112): a number as formatLookupValue writes it, a string as it is, a boolean as
+// true or false. The value is the one the field reports, its label where it has a lookup.
+// An object or array has no text, so it is an error naming the reference and template.
+// `%v` wrote 1e-07 where the generated codec writes 1e-7, so one schema reported two keys.
+func renderTemplateValue(value any, reference, template string) (string, error) {
+	switch v := value.(type) {
+	case bool:
+		if v {
+			return "true", nil
+		}
+		return "false", nil
+	case string:
+		return v, nil
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return fmt.Sprintf("%d", v), nil
+	case float32:
+		return formatLookupValue(float64(v)), nil
+	case float64:
+		return formatLookupValue(v), nil
+	}
+	return "", fmt.Errorf("template %q references %q, which is not a number, string or "+
+		"boolean and cannot be written into a key (PS-532)", template, reference)
+}
+
 // lookupTemplateNumber is a decimal as formatLookupValue writes one.
 const lookupTemplateNumber = `(-?\d+(?:\.\d+)?(?:e[-+]?\d+)?)`
 
