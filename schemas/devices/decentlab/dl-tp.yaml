@@ -31,7 +31,7 @@ fields:
                 - add: -32768
                 - div: 100
               unit: "°C"
-              ipso: {object: 3303, instance: 0, resource: 5700}
+              ipso: {object: 3303, instance: 1, resource: 5700}
               senml: {name: "temperature_at_level_1", unit: "Cel"}
               semantic: "temperature.at.level.1"
             - name: temperature_at_level_2
@@ -40,7 +40,7 @@ fields:
                 - add: -32768
                 - div: 100
               unit: "°C"
-              ipso: {object: 3303, instance: 0, resource: 5700}
+              ipso: {object: 3303, instance: 2, resource: 5700}
               senml: {name: "temperature_at_level_2", unit: "Cel"}
               semantic: "temperature.at.level.2"
             - name: temperature_at_level_3
@@ -49,7 +49,7 @@ fields:
                 - add: -32768
                 - div: 100
               unit: "°C"
-              ipso: {object: 3303, instance: 0, resource: 5700}
+              ipso: {object: 3303, instance: 3, resource: 5700}
               senml: {name: "temperature_at_level_3", unit: "Cel"}
               semantic: "temperature.at.level.3"
             - name: temperature_at_level_4
@@ -58,7 +58,7 @@ fields:
                 - add: -32768
                 - div: 100
               unit: "°C"
-              ipso: {object: 3303, instance: 0, resource: 5700}
+              ipso: {object: 3303, instance: 4, resource: 5700}
               senml: {name: "temperature_at_level_4", unit: "Cel"}
               semantic: "temperature.at.level.4"
             - name: temperature_at_level_5
@@ -67,7 +67,7 @@ fields:
                 - add: -32768
                 - div: 100
               unit: "°C"
-              ipso: {object: 3303, instance: 0, resource: 5700}
+              ipso: {object: 3303, instance: 5, resource: 5700}
               senml: {name: "temperature_at_level_5", unit: "Cel"}
               semantic: "temperature.at.level.5"
             - name: temperature_at_level_6
@@ -76,7 +76,7 @@ fields:
                 - add: -32768
                 - div: 100
               unit: "°C"
-              ipso: {object: 3303, instance: 0, resource: 5700}
+              ipso: {object: 3303, instance: 6, resource: 5700}
               senml: {name: "temperature_at_level_6", unit: "Cel"}
               semantic: "temperature.at.level.6"
             - name: temperature_at_level_7
@@ -85,7 +85,7 @@ fields:
                 - add: -32768
                 - div: 100
               unit: "°C"
-              ipso: {object: 3303, instance: 0, resource: 5700}
+              ipso: {object: 3303, instance: 7, resource: 5700}
               senml: {name: "temperature_at_level_7", unit: "Cel"}
               semantic: "temperature.at.level.7"
             - name: temperature_at_level_8
@@ -94,7 +94,7 @@ fields:
                 - add: -32768
                 - div: 100
               unit: "°C"
-              ipso: {object: 3303, instance: 0, resource: 5700}
+              ipso: {object: 3303, instance: 8, resource: 5700}
               senml: {name: "temperature_at_level_8", unit: "Cel"}
               semantic: "temperature.at.level.8"
             - name: temperature_at_level_9
@@ -103,7 +103,7 @@ fields:
                 - add: -32768
                 - div: 100
               unit: "°C"
-              ipso: {object: 3303, instance: 0, resource: 5700}
+              ipso: {object: 3303, instance: 9, resource: 5700}
               senml: {name: "temperature_at_level_9", unit: "Cel"}
               semantic: "temperature.at.level.9"
             - name: temperature_at_level_10
@@ -112,7 +112,7 @@ fields:
                 - add: -32768
                 - div: 100
               unit: "°C"
-              ipso: {object: 3303, instance: 0, resource: 5700}
+              ipso: {object: 3303, instance: 10, resource: 5700}
               senml: {name: "temperature_at_level_10", unit: "Cel"}
               semantic: "temperature.at.level.10"
             - name: temperature_at_level_11
@@ -121,7 +121,7 @@ fields:
                 - add: -32768
                 - div: 100
               unit: "°C"
-              ipso: {object: 3303, instance: 0, resource: 5700}
+              ipso: {object: 3303, instance: 11, resource: 5700}
               senml: {name: "temperature_at_level_11", unit: "Cel"}
               semantic: "temperature.at.level.11"
             - name: temperature_at_level_12
@@ -130,7 +130,7 @@ fields:
                 - add: -32768
                 - div: 100
               unit: "°C"
-              ipso: {object: 3303, instance: 0, resource: 5700}
+              ipso: {object: 3303, instance: 12, resource: 5700}
               senml: {name: "temperature_at_level_12", unit: "Cel"}
               semantic: "temperature.at.level.12"
             - name: temperature_at_level_13
@@ -139,7 +139,7 @@ fields:
                 - add: -32768
                 - div: 100
               unit: "°C"
-              ipso: {object: 3303, instance: 0, resource: 5700}
+              ipso: {object: 3303, instance: 13, resource: 5700}
               senml: {name: "temperature_at_level_13", unit: "Cel"}
               semantic: "temperature.at.level.13"
             - name: temperature_at_level_14
@@ -148,7 +148,7 @@ fields:
                 - add: -32768
                 - div: 100
               unit: "°C"
-              ipso: {object: 3303, instance: 0, resource: 5700}
+              ipso: {object: 3303, instance: 14, resource: 5700}
               senml: {name: "temperature_at_level_14", unit: "Cel"}
               semantic: "temperature.at.level.14"
             - name: temperature_at_level_15
@@ -157,7 +157,7 @@ fields:
                 - add: -32768
                 - div: 100
               unit: "°C"
-              ipso: {object: 3303, instance: 0, resource: 5700}
+              ipso: {object: 3303, instance: 15, resource: 5700}
               senml: {name: "temperature_at_level_15", unit: "Cel"}
               semantic: "temperature.at.level.15"
         - bit: 1

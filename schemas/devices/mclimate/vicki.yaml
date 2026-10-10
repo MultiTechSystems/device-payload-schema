@@ -22,7 +22,6 @@ fields:
   - name: targetTemperature
     type: u8
     unit: "°C"
-    ipso: 3308
     senml: {unit: "Cel"}
     semantic: "thermostat.setpoint"
     valid_range: [5, 30]
@@ -31,7 +30,6 @@ fields:
   - name: sensorTemperatureRaw
     type: u8
     description: "Raw temperature sensor value (before formula)"
-    ipso: 3303
     senml: {unit: "Cel"}
     semantic: "temperature.raw"
 
@@ -78,7 +76,7 @@ fields:
       - op: round
         decimals: 2
     unit: "°C"
-    ipso: 3303
+    ipso: {object: 3303}
     senml: {unit: "Cel"}
     semantic: "temperature.ambient"
     valid_range: [-40, 85]
@@ -86,7 +84,6 @@ fields:
   - name: relativeHumidityRaw
     type: u8
     description: "Raw humidity sensor value (before scaling)"
-    ipso: 3304
     senml: {unit: "%RH"}
     semantic: "humidity.raw"
 
@@ -100,7 +97,7 @@ fields:
       - op: round
         decimals: 2
     unit: "%"
-    ipso: 3304
+    ipso: {object: 3304}
     senml: {unit: "%RH"}
     semantic: "humidity.relative"
     valid_range: [0, 100]
@@ -170,7 +167,7 @@ fields:
       - op: round
         decimals: 2
     unit: "V"
-    ipso: 3316
+    ipso: {object: 3316}
     senml: {unit: "V"}
     semantic: "battery.voltage"
     valid_range: [2.0, 3.6]
@@ -236,7 +233,7 @@ fields:
       - op: round
     unit: "%"
     senml: {unit: "/100"}
-    ipso: 3337
+    ipso: {object: 3337}
     semantic: "valve.position"
     valid_range: [0, 100]
     description: "Valve openness percentage (0=closed, 100=open)"
@@ -246,7 +243,7 @@ fields:
     type: number
     ref: $targetTemperature
     unit: "°C"
-    ipso: 3308
+    ipso: {object: 3308}
     senml: {unit: "Cel"}
     semantic: "thermostat.setpoint.precise"
     description: "Target temperature with decimal precision"

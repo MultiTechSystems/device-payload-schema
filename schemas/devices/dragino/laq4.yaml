@@ -11,7 +11,7 @@ fields:
     type: u16
     div: 1000
     unit: "V"
-    ipso: 3316
+    ipso: {object: 3316}
     senml: {unit: "V"}
     semantic: "battery.voltage"
 
@@ -36,14 +36,14 @@ fields:
             type: u16
             unit: "ppb"
             description: "Total Volatile Organic Compounds"
-            ipso: 3325
+            ipso: {object: 3325, instance: 1, resource: 5700}
             senml: {unit: "ppb"}
             semantic: "air.tvoc"
           - name: co2
             type: u16
             unit: "ppm"
             description: "Carbon dioxide concentration"
-            ipso: 3325
+            ipso: {object: 3325, instance: 0, resource: 5700}
             senml: {unit: "ppm"}
             semantic: "air.co2"
           - name: temperature
@@ -51,7 +51,7 @@ fields:
             div: 10
             unit: "°C"
             description: "Ambient temperature from SHT sensor"
-            ipso: 3303
+            ipso: {object: 3303}
             senml: {unit: "Cel"}
             semantic: "temperature.ambient"
           - name: humidity
@@ -59,7 +59,7 @@ fields:
             div: 10
             unit: "%"
             description: "Relative humidity from SHT sensor"
-            ipso: 3304
+            ipso: {object: 3304}
             senml: {unit: "%RH"}
             semantic: "humidity.relative"
 

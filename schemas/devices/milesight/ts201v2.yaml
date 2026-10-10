@@ -114,8 +114,7 @@ fields:
               - name: humidity
                 unit: "%"
                 sensor: humidity
-                ipso: {object: 3304, instance: 0, resource: 5700}
-                senml: {name: "humidity", unit: "%RH"}
+                senml: {unit: "%RH"}
                 semantic: "humidity"
                 type: u8
                 div: 2

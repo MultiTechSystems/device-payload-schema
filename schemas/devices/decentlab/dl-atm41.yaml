@@ -93,7 +93,7 @@ fields:
                 - add: -32768
                 - div: 10
               unit: "°C"
-              ipso: {object: 3303, instance: 0, resource: 5700}
+              ipso: {object: 3303, instance: 1, resource: 5700}
               senml: {name: "sensor_temperature_internal", unit: "Cel"}
               semantic: "sensor.temperature.internal"
             - name: x_orientation_angle
@@ -114,7 +114,7 @@ fields:
               type: u16
               add: -32768
               unit: "°"
-              ipso: {object: 3332, instance: 0, resource: 5700}
+              ipso: {object: 3332, instance: 1, resource: 5700}
               senml: {name: "compass_heading", unit: "deg"}
               semantic: "compass.heading"
             - name: north_wind_speed
