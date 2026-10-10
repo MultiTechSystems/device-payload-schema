@@ -1,0 +1,31 @@
+# Bit ranges of a 64-bit base (PS-059, PS-352). Every value here is exact in a double,
+# so all five paths can report it as a number. The generated codec read a 64-bit base
+# as a decimal string past 2^53 and divided it, so every range of FF..F6 came out as 0
+# where the reference gives -10.
+#
+# Round-trips: the three ranges cover all 64 bits.
+name: probe_wide_bit_range
+endian: big
+fields:
+- name: low_word
+  type: "s64[0:31]"
+- name: low_53
+  type: "s64[0:52]"
+- name: high_word
+  type: "u64[32:63]"
+  consume: 8
+test_vectors:
+- name: minus_ten
+  source: spec-example
+  payload: "FF FF FF FF FF FF FF F6"
+  expected:
+    low_word: -10
+    low_53: -10
+    high_word: 4294967295
+- name: positive
+  source: spec-example
+  payload: "12 24 56 78 00 00 00 2A"
+  expected:
+    low_word: 42
+    low_53: 1220973302906922
+    high_word: 304371320

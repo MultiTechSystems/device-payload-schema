@@ -1,0 +1,35 @@
+# Output keys that are not JavaScript identifiers: ones beginning with a digit, as
+# Watteco's `4_20_mA` and `0_10_V` do, wholly numeric ones and one beginning with a
+# bracket, as mutelcor's "[06] Button Totals" group of "1", "2", ... does. A key is
+# reported exactly as the schema writes it. The generated codec declared
+# `var 4_20_mA` and `var 1`, which are not JavaScript, so the codec failed to load at
+# all; the bracketed name became `_06__Button_Totals`, which it then dropped as an
+# internal field.
+#
+# Round-trips: every value is exact after its divisor.
+name: probe_digit_leading_name
+endian: big
+fields:
+- name: 4_20_mA
+  type: u16
+  div: 1000
+- name: 0_10_V
+  type: u16
+  div: 100
+- name: "[06] Button Totals"
+  type: object
+  fields:
+  - name: "1"
+    type: u16
+  - name: "2"
+    type: u16
+test_vectors:
+- name: both
+  source: spec-example
+  payload: "2EE0 01F4 0001 0002"
+  expected:
+    4_20_mA: 12
+    0_10_V: 5
+    "[06] Button Totals":
+      "1": 1
+      "2": 2

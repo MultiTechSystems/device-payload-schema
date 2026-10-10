@@ -1,0 +1,32 @@
+# A list of records whose own name is also the name of one of each record's members.
+# The two are in different scopes - the list in the enclosing group, the member in
+# its element (PS-368) - so they cannot collide. The generated codec declared one
+# JavaScript variable for both, and the list became the member's number:
+# "altitude.push is not a function".
+#
+# Round-trips: every byte is a member's value.
+name: probe_member_shares_list_name
+endian: big
+fields:
+- name: track
+  type: object
+  fields:
+  - name: altitude
+    type: repeat
+    until: end
+    fields:
+    - name: year
+      type: u8
+    - name: altitude
+      type: s16
+test_vectors:
+- name: two_points
+  source: spec-example
+  payload: "18 0064 19 FF9C"
+  expected:
+    track:
+      altitude:
+      - year: 24
+        altitude: 100
+      - year: 25
+        altitude: -100
