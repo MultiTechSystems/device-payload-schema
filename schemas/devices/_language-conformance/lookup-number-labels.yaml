@@ -1,0 +1,42 @@
+# PS-106: a lookup label may be a number, and the field is then reported as that number
+# (PS-279) - not as the text "5". PS-513 (CR-2026-104): a label is matched by its type as
+# well as its value, so an encoder reverses 5 to the key that carries it, while the
+# string "5" matches no label at all.
+#
+# A multiplier code, as Netvox reports one: byte 0 is looked up through a mapping whose
+# keys start at one, byte 1 through a sequence of fractional factors. Every label has a
+# key of its own, so each vector re-encodes to its own bytes.
+name: probe_lookup_number_labels
+endian: big
+fields:
+- name: multiplier
+  type: u8
+  lookup: {1: 1, 2: 5, 3: 10, 4: 100}
+- name: factor
+  type: u8
+  lookup: [0.5, 1.5, 2.5]
+test_vectors:
+- name: first_entries
+  source: spec-example
+  payload: "01 00"
+  expected:
+    multiplier: 1
+    factor: 0.5
+- name: middle_entries
+  source: spec-example
+  payload: "02 01"
+  expected:
+    multiplier: 5
+    factor: 1.5
+- name: mapping_ten
+  source: spec-example
+  payload: "03 01"
+  expected:
+    multiplier: 10
+    factor: 1.5
+- name: last_entries
+  source: spec-example
+  payload: "04 02"
+  expected:
+    multiplier: 100
+    factor: 2.5

@@ -613,27 +613,27 @@ public static partial class SchemaParser
         {
             if (lookupNode is YamlMappingNode lookupMap)
             {
-                f.Lookup = new Dictionary<int, string>();
+                f.Lookup = new Dictionary<int, object>();
                 foreach (var kv in lookupMap.Children)
                 {
                     var keyText = Scalar(kv.Key);
                     if (keyText == "default")
-                        f.LookupDefault = Scalar(kv.Value);
+                        f.LookupDefault = ParseLabel(kv.Value);
                     // int.TryParse does not read `0x01`, so a table written in hex
                     // parsed to no entries at all and the field reported its raw
                     // integer - or, with no default, nothing (PS-269).
                     else if (ParseScalarValue(kv.Key) is int key)
-                        f.Lookup[key] = Scalar(kv.Value);
+                        f.Lookup[key] = ParseLabel(kv.Value);
                 }
             }
             else if (lookupNode is YamlSequenceNode lookupArr)
             {
-                f.Lookup = new Dictionary<int, string>();
+                f.Lookup = new Dictionary<int, object>();
                 // A sequence is indexed from zero and keeps the raw value when out
                 // of range (PS-104), unlike a mapping which omits (PS-269).
                 f.LookupIsSequence = true;
                 for (int i = 0; i < lookupArr.Children.Count; i++)
-                    f.Lookup[i] = Scalar(lookupArr.Children[i]);
+                    f.Lookup[i] = ParseLabel(lookupArr.Children[i]);
             }
         }
 
@@ -996,6 +996,30 @@ public static partial class SchemaParser
         var s = Scalar(node);
         if (bool.TryParse(s, out bool b)) return b;
         return double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out double v) && v != 0;
+    }
+
+    /// <summary>
+    /// A lookup label as the schema wrote it (PS-106): a plain `true`/`false` is a boolean
+    /// and a plain number a number, while a quoted scalar stays a string - `"1"` and
+    /// `"true"` are text, never the number or the boolean (PS-513).
+    /// </summary>
+    static object ParseLabel(YamlNode node)
+    {
+        if (node is not YamlScalarNode s || s.Style != YamlDotNet.Core.ScalarStyle.Plain)
+            return Scalar(node);
+        var text = s.Value ?? "";
+        // YAML 1.2's core schema: never 1.1's on/off/yes/no, and not .NET's "NaN" or
+        // "Infinity", which double.TryParse would read as numbers.
+        if (text is "true" or "True" or "TRUE") return true;
+        if (text is "false" or "False" or "FALSE") return false;
+        if (System.Text.RegularExpressions.Regex.IsMatch(text, @"^[-+]?[0-9]+$")
+            || System.Text.RegularExpressions.Regex.IsMatch(text, @"^0x[0-9a-fA-F]+$"))
+            return ParseScalarValue(node) ?? text;
+        if (System.Text.RegularExpressions.Regex.IsMatch(
+                text, @"^[-+]?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?$")
+            && double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var d))
+            return d;
+        return text;
     }
 
     static object? ParseScalarValue(YamlNode node)

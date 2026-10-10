@@ -22,9 +22,8 @@ final class Wave5 {
 
     /** The field's mapping default where it carries ${value}, else null (PS-408). */
     static String template(Field field) {
-        String fallback = field.getLookupDefault();
-        return fallback != null && !field.isLookupSequence() && fallback.contains(VALUE_TOKEN)
-                ? fallback : null;
+        return field.getLookupDefault() instanceof String fallback && !field.isLookupSequence()
+                && fallback.contains(VALUE_TOKEN) ? fallback : null;
     }
 
     /**
