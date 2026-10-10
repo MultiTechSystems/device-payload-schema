@@ -42,7 +42,7 @@ public class CorpusConformanceTests
     // (4), and match-default-skip.yaml's skipped body now expects the PS-472 warning.
     // All six new vectors decode here, so the floor is the full 2371 (2382 vectors, 11
     // without a payload or an expected block).
-    const int CorpusFloor = 2603;   // +2: flagged-group-field-list; +8: name-from-rendering (CR-2026-112); +2: boolean-literal (CR-2026-107); +14: the nine TS013-defect fixtures (bitfield-string-wide, wide-bit-range, ...); +8: CR-2026-104 lookup-boolean-labels and lookup-number-labels; +3: byte-group-bool; +11: tlv-case-field-list, object-member-field-list, tlv-tag-var-name-from; +5: tlv-case-key-patterns; +1: CR-2026-097 meta-tlv-channels; +9: CR-2026-096 meta fixtures; dl-atm41g2's two vendor vectors (+2); +121: vendor-codec vectors that kill vobo's mutation survivors
+    const int CorpusFloor = 2611;   // +8: registry divergence fixtures (tag-component-ref, reference-to-absent, zero-length, numeric-looking-text, name-from-object, round-large-value); +2: flagged-group-field-list; +8: name-from-rendering (CR-2026-112); +2: boolean-literal (CR-2026-107); +14: the nine TS013-defect fixtures (bitfield-string-wide, wide-bit-range, ...); +8: CR-2026-104 lookup-boolean-labels and lookup-number-labels; +3: byte-group-bool; +11: tlv-case-field-list, object-member-field-list, tlv-tag-var-name-from; +5: tlv-case-key-patterns; +1: CR-2026-097 meta-tlv-channels; +9: CR-2026-096 meta fixtures; dl-atm41g2's two vendor vectors (+2); +121: vendor-codec vectors that kill vobo's mutation survivors
 
     readonly ITestOutputHelper _output;
 
@@ -431,6 +431,11 @@ public class CorpusConformanceTests
     static bool ValuesMatch(object? want, object? got)
     {
         if (want is null || got is null) return Equals(want, got);
+        // A string decoded to the very text expected matches, whatever it looks like.
+        // "3E6388" - a hex rendering of three bytes - parses as a double overflowing to
+        // Infinity, and |Infinity - Infinity| is NaN, so two identical strings failed.
+        if (got is string gotText && string.Equals(want.ToString(), gotText, StringComparison.Ordinal))
+            return true;
         if (AsNumber(want) is double a && AsNumber(got) is double b)
         {
             // PS-039: an integer expectation must match exactly. PS-040's 0.001 is for
@@ -468,8 +473,11 @@ public class CorpusConformanceTests
             && long.TryParse(text.AsSpan(2), System.Globalization.NumberStyles.HexNumber,
                 null, out var hex))
             return hex;
+        // Text that overflows to an infinity, or spells NaN, is not a number a decode
+        // reports (PS-282): compare it as the text it is.
         return double.TryParse(text, System.Globalization.NumberStyles.Any,
             System.Globalization.CultureInfo.InvariantCulture, out var number)
+            && double.IsFinite(number)
             ? number
             : null;
     }

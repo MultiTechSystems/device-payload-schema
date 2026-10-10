@@ -908,7 +908,10 @@ static inline int decode_field(
             break;
             
         case FIELD_TYPE_SKIP:
-            *pos += field->size ? field->size : 1;
+            /* `length: 0` advances by nothing (PS-392). A size of 0 was read as one
+             * byte, so zero-length.yaml's second field ran past the payload. The
+             * absent-length default of one byte is the builder's (field_skip). */
+            *pos += field->size;
             return SCHEMA_OK;
             
         case FIELD_TYPE_ASCII:

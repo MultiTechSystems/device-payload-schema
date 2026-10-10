@@ -1,0 +1,22 @@
+# `length: 0` is a length: the field advances the read position by no bytes (PS-392).
+# Go, Java and C# took a length of 0 for no length at all and advanced by the type's
+# default of one byte, so the field after it read from the wrong offset - and, at the
+# end of a payload, past it. A vendor writes one where a message carries nothing of its
+# own, as a placeholder that keeps each message's field list the same shape.
+name: probe_zero_length
+endian: big
+fields:
+- name: first
+  type: u8
+- name: nothing
+  type: skip
+  length: 0
+- name: second
+  type: u8
+test_vectors:
+- name: two_bytes
+  source: spec-example
+  payload: "01 02"
+  expected:
+    first: 1
+    second: 2

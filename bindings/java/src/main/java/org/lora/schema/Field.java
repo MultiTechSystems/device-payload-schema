@@ -161,6 +161,14 @@ public class Field {
     
     public int getLength() { return length; }
     public void setLength(int length) { this.length = length; }
+
+    /**
+     * Whether `length` was written as a number, so that `length: 0` - a field of no
+     * bytes (PS-392) - is told apart from no length at all, which takes the type's width.
+     */
+    private boolean lengthDeclared;
+    public boolean isLengthDeclared() { return lengthDeclared; }
+    public void setLengthDeclared(boolean lengthDeclared) { this.lengthDeclared = lengthDeclared; }
     
     public int getByteOffset() { return byteOffset; }
     public void setByteOffset(int byteOffset) { this.byteOffset = byteOffset; }
@@ -371,6 +379,14 @@ public class Field {
             // resolves it against the payload rather than falling back to the type
             // default, which would read a single byte.
             return length;
+        }
+        // `length: 0` on a type that reads `length` bytes reads nothing (PS-392 for a
+        // skip). It was taken as no length and one byte was read, so a zero-length skip
+        // in a tlv case swallowed the next entry's tag (milesight gs601's 0xEE request).
+        if (lengthDeclared && (type == FieldType.SKIP || type == FieldType.BYTES
+                || type == FieldType.ASCII || type == FieldType.STRING
+                || type == FieldType.HEX || type == FieldType.BASE64)) {
+            return 0;
         }
         return type.defaultLength();
     }

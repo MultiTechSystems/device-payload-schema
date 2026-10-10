@@ -884,7 +884,9 @@ function encList(out, fields, data, ctx, top) {
     if ("byte_group" in f) { encByteGroup(out, f, data, ctx); return; }
     if (type === "repeat") { encRepeat(out, f, data, ctx); return; }
     if (type === "object") {
-      var nested = data[name];
+      // Read back from the key a `name_from` object was reported under (CR-2026-030).
+      var objKey = encResolveName(f, name, data);
+      var nested = objKey === null ? undefined : data[objKey];
       var isMap = nested !== null && typeof nested === "object" && !Array.isArray(nested);
       encList(out, f.fields || [], isMap ? nested : (top ? {} : data), ctx);
       return;
@@ -2541,7 +2543,18 @@ function writeS(buf, pos, size, value, endian) {
                     lines.extend(self._gen_decode_field(member))
             # An internal member is bound in `vars` and not reported, as at the top level.
             lines.append(f"{i}  for (var _k in d) {{ if (_k.charAt(0) === '_') delete d[_k]; }}")
-            lines.append(f'{i}  {outer}.{obj_name} = d; d = {outer};')
+            # A `name_from` names the object as it names any field (PS-265); the object
+            # was always reported under its declared `name`, so rakwireless's
+            # `accelerometer_${ch}` came out as `accelerometer`. The template resolves
+            # against `vars` once `d` is the enclosing object again.
+            guards, target = name_from_to_js(field, obj_name)
+            if guards:
+                lines.append(f'{i}  var {obj_name}_obj = d; d = {outer};')
+                for guard in guards:
+                    lines.append(f'{i}  {guard}')
+                lines.append(f'{i}  {target} = {obj_name}_obj;')
+            else:
+                lines.append(f'{i}  {outer}.{obj_name} = d; d = {outer};')
             return lines
 
         # type: number or integer (computed, decode-only). `integer` reports its value
@@ -3120,7 +3133,10 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append(f'{i}    pos += {tfsz};')
             # A component is read as a field, so its `var:` is bound for the case body -
             # a `name_from: "voc_${ch}"` with `ch` on the channel component found nothing
-            # (rakwireless standardized payload).
+            # (rakwireless standardized payload). Its name is bound too: a component is
+            # a field decoded earlier in the payload, so `ref: $rsn` in a case reads it
+            # (PS-265), where the codec read an undefined value.
+            lines.append(f'{i}    vars.{tfname} = {tfname};')
             if tf.get('var'):
                 lines.append(f'{i}    vars.{to_js_name(str(tf["var"]))} = {tfname};')
         if not tag_fields:
