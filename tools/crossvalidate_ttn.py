@@ -145,13 +145,21 @@ console.log(JSON.stringify(out));
 # compared by value. Only a plain decimal is taken as one: "0x1A", "1e3" and "3.1(low
 # battery)" stay strings, and so does every string compared against a string.
 _DECIMAL = re.compile(r"-?\d+(\.\d+)?\Z")
+# PS-512 as amended: a decimal followed only by a unit symbol ("257mm", "18℃", "-70dBm",
+# "80 %"). Letters, °, ℃, %, / and whitespace only - "3.1(low battery)" and "0x0a 10 Min"
+# stay strings.
+_DECIMAL_UNIT = re.compile(r"(-?\d+(?:\.\d+)?)\s*[A-Za-z°℃%/]+\Z")
 
 
 def as_number(want, got):
     """`want` as the number it denotes where it is a decimal string and `got` a number."""
-    if (isinstance(want, str) and _DECIMAL.match(want.strip())
-            and isinstance(got, (int, float)) and not isinstance(got, bool)):
-        return float(want)
+    if isinstance(got, (int, float)) and not isinstance(got, bool) and isinstance(want, str):
+        text = want.strip()
+        if _DECIMAL.match(text):
+            return float(text)
+        m = _DECIMAL_UNIT.match(text)
+        if m:
+            return float(m.group(1))
     return want
 
 

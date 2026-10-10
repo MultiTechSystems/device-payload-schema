@@ -45,8 +45,14 @@ def test_a_formatted_number_is_compared_by_value():
     assert compare(SCHEMA, bytes.fromhex("8a771f"), None, {"battery": "3.10"}) == []
 
 
+def test_a_number_with_a_unit_suffix_is_compared_by_value():
+    for text, want in (("257mm", 257.0), ("18℃", 18.0), ("-70dBm", -70.0), ("80 %", 80.0),
+                       ("3.6V", 3.6), ("12.5 m/s", 12.5)):
+        assert as_number(text, want) == want
+
+
 def test_only_a_plain_decimal_against_a_number_is_converted():
-    for text in ("0x1A", "1e3", "3.1(low battery)", "on", ""):
+    for text in ("0x1A", "1e3", "3.1(low battery)", "0x0a 10 Min", "on", "", "12 34"):
         assert as_number(text, 3.1) == text
     assert as_number("3.10", "3.10") == "3.10"     # string against string stays a string
     assert as_number("1", True) == "1"            # a boolean is not a number here
