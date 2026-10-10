@@ -26,6 +26,39 @@ from fractions import Fraction
 from typing import Dict, Any, List, Optional, Tuple, Union
 from enum import Enum
 
+try:
+    import yaml as _yaml
+except ImportError:  # pragma: no cover - the interpreter itself takes a dict
+    _yaml = None
+
+
+if _yaml is not None:
+
+    class CoreSchemaLoader(_yaml.SafeLoader):
+        """A SafeLoader that reads only `true` and `false` as booleans, as YAML 1.2 does.
+
+        PyYAML follows YAML 1.1, where `yes`, `no`, `on` and `off` are booleans too, so a
+        boolean literal's `value: yes` would arrive as True and pass PS-520 unseen; it
+        also turned `name: no` (nitric oxide) into False. Every other implementation
+        reads a schema with a YAML 1.2 (or no-conversion) reader.
+        """
+
+    CoreSchemaLoader.yaml_implicit_resolvers = {
+        first: [(tag, rx) for tag, rx in resolvers if tag != 'tag:yaml.org,2002:bool']
+        for first, resolvers in _yaml.SafeLoader.yaml_implicit_resolvers.items()
+    }
+    CoreSchemaLoader.add_implicit_resolver(
+        'tag:yaml.org,2002:bool',
+        re.compile(r'^(?:true|True|TRUE|false|False|FALSE)$'),
+        list('tTfF'))
+
+
+def load_schema_yaml(text: Any) -> Any:
+    """Parse schema YAML (or JSON) text with YAML 1.2 booleans (PS-520)."""
+    if _yaml is None:
+        raise ImportError("PyYAML is required to read a schema file")
+    return _yaml.load(text, Loader=CoreSchemaLoader)  # noqa: S506 - SafeLoader
+
 
 class Endian(Enum):
     BIG = 'big'
@@ -385,7 +418,7 @@ def fixed_element_size(fields):
         base = INTEGER_TYPE_INFO.get(ftype)
         if ftype in _FIXED_TYPE_SIZES or base:
             total += _FIXED_TYPE_SIZES.get(ftype) or base[0]
-        elif ftype in COMPUTED_TYPES or (ftype == 'string' and 'value' in field):
+        elif ftype in COMPUTED_TYPES or is_literal(field):
             continue
         elif '[' in ftype or ftype == 'bool':
             consume = field.get('consume', 0)
@@ -771,9 +804,15 @@ def arithmetic_schema_errors(node, _top=True):
     return errors
 
 
+#: The literal types (PS-357). `boolean` is a literal type only (PS-519): it is not
+#: an alias of `bool`, which reads a bit (PS-065).
+LITERAL_TYPES = ('string', 'number', 'boolean')
+
+
 def is_literal(field_def):
-    """A `string` or `number` field declaring `value`: a constant read from no bytes (PS-357)."""
-    return (isinstance(field_def, dict) and field_def.get('type') in ('string', 'number')
+    """A `string`, `number` or `boolean` field declaring `value`: a constant read from
+    no bytes (PS-357)."""
+    return (isinstance(field_def, dict) and field_def.get('type') in LITERAL_TYPES
             and 'value' in field_def)
 
 
@@ -781,7 +820,17 @@ LITERAL_FORBIDDEN = ('ref', 'polynomial', 'compute', 'lookup', 'transform', 'mul
 
 
 def literal_errors(field_def):
-    """PS-358: a literal's value matches its type, and it carries no arithmetic."""
+    """PS-358: a literal's value matches its type, and it carries no arithmetic.
+
+    PS-519: `boolean` is a literal type only, so it must declare `value`. PS-520: its
+    value is a YAML `true` or `false`; `yes`, `on`, `"true"` or `1` is refused. A YAML
+    1.1 reader turns `yes` and `on` into True before this sees them, which is why the
+    schema loaders here read booleans as YAML 1.2 does (`CoreSchemaLoader`).
+    """
+    if (isinstance(field_def, dict) and field_def.get('type') == 'boolean'
+            and 'value' not in field_def):
+        return [f"Field '{field_def.get('name', '?')}': type boolean is a literal and "
+                f"declares no value (PS-519)"]
     if not is_literal(field_def):
         return []
     name, value, ftype = field_def.get('name', '?'), field_def['value'], field_def['type']
@@ -790,6 +839,9 @@ def literal_errors(field_def):
         errors.append(f"Field '{name}': a string literal's value must be a string (PS-358)")
     if ftype == 'number' and (isinstance(value, bool) or not isinstance(value, (int, float))):
         errors.append(f"Field '{name}': a number literal's value must be a number (PS-358)")
+    if ftype == 'boolean' and not isinstance(value, bool):
+        errors.append(f"Field '{name}': a boolean literal's value must be true or false, "
+                      f"not {value!r} (PS-520)")
     extra = [k for k in LITERAL_FORBIDDEN if k in field_def]
     if extra:
         errors.append(f"Field '{name}': a literal must not declare {', '.join(extra)} (PS-358)")
@@ -2466,6 +2518,15 @@ class SchemaInterpreter:
                 f"Field '{field_def.get('name', '?')}': type string declares no value; a "
                 f"string read from the payload is type ascii (PS-361)")
         
+        if field_type == 'boolean':
+            # A boolean literal (PS-357, PS-519): reported as declared, read from no
+            # bytes. A missing or non-boolean value is refused at load (PS-519, PS-520).
+            if 'value' not in field_def:
+                raise ValueError(
+                    f"Field '{field_def.get('name', '?')}': type boolean is a literal and "
+                    f"declares no value (PS-519)")
+            return field_def['value'], pos
+
         if field_type == 'ascii':
             length = resolve_length(field_def, buf, pos, variables=self._variables)
             if pos + length > len(buf):
@@ -5568,8 +5629,8 @@ class SchemaInterpreter:
             length = encode_length(field_def, len(raw))
             return raw[:length].ljust(length, b'\x00')
         
-        if field_type == 'string' and 'value' in field_def:
-            # A literal came from no bytes, so it writes none.
+        if is_literal(field_def):
+            # A literal came from no bytes, so it writes none (PS-359).
             return b''
         if field_type in ('string', 'ascii'):
             length = encode_length(field_def, len(str(value).encode('utf-8')))
@@ -6025,7 +6086,7 @@ def _cli(argv: List[str]) -> int:
     args = parser.parse_args(argv)
 
     with open(args.schema, encoding='utf-8') as handle:
-        schema = yaml.safe_load(handle)
+        schema = load_schema_yaml(handle)
     payload = bytes.fromhex(args.payload.replace(' ', ''))
     result = SchemaInterpreter(schema).decode(payload, fPort=args.fport)
     print(json.dumps({

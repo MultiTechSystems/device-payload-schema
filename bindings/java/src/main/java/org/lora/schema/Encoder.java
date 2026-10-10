@@ -146,7 +146,7 @@ final class Encoder {
         }
 
         // PS-359: a literal writes no bytes and its key is not required of the input.
-        if (type == FieldType.STRING && field.getValue() != null) {
+        if ((type == FieldType.STRING || type == FieldType.BOOLEAN) && field.getValue() != null) {
             return EMPTY;
         }
         // PS-360: `value` on a field that reads bytes is the constant to write, whatever
@@ -504,6 +504,7 @@ final class Encoder {
         if (field.getPresentIf() != null && field.getFields() != null) {
             for (Field member : field.getFields()) {
                 boolean readsNothing = member.getType() == FieldType.NUMBER
+                        || member.getType() == FieldType.BOOLEAN
                         || (member.getType() == FieldType.STRING && member.getValue() != null);
                 if (!readsNothing) {
                     throw new SchemaException.EncodeException("repeat field '" + name
@@ -1210,7 +1211,7 @@ final class Encoder {
             return pad(raw, encodeLength(field, raw.length));
         }
 
-        if (type == FieldType.STRING && field.getValue() != null) {
+        if ((type == FieldType.STRING || type == FieldType.BOOLEAN) && field.getValue() != null) {
             // A literal came from no bytes, so it writes none. This wrote its text:
             // `{type: string, value: "ppm"}` re-encoded 07 as 70706d07.
             return new byte[0];

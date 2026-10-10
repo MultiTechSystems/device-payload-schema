@@ -333,9 +333,20 @@ public static partial class SchemaParser
     /// <summary>PS-358: a literal's value matches its type, and it carries no arithmetic.</summary>
     static void CheckLiteral(YamlMappingNode fm)
     {
+        // PS-519: `boolean` is a literal type only. PS-520: its value is a plain YAML 1.2
+        // `true` or `false`; `yes`, `on`, a quoted "true" and 1 are refused.
+        if (fm.TryGetValue("type", out var bt) && Scalar(bt) == "boolean")
+        {
+            var at = fm.TryGetValue("name", out var bn) ? Scalar(bn) : "?";
+            if (!fm.TryGetValue("value", out var bv))
+                throw new InvalidOperationException($"Field '{at}': type boolean is a literal and declares no value (PS-519)");
+            if (!IsCoreBoolean(bv))
+                throw new InvalidOperationException($"Field '{at}': a boolean literal's value must be true or false, "
+                    + $"not {(bv as YamlScalarNode)?.Value ?? bv.ToString()} (PS-520)");
+        }
         if (!fm.TryGetValue("value", out var valueNode) || !fm.TryGetValue("type", out var t)) return;
         var type = Scalar(t);
-        if (type is not ("string" or "number")) return;
+        if (type is not ("string" or "number" or "boolean")) return;
         var name = fm.TryGetValue("name", out var n) ? Scalar(n) : "?";
         var scalar = valueNode as YamlScalarNode;
         var quoted = scalar?.Style is YamlDotNet.Core.ScalarStyle.SingleQuoted or YamlDotNet.Core.ScalarStyle.DoubleQuoted;
@@ -348,6 +359,11 @@ public static partial class SchemaParser
             if (fm.Children.ContainsKey(new YamlScalarNode(key)))
                 throw new InvalidOperationException($"Field '{name}': a literal must not declare {key} (PS-358)");
     }
+
+    /// <summary>A plain scalar YAML 1.2's core schema reads as a boolean.</summary>
+    static bool IsCoreBoolean(YamlNode node) =>
+        node is YamlScalarNode { Style: not (YamlDotNet.Core.ScalarStyle.SingleQuoted or YamlDotNet.Core.ScalarStyle.DoubleQuoted) } s
+        && s.Value is "true" or "True" or "TRUE" or "false" or "False" or "FALSE";
 
     /// <summary>
     /// The operations a stage may hold: PS-098's arithmetic, the PS-115 table, and an
@@ -606,7 +622,10 @@ public static partial class SchemaParser
         if (fm.TryGetValue("on", out var onNode))
             f.On = Scalar(onNode);
         if (fm.TryGetValue("value", out var valueNode))
-            f.Value = ParseScalarValue(valueNode);
+            f.Value = f.Type == FieldType.Boolean && IsCoreBoolean(valueNode)
+                // A boolean literal (PS-520): `TRUE` too, which ParseScalarValue keeps as text.
+                ? ((YamlScalarNode)valueNode).Value!.Equals("true", StringComparison.OrdinalIgnoreCase)
+                : ParseScalarValue(valueNode);
 
         // Lookup table
         if (fm.TryGetValue("lookup", out var lookupNode))

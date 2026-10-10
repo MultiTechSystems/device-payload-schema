@@ -29,7 +29,7 @@ from schema_interpreter import (SchemaInterpreter, DecodeResult, check_byte_grou
                                 byte_group_endian,
                                 encoding_errors, expand_refs, fport_declaration_errors,
                                 arithmetic_schema_errors, internal_name_errors, meta_declaration_errors,
-                                literal_errors,
+                                literal_errors, CoreSchemaLoader,
                                 lookup_template_errors, optional_errors,
                                 schema_iterator_errors,
                                 timestamp_errors,
@@ -105,9 +105,10 @@ def _key_identity(key: Any) -> Any:
     return ("other", key)
 
 
-class DuplicateKeyLoader(yaml.SafeLoader):
+class DuplicateKeyLoader(CoreSchemaLoader):
     """A SafeLoader that raises DuplicateKeyError on a repeated mapping key, in every
-    mapping: schema keys, case maps, lookup tables, port maps, expected values."""
+    mapping: schema keys, case maps, lookup tables, port maps, expected values. It reads
+    booleans as YAML 1.2 does, so a boolean literal's `value: yes` is refused (PS-520)."""
 
     def construct_document(self, node):
         self._dup_paths = _node_paths(node)
@@ -567,6 +568,8 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
         'int8', 'int16', 'int24', 'int32', 'int64',
         'f16', 'f32', 'f64',
         'bool', 'bytes', 'string', 'ascii', 'hex', 'base64',
+        # PS-519: a literal type only; not an alias of `bool`, which reads a bit.
+        'boolean',
         'object', 'match', 'enum', 'repeat', 'skip',
         'bitfield_string', 'number',
         # PS-283: a computed field declaring an integer result.

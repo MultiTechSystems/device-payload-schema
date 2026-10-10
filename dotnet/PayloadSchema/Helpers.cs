@@ -269,6 +269,7 @@ public static class Helpers
             "bytes" => FieldType.Bytes,
             "skip" => FieldType.Skip,
             "string" => FieldType.String,
+            "boolean" => FieldType.Boolean,
             "number" => FieldType.Number,
             "integer" => FieldType.Integer,
             "object" => FieldType.Object,

@@ -368,7 +368,7 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
     encPad(out, raw, encLength(f, raw.length));
     return;
   }
-  if (type === "string" && "value" in f) return;
+  if (encIsLiteral(f)) return;                       // PS-359: a literal writes nothing
   if (type === "string" || type === "ascii") {
     var u = encUtf8(value);
     encPad(out, u, encLength(f, u.length));
@@ -406,7 +406,7 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
 }
 
 function encIsLiteral(f) {                            // is_literal
-  return (f.type === "string" || f.type === "number") && "value" in f;
+  return (f.type === "string" || f.type === "number" || f.type === "boolean") && "value" in f;
 }
 
 function encInternalValue(f, data) {                  // _internal_encode_value
@@ -1419,6 +1419,10 @@ class TS013Generator:
         from schema_interpreter import arithmetic_schema_errors, meta_declaration_errors
         iterator_problems += arithmetic_schema_errors(schema)
         iterator_problems += meta_declaration_errors(schema)    # PS-491
+        # PS-358, PS-519, PS-520: a malformed literal, as the interpreter refuses it.
+        from schema_interpreter import literal_errors, typed_field_dicts
+        for field_def in typed_field_dicts(schema):
+            iterator_problems += literal_errors(field_def)
         if iterator_problems:
             raise ValueError(iterator_problems[0])
         self.schema = schema
@@ -2456,7 +2460,9 @@ function writeS(buf, pos, size, value, endian) {
         if ftype == 'string' and 'value' not in field:
             raise ValueError(f"Field '{name}': type string declares no value; a string read "
                              f"from the payload is type ascii (PS-361)")
-        if ftype == 'string' and 'value' in field and not field.get('length'):
+        # A boolean literal likewise (PS-357, PS-519); its value is checked at load.
+        if (ftype == 'string' and 'value' in field and not field.get('length')) or (
+                ftype == 'boolean' and 'value' in field):
             literal = json.dumps(field['value'])
             lines.append(f'{i}  vars.{js_name} = {literal};')
             if not name.startswith('_'):
@@ -3620,8 +3626,10 @@ def fix_yaml_booleans(obj):
 
 
 def load_schema(path: Path) -> Dict[str, Any]:
+    # YAML 1.2 booleans, so a boolean literal's `value: yes` is refused (PS-520).
+    from schema_interpreter import load_schema_yaml
     with open(path) as f:
-        schema = yaml.safe_load(f)
+        schema = load_schema_yaml(f)
     return fix_yaml_booleans(schema)
 
 

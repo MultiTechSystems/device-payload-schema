@@ -41,7 +41,7 @@ var canonicalTypes = map[string]bool{
 	"uflt16": true, "sflt16": true, "sflt24": true,
 	"f16": true, "f32": true, "f64": true,
 	"udec": true, "sdec": true,
-	"bool": true, "bytes": true, "string": true, "ascii": true,
+	"bool": true, "boolean": true, "bytes": true, "string": true, "ascii": true,
 	"hex": true, "base64": true,
 	"skip": true, "enum": true, "bitfield_string": true,
 	"number": true, "integer": true,
@@ -332,8 +332,20 @@ func checkFieldRules(field map[string]any, at string) error {
 			}
 		}
 	}
+	// PS-519: `boolean` is a literal type only, so it declares `value`. PS-520: the
+	// value is a YAML true or false. yaml.v3 reads `yes` and `on` as text, so they
+	// arrive here as strings and are refused with "true" and 1.
+	if field["type"] == "boolean" {
+		value, ok := field["value"]
+		if !ok {
+			return fmt.Errorf("%s: type boolean is a literal and declares no value (PS-519)", at)
+		}
+		if _, isBool := value.(bool); !isBool {
+			return fmt.Errorf("%s: a boolean literal's value must be true or false, not %v (PS-520)", at, value)
+		}
+	}
 	// PS-358: a literal's value matches its type, and it carries no arithmetic.
-	if value, ok := field["value"]; ok && (field["type"] == "string" || field["type"] == "number") {
+	if value, ok := field["value"]; ok && (field["type"] == "string" || field["type"] == "number" || field["type"] == "boolean") {
 		_, isString := value.(string)
 		_, isBool := value.(bool)
 		_, isNumber := toFloat64(value)

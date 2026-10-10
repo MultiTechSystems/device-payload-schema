@@ -17,6 +17,8 @@ public enum FieldType {
     BOOL, BITS,
     // String types
     ASCII, HEX, BASE64, STRING,
+    /** A boolean literal (PS-519): reads no bytes; not an alias of {@code bool} (PS-065). */
+    BOOLEAN,
     // Byte types
     BYTES, SKIP,
     // Complex types
@@ -86,6 +88,7 @@ public enum FieldType {
             case "hex" -> HEX;
             case "base64" -> BASE64;
             case "string" -> STRING;
+            case "boolean" -> BOOLEAN;
             case "bytes" -> BYTES;
             case "skip" -> SKIP;
             case "object" -> OBJECT;

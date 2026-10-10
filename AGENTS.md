@@ -81,7 +81,7 @@ explicitly.
 
 ```
 TYPES:        u8 u16 u24 u32 u64 | s8 s16 s24 s32 s64 | f16 f32 f64 | bool
-              ascii hex bytes base64 | number integer string | skip enum | udec sdec
+              ascii hex bytes base64 | number integer string boolean | skip enum | udec sdec
               aliases uint8..uint64 int8..int64 i8..i64 - nothing else, case-sensitive
 BYTES FORMAT: hex hex:upper base64 array | separator (hex formats only)
 STRUCTURES:   type: object | repeat | byte_group | tlv
@@ -96,7 +96,8 @@ COMPUTE OPS:  add sub mul div mod idiv
 GUARD OPS:    gt gte lt lte eq ne
 ENCODINGS:    sign_magnitude bcd gray (Python only)
 REFERENCES:   $field_name | var: name | $ref: '#/definitions/name'
-LITERALS:     {type: string, value: "x"} | {type: number, value: 3}  (read no bytes)
+LITERALS:     {type: string, value: "x"} | {type: number, value: 3}
+              | {type: boolean, value: true}  (read no bytes; boolean needs value)
 ```
 
 ```yaml
@@ -194,10 +195,10 @@ the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1746 |
-| Go | `go/schema/corpus_conformance_test.go` | 2555 | 1763 (plain API 1740) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2555 | 1746 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2555 | 1746 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1748 |
+| Go | `go/schema/corpus_conformance_test.go` | 2557 | 1765 (plain API 1742) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2557 | 1748 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2557 | 1748 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 540 of 540 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -754,10 +755,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1746 |
-| Go | `go/schema/corpus_encode_test.go` | 1763 (plain 1740) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1746 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1746 |
+| Python | `tests/test_encode_round_trip.py` | 1748 |
+| Go | `go/schema/corpus_encode_test.go` | 1765 (plain 1742) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1748 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1748 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1396,6 +1397,17 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     `encode-round-trip.py` files the refusal as `separate-tlv`, a recoverable gap.
   - **The output schema did not declare `channels`.** It is now an array of objects, each
     with `tag`, its case's fields, and `raw` under `unknown: raw`.
+- **CR-2026-107: `type: boolean` is a literal** (PS-519, PS-520; tags provisional). It
+  reads no bytes and writes none, beside the string and number literals, in Python, Go,
+  Java, C# and the generated codec; `tools/schema_binary.py` refuses it for C (PS-446),
+  and the C harness files it as a C gap. `value` is required and must be YAML `true` or
+  `false`. **PyYAML and SnakeYAML read YAML 1.1, where `yes` and `on` are booleans**, so
+  `value: yes` would have passed as `true`: `load_schema_yaml`/`CoreSchemaLoader` in
+  `schema_interpreter.py` (also the validator's loader, the TS013 generator's and the
+  output-schema generator's) and Java's `CoreResolver` read booleans as YAML 1.2 does.
+  Other Python tools still call `yaml.safe_load`; a dict handed to `SchemaInterpreter`
+  after a YAML 1.1 load cannot be checked. Go's yaml.v3 and C#'s node-level check need
+  nothing. Fixture: `boolean-literal.yaml`.
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.

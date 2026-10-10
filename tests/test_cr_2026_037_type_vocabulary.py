@@ -21,8 +21,9 @@ from validate_schema import validate_schema_structure  # noqa: E402
 
 FIXTURE = REPO_ROOT / "schemas/devices/_language-conformance/type-vocabulary.yaml"
 
+# `boolean` left this list with CR-2026-107: it is a literal type (PS-519).
 UNDEFINED = ["float", "double", "UDec", "SDec", "U8", "Byte", "uint", "float16",
-             "boolean", "switch", "version_string", "hex:upper", "tlv"]
+             "switch", "version_string", "hex:upper", "tlv"]
 
 
 def one(type_name):
