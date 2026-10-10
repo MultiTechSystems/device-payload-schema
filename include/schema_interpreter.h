@@ -907,9 +907,15 @@ static inline int decode_field(
             if (field->consume) *pos += 1;
             break;
             
-        case FIELD_TYPE_SKIP:
-            *pos += field->size ? field->size : 1;
+        /* A skip past the end is a short read like any other. It stepped *pos past len
+         * and reported success, so bytes_consumed exceeded the payload and bytes_unread
+         * went negative. */
+        case FIELD_TYPE_SKIP: {
+            size_t width = field->size ? field->size : 1;
+            if (*pos + width > len) return SCHEMA_ERR_BUFFER;
+            *pos += width;
             return SCHEMA_OK;
+        }
             
         case FIELD_TYPE_ASCII:
             if (*pos + field->size > len) return SCHEMA_ERR_BUFFER;
@@ -1384,6 +1390,7 @@ typedef struct {
 typedef struct {
     char name[SCHEMA_MAX_NAME_LEN];
     field_value_t value;
+    bool is_int;               /* value.i64 holds it (encode_inputs_add_int), else value.f64 */
 } encode_input_t;
 
 typedef struct {
@@ -1399,6 +1406,7 @@ static inline void encode_inputs_add_int(encode_inputs_t* inputs, const char* na
     if (inputs->count >= SCHEMA_MAX_FIELDS) return;
     strncpy(inputs->inputs[inputs->count].name, name, SCHEMA_MAX_NAME_LEN - 1);
     inputs->inputs[inputs->count].value.i64 = val;
+    inputs->inputs[inputs->count].is_int = true;
     inputs->count++;
 }
 
@@ -1406,6 +1414,7 @@ static inline void encode_inputs_add_double(encode_inputs_t* inputs, const char*
     if (inputs->count >= SCHEMA_MAX_FIELDS) return;
     strncpy(inputs->inputs[inputs->count].name, name, SCHEMA_MAX_NAME_LEN - 1);
     inputs->inputs[inputs->count].value.f64 = val;
+    inputs->inputs[inputs->count].is_int = false;
     inputs->count++;
 }
 
@@ -1449,7 +1458,11 @@ static inline int encode_field(
         return SCHEMA_ERR_PARSE;  /* Missing input */
     }
     
-    double raw_val = input ? input->value.f64 : 0.0;
+    /* An integer input is read from i64. Reading f64 for every input reinterpreted the
+     * integer's bits as a double - 1 became 5e-324 - so encode_inputs_add_int encoded
+     * every value as 0. */
+    double raw_val = !input ? 0.0 :
+        input->is_int ? (double)input->value.i64 : input->value.f64;
     
     /* Reverse modifiers: encode_formula or inverse of mult/add */
     if (field->has_add) {
@@ -1463,6 +1476,10 @@ static inline int encode_field(
     }
     
     int64_t int_val = (int64_t)(raw_val + (raw_val >= 0 ? 0.5 : -0.5));  /* Round */
+    /* With no modifier the integer is written as given, exact past 2^53. */
+    if (input && input->is_int && !field->has_add && !field->has_mult && !field->has_div) {
+        int_val = input->value.i64;
+    }
     endian_t endian = (field->endian != ENDIAN_DEFAULT) ? field->endian : schema_endian;
     
     switch (field->type) {
@@ -1525,12 +1542,15 @@ static inline int encode_field(
             break;
         }
         
-        case FIELD_TYPE_SKIP:
-            for (int i = 0; i < field->size; i++) {
-                buf[*pos] = 0;
-                (*pos)++;
-            }
+        /* The width decode reads (size 0 is one byte), and never past the result buffer:
+         * a skip is up to 255 bytes, so a few of them overran data[SCHEMA_MAX_PAYLOAD]. */
+        case FIELD_TYPE_SKIP: {
+            size_t width = field->size ? field->size : 1;
+            if (*pos + width > SCHEMA_MAX_PAYLOAD) return SCHEMA_ERR_BUFFER;
+            memset(buf + *pos, 0, width);
+            *pos += width;
             break;
+        }
             
         case FIELD_TYPE_UDEC: {
             /* Encode nibble-decimal: value 3.7 -> 0x37 */
@@ -1608,8 +1628,11 @@ static inline int schema_encode_direction(
     for (int i = 0; i < schema->field_count; i++) {
         const field_def_t* field = &schema->fields[i];
         
-        /* Skip internal/match fields for now */
-        if (field->name[0] == '_' || field->type == FIELD_TYPE_MATCH) {
+        /* Skip internal/match fields for now. A skip is padding, not an internal value:
+         * field_skip() names it `_skip`, so this used to drop it and every field after a
+         * skip was written that many bytes early. */
+        if ((field->name[0] == '_' && field->type != FIELD_TYPE_SKIP) ||
+            field->type == FIELD_TYPE_MATCH) {
             continue;
         }
         
