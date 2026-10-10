@@ -540,6 +540,57 @@ static void test_leftover_bytes_are_reported(void) {
     TCHECK(r.bytes_unread == 2);
 }
 
+/* A skip past the end is a short read (PS-054): it stepped past the payload and reported
+ * success, with bytes_consumed beyond the payload and bytes_unread negative. */
+static void test_a_skip_past_the_end_is_an_error(void) {
+    schema_t s;
+    decode_result_t r;
+    uint8_t payload[] = {0x01, 0x02, 0x03};
+
+    memset(&s, 0, sizeof(s));
+    field_def_t lead = field_u8("lead");
+    field_def_t pad = field_skip(4);
+    schema_add_field(&s, &lead);
+    schema_add_field(&s, &pad);
+
+    TCHECK(schema_decode(&s, payload, sizeof(payload), &r) == SCHEMA_ERR_BUFFER);
+
+    uint8_t enough[] = {0x01, 0x00, 0x00, 0x00, 0x00};
+    TCHECK(schema_decode(&s, enough, sizeof(enough), &r) == SCHEMA_OK);
+    TCHECK(r.bytes_consumed == 5 && r.bytes_unread == 0);
+}
+
+/* On encode a skip writes its zeros - it was dropped with the `_` internals, so the field
+ * after it was written early - and never past the result buffer. */
+static void test_a_skip_is_written_on_encode(void) {
+    schema_t s;
+    encode_inputs_t in;
+    encode_result_t out;
+
+    memset(&s, 0, sizeof(s));
+    field_def_t a = field_u8("a");
+    field_def_t pad = field_skip(2);
+    field_def_t b = field_u8("b");
+    schema_add_field(&s, &a);
+    schema_add_field(&s, &pad);
+    schema_add_field(&s, &b);
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "a", 1);
+    encode_inputs_add_int(&in, "b", 2);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_OK);
+    TCHECK(out.len == 4);
+    TCHECK(out.data[0] == 1 && out.data[1] == 0 && out.data[2] == 0 && out.data[3] == 2);
+
+    /* Two 255-byte skips would end at 510, past data[SCHEMA_MAX_PAYLOAD]. */
+    memset(&s, 0, sizeof(s));
+    field_def_t big1 = field_skip(255);
+    field_def_t big2 = field_skip(255);
+    schema_add_field(&s, &big1);
+    schema_add_field(&s, &big2);
+    encode_inputs_init(&in);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_BUFFER);
+}
+
 /* PS-302 with PS-472: an unknown, undelimited tag ends the loop, and the bytes left are
  * counted from the tag itself, as the other five count them - not from after it. */
 static void test_an_unknown_tag_is_left_over_from_the_tag(void) {
@@ -584,6 +635,8 @@ void selftest_schema(void) {
     test_a_cut_length_is_an_error();
     test_a_cut_value_is_an_error();
     test_leftover_bytes_are_reported();
+    test_a_skip_past_the_end_is_an_error();
+    test_a_skip_is_written_on_encode();
     test_an_unknown_tag_is_left_over_from_the_tag();
 
     LOG(LOG_INFO, MOD, "Schema interpreter self-tests complete");
