@@ -27,7 +27,7 @@ definitions:
   
   no_ppb:
     fields:
-      - name: no
+      - name: "no"   # quoted: YAML 1.1 readers (PyYAML, SnakeYAML) read a bare no as false
         type: u16
         unit: "ppb"
         valid_range: [0, 2000]
