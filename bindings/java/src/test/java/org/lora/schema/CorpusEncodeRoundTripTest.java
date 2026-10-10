@@ -75,7 +75,7 @@ class CorpusEncodeRoundTripTest {
             "flagged", 193,
             "plain fixed", 111,   // +9: TS013 fixtures
             "match", 123,
-            "byte_group", 22,   // +2: wide-group
+            "byte_group", 25,   // +3: byte-group-bool; +2: wide-group
             // 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas
             // now carry only the definitions they reach, so one no longer contains an
             // unreferenced definition's `repeat` text for the classifier to find.
