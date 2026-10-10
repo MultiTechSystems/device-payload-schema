@@ -14,8 +14,7 @@ definitions:
         resolution: 0.001
         unece: "KWH"
         description: "Cumulative energy consumption"
-        semantic:
-          ipso: 3331
+        ipso: {object: 3331}
 
   energy_wh:
     fields:
@@ -37,8 +36,7 @@ definitions:
         resolution: 0.1
         unece: "WTT"
         description: "Active power"
-        semantic:
-          ipso: 3328
+        ipso: {object: 3328}
 
   reactive_power_var:
     fields:

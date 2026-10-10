@@ -63,8 +63,7 @@ definitions:
         valid_range: [0, 1000]
         resolution: 0.1
         description: "Carbon monoxide (CO)"
-        semantic:
-          ipso: 3325
+        ipso: {object: 3325}
 
   # === SULFUR DIOXIDE ===
   

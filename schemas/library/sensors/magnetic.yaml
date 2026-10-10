@@ -12,8 +12,7 @@ definitions:
         valid_range: [-1000, 1000]
         resolution: 1
         description: "Magnetic field X axis"
-        semantic:
-          ipso: 3314
+        ipso: {object: 3314, resource: 5702}
 
   mag_y:
     fields:
@@ -53,8 +52,7 @@ definitions:
         valid_range: [-2000, 2000]
         resolution: 0.01
         description: "Angular velocity X axis"
-        semantic:
-          ipso: 3334
+        ipso: {object: 3334, resource: 5702}
 
   gyro_y:
     fields:

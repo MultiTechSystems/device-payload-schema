@@ -14,8 +14,6 @@ definitions:
         resolution: 0.01
         unece: "MTS"
         description: "Wind speed"
-        semantic:
-          ipso: 3314
 
   wind_speed_kmh:
     fields:
@@ -37,8 +35,7 @@ definitions:
         valid_range: [0, 360]
         resolution: 1
         description: "Wind direction (0=N, 90=E, 180=S, 270=W)"
-        semantic:
-          ipso: 3314
+        ipso: {object: 3332}
 
   wind_gust_ms:
     fields:
@@ -96,8 +93,6 @@ definitions:
         valid_range: [0, 1500]
         resolution: 1
         description: "Global solar radiation"
-        semantic:
-          ipso: 3301
 
   par_umol:
     fields:
