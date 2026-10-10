@@ -338,11 +338,11 @@ Mean quality score 76.0% (PLATINUM 37, GOLD 39, SILVER 161, BRONZE 25, REJECTED 
 | `elsys/ers` | 32 | 3 | fields | 75% | SILVER |
 | `hbi/mla20` | 108 | 19 | fields | 80% | SILVER |
 | `makerfabs/4-channel-adc` | 8 | 0 | fields | 16% | REJECTED |
-| `makerfabs/ath20` | 4 | 0 | fields | 14% | REJECTED |
+| `makerfabs/ath20` | 4 | 0 | fields | 16% | REJECTED |
 | `makerfabs/gps-tracker` | 16 | 0 | fields | 16% | REJECTED |
-| `makerfabs/leaf-moisture-sn-3001` | 6 | 0 | fields | 14% | REJECTED |
+| `makerfabs/leaf-moisture-sn-3001` | 6 | 0 | fields | 16% | REJECTED |
 | `makerfabs/pipe-pressure` | 3 | 0 | fields | 16% | REJECTED |
-| `makerfabs/soil-monitor` | 8 | 0 | fields | 14% | REJECTED |
+| `makerfabs/soil-monitor` | 8 | 0 | fields | 15% | REJECTED |
 | `mclimate/flood-sensor` | 5 | 1 | fields | 61% | BRONZE |
 | `mclimate/t-valve` | 11 | 0 | fields | 16% | REJECTED |
 | `mclimate/vicki` | 31 | 13 | fields | 98% | PLATINUM |
