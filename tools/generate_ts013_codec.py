@@ -2947,14 +2947,20 @@ function writeS(buf, pos, size, value, endian) {
         tag_parts_expr = '[' + ', '.join(tag_parts) + ']'
 
         separate = tlv.get('merge', True) is False
+        # PS-270: exact keys are tried first, then negated (`!n`), then wildcard (`*`), so
+        # a broad key never shadows a specific one; within a rank, schema order. A
+        # composite key is compared component by component, as the interpreters do. It
+        # was compared as one string against "[" + a + ", " + b + "]", so `!` and `*` never
+        # matched, and nor did an exact key written without the space after its comma.
+        ranked = []
+        for order, (case_key, case_fields) in enumerate(cases.items()):
+            cond, rank = self._tlv_case_condition(case_key, tag_parts)
+            if cond is None:
+                continue
+            ranked.append((rank, order, cond, case_fields))
+        ranked.sort(key=lambda item: (item[0], item[1]))
         first = True
-        for case_key, case_fields in cases.items():
-            # Parse case key (convert to string if needed)
-            case_key_str = str(case_key)
-            if case_key_str.startswith('['):
-                cond = f'{tag_key_expr} === {json.dumps(case_key_str)}'
-            else:
-                cond = f'{tag_key_expr} === {case_key}'
+        for _rank, _order, cond, case_fields in ranked:
 
             kw = 'if' if first else '} else if'
             first = False
@@ -2982,6 +2988,36 @@ function writeS(buf, pos, size, value, endian) {
 
         lines.append(f'{i}  }}')
         return lines
+
+    @staticmethod
+    def _tlv_case_condition(case_key: Any, tag_parts: List[str]):
+        """A JS condition matching one tlv case key, and its PS-270 rank.
+
+        Rank 0 is an exact key, 1 a key with a negated component (`!n`), 2 a key with a
+        wildcard (`*`). Returns (None, None) for a key that names no tag, such as
+        `default`, which the unknown-tag path handles.
+        """
+        text = str(case_key).strip()
+        if text == 'default':
+            return None, None
+        if not text.startswith('['):
+            return '%s === %s' % (tag_parts[0], text), 0
+        body = text[1:-1] if text.endswith(']') else text[1:]
+        parts = [p.strip().strip('"\'') for p in body.split(',')]
+        if len(parts) != len(tag_parts):
+            raise ValueError("tlv case key %s has %d components; the tag has %d"
+                             % (text, len(parts), len(tag_parts)))
+        terms, rank = [], 0
+        for part, expr in zip(parts, tag_parts):
+            if part == '*':
+                rank = max(rank, 2)
+                continue
+            if part.startswith('!'):
+                rank = max(rank, 1)
+                terms.append('%s !== %d' % (expr, int(part[1:].strip(), 0)))
+            else:
+                terms.append('%s === %d' % (expr, int(part, 0)))
+        return (' && '.join(terms) or 'true'), rank
 
     def _gen_decode_tlv_unknown(self, tlv: Dict, i: str, tag_parts_expr: str,
                                 length_size: int) -> List[str]:

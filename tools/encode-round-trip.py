@@ -49,6 +49,9 @@ The `inherent` reasons, each of which is a decision recorded elsewhere:
                     output. ws50x's `v11.1` leaves the low nibble undescribed.
   ambiguous-case    Several TLV or match cases carry the same field names, so the tag that
                     produced them is not recoverable from the names alone.
+  pattern-tag       A tlv case keyed `[1, !0]` or `[9, *]` stands for many tags (PS-270),
+                    and the decoded output does not say which one arrived, so an encoder
+                    refuses to choose one rather than write a tag the device never sent.
   dropped-element   A repeat declaring `present_if` omits the elements whose condition is
                     false (PS-386); their bytes are not in the output, so an encoder
                     refuses the schema rather than invent them (PS-387).
@@ -88,6 +91,7 @@ CORPUS = REPO_ROOT / "schemas" / "devices"
 
 INHERENT = (
     "dropped-element",
+    "pattern-tag",
     "absent-value",
     "undecoded-bytes",
     "internal-field",
@@ -159,6 +163,9 @@ def schema_traits(schema):
         tlv = node.get("tlv")
         if isinstance(tlv, dict) and tlv.get("merge", True) is False:
             traits.add("separate-tlv")
+        if isinstance(tlv, dict) and any(
+                "!" in str(key) or "*" in str(key) for key in (tlv.get("cases") or {})):
+            traits.add("pattern-tag")
         # A repeat with a ceiling can stop before the payload does, and a match that
         # skips an unmatched value reports nothing for the bytes it passed over. Neither
         # emits a warning, so the trait is the only evidence.

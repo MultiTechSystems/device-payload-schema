@@ -40,8 +40,8 @@
         "no-vendor-codec": 1
       },
       "mclimate": {
-        "disagrees": 2,
-        "agrees": 1
+        "agrees": 2,
+        "disagrees": 1
       },
       "milesight": {
         "agrees": 64,
@@ -919,7 +919,7 @@
     "dragino/laq4.yaml": {
       "ttn": {
         "status": "disagrees",
-        "problems": 14,
+        "problems": 15,
         "decode_failures": 0,
         "notes": 0
       }
@@ -990,9 +990,9 @@
     },
     "mclimate/flood-sensor.yaml": {
       "ttn": {
-        "status": "disagrees",
-        "problems": 2,
-        "decode_failures": 2,
+        "status": "agrees",
+        "problems": 0,
+        "decode_failures": 0,
         "notes": 0
       }
     },
