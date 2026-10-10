@@ -85,8 +85,16 @@ var fieldConstructKeys = []string{"$ref", "flagged", "tlv", "byte_group", "match
 // it (PS-334).
 func checkTypeVocabulary(raw map[string]any) error {
 	var check func(fields any, path string) error
-	checkCases := func(cases any, path string) error {
-		for key, body := range asStringMap(cases) {
+	// strict: the cases of a `match` or `tlv` construct, whose bodies are field lists
+	// (PS-347, PS-441). A bare string such as `5: skip` was parsed as an empty case, so
+	// a match decoded nothing for it and a tlv dropped the case and skipped the tag.
+	checkCases := func(cases any, path string, strict bool) error {
+		caseMap := asStringMap(cases)
+		for _, key := range sortedKeys(caseMap) {
+			body := caseMap[key]
+			if _, ok := body.([]any); !ok && strict {
+				return fmt.Errorf("%s.cases[%s]: a case body is a field list; write [] for a case that reads nothing (PS-441)", path, key)
+			}
 			if list, ok := body.([]any); ok {
 				if err := check(list, fmt.Sprintf("%s[%s]", path, key)); err != nil {
 					return err
@@ -160,7 +168,7 @@ func checkTypeVocabulary(raw map[string]any) error {
 			}
 			for _, key := range []string{"match", "tlv"} {
 				if construct := asStringMap(field[key]); construct != nil {
-					if err := checkCases(construct["cases"], at+"."+key); err != nil {
+					if err := checkCases(construct["cases"], at+"."+key, true); err != nil {
 						return err
 					}
 					if err := check(construct["default"], at+"."+key+".default"); err != nil {
@@ -168,7 +176,7 @@ func checkTypeVocabulary(raw map[string]any) error {
 					}
 				}
 			}
-			if err := checkCases(field["cases"], at+".cases"); err != nil {
+			if err := checkCases(field["cases"], at+".cases", false); err != nil {
 				return err
 			}
 			if flagged := asStringMap(field["flagged"]); flagged != nil {

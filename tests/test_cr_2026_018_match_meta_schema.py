@@ -197,7 +197,8 @@ class TestTheValidatorNowLooksInside:
         errors = validate_schema_structure(
             match_schema(working_match(cases={1: {"name": "a", "type": "u8"}}))
         )
-        assert any("array of fields" in e for e in errors), errors
+        # The wording is case_body_errors' now, shared with tlv cases (PS-441).
+        assert any("a case body is a field list" in e for e in errors), errors
 
     def test_cases_must_be_a_mapping(self):
         errors = validate_schema_structure(

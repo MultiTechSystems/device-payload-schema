@@ -1,0 +1,72 @@
+# A nested group's `fields` is a field list (PS-347, PS-441), decoded as the top level
+# is: its members may be a discriminated dispatch, a computed value, literals, an
+# internal field read by a later member, and bit ranges sharing one byte. A name bound
+# inside the group stays bound after it, as in the spec's "Combining Nested and
+# Conditional" example, which dispatches on $msg_type bound in a nested header.
+name: probe_object_member_field_list
+endian: big
+fields:
+- name: body
+  type: object
+  fields:
+  - name: kind
+    type: u8
+    var: kind
+  - match:
+      field: $kind
+      cases:
+        1:
+        - name: small
+          type: u8
+        2:
+        - name: large
+          type: u16
+  - name: _base
+    type: u8
+  - name: base_doubled
+    type: number
+    ref: $_base
+    mult: 2
+  - name: unit_label
+    type: string
+    value: "ppm"
+  - name: version
+    type: number
+    value: 3
+  - byte_group:
+      size: 1
+      fields:
+      - name: hi
+        type: u8[4:7]
+      - name: lo
+        type: u8[0:3]
+- name: kind_again
+  type: number
+  ref: $kind
+test_vectors:
+- name: first_case
+  payload: 01 2A 05 A3
+  source: spec-example
+  expected:
+    body:
+      kind: 1
+      small: 42
+      base_doubled: 10
+      unit_label: ppm
+      version: 3
+      hi: 10
+      lo: 3
+    kind_again: 1
+- name: second_case
+  payload: 02 01 00 05 A3
+  source: spec-example
+  expected:
+    body:
+      kind: 2
+      large: 256
+      base_doubled: 10
+      unit_label: ppm
+      version: 3
+      hi: 10
+      lo: 3
+    kind_again: 2

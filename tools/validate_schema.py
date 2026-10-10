@@ -28,7 +28,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 from schema_interpreter import (SchemaInterpreter, DecodeResult, check_byte_group_overlap,
                                 byte_group_endian,
                                 encoding_errors, expand_refs, fport_declaration_errors,
-                                arithmetic_schema_errors, internal_name_errors, meta_declaration_errors,
+                                arithmetic_schema_errors, case_body_errors,
+                                internal_name_errors, meta_declaration_errors,
                                 literal_errors,
                                 lookup_template_errors, optional_errors,
                                 schema_iterator_errors,
@@ -680,8 +681,7 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                     for case_key, case_fields in cases.items():
                         cpath = f"{mpath}.cases[{case_key!r}]"
                         if not isinstance(case_fields, list):
-                            errors.append(f"{cpath}: must be an array of fields")
-                            continue
+                            continue            # case_body_errors reports it (PS-441)
                         validate_field_list(case_fields, cpath, errors, known_field_names)
                         for cf in case_fields:
                             if isinstance(cf, dict) and 'name' in cf:
@@ -867,6 +867,19 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                                         element_names)
                     if isinstance(fld.get('count_as'), str):
                         known_field_names.append(fld['count_as'])    # PS-367
+                continue
+
+            # PS-139, PS-142, PS-347: a nested group's members are a field list, checked
+            # as one. Nothing descended into them before, so a member with no type was
+            # reported valid. Its names stay bound after it, as every decoder binds them.
+            if ftype == 'object':
+                if not isinstance(fld.get('fields'), list) or not fld['fields']:
+                    errors.append(
+                        f"{path}[{i}] ({name}): an object needs a non-empty 'fields' "
+                        "(PS-142)")
+                else:
+                    validate_field_list(fld['fields'], f"{path}[{i}].fields", errors,
+                                        known_field_names)
                 continue
 
             # PS-392: a skip declares how many bytes it passes over.
@@ -1227,6 +1240,7 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
     # rather than at decode (PS-348). PS-358: malformed literals.
     errors = list(expand_refs(schema)[1]) if isinstance(schema, dict) else []
     if isinstance(schema, dict):
+        errors.extend(case_body_errors(schema))                  # PS-441
         for field_def in typed_field_dicts(schema):
             errors.extend(literal_errors(field_def))
             errors.extend(encoding_errors(field_def))
