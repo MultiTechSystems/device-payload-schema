@@ -628,6 +628,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             )
         )
     print("passing vectors: " + ", ".join(tally))
+    if not any(e["status"] != SKIP for e in reports[impls[0]].values()):
+        # A wrong --corpus-root (relative, or outside schemas/devices) finds no schema, and
+        # every rule below then holds vacuously: "0/0" printed beside PASS read as a pass.
+        print("FAIL: no vectors were checked - is --corpus-root right? It must be absolute "
+              "and contain the schemas' vendor directories")
+        return 1
 
     # Rule 1
     if changed is not None:
