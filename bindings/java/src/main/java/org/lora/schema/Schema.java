@@ -2035,6 +2035,11 @@ public class Schema {
                     if (tf.getName() != null) {
                         tagValues.put(tf.getName(), val);
                     }
+                    // A component's `var:` binds for the case body, as a field's does; a
+                    // name_from template such as "temperature_${ch}" reads it.
+                    if (tf.getVar() != null) {
+                        ctx.setVariable(tf.getVar(), (long) val);
+                    }
                 }
                 
                 Object tagKey = field.getTagKey();

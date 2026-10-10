@@ -2560,7 +2560,11 @@ function writeS(buf, pos, size, value, endian) {
 
         # skip
         if ftype == 'skip':
-            lines.append(f'{i}  pos += {length_to_js(field)};')
+            # A skip past the end is a short read, as in every interpreter; the codec
+            # advanced past the payload and reported success.
+            lines.append(f'{i}  var _skipN = {length_to_js(field)};')
+            lines.append(f'{i}  if (pos + _skipN > buf.length) throw new Error("Buffer too short for skip");')
+            lines.append(f'{i}  pos += _skipN;')
             return lines
 
         # base64 (clause 2 string types): this had no case and fell through to the
@@ -2929,6 +2933,10 @@ function writeS(buf, pos, size, value, endian) {
             tfsz = type_size(tf.get('type', 'u8')) or 1
             lines.append(f'{i}    var {tfname} = readU(buf, pos, {tfsz}, endian);')
             lines.append(f'{i}    pos += {tfsz};')
+            # A component's `var:` binds for the case body, as in every interpreter; a
+            # name_from template such as "temperature_${ch}" reads it.
+            if tf.get('var'):
+                lines.append(f'{i}    vars.{to_js_name(tf["var"])} = {tfname};')
         if not tag_fields:
             lines.append(f'{i}    var _tlvTag = readU(buf, pos, {tag_size}, endian);')
             lines.append(f'{i}    pos += {tag_size};')

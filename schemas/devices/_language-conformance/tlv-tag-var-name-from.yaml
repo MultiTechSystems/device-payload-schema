@@ -1,0 +1,38 @@
+# A composite tag's component binds its `var:` for the case body, so a field there can
+# build its output key from the channel with name_from (PS-267), as the IPSO-style
+# channel/type layouts do. Each case body is a field list (PS-347).
+name: probe_tlv_tag_var_name_from
+endian: big
+fields:
+- tlv:
+    tag_fields:
+    - name: channel
+      type: u8
+      var: ch
+    - name: kind
+      type: u8
+    tag_key: [channel, kind]
+    cases:
+      "[*, 0x67]":
+      - name: temperature
+        type: s16
+        div: 10
+        name_from: "temperature_${ch}"
+      "[*, 0x00]":
+      - name: digital_in
+        type: u8
+        name_from: "digital_in_${ch}"
+test_vectors:
+- name: two_channels
+  payload: 01 67 FF9C 02 67 00E7
+  source: spec-example
+  expected:
+    temperature_1: -10
+    temperature_2: 23.1
+    temperature: null
+- name: one_input
+  payload: 03 00 01
+  source: spec-example
+  expected:
+    digital_in_3: 1
+    digital_in: null

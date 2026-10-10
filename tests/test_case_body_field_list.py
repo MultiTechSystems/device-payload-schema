@@ -137,3 +137,38 @@ def test_the_generated_codec_drops_trailing_nul_padding_from_ascii():
     assert SchemaInterpreter(schema).decode(bytes([72, 0, 67, 0, 0])).data == {
         "label": "H\u0000C"
     }
+
+
+def test_padding_and_internal_group_members_are_not_reported():
+    # PS-432: an unnamed skip came back as `unknown: None` and `_h` as `_h: None`.
+    src = (
+        "name: p\nfields:\n- name: g\n  type: object\n  fields:\n"
+        "  - {name: t, type: u8}\n  - {type: skip, length: 1}\n"
+        "  - {name: _h, type: skip, length: 1}\n  - {name: y, type: u8}\n"
+    )
+    result = SchemaInterpreter(yaml.safe_load(src)).decode(bytes([1, 2, 3, 4]))
+    assert result.success and result.data == {"g": {"t": 1, "y": 4}}
+
+
+SKIP_PAST_END = (
+    "name: p\nfields:\n- {name: a, type: u8}\n- {name: pad, type: skip, length: 4}\n"
+)
+
+
+def test_a_skip_past_the_end_is_an_error():
+    # It decoded with success; Go, Java and C# report the short read.
+    result = SchemaInterpreter(yaml.safe_load(SKIP_PAST_END)).decode(bytes([1, 2]))
+    assert not result.success
+    assert result.errors == ["Error decoding pad: Buffer too short for skip"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_generated_codec_reports_a_skip_past_the_end():
+    script = TS013Generator(yaml.safe_load(SKIP_PAST_END), slim=True).generate() + (
+        "\nprocess.stdout.write(JSON.stringify(decodeUplink("
+        "{bytes: [1, 2], fPort: 1}).errors));"
+    )
+    out = subprocess.run(
+        ["node"], input=script, capture_output=True, text=True, check=True
+    )
+    assert any("Buffer too short for skip" in e for e in json.loads(out.stdout))

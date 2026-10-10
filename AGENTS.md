@@ -195,9 +195,9 @@ the same vectors:
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
 | Python | `tests/test_corpus_conformance.py` | every vector | 1749 |
-| Go | `go/schema/corpus_conformance_test.go` | 2564 | 1766 (plain API 1743) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2564 | 1749 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2564 | 1749 |
+| Go | `go/schema/corpus_conformance_test.go` | 2566 | 1766 (plain API 1743) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2566 | 1749 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2566 | 1749 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 540 of 540 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -1109,6 +1109,23 @@ field list; write [] for a case that reads nothing (PS-441)`. `[]` is the empty 
 **`ascii` drops trailing NUL padding only, in all five.** Python, Go and C# did; the generated
 codec kept every NUL and Java removed every NUL and trimmed whitespace at both ends. The spec
 says nothing about NUL padding in `ascii` - this is agreement, not a requirement.
+
+**A `skip` past the end of the payload is an error in all five.** Python and the generated codec
+advanced past the end and reported success, so a truncated frame decoded with no error; Go, Java
+and C# already failed the read. Measured on the private registry, the nested-list and skip fixes
+together moved 487 vectors from failing to passing in Python and none the other way.
+
+**Go's corpus runner compares nested values member by member (PS-043 to PS-045).** It compared a
+nested mapping or list by its printed form, so a nested null - "this member is absent" - could
+never pass, and a nested float had no tolerance. Python, Java and C# already recursed.
+`object-member-field-list.yaml` asserts that padding and internal members of a group are absent,
+which is what found it: Python used to report them as `unknown: null` and `_h: null`.
+
+**A tlv `tag_fields` component's `var:` binds for the case body, in all five.** None of them
+bound it, so `name_from: "temperature_${ch}"` with `ch` from the tag failed "references ch, which
+has not been decoded" everywhere (the registry's rakwireless standardized payload).
+`tlv-tag-var-name-from.yaml` pins it. Encoding such a case cannot rebuild the key: the tag's
+value is not in the data.
 
 **The Milesight wrong-decode pass (2026-09-24) left three things open.**
 

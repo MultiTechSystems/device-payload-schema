@@ -2,7 +2,8 @@
 # is: its members may be a discriminated dispatch, a computed value, literals, an
 # internal field read by a later member, and bit ranges sharing one byte. A name bound
 # inside the group stays bound after it, as in the spec's "Combining Nested and
-# Conditional" example, which dispatches on $msg_type bound in a nested header.
+# Conditional" example, which dispatches on $msg_type bound in a nested header. Padding
+# and internal members are not reported (PS-432), so the vectors assert their absence.
 name: probe_object_member_field_list
 endian: big
 fields:
@@ -40,12 +41,20 @@ fields:
         type: u8[4:7]
       - name: lo
         type: u8[0:3]
+  - type: skip
+    length: 1
+  - name: pad
+    type: skip
+    length: 1
+  - name: _spare
+    type: skip
+    length: 1
 - name: kind_again
   type: number
   ref: $kind
 test_vectors:
 - name: first_case
-  payload: 01 2A 05 A3
+  payload: 01 2A 05 A3 00 00 00
   source: spec-example
   expected:
     body:
@@ -56,9 +65,12 @@ test_vectors:
       version: 3
       hi: 10
       lo: 3
+      pad: null
+      _spare: null
+      _base: null
     kind_again: 1
 - name: second_case
-  payload: 02 01 00 05 A3
+  payload: 02 01 00 05 A3 00 00 00
   source: spec-example
   expected:
     body:
@@ -69,4 +81,7 @@ test_vectors:
       version: 3
       hi: 10
       lo: 3
+      pad: null
+      _spare: null
+      _base: null
     kind_again: 2

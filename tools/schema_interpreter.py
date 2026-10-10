@@ -2534,6 +2534,10 @@ class SchemaInterpreter:
         if field_type == 'skip':
             # Padding/reserved bytes - advance position but don't output
             length = resolve_length(field_def, buf, pos, variables=self._variables)
+            # A skip past the end is a short read like any other, as in Go, Java and C#.
+            # It succeeded, so a truncated payload decoded with no error.
+            if pos + length > len(buf):
+                raise ValueError("Buffer too short for skip")
             return None, pos + length
         
         if field_type == 'object':
@@ -3773,6 +3777,11 @@ class SchemaInterpreter:
                     tf_name = tf.get('name', 'unknown')
                     tf_value, pos = self._decode_field(tf, buf, pos)
                     tag_parts[tf_name] = tf_value
+                    # A component's `var:` binds for the case body (a `name_from`
+                    # template, a `match`), as a field's does; it bound nothing, so
+                    # `name_from: "temperature_${ch}"` failed in every case.
+                    if tf.get('var'):
+                        self._variables[tf['var']] = tf_value
                 
                 # Build composite key for matching
                 if isinstance(tag_key, list):
