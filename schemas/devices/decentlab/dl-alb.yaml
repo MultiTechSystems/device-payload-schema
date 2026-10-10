@@ -22,7 +22,6 @@ fields:
                 - add: -32768
                 - div: 10
               unit: "W/m²"
-              ipso: {object: 3301, instance: 0, resource: 5700}
               senml: {name: "solar_in", unit: "W/m2"}
               semantic: "solar.irradiance.incoming"
             - name: reflected_radiation
@@ -31,7 +30,6 @@ fields:
                 - add: -32768
                 - div: 10
               unit: "W/m²"
-              ipso: {object: 3301, instance: 1, resource: 5700}
               senml: {name: "solar_ref", unit: "W/m2"}
               semantic: "solar.irradiance.reflected"
             - name: albedo

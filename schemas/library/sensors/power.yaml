@@ -15,8 +15,6 @@ definitions:
         resolution: 1
         unece: "P1"
         description: "Battery percentage"
-        semantic:
-          ipso: 3316
 
   battery_mv:
     fields:
@@ -26,8 +24,7 @@ definitions:
         valid_range: [1800, 4200]
         resolution: 1
         description: "Battery voltage in millivolts"
-        semantic:
-          ipso: 3316
+        ipso: {object: 3316}
 
   battery_v_div10:
     fields:
@@ -39,8 +36,7 @@ definitions:
         resolution: 0.1
         unece: "VLT"
         description: "Battery voltage"
-        semantic:
-          ipso: 3316
+        ipso: {object: 3316}
 
   battery_v_div100:
     fields:
@@ -51,8 +47,7 @@ definitions:
         valid_range: [1.8, 4.2]
         resolution: 0.01
         unece: "VLT"
-        semantic:
-          ipso: 3316
+        ipso: {object: 3316}
 
   # Computed battery percentage from mV
   battery_pct_from_mv:
@@ -90,8 +85,7 @@ definitions:
         resolution: 1
         unece: "AMP"
         description: "Current draw"
-        semantic:
-          ipso: 3317
+        ipso: {object: 3317}
 
   power_w:
     fields:
@@ -102,8 +96,7 @@ definitions:
         resolution: 1
         unece: "WTT"
         description: "Power consumption"
-        semantic:
-          ipso: 3328
+        ipso: {object: 3328}
 
   energy_kwh:
     fields:

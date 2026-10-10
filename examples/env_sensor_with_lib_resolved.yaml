@@ -21,8 +21,7 @@ fields:
   - 85
   resolution: 0.1
   unece: CEL
-  semantic:
-    ipso: 3303
+  ipso: {object: 3303}
 - name: humidity
   type: u8
   mult: 0.5
@@ -32,8 +31,7 @@ fields:
   - 100
   resolution: 0.5
   unece: P1
-  semantic:
-    ipso: 3304
+  ipso: {object: 3304}
 - name: battery_mv
   type: u16
   unit: mV
@@ -42,8 +40,7 @@ fields:
   - 4200
   resolution: 1
   description: Battery voltage in millivolts
-  semantic:
-    ipso: 3316
+  ipso: {object: 3316}
 - name: battery_percent
   type: number
   ref: $battery_mv

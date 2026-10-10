@@ -11,21 +11,18 @@ fields:
     type: s16
     mult: 0.01
     unit: "Cel"
-    semantic:
-      ipso: 3303
+    ipso: {object: 3303}
     
   - name: humidity
     type: u8
     mult: 0.5
     unit: "%RH"
-    semantic:
-      ipso: 3304
+    ipso: {object: 3304}
     
   - name: battery_mv
     type: u16
     unit: "mV"
-    semantic:
-      ipso: 3316
+    ipso: {object: 3316}
     
   - name: status
     type: u8
