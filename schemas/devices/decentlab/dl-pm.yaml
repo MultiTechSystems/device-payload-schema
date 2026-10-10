@@ -80,7 +80,7 @@ fields:
                 - mult: 0.0019073486328125
                 - add: -6
               unit: "%"
-              senml: {unit: "/100"}
+              senml: {unit: "%RH"}
         - bit: 3
           fields:
             - name: barometric_pressure
