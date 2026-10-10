@@ -34,6 +34,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from validate_schema import (  # noqa: E402
+    CORRECTED_SOURCE, correction_errors, is_independent_vector)
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 DEVICES = "schemas/devices/"
@@ -43,7 +47,7 @@ GENERATED = DEVICES + "_library-composed/"
 INDEPENDENT_SOURCES = frozenset(
     {"vendor-doc", "vendor-codec", "field-capture", "spec-example"}
 )
-KNOWN_SOURCES = INDEPENDENT_SOURCES | {"generated"}
+KNOWN_SOURCES = INDEPENDENT_SOURCES | {"generated", CORRECTED_SOURCE}
 
 #: What a vector is asked, and what it claims the answer is.
 STIMULUS_KEYS = ("payload", "fPort", "fport", "port", "input", "input_metadata")
@@ -180,7 +184,8 @@ def check_schema(path: str, new_text: str, old_text: Optional[str]) -> Report:
         _identity(v, i): v for i, v in enumerate(_vectors(old) if old else [])
     }
     fixture = path.startswith(FIXTURES)
-    independent = [v for v in vectors if _source(v) in INDEPENDENT_SOURCES]
+    independent = [v for v in vectors
+                   if isinstance(v, dict) and is_independent_vector(v, INDEPENDENT_SOURCES)]
 
     report.notes.append(
         "%d vector(s), %d independent%s"
@@ -191,6 +196,9 @@ def check_schema(path: str, new_text: str, old_text: Optional[str]) -> Report:
         ident = _identity(vector, i)
         src = _source(vector)
         added = ident not in old_vectors
+        if isinstance(vector, dict):
+            for problem in correction_errors(vector):
+                report.failures.append("vector %r: %s" % (ident, problem))
         if src is not None and src not in KNOWN_SOURCES:
             report.failures.append(
                 "vector %r: unknown source %r (one of: %s)"
@@ -321,7 +329,8 @@ def run_all(repo: Path) -> int:
         unsourced = [v for v in vectors if _source(v) is None]
         stats["unsourced"] += len(unsourced)
         stats["independent"] += sum(
-            1 for v in vectors if _source(v) in INDEPENDENT_SOURCES
+            1 for v in vectors
+            if isinstance(v, dict) and is_independent_vector(v, INDEPENDENT_SOURCES)
         )
         if rel.startswith(FIXTURES):
             fixtures_unsourced.extend(
@@ -331,7 +340,8 @@ def run_all(repo: Path) -> int:
         total_schemas += 1
         if not vectors:
             no_vectors.append(rel)
-        elif not any(_source(v) in INDEPENDENT_SOURCES for v in vectors):
+        elif not any(isinstance(v, dict) and is_independent_vector(v, INDEPENDENT_SOURCES)
+                     for v in vectors):
             no_independent.append(rel)
 
     print("Corpus provenance (device schemas; %s excluded)" % GENERATED)

@@ -294,6 +294,7 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
             "runners ignore it (harmless in laq4, which is not port-based)",
         ),
         "source": (("score", "validate"), "provenance (PS-263/PS-264)"),
+        "correction": (("validate",), "fields a vendor-codec-corrected vector corrects (PS-514)"),
         "expected_quality": (
             ("validate",),
             "asserts `_quality` flags; checked by validate_schema.py only, so it belongs "

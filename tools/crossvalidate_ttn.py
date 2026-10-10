@@ -141,8 +141,43 @@ console.log(JSON.stringify(out));
         Path(temp).unlink(missing_ok=True)
 
 
+# PS-512: a vendor codec's string rendering of a number - `(x / 10).toFixed(2)` - is
+# compared by value. Only a plain decimal is taken as one: "0x1A", "1e3" and "3.1(low
+# battery)" stay strings, and so does every string compared against a string.
+_DECIMAL = re.compile(r"-?\d+(\.\d+)?\Z")
+
+
+def as_number(want, got):
+    """`want` as the number it denotes where it is a decimal string and `got` a number."""
+    if (isinstance(want, str) and _DECIMAL.match(want.strip())
+            and isinstance(got, (int, float)) and not isinstance(got, bool)):
+        return float(want)
+    return want
+
+
+def _hex(payload):
+    return re.sub(r"[^0-9a-f]", "", str(payload).lower())
+
+
+def corrections(schema):
+    """{(payload hex, fPort): {field, ...}} for the schema's `vendor-codec-corrected` vectors.
+
+    PS-514: such a vector says which fields the vendor codec gets wrong for its payload, so a
+    comparison against that codec on the same payload skips exactly those fields.
+    """
+    out = {}
+    for vec in (schema or {}).get("test_vectors") or []:
+        if not isinstance(vec, dict) or vec.get("source") != "vendor-codec-corrected":
+            continue
+        port = vec.get("fPort", vec.get("fport", vec.get("port")))
+        names = {c.get("field") for c in vec.get("correction") or [] if isinstance(c, dict)}
+        out.setdefault((_hex(vec.get("payload", "")), port), set()).update(names)
+    return out
+
+
 def compare(schema, payload, fport, expected):
     """Return a list of disagreements between our decode and `expected`."""
+    skip = corrections(schema).get((payload.hex(), fport), set())
     try:
         result = SchemaInterpreter(schema).decode(payload, fPort=fport)
     except Exception as exc:  # noqa: BLE001 - report, do not abort the sweep
@@ -152,10 +187,12 @@ def compare(schema, payload, fport, expected):
     got = {k: v for k, v in result.data.items() if not k.startswith("_")}
     problems = []
     for key, want in (expected or {}).items():
+        if key in skip:
+            continue
         if key not in got:
             problems.append("%s: vendor %r, ours <missing>" % (key, want))
             continue
-        match, _message = values_match(want, got[key], CONFORMANCE_TOLERANCE)
+        match, _message = values_match(as_number(want, got[key]), got[key], CONFORMANCE_TOLERANCE)
         if not match:
             problems.append("%s: vendor %r, ours %r" % (key, want, got[key]))
     return problems
