@@ -329,3 +329,13 @@ func TestMetaMatchesIsExact(t *testing.T) {
 		t.Errorf("detail %q", detail)
 	}
 }
+
+// A tlv with merge: false is refused by the encoder rather than written as nothing: its
+// entries are a list under `channels`, and encoding them is not defined yet.
+func TestEncodeRefusesASeparateTLV(t *testing.T) {
+	s := mustParse(t, "name: x\nfields:\n  - tlv:\n      tag_size: 1\n      length_size: 1\n      merge: false\n      cases:\n        1:\n          - {name: a, type: u8}\n")
+	data := map[string]any{"channels": []any{map[string]any{"tag": []any{1}, "a": 7}}}
+	if _, err := s.EncodeToResult(data, 0); err == nil || !strings.Contains(err.Error(), "merge: false") {
+		t.Fatalf("expected a refusal naming merge: false, got %v", err)
+	}
+}

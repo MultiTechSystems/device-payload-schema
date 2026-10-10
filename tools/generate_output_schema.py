@@ -627,6 +627,23 @@ def process_fields(fields: List[Dict], properties: Dict, required: List[str],
         # Handle tlv
         if 'tlv' in field:
             tlv = field['tlv']
+            if isinstance(tlv, dict) and tlv.get('merge', True) is False:
+                # Clause 4: the entries are a list under `channels`, each its tag and its
+                # own case's fields (or `raw`, for a tag captured with `unknown: raw`).
+                # This was not declared, so every key such a schema reports was missing.
+                item_props: Dict[str, Any] = {
+                    "tag": {"type": "array", "items": {"type": "integer"}}}
+                for case_fields in (tlv.get('cases') or {}).values():
+                    if isinstance(case_fields, list):
+                        process_fields(case_fields, item_props, [], definitions, context)
+                if tlv.get('unknown') == 'raw':
+                    item_props["raw"] = {"type": "string"}
+                properties['channels'] = {
+                    "type": "array",
+                    "items": {"type": "object", "properties": item_props,
+                              "required": ["tag"]},
+                }
+                continue
             for case_fields in tlv.get('cases', {}).values():
                 if isinstance(case_fields, list):
                     process_fields(case_fields, properties, required, definitions, context)

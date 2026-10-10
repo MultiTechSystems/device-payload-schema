@@ -232,4 +232,22 @@ public class CR2026096Test {
                 Map.of("f", Map.of("x", Map.of("type", "s8"))), "_meta");
         assertTrue(detail.contains("_meta.f.x.type"), detail);
     }
+
+    /** A tlv with merge: false is refused rather than encoded to nothing (its entries are under channels). */
+    @Test
+    void encodeRefusesASeparateTlv() {
+        Schema s = Schema.fromYaml("name: x\nfields:\n  - tlv:\n      tag_size: 1\n      length_size: 1\n"
+                + "      merge: false\n      cases:\n        1:\n          - {name: a, type: u8}\n");
+        java.util.Map<String, Object> entry = new java.util.LinkedHashMap<>();
+        entry.put("tag", java.util.List.of(1));
+        entry.put("a", 7);
+        String reported;
+        try {
+            EncodeResult r = s.encode(java.util.Map.of("channels", java.util.List.of(entry)));
+            reported = String.join("; ", r.getErrors());
+        } catch (SchemaException e) {
+            reported = e.getMessage();
+        }
+        org.junit.jupiter.api.Assertions.assertTrue(reported.contains("merge: false"), reported);
+    }
 }

@@ -5344,6 +5344,13 @@ class SchemaInterpreter:
         caller records it against the payload rather than writing a wrong tag.
         """
         tlv_def = field_def.get('tlv', {})
+        if tlv_def.get('merge', True) is False:
+            # Its entries are a list under `channels`, which the claiming below cannot
+            # see, so this wrote an empty payload and reported nothing. Encoding them is
+            # not defined yet; say so rather than write a frame with the entries missing.
+            raise ValueError(
+                "a tlv with merge: false reports its entries under 'channels', and "
+                "encoding them is not supported")
         cases = tlv_def.get('cases', {}) or {}
         length_size = tlv_def.get('length_size', 0) or 0
         byteorder = 'little' if self.endian == Endian.LITTLE else 'big'

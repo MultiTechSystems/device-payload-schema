@@ -4118,6 +4118,12 @@ func parseIntAny(text string) (int64, error) {
 // into one map, so the channels are recovered from which field names are present and
 // ordered by where those names appear in the decoded output.
 func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
+	// `merge: false` reports its entries as a list under `channels`, which the claiming
+	// below cannot see, so this wrote nothing and returned success. Encoding the list is
+	// not defined yet; refuse it by name, as the reference does.
+	if field.Merge != nil && !*field.Merge {
+		return fmt.Errorf("%s", "a tlv with merge: false reports its entries under 'channels', and encoding them is not supported")
+	}
 	// Python recovers channel order from its decoded output, whose keys are in payload
 	// order. A Go map has no order at all, so the channels are emitted in ascending tag
 	// order instead - which is how devices in this corpus lay them out, but is an

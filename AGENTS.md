@@ -1382,10 +1382,20 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
       value is malformed (`match: 3`), which slips past the PS-334 check.
     - Go reads a typeless tlv `tag_fields` member, and an enum with no `base`, as one byte.
     - PS-498 (enum `descriptions`, MAY) is not produced.
-    - Encoding a `merge: false` tlv's decoded output writes an empty payload with no error
-      or warning in Python (found porting `_meta` to Java). That is the silent-write-of-
-      nothing shape above, in the encoder, and is not part of this change.
   - CR-2026-043 (`_meta.fPort`) and the `_meta` parts of CR-2026-054 land with this.
+- **A `tlv` with `merge: false` (Clause 4) had three gaps, found by `meta-tlv-channels.yaml`.**
+  No device schema uses the construct, so nothing had run it until `_meta` needed its
+  `channels` entry.
+  - **The generated TS013 codec did not decode it.** `channels` was missing from the codec's
+    output, with no error. Each entry is now decoded into its own object and pushed to
+    `channels`, and a raw-captured unknown tag goes there too (PS-303).
+  - **All five encoders wrote an empty payload for it and reported success.** That was the
+    silent write of nothing, in Python, Go, Java, C# and the generated codec alike. Each now
+    refuses it by name: "a tlv with merge: false reports its entries under 'channels', and
+    encoding them is not supported". Encoding the list is the subject of a CR being drafted;
+    `encode-round-trip.py` files the refusal as `separate-tlv`, a recoverable gap.
+  - **The output schema did not declare `channels`.** It is now an array of objects, each
+    with `tag`, its case's fields, and `raw` under `unknown: raw`.
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.

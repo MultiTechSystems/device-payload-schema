@@ -284,4 +284,21 @@ public class CR2026_096MetaTests
         Assert.Equal("tlv", Meta.MetaType((YamlDotNet.RepresentationModel.YamlMappingNode)Node(
             "{name: c, tlv: {merge: false, cases: {}}}")));
     }
+
+    // A tlv with merge: false is refused rather than encoded to nothing (its entries are
+    // under `channels`, and encoding them is not defined yet).
+    [Fact]
+    public void EncodeRefusesASeparateTlv()
+    {
+        var schema = SchemaParser.Parse("name: x\nfields:\n  - tlv:\n      tag_size: 1\n      length_size: 1\n"
+            + "      merge: false\n      cases:\n        1:\n          - {name: a, type: u8}\n");
+        var data = new Dictionary<string, object?>
+        {
+            ["channels"] = new List<object?> { new Dictionary<string, object?> { ["tag"] = new List<object?> { 1L }, ["a"] = 7L } },
+        };
+        string reported;
+        try { reported = string.Join("; ", SchemaEncoder.Encode(schema, data).Errors); }
+        catch (InvalidOperationException e) { reported = e.Message; }
+        Assert.Contains("merge: false", reported);
+    }
 }

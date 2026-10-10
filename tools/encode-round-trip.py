@@ -64,6 +64,10 @@ loss:
                     for a schema-declared `reading` - and the encoders look the value up by
                     the declared name, so they find nothing. The template's inputs are in
                     the decoded output, so this one is recoverable and nobody has done it.
+  separate-tlv      A `tlv` with `merge: false` reports its entries as a list under
+                    `channels` (Clause 4). Encoding that list is not defined yet, so the
+                    encoders refuse it by name rather than write a payload with the entries
+                    missing, which they used to do silently.
 """
 
 import argparse
@@ -94,7 +98,7 @@ INHERENT = (
 )
 
 #: Recoverable in principle, so counted apart from the inherent set.
-FIXABLE = ("templated-name",)
+FIXABLE = ("templated-name", "separate-tlv")
 
 #: What a decode says when it could not read part of the payload. CR-2026-013 and
 #: CR-2026-021 put these there; they are the evidence this tool reads.
@@ -152,6 +156,9 @@ def schema_traits(schema):
                 traits.add("lossy-value")
         if node.get("name_from"):
             traits.add("templated-name")
+        tlv = node.get("tlv")
+        if isinstance(tlv, dict) and tlv.get("merge", True) is False:
+            traits.add("separate-tlv")
         # A repeat with a ceiling can stop before the payload does, and a match that
         # skips an unmatched value reports nothing for the bytes it passed over. Neither
         # emits a warning, so the trait is the only evidence.
