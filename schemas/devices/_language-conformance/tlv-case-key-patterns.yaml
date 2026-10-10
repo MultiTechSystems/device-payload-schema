@@ -1,0 +1,47 @@
+# Composite tlv case keys with a negated (`!n`) or wildcard (`*`) component, and their
+# precedence: an exact key first, then a negated one, then a wildcard, whatever their order
+# in the schema (PS-270, CR-2026-004). The cases are declared broadest first on purpose, so
+# an implementation trying them in schema order picks the wrong one.
+name: tlv_case_key_patterns
+endian: big
+fields:
+  - tlv:
+      tag_fields:
+        - {name: ch, type: u8}
+        - {name: ty, type: u8}
+      tag_key: [ch, ty]
+      cases:
+        "[2, *]":
+          - {name: any_type, type: u8}
+        "[1, !200]":
+          - {name: not_200, type: u8}
+        "[1,200]":
+          - {name: exactly_200, type: u8}
+        "[2, 9]":
+          - {name: type_9, type: u8}
+test_vectors:
+  - name: negated_component
+    source: spec-example
+    payload: "01 05 07"
+    expected: {not_200: 7}
+    expected_warnings: []
+  - name: exact_beats_negated
+    source: spec-example
+    payload: "01 C8 07"
+    expected: {exactly_200: 7}
+    expected_warnings: []
+  - name: exact_beats_wildcard
+    source: spec-example
+    payload: "02 09 07"
+    expected: {type_9: 7}
+    expected_warnings: []
+  - name: wildcard_component
+    source: spec-example
+    payload: "02 05 07"
+    expected: {any_type: 7}
+    expected_warnings: []
+  - name: all_four_in_one_payload
+    source: spec-example
+    payload: "01 05 01 01 C8 02 02 09 03 02 05 04"
+    expected: {not_200: 1, exactly_200: 2, type_9: 3, any_type: 4}
+    expected_warnings: []

@@ -77,12 +77,12 @@ fields:
           - name: humidity_min
             type: u8
             unit: "%"
-            senml: {unit: "/100"}
+            senml: {unit: "%RH"}
             description: "Humidity alarm minimum threshold"
           - name: humidity_max
             type: u8
             unit: "%"
-            senml: {unit: "/100"}
+            senml: {unit: "%RH"}
             description: "Humidity alarm maximum threshold"
           - name: co2_min
             type: u16
