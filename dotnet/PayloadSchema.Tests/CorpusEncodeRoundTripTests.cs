@@ -52,7 +52,7 @@ public class CorpusEncodeRoundTripTests
     // which the raw-YAML classifier had filed under that shape. Its out_of_range vector
     // omits a field and cannot (bytes differ), and leftover-bytes' second vector
     // re-encodes to its first byte only (PS-474): both by design.
-    const int EncodeFloorTotal = 1742;   // +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
+    const int EncodeFloorTotal = 1744;   // +2: CR-2026-096 meta fixtures (meta-port-default, plain fixed); +6 before: trimmed vendor vectors
 
     /// <summary>
     /// Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -63,7 +63,7 @@ public class CorpusEncodeRoundTripTests
         // 1283 -> 1281 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped only because their internal byte halves were all zero, which the encoder wrote for an internal field with no value. It now reports such a field instead.
         ["tlv"] = 1294,   // +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
         ["flagged"] = 193,
-        ["plain fixed"] = 100,
+        ["plain fixed"] = 102,   // +2: CR-2026-096 meta-port-default.yaml
         ["match"] = 123,
         ["byte_group"] = 20,
         // 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now

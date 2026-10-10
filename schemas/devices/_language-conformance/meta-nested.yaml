@@ -1,0 +1,60 @@
+# Nested _meta entries list what is declared, not what one payload reported, and no
+# internal field has one at any depth (PS-371, CR-2026-088 PS-481 as amended by
+# CR-2026-096, PS-494). An element's identity names a field whose lookup default carries
+# ${value}, so the listing of its values is open (CR-2026-095 PS-489), and an element's
+# SenML name is a template carried as written (PS-373).
+name: meta_nested
+endian: big
+fields:
+  - name: probe
+    type: object
+    fields:
+      - {name: depth, type: u8, unit: cm}
+      - {name: moisture, type: u8, unit: "/100", senml: {name: vwc}}
+  - name: channels
+    type: repeat
+    count: 2
+    identity: $sensor
+    fields:
+      - name: sensor
+        type: u8
+        lookup: {1: soil, 2: air, default: "s${value}"}
+      - name: _flags
+        type: u8
+      - name: value
+        type: s16
+        div: 10
+        unit: Cel
+        senml: {name: "t_${sensor}"}
+test_vectors:
+  - name: two_elements
+    source: spec-example
+    payload: "1E32 0100 00E7 0700 0064"
+    expected:
+      probe: {depth: 30, moisture: 50}
+      channels:
+        - {sensor: soil, value: 23.1}
+        - {sensor: s7, value: 10}
+    expected_meta:
+      schema: meta_nested
+      fields:
+        probe:
+          type: object
+          fields:
+            depth: {type: u8, unit: cm}
+            moisture: {type: u8, unit: "/100", senml: {name: vwc}}
+        channels:
+          type: repeat
+          elements:
+            sensor: {type: u8}
+            value: {type: s16, unit: Cel, senml: {name: "t_${sensor}"}}
+          identity: {field: sensor, values: [soil, air, "s${value}"], open: true}
+  - name: a_listed_label
+    source: spec-example
+    payload: "1E32 0200 FF9C 0100 0000"
+    expected:
+      probe: {depth: 30, moisture: 50}
+      channels:
+        - {sensor: air, value: -10}
+        - {sensor: soil, value: 0}
+    expected_warnings: []

@@ -761,6 +761,7 @@ function encTlvTag(out, key, tlv, ctx) {              // _encode_tlv_tag
 
 function encTlv(out, f, data, ctx) {                  // _encode_tlv
   var tlv = f.tlv || {}, cases = tlv.cases || {}, lsize = tlv.length_size || 0;
+  if (tlv.merge === false) encFail("a tlv with merge: false reports its entries under 'channels', and encoding them is not supported");
   var order = Object.keys(data), cands = [];
   for (var key in cases) {
     if (key === "default" || !Array.isArray(cases[key])) continue;
@@ -1415,8 +1416,9 @@ class TS013Generator:
             group = port_entry.get('fields') if isinstance(port_entry, dict) else port_entry
             iterator_problems += optional_errors(group)
         # PS-445, PS-452: a guard only on a computed field, one operation per stage.
-        from schema_interpreter import arithmetic_schema_errors
+        from schema_interpreter import arithmetic_schema_errors, meta_declaration_errors
         iterator_problems += arithmetic_schema_errors(schema)
+        iterator_problems += meta_declaration_errors(schema)    # PS-491
         if iterator_problems:
             raise ValueError(iterator_problems[0])
         self.schema = schema
@@ -1516,14 +1518,17 @@ function tlvTagLabel(parts) {
 
 // The captured bytes of an unknown tag, under the key PS-303 names. Generated codecs
 // merge a TLV case into the parent, so this is always the merged form.
-function tlvUnknownRaw(d, tag, buf, from, span) {
+function tlvUnknownRaw(d, tag, buf, from, span, separate) {
   var hex = "";
   for (var n = from; n < from + span && n < buf.length; n++) {
     var part = (buf[n] & 0xFF).toString(16);
     hex += part.length < 2 ? "0" + part : part;
   }
-  if (!d.unknown_tags) { d.unknown_tags = []; }
-  d.unknown_tags.push({ tag: tag, raw: hex });
+  // PS-303: with `merge: false` the captured entry is one of the channels, as the
+  // interpreters report it; merged output has no channel list, so `unknown_tags`.
+  var key = separate ? "channels" : "unknown_tags";
+  if (!d[key]) { d[key] = []; }
+  d[key].push({ tag: tag, raw: hex });
 }
 
 // --- Absent values ---
@@ -2941,6 +2946,7 @@ function writeS(buf, pos, size, value, endian) {
         #: so a warning naming it reads the same on both paths.
         tag_parts_expr = '[' + ', '.join(tag_parts) + ']'
 
+        separate = tlv.get('merge', True) is False
         first = True
         for case_key, case_fields in cases.items():
             # Parse case key (convert to string if needed)
@@ -2954,10 +2960,19 @@ function writeS(buf, pos, size, value, endian) {
             first = False
             lines.append(f'{i}    {kw} ({cond}) {{')
 
+            if separate:
+                # `merge: false` (Clause 4): each entry is its own object, carrying its
+                # tag, in a list under `channels`. The case's fields are decoded into it
+                # by swapping it in as `d` for their length. This was not generated at
+                # all, so `channels` was missing from the codec's output with no error.
+                lines.append(f'{i}      var _tlvOuter = d; d = {{ tag: {tag_parts_expr} }};')
             self.indent += 2
             for cf in case_fields:
                 lines.extend(self._gen_decode_field(cf))
             self.indent -= 2
+            if separate:
+                lines.append(f'{i}      if (!_tlvOuter.channels) {{ _tlvOuter.channels = []; }}')
+                lines.append(f'{i}      _tlvOuter.channels.push(d); d = _tlvOuter;')
 
         if not first:
             lines.append(f'{i}    }} else {{')
@@ -2977,9 +2992,8 @@ function writeS(buf, pos, size, value, endian) {
         the generator ignored `unknown`, so every mode came out as a silent `break` -
         including `error`, which the interpreters raise on.
 
-        `merge` is not consulted: a generated codec puts a TLV case's fields straight into
-        the output and has no channel list, so PS-303's merged form is the only one
-        available here.
+        With `merge: false` a raw capture is one of the `channels`, as the interpreters
+        report it (PS-303); merged output puts it under `unknown_tags`.
         """
         mode = tlv.get('unknown', 'skip')
         lines = [f'{i}      var _tlvLabel = tlvTagLabel({tag_parts_expr});']
@@ -2991,8 +3005,9 @@ function writeS(buf, pos, size, value, endian) {
         if mode == 'raw':
             span = '_tlvLen' if length_size else 'buf.length - pos'
             lines.append(f'{i}      var _tlvSpan = {span};')
+            separate = 'true' if tlv.get('merge', True) is False else 'false'
             lines.append(
-                f'{i}      tlvUnknownRaw(d, {tag_parts_expr}, buf, pos, _tlvSpan);')
+                f'{i}      tlvUnknownRaw(d, {tag_parts_expr}, buf, pos, _tlvSpan, {separate});')
             lines.append(f'{i}      pos += _tlvSpan;')
             if not length_size:
                 # Nothing delimits the entry, so the capture ran to the end of the buffer
@@ -3310,11 +3325,13 @@ function writeS(buf, pos, size, value, endian) {
         lines = []
 
         if self.has_ports:
-            # Rejects a `default` port entry, which this generator cannot express as an
-            # fPort comparison. Keep it: without it the loops below emit
-            # `input.fPort === default`.
+            # A `default` entry is not an fPort comparison: it is the fallback for every
+            # port the schema does not list (PS-024), emitted after them below. It used to
+            # be refused here, by int('default').
             port_map = {}
             for port_key, port_def in self.schema['ports'].items():
+                if str(port_key) == 'default':
+                    continue
                 port_map[int(port_key)] = {
                     'direction': port_def.get('direction', DEFAULT_PORT_DIRECTION),
                 }
@@ -3338,6 +3355,8 @@ function writeS(buf, pos, size, value, endian) {
                 for port_key in self.schema['ports']:
                     declared = self.schema['ports'][port_key].get(
                         'direction', DEFAULT_PORT_DIRECTION)
+                    if str(port_key) == 'default':
+                        continue
                     lines.append(f'    if (input.fPort === {port_key}) {{')
                     if declared in (direction, 'both'):
                         lines.append(f'      var r = decodePort{port_key}(input.bytes, endian);')
@@ -3347,6 +3366,17 @@ function writeS(buf, pos, size, value, endian) {
                                    f'message direction is {direction}')
                         lines.append(f'      return {{ data: {{}}, warnings: [], errors: ["{message}"] }};')
                     lines.append(f'    }}')
+                fallback = self.schema['ports'].get('default')
+                if isinstance(fallback, dict):
+                    # PS-024: every port not listed falls through to `default`.
+                    declared = fallback.get('direction', DEFAULT_PORT_DIRECTION)
+                    if declared == 'both' or declared == direction:
+                        lines.append('    var rd = decodePortdefault(input.bytes, endian);')
+                        lines.append('    return { data: omitAbsent(rd.data), warnings: rd.warnings || [], errors: [] };')
+                    else:
+                        message = (f'the default port entry is declared direction:{declared}; '
+                                   f'message direction is {direction}')
+                        lines.append(f'    return {{ data: {{}}, warnings: [], errors: ["{message}"] }};')
                 # PS-025: an FPort the schema does not describe is an error. It was a
                 # warning beside an empty result, which reads as a successful decode.
                 lines.append(f'    return {{ data: {{}}, warnings: [], errors: ["No port definition for fPort " + input.fPort] }};')
@@ -3388,6 +3418,12 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append(f'      return {{ bytes: [], fPort: {pk}, warnings: [], errors: '
                              f'["fPort {pk} declares direction uplink, so it is not encoded as a '
                              f'downlink (PS-292)"] }};')
+            if 'default' in encodable:
+                # PS-024: an unlisted port encodes through the `default` entry.
+                kw = 'if' if first else '} else if'
+                first = False
+                lines.append(f'    {kw} (typeof port === "number") {{')
+                lines.append('      r = encodePortdefault(input.data, endian);')
             kw = 'if' if first else '} else if'
             if dl_ports:
                 lines.append(f'    {kw} (port === undefined || port === null) {{')

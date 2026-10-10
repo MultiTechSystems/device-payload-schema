@@ -222,6 +222,9 @@ type Field struct {
 	Sentinel       []int64 `json:"-" yaml:"-"`
 	OutOfRangeOmit bool    `json:"-" yaml:"-"`
 	MatchRemaining bool    `json:"-" yaml:"-"`
+	// decl is the field's declaration as written (after $ref splicing), from which its
+	// _meta entry is derived (CR-2026-096). See meta.go.
+	decl map[string]any
 }
 
 // Transform represents a single transformation stage.
@@ -319,6 +322,12 @@ type Schema struct {
 	// repeatOnly is every name declared in some repeat's elements and nowhere outside
 	// one (PS-368): a reference to one from outside an element is an error.
 	repeatOnly map[string]bool
+	// For _meta (CR-2026-096, meta.go): the document's `name` and `version` as written,
+	// and the source order of every mapping, which a Go map does not keep.
+	rawName    any
+	rawVersion any
+	hasVersion bool
+	keyOrder   keyOrder
 }
 
 // DecodeContext maintains state during decoding.
@@ -348,6 +357,11 @@ type DecodeContext struct {
 	// the bytes left, so PS-472 reports no second one.
 	rangeStash       rangeStash
 	leftoverReported bool
+	// metaProducers, set only by Interpret, records the declaration that wrote each
+	// top-level reported key (PS-490); metaDepth counts enclosing objects and repeats,
+	// whose members are not top-level keys. See meta.go.
+	metaProducers map[string]map[string]any
+	metaDepth     int
 }
 
 // EncodeContext maintains state during encoding.
@@ -842,7 +856,15 @@ func ParseSchema(data string) (*Schema, error) {
 		return nil, err
 	}
 
-	schema := &Schema{repeatOnly: repeatOnlyNames(raw)}
+	// CR-2026-096: the source order of every mapping, for _meta, and PS-491 at load.
+	order := buildKeyOrder(raw, &rootNode)
+	if err := checkMetaDeclarations(raw, order); err != nil {
+		return nil, err
+	}
+
+	schema := &Schema{repeatOnly: repeatOnlyNames(raw), keyOrder: order}
+	schema.rawName = raw["name"]
+	schema.rawVersion, schema.hasVersion = raw["version"]
 	
 	if name, ok := raw["name"].(string); ok {
 		schema.Name = name
@@ -993,7 +1015,7 @@ func enumLabel(v any) (string, bool) {
 }
 
 func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
-	f := Field{}
+	f := Field{decl: fm}
 	
 	if name, ok := fm["name"].(string); ok {
 		f.Name = name
@@ -1785,6 +1807,11 @@ func (s *Schema) DecodeWithPort(data []byte, fPort int) (map[string]any, error) 
 // mark them as such, so no field is returned (PS-288). Pass "" for direction to skip
 // the check.
 func (s *Schema) DecodeWithPortDirection(data []byte, fPort int, direction string) (map[string]any, error) {
+	return s.decodeWithPort(data, fPort, direction, nil)
+}
+
+// decodeWithPort is DecodeWithPortDirection with an optional _meta recorder (Interpret).
+func (s *Schema) decodeWithPort(data []byte, fPort int, direction string, producers map[string]map[string]any) (map[string]any, error) {
 	if err := s.checkDirection(fPort, direction); err != nil {
 		return nil, err
 	}
@@ -1796,6 +1823,7 @@ func (s *Schema) DecodeWithPortDirection(data []byte, fPort int, direction strin
 
 	ctx := NewDecodeContext(data, s.Endian)
 	ctx.repeatOnly = s.repeatOnly
+	ctx.metaProducers = producers
 	result := make(map[string]any)
 
 	if len(s.Header) > 0 {
@@ -1836,6 +1864,11 @@ func (s *Schema) DecodeWithPortDirection(data []byte, fPort int, direction strin
 
 // Decode decodes binary data using the schema.
 func (s *Schema) Decode(data []byte) (map[string]any, error) {
+	return s.decode(data, nil)
+}
+
+// decode is Decode with an optional _meta recorder (Interpret).
+func (s *Schema) decode(data []byte, producers map[string]map[string]any) (map[string]any, error) {
 	// PS-459, PS-460: a ports schema decoded with no FPort selects nothing. This decoded
 	// the empty top-level field list and returned {} with success.
 	if len(s.Ports) > 0 {
@@ -1843,6 +1876,7 @@ func (s *Schema) Decode(data []byte) (map[string]any, error) {
 	}
 	ctx := NewDecodeContext(data, s.Endian)
 	ctx.repeatOnly = s.repeatOnly
+	ctx.metaProducers = producers
 	result := make(map[string]any)
 
 	// Decode header fields
@@ -2007,7 +2041,7 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 		}
 
 		ctx.rangeStash = rangeStash{}
-		value, err := decodeField(field, ctx)
+		value, err := ctx.decodeFieldProduced(field)
 		if err != nil {
 			return nil, err
 		}
@@ -2045,6 +2079,9 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 			outputName, err := resolveFieldName(field, ctx)
 			if err != nil {
 				return nil, err
+			}
+			if outputName != field.Name {
+				ctx.produced(field.decl, outputName) // PS-492
 			}
 			// A leading underscore marks an internal field: it becomes a variable
 			// later fields can reference, but is not reported. The encode path
@@ -2119,6 +2156,7 @@ func decodeByteGroup(field Field, ctx *DecodeContext) (map[string]any, error) {
 	}
 
 	for _, subfield := range field.ByteGroup {
+		ctx.produced(subfield.decl, subfield.Name) // PS-490
 		var raw any
 		if m := bitRangePattern.FindStringSubmatch(string(subfield.Type)); m != nil {
 			start, _ := strconv.Atoi(m[2])
@@ -3070,6 +3108,7 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 			// Structured tag
 			tagValues = make(map[string]int)
 			for _, tf := range field.TagFields {
+				ctx.produced(tf.decl, tf.Name) // as the reference records a tag field
 				data, err := ctx.Read(tagFieldWidth(tf))
 				if err != nil {
 					break
@@ -4079,6 +4118,12 @@ func parseIntAny(text string) (int64, error) {
 // into one map, so the channels are recovered from which field names are present and
 // ordered by where those names appear in the decoded output.
 func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
+	// `merge: false` reports its entries as a list under `channels`, which the claiming
+	// below cannot see, so this wrote nothing and returned success. Encoding the list is
+	// not defined yet; refuse it by name, as the reference does.
+	if field.Merge != nil && !*field.Merge {
+		return fmt.Errorf("%s", "a tlv with merge: false reports its entries under 'channels', and encoding them is not supported")
+	}
 	// Python recovers channel order from its decoded output, whose keys are in payload
 	// order. A Go map has no order at all, so the channels are emitted in ascending tag
 	// order instead - which is how devices in this corpus lay them out, but is an

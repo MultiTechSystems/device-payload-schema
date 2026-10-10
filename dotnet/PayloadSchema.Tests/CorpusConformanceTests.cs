@@ -42,7 +42,7 @@ public class CorpusConformanceTests
     // (4), and match-default-skip.yaml's skipped body now expects the PS-472 warning.
     // All six new vectors decode here, so the floor is the full 2371 (2382 vectors, 11
     // without a payload or an expected block).
-    const int CorpusFloor = 2540;   // dl-atm41g2's two vendor vectors (+2); +121: vendor-codec vectors that kill vobo's mutation survivors
+    const int CorpusFloor = 2550;   // +1: CR-2026-097 meta-tlv-channels; +9: CR-2026-096 meta fixtures; dl-atm41g2's two vendor vectors (+2); +121: vendor-codec vectors that kill vobo's mutation survivors
 
     readonly ITestOutputHelper _output;
 
@@ -120,6 +120,7 @@ public class CorpusConformanceTests
         int total = 0, passed = 0;
         var failures = new Dictionary<string, int>();
         var report = new CorpusReport();
+        var metaReport = new CorpusMetaReport();
 
         foreach (var file in Directory.GetFiles(corpus, "*.yaml", SearchOption.AllDirectories)
                      .OrderBy(f => f))
@@ -140,6 +141,7 @@ public class CorpusConformanceTests
             {
                 Bump(failures, $"{Path.GetFileName(file)}: parse: {e.Message}");
                 report.SchemaFailed(rel, text, e.Message);
+                MetaSchemaFailed(metaReport, rel, text);
                 continue;
             }
             if (!root.Children.TryGetValue(new YamlScalarNode("test_vectors"), out var tvNode)
@@ -153,6 +155,26 @@ public class CorpusConformanceTests
                 if (vectors.Children[index] is not YamlMappingNode vector) continue;
                 total++;
                 var vectorName = CorpusReport.Scalar(vector, "name");
+                // CR-2026-096: the interpreter output's _meta, for every vector with a
+                // payload when CORPUS_META_REPORT asks, and wherever a vector pins it.
+                var expectsMeta = vector.Children.TryGetValue(new YamlScalarNode("expected_meta"), out var expectedMeta);
+                object? meta = null;
+                string? metaError = null;
+                if ((metaReport.Enabled || expectsMeta)
+                    && vector.Children.ContainsKey(new YamlScalarNode("payload")))
+                {
+                    try
+                    {
+                        var interpreted = SchemaDecoder.Interpret(schema,
+                            Convert.FromHexString(Text(vector, "payload").Replace(" ", "")), MetaContext(vector));
+                        meta = interpreted["_meta"];
+                    }
+                    catch (Exception e)
+                    {
+                        metaError = $"{e.GetType().Name}: {e.Message}";
+                    }
+                    metaReport.Add(rel, index, vectorName, meta);
+                }
                 try
                 {
                     // An encode vector carries the values to encode and no payload to decode
@@ -203,6 +225,12 @@ public class CorpusConformanceTests
                             break;
                         }
                     }
+                    if (mismatch == null && expectsMeta)
+                    {
+                        mismatch = metaError != null
+                            ? "_meta: interpret failed: " + metaError
+                            : MetaMismatch(Meta.FromYaml(expectedMeta), meta, "_meta");
+                    }
                     if (mismatch == null)
                     {
                         passed++;
@@ -228,6 +256,7 @@ public class CorpusConformanceTests
             _output.WriteLine($"  ... and {failures.Count - 12} more distinct failures");
 
         report.Write(_output.WriteLine);
+        metaReport.Write(_output.WriteLine);
         if (report.Restricted)
         {
             _output.WriteLine(
@@ -237,6 +266,95 @@ public class CorpusConformanceTests
         Assert.True(passed >= CorpusFloor,
             $"only {passed} corpus vectors pass, floor is {CorpusFloor}");
     }
+
+    /// <summary>
+    /// The input context of a vector (PS-495): its fPort, else input_metadata's, and
+    /// input_metadata's recvTime and devEUI. A devEUI that YAML resolves to something
+    /// other than a string is passed as written, since the context carries a string.
+    /// </summary>
+    internal static InputContext MetaContext(YamlMappingNode vector)
+    {
+        YamlNode? Child(YamlMappingNode map, string key) =>
+            map.Children.TryGetValue(new YamlScalarNode(key), out var value) ? value : null;
+        var port = Meta.FromYaml(Child(vector, "fPort") ?? Child(vector, "fport"));
+        var input = Child(vector, "input_metadata") as YamlMappingNode;
+        if (port == null && input != null && Meta.FromYaml(Child(input, "fPort")) is long contextPort)
+            port = contextPort;
+        object? recvTime = input != null ? Meta.FromYaml(Child(input, "recvTime")) : null;
+        string? devEui = null;
+        if (input != null && Child(input, "devEUI") is YamlScalarNode euiNode && Meta.FromYaml(euiNode) != null)
+            devEui = euiNode.Value;
+        return new InputContext(port is long p ? (int)p : null, recvTime, devEui);
+    }
+
+    /// <summary>A null `_meta` for each payload vector of a schema that did not load (PS-497).</summary>
+    static void MetaSchemaFailed(CorpusMetaReport metaReport, string rel, string text)
+    {
+        if (!metaReport.Enabled) return;
+        try
+        {
+            var yaml = new YamlStream();
+            yaml.Load(new StringReader(text));
+            var root = (YamlMappingNode)yaml.Documents[0].RootNode;
+            if (!root.Children.TryGetValue(new YamlScalarNode("test_vectors"), out var node)
+                || node is not YamlSequenceNode vectors)
+                return;
+            for (int i = 0; i < vectors.Children.Count; i++)
+                if (vectors.Children[i] is YamlMappingNode vector
+                    && vector.Children.ContainsKey(new YamlScalarNode("payload")))
+                    metaReport.Add(rel, i, CorpusReport.Scalar(vector, "name"), null);
+        }
+        catch (Exception)
+        {
+            // Unreadable YAML: the reference skips it too.
+        }
+    }
+
+    /// <summary>
+    /// Whether `_meta` is exactly what a vector expects, or where it differs (CR-2026-096).
+    /// Exact, not a subset: the same keys at every level. Numbers compare by value, a
+    /// boolean is never a number, and lists compare in order. Mirrors meta_matches in
+    /// tools/validate_schema.py.
+    /// </summary>
+    internal static string? MetaMismatch(object? want, object? got, string path)
+    {
+        switch (want)
+        {
+            case Dictionary<string, object?> wantMap:
+            {
+                if (got is not Dictionary<string, object?> gotMap)
+                    return $"{path}: expected an object, got {Meta.PyRepr(got)}";
+                var missing = wantMap.Keys.Where(k => !gotMap.ContainsKey(k)).ToList();
+                var extra = gotMap.Keys.Where(k => !wantMap.ContainsKey(k)).ToList();
+                if (missing.Count > 0 || extra.Count > 0)
+                    return $"{path}: missing [{string.Join(", ", missing)}], unexpected [{string.Join(", ", extra)}]";
+                foreach (var (key, value) in wantMap)
+                    if (MetaMismatch(value, gotMap[key], $"{path}.{key}") is { } detail)
+                        return detail;
+                return null;
+            }
+            case List<object?> wantList:
+            {
+                if (got is not List<object?> gotList || gotList.Count != wantList.Count)
+                    return $"{path}: expected {Meta.PyRepr(want)}, got {Meta.PyRepr(got)}";
+                for (int i = 0; i < wantList.Count; i++)
+                    if (MetaMismatch(wantList[i], gotList[i], $"{path}[{i}]") is { } detail)
+                        return detail;
+                return null;
+            }
+        }
+        bool ok;
+        if (want is bool || got is bool)
+            ok = want is bool a && got is bool b && a == b;
+        else if (IsMetaNumber(want) && IsMetaNumber(got))
+            ok = Convert.ToDouble(want, System.Globalization.CultureInfo.InvariantCulture)
+                 == Convert.ToDouble(got, System.Globalization.CultureInfo.InvariantCulture);
+        else
+            ok = Equals(want, got);
+        return ok ? null : $"{path}: expected {Meta.PyRepr(want)}, got {Meta.PyRepr(got)}";
+    }
+
+    static bool IsMetaNumber(object? value) => value is long or int or double;
 
     static string Text(YamlMappingNode node, string key) =>
         node.Children.TryGetValue(new YamlScalarNode(key), out var value)

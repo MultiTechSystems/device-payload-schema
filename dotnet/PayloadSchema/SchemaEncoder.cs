@@ -883,6 +883,11 @@ public static class SchemaEncoder
         /// </remarks>
         byte[] EncodeTLV(SchemaField tlv, Dictionary<string, object?> data)
         {
+            // `merge: false` reports its entries as a list under `channels`, which the
+            // claiming below cannot see, so this wrote nothing and reported success. Encoding
+            // the list is not defined yet; refuse it by name, as the reference does.
+            if (tlv.Merge == false)
+                throw new InvalidOperationException("a tlv with merge: false reports its entries under 'channels', and encoding them is not supported");
             if (tlv.TLVCases == null || tlv.TLVCases.Count == 0) return Array.Empty<byte>();
             int lengthSize = Math.Max(0, tlv.LengthSize);
             var order = _order ?? data.Keys.ToList();

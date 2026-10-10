@@ -29,6 +29,7 @@ from schema_interpreter import SchemaInterpreter  # noqa: E402
 from score_schema import CONFORMANCE_TOLERANCE  # noqa: E402
 from validate_schema import (  # noqa: E402
     expected_fields_match,
+    meta_matches,
     is_encode_vector,
     warnings_match,
 )
@@ -81,3 +82,13 @@ def test_corpus_vector(path, schema, vector):
     # a vector without the key asserts nothing, which is most of the corpus.
     match, message = warnings_match(vector.get("expected_warnings"), result.warnings)
     assert match, "%s: %s" % (path.name, message)
+
+    # CR-2026-096: a vector may pin the interpreter output's _meta, built from its fPort
+    # and its input_metadata as the input context (PS-495). Absent asserts nothing.
+    if "expected_meta" in vector:
+        interpreted = SchemaInterpreter(schema).interpret(
+            bytes.fromhex(payload), fPort=fport, input_metadata=vector.get("input_metadata")
+        )
+        assert interpreted.success, "%s: %s" % (path.name, interpreted.errors[:2])
+        match, message = meta_matches(vector["expected_meta"], interpreted.data["_meta"])
+        assert match, "%s: %s" % (path.name, message)

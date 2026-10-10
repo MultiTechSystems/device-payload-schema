@@ -56,6 +56,28 @@ public class DecodeContext {
     private final Map<Field, Boolean> guardElse = new IdentityHashMap<>();
     /** A PS-302 warning has already reported the bytes left over (PS-472). */
     private boolean leftoverReported;
+    /**
+     * PS-490: the declaration that wrote each top-level reported value, by output key, for
+     * {@code _meta}. Recorded where a field is decoded; the last write wins.
+     */
+    private final Map<String, Map<String, Object>> producers = new HashMap<>();
+    /** How deep inside an object's members or a repeat's elements the decode is. */
+    private int metaDepth;
+
+    /**
+     * Records the declaration about to report {@code key} (its name where null), unless
+     * the decode is inside an object or repeat, which {@code _meta} describes from the
+     * declaration instead (PS-371, PS-481), or the key is internal (PS-494).
+     */
+    void produced(Field field, String key) {
+        if (metaDepth > 0 || field == null || field.getRaw() == null) return;
+        String k = key != null ? key : field.getName();
+        if (k != null && !k.startsWith("_")) producers.put(k, field.getRaw());
+    }
+
+    void enterMetaLevel() { metaDepth++; }
+    void exitMetaLevel() { metaDepth--; }
+    Map<String, Map<String, Object>> getProducers() { return producers; }
 
     public DecodeContext(byte[] data, String endian) {
         this.data = data;

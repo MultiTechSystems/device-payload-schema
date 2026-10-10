@@ -788,6 +788,12 @@ final class Encoder {
      * records it against the payload rather than writing a wrong tag.
      */
     private byte[] encodeTLV(Field tlv, Map<String, Object> data) {
+        // `merge: false` reports its entries as a list under `channels`, which the claiming
+        // below cannot see, so this wrote nothing and reported success. Encoding the list
+        // is not defined yet; refuse it by name, as the reference does.
+        if (Boolean.FALSE.equals(tlv.getMerge())) {
+            throw new SchemaException.EncodeException("a tlv with merge: false reports its entries under 'channels', and encoding them is not supported");
+        }
         Map<String, List<Field>> cases = tlv.getTlvCases();
         if (cases == null || cases.isEmpty()) return EMPTY;
         int lengthSize = Math.max(0, tlv.getLengthSize());

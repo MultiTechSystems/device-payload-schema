@@ -1,0 +1,98 @@
+# The interpreter output's _meta at device level, and the per-field entries of a flat
+# schema (PS-175, PS-178, PS-180, PS-181, PS-340, PS-341, PS-177; CR-2026-088 PS-480;
+# CR-2026-096 PS-493 to PS-496). The input context is the vector's fPort and its
+# input_metadata: recvTime becomes rx_time in Unix seconds keeping its fraction, and
+# devEUI is written as 16 lower-case hex digits.
+#
+# Entries come from the declarations: senml.unit is preferred to unit and nothing is
+# converted, an alias type is written by its canonical name, a bit range as written, a
+# computed field as number, and the internal byte has no entry.
+name: meta_device_context
+version: 2
+endian: big
+fields:
+  - name: temperature
+    type: s16
+    div: 10
+    unit: "°C"
+    senml: {name: temp, unit: Cel}
+    ipso: {object: 3303}
+    description: Air temperature
+  - name: humidity
+    type: uint8
+    unit: "%RH"
+  - name: _reserved
+    type: u8
+  - name: state
+    type: u8[0:3]
+    consume: 1
+    lookup: {0: idle, 1: busy}
+  - name: echo
+    type: number
+    ref: $temperature
+    unit: Cel
+test_vectors:
+  - name: full_context
+    source: spec-example
+    payload: "00E7 32 00 01"
+    fPort: 7
+    input_metadata: {recvTime: "2026-08-26T12:00:00.123Z", devEUI: "00-11-22-33-44-55-66-AA"}
+    expected: {temperature: 23.1, humidity: 50, state: busy, echo: 23.1}
+    expected_warnings: []
+    expected_meta:
+      schema: meta_device_context
+      version: 2
+      device_eui: "00112233445566aa"
+      rx_time: 1787745600.123
+      fPort: 7
+      fields:
+        temperature:
+          type: s16
+          unit: Cel
+          ipso: {object: 3303, instance: 0, resource: 5700}
+          senml: {name: temp}
+          description: Air temperature
+        humidity: {type: u8, unit: "%RH"}
+        state: {type: "u8[0:3]"}
+        echo: {type: number, unit: Cel}
+  - name: no_context
+    description: "No fPort, recvTime or devEUI: those keys are omitted, never invented"
+    source: spec-example
+    payload: "00E7 32 00 01"
+    expected: {temperature: 23.1, humidity: 50, state: busy, echo: 23.1}
+    expected_warnings: []
+    expected_meta:
+      schema: meta_device_context
+      version: 2
+      fields:
+        temperature:
+          type: s16
+          unit: Cel
+          ipso: {object: 3303, instance: 0, resource: 5700}
+          senml: {name: temp}
+          description: Air temperature
+        humidity: {type: u8, unit: "%RH"}
+        state: {type: "u8[0:3]"}
+        echo: {type: number, unit: Cel}
+  - name: offset_time_whole_seconds
+    description: "A UTC offset is applied, and a time with no fraction is a whole number"
+    source: spec-example
+    payload: "FF9C 0A 00 00"
+    input_metadata: {recvTime: "2026-08-26T14:00:00+02:00", devEUI: "0011223344556677"}
+    expected: {temperature: -10, humidity: 10, state: idle, echo: -10}
+    expected_warnings: []
+    expected_meta:
+      schema: meta_device_context
+      version: 2
+      device_eui: "0011223344556677"
+      rx_time: 1787745600
+      fields:
+        temperature:
+          type: s16
+          unit: Cel
+          ipso: {object: 3303, instance: 0, resource: 5700}
+          senml: {name: temp}
+          description: Air temperature
+        humidity: {type: u8, unit: "%RH"}
+        state: {type: "u8[0:3]"}
+        echo: {type: number, unit: Cel}

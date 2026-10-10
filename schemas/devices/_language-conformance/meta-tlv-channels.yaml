@@ -1,0 +1,26 @@
+# A tlv with `merge: false` reports its entries as a list under the fixed key `channels`
+# (Clause 4), and that key's _meta entry has type `tlv` (CR-2026-097, PS-493).
+name: meta_tlv_channels
+endian: big
+fields:
+  - tlv:
+      tag_size: 1
+      merge: false
+      cases:
+        1:
+          - {name: temperature, type: s16, div: 10, unit: Cel}
+        2:
+          - {name: humidity, type: u8, unit: "%RH"}
+test_vectors:
+  - name: two_entries
+    source: spec-example
+    payload: "01 00E7 02 32"
+    expected:
+      channels:
+        - {tag: [1], temperature: 23.1}
+        - {tag: [2], humidity: 50}
+    expected_warnings: []
+    expected_meta:
+      schema: meta_tlv_channels
+      fields:
+        channels: {type: tlv}

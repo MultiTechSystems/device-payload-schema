@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from schema_interpreter import (SchemaInterpreter, DecodeResult, check_byte_group_overlap,
                                 byte_group_endian,
                                 encoding_errors, expand_refs, fport_declaration_errors,
-                                arithmetic_schema_errors, internal_name_errors,
+                                arithmetic_schema_errors, internal_name_errors, meta_declaration_errors,
                                 literal_errors,
                                 lookup_template_errors, optional_errors,
                                 schema_iterator_errors,
@@ -476,6 +476,43 @@ def values_match(expected: Any, actual: Any, tolerance: float = 0.001) -> Tuple[
         return False, f"expected {expected}, got {actual}"
     
     return True, ""
+
+
+def meta_matches(expected, actual, path='_meta'):
+    """Whether interpreter output's `_meta` is exactly `expected` (CR-2026-096).
+
+    Exact, not a subset: `_meta` is a structure the Integration Layer reads, so a key too
+    many is as wrong as one missing. Numbers compare by value (`5` equals `5.0`, the
+    representation every YAML reader agrees on); a boolean is never a number. Returns
+    (ok, detail) - unpack it, `if not meta_matches(...)` is always false.
+    """
+    if isinstance(expected, dict):
+        if not isinstance(actual, dict):
+            return False, '%s: expected an object, got %r' % (path, actual)
+        missing = [k for k in expected if k not in actual]
+        extra = [k for k in actual if k not in expected]
+        if missing or extra:
+            return False, '%s: missing %s, unexpected %s' % (path, missing, extra)
+        for key in expected:
+            ok, detail = meta_matches(expected[key], actual[key], '%s.%s' % (path, key))
+            if not ok:
+                return ok, detail
+        return True, ''
+    if isinstance(expected, list):
+        if not isinstance(actual, list) or len(actual) != len(expected):
+            return False, '%s: expected %r, got %r' % (path, expected, actual)
+        for i, (want, got) in enumerate(zip(expected, actual)):
+            ok, detail = meta_matches(want, got, '%s[%d]' % (path, i))
+            if not ok:
+                return ok, detail
+        return True, ''
+    if isinstance(expected, bool) or isinstance(actual, bool):
+        ok = expected is actual
+    elif isinstance(expected, (int, float)) and isinstance(actual, (int, float)):
+        ok = expected == actual
+    else:
+        ok = expected == actual
+    return (True, '') if ok else (False, '%s: expected %r, got %r' % (path, expected, actual))
 
 
 def warnings_match(expected: Any, actual: List[str]) -> Tuple[bool, str]:
@@ -1195,6 +1232,7 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
             errors.extend(encoding_errors(field_def))
             errors.extend(lookup_template_errors(field_def))      # PS-407
         errors.extend(arithmetic_schema_errors(schema))          # PS-445, PS-452
+        errors.extend(meta_declaration_errors(schema))           # PS-491
         # PS-350, PS-366 to PS-387, PS-471: the repeat iterator and reserve.
         errors.extend(schema_iterator_errors(schema))
         # PS-014, PS-015, PS-464, PS-465: what `length` may be. Checked only on the

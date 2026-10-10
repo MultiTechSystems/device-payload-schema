@@ -45,7 +45,7 @@ import (
 // CR-2026-085/086's fixtures decode now that bytes after the last field are reported
 // (leftover-bytes, match-default-skip's skipped body) and valid_range is compared before
 // the lookup (range-before-lookup's four vectors), so the full count is 2371.
-const corpusFloor = 2540 // dl-atm41g2's two vendor vectors (+2); +40: vendor vectors for the schemas the unit cleanup touches; +121: vendor-codec vectors that kill vobo's mutation survivors; +6: Milesight battery-channel vendor vectors (percent units)
+const corpusFloor = 2550 // +1: meta-tlv-channels (CR-2026-097); +9: the CR-2026-096 _meta fixtures (meta-device-context, meta-port-default, meta-producer, meta-nested); dl-atm41g2's two vendor vectors (+2); +40: vendor vectors for the schemas the unit cleanup touches; +121: vendor-codec vectors that kill vobo's mutation survivors; +6: Milesight battery-channel vendor vectors (percent units)
 
 type corpusVector struct {
 	Name    string `yaml:"name"`
@@ -65,6 +65,10 @@ type corpusVector struct {
 	// warning (PS-306) - the tag and the byte count are not contiguous in any
 	// implementation's text - so the element type is `any`.
 	ExpectedWarnings *[]any `yaml:"expected_warnings"`
+	// CR-2026-096: the input context (PS-495) beside the fPort, and the interpreter
+	// output's `_meta`, compared exactly where present.
+	InputMetadata map[string]any `yaml:"input_metadata"`
+	ExpectedMeta  *any           `yaml:"expected_meta"`
 }
 
 // corpusWarningsMismatch reports how the warnings a decode produced differ from what the
@@ -149,6 +153,7 @@ func TestCorpusConformance(t *testing.T) {
 	var passed, failed, total int
 	failures := map[string]int{}
 	report := newCorpusReport()
+	metaReport := newCorpusMetaReport()
 
 	for _, file := range files {
 		rel, _ := filepath.Rel(root, file)
@@ -170,6 +175,11 @@ func TestCorpusConformance(t *testing.T) {
 		}
 		parsed, err := ParseSchema(string(data))
 		if err != nil {
+			for index, vector := range meta.TestVectors {
+				if vector.Payload != "" {
+					metaReport.add(rel, index, vector.Name, nil)
+				}
+			}
 			failed += len(meta.TestVectors)
 			total += len(meta.TestVectors)
 			failures[fmt.Sprintf("%s: parse: %v", filepath.Base(file), err)]++
@@ -196,7 +206,20 @@ func TestCorpusConformance(t *testing.T) {
 			if err != nil {
 				failed++
 				report.add(rel, index, vector.Name, "error", fmt.Sprintf("payload: %v", err))
+				metaReport.add(rel, index, vector.Name, nil)
 				continue
+			}
+			// CR-2026-096: the interpreter output, for every vector the meta report
+			// covers and for those that pin their `_meta`.
+			var interpreted map[string]any
+			var interpretErr error
+			if metaReport.enabled() || vector.ExpectedMeta != nil {
+				interpreted, interpretErr = corpusInterpret(parsed, vector, payload)
+				var produced any
+				if interpretErr == nil {
+					produced = interpreted["_meta"]
+				}
+				metaReport.add(rel, index, vector.Name, produced)
 			}
 			// Recover per vector: a panic in the decoder is a defect to report, not
 			// a reason to abandon the remaining vectors.
@@ -243,6 +266,13 @@ func TestCorpusConformance(t *testing.T) {
 					break
 				}
 			}
+			if mismatch == "" && vector.ExpectedMeta != nil {
+				if interpretErr != nil {
+					mismatch = fmt.Sprintf("interpret: %v", interpretErr)
+				} else if ok, detail := corpusMetaMatches(*vector.ExpectedMeta, interpreted["_meta"], "_meta"); !ok {
+					mismatch = detail
+				}
+			}
 			if mismatch == "" {
 				passed++
 				report.add(rel, index, vector.Name, "pass", "")
@@ -265,6 +295,7 @@ func TestCorpusConformance(t *testing.T) {
 		shown++
 	}
 	report.write(t)
+	metaReport.write(t)
 	if report.restricted() {
 		t.Logf("CORPUS_ONLY/CORPUS_ROOT is set: %d schema(s) selected, floor %d not applied", len(report.only), corpusFloor)
 	} else if passed < corpusFloor {
@@ -358,4 +389,100 @@ func hexToBytes(text string) ([]byte, error) {
 		out = append(out, byte(value))
 	}
 	return out, nil
+}
+
+// corpusInputContext is the vector's input context (PS-495): its fPort, else
+// input_metadata's, and input_metadata's recvTime and devEUI.
+func corpusInputContext(vector corpusVector) InputContext {
+	in := InputContext{FPort: vector.port()}
+	if in.FPort == nil {
+		if port, ok := vector.InputMetadata["fPort"].(int); ok {
+			in.FPort = &port
+		}
+	}
+	in.RecvTime = vector.InputMetadata["recvTime"]
+	if eui, present := vector.InputMetadata["devEUI"]; present && eui != nil {
+		in.DevEUI = fmt.Sprintf("%v", eui)
+	}
+	return in
+}
+
+// corpusInterpret runs Interpret for a vector, recovering a panic as an error.
+func corpusInterpret(parsed *Schema, vector corpusVector, payload []byte) (out map[string]any, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("panic: %v", recovered)
+		}
+	}()
+	return parsed.Interpret(payload, corpusInputContext(vector))
+}
+
+// corpusMetaMatches is validate_schema.meta_matches: `_meta` exactly as expected. The
+// same keys at every level and no others; numbers by value (5 equals 5.0); a boolean is
+// never a number; lists elementwise in order.
+func corpusMetaMatches(want, got any, path string) (bool, string) {
+	if wantMap := asStringMap(want); wantMap != nil {
+		gotMap := asStringMap(got)
+		if gotMap == nil {
+			return false, fmt.Sprintf("%s: expected an object, got %v", path, got)
+		}
+		var missing, extra []string
+		for key := range wantMap {
+			if _, ok := gotMap[key]; !ok {
+				missing = append(missing, key)
+			}
+		}
+		for key := range gotMap {
+			if _, ok := wantMap[key]; !ok {
+				extra = append(extra, key)
+			}
+		}
+		if len(missing) > 0 || len(extra) > 0 {
+			sort.Strings(missing)
+			sort.Strings(extra)
+			return false, fmt.Sprintf("%s: missing %v, unexpected %v", path, missing, extra)
+		}
+		keys := make([]string, 0, len(wantMap))
+		for key := range wantMap {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			if ok, detail := corpusMetaMatches(wantMap[key], gotMap[key], path+"."+key); !ok {
+				return ok, detail
+			}
+		}
+		return true, ""
+	}
+	if wantList, ok := want.([]any); ok {
+		gotList, ok := got.([]any)
+		if !ok || len(gotList) != len(wantList) {
+			return false, fmt.Sprintf("%s: expected %v, got %v", path, want, got)
+		}
+		for i := range wantList {
+			if ok, detail := corpusMetaMatches(wantList[i], gotList[i], fmt.Sprintf("%s[%d]", path, i)); !ok {
+				return ok, detail
+			}
+		}
+		return true, ""
+	}
+	_, wantBool := want.(bool)
+	_, gotBool := got.(bool)
+	var ok bool
+	if wantBool || gotBool {
+		ok = wantBool && gotBool && want == got
+	} else {
+		wantNum, wantIsNum := toFloat64(want)
+		gotNum, gotIsNum := toFloat64(got)
+		if wantIsNum && gotIsNum {
+			ok = wantNum == gotNum
+		} else {
+			ok = !wantIsNum && !gotIsNum &&
+				fmt.Sprintf("%T:%v", want, want) == fmt.Sprintf("%T:%v", got, got)
+		}
+	}
+	if ok {
+		return true, ""
+	}
+	return false, fmt.Sprintf("%s: expected %v, got %v", path, want, got)
 }

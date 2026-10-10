@@ -37,6 +37,11 @@ public class Schema {
     private Map<String, PortDef> ports;
     /** Names declared only inside some repeat's elements (PS-368). */
     private Set<String> repeatOnlyNames = Set.of();
+    /** The document's {@code name} as written, null where it has none (`_meta.schema`). */
+    private Object metaName;
+    /** Whether the document declares {@code version}, and the value it declares. */
+    private boolean declaresVersion;
+    private Object declaredVersion;
 
     public Schema() {
         this.fields = new ArrayList<>();
@@ -81,8 +86,17 @@ public class Schema {
 
     @SuppressWarnings("unchecked")
     private static Schema parseRaw(Map<String, Object> raw) {
+        // `_meta.version` is the version the document declares, never a default (PS-175).
+        boolean declaresVersion = raw.containsKey("version");
+        Object declaredVersion = raw.get("version");
         // CR-2026-045: splice every $ref first, rejecting what cannot be (PS-345 to PS-349).
         raw = expandRawRefs(raw);
+        // PS-491 (CR-2026-096): one reported name's declarations in one field list agree on
+        // unit, senml and ipso, so its `_meta` entry does not depend on which one decoded.
+        List<String> metaErrors = Meta.declarationErrors(raw);
+        if (!metaErrors.isEmpty()) {
+            throw new SchemaException(metaErrors.get(0));
+        }
         // Wave 6a (CR-2026-048, -053, -054, -055, -081): the iterator's and the reserves'
         // schema rules, over the whole document, since PS-369 and PS-381 depend on which
         // repeats enclose a field.
@@ -92,6 +106,9 @@ public class Schema {
         Wave6b.checkSchema(raw);
         Schema schema = new Schema();
         schema.repeatOnlyNames = Wave6a.repeatOnlyNames(raw);
+        schema.metaName = raw.get("name");
+        schema.declaresVersion = declaresVersion;
+        schema.declaredVersion = declaredVersion;
 
         schema.name = (String) raw.getOrDefault("name", "unnamed");
         schema.version = toInt(raw.get("version"), 1);
@@ -596,6 +613,7 @@ public class Schema {
     @SuppressWarnings("unchecked")
     private static Field parseField(Map<String, Object> fm) {
         Field f = new Field();
+        f.setRaw(fm);
         
         f.setName((String) fm.get("name"));
         String rawType = (String) fm.get("type");
@@ -999,6 +1017,86 @@ public class Schema {
         return f;
     }
 
+    /**
+     * The interpreter output (PS-174, PS-175, PS-180): the decoded map with {@code _meta}
+     * added as its last key. {@link #decode} and {@link #decodeWithPort} are unchanged;
+     * a generated codec never carries {@code _meta} (PS-467).
+     *
+     * <p>The input context (PS-495) is the FPort - selecting the port entry exactly as
+     * {@link #decodeWithPort} does, or as {@link #decode} where it is null - and the
+     * device's {@code recvTime} and {@code devEUI}. {@code _meta} holds {@code schema},
+     * {@code version} where the document declares one, {@code device_eui} (PS-496),
+     * {@code rx_time} (PS-177) and {@code fPort} as supplied (PS-340 to PS-342), each
+     * omitted where its source is absent, then {@code fields}: one entry per top-level
+     * reported key (PS-181), from the declaration that produced it (PS-490, PS-492).
+     *
+     * <p>A failed decode throws exactly as the decode does, so there is no {@code _meta}
+     * (PS-497); a malformed devEUI or recvTime throws too.
+     */
+    public Map<String, Object> interpret(byte[] data, InputContext in) {
+        InputContext context = in != null ? in : new InputContext(null, null, null);
+        Integer fPort = context.fPort();
+        DecodeContext ctx = new DecodeContext(data, endian);
+        ctx.setRepeatOnlyNames(repeatOnlyNames);
+        List<Field> selected;
+        if (fPort == null) {
+            if (ports != null && !ports.isEmpty()) {
+                throw new SchemaException.DecodeException("no FPort was supplied, and schema '"
+                        + name + "' selects its fields by port (PS-459)");
+            }
+            selected = fields;
+        } else {
+            selected = resolveFields(fPort);
+        }
+        Map<String, Object> result = decodeInto(selected, ctx);
+
+        Map<String, Object> meta = new LinkedHashMap<>();
+        if (metaName != null) meta.put("schema", metaName);
+        if (declaresVersion) meta.put("version", declaredVersion);
+        // PS-496, PS-495: a context present but malformed is refused, not dropped.
+        if (context.devEUI() != null) {
+            String eui = Meta.normaliseDevEui(context.devEUI());
+            if (eui == null) {
+                throw new SchemaException.DecodeException("devEUI " + Meta.pyRepr(context.devEUI())
+                        + " is not 16 hexadecimal digits (PS-496)");
+            }
+            meta.put("device_eui", eui);
+        }
+        if (context.recvTime() != null) {
+            Object rxTime = Meta.rxTimeSeconds(context.recvTime());
+            if (rxTime == null) {
+                throw new SchemaException.DecodeException("recvTime " + Meta.pyRepr(context.recvTime())
+                        + " is not an ISO 8601 time or a number of seconds (PS-495)");
+            }
+            meta.put("rx_time", rxTime);
+        }
+        if (fPort != null) meta.put("fPort", fPort);       // PS-340, PS-342: as supplied
+
+        List<Map<String, Object>> declaredList = new ArrayList<>();
+        for (Field f : selected == null ? List.<Field>of() : selected) {
+            if (f.getRaw() != null) declaredList.add(f.getRaw());
+        }
+        Map<String, Map<?, ?>> declared = Meta.declarations(declaredList);
+        Map<String, Object> entries = new LinkedHashMap<>();
+        for (String key : result.keySet()) {
+            if (key.startsWith("_")) continue;              // `_quality`, `_warnings`
+            Map<?, ?> source = ctx.getProducers().get(key);
+            if (source == null) source = declared.get(key);
+            entries.put(key, source != null ? Meta.fieldMeta(source, null) : new LinkedHashMap<>());
+        }
+        meta.put("fields", entries);
+        result.put("_meta", meta);
+        return result;
+    }
+
+    /** Decodes a selected field list into a result map, with leftover bytes and warnings. */
+    private Map<String, Object> decodeInto(List<Field> fieldList, DecodeContext ctx) {
+        Map<String, Object> result = new LinkedHashMap<>(decodeFields(fieldList, ctx));
+        ctx.reportLeftover();       // PS-472
+        reportWarnings(result, ctx);
+        return result;
+    }
+
     // Decode methods
     public Map<String, Object> decode(byte[] data) {
         // PS-459, PS-460: a ports schema decoded with no FPort selects nothing. This
@@ -1257,7 +1355,19 @@ public class Schema {
                 continue;
             }
             
-            Object value = decodeField(field, ctx);
+            // PS-490: the declaration that writes this key, recorded before it is decoded
+            // as the reference does. An object's members and a repeat's elements are
+            // another level of output, described by the declaration (PS-371, PS-481).
+            ctx.produced(field, null);
+            boolean nestedLevel = field.getType() == FieldType.OBJECT
+                    || field.getType() == FieldType.REPEAT;
+            Object value;
+            if (nestedLevel) ctx.enterMetaLevel();
+            try {
+                value = decodeField(field, ctx);
+            } finally {
+                if (nestedLevel) ctx.exitMetaLevel();
+            }
 
             // PS-427, PS-428: no reading, recorded in `_quality` where it is produced. An
             // internal field is only left unbound, except inside a flagged group, where
@@ -1282,7 +1392,11 @@ public class Schema {
                 if (!field.getName().startsWith("_")) {
                     Object reported = normalizeOutput(value);
                     if (reported != null) {
-                        result.put(resolveFieldName(field, ctx), reported);
+                        String outputName = resolveFieldName(field, ctx);
+                        if (!outputName.equals(field.getName())) {
+                            ctx.produced(field, outputName);        // PS-492
+                        }
+                        result.put(outputName, reported);
                     }
                 }
                 // Variables are keyed by the schema-level name so $references keep
@@ -2449,6 +2563,7 @@ public class Schema {
             ctx.setOffset(start);
             String name = member.getName();
             if (name == null || name.isEmpty()) continue;
+            ctx.produced(member, null);                             // PS-490
             try {
                 Object value;
                 if (member.getType() == FieldType.BITS) {
@@ -2463,7 +2578,9 @@ public class Schema {
                 if (value == OMITTED || value == null) continue;
                 ctx.setVariable(name, value);
                 if (!name.startsWith("_")) {
-                    result.put(resolveFieldName(member, ctx), value);
+                    String outputName = resolveFieldName(member, ctx);
+                    if (!outputName.equals(name)) ctx.produced(member, outputName);   // PS-492
+                    result.put(outputName, value);
                 }
             } catch (RuntimeException e) {
                 // One unreadable member must not abandon the rest of the payload.

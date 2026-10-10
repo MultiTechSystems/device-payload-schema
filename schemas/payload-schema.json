@@ -573,7 +573,11 @@
           },
           "input_metadata": {
             "type": "object",
-            "description": "TS013 input metadata for testing"
+            "description": "The input context (PS-324, PS-495): TS013 input such as recvTime, and devEUI"
+          },
+          "expected_meta": {
+            "type": "object",
+            "description": "The _meta the interpreter output must carry for this vector, compared exactly (PS-175, CR-2026-096). Absent asserts nothing."
           },
           "source": {
             "type": "string",
