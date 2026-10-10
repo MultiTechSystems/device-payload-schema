@@ -525,6 +525,10 @@ function encByteGroup(out, f, data, ctx) {            // _encode_byte_group
     if (!name) v = g["default"] === undefined ? 0 : g["default"];
     else if (name.charAt(0) === "_") v = encInternalValue(g, data);
     else v = Object.prototype.hasOwnProperty.call(data, name) ? data[name] : (g["default"] === undefined ? 0 : g["default"]);
+    if (g.type === "bool") {                    // its `bit` of the group (PS-364)
+      if (v) packed = encPlace(packed, 1, Number(g.bit || 0), 1);
+      continue;
+    }
     v = encReverseModifiers(v, g);
     if (typeof v === "boolean") v = v ? 1 : 0;
     if (!encIsNumber(v)) continue;
@@ -2119,6 +2123,23 @@ function writeS(buf, pos, size, value, endian) {
                 bname = bf.get('name', '_')
                 btype = bf.get('type', 'u8')
                 bit_m = re.match(r'([us])\d+\[(\d+):(\d+)\]', btype)
+                if btype == 'bool':
+                    # PS-364: a bool member reads its `bit` of the group's value. Members
+                    # other than bit ranges were skipped here with no error, so a group's
+                    # bool flags were missing from the generated codec's output.
+                    bjs = to_js_name(bname)
+                    lines.append(f'{i}  var {bjs}_out = (Math.floor(bgVal / {2 ** int(bf.get("bit", 0))}) % 2) === 1;')
+                    lines.append(f'{i}  vars.{bjs} = {bjs}_out;')
+                    if not bname.startswith('_'):
+                        guards, target = name_from_to_js(bf, bjs)
+                        for guard in guards:
+                            lines.append(f'{i}  {guard}')
+                        lines.append(f'{i}  {target} = {bjs}_out;')
+                    continue
+                if not bit_m:
+                    raise ValueError(
+                        f"byte_group member {bname!r}: type {btype!r} is not a bit range or "
+                        f"bool, which is all the generator emits for a group member")
                 if bit_m:
                     lo, hi = int(bit_m.group(2)), int(bit_m.group(3))
                     width = hi - lo + 1
