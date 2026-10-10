@@ -3,10 +3,10 @@
   "min_score_new": 0.8,
   "include_library_composed": false,
   "distribution": {
-    "100%": 171,
+    "100%": 181,
     "95-99%": 19,
     "90-94%": 2,
-    "80-89%": 7,
+    "80-89%": 8,
     "70-79%": 1,
     "<70%": 1,
     "unscored": 5
@@ -310,6 +310,56 @@
       "generated": 6,
       "vectors": 1,
       "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/meta-device-context.yaml": {
+      "score": 1.0,
+      "killed": 16,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 21,
+      "vectors": 3,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/meta-nested.yaml": {
+      "score": 1.0,
+      "killed": 17,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 24,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/meta-port-default.yaml": {
+      "score": 1.0,
+      "killed": 6,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 8,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/meta-producer.yaml": {
+      "score": 1.0,
+      "killed": 12,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 15,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/meta-tlv-channels.yaml": {
+      "score": 1.0,
+      "killed": 11,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 13,
+      "vectors": 1,
+      "provenance": "independent",
       "failing_original": 0
     },
     "_language-conformance/metadata-enrichment.yaml": {
@@ -1572,6 +1622,16 @@
       "provenance": "independent",
       "failing_original": 0
     },
+    "milesight/em320-tilt.yaml": {
+      "score": 1.0,
+      "killed": 6,
+      "survived": 0,
+      "unreached": 31,
+      "generated": 46,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "milesight/em400-mud.yaml": {
       "score": 1.0,
       "killed": 49,
@@ -1609,6 +1669,16 @@
       "unreached": 8,
       "generated": 72,
       "vectors": 20,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/em500-co2.yaml": {
+      "score": 1.0,
+      "killed": 6,
+      "survived": 0,
+      "unreached": 31,
+      "generated": 41,
+      "vectors": 1,
       "provenance": "independent",
       "failing_original": 0
     },
@@ -1669,6 +1739,16 @@
       "unreached": 0,
       "generated": 16,
       "vectors": 7,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/em500-udl.yaml": {
+      "score": 1.0,
+      "killed": 6,
+      "survived": 0,
+      "unreached": 8,
+      "generated": 18,
+      "vectors": 1,
       "provenance": "independent",
       "failing_original": 0
     },
@@ -1869,6 +1949,36 @@
       "unreached": 0,
       "generated": 197,
       "vectors": 44,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/ws101.yaml": {
+      "score": 0.8,
+      "killed": 8,
+      "survived": 2,
+      "unreached": 4,
+      "generated": 17,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/ws136.yaml": {
+      "score": 1.0,
+      "killed": 5,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 9,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "milesight/ws156.yaml": {
+      "score": 1.0,
+      "killed": 5,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 9,
+      "vectors": 1,
       "provenance": "independent",
       "failing_original": 0
     },
