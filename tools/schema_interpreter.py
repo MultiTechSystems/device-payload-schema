@@ -4874,6 +4874,12 @@ class SchemaInterpreter:
                 value = self._internal_encode_value(gf, data)          # PS-434
             else:
                 value = data.get(name, gf.get('default', 0))
+            if gtype == 'bool':
+                # PS-364: a bool member is its `bit` of the group's value. It was taken as a
+                # full-width member, so True set bit 0 whatever `bit` it declared.
+                if value:
+                    packed |= 1 << int(gf.get('bit', 0))
+                continue
             value = self._reverse_modifiers(value, gf)
             if not isinstance(value, (int, float)):
                 continue

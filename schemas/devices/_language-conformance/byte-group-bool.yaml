@@ -1,0 +1,53 @@
+# Conformance fixture: bool members of a byte_group (PS-364).
+#
+# A bool member is its `bit` of the group's assembled value, beside bit-range members
+# of the same byte. The TS013 generator emitted no bool member at all, and the Python
+# and generated encoders wrote a true bool at bit 0 whatever `bit` it declared, so
+# 83 re-encoded as 03.
+
+name: byte_group_bool
+version: 1
+endian: big
+
+fields:
+  - byte_group:
+      size: 1
+      fields:
+        - name: flag_a
+          type: bool
+          bit: 0
+        - name: level
+          type: u8[1:3]
+        - name: flag_b
+          type: bool
+          bit: 7
+  - name: tail
+    type: u8
+
+test_vectors:
+  - name: both_flags_set
+    source: spec-example
+    payload: "83 2A"
+    expected:
+      flag_a: true
+      level: 1
+      flag_b: true
+      tail: 42
+
+  - name: high_flag_only
+    source: spec-example
+    payload: "80 00"
+    expected:
+      flag_a: false
+      level: 0
+      flag_b: true
+      tail: 0
+
+  - name: low_flag_and_level
+    source: spec-example
+    payload: "0F 01"
+    expected:
+      flag_a: true
+      level: 7
+      flag_b: false
+      tail: 1

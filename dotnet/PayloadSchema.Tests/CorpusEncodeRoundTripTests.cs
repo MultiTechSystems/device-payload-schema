@@ -52,7 +52,7 @@ public class CorpusEncodeRoundTripTests
     // which the raw-YAML classifier had filed under that shape. Its out_of_range vector
     // omits a field and cannot (bytes differ), and leftover-bytes' second vector
     // re-encodes to its first byte only (PS-474): both by design.
-    const int EncodeFloorTotal = 1754;   // +8: CR-2026-104 lookup label fixtures (plain fixed); +2: tlv-case-key-patterns; +2: CR-2026-096 meta fixtures (meta-port-default, plain fixed); +6 before: trimmed vendor vectors
+    const int EncodeFloorTotal = 1757;   // +3: byte-group-bool; +8: CR-2026-104 lookup label fixtures (plain fixed); +2: tlv-case-key-patterns; +2: CR-2026-096 meta fixtures (meta-port-default, plain fixed); +6 before: trimmed vendor vectors
 
     /// <summary>
     /// Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -65,7 +65,7 @@ public class CorpusEncodeRoundTripTests
         ["flagged"] = 193,
         ["plain fixed"] = 110,   // +8: CR-2026-104 lookup label fixtures; +2: CR-2026-096 meta-port-default.yaml
         ["match"] = 123,
-        ["byte_group"] = 20,
+        ["byte_group"] = 23,
         // 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now
         // carry only the definitions they reach, so one no longer contains an
         // unreferenced definition's `repeat` text for the classifier to find.
