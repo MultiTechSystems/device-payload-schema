@@ -73,7 +73,7 @@ class CorpusEncodeRoundTripTest {
             // 1283 -> 1281 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped only because their internal byte halves were all zero, which the encoder wrote for an internal field with no value. It now reports such a field instead.
             "tlv", 1296,   // +2: tlv-case-key-patterns; +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
             "flagged", 193,
-            "plain fixed", 111,   // +9: TS013 fixtures
+            "plain fixed", 119,   // +8: CR-2026-104 lookup label fixtures; +9: TS013 fixtures
             "match", 123,
             "byte_group", 25,   // +3: byte-group-bool; +2: wide-group
             // 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas
