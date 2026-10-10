@@ -335,10 +335,15 @@ def main():
         if schema:
             print(schema)
         else:
+            # A failure must say so in its exit status too: this printed the error and
+            # exited 0, so a caller redirecting stdout got an empty schema file and a
+            # success, and only a human reading stderr knew nothing was converted.
             print("ERROR: Could not parse Milesight codec", file=sys.stderr)
+            return 1
     else:
         parser.print_help()
+    return 0
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

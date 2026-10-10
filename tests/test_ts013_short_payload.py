@@ -139,3 +139,33 @@ def test_a_short_read_matches_the_reference(ftype, payload):
 @pytest.mark.parametrize("payload", ["01", "0102", "010203", "0102030405"])
 def test_a_short_declared_length_matches_the_reference(ftype, payload):
     assert_same_verdict(one_field({"type": ftype, "length": 4}), payload)
+
+
+def test_tlv_negated_and_wildcard_keys_match_in_the_generated_codec():
+    # PS-270, CR-2026-004: a composite tlv case key was compared as one string, so `!n`
+    # and `*` never matched and nor did an exact key written without the space after
+    # its comma. Found converting milesight-iot uc1122 for the private registry.
+    import json
+    import subprocess
+
+    import yaml
+
+    from generate_ts013_codec import TS013Generator
+    from schema_interpreter import SchemaInterpreter
+
+    path = REPO_ROOT / "schemas/devices/_language-conformance/tlv-case-key-patterns.yaml"
+    schema = yaml.safe_load(path.read_text())
+    code = TS013Generator(schema).generate()
+    for vector in schema["test_vectors"]:
+        raw = bytes.fromhex(vector["payload"].replace(" ", ""))
+        out = subprocess.run(
+            ["node"],
+            input=code
+            + "\nprocess.stdout.write(JSON.stringify(decodeUplink({bytes: %s, fPort: 1})));"
+            % list(raw),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        generated = json.loads(out.stdout)["data"]
+        assert generated == vector["expected"] == SchemaInterpreter(schema).decode(raw).data

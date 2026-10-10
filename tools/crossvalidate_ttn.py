@@ -175,7 +175,22 @@ def check_schema(path, vendor_dir, use_decoder):
     for example in examples:
         payload = bytes(example["input"]["bytes"])
         fport = example["input"].get("fPort")
-        expected = example["output"].get("data") or {}
+        declared = example.get("output") or {}
+        if declared.get("errors") and not declared.get("data"):
+            # The vendor declares that this payload fails, typically on an fPort the
+            # codec does not handle. That is an expectation too: our decode must fail. It
+            # was compared as data instead, so every port-based schema "disagreed" with
+            # the vendor's own unknown-FPort example.
+            try:
+                succeeded = SchemaInterpreter(schema).decode(payload, fPort=fport).success
+            except Exception:  # noqa: BLE001 - an undeclared fPort raises; that is a failure
+                succeeded = False
+            if succeeded:
+                problems.append(
+                    "%s (declared example): the vendor declares an error (%s), and our "
+                    "decode succeeded" % (payload.hex(), declared["errors"][0]))
+            continue
+        expected = declared.get("data") or {}
         problems += [
             "%s (declared example): %s" % (payload.hex(), issue)
             for issue in compare(schema, payload, fport, expected)
