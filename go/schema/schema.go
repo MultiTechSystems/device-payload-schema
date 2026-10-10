@@ -215,6 +215,11 @@ type Field struct {
 	Index     string          `json:"-" yaml:"-"`
 	CountAs   string          `json:"-" yaml:"-"`
 	PresentIf *GuardCondition `json:"-" yaml:"-"`
+	// IndexBase is the number Index starts at (PS-530). ElementName is set on a repeat
+	// of single values (PS-528): its one element field, named this, is Fields[0], and the
+	// repeat reports each element's value rather than a record holding it.
+	IndexBase   int    `json:"-" yaml:"-"`
+	ElementName string `json:"-" yaml:"-"`
 	// Carry is a computed element field's value before the first element: a number or a
 	// `$name` (PS-378). nil when the field carries nothing.
 	Carry any `json:"-" yaml:"-"`
@@ -4515,6 +4520,20 @@ func encodeRepeatRecords(field Field, records []any, ctx *EncodeContext) error {
 		return fmt.Errorf("repeat field %q declares present_if and its elements read payload "+
 			"bytes, so the elements it dropped cannot be encoded (PS-387)", field.Name)
 	}
+	if field.ElementName != "" {
+		// PS-529: each value is encoded as the element, wrapped as it was decoded.
+		// CR-2026-111 leaves open what a null position encodes as; the spec prototype
+		// refuses it rather than guess, and so does every encoder here.
+		wrapped := make([]any, len(records))
+		for position, item := range records {
+			if item == nil {
+				return fmt.Errorf("Repeat '%s' has null at position %d, which has no encoding (PS-529)",
+					field.Name, position)
+			}
+			wrapped[position] = map[string]any{field.ElementName: item}
+		}
+		records = wrapped
+	}
 	for position, item := range records {
 		record, ok := item.(map[string]any)
 		if !ok {
@@ -4527,7 +4546,7 @@ func encodeRepeatRecords(field Field, records []any, ctx *EncodeContext) error {
 			for k, v := range record {
 				bound[k] = v
 			}
-			bound[field.Index] = position
+			bound[field.Index] = position + field.IndexBase // PS-530
 			record = bound
 		}
 		if err := encodeFields(field.Fields, record, ctx); err != nil {

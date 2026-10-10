@@ -726,13 +726,24 @@ function encRepeat(out, f, data, ctx) {               // _encode_repeat
   if (!Array.isArray(records) && typeof records === "object") records = [records];
   if (!Array.isArray(records)) encFail("repeat field " + JSON.stringify(name) + ": expected a list of records, got " + typeof records);
   var rf = f.fields || [];
+  if (f.element && typeof f.element === "object" && !f.fields) {
+    // PS-529: each value is encoded as the element, wrapped as it was decoded. A null
+    // position has no encoding (CR-2026-111 leaves it open), so it is refused.
+    var en = f.element.name || "element", el = {};
+    for (var ek in f.element) el[ek] = f.element[ek];
+    el.name = en; rf = [el];
+    records = records.map(function (v, p) {
+      if (v === null || v === undefined) encFail("Repeat '" + name + "' has null at position " + p + ", which has no encoding (PS-529)");
+      var w = {}; w[en] = v; return w;
+    });
+  }
   if (f.present_if && rf.some(function (r) { return r && ENC_COMPUTED.indexOf(r.type) < 0 && !encIsLiteral(r); })) {
     encFail("repeat field " + JSON.stringify(name) + " declares present_if and its elements read payload bytes, so the elements it dropped cannot be encoded (PS-387)");
   }
   for (var i = 0; i < records.length; i++) {
     var rec = records[i];
     if (rec === null || typeof rec !== "object" || Array.isArray(rec)) encFail("repeat field " + JSON.stringify(name) + ": expected each record to be a mapping");
-    if (f.index) { var copy = {}; for (var k in rec) copy[k] = rec[k]; copy[f.index] = i; rec = copy; }
+    if (f.index) { var copy = {}; for (var k in rec) copy[k] = rec[k]; copy[f.index] = i + (f.index_base || 0); rec = copy; }
     encList(out, rf, rec, ctx);
   }
   if (f.trailer) encList(out, f.trailer, data, ctx);
@@ -2327,7 +2338,12 @@ function writeS(buf, pos, size, value, endian) {
         # Members decode into the flat `d`, then each iteration lifts them into a record
         # and deletes them, the same approach the nested `object` support uses - so their
         # modifiers, lookups and bitfields keep working through the existing generators.
-        if field.get('type') == 'repeat' and field.get('fields'):
+        from schema_interpreter import index_base, repeat_members
+        # PS-528: `element` decodes as a one-field record under its name (or `element`),
+        # and the repeat reports the record's value - null where it was omitted.
+        element_members, element_name = (repeat_members(field) if field.get('type') == 'repeat'
+                                         else ([], None))
+        if field.get('type') == 'repeat' and element_members:
             key = to_js_name(field.get('name', '_items'))
             # The list's own variable is numbered, not named after the field: a member
             # sharing the repeat's name (an `altitude` list of records each holding an
@@ -2336,7 +2352,7 @@ function writeS(buf, pos, size, value, endian) {
             arr = f'_rep{self._next_uid()}'
             # Every member, constructs included: a bare `match` or `tlv` inside an
             # element has no name, and filtering on one dropped it from the codec.
-            members = [m for m in field['fields'] if isinstance(m, dict)]
+            members = [m for m in element_members if isinstance(m, dict)]
             lines.append(f'{i}  var {arr} = [];')
             # Iterations, not reported elements: present_if drops an element and it still
             # advances the index and counts toward `count` and `max` (PS-386).
@@ -2358,8 +2374,7 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append(f'{i}  var {arr}_buf = buf; buf = buf.slice(0, {arr}_end);')
             # PS-378 to PS-380: a carried field starts from its `carry` value each time the
             # repeat begins, and its own name resolves to its previous value.
-            carried = [(m['name'], m['carry']) for m in field['fields']
-                       if isinstance(m, dict) and 'carry' in m]
+            carried = [(m['name'], m['carry']) for m in members if 'carry' in m]
             if carried:
                 initial = ', '.join(
                     f'{json.dumps(to_js_name(name))}: '
@@ -2424,7 +2439,10 @@ function writeS(buf, pos, size, value, endian) {
             # PS-368: an element's names do not outlive it; `vars` is restored after it.
             lines.append(f'{i}    var {arr}_vars = Object.assign({{}}, vars);')
             if field.get('index'):
-                lines.append(f'{i}    vars.{to_js_name(field["index"])} = {arr}_i;')   # PS-366
+                # PS-366, PS-530: the position counted from index_base.
+                base = index_base(field)    # the field's 'index_base' (PS-530)
+                lines.append(f'{i}    vars.{to_js_name(field["index"])} = {arr}_i'
+                             + (f' + {base}' if base else '') + ';')
             for name, _ in carried:
                 lines.append(f'{i}    vars.{to_js_name(name)} = {arr}_carry.{to_js_name(name)};')
             ragged = None
@@ -2434,7 +2452,7 @@ function writeS(buf, pos, size, value, endian) {
                 # end of the buffer, so without this a short tail decoded as a final
                 # element of zeros and reported success.
                 from schema_interpreter import fixed_element_size
-                size = fixed_element_size(field['fields'])
+                size = fixed_element_size(members)
                 ragged = ('throw new Error("repeat \'" + ' + rname + ' + "\' ends in a ragged tail: " + '
                           f'(buf.length - {arr}_before) + " byte(s) at offset " + {arr}_before'
                           + (f' + ", fewer than the {size} an element takes (PS-343)");' if size
@@ -2457,7 +2475,17 @@ function writeS(buf, pos, size, value, endian) {
             keep = condition_to_js(field['present_if']) if field.get('present_if') else 'true'
             lines.append(f'{i}    var {arr}_keep = {keep};')
             lines.append(f'{i}    vars = {arr}_vars; {arr}_i++;')
-            lines.append(f'{i}    if ({arr}_keep) {arr}.push({arr}_rec);')
+            if element_name is None:
+                lines.append(f'{i}    if ({arr}_keep) {arr}.push({arr}_rec);')
+            else:
+                # PS-528: the record's one value, or null where it was omitted, so the
+                # values after it keep their positions.
+                lines.append(f'{i}    if ({arr}_keep) {{ var {arr}_v = null;')
+                lines.append(f'{i}      for (var {arr}_k in {arr}_rec) {{ if ({arr}_k !== "_quality" '
+                             f'&& {arr}_k !== "_warnings") {{ {arr}_v = {arr}_rec[{arr}_k]; break; }} }}')
+                lines.append(f'{i}      if ({arr}_v === undefined || (typeof {arr}_v === "number" '
+                             f'&& !isFinite({arr}_v))) {arr}_v = null;')
+                lines.append(f'{i}      {arr}.push({arr}_v); }}')
             # The zero-progress guard is for the loops bounded by bytes. A counted one
             # ends by its count, and elements reading no bytes - computed fields, bit
             # ranges with no consume - are still `count` elements; it stopped at one.

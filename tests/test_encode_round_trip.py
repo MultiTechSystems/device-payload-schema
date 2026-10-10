@@ -62,7 +62,9 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # +3: tlv-case-field-list.
 # +2: boolean-literal (CR-2026-107).
 # +8: name-from-rendering (CR-2026-112), all plain fixed.
-FLOOR_TOTAL = 1783
+# +5: repeat-element-named, -unnamed, -object, repeat-index-base and the null fixture's
+# vector with no null (CR-2026-111), all repeat. Its two null vectors are refused.
+FLOOR_TOTAL = 1788
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -78,7 +80,7 @@ FLOOR_BY_SHAPE = {
     # 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now
     # carry only the definitions they reach, so one no longer has a `repeat` in an
     # unreferenced definition for the classifier to find.
-    "repeat": 14,
+    "repeat": 19,
 }
 
 #: Encoding must never raise. It used to, 26 times: "Cannot encode type: number" for any

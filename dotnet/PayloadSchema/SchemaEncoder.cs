@@ -587,6 +587,18 @@ public static class SchemaEncoder
                 _ => throw new InvalidOperationException(
                     $"repeat field '{field.Name}': expected a list of records, got {records.GetType().Name}")
             };
+            if (field.ElementName != null)
+            {
+                // PS-529: each value is encoded as the element, wrapped as it was decoded.
+                // CR-2026-111 leaves open what a null position encodes as; the spec
+                // prototype refuses it rather than guess, and so does every encoder here.
+                for (int p = 0; p < list.Count; p++)
+                    if (list[p] == null)
+                        throw new InvalidOperationException(
+                            $"Repeat '{field.Name}' has null at position {p}, which has no encoding (PS-529)");
+                list = list.Select(v => (object?)new Dictionary<string, object?> { [field.ElementName] = v })
+                    .ToList();
+            }
 
             // PS-387: an element present_if dropped is not in the data, and its bytes were
             // in the payload, so they cannot be written back. Only elements that read
@@ -608,7 +620,7 @@ public static class SchemaEncoder
                 {
                     // PS-370: the index is bound while each element is encoded, as it was
                     // while each was decoded, so a name_from template resolves the same way.
-                    asMap = new Dictionary<string, object?>(asMap) { [field.Index!] = position };
+                    asMap = new Dictionary<string, object?>(asMap) { [field.Index!] = position + field.IndexBase };
                 }
                 output.AddRange(EncodeFieldList(field.Fields, asMap));
                 position++;

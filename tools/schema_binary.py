@@ -214,6 +214,10 @@ C_UNSUPPORTED_KEYS = {
     "flagged": "this format has no flagged record",
     "byte_group": "this format has no byte_group record",
     "repeat": "this format has no repeat record",
+    # CR-2026-111: a repeat of single values and its index base (PS-528, PS-530). A
+    # `type: repeat` is refused already; these name the keys where they appear.
+    "element": "this format has no repeat record (PS-528)",
+    "index_base": "this format has no repeat record (PS-530)",
     "fields": "this format has no nested object record",
     "name_from": "this format has no name template",
     # A bytes rendering other than lowercase hex (PS-079, PS-391); the C interpreter

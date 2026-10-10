@@ -128,7 +128,9 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "min": (("py", "go"), "repeat floor (CR-2026-021)"),
         "reserve": (_DECODERS, "bytes at the end a repeat must not read (PS-350)"),
         "trailer": (_DECODERS, "fields decoded from a repeat's reserved bytes (PS-383)"),
-        "index": (_DECODERS, "a repeat element's zero-based position (PS-366)"),
+        "index": (_DECODERS, "a repeat element's position, from index_base (PS-366)"),
+        "index_base": (_DECODERS, "the number a repeat's index starts at (PS-530)"),
+        "element": (_DECODERS, "a repeat's one field, reported as an array of values (PS-528)"),
         "count_as": (_DECODERS, "the number of elements a repeat reports (PS-367)"),
         "present_if": (_DECODERS, "drops an element whose condition is false (PS-386)"),
         "carry": (_DECODERS, "a computed field's value from the previous element (PS-378)"),
@@ -442,6 +444,9 @@ def iter_keys(schema: Any) -> Iterator[Tuple[str, str, str]]:
             kpath = _p(path, key)
             if key in ("fields", "trailer"):
                 yield from field_list(value, kpath)
+            elif key == "element" and isinstance(value, dict):
+                # A repeat of single values: one field definition (PS-528).
+                yield from field(value, kpath)
             elif key == "present_if" and isinstance(value, dict):
                 # One guard condition (PS-386), with the guard condition's keys.
                 yield from rec("guard_when", value, kpath)

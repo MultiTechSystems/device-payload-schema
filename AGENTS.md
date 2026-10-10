@@ -188,17 +188,17 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2601 payload vectors in `schemas/devices/` (measured 2026-10-10 with
-`tools/check-floors.py`, after the CR-2026-112 name-from-rendering fixture) are the shared
+The 2610 payload vectors in `schemas/devices/` (measured 2026-10-10 with
+`tools/check-floors.py`, after the CR-2026-111 element-repeat fixtures) are the shared
 cross-language test set. Every implementation has a runner that reads the same YAML and
 the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1783 |
-| Go | `go/schema/corpus_conformance_test.go` | 2603 | 1800 (plain API 1777) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2603 | 1783 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2603 | 1783 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1788 |
+| Go | `go/schema/corpus_conformance_test.go` | 2610 | 1805 (plain API 1782) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2610 | 1788 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2610 | 1788 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 546 of 546 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -755,10 +755,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1783 |
-| Go | `go/schema/corpus_encode_test.go` | 1800 (plain 1777) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1783 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1783 |
+| Python | `tests/test_encode_round_trip.py` | 1788 |
+| Go | `go/schema/corpus_encode_test.go` | 1805 (plain 1782) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1788 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1788 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1491,6 +1491,41 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   vector changed. `senml.name` templates are not rendered by either SenML producer (Python,
   C#): a record's `n` is the template as written, so PS-532's senml half is open. Fixture:
   `name-from-rendering.yaml`.
+- **CR-2026-111 (PS-528 to PS-531): `element` and `index_base` on a repeat.**
+  - **What it does:** `element`, one field in place of `fields`, reports an array of values.
+    Each element is decoded as a one-field record under its own `name`, or `element` where it
+    has none, through the existing element function, so `present_if` and `name_from` work
+    unchanged. The repeat then reports that record's value. A record with nothing reported
+    gives `null` in its position, whatever the reason: a sentinel, a lookup miss, a log of
+    x <= 0. **This is the one place a decoded value is `null`.**
+  - **One helper per language reads the members:** Python `repeat_members`, Go
+    `rawRepeatMembers`, Java `Wave6a.repeatMembers`, C# `SchemaParser.RepeatMembers`. The
+    PS-369/372/373/374 checks, the PS-368 name walk and `_meta` all go through it. A check
+    that still reads `fields` directly misses the element.
+  - **Load-time rules, in the spec prototype's wording:** "Repeat '{name}' declares
+    both|neither of \`fields\` and \`element\`; it declares exactly one (PS-083, PS-528)",
+    "Repeat '{name}': \`element\` is a single field definition (PS-528)" and
+    "Repeat '{name}': \`index_base\` is an integer (PS-530)". They live in Python
+    `element_repeat_errors` (reached from `schema_iterator_errors`, so the validator and
+    the TS013 generator get them too), Go `elementRepeatError`, Java
+    `Wave6a.elementRepeatErrors` and C# `Wave6a`'s `ElementRepeatErrors`.
+  - **Encoding:** each value is wrapped back into its record. A `null` position is refused
+    everywhere with "Repeat '{name}' has null at position {p}, which has no encoding
+    (PS-529)", because the CR leaves open what it encodes as. `encode-round-trip.py` files
+    those vectors as `null-element`.
+  - **`index`** binds the position plus `index_base` on decode and on encode. `count_as` is
+    unaffected.
+  - **`_meta`:** an element repeat's entry is `{type: repeat, element: {...}, identity}`,
+    with the element's name left out. An index listing gains `index_base` after `count`
+    when the base is not 0.
+  - **Runners:** the Java and C# corpus runners compared a `null` inside an expected array
+    by its printed form, so it never matched. Java's `normalizeOutput` also dropped null
+    list items. All three are fixed.
+  - **Where implementations differ:** Go accepts a whole float such as `index_base: 1.0`,
+    because a JSON-authored schema gives it floats; the others reject it.
+  - **C:** has no repeat. `schema_binary.py` refuses `element` and `index_base` by name.
+  - **Fixtures:** `repeat-element-named`, `-unnamed`, `-null` and `-object`, and
+    `repeat-index-base`.
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.

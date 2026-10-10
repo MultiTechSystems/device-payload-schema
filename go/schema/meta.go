@@ -315,10 +315,14 @@ func (s *Schema) metaReference(value any, repeat map[string]any, bare bool) any 
 		if !isPlainInt(count) {
 			count = repeat["max"]
 		}
-		return map[string]any{"index": name, "count": count}
+		listing := map[string]any{"index": name, "count": count}
+		if base, ok := intValue(repeat["index_base"]); ok && base != 0 {
+			listing["index_base"] = base // PS-375, PS-530
+		}
+		return listing
 	}
 	target := map[string]any{}
-	if members, ok := repeat["fields"].([]any); ok {
+	if members, _ := rawRepeatMembers(repeat); members != nil {
 		for _, member := range members {
 			if m := asStringMap(member); m != nil && m["name"] == name {
 				target = m
@@ -394,8 +398,22 @@ func (s *Schema) fieldMeta(decl map[string]any, repeat map[string]any) map[strin
 	if truthy(decl["description"]) {
 		entry["description"] = decl["description"]
 	}
-	switch declaredType {
-	case "repeat":
+	_, element := rawRepeatMembers(decl)
+	switch {
+	case declaredType == "repeat" && element != "":
+		// PS-531: the element's own entry, nested, without its name; the repeat keeps
+		// `type: repeat` and its identity.
+		declared := map[string]any{}
+		for k, v := range asStringMap(decl["element"]) {
+			if k != "name" {
+				declared[k] = v
+			}
+		}
+		entry["element"] = s.fieldMeta(declared, decl)
+		if identity, present := decl["identity"]; present {
+			entry["identity"] = s.metaReference(identity, decl, true)
+		}
+	case declaredType == "repeat":
 		elements := map[string]any{} // PS-371
 		members := s.metaDeclarations(decl["fields"])
 		for _, name := range members.names {
@@ -405,7 +423,7 @@ func (s *Schema) fieldMeta(decl map[string]any, repeat map[string]any) map[strin
 		if identity, present := decl["identity"]; present {
 			entry["identity"] = s.metaReference(identity, decl, true)
 		}
-	case "object":
+	case declaredType == "object":
 		nested := map[string]any{} // PS-481
 		members := s.metaDeclarations(decl["fields"])
 		for _, name := range members.names {

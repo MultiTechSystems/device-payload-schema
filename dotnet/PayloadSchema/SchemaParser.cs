@@ -816,6 +816,16 @@ public static partial class SchemaParser
         // checked over the whole document by CheckIterator once the fields are parsed.
         if (fm.TryGetValue("index", out var indexNode)) f.Index = Scalar(indexNode);
         if (fm.TryGetValue("count_as", out var countAsNode)) f.CountAs = Scalar(countAsNode);
+        // PS-528, PS-530: a repeat of single values, and the base its index counts from.
+        // Their rules are checked by CheckIterator; an invalid value never reaches here.
+        if (fm.TryGetValue("index_base", out var indexBaseNode) && YamlInt(indexBaseNode) is { } ib)
+            f.IndexBase = (int)ib;
+        if (f.Type == FieldType.Repeat && !fm.Children.ContainsKey(new YamlScalarNode("fields"))
+            && RepeatMembers(fm) is ({ } elementSeq, { } elementName))
+        {
+            f.Fields = ParseFields(elementSeq);
+            f.ElementName = elementName;
+        }
         if (fm.TryGetValue("identity", out var identityNode)) f.Identity = Scalar(identityNode);
         if (fm.TryGetValue("reserve", out var reserveNode)) f.Reserve = Int(reserveNode);
         if (fm.TryGetValue("trailer", out var trailerNode) && trailerNode is YamlSequenceNode trailerSeq)

@@ -174,6 +174,12 @@ func checkTypeVocabulary(raw map[string]any) error {
 			if err := check(field["trailer"], at+".trailer"); err != nil {
 				return err
 			}
+			// PS-528: a repeat's `element` is one field definition, held to the same rules.
+			if element := asStringMap(field["element"]); element != nil {
+				if err := check([]any{element}, at+".element"); err != nil {
+					return err
+				}
+			}
 			switch group := field["byte_group"].(type) {
 			case []any:
 				if err := check(group, at+".byte_group"); err != nil {

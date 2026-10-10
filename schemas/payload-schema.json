@@ -263,7 +263,16 @@
           },
           "index": {
             "type": "string",
-            "description": "`type: repeat`: a name bound to each element's zero-based position while it is decoded and encoded (PS-366, PS-370)."
+            "description": "`type: repeat`: a name bound to each element's position, counted from `index_base`, while it is decoded and encoded (PS-366, PS-370)."
+          },
+          "index_base": {
+            "type": "integer",
+            "default": 0,
+            "description": "`type: repeat`: the number `index` starts at; `index` is bound to the element's position plus this. `count_as` is unaffected. Anything but an integer is rejected (PS-530)."
+          },
+          "element": {
+            "$ref": "#/definitions/field",
+            "description": "`type: repeat`: one field, in place of `fields`. The repeat reports an array of its values rather than of records, with `null` at a position whose value was omitted (PS-528); an encoder takes the array of values (PS-529). Its `name`, defaulting to `element`, is how a reference inside it names the current value, and is not reported. A repeat declares exactly one of `fields` and `element` (PS-083)."
           },
           "count_as": {
             "type": "string",

@@ -913,8 +913,20 @@ public class Schema {
         Object fieldsRaw = fm.get("fields");
         if (fieldsRaw instanceof List) {
             f.setFields(parseFields((List<Map<String, Object>>) fieldsRaw));
+        } else if ("repeat".equals(fm.get("type")) && fm.get("element") instanceof Map<?, ?> element) {
+            // PS-528: a repeat of single values decodes its element as a one-field record
+            // under the element's name, or "element", and reports the value. Wave6a has
+            // already rejected both, neither, and a non-mapping element.
+            Map<String, Object> member = new LinkedHashMap<>((Map<String, Object>) element);
+            String elementName = member.get("name") instanceof String n && !n.isEmpty() ? n : "element";
+            member.put("name", elementName);
+            List<Map<String, Object>> one = new ArrayList<>();
+            one.add(member);
+            f.setFields(parseFields(one));
+            f.setElementName(elementName);
         }
-        
+        if (fm.get("index_base") instanceof Number base) f.setIndexBase(base.longValue());  // PS-530
+
         // Cases (for match/switch)
         Object casesRaw = fm.get("cases");
         if (casesRaw instanceof List) {
@@ -2409,11 +2421,11 @@ public class Schema {
      * count_as is bound to the number reported once the array is complete (PS-367,
      * CR-2026-080). Mirrors _decode_repeat in tools/schema_interpreter.py.
      */
-    private List<Map<String, Object>> decodeRepeat(Field field, DecodeContext ctx) {
+    private List<Object> decodeRepeat(Field field, DecodeContext ctx) {
         int maxIterations = field.getMax() > 0 ? field.getMax() : 1000;
         int minIterations = field.getMin();
 
-        List<Map<String, Object>> result = new ArrayList<>();
+        List<Object> result = new ArrayList<>();
         int[] iterations = {0};
 
         // PS-378, PS-380: a carried field starts again from its `carry` value each time
@@ -2548,7 +2560,7 @@ public class Schema {
      * The iteration count advances either way (PS-386).
      */
     private void decodeElement(Field repeat, DecodeContext ctx, int[] iterations,
-                               Map<String, Object> carryState, List<Map<String, Object>> result) {
+                               Map<String, Object> carryState, List<Object> result) {
         Map<String, Object> outer = ctx.snapshotVariables();
         Set<String> savedNames = ctx.getElementNames();
         List<Field> members = repeat.getFields() == null ? List.of() : repeat.getFields();
@@ -2556,7 +2568,8 @@ public class Schema {
         for (Field member : members) names.add(member.getName());
         ctx.setElementNames(names);
         if (repeat.getIndex() != null) {
-            ctx.setVariable(repeat.getIndex(), (long) iterations[0]);      // PS-366
+            // PS-366, PS-530: the position counted from index_base.
+            ctx.setVariable(repeat.getIndex(), (long) iterations[0] + repeat.getIndexBase());
         }
         ctx.getVariables().putAll(carryState);                              // PS-379
         Map<String, Object> element;
@@ -2575,7 +2588,25 @@ public class Schema {
             ctx.setElementNames(savedNames);
         }
         iterations[0]++;
-        if (keep) result.add(element);                                      // PS-386
+        if (keep) {                                                         // PS-386
+            // PS-528: an element repeat reports the value, or null where it was omitted.
+            result.add(repeat.getElementName() == null ? element : elementValue(element));
+        }
+    }
+
+    /**
+     * The value a repeat of single values reports for one element: the record's one
+     * reported value, or null where it was omitted (PS-528), so positions keep their index.
+     * Interpreter metadata beside it is not the value. Mirrors element_value.
+     */
+    static Object elementValue(Map<String, Object> record) {
+        for (Map.Entry<String, Object> e : record.entrySet()) {
+            if (!"_quality".equals(e.getKey()) && !"_warnings".equals(e.getKey())
+                    && !"_meta".equals(e.getKey())) {
+                return e.getValue();
+            }
+        }
+        return null;
     }
 
     /** A carried field's value before the first element (PS-378). */
@@ -2832,10 +2863,9 @@ public class Schema {
         if (value instanceof List<?> list) {
             List<Object> out = new ArrayList<>(list.size());
             for (Object item : list) {
-                Object v = normalizeOutput(item);
-                if (v != null) {
-                    out.add(v);
-                }
+                // PS-528: a null in an array is an `element` repeat's omitted value, and
+                // keeps its position; dropping it would move every later value.
+                out.add(normalizeOutput(item));
             }
             return out;
         }

@@ -71,6 +71,9 @@ loss:
                     `channels` (Clause 4). Encoding that list is not defined yet, so the
                     encoders refuse it by name rather than write a payload with the entries
                     missing, which they used to do silently.
+  null-element      A repeat declaring `element` reports an omitted value as `null` in its
+                    position (PS-528). CR-2026-111 leaves open what an encoder writes for
+                    it, so every encoder refuses the array, naming the position (PS-529).
 """
 
 import argparse
@@ -102,7 +105,7 @@ INHERENT = (
 )
 
 #: Recoverable in principle, so counted apart from the inherent set.
-FIXABLE = ("templated-name", "separate-tlv")
+FIXABLE = ("templated-name", "separate-tlv", "null-element")
 
 #: What a decode says when it could not read part of the payload. CR-2026-013 and
 #: CR-2026-021 put these there; they are the evidence this tool reads.
@@ -205,6 +208,15 @@ def absent_fields(schema, data, port=None):
     return [n for n in names if n not in data]
 
 
+def has_null_element(node):
+    """A null inside an array: an `element` repeat's omitted value (PS-528)."""
+    if isinstance(node, dict):
+        return any(has_null_element(v) for v in node.values())
+    if isinstance(node, list):
+        return any(item is None or has_null_element(item) for item in node)
+    return False
+
+
 def classify(decoded, traits, schema=None, port=None):
     """Why this vector cannot round-trip, or None where nothing explains it."""
     if decoded.warnings:
@@ -213,6 +225,8 @@ def classify(decoded, traits, schema=None, port=None):
         for warning in decoded.warnings:
             if any(marker in warning for marker in UNREAD_MARKERS):
                 return "undecoded-bytes"
+    if has_null_element(decoded.data):
+        return "null-element"
     for trait in INHERENT + FIXABLE:
         if trait in traits:
             return trait
