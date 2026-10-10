@@ -15,7 +15,7 @@ ports:
         div: 10000000
         unit: "°"
         description: "Latitude in degrees (WGS84)"
-        ipso: 3336
+        ipso: {object: 3336, instance: 0, resource: 5514}
         senml: {unit: "lat"}
         semantic: "location.latitude"
         
@@ -24,7 +24,7 @@ ports:
         div: 10000000
         unit: "°"
         description: "Longitude in degrees (WGS84)"
-        ipso: 3336
+        ipso: {object: 3336, instance: 0, resource: 5515}
         senml: {unit: "lon"}
         semantic: "location.longitude"
         
@@ -47,7 +47,7 @@ ports:
         mult: 5.625
         unit: "°"
         description: "Heading (0-360°)"
-        ipso: 3332
+        ipso: {object: 3332}
         senml: {unit: "deg"}
         semantic: "location.heading"
         
@@ -55,7 +55,7 @@ ports:
         type: u8
         unit: "km/h"
         description: "Speed in km/h"
-        ipso: 3346
+        ipso: {object: 3346}
         senml: {unit: "km/h"}
         semantic: "location.speed"
         
@@ -64,7 +64,7 @@ ports:
         mult: 0.025
         unit: "V"
         description: "Battery voltage"
-        ipso: 3316
+        ipso: {object: 3316}
         senml: {unit: "V"}
         semantic: "battery.voltage"
 
@@ -100,7 +100,7 @@ ports:
         mult: 0.0000256
         unit: "°"
         description: "Latitude in degrees (WGS84)"
-        ipso: 3336
+        ipso: {object: 3336, instance: 0, resource: 5514}
         senml: {unit: "lat"}
         semantic: "location.latitude"
         
@@ -114,7 +114,7 @@ ports:
         mult: 0.0000256
         unit: "°"
         description: "Longitude in degrees (WGS84)"
-        ipso: 3336
+        ipso: {object: 3336, instance: 0, resource: 5515}
         senml: {unit: "lon"}
         semantic: "location.longitude"
         
@@ -134,7 +134,7 @@ ports:
         mult: 45
         unit: "°"
         description: "Heading (0-315° in 45° steps)"
-        ipso: 3332
+        ipso: {object: 3332}
         senml: {unit: "deg"}
         semantic: "location.heading"
         
@@ -144,7 +144,7 @@ ports:
         mult: 5
         unit: "km/h"
         description: "Speed in km/h (0-155 in steps of 5)"
-        ipso: 3346
+        ipso: {object: 3346}
         senml: {unit: "km/h"}
         semantic: "location.speed"
         
@@ -153,7 +153,7 @@ ports:
         mult: 0.025
         unit: "V"
         description: "Battery voltage"
-        ipso: 3316
+        ipso: {object: 3316}
         senml: {unit: "V"}
         semantic: "battery.voltage"
         
