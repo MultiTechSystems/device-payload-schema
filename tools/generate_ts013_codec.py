@@ -1408,8 +1408,10 @@ class TS013Generator:
         if ref_errors:
             raise ValueError(ref_errors[0])
         # The repeat iterator's and reserve's schema rules (PS-350 to PS-387, PS-471).
-        from schema_interpreter import schema_iterator_errors
-        iterator_problems = schema_iterator_errors(schema)
+        from schema_interpreter import case_body_errors, schema_iterator_errors
+        # PS-441: a case body is a field list; a bare string was iterated by character.
+        iterator_problems = case_body_errors(schema)
+        iterator_problems += schema_iterator_errors(schema)
         from schema_interpreter import internal_name_errors, optional_errors
         iterator_problems += optional_errors(schema.get('fields')) + internal_name_errors(schema)
         for port_entry in (schema.get('ports') or {}).values():
@@ -2378,10 +2380,15 @@ function writeS(buf, pos, size, value, endian) {
             # beside an object with a `value` member.
             outer = f'{obj_name}_outer{id(field) % 100000}'
             lines.append(f'{i}  var {outer} = d; d = {{}};')
+            # The members are a field list (PS-347, PS-441), so a nameless construct -
+            # a `match` or a group of bit ranges - is a member like any other. Members
+            # without a name were skipped, so neither was decoded: a match's fields were
+            # missing and a group's byte was never consumed, shifting every later field.
             for member in field['fields']:
-                if not isinstance(member, dict) or not member.get('name'):
-                    continue
-                lines.extend(self._gen_decode_field(member))
+                if isinstance(member, dict):
+                    lines.extend(self._gen_decode_field(member))
+            # An internal member is bound in `vars` and not reported, as at the top level.
+            lines.append(f"{i}  for (var _k in d) {{ if (_k.charAt(0) === '_') delete d[_k]; }}")
             lines.append(f'{i}  {outer}.{obj_name} = d; d = {outer};')
             return lines
 
@@ -2583,6 +2590,10 @@ function writeS(buf, pos, size, value, endian) {
             if ftype == 'ascii':
                 lines.append(f'{i}  for (var _si = 0; _si < {js_name}_n && pos < buf.length; _si++)'
                              f' {{ {js_name} += String.fromCharCode(buf[pos++]); }}')
+                # Trailing NUL padding is dropped, as Python, Go and C# drop it; an
+                # interior NUL is kept. The codec kept it all, so "HC\0\0" was reported
+                # where every interpreter reported "HC".
+                lines.append(f'{i}  {js_name} = {js_name}.replace(/\\u0000+$/, "");')
             elif ftype == 'bytes' and field.get('format', 'hex') in ('base64', 'array'):
                 # PS-079: the declared format. Ignored before, so every bytes field was
                 # rendered as lowercase hex whatever the schema asked for.

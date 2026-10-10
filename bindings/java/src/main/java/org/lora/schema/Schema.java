@@ -182,6 +182,7 @@ public class Schema {
             }
             checkBytesFormat(fm);
             if (fm.containsKey("byte_group")) checkByteGroupOverlap(fm.get("byte_group"));
+            checkCaseBodies(fm);               // PS-441
             checkLiteral(fm);
             checkWave4(fm);
             Wave5.checkLookupTemplate(fm);     // PS-407
@@ -192,6 +193,25 @@ public class Schema {
             fields.add(parseField(fm));
         }
         return fields;
+    }
+
+    /**
+     * PS-347, PS-441: a {@code match} or {@code tlv} case body is a field list, {@code []}
+     * for a case that reads nothing. A bare string such as {@code 5: skip} was skipped by
+     * the parser, so a match had no case for the value and a tlv skipped the tag.
+     */
+    private static void checkCaseBodies(Map<String, Object> fm) {
+        for (String construct : List.of("match", "tlv")) {
+            if (!(fm.get(construct) instanceof Map<?, ?> body)) continue;
+            if (!(body.get("cases") instanceof Map<?, ?> cases)) continue;
+            for (Map.Entry<?, ?> entry : cases.entrySet()) {
+                if (!(entry.getValue() instanceof List)) {
+                    throw new SchemaException(construct + ".cases[" + entry.getKey()
+                            + "]: a case body is a field list; write [] for a case that reads "
+                            + "nothing (PS-441)");
+                }
+            }
+        }
     }
 
     private static final String REF_PREFIX = "#/definitions/";
@@ -1586,7 +1606,11 @@ public class Schema {
             case ASCII -> {
                 byte[] data = ctx.read(length);
                 String str = new String(data, StandardCharsets.US_ASCII);
-                value = str.replace("\0", "").trim();
+                // Trailing NUL padding is dropped, as in Python, Go, C# and the generated
+                // codec. This removed every NUL and trimmed whitespace at both ends too.
+                int end = str.length();
+                while (end > 0 && str.charAt(end - 1) == '\0') end--;
+                value = str.substring(0, end);
             }
             
             case HEX -> {

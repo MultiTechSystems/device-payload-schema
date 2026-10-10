@@ -50,7 +50,7 @@ class CorpusConformanceTest {
     // CR-2026-096 added nine vectors (the meta-* fixtures); with _meta compared exactly
     // where a vector carries expected_meta, all pass: 2549.
     // CR-2026-097 added meta-tlv-channels.yaml: 2550.
-    private static final int CORPUS_FLOOR = 2555;   // +5: tlv-case-key-patterns; dl-atm41g2's two vendor vectors (+2); +121: vendor-codec vectors that kill vobo's mutation survivors
+    private static final int CORPUS_FLOOR = 2564;   // +9: tlv-case-field-list and object-member-field-list; +5: tlv-case-key-patterns; dl-atm41g2's two vendor vectors (+2); +121: vendor-codec vectors that kill vobo's mutation survivors
 
     @Test
     void corpusVectorsDecodeAsExpected() throws IOException {

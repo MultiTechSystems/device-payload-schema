@@ -194,10 +194,10 @@ the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1746 |
-| Go | `go/schema/corpus_conformance_test.go` | 2555 | 1763 (plain API 1740) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2555 | 1746 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2555 | 1746 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1749 |
+| Go | `go/schema/corpus_conformance_test.go` | 2564 | 1766 (plain API 1743) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2564 | 1749 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2564 | 1749 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 540 of 540 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -754,10 +754,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1746 |
-| Go | `go/schema/corpus_encode_test.go` | 1763 (plain 1740) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1746 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1746 |
+| Python | `tests/test_encode_round_trip.py` | 1749 |
+| Go | `go/schema/corpus_encode_test.go` | 1766 (plain 1743) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1749 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1749 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1079,13 +1079,36 @@ corpus before those schemas existed.** Each is fixed; the list is here so nobody
   with the same type — r718x's `Status` is ON/OFF in one message and Success/Failure in another.
   Same-typed branches now union their enums and widen their bounds.
 
-Still open from the same work: Python's tlv case path handles only `byte_group` and
-`bitfield_string` (`flagged`, `type: number` and `var:` inside a case fail or read a phantom
-`unknown` byte); `lookup` is ignored on a `number` field; the generator drops string case keys in
+Still open from the same work: `lookup` is ignored on a `number` field; the generator drops string case keys in
 a `match`; `score_schema.py` counts branch coverage only for discriminators present in the output
 and never looks inside `match`/`byte_group` for semantic fields, which is most of why r718x and
 dnt stop at Silver. r718x still reads its device and command bytes through a non-advancing peek
 it adopted before the `_` fix; it can use `$_device_type` directly now.
+
+**Every nested field list is decoded by `_decode_field_list` (2026-10-10).** Python's tlv
+case body and a `type: object`'s members were each their own loop of plain reads, so a number
+literal there was "unknown type: number", a `match` or `byte_group` member "declares no type",
+`var:`, internal references and `sentinel` were ignored, and a case's `flagged` read a phantom
+byte. Go, Java and C# already decoded all of it. Both now go through `_decode_nested_list`,
+which decodes into a fresh object, raises the list's first error, and hands its `_quality`
+and warnings to the decode, as a match case body's are. A name bound inside an object stays
+bound after it - the spec's "Combining Nested and Conditional" example relies on it, and Go,
+Java and C# all do it. The TS013 generator skipped every nameless object member (a `match`
+or a group of bit ranges decoded nothing and the group's byte was never consumed) and
+reported internal members; both are fixed. `tlv-case-field-list.yaml` and
+`object-member-field-list.yaml` hold all five to it. The validator now descends into an
+object's members too; it never had, so a typeless member passed.
+
+**A case body is a field list; a bare string is rejected at load (PS-441).** `cases: {5: skip}`
+crashed `schema_iterator_errors` and the decoder, while Go, Java and C# parsed it as an empty
+case - a match then decoded nothing for 5 with success, and a tlv dropped the case and skipped
+the tag. `case_body_errors` (Python, the validator and the generator), Go's `checkCases`,
+Java's `checkCaseBodies` and C#'s `CheckCaseBodies` all give `match.cases[5]: a case body is a
+field list; write [] for a case that reads nothing (PS-441)`. `[]` is the empty case.
+
+**`ascii` drops trailing NUL padding only, in all five.** Python, Go and C# did; the generated
+codec kept every NUL and Java removed every NUL and trimmed whitespace at both ends. The spec
+says nothing about NUL padding in `ascii` - this is agreement, not a requirement.
 
 **The Milesight wrong-decode pass (2026-09-24) left three things open.**
 
@@ -1267,8 +1290,7 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   Two vobo vectors (`standard_zero`, `heartbeat2_zero`) round-tripped only because their
   internal byte halves were all zero, so the tlv floors dropped by 2 in every language,
   deliberately. A sentinel is compared on the bits before an `encoding` and written back
-  as raw bits. Python's TLV case loop is still its own loop, so `optional` and `sentinel`
-  inside a TLV case apply in Go, Java and C# and not in Python - no corpus vector reaches it.
+  as raw bits.
 - **CR-2026-071/073: one arithmetic pipeline, one operation per stage.** Every numeric field,
   computed or read, is source -> mult/div/add -> `transform` -> lookup (PS-443); a failed
   guard's `else` is reported as declared, skipping all of it (PS-444). The load-time checks
