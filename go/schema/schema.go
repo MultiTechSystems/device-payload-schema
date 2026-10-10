@@ -100,6 +100,10 @@ const (
 	TypeStringLower FieldType = "string"
 	TypeAsciiLower  FieldType = "ascii"
 
+	// A boolean literal (PS-519): reads no bytes and reports its `value`. Not an
+	// alias of `bool`, which reads a bit (PS-065).
+	TypeBoolean FieldType = "boolean"
+
 	// Repeat type (arrays)
 	TypeRepeat      FieldType = "Repeat"
 	TypeRepeatLower FieldType = "repeat"
@@ -2455,6 +2459,14 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		}
 		value = field.Value
 
+	case TypeBoolean:
+		// A boolean literal reads no bytes (PS-357, PS-519); its value was checked at
+		// load (PS-520).
+		if field.Value == nil {
+			return nil, fmt.Errorf("field '%s': type boolean is a literal and declares no value (PS-519)", field.Name)
+		}
+		value = field.Value
+
 	case TypeAscii, TypeAsciiLower:
 		data, err := ctx.Read(length)
 		if err != nil {
@@ -3535,6 +3547,8 @@ func fixedElementSizeKnown(fields []Field) (int, bool) {
 		case f.Type == TypeNumber || f.Type == "number" || f.IntegerResult:
 			continue
 		case (f.Type == TypeString || f.Type == TypeStringLower) && f.Value != nil:
+			continue
+		case f.Type == TypeBoolean:
 			continue
 		case bitRangePattern.MatchString(string(f.Type)) || f.Type == TypeBoolLower:
 			total += f.Consume
@@ -4751,7 +4765,7 @@ func encodeFields(fields []Field, data map[string]any, ctx *EncodeContext) error
 
 		// PS-359: a literal writes no bytes and its key is not required of the input.
 		if field.Value != nil && (field.Type == TypeString || field.Type == TypeStringLower ||
-			field.Type == TypeNumber || field.Type == "number") {
+			field.Type == TypeNumber || field.Type == "number" || field.Type == TypeBoolean) {
 			continue
 		}
 		// PS-360: `value` on a field that reads bytes is the constant to write, whatever
@@ -5213,6 +5227,9 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 	// `string`, `bool` and `enum` are all written lowercase in every schema, and the
 	// switch matched only the capitalised constants, so those fields silently wrote no
 	// bytes. am102's 8-byte serial number emitted its tag and then nothing.
+	case TypeBoolean:
+		// A boolean literal came from no bytes, so it writes none (PS-359).
+
 	case TypeAscii, TypeAsciiLower, TypeString, TypeStringLower:
 		if (field.Type == TypeString || field.Type == TypeStringLower) && field.Value != nil {
 			// A literal came from no bytes, so it writes none (PS-359).

@@ -81,7 +81,7 @@ explicitly.
 
 ```
 TYPES:        u8 u16 u24 u32 u64 | s8 s16 s24 s32 s64 | f16 f32 f64 | bool
-              ascii hex bytes base64 | number integer string | skip enum | udec sdec
+              ascii hex bytes base64 | number integer string boolean | skip enum | udec sdec
               aliases uint8..uint64 int8..int64 i8..i64 - nothing else, case-sensitive
 BYTES FORMAT: hex hex:upper base64 array | separator (hex formats only)
 STRUCTURES:   type: object | repeat | byte_group | tlv
@@ -96,7 +96,8 @@ COMPUTE OPS:  add sub mul div mod idiv
 GUARD OPS:    gt gte lt lte eq ne
 ENCODINGS:    sign_magnitude bcd gray (Python only)
 REFERENCES:   $field_name | var: name | $ref: '#/definitions/name'
-LITERALS:     {type: string, value: "x"} | {type: number, value: 3}  (read no bytes)
+LITERALS:     {type: string, value: "x"} | {type: number, value: 3}
+              | {type: boolean, value: true}  (read no bytes; boolean needs value)
 ```
 
 ```yaml
@@ -194,10 +195,10 @@ the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1773 |
-| Go | `go/schema/corpus_conformance_test.go` | 2591 | 1790 (plain API 1767) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2591 | 1773 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2591 | 1773 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1775 |
+| Go | `go/schema/corpus_conformance_test.go` | 2593 | 1792 (plain API 1769) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2593 | 1775 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2593 | 1775 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 546 of 546 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -754,10 +755,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1773 |
-| Go | `go/schema/corpus_encode_test.go` | 1790 (plain 1767) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1773 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1773 |
+| Python | `tests/test_encode_round_trip.py` | 1775 |
+| Go | `go/schema/corpus_encode_test.go` | 1792 (plain 1769) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1775 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1775 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1449,6 +1450,17 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     `encode-round-trip.py` files the refusal as `separate-tlv`, a recoverable gap.
   - **The output schema did not declare `channels`.** It is now an array of objects, each
     with `tag`, its case's fields, and `raw` under `unknown: raw`.
+- **CR-2026-107: `type: boolean` is a literal** (PS-519, PS-520). It reads no bytes and
+  writes none, beside the string and number literals (PS-357, PS-359), in Python, Go,
+  Java, C# and the generated codec, and is reported as a JSON boolean (PS-279; the
+  output schema declares `type: boolean`). It is not an alias of `bool`. A `boolean`
+  with no `value` (PS-519), a non-boolean `value` such as `"true"`, `1` or `null`
+  (PS-520), and a lookup or modifier on it (PS-358) are refused at load by all four, the
+  validator and the TS013 generator. `tools/schema_binary.py` refuses it for C (PS-446)
+  and the C harness files it as a C gap. **YAML 1.1 `yes`/`on` is deliberately not
+  detected**: PyYAML and SnakeYAML hand the check a boolean for it, C# (YAML 1.2) a string
+  it rejects, and PS-520 permits both, so no shared vector may use one. Fixture:
+  `boolean-literal.yaml`.
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.

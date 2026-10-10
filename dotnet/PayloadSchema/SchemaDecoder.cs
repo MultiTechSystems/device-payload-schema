@@ -522,6 +522,16 @@ public static class SchemaDecoder
                 break;
             }
 
+            case FieldType.Boolean:
+            {
+                // A boolean literal reads no bytes (PS-357, PS-519); checked at load (PS-520).
+                if (field.Value is not bool)
+                    throw new InvalidOperationException($"field '{field.Name}': type boolean is a "
+                        + "literal and declares no value (PS-519)");
+                value = field.Value;
+                break;
+            }
+
             case FieldType.Ascii:
             {
                 var data = ctx.Read(length);
@@ -908,7 +918,7 @@ public static class SchemaDecoder
             {
                 case FieldType.Number:
                     continue;
-                case FieldType.String when f.Value != null:
+                case FieldType.String or FieldType.Boolean when f.Value != null:
                     continue;
                 case FieldType.Bits or FieldType.Bool:
                     total += f.Consume;

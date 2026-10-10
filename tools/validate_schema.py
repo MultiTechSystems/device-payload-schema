@@ -615,6 +615,8 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
         'int8', 'int16', 'int24', 'int32', 'int64',
         'f16', 'f32', 'f64',
         'bool', 'bytes', 'string', 'ascii', 'hex', 'base64',
+        # PS-519: a literal type only; not an alias of `bool`, which reads a bit.
+        'boolean',
         'object', 'match', 'enum', 'repeat', 'skip',
         'bitfield_string', 'number',
         # PS-283: a computed field declaring an integer result.

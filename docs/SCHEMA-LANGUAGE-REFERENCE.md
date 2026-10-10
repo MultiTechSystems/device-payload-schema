@@ -184,6 +184,7 @@ none do (PS-402). Devices that append fields in later firmware are described by 
 | `bool` | Boolean (0=false, nonzero=true) |
 | `number` | Computed field, or a constant with `value:` (no wire bytes) |
 | `string` | Constant with `value:` (no wire bytes) only; text read from the payload is `ascii` (PS-361) |
+| `boolean` | Constant `true` or `false` with `value:` (no wire bytes) only; `value` is required, and `yes`, `on` or `"true"` is refused (PS-519, PS-520). Not a spelling of `bool`, which reads a bit |
 | `skip` | Skip bytes (padding) |
 | `enum` | Enumerated values |
 | `bitfield_string` | Bit flags as string |
@@ -201,6 +202,15 @@ Boolean fields extract a single bit and convert to true/false:
 
 By default, bool fields do not advance the position, allowing multiple bits
 from the same byte. Add `consume: 1` to advance after reading.
+
+A constant boolean that the payload does not carry - a flag the device has no bit
+for - is a `boolean` literal, which reads no bytes and writes none (PS-357, PS-519):
+
+```yaml
+- name: hardware_error
+  type: boolean
+  value: false      # true or false; required
+```
 
 ### Bitfields
 

@@ -26,7 +26,6 @@ from fractions import Fraction
 from typing import Dict, Any, List, Optional, Tuple, Union
 from enum import Enum
 
-
 class Endian(Enum):
     BIG = 'big'
     LITTLE = 'little'
@@ -385,7 +384,7 @@ def fixed_element_size(fields):
         base = INTEGER_TYPE_INFO.get(ftype)
         if ftype in _FIXED_TYPE_SIZES or base:
             total += _FIXED_TYPE_SIZES.get(ftype) or base[0]
-        elif ftype in COMPUTED_TYPES or (ftype == 'string' and 'value' in field):
+        elif ftype in COMPUTED_TYPES or is_literal(field):
             continue
         elif '[' in ftype or ftype == 'bool':
             consume = field.get('consume', 0)
@@ -771,9 +770,15 @@ def arithmetic_schema_errors(node, _top=True):
     return errors
 
 
+#: The literal types (PS-357). `boolean` is a literal type only (PS-519): it is not
+#: an alias of `bool`, which reads a bit (PS-065).
+LITERAL_TYPES = ('string', 'number', 'boolean')
+
+
 def is_literal(field_def):
-    """A `string` or `number` field declaring `value`: a constant read from no bytes (PS-357)."""
-    return (isinstance(field_def, dict) and field_def.get('type') in ('string', 'number')
+    """A `string`, `number` or `boolean` field declaring `value`: a constant read from
+    no bytes (PS-357)."""
+    return (isinstance(field_def, dict) and field_def.get('type') in LITERAL_TYPES
             and 'value' in field_def)
 
 
@@ -781,7 +786,17 @@ LITERAL_FORBIDDEN = ('ref', 'polynomial', 'compute', 'lookup', 'transform', 'mul
 
 
 def literal_errors(field_def):
-    """PS-358: a literal's value matches its type, and it carries no arithmetic."""
+    """PS-358: a literal's value matches its type, and it carries no arithmetic.
+
+    PS-519: `boolean` is a literal type only, so it must declare `value`. PS-520: its
+    value is a boolean; `"true"`, `1` or `null` is refused. A YAML 1.1 reader such as
+    PyYAML hands this `yes` as True already, and PS-520 does not ask a decoder to
+    detect that: authors write `true` or `false`.
+    """
+    if (isinstance(field_def, dict) and field_def.get('type') == 'boolean'
+            and 'value' not in field_def):
+        return [f"Field '{field_def.get('name', '?')}': type boolean is a literal and "
+                f"declares no value (PS-519)"]
     if not is_literal(field_def):
         return []
     name, value, ftype = field_def.get('name', '?'), field_def['value'], field_def['type']
@@ -790,6 +805,9 @@ def literal_errors(field_def):
         errors.append(f"Field '{name}': a string literal's value must be a string (PS-358)")
     if ftype == 'number' and (isinstance(value, bool) or not isinstance(value, (int, float))):
         errors.append(f"Field '{name}': a number literal's value must be a number (PS-358)")
+    if ftype == 'boolean' and not isinstance(value, bool):
+        errors.append(f"Field '{name}': a boolean literal's value must be true or false, "
+                      f"not {value!r} (PS-520)")
     extra = [k for k in LITERAL_FORBIDDEN if k in field_def]
     if extra:
         errors.append(f"Field '{name}': a literal must not declare {', '.join(extra)} (PS-358)")
@@ -2518,6 +2536,15 @@ class SchemaInterpreter:
                 f"Field '{field_def.get('name', '?')}': type string declares no value; a "
                 f"string read from the payload is type ascii (PS-361)")
         
+        if field_type == 'boolean':
+            # A boolean literal (PS-357, PS-519): reported as declared, read from no
+            # bytes. A missing or non-boolean value is refused at load (PS-519, PS-520).
+            if 'value' not in field_def:
+                raise ValueError(
+                    f"Field '{field_def.get('name', '?')}': type boolean is a literal and "
+                    f"declares no value (PS-519)")
+            return field_def['value'], pos
+
         if field_type == 'ascii':
             length = resolve_length(field_def, buf, pos, variables=self._variables)
             if pos + length > len(buf):
@@ -5639,8 +5666,8 @@ class SchemaInterpreter:
             length = encode_length(field_def, len(raw))
             return raw[:length].ljust(length, b'\x00')
         
-        if field_type == 'string' and 'value' in field_def:
-            # A literal came from no bytes, so it writes none.
+        if is_literal(field_def):
+            # A literal came from no bytes, so it writes none (PS-359).
             return b''
         if field_type in ('string', 'ascii'):
             length = encode_length(field_def, len(str(value).encode('utf-8')))

@@ -148,7 +148,14 @@ def yaml_type_to_json_schema(field_type: str, field_def: Dict[str, Any]) -> Dict
     # Bool type
     if base_type == 'bool':
         return {"type": "boolean"}
-    
+
+    # A boolean literal (PS-519, PS-520) reports its declared value and nothing else.
+    # An enum rather than a const, so two branches reporting one key union their values.
+    if base_type == 'boolean':
+        value = field_def.get('value')
+        return {"type": "boolean", "enum": [value]} if isinstance(value, bool) else {
+            "type": "boolean"}
+
     # String types. `hex` is lowercase per PS-074 and PS-281; `hex:upper` is the
     # opt-out and keeps a plain string.
     if base_type == 'hex':
@@ -371,6 +378,8 @@ def reference_pattern(field_def: Optional[Dict[str, Any]]) -> str:
         # A scaled or floating value renders as a decimal, and an integral one loses its
         # trailing zero: `v_2.5_reading`, but `v_2_reading`.
         return r'-?\d+(?:\.\d+)?'
+    if field_type == 'boolean':     # a literal; how a template renders it is open
+        return '.+'
     if field_type.startswith(('u', 'byte', 'bool')):
         return r'\d+'
     if field_type.startswith(('s', 'i')) and field_type not in ('string',):

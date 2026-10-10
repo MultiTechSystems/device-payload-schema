@@ -1,0 +1,57 @@
+# A boolean literal: `type: boolean` with a `value` of true or false is a constant in
+# the output, read from no bytes and written as none (PS-357, PS-359, PS-519, PS-520;
+# CR-2026-107).
+#
+# `boolean` is a literal type only and is not a spelling of `bool`, which reads a
+# bit (PS-065). Before CR-2026-107 every implementation refused it as an unknown type.
+#
+# Each literal sits between fields read from the payload, so one that consumed a
+# byte would shift every field after it, and one that wrote a byte would make the
+# vector fail to re-encode to its payload. Literals appear at the top level and in
+# both branches of the discriminated section, with both values.
+name: probe_boolean_literal
+endian: big
+fields:
+- name: kind
+  type: u8
+- name: hardware_error
+  type: boolean
+  value: false
+- name: level
+  type: u8
+- match:
+    field: $kind
+    cases:
+      1:
+      - name: ok
+        type: boolean
+        value: true
+      - name: reading
+        type: u8
+      2:
+      - name: ok
+        type: boolean
+        value: false
+- name: calibrated
+  type: boolean
+  value: true
+test_vectors:
+- name: literals_beside_reads_true_branch
+  payload: 01 2A 05
+  source: spec-example
+  expected:
+    kind: 1
+    hardware_error: false
+    level: 42
+    ok: true
+    reading: 5
+    calibrated: true
+- name: literals_beside_reads_false_branch
+  payload: 02 00
+  source: spec-example
+  expected:
+    kind: 2
+    hardware_error: false
+    level: 0
+    ok: false
+    calibrated: true

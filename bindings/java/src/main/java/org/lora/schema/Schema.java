@@ -435,7 +435,8 @@ public class Schema {
         int total = 0;
         for (Field f : fields) {
             FieldType t = f.getType();
-            if (t == FieldType.NUMBER || (t == FieldType.STRING && f.getValue() != null)) continue;
+            if (t == FieldType.NUMBER || t == FieldType.BOOLEAN
+                    || (t == FieldType.STRING && f.getValue() != null)) continue;
             if (t == FieldType.BITS || t == FieldType.BOOL) { total += f.getConsume(); continue; }
             if (t == FieldType.BYTES || t == FieldType.ASCII || t == FieldType.HEX
                     || t == FieldType.BASE64 || t == FieldType.SKIP) {
@@ -511,9 +512,22 @@ public class Schema {
     /** PS-358: a literal's value matches its type, and it carries no arithmetic. */
     private static void checkLiteral(Map<String, Object> fm) {
         Object type = fm.get("type");
-        if (!fm.containsKey("value") || !("string".equals(type) || "number".equals(type))) return;
-        Object value = fm.get("value");
         String at = "Field '" + fm.get("name") + "': ";
+        // PS-519: `boolean` is a literal type only, so it declares `value`. PS-520: the
+        // value is a boolean; "true", 1 and null are refused. SnakeYAML reads YAML 1.1,
+        // so `yes` arrives as true, which PS-520 does not ask a decoder to detect.
+        if ("boolean".equals(type)) {
+            if (!fm.containsKey("value")) {
+                throw new SchemaException(at + "type boolean is a literal and declares no value (PS-519)");
+            }
+            if (!(fm.get("value") instanceof Boolean)) {
+                throw new SchemaException(at + "a boolean literal's value must be true or false, not "
+                        + fm.get("value") + " (PS-520)");
+            }
+        }
+        if (!fm.containsKey("value")
+                || !("string".equals(type) || "number".equals(type) || "boolean".equals(type))) return;
+        Object value = fm.get("value");
         if ("string".equals(type) && !(value instanceof String)) {
             throw new SchemaException(at + "a string literal's value must be a string (PS-358)");
         }
@@ -1659,7 +1673,16 @@ public class Schema {
                 }
                 value = field.getValue();
             }
-            
+
+            case BOOLEAN -> {
+                // A boolean literal reads no bytes (PS-357, PS-519); checked at load (PS-520).
+                if (field.getValue() == null) {
+                    throw new SchemaException.DecodeException("field '" + field.getName()
+                            + "': type boolean is a literal and declares no value (PS-519)");
+                }
+                value = field.getValue();
+            }
+
             case NUMBER -> {
                 value = decodeComputed(field, ctx);
                 if (value instanceof GuardElse fallback) {

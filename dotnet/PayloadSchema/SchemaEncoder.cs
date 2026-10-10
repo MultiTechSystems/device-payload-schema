@@ -194,7 +194,7 @@ public static class SchemaEncoder
             }
 
             // PS-359: a literal writes no bytes and its key is not required of the input.
-            if (field.Type == FieldType.String && field.Value != null)
+            if (field.Type is FieldType.String or FieldType.Boolean && field.Value != null)
                 return Array.Empty<byte>();
             // PS-360: `value` on a field that reads bytes is the constant to write,
             // whatever the input supplies.
@@ -592,7 +592,7 @@ public static class SchemaEncoder
             // in the payload, so they cannot be written back. Only elements that read
             // nothing (computed fields and literals) can be encoded.
             if (field.PresentIf != null && field.Fields.Any(f =>
-                    f.Type != FieldType.Number && !(f.Type == FieldType.String && f.Value != null)))
+                    f.Type != FieldType.Number && !(f.Type is FieldType.String or FieldType.Boolean && f.Value != null)))
                 throw new InvalidOperationException($"repeat field '{field.Name}' declares present_if "
                     + "and its elements read payload bytes, so the elements it dropped cannot be "
                     + "encoded (PS-387)");
@@ -1302,7 +1302,7 @@ public static class SchemaEncoder
                     var raw = ToBytes(field, value);
                     return Pad(raw, EncodeLength(field, raw.Length));
                 }
-                case FieldType.String when field.Value != null:
+                case FieldType.String or FieldType.Boolean when field.Value != null:
                     // A literal came from no bytes, so it writes none.
                     return Array.Empty<byte>();
                 case FieldType.Ascii or FieldType.String:
