@@ -6,7 +6,9 @@ decoder did, bugs included (AGENTS.md, "Test vectors must come from outside our 
 decoder"). PS-264 caps a schema with no independently sourced vector at Silver; this
 gate applies the same rule at review time, to the schemas a change adds or modifies:
 
-  FAIL  a changed device schema has no vector whose `source:` is independent
+  FAIL  a changed device schema has no vector whose `source:` is independent, unless
+        the change touches only annotations (ipso, senml, semantic, description, unit),
+        which no decode reads - that is admitted with a warning
         (vendor-doc, vendor-codec, field-capture, spec-example);
   FAIL  a vector added by the change declares no `source:` (or an unknown one);
   FAIL  a changed `_language-conformance/` fixture has a vector declaring no source.
@@ -34,6 +36,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from validate_schema import (  # noqa: E402
+    CORRECTED_SOURCE, correction_errors, is_independent_vector)
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 DEVICES = "schemas/devices/"
@@ -43,7 +49,7 @@ GENERATED = DEVICES + "_library-composed/"
 INDEPENDENT_SOURCES = frozenset(
     {"vendor-doc", "vendor-codec", "field-capture", "spec-example"}
 )
-KNOWN_SOURCES = INDEPENDENT_SOURCES | {"generated"}
+KNOWN_SOURCES = INDEPENDENT_SOURCES | {"generated", CORRECTED_SOURCE}
 
 #: What a vector is asked, and what it claims the answer is.
 STIMULUS_KEYS = ("payload", "fPort", "fport", "port", "input", "input_metadata")
@@ -163,6 +169,39 @@ class Report:
         return "PASS"
 
 
+#: Keys that describe a value for downstream consumers and that no decode reads: the
+#: semantic annotations and the display unit. An edit confined to these cannot change a
+#: decoded value.
+ANNOTATION_KEYS = frozenset(("ipso", "senml", "semantic", "description", "unit"))
+
+
+def _str_keys(node: Any) -> Any:
+    """Keys as strings, so a lookup mixing 1 and `default` can be serialised sorted."""
+    if isinstance(node, dict):
+        return {str(k): _str_keys(v) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_str_keys(x) for x in node]
+    return node
+
+
+def _without_annotations(node: Any) -> Any:
+    if isinstance(node, dict):
+        return {
+            str(k): (_str_keys(v) if k == "test_vectors" else _without_annotations(v))
+            for k, v in node.items()
+            if k not in ANNOTATION_KEYS
+        }
+    if isinstance(node, list):
+        return [_without_annotations(x) for x in node]
+    return node
+
+
+def annotation_only(old: Any, new: Any) -> bool:
+    """Whether new differs from old only in annotation keys. Test vectors are compared as
+    they are, never stripped: an expected value may itself be named `unit`."""
+    return _canon(_without_annotations(old)) == _canon(_without_annotations(new))
+
+
 def check_schema(path: str, new_text: str, old_text: Optional[str]) -> Report:
     report = Report(path)
     try:
@@ -180,7 +219,8 @@ def check_schema(path: str, new_text: str, old_text: Optional[str]) -> Report:
         _identity(v, i): v for i, v in enumerate(_vectors(old) if old else [])
     }
     fixture = path.startswith(FIXTURES)
-    independent = [v for v in vectors if _source(v) in INDEPENDENT_SOURCES]
+    independent = [v for v in vectors
+                   if isinstance(v, dict) and is_independent_vector(v, INDEPENDENT_SOURCES)]
 
     report.notes.append(
         "%d vector(s), %d independent%s"
@@ -191,6 +231,9 @@ def check_schema(path: str, new_text: str, old_text: Optional[str]) -> Report:
         ident = _identity(vector, i)
         src = _source(vector)
         added = ident not in old_vectors
+        if isinstance(vector, dict):
+            for problem in correction_errors(vector):
+                report.failures.append("vector %r: %s" % (ident, problem))
         if src is not None and src not in KNOWN_SOURCES:
             report.failures.append(
                 "vector %r: unknown source %r (one of: %s)"
@@ -223,7 +266,17 @@ def check_schema(path: str, new_text: str, old_text: Optional[str]) -> Report:
                     "right" % (ident, src or "none")
                 )
 
-    if not fixture and not independent:
+    if not fixture and not independent and old is not None and annotation_only(old, new):
+        # The edit cannot change what the schema decodes, so it cannot have been made
+        # wrong by our own decoder either: the missing vector is a condition the schema
+        # already had, not one this change introduced. Say so, and let it through.
+        report.warnings.append(
+            "no vector has an independent source, but this change touches only "
+            "annotations (%s), which no decode reads, so it is admitted; the schema "
+            "still needs vendor vectors, and PS-264 still caps it at Silver"
+            % ", ".join(sorted(ANNOTATION_KEYS))
+        )
+    elif not fixture and not independent:
         if not vectors:
             report.failures.append(
                 "no test vectors: a schema with none cannot be verified at all"
@@ -321,7 +374,8 @@ def run_all(repo: Path) -> int:
         unsourced = [v for v in vectors if _source(v) is None]
         stats["unsourced"] += len(unsourced)
         stats["independent"] += sum(
-            1 for v in vectors if _source(v) in INDEPENDENT_SOURCES
+            1 for v in vectors
+            if isinstance(v, dict) and is_independent_vector(v, INDEPENDENT_SOURCES)
         )
         if rel.startswith(FIXTURES):
             fixtures_unsourced.extend(
@@ -331,7 +385,8 @@ def run_all(repo: Path) -> int:
         total_schemas += 1
         if not vectors:
             no_vectors.append(rel)
-        elif not any(_source(v) in INDEPENDENT_SOURCES for v in vectors):
+        elif not any(isinstance(v, dict) and is_independent_vector(v, INDEPENDENT_SOURCES)
+                     for v in vectors):
             no_independent.append(rel)
 
     print("Corpus provenance (device schemas; %s excluded)" % GENERATED)

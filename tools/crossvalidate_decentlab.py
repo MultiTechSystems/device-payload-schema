@@ -34,6 +34,7 @@ SCHEMA_DIR = REPO_ROOT / "schemas" / "devices" / "decentlab"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from schema_interpreter import SchemaInterpreter  # noqa: E402
+from crossvalidate_ttn import corrections  # noqa: E402
 
 #: Relative tolerance used when comparing against the vendor's floating point
 #: results, plus an absolute floor for values near zero.
@@ -134,7 +135,15 @@ def check_schema(path, vendor_root, available):
         if actual is None:
             problems.append((payload, "our decode failed: %s" % errors))
             continue
+        # PS-514: fields a vendor-codec-corrected vector names for this payload are the
+        # ones the vendor decoder is known to get wrong, so they are not compared.
+        skip = set()
+        for (hexed, _port), names in corrections(schema).items():
+            if hexed == payload.lower():
+                skip |= names
         for key, want in expected.items():
+            if key in skip:
+                continue
             if key not in actual:
                 problems.append((payload, "%s missing from our output" % key))
             elif not agrees(actual[key], want):

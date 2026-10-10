@@ -156,11 +156,15 @@ public class SchemaField
     public double? Mult { get; set; }
     public double? Div { get; set; }
     public List<TransformStage> Transform { get; set; } = new();
-    public Dictionary<int, string>? Lookup { get; set; }
+    /// <summary>
+    /// The lookup's labels, each a string, a number or a boolean (PS-106). Every label was
+    /// read as text, so a boolean label was reported as the string "true" (CR-2026-104).
+    /// </summary>
+    public Dictionary<int, object>? Lookup { get; set; }
     /// <summary>True when `lookup` was written as a sequence, indexed from zero (PS-104).</summary>
     public bool LookupIsSequence { get; set; }
-    /// <summary>Fallback for a mapping lookup with no entry for the value (PS-269).</summary>
-    public string? LookupDefault { get; set; }
+    /// <summary>Fallback for a mapping lookup with no entry for the value (PS-269), a scalar like any label.</summary>
+    public object? LookupDefault { get; set; }
     /// <summary>Output key template resolved against earlier fields (PS-265).</summary>
     public string? NameFrom { get; set; }
 
