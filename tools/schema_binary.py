@@ -357,6 +357,15 @@ def field_errors(field: Dict, schema_endian: str = 'big') -> List[str]:
                     refuse(f"lookup key {key!r}", "this format's keys are 0-255")
                 if isinstance(label, dict):
                     label = label.get('name', label)
+                if isinstance(label, (bool, int, float)):
+                    # PS-106 allows a number or boolean label (CR-2026-104), reported as
+                    # a JSON number or boolean. This format holds a label as text, so the
+                    # C interpreter would report the string "5" or "True": refused
+                    # rather than mis-typed.
+                    refuse(f"lookup label {label!r}",
+                           "this format holds a label as text, and a number or boolean "
+                           "label is reported as one (PS-106)")
+                    continue
                 if len(str(label).encode('utf-8')) > MAX_LABEL_BYTES:
                     refuse(f"lookup label {label!r}",
                            f"this format holds {MAX_LABEL_BYTES} bytes of a label")

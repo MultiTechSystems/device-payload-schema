@@ -129,10 +129,13 @@ type Field struct {
 	Div         *float64       `json:"div,omitempty" yaml:"div,omitempty"`
 	Transform   []Transform    `json:"transform,omitempty" yaml:"transform,omitempty"`
 	Modifiers   []Transform    `json:"modifiers,omitempty" yaml:"modifiers,omitempty"` // Legacy support
-	Lookup      map[int]string `json:"lookup,omitempty" yaml:"lookup,omitempty"`
-	LookupArray []any          `json:"lookup_array,omitempty" yaml:"lookup_array,omitempty"`
-	// Fallback for a mapping lookup with no entry for the decoded value (PS-269).
-	LookupDefault *string `json:"-" yaml:"-"`
+	// A mapping lookup's labels, each a string, a number or a boolean (PS-106). It was a
+	// map[int]string, which dropped every other label at parse time (CR-2026-104).
+	Lookup      map[int]any `json:"lookup,omitempty" yaml:"lookup,omitempty"`
+	LookupArray []any       `json:"lookup_array,omitempty" yaml:"lookup_array,omitempty"`
+	// Fallback for a mapping lookup with no entry for the decoded value (PS-269), a
+	// scalar like any label.
+	LookupDefault *any `json:"-" yaml:"-"`
 	// Output key template resolved against earlier fields (PS-265).
 	NameFrom string `json:"name_from,omitempty" yaml:"name_from,omitempty"`
 	Var         string         `json:"var,omitempty" yaml:"var,omitempty"`
@@ -752,21 +755,46 @@ func reverseCanonicalModifiers(value float64, field Field) float64 {
 // A label in neither table came from a `default`, which stands for every value the
 // table does not list (PS-269): there is no original to recover, and saying so is
 // better than writing a byte that is merely plausible.
+//
+// Labels are compared by sameLabel (PS-513): a boolean is found only as a boolean, so
+// `true` never reverses through a label of 1, nor 1 through a label of `true`.
 func reverseLookupLabel(field Field, value any) (any, error) {
-	strVal, isStr := value.(string)
-	if !isStr || (field.Lookup == nil && field.LookupArray == nil) {
+	if field.Lookup == nil && field.LookupArray == nil {
 		return value, nil
 	}
 	// Smallest matching key, so a table that gives two values the same label resolves
 	// the same way on every run rather than however the map happens to be walked.
 	matched, found := 0, false
 	for k, v := range field.Lookup {
-		if v == strVal && (!found || k < matched) {
+		if sameLabel(v, value) && (!found || k < matched) {
 			matched, found = k, true
 		}
 	}
 	if found {
 		return float64(matched), nil
+	}
+	strVal, isStr := value.(string)
+	if boolVal, isBool := value.(bool); isBool {
+		for i, entry := range field.LookupArray {
+			if sameLabel(entry, boolVal) {
+				return float64(i), nil
+			}
+		}
+		// A boolean only the `default` carries has no key to write (PS-409), and no
+		// number stands for a boolean (PS-513).
+		return nil, fmt.Errorf("%v is not a label with a key of its own in the lookup "+
+			"for %q; a boolean matches only a boolean label, and a `default` label has "+
+			"no value to recover (PS-409, PS-513)", boolVal, field.Name)
+	}
+	if !isStr {
+		// A number: a number label reverses to its index (PS-106); any other number is
+		// the value itself, as it always was.
+		for i, entry := range field.LookupArray {
+			if sameLabel(entry, value) {
+				return float64(i), nil
+			}
+		}
+		return value, nil
 	}
 	// PS-409: a string matching the ${value} default carries the value it stands for.
 	if template := lookupTemplate(field); template != "" {
@@ -777,7 +805,7 @@ func reverseLookupLabel(field Field, value any) (any, error) {
 			"for its default %q (PS-409)", strVal, field.Name, template)
 	}
 	for i, entry := range field.LookupArray {
-		if label, ok := entry.(string); ok && label == strVal {
+		if sameLabel(entry, strVal) {
 			return float64(i), nil
 		}
 	}
@@ -1199,32 +1227,31 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	}
 	// Lookup table - handle both string and int keys
 	if lookup, ok := fm["lookup"].(map[string]any); ok {
-		f.Lookup = make(map[int]string)
+		f.Lookup = make(map[int]any)
 		for k, v := range lookup {
 			if key, err := strconv.Atoi(k); err == nil {
-				if str, ok := v.(string); ok {
-					f.Lookup[key] = str
+				if label, ok := lookupLabel(v); ok {
+					f.Lookup[key] = label
 				}
 			} else if k == "default" {
-				if str, ok := v.(string); ok {
-					fallback := str
-					f.LookupDefault = &fallback
+				if label, ok := lookupLabel(v); ok {
+					f.LookupDefault = &label
 				}
 			}
 		}
 	}
 	// YAML may parse numeric keys as int
 	if lookup, ok := fm["lookup"].(map[int]any); ok {
-		f.Lookup = make(map[int]string)
+		f.Lookup = make(map[int]any)
 		for k, v := range lookup {
-			if str, ok := v.(string); ok {
-				f.Lookup[k] = str
+			if label, ok := lookupLabel(v); ok {
+				f.Lookup[k] = label
 			}
 		}
 	}
 	// Handle map[any]any from YAML
 	if lookup, ok := fm["lookup"].(map[any]any); ok {
-		f.Lookup = make(map[int]string)
+		f.Lookup = make(map[int]any)
 		for k, v := range lookup {
 			var key int
 			switch kv := k.(type) {
@@ -1234,16 +1261,15 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 				key = int(kv)
 			case string:
 				if kv == "default" {
-					if str, ok := v.(string); ok {
-						fallback := str
-						f.LookupDefault = &fallback
+					if label, ok := lookupLabel(v); ok {
+						f.LookupDefault = &label
 					}
 					continue
 				}
 				key, _ = strconv.Atoi(kv)
 			}
-			if str, ok := v.(string); ok {
-				f.Lookup[key] = str
+			if label, ok := lookupLabel(v); ok {
+				f.Lookup[key] = label
 			}
 		}
 	}
@@ -2715,7 +2741,8 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 		if numVal, ok := toFloat64(value); ok {
 			// A value with a fraction matches no key: toInt would truncate 2.5 to the
 			// key 2. An integral float such as 7.0 is the key 7.
-			lookup, found := "", false
+			var lookup any
+			found := false
 			if numVal == math.Trunc(numVal) && !math.IsInf(numVal, 0) {
 				lookup, found = field.Lookup[int(numVal)]
 			}
@@ -4558,9 +4585,16 @@ func encodeBitfieldRun(run []Field, data map[string]any, ctx *EncodeContext) err
 
 // bitfieldLabelValue is the number a bit range's enum label stands for.
 func bitfieldLabelValue(value any, gf Field) (float64, error) {
+	// A label the lookup refuses outright - a boolean with no key of its own - is
+	// reported with its reason rather than as an undeclared value (PS-513).
+	if _, err := reverseLookupLabel(gf, value); err != nil {
+		if _, isBool := value.(bool); isBool {
+			return 0, err
+		}
+	}
 	label := fmt.Sprintf("%v", value)
 	for number, name := range gf.Lookup {
-		if name == label {
+		if text, ok := name.(string); ok && text == label {
 			return float64(number), nil
 		}
 	}
@@ -5218,13 +5252,16 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 		if strVal, ok := value.(string); ok {
 			// A `type: enum` field keeps its mapping in Values; Lookup is the separate
 			// `lookup:` modifier. Reading the wrong one made every label unknown.
-			tables := []map[int]string{field.Values, field.Lookup}
-			for _, table := range tables {
-				for k, v := range table {
-					if v == strVal {
-						ctx.Write(encodeUint(uint64(k), maxInt(length, 1), endian))
-						return nil
-					}
+			for k, v := range field.Values {
+				if v == strVal {
+					ctx.Write(encodeUint(uint64(k), maxInt(length, 1), endian))
+					return nil
+				}
+			}
+			for k, v := range field.Lookup {
+				if sameLabel(v, strVal) {
+					ctx.Write(encodeUint(uint64(k), maxInt(length, 1), endian))
+					return nil
 				}
 			}
 			return fmt.Errorf(

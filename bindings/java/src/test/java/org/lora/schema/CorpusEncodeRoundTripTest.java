@@ -63,7 +63,7 @@ class CorpusEncodeRoundTripTest {
     // classifier filed it under that shape). The leftover vector re-encodes to its first byte only
     // (PS-474) and the omitted out-of-range one has no value to write, both by design.
     // +2 with plain fixed 100 -> 102 (CR-2026-096): the meta-* fixtures that round-trip.
-    private static final int ENCODE_FLOOR_TOTAL = 1749;   // +3: byte-group-bool; +2: tlv-case-key-patterns; +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
+    private static final int ENCODE_FLOOR_TOTAL = 1757;   // +3: byte-group-bool; +8: CR-2026-104 lookup label fixtures (plain fixed); +2: tlv-case-key-patterns; +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
 
     /**
      * Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -73,7 +73,7 @@ class CorpusEncodeRoundTripTest {
             // 1283 -> 1281 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped only because their internal byte halves were all zero, which the encoder wrote for an internal field with no value. It now reports such a field instead.
             "tlv", 1296,   // +2: tlv-case-key-patterns; +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
             "flagged", 193,
-            "plain fixed", 102,
+            "plain fixed", 110,
             "match", 123,
             "byte_group", 23,
             // 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas

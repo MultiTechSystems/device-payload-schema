@@ -17,8 +17,11 @@ const lookupValueToken = "${value}"
 // lookupTemplate is the field's mapping default where it carries ${value}, else "".
 // Only a mapping's default is a template (PS-408).
 func lookupTemplate(field Field) string {
-	if field.LookupDefault != nil && strings.Contains(*field.LookupDefault, lookupValueToken) {
-		return *field.LookupDefault
+	if field.LookupDefault == nil {
+		return ""
+	}
+	if text, ok := (*field.LookupDefault).(string); ok && strings.Contains(text, lookupValueToken) {
+		return text
 	}
 	return ""
 }
@@ -72,7 +75,8 @@ func matchLookupTemplate(template, text string) (float64, bool) {
 }
 
 // checkLookupTemplate is PS-407: a ${value} default reports a string, so every label
-// must be one. Checked on the raw field, because Field.Lookup keeps string labels only.
+// must be one - a number or a boolean label is refused alike (CR-2026-104). Checked on
+// the raw field, where the template and the labels are still as the schema wrote them.
 func checkLookupTemplate(field map[string]any, at string) error {
 	var entries map[string]any
 	switch lookup := field["lookup"].(type) {

@@ -45,7 +45,7 @@ import (
 // CR-2026-085/086's fixtures decode now that bytes after the last field are reported
 // (leftover-bytes, match-default-skip's skipped body) and valid_range is compared before
 // the lookup (range-before-lookup's four vectors), so the full count is 2371.
-const corpusFloor = 2558 // +3: byte-group-bool; +5: tlv-case-key-patterns; +1: meta-tlv-channels (CR-2026-097); +9: the CR-2026-096 _meta fixtures (meta-device-context, meta-port-default, meta-producer, meta-nested); dl-atm41g2's two vendor vectors (+2); +40: vendor vectors for the schemas the unit cleanup touches; +121: vendor-codec vectors that kill vobo's mutation survivors; +6: Milesight battery-channel vendor vectors (percent units)
+const corpusFloor = 2566 // +3: byte-group-bool; +8: CR-2026-104 lookup-boolean-labels and lookup-number-labels; +5: tlv-case-key-patterns; +1: meta-tlv-channels (CR-2026-097); +9: the CR-2026-096 _meta fixtures (meta-device-context, meta-port-default, meta-producer, meta-nested); dl-atm41g2's two vendor vectors (+2); +40: vendor vectors for the schemas the unit cleanup touches; +121: vendor-codec vectors that kill vobo's mutation survivors; +6: Milesight battery-channel vendor vectors (percent units)
 
 type corpusVector struct {
 	Name    string `yaml:"name"`

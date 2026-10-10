@@ -789,23 +789,26 @@ public class Schema {
         // Lookup table
         Object lookupRaw = fm.get("lookup");
         if (lookupRaw instanceof Map) {
-            Map<Integer, String> lookup = new HashMap<>();
+            // A label keeps the type the schema gave it: a string, a number or a boolean
+            // (PS-106). String.valueOf made every one text, so a boolean label was
+            // reported as the string "true" (CR-2026-104).
+            Map<Integer, Object> lookup = new HashMap<>();
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) lookupRaw).entrySet()) {
                 if ("default".equals(String.valueOf(entry.getKey()))) {
-                    f.setLookupDefault(String.valueOf(entry.getValue()));
+                    f.setLookupDefault(lookupLabel(entry.getValue()));
                     continue;
                 }
                 int key = toInt(entry.getKey(), 0);
-                lookup.put(key, String.valueOf(entry.getValue()));
+                lookup.put(key, lookupLabel(entry.getValue()));
             }
             f.setLookup(lookup);
         } else if (lookupRaw instanceof List) {
             // Sequence form, indexed from zero (PS-104). This was unparsed, so a
             // schema using it decoded a raw integer instead of its label.
             List<?> items = (List<?>) lookupRaw;
-            Map<Integer, String> lookup = new HashMap<>();
+            Map<Integer, Object> lookup = new HashMap<>();
             for (int i = 0; i < items.size(); i++) {
-                lookup.put(i, String.valueOf(items.get(i)));
+                lookup.put(i, lookupLabel(items.get(i)));
             }
             f.setLookup(lookup);
             f.setLookupSequence(true);
@@ -2900,6 +2903,31 @@ public class Schema {
             }
         }
         return defaultValue;
+    }
+
+    /**
+     * A lookup label as the schema wrote it: a String, a Number or a Boolean (PS-106).
+     * Anything else - a nested mapping, say - keeps its old rendering as text.
+     */
+    private static Object lookupLabel(Object obj) {
+        if (obj instanceof String || obj instanceof Boolean || obj instanceof Number) return obj;
+        return String.valueOf(obj);
+    }
+
+    /**
+     * PS-513 (CR-2026-104): a boolean label matches only a boolean input, and a boolean
+     * input only a boolean label - {@code true} is not 1, and "true" is not {@code true}. A
+     * string matches only an equal string, and a number any number equal to it.
+     */
+    static boolean sameLabel(Object label, Object value) {
+        if (label instanceof Boolean || value instanceof Boolean) {
+            return label instanceof Boolean && label.equals(value);
+        }
+        if (label instanceof String || value instanceof String) {
+            return label instanceof String && label.equals(value);
+        }
+        return label instanceof Number l && value instanceof Number v
+                && l.doubleValue() == v.doubleValue();
     }
 
     /** Reads a flag written as a YAML boolean, or as "true"/1 by a JSON producer. */

@@ -215,7 +215,7 @@ public class BinarySchemaParser {
             int lookupIdx = (int) lookupIdxResult.value;
             pos = lookupIdxResult.newPos;
             
-            Map<Integer, String> lookup = new HashMap<>();
+            Map<Integer, Object> lookup = new HashMap<>();
             for (Map.Entry<Integer, Object> entry : lookups.get(lookupIdx).entrySet()) {
                 lookup.put(entry.getKey(), String.valueOf(entry.getValue()));
             }
@@ -253,7 +253,7 @@ public class BinarySchemaParser {
             int lookupIdx = (int) lookupIdxResult.value;
             pos = lookupIdxResult.newPos;
             
-            Map<Integer, String> lookup = new HashMap<>();
+            Map<Integer, Object> lookup = new HashMap<>();
             for (Map.Entry<Integer, Object> entry : lookups.get(lookupIdx).entrySet()) {
                 lookup.put(entry.getKey(), String.valueOf(entry.getValue()));
             }
