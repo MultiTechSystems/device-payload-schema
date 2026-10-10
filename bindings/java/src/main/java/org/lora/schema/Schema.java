@@ -91,6 +91,10 @@ public class Schema {
         Object declaredVersion = raw.get("version");
         // CR-2026-045: splice every $ref first, rejecting what cannot be (PS-345 to PS-349).
         raw = expandRawRefs(raw);
+        // PS-510: the definitions' fields too; the spliced ones are checked in parseFields.
+        if (raw.get("definitions") instanceof Map<?, ?> definitions) {
+            for (Object definition : definitions.values()) checkDefinitionAnnotations(definition);
+        }
         // PS-491 (CR-2026-096): one reported name's declarations in one field list agree on
         // unit, senml and ipso, so its `_meta` entry does not depend on which one decoded.
         List<String> metaErrors = Meta.declarationErrors(raw);
@@ -184,6 +188,7 @@ public class Schema {
             if (fm.containsKey("byte_group")) checkByteGroupOverlap(fm.get("byte_group"));
             checkCaseBodies(fm);               // PS-441
             checkLiteral(fm);
+            checkAnnotations(fm);              // PS-510
             checkWave4(fm);
             Wave5.checkLookupTemplate(fm);     // PS-407
             // PS-399, PS-414, PS-416, PS-427, PS-428: the match's discriminator source,
@@ -506,6 +511,42 @@ public class Schema {
                 throw new SchemaException("byte_group member '" + mm.get("name")
                         + "' declares endian; the group's byte order is declared on the group (PS-364)");
             }
+        }
+    }
+
+    /**
+     * PS-510 (CR-2026-102): a field's {@code ipso} is a mapping carrying {@code object}, and
+     * its {@code senml} a mapping. {@code ipso: 3303} loaded and was dropped, so the author
+     * believed the field annotated and no consumer saw an annotation. The wording is the
+     * spec prototype's, and Python, Go and C# give it identically. The legacy
+     * {@code semantic: {ipso: N}} is a different key, outside PS-510.
+     */
+    static void checkAnnotations(Map<?, ?> fm) {
+        Object name = fm.get("name") instanceof String s ? s : "?";
+        if (fm.containsKey("ipso")
+                && !(fm.get("ipso") instanceof Map<?, ?> ipso && ipso.containsKey("object"))) {
+            throw new SchemaException("The ipso of '" + name + "' is a mapping that carries `object`, "
+                    + "such as {object: 3303}; a bare object number is not a shorthand (PS-510)");
+        }
+        if (fm.containsKey("senml") && !(fm.get("senml") instanceof Map)) {
+            throw new SchemaException("The senml of '" + name + "' is a mapping, such as {unit: Cel} (PS-510)");
+        }
+    }
+
+    /**
+     * checkAnnotations over every field mapping of the {@code definitions}, referenced or
+     * not, as Go and C# parse them; a referenced one is also checked where it is spliced.
+     */
+    private static void checkDefinitionAnnotations(Object node) {
+        if (node instanceof Map<?, ?> m) {
+            checkAnnotations(m);
+            for (Map.Entry<?, ?> e : m.entrySet()) {
+                Object key = e.getKey();
+                if ("ipso".equals(key) || "senml".equals(key) || "semantic".equals(key)) continue;
+                checkDefinitionAnnotations(e.getValue());
+            }
+        } else if (node instanceof List<?> list) {
+            for (Object item : list) checkDefinitionAnnotations(item);
         }
     }
 

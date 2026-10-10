@@ -1462,6 +1462,19 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   detected**: PyYAML and SnakeYAML hand the check a boolean for it, C# (YAML 1.2) a string
   it rejects, and PS-520 permits both, so no shared vector may use one. Fixture:
   `boolean-literal.yaml`.
+- **CR-2026-102: `ipso` and `senml` are mappings** (PS-510). `ipso` must be a mapping
+  carrying `object`, `senml` a mapping; `ipso: 3303` is not a shorthand and is refused at
+  load, with the spec prototype's wording, identical everywhere: `The ipso of '{name}' is a
+  mapping that carries ``object``, such as {object: 3303}; a bare object number is not a
+  shorthand (PS-510)` / `The senml of '{name}' is a mapping, such as {unit: Cel} (PS-510)`.
+  Python `annotation_schema_errors` (called by the interpreter, `validate_schema.py` on the
+  expanded schema, and the TS013 generator), Go `checkAnnotations` from `checkFieldRules`,
+  Java `checkAnnotations` from `parseFields` plus `checkDefinitionAnnotations`, C#
+  `CheckAnnotations` from `ParseFields`. Every field list is covered, and **unreferenced
+  `definitions` too**, because Go and C# already parse them. The legacy
+  `semantic: {ipso: N}` is a different key and is not checked. No fixture: a rejection
+  cannot be a corpus vector, and the corpus already uses all the accepted forms;
+  `test_cr_2026_102_ipso_senml_mappings.py` also sweeps the corpus, library and examples.
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.

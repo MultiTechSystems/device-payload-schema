@@ -5535,7 +5535,7 @@ class TestValidationLevels:
         schema = {
             'name': 'test',
             'fields': [
-                {'name': 'temperature', 'type': 's16', 'div': 10, 'ipso': 3303}
+                {'name': 'temperature', 'type': 's16', 'div': 10, 'ipso': {'object': 3303}}
             ],
             'test_vectors': [
                 {'name': 'basic', 'payload': '00E7', 'expected': {'temperature': 23.1}}
