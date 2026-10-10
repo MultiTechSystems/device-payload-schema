@@ -123,7 +123,7 @@ Generated inventory of this repository: what lives where, what each document cov
 ## Device schemas
 
 281 schemas under `schemas/devices/`.
-Mean quality score 76.0% (PLATINUM 37, GOLD 39, SILVER 160, BRONZE 25, REJECTED 20). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+Mean quality score 75.9% (PLATINUM 37, GOLD 39, SILVER 160, BRONZE 25, REJECTED 20). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
@@ -344,9 +344,9 @@ Mean quality score 76.0% (PLATINUM 37, GOLD 39, SILVER 160, BRONZE 25, REJECTED 
 | `makerfabs/soil-monitor` | 8 | 0 | fields | 14% | REJECTED |
 | `mclimate/flood-sensor` | 5 | 1 | fields | 61% | BRONZE |
 | `mclimate/t-valve` | 11 | 0 | fields | 16% | REJECTED |
-| `mclimate/vicki` | 31 | 13 | fields | 100% | PLATINUM |
-| `milesight/am102` | 22 | 21 | fields | 100% | PLATINUM |
-| `milesight/am102l` | 22 | 19 | fields | 100% | PLATINUM |
+| `mclimate/vicki` | 31 | 13 | fields | 98% | PLATINUM |
+| `milesight/am102` | 20 | 21 | fields | 97% | PLATINUM |
+| `milesight/am102l` | 20 | 19 | fields | 97% | PLATINUM |
 | `milesight/am103` | 16 | 19 | fields | 94% | GOLD |
 | `milesight/am103l` | 16 | 19 | fields | 94% | GOLD |
 | `milesight/am104` | 12 | 15 | fields | 100% | PLATINUM |
@@ -391,7 +391,7 @@ Mean quality score 76.0% (PLATINUM 37, GOLD 39, SILVER 160, BRONZE 25, REJECTED 
 | `milesight/gs301` | 23 | 31 | fields | 100% | PLATINUM |
 | `milesight/ts101` | 14 | 15 | fields | 94% | GOLD |
 | `milesight/ts201` | 16 | 23 | fields | 100% | PLATINUM |
-| `milesight/ts201v2` | 25 | 20 | fields | 94% | GOLD |
+| `milesight/ts201v2` | 24 | 20 | fields | 93% | GOLD |
 | `milesight/ts30x` | 26 | 20 | fields | 80% | SILVER |
 | `milesight/uc100` | 7 | 11 | fields | 78% | SILVER |
 | `milesight/uc1114` | 6 | 0 | fields | 16% | REJECTED |
