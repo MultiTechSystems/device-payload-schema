@@ -1,0 +1,47 @@
+# Parts of a packed version string taken from above bit 31, and one part wider than
+# 53 bits. Every part is exact (PS-430): the reference extracts from an integer of any
+# width. The generated codec shifted the whole value with JavaScript's 32-bit
+# operators, so bits 40..47 of the six-byte firmware word came out as 21 rather than 3,
+# and an eight-byte EUI could not be rendered at all. A 64-bit decimal part is text
+# like every other part, so its digits are exact too.
+#
+# Round-trips: every part is written back from its digits.
+name: probe_bitfield_string_wide
+endian: big
+fields:
+- name: firmware
+  type: bitfield_string
+  length: 6
+  delimiter: "."
+  parts:
+  - [40, 8]
+  - [32, 8]
+  - [24, 8]
+  - [0, 24]
+- name: app_eui
+  type: bitfield_string
+  length: 8
+  delimiter: "-"
+  parts:
+  - [32, 32, "hex:upper"]
+  - [0, 32, "hex:upper"]
+- name: serial
+  type: bitfield_string
+  length: 8
+  parts:
+  - [0, 64]
+test_vectors:
+- name: high_parts
+  source: spec-example
+  payload: "03 05 02 00 15 E2  70 B3 D5 7E D0 00 AB CD  FF FF FF FF FF FF FF FE"
+  expected:
+    firmware: "3.5.2.5602"
+    app_eui: "70B3D57E-D000ABCD"
+    serial: "18446744073709551614"
+- name: top_bit_and_past_2_53
+  source: spec-example
+  payload: "80 FF 00 00 00 01  00 00 00 00 00 00 00 01  00 20 00 00 00 00 00 01"
+  expected:
+    firmware: "128.255.0.1"
+    app_eui: "0-1"
+    serial: "9007199254740993"

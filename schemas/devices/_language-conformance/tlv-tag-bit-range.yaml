@@ -1,0 +1,40 @@
+# A composite tag whose second component is a bit range with no `consume`: the count
+# is the low nibble of the byte after the type, and that byte is also the first of the
+# entry's value (comtac lpn-td1). The range reads where it stands and advances by
+# nothing (PS-060), so the tag takes one byte. The generated codec read it as a whole
+# byte and advanced, and every entry after the first read from the wrong offset.
+name: probe_tag_bit_range
+endian: big
+fields:
+- tlv:
+    tag_fields:
+    - name: _type
+      type: u8
+    - name: _n
+      type: "u8[0:3]"
+    tag_key: [_type, _n]
+    length_size: 0
+    unknown: error
+    cases:
+      "[1, 1]":
+      - name: one_head
+        type: u8
+      - name: one_a
+        type: u8
+      "[1, 2]":
+      - name: two_head
+        type: u8
+      - name: two_a
+        type: u8
+      - name: two_b
+        type: u8
+test_vectors:
+- name: two_entries
+  source: spec-example
+  payload: "01 31 0A 01 52 0B 0C"
+  expected:
+    one_head: 49
+    one_a: 10
+    two_head: 82
+    two_a: 11
+    two_b: 12

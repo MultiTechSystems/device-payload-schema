@@ -183,6 +183,7 @@ public class Schema {
             }
             checkBytesFormat(fm);
             if (fm.containsKey("byte_group")) checkByteGroupOverlap(fm.get("byte_group"));
+            checkCaseBodies(fm);               // PS-441
             checkLiteral(fm);
             checkWave4(fm);
             Wave5.checkLookupTemplate(fm);     // PS-407
@@ -193,6 +194,25 @@ public class Schema {
             fields.add(parseField(fm));
         }
         return fields;
+    }
+
+    /**
+     * PS-347, PS-441: a {@code match} or {@code tlv} case body is a field list, {@code []}
+     * for a case that reads nothing. A bare string such as {@code 5: skip} was skipped by
+     * the parser, so a match had no case for the value and a tlv skipped the tag.
+     */
+    private static void checkCaseBodies(Map<String, Object> fm) {
+        for (String construct : List.of("match", "tlv")) {
+            if (!(fm.get(construct) instanceof Map<?, ?> body)) continue;
+            if (!(body.get("cases") instanceof Map<?, ?> cases)) continue;
+            for (Map.Entry<?, ?> entry : cases.entrySet()) {
+                if (!(entry.getValue() instanceof List)) {
+                    throw new SchemaException(construct + ".cases[" + entry.getKey()
+                            + "]: a case body is a field list; write [] for a case that reads "
+                            + "nothing (PS-441)");
+                }
+            }
+        }
     }
 
     private static final String REF_PREFIX = "#/definitions/";
@@ -804,23 +824,26 @@ public class Schema {
         // Lookup table
         Object lookupRaw = fm.get("lookup");
         if (lookupRaw instanceof Map) {
-            Map<Integer, String> lookup = new HashMap<>();
+            // A label keeps the type the schema gave it: a string, a number or a boolean
+            // (PS-106). String.valueOf made every one text, so a boolean label was
+            // reported as the string "true" (CR-2026-104).
+            Map<Integer, Object> lookup = new HashMap<>();
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) lookupRaw).entrySet()) {
                 if ("default".equals(String.valueOf(entry.getKey()))) {
-                    f.setLookupDefault(String.valueOf(entry.getValue()));
+                    f.setLookupDefault(lookupLabel(entry.getValue()));
                     continue;
                 }
                 int key = toInt(entry.getKey(), 0);
-                lookup.put(key, String.valueOf(entry.getValue()));
+                lookup.put(key, lookupLabel(entry.getValue()));
             }
             f.setLookup(lookup);
         } else if (lookupRaw instanceof List) {
             // Sequence form, indexed from zero (PS-104). This was unparsed, so a
             // schema using it decoded a raw integer instead of its label.
             List<?> items = (List<?>) lookupRaw;
-            Map<Integer, String> lookup = new HashMap<>();
+            Map<Integer, Object> lookup = new HashMap<>();
             for (int i = 0; i < items.size(); i++) {
-                lookup.put(i, String.valueOf(items.get(i)));
+                lookup.put(i, lookupLabel(items.get(i)));
             }
             f.setLookup(lookup);
             f.setLookupSequence(true);
@@ -1601,7 +1624,12 @@ public class Schema {
             case ASCII -> {
                 byte[] data = ctx.read(length);
                 String str = new String(data, StandardCharsets.US_ASCII);
-                value = str.replace("\0", "").trim();
+                // Trailing NUL padding only, as the reference strips it: this removed
+                // every NUL and then trimmed spaces, so "HC " read as "HC" and "A\0B"
+                // as "AB" where Python, Go and C# keep both.
+                int end = str.length();
+                while (end > 0 && str.charAt(end - 1) == '\0') end--;
+                value = str.substring(0, end);
             }
             
             case HEX -> {
@@ -2012,7 +2040,8 @@ public class Schema {
         if (field.getTagFields() != null && !field.getTagFields().isEmpty()) {
             tagWidth = 0;
             for (Field tf : field.getTagFields()) {
-                tagWidth += tagFieldWidth(tf);
+                // A bit-range component advances by its `consume` alone (PS-060).
+                tagWidth += tf.getType() == FieldType.BITS ? tf.getConsume() : tagFieldWidth(tf);
             }
         }
 
@@ -2030,10 +2059,31 @@ public class Schema {
             
             if (field.getTagFields() != null && !field.getTagFields().isEmpty()) {
                 for (Field tf : field.getTagFields()) {
-                    byte[] data = ctx.read(tagFieldWidth(tf));
-                    int val = (int) ctx.decodeUnsigned(data, ctx.getEndian());
+                    int val;
+                    if (tf.getType() == FieldType.BITS) {
+                        // A bit range reads its base where it stands and advances by its
+                        // `consume` alone (PS-060), as anywhere else; it was read as a
+                        // whole byte and consumed one (comtac lpn-td1's `[u8, u8[0:3]]`).
+                        int baseBytes = Math.max(1, tf.getBitBaseBytes());
+                        byte[] peeked = ctx.peek(baseBytes, 0);
+                        String tfEndian = tf.getEndian() != null ? tf.getEndian() : ctx.getEndian();
+                        long base = ctx.decodeUnsigned(peeked, tfEndian);
+                        val = (int) extractRange(base, tf.isSignedBits(), tf.getBitOffset(),
+                                tf.getBits() > 0 ? tf.getBits() : 1);
+                        if (tf.getConsume() > 0) {
+                            ctx.read(tf.getConsume());
+                        }
+                    } else {
+                        byte[] data = ctx.read(tagFieldWidth(tf));
+                        val = (int) ctx.decodeUnsigned(data, ctx.getEndian());
+                    }
                     if (tf.getName() != null) {
                         tagValues.put(tf.getName(), val);
+                    }
+                    // A component's `var:` binds for the case body, as a field's does; a
+                    // name_from template such as "temperature_${ch}" reads it.
+                    if (tf.getVar() != null) {
+                        ctx.setVariable(tf.getVar(), (long) val);
                     }
                 }
                 
@@ -2499,8 +2549,11 @@ public class Schema {
                 int bitLen = toInt(part.get(1), 0);
                 String format = part.size() >= 3 ? String.valueOf(part.get(2)) : "decimal";
                 
-                long mask = (1L << bitLen) - 1;
-                long raw = (intVal >> bitOff) & mask;
+                // The value is unsigned: a logical shift, and a 64-bit part's mask is all
+                // ones - Java takes a shift count mod 64, so `(1L << 64) - 1` was 0 and
+                // a 64-bit part read 0. Rendered unsigned for the same reason.
+                long mask = bitLen >= 64 ? -1L : (1L << bitLen) - 1;
+                long raw = bitOff >= 64 ? 0 : (intVal >>> bitOff) & mask;
                 
                 // PS-430: hex lower case, hex:upper upper case; any other format is
                 // refused when the schema is loaded.
@@ -2509,7 +2562,7 @@ public class Schema {
                 } else if ("hex:upper".equals(format)) {
                     partStrs.add(Long.toHexString(raw).toUpperCase());
                 } else {
-                    partStrs.add(String.valueOf(raw));
+                    partStrs.add(Long.toUnsignedString(raw));
                 }
             }
         }
@@ -2924,6 +2977,31 @@ public class Schema {
             }
         }
         return defaultValue;
+    }
+
+    /**
+     * A lookup label as the schema wrote it: a String, a Number or a Boolean (PS-106).
+     * Anything else - a nested mapping, say - keeps its old rendering as text.
+     */
+    private static Object lookupLabel(Object obj) {
+        if (obj instanceof String || obj instanceof Boolean || obj instanceof Number) return obj;
+        return String.valueOf(obj);
+    }
+
+    /**
+     * PS-513 (CR-2026-104): a boolean label matches only a boolean input, and a boolean
+     * input only a boolean label - {@code true} is not 1, and "true" is not {@code true}. A
+     * string matches only an equal string, and a number any number equal to it.
+     */
+    static boolean sameLabel(Object label, Object value) {
+        if (label instanceof Boolean || value instanceof Boolean) {
+            return label instanceof Boolean && label.equals(value);
+        }
+        if (label instanceof String || value instanceof String) {
+            return label instanceof String && label.equals(value);
+        }
+        return label instanceof Number l && value instanceof Number v
+                && l.doubleValue() == v.doubleValue();
     }
 
     /** Reads a flag written as a YAML boolean, or as "true"/1 by a JSON producer. */

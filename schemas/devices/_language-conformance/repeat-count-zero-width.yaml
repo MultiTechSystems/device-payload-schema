@@ -1,0 +1,29 @@
+# A counted list whose elements read no bytes still has `count` elements (PS-084).
+# Stopping when an element makes no progress is a guard for lists bounded by bytes;
+# the generated codec applied it to a counted list too and reported one element of
+# three (nke-watteco pulse-senso and torano-atex).
+#
+# Round-trips: the elements write no bytes, and the byte after them is a value.
+name: probe_count_zero_width
+endian: big
+fields:
+- name: slots
+  type: repeat
+  count: 3
+  index: i
+  fields:
+  - name: slot
+    type: number
+    ref: $i
+- name: after
+  type: u8
+test_vectors:
+- name: three_elements
+  source: spec-example
+  payload: "2A"
+  expected:
+    slots:
+    - slot: 0
+    - slot: 1
+    - slot: 2
+    after: 42

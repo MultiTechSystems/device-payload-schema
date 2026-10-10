@@ -61,7 +61,7 @@ import (
 // two do not round-trip, by design: the leftover vector re-encodes without its leftover
 // bytes (PS-474), and the omitted out-of-range reading has no value to write back.
 // `match` was already reading 123 against a floor of 122. Total 1709.
-const encodeFloorTotal = 1765 // +2: boolean-literal (CR-2026-107); +2: tlv-case-key-patterns round trips; +2: CR-2026-096 _meta fixtures that round-trip; +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip; +2: dl-atm41g2's two vendor vectors (+2); +36: vendor vectors (unit cleanup); +6: Milesight battery-channel vendor vectors (percent units)
+const encodeFloorTotal = 1792 // +2: boolean-literal (CR-2026-107); +13: the nine TS013-defect fixtures (tlv-tag-bit-range does not round-trip); +8: CR-2026-104 lookup label fixtures (plain fixed); +3: byte-group-bool; +3: tlv-case-field-list; +2: tlv-case-key-patterns round trips; +2: CR-2026-096 _meta fixtures that round-trip; +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip; +2: dl-atm41g2's two vendor vectors (+2); +36: vendor vectors (unit cleanup); +6: Milesight battery-channel vendor vectors (percent units)
 
 // encodeFloorByShape guards each layout separately, so a regression in one that works
 // cannot hide behind the mass of one that does not. It has earned that: raising the total
@@ -76,15 +76,15 @@ const encodeFloorTotal = 1765 // +2: boolean-literal (CR-2026-107); +2: tlv-case
 // keys, which cannot tell those two cases apart, and pick the first.
 var encodeFloorByShape = map[string]int{
 	// 1300 -> 1298 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped only because their internal byte halves were all zero, which the encoder wrote for an internal field with no value. It now reports such a field instead.
-	"tlv":         1313, // +2: tlv-case-key-patterns; +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
+	"tlv":         1316, // +3: tlv-case-field-list; +2: tlv-case-key-patterns; +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
 	"flagged":     193,
-	"plain fixed": 102, // +2: CR-2026-096 _meta fixtures
-	"match":       125,
-	"byte_group":  20,
+	"plain fixed": 119, // +8: CR-2026-104 lookup label fixtures; +9: TS013 fixtures; +2: CR-2026-096 _meta fixtures
+	"match":       125, // +2: boolean-literal (CR-2026-107)
+	"byte_group":  25, // +3: byte-group-bool; +2: wide-group
 	// 6 -> 5 with plain fixed 66 -> 67: a bucket move, not a regression. Composed
 	// library schemas now carry only the definitions they reach, so one no longer
 	// contains an unreferenced definition's `repeat` text for this harness to find.
-	"repeat": 12,
+	"repeat": 14, // +2: TS013 fixtures
 }
 
 type encodeVector struct {
@@ -219,7 +219,7 @@ func TestCorpusEncodeRoundTrip(t *testing.T) {
 // failures are not all defects, and this floor is lower than the ordered one on purpose.
 // CR-2026-071 raised it to 1680, for the reasons given at encodeFloorTotal, and
 // CR-2026-085/086's fixtures to 1686.
-const encodePlainFloorTotal = 1742 // +2: boolean-literal (CR-2026-107); +2: tlv-case-key-patterns round trips; +2: CR-2026-096 _meta fixtures that round-trip; +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip; +2: dl-atm41g2's two vendor vectors (+2); +36: vendor vectors (unit cleanup); +6: Milesight battery-channel vendor vectors (percent units)
+const encodePlainFloorTotal = 1769 // +2: boolean-literal (CR-2026-107); +13: the nine TS013-defect fixtures (tlv-tag-bit-range does not round-trip); +8: CR-2026-104 lookup label fixtures; +3: byte-group-bool; +3: tlv-case-field-list; +2: tlv-case-key-patterns round trips; +2: CR-2026-096 _meta fixtures that round-trip; +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip; +2: dl-atm41g2's two vendor vectors (+2); +36: vendor vectors (unit cleanup); +6: Milesight battery-channel vendor vectors (percent units)
 
 // TestCorpusEncodePlainRoundTrip measures the unordered pair, so the two contracts are
 // ratcheted separately and neither can be mistaken for the other.

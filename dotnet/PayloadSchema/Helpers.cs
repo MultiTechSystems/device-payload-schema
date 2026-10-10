@@ -161,6 +161,22 @@ public static class Helpers
         _ => 1
     };
 
+    /// <summary>
+    /// PS-513 (CR-2026-104): a boolean label matches only a boolean input, and a boolean
+    /// input only a boolean label - `true` is not 1, and "true" is not `true`. A string
+    /// matches only an equal string, and a number any number equal to it.
+    /// </summary>
+    public static bool SameLabel(object? label, object? value)
+    {
+        if (label is bool || value is bool)
+            return label is bool l && value is bool v && l == v;
+        if (label is string || value is string)
+            return label is string ls && value is string vs && ls == vs;
+        var (lok, ln) = ToFloat64(label);
+        var (vok, vn) = ToFloat64(value);
+        return lok && vok && ln == vn;
+    }
+
     public static (bool ok, double value) ToFloat64(object? v)
     {
         return v switch

@@ -20,7 +20,7 @@ static class Wave5
 
     /// <summary>The field's mapping default where it carries ${value}, else null (PS-408).</summary>
     public static string? Template(SchemaField field) =>
-        field.LookupDefault is { } fallback && !field.LookupIsSequence && fallback.Contains(ValueToken)
+        field.LookupDefault is string fallback && !field.LookupIsSequence && fallback.Contains(ValueToken)
             ? fallback : null;
 
     /// <summary>

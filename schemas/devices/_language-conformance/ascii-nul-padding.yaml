@@ -1,0 +1,30 @@
+# Text read from the payload loses its trailing NUL padding, as the reference has
+# always done, and nothing else: a trailing space is kept. The specification is silent
+# on padding (clause 2's `ascii` says only that each character is one byte), so this
+# pins the reference's behaviour rather than a PS requirement. The generated codec
+# reported "HC" followed by two NULs; Java removed every NUL and then trimmed spaces.
+# A NUL before other text is not asserted: C holds text as a NUL-terminated string.
+#
+# Round-trips: the encoder pads text to its length with NUL.
+name: probe_ascii_nul_padding
+endian: big
+fields:
+- name: model
+  type: ascii
+  length: 4
+test_vectors:
+- name: padded
+  source: spec-example
+  payload: "48 43 00 00"
+  expected:
+    model: "HC"
+- name: full
+  source: spec-example
+  payload: "48 43 2D 31"
+  expected:
+    model: "HC-1"
+- name: trailing_space_kept
+  source: spec-example
+  payload: "48 43 20 00"
+  expected:
+    model: "HC "

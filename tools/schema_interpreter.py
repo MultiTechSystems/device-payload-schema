@@ -1129,7 +1129,9 @@ def iterator_errors(fields, enclosing=(), in_elements=False, where='fields'):
                 case_lists = (cases.values() if isinstance(cases, dict)
                               else cases if isinstance(cases, list) else [])
                 for case in case_lists:
-                    group = case if isinstance(case, list) else (case or {}).get('fields')
+                    # A non-list case body is case_body_errors' to report.
+                    group = case if isinstance(case, list) else (
+                        case.get('fields') if isinstance(case, dict) else None)
                     errors.extend(iterator_errors(group, enclosing, False, f"{at}.{construct}"))
                 if isinstance(body.get('fields'), list):
                     errors.extend(iterator_errors(body['fields'], enclosing, False,
@@ -1171,6 +1173,39 @@ def tlv_reserve_errors(field_def):
     if isinstance(reserve, bool) or not isinstance(reserve, int) or reserve < 0:
         return [f"tlv reserve must be a non-negative integer, got {reserve!r} (PS-471)"]
     return []
+
+
+def case_body_errors(schema):
+    """A `match` or `tlv` case body is a field list (PS-347, PS-441), `[]` for a case
+    that reads nothing.
+
+    A bare string such as `cases: {5: skip}` was taken for one: the validator crashed
+    walking it and the decoder failed with `'str' object has no attribute 'get'` only
+    when a payload reached that case. Rejected at load, naming the case, as Go, Java
+    and C# do. A legacy `type: match` lists its cases and is not checked here.
+    """
+    errors = []
+
+    def walk(node, where):
+        if isinstance(node, dict):
+            for construct in ('match', 'tlv'):
+                body = node.get(construct)
+                if not isinstance(body, dict) or not isinstance(body.get('cases'), dict):
+                    continue
+                for key, case in body['cases'].items():
+                    if not isinstance(case, list):
+                        errors.append(
+                            f"{where}.{construct}.cases[{key}]: a case body is a field "
+                            f"list; write [] for a case that reads nothing (PS-441)")
+            for key, value in node.items():
+                if key not in ('test_vectors', 'definitions'):
+                    walk(value, f"{where}.{key}" if where else key)
+        elif isinstance(node, list):
+            for i, item in enumerate(node):
+                walk(item, f"{where}[{i}]")
+
+    walk(schema, '')
+    return errors
 
 
 def schema_iterator_errors(schema):
@@ -1368,11 +1403,24 @@ def _match_composite_key(case_key: str, tag_tuple):
     return True, specificity
 
 
+def same_label(label, value):
+    """PS-513: a boolean label matches only a boolean input, and a boolean input only
+    a boolean label.
+
+    Python's ``True == 1`` (and ``hash(True) == hash(1)``) would otherwise match
+    ``true`` to a label of 1 and ``1`` to a label of ``true``, so the types are
+    compared before the values. ``"true"`` is a string and never equals ``True``.
+    """
+    return isinstance(label, bool) == isinstance(value, bool) and label == value
+
+
 def reverse_lookup(value, lookup):
     """Map a label back to its integer for encoding.
 
     A string that is no label but matches the mapping's `${value}` default yields the
-    value written into it (PS-409); the caller rejects any other string.
+    value written into it (PS-409); the caller rejects any other string. Labels are
+    compared with `same_label` (PS-513), so a boolean is never found as a number. A
+    boolean with no key of its own is returned unchanged, and the caller rejects it.
     """
     if not lookup:
         return value
@@ -1380,7 +1428,7 @@ def reverse_lookup(value, lookup):
         for key, label in lookup.items():
             if key == 'default':
                 continue
-            if label == value:
+            if same_label(label, value):
                 try:
                     return int(key)
                 except (TypeError, ValueError):
@@ -1391,10 +1439,11 @@ def reverse_lookup(value, lookup):
             if recovered is not None:
                 return recovered
         return value
-    try:
-        return lookup.index(value)
-    except (ValueError, AttributeError):
-        return value
+    if isinstance(lookup, (list, tuple)):
+        for index, label in enumerate(lookup):
+            if same_label(label, value):
+                return index
+    return value
 
 #: Order in which the bare `mult`, `div` and `add` modifiers are applied,
 #: irrespective of the order the keys appear in the source document (PS-101).
@@ -1900,6 +1949,7 @@ class SchemaInterpreter:
         # with the references are reported by decode and encode (PS-348).
         self.source_schema = schema
         schema, self._load_errors = expand_refs(schema)
+        self._load_errors.extend(case_body_errors(schema))      # PS-441
         # PS-358: a malformed literal is a schema error, reported as the references are;
         # so are an `encoding` off an unsigned integer and `match_value` (PS-422, PS-426).
         for field_def in typed_field_dicts(schema):
@@ -1920,6 +1970,8 @@ class SchemaInterpreter:
         self._pre_lookup = {}           # PS-475, reset by decode
         self._guard_else = set()
         self._leftover_reported = False
+        self._case_quality: Dict[str, str] = {}     # reset by decode
+        self._nested_warnings: List[str] = []       # reset by decode
         #: What the last get_semantic_output call could not express, such as a unit
         #: the SenML registry does not have (PS-488). Its return value stays the
         #: records alone, as callers already read it.
@@ -2557,18 +2609,20 @@ class SchemaInterpreter:
         if field_type == 'skip':
             # Padding/reserved bytes - advance position but don't output
             length = resolve_length(field_def, buf, pos, variables=self._variables)
+            # A skip past the end is a short read like any other, as in Go, Java and C#.
+            # It succeeded, so a truncated payload decoded with no error.
+            if pos + length > len(buf):
+                raise ValueError("Buffer too short for skip")
             return None, pos + length
         
         if field_type == 'object':
-            # Nested object
-            nested_fields = field_def.get('fields', [])
-            nested_result = {}
-            for nested_field in nested_fields:
-                name = nested_field.get('name', 'unknown')
-                value, pos = self._decode_field(nested_field, buf, pos)
-                value = self._apply_modifiers(value, nested_field)
-                nested_result[name] = value
-            return nested_result, pos
+            # A nested group's `fields` is a field list (PS-347, PS-441), decoded by the
+            # same decoder as the top level, so a member may be a construct, a computed
+            # field, a literal or an internal field. This used to be its own loop of
+            # plain reads, which rejected a `byte_group` or `match` member as declaring
+            # no type and a `type: number` member as an unknown type. Names it binds
+            # stay bound after it, as in Go, Java and C#.
+            return self._decode_nested_list(field_def.get('fields', []), buf, pos)
         
         if field_type == 'repeat':
             # Repeated/array field
@@ -3131,6 +3185,32 @@ class SchemaInterpreter:
         self._case_quality.update(scratch.quality)
         return result, pos
     
+    def _decode_nested_list(self, fields: Any, buf: bytes,
+                            pos: int) -> Tuple[Dict[str, Any], int]:
+        """Decode a nested field list - a group's members or a tlv case body - into a
+        fresh output object, returning it and the read position after it.
+
+        The list goes through `_decode_field_list`, so it is decoded exactly as the top
+        level is. Its names are bound in the decode's one scope. Its first error is
+        raised, so the enclosing field fails as it would on a short read; its `_quality`
+        and warnings belong to the decode, as a match case body's do.
+        """
+        if not isinstance(fields, list):
+            raise ValueError(
+                "a field list must be a list of fields, got %r (PS-441)" % (fields,))
+        scratch = DecodeResult(data={}, bytes_consumed=0)
+        saved_current = getattr(self, '_current_data', None)
+        self._current_data = scratch.data
+        try:
+            pos = self._decode_field_list(fields, buf, pos, scratch)
+        finally:
+            self._current_data = saved_current
+        if scratch.errors:
+            raise ValueError(scratch.errors[0])
+        self._case_quality.update(scratch.quality)
+        self._nested_warnings.extend(scratch.warnings)
+        return scratch.data, pos
+
     def _match_case_pattern(self, value: Any, pattern: Any) -> bool:
         """
         Check if value matches case pattern.
@@ -3772,6 +3852,11 @@ class SchemaInterpreter:
                     tf_name = tf.get('name', 'unknown')
                     tf_value, pos = self._decode_field(tf, buf, pos)
                     tag_parts[tf_name] = tf_value
+                    # A component's `var:` binds for the case body (a `name_from`
+                    # template, a `match`), as a field's does; it bound nothing, so
+                    # `name_from: "temperature_${ch}"` failed in every case.
+                    if tf.get('var'):
+                        self._variables[tf['var']] = tf_value
                 
                 # Build composite key for matching
                 if isinstance(tag_key, list):
@@ -3899,47 +3984,14 @@ class SchemaInterpreter:
                 self._leftover_reported = True
                 break
             
-            # Decode fields for this tag
-            tag_result = {}
-            for cf in matched_fields:
-                cf_name = cf.get('name', 'unknown')
-                cf_type = cf.get('type', 'u8')
+            # A case body is a field list (PS-347, PS-441), decoded by the same decoder
+            # as the top level, match cases and repeat elements, so it has computed
+            # fields, literals, `var:` bindings, internal fields, constructs and the
+            # per-field rules (optional, sentinel, out_of_range). It used to be its own
+            # loop that knew only `byte_group` and `bitfield_string`, so a number
+            # literal in a case was "unknown type: number".
+            tag_result, pos = self._decode_nested_list(matched_fields, buf, pos)
 
-                # A byte_group carries no name and no type of its own - its names
-                # live in its own `fields`, sharing one byte. The generic path
-                # below therefore read that shared byte as a `u8` called
-                # "unknown" and never descended into the bit ranges, so
-                # hbi/mla20's case 0x20 decoded to {"unknown": 81} and its
-                # charger_status and device_status were never reported at all.
-                # Go descends into it; this brings Python onto the same result.
-                #
-                # The group is decoded into a scratch result so its fields land
-                # in tag_result rather than jumping straight to the payload-level
-                # output, which would bypass the merge/channels handling below.
-                if 'byte_group' in cf and not cf.get('type'):
-                    group = DecodeResult(data={}, bytes_consumed=0)
-                    pos = self._decode_byte_group(cf, buf, pos, group)
-                    tag_result.update(group.data)
-                    # `outer`, not `result`: this method already binds a local
-                    # `result` dict for the channel output further down.
-                    if outer is not None:
-                        outer.errors.extend(group.errors)
-                        outer.warnings.extend(group.warnings)
-                    continue
-
-                # Handle bitfield_string inside TLV cases
-                if cf_type == 'bitfield_string':
-                    value, pos = self._decode_bitfield_string(cf, buf, pos)
-                    if not cf_name.startswith('_'):
-                        tag_result[cf_name] = value
-                    continue
-                
-                value, pos = self._decode_field(cf, buf, pos)
-                if value is not None:
-                    value = self._apply_modifiers(value, cf)
-                    if not cf_name.startswith('_'):
-                        tag_result[cf_name] = value
-            
             if merge:
                 for k, v in tag_result.items():
                     if k in result:
@@ -4088,6 +4140,8 @@ class SchemaInterpreter:
         self._pending_absent = {}
         # `_quality` from match case bodies, which decode into a scratch result.
         self._case_quality = {}
+        # Warnings raised inside a nested field list, reported with the decode's own.
+        self._nested_warnings = []
         # Set where a PS-302 warning has already reported the bytes left (PS-472).
         self._leftover_reported = False
         # PS-475: a looked-up field's pre-lookup value, and the guards that reported
@@ -4111,6 +4165,7 @@ class SchemaInterpreter:
             self._enrich_metadata(result.data, metadata_def, input_metadata,
                                   result.warnings)
         
+        result.warnings.extend(self._nested_warnings)
         for case_name, flag in self._case_quality.items():
             result.quality.setdefault(case_name, flag)
         # PS-427, PS-428: an omitted reading is recorded where `_quality` is produced -
@@ -4921,6 +4976,12 @@ class SchemaInterpreter:
                 value = self._internal_encode_value(gf, data)          # PS-434
             else:
                 value = data.get(name, gf.get('default', 0))
+            if gtype == 'bool':
+                # PS-364: a bool member is its `bit` of the group's value. It was taken as a
+                # full-width member, so True set bit 0 whatever `bit` it declared.
+                if value:
+                    packed |= 1 << int(gf.get('bit', 0))
+                continue
             value = self._reverse_modifiers(value, gf)
             if not isinstance(value, (int, float)):
                 continue
@@ -5464,6 +5525,16 @@ class SchemaInterpreter:
         # and the label then reached int() as "invalid literal for int() with base 10:
         # 'Class A'". 69 corpus vectors failed to encode on exactly that.
         value = reverse_lookup(value, field_def.get('lookup'))
+
+        if isinstance(value, bool) and field_def.get('lookup'):
+            # PS-513: a boolean matches only a boolean label, and none carries this one
+            # under a key of its own. Where only the mapping's `default` carries it, it
+            # stands for every unmapped value (PS-269, PS-409), so there is nothing to
+            # write. It used to reach int() below and be written as 1.
+            raise ValueError(
+                f"{value!r} is not a label with a key of its own in the lookup for "
+                f"{field_def.get('name')!r}; a boolean matches only a boolean label, "
+                "and a `default` label has no value to recover (PS-409, PS-513)")
 
         if isinstance(value, str) and field_def.get('lookup'):
             # The label is not in the table, so it came from the mapping's `default`,

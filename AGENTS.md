@@ -188,18 +188,18 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2371 payload vectors in `schemas/devices/` (measured 2026-10-09 with
-`tools/check-floors.py`, after the CR-2026-071 to -087 fixtures) are the shared
+The 2563 payload vectors in `schemas/devices/` (measured 2026-10-10 with
+`tools/check-floors.py`, after the CR-2026-104 lookup-label fixtures) are the shared
 cross-language test set. Every implementation has a runner that reads the same YAML and
 the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1748 |
-| Go | `go/schema/corpus_conformance_test.go` | 2557 | 1765 (plain API 1742) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2557 | 1748 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2557 | 1748 |
-| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 540 of 540 attempted | n/a |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1775 |
+| Go | `go/schema/corpus_conformance_test.go` | 2593 | 1792 (plain API 1769) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2593 | 1775 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2593 | 1775 |
+| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 546 of 546 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
 its own implementation's actual; trust it over this table.
@@ -755,10 +755,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1748 |
-| Go | `go/schema/corpus_encode_test.go` | 1765 (plain 1742) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1748 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1748 |
+| Python | `tests/test_encode_round_trip.py` | 1775 |
+| Go | `go/schema/corpus_encode_test.go` | 1792 (plain 1769) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1775 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1775 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1070,9 +1070,9 @@ corpus before those schemas existed.** Each is fixed; the list is here so nobody
 - **Java's `bool` ignored `bit:` and `consume:`** — every bool read bit 0, and a flag group ending
   in `consume: 1` left the cursor on the byte. No corpus schema used `type: bool` until dnt.
 - **The TS013 generator had no `bool` at all** (a TODO and no value), which is why the first dnt
-  draft used `{0: false, 1: true}` lookups — outside what PS-106 lists (numbers or strings), and
-  **Go drops a non-string lookup label silently**. Go still does; PS-106 also allows *numeric*
-  labels, which Go's `map[int]string` cannot hold either.
+  draft used `{0: false, 1: true}` lookups — outside what PS-106 then listed (numbers or
+  strings), and **Go dropped a non-string lookup label silently**. CR-2026-104 since allows
+  boolean labels and fixed Go's labels to hold any scalar (see below).
 - **The generator renamed output keys** to JS identifiers — `pm1.0` came out as `pm1_0`. Keys are
   now restored at the entry points from a table built at generation time; two names mangling to
   one spelling is a generation error.
@@ -1080,13 +1080,53 @@ corpus before those schemas existed.** Each is fixed; the list is here so nobody
   with the same type — r718x's `Status` is ON/OFF in one message and Success/Failure in another.
   Same-typed branches now union their enums and widen their bounds.
 
-Still open from the same work: Python's tlv case path handles only `byte_group` and
-`bitfield_string` (`flagged`, `type: number` and `var:` inside a case fail or read a phantom
-`unknown` byte); `lookup` is ignored on a `number` field; the generator drops string case keys in
+Still open from the same work: `lookup` is ignored on a `number` field; the generator drops string case keys in
 a `match`; `score_schema.py` counts branch coverage only for discriminators present in the output
 and never looks inside `match`/`byte_group` for semantic fields, which is most of why r718x and
 dnt stop at Silver. r718x still reads its device and command bytes through a non-advancing peek
 it adopted before the `_` fix; it can use `$_device_type` directly now.
+
+**Every nested field list is decoded by `_decode_field_list` (2026-10-10).** Python's tlv
+case body and a `type: object`'s members were each their own loop of plain reads, so a number
+literal there was "unknown type: number", a `match` or `byte_group` member "declares no type",
+`var:`, internal references and `sentinel` were ignored, and a case's `flagged` read a phantom
+byte. Go, Java and C# already decoded all of it. Both now go through `_decode_nested_list`,
+which decodes into a fresh object, raises the list's first error, and hands its `_quality`
+and warnings to the decode, as a match case body's are. A name bound inside an object stays
+bound after it - the spec's "Combining Nested and Conditional" example relies on it, and Go,
+Java and C# all do it. The TS013 generator skipped every nameless object member (a `match`
+or a group of bit ranges decoded nothing and the group's byte was never consumed) and
+reported internal members; both are fixed. `tlv-case-field-list.yaml` and
+`object-member-field-list.yaml` hold all five to it. The validator now descends into an
+object's members too; it never had, so a typeless member passed.
+
+**A case body is a field list; a bare string is rejected at load (PS-441).** `cases: {5: skip}`
+crashed `schema_iterator_errors` and the decoder, while Go, Java and C# parsed it as an empty
+case - a match then decoded nothing for 5 with success, and a tlv dropped the case and skipped
+the tag. `case_body_errors` (Python, the validator and the generator), Go's `checkCases`,
+Java's `checkCaseBodies` and C#'s `CheckCaseBodies` all give `match.cases[5]: a case body is a
+field list; write [] for a case that reads nothing (PS-441)`. `[]` is the empty case.
+
+**`ascii` drops trailing NUL padding only, in all five.** Python, Go and C# did; the generated
+codec kept every NUL and Java removed every NUL and trimmed whitespace at both ends. The spec
+says nothing about NUL padding in `ascii` - this is agreement, not a requirement.
+
+**A `skip` past the end of the payload is an error in all five.** Python and the generated codec
+advanced past the end and reported success, so a truncated frame decoded with no error; Go, Java
+and C# already failed the read. Measured on the private registry, the nested-list and skip fixes
+together moved 487 vectors from failing to passing in Python and none the other way.
+
+**Go's corpus runner compares nested values member by member (PS-043 to PS-045).** It compared a
+nested mapping or list by its printed form, so a nested null - "this member is absent" - could
+never pass, and a nested float had no tolerance. Python, Java and C# already recursed.
+`object-member-field-list.yaml` asserts that padding and internal members of a group are absent,
+which is what found it: Python used to report them as `unknown: null` and `_h: null`.
+
+**A tlv `tag_fields` component's `var:` binds for the case body, in all five.** None of them
+bound it, so `name_from: "temperature_${ch}"` with `ch` from the tag failed "references ch, which
+has not been decoded" everywhere (the registry's rakwireless standardized payload).
+`tlv-tag-var-name-from.yaml` pins it. Encoding such a case cannot rebuild the key: the tag's
+value is not in the data.
 
 **The Milesight wrong-decode pass (2026-09-24) left three things open.**
 
@@ -1268,8 +1308,7 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   Two vobo vectors (`standard_zero`, `heartbeat2_zero`) round-tripped only because their
   internal byte halves were all zero, so the tlv floors dropped by 2 in every language,
   deliberately. A sentinel is compared on the bits before an `encoding` and written back
-  as raw bits. Python's TLV case loop is still its own loop, so `optional` and `sentinel`
-  inside a TLV case apply in Go, Java and C# and not in Python - no corpus vector reaches it.
+  as raw bits.
 - **CR-2026-071/073: one arithmetic pipeline, one operation per stage.** Every numeric field,
   computed or read, is source -> mult/div/add -> `transform` -> lookup (PS-443); a failed
   guard's `else` is reported as declared, skipping all of it (PS-444). The load-time checks
@@ -1334,6 +1373,20 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   the 8 schemas with a `length_size`, probed), so no floor moves. C's `error_msg` grew from
   112 to 152 bytes to hold the length message's worst case, since the build treats a
   possible truncation as an error.
+- **CR-2026-104: a lookup label may be a boolean** (PS-106), never with a `${value}` default
+  (PS-407), and **a label matches only an input of its own type** (PS-513): `true` is not 1,
+  and neither `"true"` nor `"5"` is a label of `true` or 5. One helper per language -
+  `same_label` in `schema_interpreter.py`, `sameLabel` in `go/schema/cr104.go`,
+  `Schema.sameLabel` in Java, `Helpers.SameLabel` in C#, and `===` in the generated
+  codec's `encReverseLookup`. **Python's `True == 1` and `hash(True) == hash(1)` are the
+  trap**: `list.index`, `==` and a dict keyed by label all conflate them, which is how the
+  reference wrote a default-only `true` as 1. A boolean with no key of its own is refused on
+  encode in all five (PS-409). Measured before: Go, Java and C# kept labels as strings -
+  **Go dropped a number or boolean mapping silently** (its `map[int]string`; Netvox r718n3's
+  `{1: 1, 2: 5, ...}` multiplier was blocked on it), Java and C# reported `"true"` and `"5"`
+  as text - and Java, C# and TS013 wrote `false` through `[true, false]` as index 0. C holds
+  a label as text, so `schema_binary.py` refuses a number or boolean label (PS-446) and the C
+  harness skips them as a C gap. Fixtures: `lookup-boolean-labels`, `lookup-number-labels`.
 - **CR-2026-094: SenML output takes primary units** (PS-478 amended, PS-487, PS-488).
   Python's `get_semantic_output(..., "senml")` and C#'s `SemanticFormatter.ToSenML` are
   the only SenML producers. A record's `u` is a registered SenML unit: a secondary unit is
@@ -1614,7 +1667,7 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   (CR-2026-032).** `make test-c` builds the three previously-orphaned C test files and runs
   `tools/c-corpus-harness.py`, which generates C that builds each expressible corpus schema
   through the struct API, compiles it, and compares the decode against the vectors.
-  **540 of 540 attempted vectors pass** (2026-10-09) since CR-2026-033 added `tlv` and CR-2026-034
+  **546 of 546 attempted vectors pass** (2026-10-10) since CR-2026-033 added `tlv` and CR-2026-034
   `flagged` (it was 50 of 50 before either). 751 of 1239 are still in schemas the struct API
   cannot build - 26 use a `transform` chain, 24 a `bitfield_string`, 15 more cases than
   `SCHEMA_MAX_CASES` allows, 3 `repeat`, 3 a `u32le16` **the interpreter has and the harness
@@ -1779,6 +1832,37 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   big-endian (see SESSION-NOTES). A field named like a codec variable (`d`, `w`, `pos`,
   a helper's name or a reserved word) is staged as `name_` and reported under its own
   name; `d` used to replace the output object, so decodeUplink returned `data: 0`.
+- **The TTN conversion found more generated-codec defects (2026-10-10), most now a
+  `_language-conformance` fixture.** None is a language question; each made the codec
+  disagree with the reference on a payload the reference decodes:
+  - *Anything wider than 32 bits went through JavaScript's bit operators or a double.*
+    A `bitfield_string` part above bit 31 read the wrong byte (`21.226.2.5602` for
+    `3.5.2.5602`); a bit range of a `u64`/`s64` base, and a member of an eight-byte
+    `byte_group`, divided a value `readU` had already rounded or turned into a decimal
+    string past 2^53, and read 0 or lost low bits (nke-watteco celso). All three now
+    move bits one at a time into a byte array (`bitBytes`, `bitRange`), exact at any
+    width; the encoder places a segment past 2^53 from its digits. **Java and C# had
+    the 64-bit `bitfield_string` part too**: both take a shift count mod 64, so the mask
+    `(1 << 64) - 1` was 0, and Java parsed and printed segments signed.
+  - *A composite tlv tag with a bit-range component* (comtac lpn-td1's `[u8, u8[0:3]]`,
+    the count in the low nibble of the value's first byte) read the range as a whole
+    byte and advanced. **Go, Java and C# had the same defect** and now read it as any
+    bit range: in place, advancing by `consume` alone (PS-060).
+  - *A list sharing its name with one of its members* declared one `var` for both;
+    the list's variable is numbered now. *A counted list of elements reading no bytes*
+    stopped after one, on a zero-progress guard meant for byte-bounded lists.
+  - *An unnamed member of a nested `object`* (a `skip`, or a `match`) was filtered out
+    and consumed nothing; an object with `fields: []` was an unknown type and no codec
+    was generated at all (quandify).
+  - *A tag component's `var:`* was never bound, so a case's `name_from: "voc_${ch}"`
+    failed (rakwireless). The codec binds it now; no fixture yet, because the reference's
+    tlv case loop does not apply `name_from` either - that is Python's own gap.
+  - *A key that is not an identifier* - `4_20_mA`, `"1"`, `"[06] Button Totals"` - emitted
+    `var 4_20_mA` (the codec did not load) or mangled to a leading `_`, which the codec
+    then drops as internal. Such a name is staged with an `n` prefix and restored.
+  - *`ascii` trailing NULs* are stripped, as the reference does, and nothing else;
+    the specification says nothing about padding. **Java removed every NUL and trimmed
+    spaces**, so `"HC "` read as `"HC"`; it now strips trailing NULs only, like Go and C#.
 - **The generated codec's encoder is a runtime port of the reference's**, not code
   unrolled per field. `ENCODER_RUNTIME_JS` in `tools/generate_ts013_codec.py` mirrors
   `encode`/`_encode_field_list` function by function, each marked with the reference
