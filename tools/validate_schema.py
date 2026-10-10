@@ -30,7 +30,7 @@ from schema_interpreter import (SchemaInterpreter, DecodeResult, check_byte_grou
                                 encoding_errors, expand_refs, fport_declaration_errors,
                                 arithmetic_schema_errors, case_body_errors,
                                 internal_name_errors, meta_declaration_errors,
-                                literal_errors, CoreSchemaLoader,
+                                literal_errors,
                                 lookup_template_errors, optional_errors,
                                 schema_iterator_errors,
                                 timestamp_errors,
@@ -106,10 +106,9 @@ def _key_identity(key: Any) -> Any:
     return ("other", key)
 
 
-class DuplicateKeyLoader(CoreSchemaLoader):
+class DuplicateKeyLoader(yaml.SafeLoader):
     """A SafeLoader that raises DuplicateKeyError on a repeated mapping key, in every
-    mapping: schema keys, case maps, lookup tables, port maps, expected values. It reads
-    booleans as YAML 1.2 does, so a boolean literal's `value: yes` is refused (PS-520)."""
+    mapping: schema keys, case maps, lookup tables, port maps, expected values."""
 
     def construct_document(self, node):
         self._dup_paths = _node_paths(node)

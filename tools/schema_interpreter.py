@@ -26,40 +26,6 @@ from fractions import Fraction
 from typing import Dict, Any, List, Optional, Tuple, Union
 from enum import Enum
 
-try:
-    import yaml as _yaml
-except ImportError:  # pragma: no cover - the interpreter itself takes a dict
-    _yaml = None
-
-
-if _yaml is not None:
-
-    class CoreSchemaLoader(_yaml.SafeLoader):
-        """A SafeLoader that reads only `true` and `false` as booleans, as YAML 1.2 does.
-
-        PyYAML follows YAML 1.1, where `yes`, `no`, `on` and `off` are booleans too, so a
-        boolean literal's `value: yes` would arrive as True and pass PS-520 unseen; it
-        also turned `name: no` (nitric oxide) into False. Every other implementation
-        reads a schema with a YAML 1.2 (or no-conversion) reader.
-        """
-
-    CoreSchemaLoader.yaml_implicit_resolvers = {
-        first: [(tag, rx) for tag, rx in resolvers if tag != 'tag:yaml.org,2002:bool']
-        for first, resolvers in _yaml.SafeLoader.yaml_implicit_resolvers.items()
-    }
-    CoreSchemaLoader.add_implicit_resolver(
-        'tag:yaml.org,2002:bool',
-        re.compile(r'^(?:true|True|TRUE|false|False|FALSE)$'),
-        list('tTfF'))
-
-
-def load_schema_yaml(text: Any) -> Any:
-    """Parse schema YAML (or JSON) text with YAML 1.2 booleans (PS-520)."""
-    if _yaml is None:
-        raise ImportError("PyYAML is required to read a schema file")
-    return _yaml.load(text, Loader=CoreSchemaLoader)  # noqa: S506 - SafeLoader
-
-
 class Endian(Enum):
     BIG = 'big'
     LITTLE = 'little'
@@ -823,9 +789,9 @@ def literal_errors(field_def):
     """PS-358: a literal's value matches its type, and it carries no arithmetic.
 
     PS-519: `boolean` is a literal type only, so it must declare `value`. PS-520: its
-    value is a YAML `true` or `false`; `yes`, `on`, `"true"` or `1` is refused. A YAML
-    1.1 reader turns `yes` and `on` into True before this sees them, which is why the
-    schema loaders here read booleans as YAML 1.2 does (`CoreSchemaLoader`).
+    value is a boolean; `"true"`, `1` or `null` is refused. A YAML 1.1 reader such as
+    PyYAML hands this `yes` as True already, and PS-520 does not ask a decoder to
+    detect that: authors write `true` or `false`.
     """
     if (isinstance(field_def, dict) and field_def.get('type') == 'boolean'
             and 'value' not in field_def):
@@ -6157,7 +6123,7 @@ def _cli(argv: List[str]) -> int:
     args = parser.parse_args(argv)
 
     with open(args.schema, encoding='utf-8') as handle:
-        schema = load_schema_yaml(handle)
+        schema = yaml.safe_load(handle)
     payload = bytes.fromhex(args.payload.replace(' ', ''))
     result = SchemaInterpreter(schema).decode(payload, fPort=args.fport)
     print(json.dumps({

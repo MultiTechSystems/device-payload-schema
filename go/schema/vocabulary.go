@@ -341,8 +341,7 @@ func checkFieldRules(field map[string]any, at string) error {
 		}
 	}
 	// PS-519: `boolean` is a literal type only, so it declares `value`. PS-520: the
-	// value is a YAML true or false. yaml.v3 reads `yes` and `on` as text, so they
-	// arrive here as strings and are refused with "true" and 1.
+	// value is a boolean; "true", 1 and null are refused.
 	if field["type"] == "boolean" {
 		value, ok := field["value"]
 		if !ok {

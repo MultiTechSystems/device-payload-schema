@@ -70,8 +70,7 @@ public class Schema {
     public void setPorts(Map<String, PortDef> ports) { this.ports = ports; }
 
     public static Schema fromYaml(String yamlContent) {
-        // YAML 1.2 booleans, so a boolean literal's `value: yes` is refused (PS-520).
-        Yaml yaml = CoreResolver.yaml();
+        Yaml yaml = new Yaml();
         Map<String, Object> raw = yaml.load(yamlContent);
         return parseRaw(raw);
     }
@@ -514,9 +513,9 @@ public class Schema {
     private static void checkLiteral(Map<String, Object> fm) {
         Object type = fm.get("type");
         String at = "Field '" + fm.get("name") + "': ";
-        // PS-519: `boolean` is a literal type only. PS-520: its value is true or false;
-        // the schema is read with YAML 1.2 booleans (CoreResolver), so `yes` and `on`
-        // arrive as text and are refused with "true" and 1.
+        // PS-519: `boolean` is a literal type only, so it declares `value`. PS-520: the
+        // value is a boolean; "true", 1 and null are refused. SnakeYAML reads YAML 1.1,
+        // so `yes` arrives as true, which PS-520 does not ask a decoder to detect.
         if ("boolean".equals(type)) {
             if (!fm.containsKey("value")) {
                 throw new SchemaException(at + "type boolean is a literal and declares no value (PS-519)");

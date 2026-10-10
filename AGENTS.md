@@ -1450,17 +1450,17 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     `encode-round-trip.py` files the refusal as `separate-tlv`, a recoverable gap.
   - **The output schema did not declare `channels`.** It is now an array of objects, each
     with `tag`, its case's fields, and `raw` under `unknown: raw`.
-- **CR-2026-107: `type: boolean` is a literal** (PS-519, PS-520; tags provisional). It
-  reads no bytes and writes none, beside the string and number literals, in Python, Go,
-  Java, C# and the generated codec; `tools/schema_binary.py` refuses it for C (PS-446),
-  and the C harness files it as a C gap. `value` is required and must be YAML `true` or
-  `false`. **PyYAML and SnakeYAML read YAML 1.1, where `yes` and `on` are booleans**, so
-  `value: yes` would have passed as `true`: `load_schema_yaml`/`CoreSchemaLoader` in
-  `schema_interpreter.py` (also the validator's loader, the TS013 generator's and the
-  output-schema generator's) and Java's `CoreResolver` read booleans as YAML 1.2 does.
-  Other Python tools still call `yaml.safe_load`; a dict handed to `SchemaInterpreter`
-  after a YAML 1.1 load cannot be checked. Go's yaml.v3 and C#'s node-level check need
-  nothing. Fixture: `boolean-literal.yaml`.
+- **CR-2026-107: `type: boolean` is a literal** (PS-519, PS-520). It reads no bytes and
+  writes none, beside the string and number literals (PS-357, PS-359), in Python, Go,
+  Java, C# and the generated codec, and is reported as a JSON boolean (PS-279; the
+  output schema declares `type: boolean`). It is not an alias of `bool`. A `boolean`
+  with no `value` (PS-519), a non-boolean `value` such as `"true"`, `1` or `null`
+  (PS-520), and a lookup or modifier on it (PS-358) are refused at load by all four, the
+  validator and the TS013 generator. `tools/schema_binary.py` refuses it for C (PS-446)
+  and the C harness files it as a C gap. **YAML 1.1 `yes`/`on` is deliberately not
+  detected**: PyYAML and SnakeYAML hand the check a boolean for it, C# (YAML 1.2) a string
+  it rejects, and PS-520 permits both, so no shared vector may use one. Fixture:
+  `boolean-literal.yaml`.
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.

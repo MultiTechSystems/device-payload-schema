@@ -2,13 +2,13 @@
 
 `{type: boolean, value: true|false}` reports the boolean and reads no bytes, beside the
 string and number literals (PS-357). `boolean` is a literal type only, so `value` is
-required (PS-519), and the value is a YAML `true` or `false`: `yes`, `on`, `"true"` and
-`1` are refused (PS-520). Encoders write nothing for it and do not require its key
-(PS-359). The C binary schema has no literal record, so it is refused there (PS-446).
+required (PS-519), and the value is a boolean: `"true"`, `1` and `null` are refused
+(PS-520). A lookup or modifier on it is refused (PS-358). Encoders write nothing for it
+and do not require its key (PS-359). The C binary schema has no literal record, so it
+is refused there (PS-446).
 
-PyYAML reads YAML 1.1, where `yes` and `on` are booleans, so the schema loaders read
-booleans as YAML 1.2 does (`load_schema_yaml`, the validator's loader); a `yes` loaded
-that way reaches the literal check as text.
+PyYAML reads YAML 1.1, so `value: yes` arrives as True. PS-520 does not ask a decoder
+to detect that, so nothing here asserts it either way.
 """
 
 import json
@@ -24,7 +24,8 @@ sys.path.insert(0, str(REPO_ROOT / "tools"))
 from generate_output_schema import generate_output_schema  # noqa: E402
 from generate_ts013_codec import TS013Generator  # noqa: E402
 from schema_binary import schema_errors  # noqa: E402
-from schema_interpreter import SchemaInterpreter, load_schema_yaml  # noqa: E402
+import yaml  # noqa: E402
+from schema_interpreter import SchemaInterpreter  # noqa: E402
 from validate_schema import load_schema_text, validate_schema_structure  # noqa: E402
 
 SCHEMA = """\
@@ -37,8 +38,8 @@ fields:
 
 REFUSED = {
     "missing value": ("", "PS-519"),
-    "yes": (", value: yes", "PS-520"),
-    "on": (", value: on", "PS-520"),
+    "null": (", value: null", "PS-520"),
+    "with a modifier": (", value: true, mult: 2", "PS-358"),
     "quoted true": (', value: "true"', "PS-520"),
     "one": (", value: 1", "PS-520"),
     "with a lookup": (", value: true, lookup: {1: x}", "PS-358"),
@@ -49,7 +50,7 @@ REFUSED = {
 def test_a_malformed_boolean_literal_is_refused_on_every_path(label):
     fragment, tag = REFUSED[label]
     text = SCHEMA % fragment
-    schema = load_schema_yaml(text)
+    schema = yaml.safe_load(text)
     assert any(tag in e for e in SchemaInterpreter(schema).decode(b"\x01\x02").errors)
     assert any(tag in e for e in SchemaInterpreter(schema).encode({"a": 1}).errors)
     assert any(tag in e for e in validate_schema_structure(load_schema_text(text)))
@@ -57,18 +58,9 @@ def test_a_malformed_boolean_literal_is_refused_on_every_path(label):
         TS013Generator(schema).generate()
 
 
-def test_the_loaders_read_yaml_1_2_booleans():
-    """A YAML 1.1 reader would have handed PS-520 a True for `yes`."""
-    for spelling in ("yes", "on", "no", "off", "y", "n"):
-        assert load_schema_yaml(f"v: {spelling}") == {"v": spelling}
-        assert load_schema_text(f"v: {spelling}") == {"v": spelling}
-    for spelling, value in (("true", True), ("false", False), ("True", True)):
-        assert load_schema_yaml(f"v: {spelling}") == {"v": value}
-
-
 @pytest.mark.parametrize("value", [True, False])
 def test_a_boolean_literal_reads_and_writes_no_bytes(value):
-    schema = load_schema_yaml(SCHEMA % (", value: " + str(value).lower()))
+    schema = yaml.safe_load(SCHEMA % (", value: " + str(value).lower()))
     result = SchemaInterpreter(schema).decode(b"\x01\x02")
     assert result.success and result.data == {"a": 1, "flag": value, "b": 2}
     assert result.bytes_consumed == 2
@@ -132,7 +124,7 @@ def run_codec(schema, payload):
 @pytest.mark.parametrize("context", sorted(CONTEXTS))
 def test_a_boolean_literal_in_every_field_list(context):
     body, payload_hex, expected = CONTEXTS[context]
-    schema = load_schema_yaml("name: p\nfields:\n" + body)
+    schema = yaml.safe_load("name: p\nfields:\n" + body)
     payload = bytes.fromhex(payload_hex)
     result = SchemaInterpreter(schema).decode(payload)
     assert result.success and result.data == expected, (result.data, result.errors)
@@ -144,7 +136,7 @@ def test_a_boolean_literal_in_every_field_list(context):
 
 
 def test_the_output_schema_declares_a_boolean():
-    schema = load_schema_yaml(
+    schema = yaml.safe_load(
         (
             REPO_ROOT / "schemas/devices/_language-conformance/boolean-literal.yaml"
         ).read_text()
@@ -159,5 +151,5 @@ def test_the_output_schema_declares_a_boolean():
 
 
 def test_the_c_binary_schema_refuses_it():
-    schema = load_schema_yaml(SCHEMA % ", value: true")
+    schema = yaml.safe_load(SCHEMA % ", value: true")
     assert any("boolean" in e and "PS-446" in e for e in schema_errors(schema))

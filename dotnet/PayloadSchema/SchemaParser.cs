@@ -333,8 +333,9 @@ public static partial class SchemaParser
     /// <summary>PS-358: a literal's value matches its type, and it carries no arithmetic.</summary>
     static void CheckLiteral(YamlMappingNode fm)
     {
-        // PS-519: `boolean` is a literal type only. PS-520: its value is a plain YAML 1.2
-        // `true` or `false`; `yes`, `on`, a quoted "true" and 1 are refused.
+        // PS-519: `boolean` is a literal type only, so it declares `value`. PS-520: the
+        // value is a boolean; "true", 1 and null are refused. This reader keeps YAML 1.2's
+        // core booleans, so a plain `yes` is text here and is refused too.
         if (fm.TryGetValue("type", out var bt) && Scalar(bt) == "boolean")
         {
             var at = fm.TryGetValue("name", out var bn) ? Scalar(bn) : "?";

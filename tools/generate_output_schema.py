@@ -20,8 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from schema_interpreter import (  # noqa: E402
-    load_schema_yaml, lookup_template, lookup_template_pattern)
+from schema_interpreter import lookup_template, lookup_template_pattern  # noqa: E402
 
 
 def scalar_json_type(value: Any) -> str:
@@ -952,7 +951,7 @@ def main():
     
     # Load YAML schema
     with open(args.schema, 'r') as f:
-        yaml_schema = load_schema_yaml(f)  # YAML 1.2 booleans (PS-520)
+        yaml_schema = yaml.safe_load(f)
     
     # Generate output schema
     output_schema = generate_output_schema(yaml_schema)

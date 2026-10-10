@@ -13,8 +13,8 @@ import (
 func TestCR107BooleanLiteralIsRefusedWhenMalformed(t *testing.T) {
 	cases := map[string]string{
 		"{name: k, type: boolean}":                              "PS-519",
-		"{name: k, type: boolean, value: yes}":                  "PS-520",
-		"{name: k, type: boolean, value: on}":                   "PS-520",
+		"{name: k, type: boolean, value: null}":                 "PS-520",
+		"{name: k, type: boolean, value: true, mult: 2}":        "PS-358",
 		`{name: k, type: boolean, value: "true"}`:               "PS-520",
 		"{name: k, type: boolean, value: 1}":                    "PS-520",
 		"{name: k, type: boolean, value: true, lookup: {1: x}}": "PS-358",

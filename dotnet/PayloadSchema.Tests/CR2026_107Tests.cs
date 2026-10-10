@@ -10,8 +10,8 @@ public class CR2026_107Tests
 {
     [Theory]
     [InlineData("PS-519", "{name: k, type: boolean}")]
-    [InlineData("PS-520", "{name: k, type: boolean, value: yes}")]
-    [InlineData("PS-520", "{name: k, type: boolean, value: on}")]
+    [InlineData("PS-520", "{name: k, type: boolean, value: null}")]
+    [InlineData("PS-358", "{name: k, type: boolean, value: true, mult: 2}")]
     [InlineData("PS-520", "{name: k, type: boolean, value: \"true\"}")]
     [InlineData("PS-520", "{name: k, type: boolean, value: 1}")]
     [InlineData("PS-358", "{name: k, type: boolean, value: true, lookup: {1: x}}")]

@@ -3816,10 +3816,8 @@ def fix_yaml_booleans(obj):
 
 
 def load_schema(path: Path) -> Dict[str, Any]:
-    # YAML 1.2 booleans, so a boolean literal's `value: yes` is refused (PS-520).
-    from schema_interpreter import load_schema_yaml
     with open(path) as f:
-        schema = load_schema_yaml(f)
+        schema = yaml.safe_load(f)
     return fix_yaml_booleans(schema)
 
 
