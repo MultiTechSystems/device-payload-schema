@@ -122,14 +122,14 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Device schemas
 
-297 schemas under `schemas/devices/`.
-Mean quality score 75.7% (PLATINUM 37, GOLD 39, SILVER 174, BRONZE 26, REJECTED 21). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+298 schemas under `schemas/devices/`.
+Mean quality score 75.6% (PLATINUM 37, GOLD 39, SILVER 174, BRONZE 26, REJECTED 22). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
-| _language-conformance | 85 | 157 | SILVER 64, BRONZE 15, REJECTED 6 |
+| _language-conformance | 86 | 159 | SILVER 64, BRONZE 15, REJECTED 7 |
 | milesight | 84 | 1427 | PLATINUM 21, GOLD 33, SILVER 27, REJECTED 3 |
 | decentlab | 58 | 204 | PLATINUM 13, GOLD 6, SILVER 27, BRONZE 8, REJECTED 4 |
 | _library-composed | 49 | 57 | SILVER 48, BRONZE 1 |
@@ -170,6 +170,7 @@ Mean quality score 75.7% (PLATINUM 37, GOLD 39, SILVER 174, BRONZE 26, REJECTED 
 | `_language-conformance/enum-description` | 3 | 2 | fields | 71% | SILVER |
 | `_language-conformance/enum-spec-default` | 2 | 1 | fields | 71% | SILVER |
 | `_language-conformance/field-endian` | 3 | 1 | fields | 71% | SILVER |
+| `_language-conformance/flagged-group-field-list` | 8 | 2 | fields | 42% | REJECTED |
 | `_language-conformance/float-endian` | 4 | 1 | fields | 71% | SILVER |
 | `_language-conformance/guard-else-as-declared` | 3 | 4 | fields | 75% | SILVER |
 | `_language-conformance/internal-discriminator` | 3 | 2 | fields | 57% | REJECTED |

@@ -3208,49 +3208,18 @@ class SchemaInterpreter:
             raise ValueError(f"Flagged field reference not found: {field_name}")
         flags = int(self._variables[field_name])
         
+        # A present group's fields are a field list (PS-347, PS-441), decoded as the top
+        # level is. They were their own loop of plain reads, so a group holding another
+        # flagged, a match or a byte_group failed with "declares no type" (mutelcor's
+        # nested measurement groups); computed and internal fields, sentinels,
+        # out_of_range and valid_range now behave exactly as they do anywhere else.
         result = {}
         for group in groups:
             bit = group.get('bit', 0)
-            is_present = (flags >> bit) & 1
-            if is_present:
-                for gf in group.get('fields', []):
-                    gf_name = gf.get('name', 'unknown')
-                    gf_type = gf.get('type', 'u8')
-                    
-                    # A leading underscore marks an internal field: it becomes a
-                    # variable that later fields can reference, but is not reported.
-                    # Every other construct already did this; flagged did not, so an
-                    # intermediate used to combine two words appeared in the output.
-                    internal = gf_name.startswith('_')
+            if (flags >> bit) & 1:
+                group_data, pos = self._decode_nested_list(group.get('fields', []), buf, pos)
+                result.update(group_data)
 
-                    # Handle computed fields (type: number)
-                    if gf_type in COMPUTED_TYPES:
-                        value = self._decode_computed_field(gf)
-                        if value is not None:
-                            if not internal:
-                                result[gf_name] = value
-                            self._variables[gf_name] = value
-                        continue
-
-                    start = pos
-                    value, pos = self._decode_field(gf, buf, pos)
-                    if value is not None and self._sentinel_hit(gf, value, buf, start):
-                        self._pending_absent[gf_name] = 'absent'          # PS-427
-                        continue
-                    if value is not None:
-                        if gf.get('formula'):
-                            import warnings
-                            warnings.warn(f"Field '{gf_name}': 'formula' is deprecated.", DeprecationWarning)
-                            value = self._evaluate_formula(gf['formula'], value)
-                        else:
-                            value = self._apply_modifiers(value, gf)
-                        if self._range_omits(gf, value):
-                            self._pending_absent[gf_name] = 'out_of_range'    # PS-428
-                            continue
-                        if not internal:
-                            result[gf_name] = value
-                        self._variables[gf_name] = value
-        
         return result, pos
     
     def _decode_computed_field(self, field_def: Dict[str, Any]) -> Optional[float]:
@@ -4295,16 +4264,8 @@ class SchemaInterpreter:
                     flagged_def = field_def['flagged']
                     flagged_result, pos = self._decode_flagged(flagged_def, payload, pos)
                     result.data.update(flagged_result)
-                    # Store flagged fields as variables and check valid_range
-                    for k, v in flagged_result.items():
-                        self._variables[k] = v
-                    # Check valid_range for fields in flagged groups
-                    for group in flagged_def.get('groups', []):
-                        for gf in group.get('fields', []):
-                            gf_name = gf.get('name')
-                            if gf_name and gf_name in flagged_result and gf.get('valid_range'):
-                                quality = self._check_valid_range(flagged_result[gf_name], gf, result)
-                                result.quality[gf_name] = quality
+                    # The groups' fields are bound and range-checked by the field-list
+                    # decoder that read them.
                 except Exception as e:
                     result.errors.append(f"Error in flagged: {e}")
                 continue
