@@ -63,6 +63,10 @@ func tlvTagWidth(field Field, tagSize int) int {
 	}
 	width := 0
 	for _, tf := range field.TagFields {
+		if bitRangePattern.MatchString(string(tf.Type)) {
+			width += tf.Consume // a bit range advances by its consume alone (PS-060)
+			continue
+		}
 		width += tagFieldWidth(tf)
 	}
 	return width

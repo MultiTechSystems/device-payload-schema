@@ -589,8 +589,10 @@ public static class SchemaDecoder
                     var (_, bitOff) = Helpers.ToInt(part[0]);
                     var (_, bitLen) = Helpers.ToInt(part[1]);
                     string format = part.Count >= 3 && part[2] is string f ? f : "decimal";
-                    ulong mask = (1UL << bitLen) - 1;
-                    ulong raw = (intVal >> bitOff) & mask;
+                    // C# takes a shift count mod 64, so `(1UL << 64) - 1` was 0 and a
+                    // 64-bit part read 0.
+                    ulong mask = bitLen >= 64 ? ulong.MaxValue : (1UL << bitLen) - 1;
+                    ulong raw = bitOff >= 64 ? 0 : (intVal >> bitOff) & mask;
                     // PS-430: hex lower case, hex:upper upper case; any other format is
                     // refused when the schema is loaded.
                     partStrs.Add(format switch
@@ -1341,8 +1343,9 @@ public static class SchemaDecoder
             // an entry is an error identifying the tlv; the plain tag_size path threw a
             // bare buffer underflow, naming neither the tlv nor the tag. A composite tag's
             // width is its tag_fields', as they are read below.
+            // A bit-range component advances by its `consume` alone (PS-060).
             var width = field.TagFields.Count > 0
-                ? field.TagFields.Sum(TagFieldWidth)
+                ? field.TagFields.Sum(tf => tf.Type == FieldType.Bits ? tf.Consume : TagFieldWidth(tf))
                 : tagSize;
             if (ctx.Remaining < width)
                 throw new InvalidOperationException($"tlv entry at offset {ctx.Offset}: "
@@ -1356,8 +1359,24 @@ public static class SchemaDecoder
                     // The reference reads a composite tag's components as fields, which
                     // records them (PS-490); a case member of the same name overwrites it.
                     if (field.TagKey != null) ctx.Produced(tf);
-                    var data = ctx.Read(TagFieldWidth(tf));
-                    int val = (int)Helpers.DecodeUint(data, ctx.Endian);
+                    int val;
+                    if (tf.Type == FieldType.Bits)
+                    {
+                        // A bit range reads its base where it stands and advances by its
+                        // `consume` alone (PS-060), as anywhere else; it was read as a
+                        // whole byte and consumed one (comtac lpn-td1's `[u8, u8[0:3]]`).
+                        int baseBytes = tf.BitBaseBytes > 0 ? tf.BitBaseBytes : 1;
+                        var peeked = ctx.Peek(baseBytes, 0);
+                        ulong baseValue = Helpers.DecodeUint(peeked, tf.Endian ?? ctx.Endian);
+                        val = (int)ExtractRange(baseValue, tf.SignedBits, tf.BitOffset,
+                            tf.BitCount > 0 ? tf.BitCount : 1);
+                        if (tf.Consume > 0) ctx.Read(tf.Consume);
+                    }
+                    else
+                    {
+                        var data = ctx.Read(TagFieldWidth(tf));
+                        val = (int)Helpers.DecodeUint(data, ctx.Endian);
+                    }
                     if (!string.IsNullOrEmpty(tf.Name))
                         tagValues[tf.Name] = val;
                 }

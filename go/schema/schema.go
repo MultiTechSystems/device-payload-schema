@@ -3109,6 +3109,24 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 			tagValues = make(map[string]int)
 			for _, tf := range field.TagFields {
 				ctx.produced(tf.decl, tf.Name) // as the reference records a tag field
+				// A bit-range component reads its base where it stands and advances by its
+				// `consume` alone (PS-060), as anywhere else; it was read as a whole byte
+				// and consumed one (comtac lpn-td1's `[u8, u8[0:3]]` tag).
+				if m := bitRangePattern.FindStringSubmatch(string(tf.Type)); m != nil {
+					v, consume, err := decodeBitRange(tf, ctx, m)
+					if err != nil {
+						break
+					}
+					if consume > 0 {
+						if _, err := ctx.Read(consume); err != nil {
+							break
+						}
+					}
+					if tf.Name != "" {
+						tagValues[tf.Name] = int(v.(float64))
+					}
+					continue
+				}
 				data, err := ctx.Read(tagFieldWidth(tf))
 				if err != nil {
 					break

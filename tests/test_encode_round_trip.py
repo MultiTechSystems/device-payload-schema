@@ -54,7 +54,11 @@ from validate_schema import is_encode_vector  # noqa: E402
 DEVICES = REPO_ROOT / "schemas" / "devices"
 
 #: Exact round-trips required overall. Raise as encoding improves.
-FLOOR_TOTAL = 1749
+# +13: the TS013-defect fixtures - bitfield-string-wide, repeat-member-shares-name,
+# ascii-nul-padding, digit-leading-name, wide-bit-range, wide-group,
+# object-unnamed-skip, repeat-count-zero-width (tlv-tag-bit-range does not round-trip).
+# +3: byte-group-bool.
+FLOOR_TOTAL = 1762
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -64,13 +68,13 @@ FLOOR_BY_SHAPE = {
     # for an internal field with no value. It now reports such a field instead.
     "tlv": 1296,
     "flagged": 193,
-    "plain fixed": 102,
+    "plain fixed": 111,
     "match": 123,
-    "byte_group": 23,
+    "byte_group": 25,
     # 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now
     # carry only the definitions they reach, so one no longer has a `repeat` in an
     # unreferenced definition for the classifier to find.
-    "repeat": 12,
+    "repeat": 14,
 }
 
 #: Encoding must never raise. It used to, 26 times: "Cannot encode type: number" for any

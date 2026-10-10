@@ -1283,8 +1283,10 @@ final class Encoder {
                 long raw;
                 try {
                     // PS-431: a hex segment is read without regard to case.
-                    raw = "hex".equals(format) || "hex:upper".equals(format) ? Long.parseLong(segment, 16)
-                            : Long.parseLong(segment);
+                    // Unsigned: a 64-bit part past Long.MAX_VALUE is a valid segment.
+                    raw = "hex".equals(format) || "hex:upper".equals(format)
+                            ? Long.parseUnsignedLong(segment, 16)
+                            : Long.parseUnsignedLong(segment);
                 } catch (NumberFormatException e) {
                     throw new SchemaException.EncodeException("bitfield_string field '"
                             + field.getName() + "': segment '" + segment + "' is not "

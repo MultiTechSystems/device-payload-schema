@@ -546,6 +546,28 @@ function encByteGroup(out, f, data, ctx) {            // _encode_byte_group
   encPacked(out, packed, Math.max(1, size), endian);
 }
 
+/* The bits of an unsigned digit string, least significant first, by repeated halving of
+ * its digits - exact at any width, where parseInt is exact only to 2^53. Null when the
+ * text is not a plain run of digits in `base`. */
+function encDigitBits(text, base) {
+  text = String(text).replace(/^\s+|\s+$/g, "").replace(/^\+/, "");
+  if (base === 16) text = text.replace(/^0[xX]/, "");
+  if (!(base === 16 ? /^[0-9a-fA-F]+$/ : /^[0-9]+$/).test(text)) return null;
+  var digits = [], bits = [], i;
+  for (i = 0; i < text.length; i++) digits.push(parseInt(text.charAt(i), base));
+  while (digits.length) {
+    var rem = 0, next = [];
+    for (i = 0; i < digits.length; i++) {
+      var cur = rem * base + digits[i], q = Math.floor(cur / 2);
+      rem = cur % 2;
+      if (next.length || q) next.push(q);
+    }
+    bits.push(rem);
+    digits = next;
+  }
+  return bits;
+}
+
 function encBitfieldString(out, f, value, ctx) {      // _encode_bitfield_string
   var parts = f.parts || [], delim = f.delimiter === undefined ? "." : f.delimiter;
   var prefix = f.prefix || "", length = f.length === undefined ? 2 : f.length;
@@ -557,8 +579,17 @@ function encBitfieldString(out, f, value, ctx) {      // _encode_bitfield_string
     if (p.length < 2) continue;
     var fmt = p.length > 2 ? p[2] : "decimal";
     var seg = i < segs.length ? segs[i] : "0";
-    var v = (fmt === "hex" || fmt === "hex:upper") ? parseInt(seg, 16) : parseInt(seg, 10);
+    var hexFmt = fmt === "hex" || fmt === "hex:upper";
+    var v = hexFmt ? parseInt(seg, 16) : parseInt(seg, 10);
     if (isNaN(v)) encFail("invalid literal for bitfield_string segment: " + JSON.stringify(seg));
+    if (Math.abs(v) > 9007199254740991) {
+      // Past 2^53 a Number has already lost the low bits, so place the digits exactly.
+      var bits = encDigitBits(seg, hexFmt ? 16 : 10);
+      if (!bits) encFail("invalid literal for bitfield_string segment: " + JSON.stringify(seg));
+      var start = Number(p[0]), width = Number(p[1]);
+      for (var b = 0; b < width && b < bits.length; b++) if (bits[b]) packed[start + b] = 1;
+      continue;
+    }
     packed = encPlace(packed, v, Number(p[0]), Number(p[1]));
   }
   encPacked(out, packed, length, ctx.endian);
@@ -998,6 +1029,15 @@ def _codec_globals() -> set:
 
 def to_js_name(name: str) -> str:
     mangled = re.sub(r'[^a-zA-Z0-9_]', '_', name)
+    # An identifier cannot start with a digit: Watteco's `4_20_mA` emitted
+    # `var 4_20_mA`, a syntax error that stopped the whole codec loading. The key is
+    # restored at the entry points like any other mangled name, as are wholly numeric
+    # names (mutelcor's "1" to "12"). Not an `_` prefix: the codec drops `_` keys from
+    # its output as internal fields - which is also why a name whose first character
+    # mangles to `_` (mutelcor's "[06] Button Totals") gets the prefix: it was
+    # reported as `_06__Button_Totals` and then deleted as internal.
+    if mangled[:1].isdigit() or (mangled[:1] == '_' and str(name)[:1] != '_'):
+        mangled = 'n' + mangled
     if mangled in _CODEC_LOCALS or mangled in _JS_RESERVED or mangled in _codec_globals() \
             or re.match(r'^(decodePort|encodePort)', mangled):
         mangled += '_'
@@ -1656,6 +1696,53 @@ function decimalOf(bytes) {
   return text;
 }
 
+/* `width` bits from bit `off` of the value whose bytes are `bytes`, most significant
+ * first, as a byte array of their own, most significant first. Bits are moved one at a
+ * time, so a range above bit 31 - or wider than 53 bits - is as exact as the
+ * reference's arbitrary-precision integer. A shift and mask on the whole value works on
+ * JavaScript's 32-bit integers, so bits 40..47 of a six-byte firmware word came out as
+ * some other byte, and a range of a 64-bit base read 0. */
+function bitBytes(bytes, off, width) {
+  var n = Math.ceil(width / 8), out = [];
+  for (var i = 0; i < n; i++) out.push(0);
+  var top = bytes.length * 8;
+  for (var b = 0; b < width; b++) {
+    var at = off + b;
+    if (at >= top) break;
+    if ((bytes[bytes.length - 1 - Math.floor(at / 8)] >> (at % 8)) & 1) {
+      out[n - 1 - Math.floor(b / 8)] |= 1 << (b % 8);
+    }
+  }
+  return out;
+}
+
+/* One part of a bitfield_string, rendered in `fmt` (PS-430). */
+function bitfieldPart(bytes, off, width, fmt) {
+  var out = bitBytes(bytes, off, width);
+  if (fmt === 'decimal') return decimalOf(out);
+  var hex = '';
+  for (var k = 0; k < out.length; k++) hex += (out[k] < 16 ? '0' : '') + out[k].toString(16);
+  hex = hex.replace(/^0+/, '') || '0';
+  return fmt === 'hex:upper' ? hex.toUpperCase() : hex;
+}
+
+/* A bit range of a base wider than six bytes, sign-extended from the range's width when
+ * `signed` (PS-352). A number where it is exact, else the decimal string (PS-296). */
+function bitRange(bytes, off, width, signed) {
+  var out = bitBytes(bytes, off, width), neg = false, k;
+  if (signed && width > 0 && (out[0] >> ((width - 1) % 8)) & 1) {
+    // Two's complement within `width` bits: invert, mask the top byte, add one.
+    neg = true;
+    var spare = out.length * 8 - width;
+    for (k = 0; k < out.length; k++) out[k] = (~out[k]) & 0xFF;
+    out[0] &= 0xFF >> spare;
+    for (k = out.length - 1; k >= 0; k--) { out[k] = (out[k] + 1) & 0xFF; if (out[k]) break; }
+  }
+  var text = decimalOf(out), v = Number(text);
+  if (v <= SAFE_INTEGER) return neg ? -v : v;
+  return neg ? '-' + text : text;
+}
+
 function readU(buf, pos, size, endian) {
   if (size >= 7) {
     var text = decimalOf(orderedBytes(buf, pos, size, endian));
@@ -2118,7 +2205,12 @@ function writeS(buf, pos, size, value, endian) {
             group_endian = f'"{bg["endian"]}"' if isinstance(bg, dict) and bg.get('endian') else 'endian'
             lines.append(f'{i}  // byte_group')
             lines.append(f'{i}  var bgStart = pos;')
-            lines.append(f'{i}  var bgVal = readU(buf, pos, {bg_size}, {group_endian});')
+            wide_group = int(bg_size) >= 7
+            if wide_group:
+                # Past 2^53 readU gives a decimal string; take each range from the bytes.
+                lines.append(f'{i}  var bgVal = orderedBytes(buf, pos, {bg_size}, {group_endian});')
+            else:
+                lines.append(f'{i}  var bgVal = readU(buf, pos, {bg_size}, {group_endian});')
             for bf in (bg_fields if isinstance(bg_fields, list) else []):
                 bname = bf.get('name', '_')
                 btype = bf.get('type', 'u8')
@@ -2144,8 +2236,12 @@ function writeS(buf, pos, size, value, endian) {
                     lo, hi = int(bit_m.group(2)), int(bit_m.group(3))
                     width = hi - lo + 1
                     bjs = to_js_name(bname)
-                    lines.append(f'{i}  var {bjs} = Math.floor(bgVal / {2 ** lo}) % {2 ** width};')
-                    if bit_m.group(1) == 's':
+                    if wide_group:
+                        lines.append(f'{i}  var {bjs} = bitRange(bgVal, {lo}, {width}, '
+                                     f'{json.dumps(bit_m.group(1) == "s")});')
+                    else:
+                        lines.append(f'{i}  var {bjs} = Math.floor(bgVal / {2 ** lo}) % {2 ** width};')
+                    if bit_m.group(1) == 's' and not wide_group:
                         lines.append(f'{i}  if ({bjs} >= {2 ** (width - 1)}) {bjs} -= {2 ** width};')
                     # `vars` records the post-modifier value - see _apply_modifiers_expr.
                     bval = self._apply_modifiers_expr(bjs, bf)
@@ -2206,7 +2302,12 @@ function writeS(buf, pos, size, value, endian) {
         # and deletes them, the same approach the nested `object` support uses - so their
         # modifiers, lookups and bitfields keep working through the existing generators.
         if field.get('type') == 'repeat' and field.get('fields'):
-            arr = to_js_name(field.get('name', '_items'))
+            key = to_js_name(field.get('name', '_items'))
+            # The list's own variable is numbered, not named after the field: a member
+            # sharing the repeat's name (an `altitude` list of records each holding an
+            # `altitude`) declared the same `var`, and the list became that member's
+            # number - "altitude.push is not a function".
+            arr = f'_rep{self._next_uid()}'
             # Every member, constructs included: a bare `match` or `tlv` inside an
             # element has no name, and filtering on one dropped it from the codec.
             members = [m for m in field['fields'] if isinstance(m, dict)]
@@ -2260,7 +2361,7 @@ function writeS(buf, pos, size, value, endian) {
                 # generated source so it is visible where it matters.
                 lines.append(f'{i}  // repeat {field.get("name")}: no count, '
                              f'byte_length or until - nothing to iterate')
-                lines.append(f'{i}  d.{arr} = {arr};')
+                lines.append(f'{i}  d.{key} = {arr};')
                 return lines
 
             # `max` is the iteration ceiling the four interpreters enforce: they clamp a
@@ -2331,7 +2432,11 @@ function writeS(buf, pos, size, value, endian) {
             lines.append(f'{i}    var {arr}_keep = {keep};')
             lines.append(f'{i}    vars = {arr}_vars; {arr}_i++;')
             lines.append(f'{i}    if ({arr}_keep) {arr}.push({arr}_rec);')
-            lines.append(f'{i}    if (pos <= {arr}_before) break;')
+            # The zero-progress guard is for the loops bounded by bytes. A counted one
+            # ends by its count, and elements reading no bytes - computed fields, bit
+            # ranges with no consume - are still `count` elements; it stopped at one.
+            if count is None:
+                lines.append(f'{i}    if (pos <= {arr}_before) break;')
             lines.append(f'{i}    if (pos >= buf.length && !({condition})) break;')
             lines.append(f'{i}  }}')
             # PS-088: a byte_length span must be divided exactly by the members. There was
@@ -2375,9 +2480,9 @@ function writeS(buf, pos, size, value, endian) {
                     lines.append(f'{i}  pos = buf.length;')   # the trailer was read already
             if field.get('count_as'):
                 lines.append(f'{i}  vars.{to_js_name(field["count_as"])} = {arr}.length;')  # PS-367
-            lines.append(f'{i}  vars.{arr} = {arr};')
+            lines.append(f'{i}  vars.{key} = {arr};')
             if not str(field.get('name', '')).startswith('_'):
-                lines.append(f'{i}  d.{arr} = {arr};')
+                lines.append(f'{i}  d.{key} = {arr};')
             return lines
 
         # object - a nested group reported under its own key.
@@ -2390,7 +2495,9 @@ function writeS(buf, pos, size, value, endian) {
         # The members decode into the same flat `d` and are then lifted into a
         # sub-object, so nested modifiers, lookups and bitfields all keep working
         # without duplicating their generators.
-        if field.get('type') == 'object' and field.get('fields'):
+        # An empty `fields: []` is an object too, reported as {} (quandify's response 0);
+        # it fell through to the type switch as an unknown type and no codec was made.
+        if field.get('type') == 'object' and isinstance(field.get('fields'), list):
             obj_name = to_js_name(field.get('name', '_object'))
             lines.append(f'{i}  // object {field.get("name")}')
             # The members decode into a fresh `d`, which then becomes the object. They
@@ -2399,8 +2506,11 @@ function writeS(buf, pos, size, value, endian) {
             # beside an object with a `value` member.
             outer = f'{obj_name}_outer{id(field) % 100000}'
             lines.append(f'{i}  var {outer} = d; d = {{}};')
+            # Every member, unnamed ones included: a nameless `skip` was filtered out
+            # here, so it consumed no bytes and every field after it, inside the object
+            # and after it, read from the wrong offset (dnt-lw-dis `device_info`).
             for member in field['fields']:
-                if not isinstance(member, dict) or not member.get('name'):
+                if not isinstance(member, dict):
                     continue
                 lines.extend(self._gen_decode_field(member))
             lines.append(f'{i}  {outer}.{obj_name} = d; d = {outer};')
@@ -2512,10 +2622,18 @@ function writeS(buf, pos, size, value, endian) {
             # extraction is arithmetic rather than `>>`, which converts to a signed 32-bit
             # integer and corrupts a u32 base with its top bit set. An `sN` base is
             # sign-extended from the range's width (PS-352, PS-353).
-            lines.append(f'{i}  var {js_name}_raw = readU(buf, pos, {base_size}, {endian_arg});')
-            lines.append(f'{i}  var {js_name} = Math.floor({js_name}_raw / {2 ** bit_start}) % {2 ** bit_width};')
-            if base_type.startswith('s'):
-                lines.append(f'{i}  if ({js_name} >= {2 ** (bit_width - 1)}) {js_name} -= {2 ** bit_width};')
+            signed = base_type.startswith('s')
+            if base_size >= 7:
+                # readU gives a seven- or eight-byte base as a decimal string past 2^53,
+                # and the division below then read every range of it as 0.
+                lines.append(f'{i}  var {js_name}_raw = orderedBytes(buf, pos, {base_size}, {endian_arg});')
+                lines.append(f'{i}  var {js_name} = bitRange({js_name}_raw, {bit_start}, '
+                             f'{bit_width}, {json.dumps(signed)});')
+            else:
+                lines.append(f'{i}  var {js_name}_raw = readU(buf, pos, {base_size}, {endian_arg});')
+                lines.append(f'{i}  var {js_name} = Math.floor({js_name}_raw / {2 ** bit_start}) % {2 ** bit_width};')
+                if signed:
+                    lines.append(f'{i}  if ({js_name} >= {2 ** (bit_width - 1)}) {js_name} -= {2 ** bit_width};')
             if consume:
                 lines.append(f'{i}  pos += {int(consume)};')
 
@@ -2604,6 +2722,9 @@ function writeS(buf, pos, size, value, endian) {
             if ftype == 'ascii':
                 lines.append(f'{i}  for (var _si = 0; _si < {js_name}_n && pos < buf.length; _si++)'
                              f' {{ {js_name} += String.fromCharCode(buf[pos++]); }}')
+                # Trailing NUL padding is not part of the text, as in the reference
+                # (`rstrip` of NUL); the codec used to report "HC" followed by two NULs.
+                lines.append(f'{i}  {js_name} = {js_name}.replace(/\\u0000+$/, "");')
             elif ftype == 'bytes' and field.get('format', 'hex') in ('base64', 'array'):
                 # PS-079: the declared format. Ignored before, so every bytes field was
                 # rendered as lowercase hex whatever the schema asked for.
@@ -2871,25 +2992,22 @@ function writeS(buf, pos, size, value, endian) {
         delim = field.get('delimiter', '.')
         prefix = field.get('prefix', '')
 
-        lines.append(f'{i}  var {name}_raw = readU(buf, pos, {length}, endian);')
+        # The value's bytes, most significant first. Reading it as one number and
+        # shifting broke above bit 31, where JavaScript's bit operators wrap.
+        lines.append(f'{i}  var {name}_raw = orderedBytes(buf, pos, {length}, endian);')
         lines.append(f'{i}  pos += {length};')
         seg_exprs = []
         for part in parts:
-            offset = part[0]
-            width = part[1]
+            offset = int(part[0])
+            width = int(part[1])
             fmt = part[2] if len(part) > 2 else 'decimal'
-            mask = (1 << width) - 1
-            extract = f'(({name}_raw >> {offset}) & 0x{mask:X})'
             # PS-430: hex lower case, hex:upper upper case, anything else refused.
-            if fmt == 'hex':
-                seg_exprs.append(f'{extract}.toString(16)')
-            elif fmt == 'hex:upper':
-                seg_exprs.append(f'{extract}.toString(16).toUpperCase()')
-            elif fmt == 'decimal':
-                seg_exprs.append(f'{extract}.toString()')
-            else:
+            if fmt not in ('decimal', 'hex', 'hex:upper'):
                 raise ValueError(f"bitfield_string part format {fmt!r} is not one of "
                                  f"decimal, hex, hex:upper (PS-430)")
+            seg_exprs.append(
+                f'bitfieldPart({name}_raw, {offset}, {width}, {json.dumps(fmt)})'
+            )
         joined = f' + "{delim}" + '.join(seg_exprs)
         if prefix:
             joined = f'"{prefix}" + {joined}'
@@ -2911,7 +3029,11 @@ function writeS(buf, pos, size, value, endian) {
         # nothing - so elsys/ers decoded to {} entirely. Go had the identical defect for
         # the identical reason.
         if tag_fields:
-            tag_size = sum(type_size(tf.get('type', 'u8')) or 1 for tf in tag_fields)
+            # The bytes a tag takes, as the reference counts them: a bit range advances
+            # by its `consume` and no further (PS-060).
+            from schema_interpreter import fixed_element_size
+            tag_size = fixed_element_size(tag_fields) or sum(
+                type_size(tf.get('type', 'u8')) or 1 for tf in tag_fields)
         else:
             tag_size = int(tlv.get('tag_size', 1))
         length_size = int(tlv.get('length_size', 0))
@@ -2936,9 +3058,37 @@ function writeS(buf, pos, size, value, endian) {
         # Read tag fields
         for tf in tag_fields:
             tfname = to_js_name(tf['name'])
-            tfsz = type_size(tf.get('type', 'u8')) or 1
-            lines.append(f'{i}    var {tfname} = readU(buf, pos, {tfsz}, endian);')
-            lines.append(f'{i}    pos += {tfsz};')
+            tf_slice = parse_bit_slice_type(str(tf.get('type', 'u8')))
+            if tf_slice is not None:
+                # A bit range in a composite tag reads its base where it stands and
+                # advances only by `consume` (PS-060), as anywhere else. It was read as a
+                # whole byte and consumed one, so comtac lpn-td1's `[u8, u8[0:3]]` tag -
+                # the count is the low nibble of the next byte - took two bytes and
+                # every record after it read from the wrong offset.
+                base_type, bit_start, bit_width = tf_slice
+                base_size = type_size(base_type) or 1
+                if base_size >= 7:
+                    lines.append(f'{i}    var {tfname} = bitRange(orderedBytes(buf, pos, '
+                                 f'{base_size}, endian), {bit_start}, {bit_width}, '
+                                 f'{json.dumps(base_type.startswith("s"))});')
+                else:
+                    lines.append(f'{i}    var {tfname} = Math.floor(readU(buf, pos, {base_size}, '
+                                 f'endian) / {2 ** bit_start}) % {2 ** bit_width};')
+                    if base_type.startswith('s'):
+                        lines.append(f'{i}    if ({tfname} >= {2 ** (bit_width - 1)}) '
+                                     f'{tfname} -= {2 ** bit_width};')
+                consume = tf.get('consume', 0)
+                if consume:
+                    lines.append(f'{i}    pos += {int(consume)};')
+            else:
+                tfsz = type_size(tf.get('type', 'u8')) or 1
+                lines.append(f'{i}    var {tfname} = readU(buf, pos, {tfsz}, endian);')
+                lines.append(f'{i}    pos += {tfsz};')
+            # A component is read as a field, so its `var:` is bound for the case body -
+            # a `name_from: "voc_${ch}"` with `ch` on the channel component found nothing
+            # (rakwireless standardized payload).
+            if tf.get('var'):
+                lines.append(f'{i}    vars.{to_js_name(str(tf["var"]))} = {tfname};')
         if not tag_fields:
             lines.append(f'{i}    var _tlvTag = readU(buf, pos, {tag_size}, endian);')
             lines.append(f'{i}    pos += {tag_size};')

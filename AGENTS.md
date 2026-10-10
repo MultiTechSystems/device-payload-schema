@@ -194,10 +194,10 @@ the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1749 |
-| Go | `go/schema/corpus_conformance_test.go` | 2558 | 1766 (plain API 1743) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2558 | 1749 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2558 | 1749 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1762 |
+| Go | `go/schema/corpus_conformance_test.go` | 2572 | 1779 (plain API 1756) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2572 | 1762 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2572 | 1762 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 540 of 540 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -754,10 +754,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1749 |
-| Go | `go/schema/corpus_encode_test.go` | 1766 (plain 1743) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1749 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1749 |
+| Python | `tests/test_encode_round_trip.py` | 1762 |
+| Go | `go/schema/corpus_encode_test.go` | 1779 (plain 1756) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1762 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1762 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1767,6 +1767,37 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   big-endian (see SESSION-NOTES). A field named like a codec variable (`d`, `w`, `pos`,
   a helper's name or a reserved word) is staged as `name_` and reported under its own
   name; `d` used to replace the output object, so decodeUplink returned `data: 0`.
+- **The TTN conversion found more generated-codec defects (2026-10-10), most now a
+  `_language-conformance` fixture.** None is a language question; each made the codec
+  disagree with the reference on a payload the reference decodes:
+  - *Anything wider than 32 bits went through JavaScript's bit operators or a double.*
+    A `bitfield_string` part above bit 31 read the wrong byte (`21.226.2.5602` for
+    `3.5.2.5602`); a bit range of a `u64`/`s64` base, and a member of an eight-byte
+    `byte_group`, divided a value `readU` had already rounded or turned into a decimal
+    string past 2^53, and read 0 or lost low bits (nke-watteco celso). All three now
+    move bits one at a time into a byte array (`bitBytes`, `bitRange`), exact at any
+    width; the encoder places a segment past 2^53 from its digits. **Java and C# had
+    the 64-bit `bitfield_string` part too**: both take a shift count mod 64, so the mask
+    `(1 << 64) - 1` was 0, and Java parsed and printed segments signed.
+  - *A composite tlv tag with a bit-range component* (comtac lpn-td1's `[u8, u8[0:3]]`,
+    the count in the low nibble of the value's first byte) read the range as a whole
+    byte and advanced. **Go, Java and C# had the same defect** and now read it as any
+    bit range: in place, advancing by `consume` alone (PS-060).
+  - *A list sharing its name with one of its members* declared one `var` for both;
+    the list's variable is numbered now. *A counted list of elements reading no bytes*
+    stopped after one, on a zero-progress guard meant for byte-bounded lists.
+  - *An unnamed member of a nested `object`* (a `skip`, or a `match`) was filtered out
+    and consumed nothing; an object with `fields: []` was an unknown type and no codec
+    was generated at all (quandify).
+  - *A tag component's `var:`* was never bound, so a case's `name_from: "voc_${ch}"`
+    failed (rakwireless). The codec binds it now; no fixture yet, because the reference's
+    tlv case loop does not apply `name_from` either - that is Python's own gap.
+  - *A key that is not an identifier* - `4_20_mA`, `"1"`, `"[06] Button Totals"` - emitted
+    `var 4_20_mA` (the codec did not load) or mangled to a leading `_`, which the codec
+    then drops as internal. Such a name is staged with an `n` prefix and restored.
+  - *`ascii` trailing NULs* are stripped, as the reference does, and nothing else;
+    the specification says nothing about padding. **Java removed every NUL and trimmed
+    spaces**, so `"HC "` read as `"HC"`; it now strips trailing NULs only, like Go and C#.
 - **The generated codec's encoder is a runtime port of the reference's**, not code
   unrolled per field. `ENCODER_RUNTIME_JS` in `tools/generate_ts013_codec.py` mirrors
   `encode`/`_encode_field_list` function by function, each marked with the reference

@@ -1,0 +1,29 @@
+# Members of an eight-byte group of bit ranges (PS-364). The group's value passes 2^53,
+# where a JavaScript double rounds off its low bits; the generated codec divided that
+# double, so the low ranges were wrong and a carry could reach their neighbours
+# (nke-watteco celso).
+#
+# Round-trips: the two ranges cover all 64 bits.
+name: probe_wide_group
+endian: big
+fields:
+- byte_group:
+    size: 8
+    fields:
+    - name: top
+      type: "u64[32:63]"
+    - name: low
+      type: "s64[0:31]"
+test_vectors:
+- name: minus_ten
+  source: spec-example
+  payload: "FF FF FF FF FF FF FF F6"
+  expected:
+    top: 4294967295
+    low: -10
+- name: mixed
+  source: spec-example
+  payload: "FF 29 F8 30 00 00 00 2A"
+  expected:
+    top: 4280940592
+    low: 42
