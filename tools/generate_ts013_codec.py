@@ -3190,9 +3190,9 @@ function writeS(buf, pos, size, value, endian) {
         """The test for one case key, or None where no value could ever satisfy it.
 
         Mirrors the interpreters' `_match_case_pattern`: an integer compares equal,
-        `"2..5"` is an inclusive range, and `"[1, 2]"` matches any element (PS-398). A key
-        that is none of these yields no branch at all rather than an expression that is
-        never true, so the generated codec does not carry a test that cannot fire.
+        `"2..5"` is an inclusive range, `"[1, 2]"` matches any element (PS-398), and any
+        other string compares equal as a string (a lookup label). A key no value could
+        satisfy yields no branch at all rather than an expression that is never true.
         """
         if isinstance(case_key, bool):
             return None
@@ -3216,7 +3216,11 @@ function writeS(buf, pos, size, value, endian) {
             try:
                 return f'{discriminator} === {int(text, 0)}'
             except ValueError:
-                return None
+                # A string key matches a string discriminator by equality, as the
+                # interpreters compare it - typically a lookup label (`Cmd` reads 0x81
+                # and reports "ConfigReportRsp"). These keys yielded no branch, so every
+                # such case body was silently missing from the codec's output.
+                return f'{discriminator} === {json.dumps(case_key)}'
         return None
 
     # ---------------------------------------------------------------
