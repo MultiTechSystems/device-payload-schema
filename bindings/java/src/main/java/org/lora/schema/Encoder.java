@@ -981,6 +981,17 @@ final class Encoder {
     private Object reverseModifiers(Object value, Field field) {
         Object reversed = reverseLookup(value, field.getLookup());
 
+        if (reversed instanceof Boolean flag && field.getLookup() != null
+                && !field.getLookup().isEmpty()) {
+            // PS-513: a boolean matches only a boolean label, and none has this one under
+            // a key of its own. Where only the `default` carries it, it stands for every
+            // unmapped value (PS-269, PS-409): there is nothing to write.
+            throw new SchemaException.EncodeException(flag + " is not a label with a key of "
+                    + "its own in the lookup for '" + field.getName() + "'; a boolean matches "
+                    + "only a boolean label, and a `default` label has no value to recover "
+                    + "(PS-409, PS-513)");
+        }
+
         // PS-409: a string matching the ${value} default carries the value it stands for.
         String template = Wave5.template(field);
         if (reversed instanceof String s && template != null) {
@@ -1026,11 +1037,16 @@ final class Encoder {
         return (long) Math.rint(result);
     }
 
-    /** Map a label back to its integer. */
-    private static Object reverseLookup(Object value, Map<Integer, String> lookup) {
+    /**
+     * Map a label back to its integer, comparing by {@link Schema#sameLabel} (PS-513). A
+     * boolean label used to be stored as the text "false", so a boolean input never
+     * matched it and was written as its own 0 or 1: {@code false} through
+     * {@code [true, false]} wrote index 0 (CR-2026-104).
+     */
+    private static Object reverseLookup(Object value, Map<Integer, Object> lookup) {
         if (lookup == null || lookup.isEmpty()) return value;
-        for (Map.Entry<Integer, String> entry : lookup.entrySet()) {
-            if (entry.getValue() != null && entry.getValue().equals(value)) {
+        for (Map.Entry<Integer, Object> entry : lookup.entrySet()) {
+            if (Schema.sameLabel(entry.getValue(), value)) {
                 return Long.valueOf(entry.getKey());
             }
         }

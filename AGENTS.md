@@ -187,18 +187,18 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2371 payload vectors in `schemas/devices/` (measured 2026-10-09 with
-`tools/check-floors.py`, after the CR-2026-071 to -087 fixtures) are the shared
+The 2563 payload vectors in `schemas/devices/` (measured 2026-10-10 with
+`tools/check-floors.py`, after the CR-2026-104 lookup-label fixtures) are the shared
 cross-language test set. Every implementation has a runner that reads the same YAML and
 the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1749 |
-| Go | `go/schema/corpus_conformance_test.go` | 2558 | 1766 (plain API 1743) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2558 | 1749 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2558 | 1749 |
-| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 540 of 540 attempted | n/a |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1757 |
+| Go | `go/schema/corpus_conformance_test.go` | 2566 | 1774 (plain API 1751) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2566 | 1757 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2566 | 1757 |
+| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 546 of 546 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
 its own implementation's actual; trust it over this table.
@@ -754,10 +754,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1749 |
-| Go | `go/schema/corpus_encode_test.go` | 1766 (plain 1743) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1749 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1749 |
+| Python | `tests/test_encode_round_trip.py` | 1757 |
+| Go | `go/schema/corpus_encode_test.go` | 1774 (plain 1751) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1757 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1757 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1069,9 +1069,9 @@ corpus before those schemas existed.** Each is fixed; the list is here so nobody
 - **Java's `bool` ignored `bit:` and `consume:`** — every bool read bit 0, and a flag group ending
   in `consume: 1` left the cursor on the byte. No corpus schema used `type: bool` until dnt.
 - **The TS013 generator had no `bool` at all** (a TODO and no value), which is why the first dnt
-  draft used `{0: false, 1: true}` lookups — outside what PS-106 lists (numbers or strings), and
-  **Go drops a non-string lookup label silently**. Go still does; PS-106 also allows *numeric*
-  labels, which Go's `map[int]string` cannot hold either.
+  draft used `{0: false, 1: true}` lookups — outside what PS-106 then listed (numbers or
+  strings), and **Go dropped a non-string lookup label silently**. CR-2026-104 since allows
+  boolean labels and fixed Go's labels to hold any scalar (see below).
 - **The generator renamed output keys** to JS identifiers — `pm1.0` came out as `pm1_0`. Keys are
   now restored at the entry points from a table built at generation time; two names mangling to
   one spelling is a generation error.
@@ -1333,6 +1333,20 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   the 8 schemas with a `length_size`, probed), so no floor moves. C's `error_msg` grew from
   112 to 152 bytes to hold the length message's worst case, since the build treats a
   possible truncation as an error.
+- **CR-2026-104: a lookup label may be a boolean** (PS-106), never with a `${value}` default
+  (PS-407), and **a label matches only an input of its own type** (PS-513): `true` is not 1,
+  and neither `"true"` nor `"5"` is a label of `true` or 5. One helper per language -
+  `same_label` in `schema_interpreter.py`, `sameLabel` in `go/schema/cr104.go`,
+  `Schema.sameLabel` in Java, `Helpers.SameLabel` in C#, and `===` in the generated
+  codec's `encReverseLookup`. **Python's `True == 1` and `hash(True) == hash(1)` are the
+  trap**: `list.index`, `==` and a dict keyed by label all conflate them, which is how the
+  reference wrote a default-only `true` as 1. A boolean with no key of its own is refused on
+  encode in all five (PS-409). Measured before: Go, Java and C# kept labels as strings -
+  **Go dropped a number or boolean mapping silently** (its `map[int]string`; Netvox r718n3's
+  `{1: 1, 2: 5, ...}` multiplier was blocked on it), Java and C# reported `"true"` and `"5"`
+  as text - and Java, C# and TS013 wrote `false` through `[true, false]` as index 0. C holds
+  a label as text, so `schema_binary.py` refuses a number or boolean label (PS-446) and the C
+  harness skips them as a C gap. Fixtures: `lookup-boolean-labels`, `lookup-number-labels`.
 - **CR-2026-094: SenML output takes primary units** (PS-478 amended, PS-487, PS-488).
   Python's `get_semantic_output(..., "senml")` and C#'s `SemanticFormatter.ToSenML` are
   the only SenML producers. A record's `u` is a registered SenML unit: a secondary unit is
@@ -1602,7 +1616,7 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   (CR-2026-032).** `make test-c` builds the three previously-orphaned C test files and runs
   `tools/c-corpus-harness.py`, which generates C that builds each expressible corpus schema
   through the struct API, compiles it, and compares the decode against the vectors.
-  **540 of 540 attempted vectors pass** (2026-10-09) since CR-2026-033 added `tlv` and CR-2026-034
+  **546 of 546 attempted vectors pass** (2026-10-10) since CR-2026-033 added `tlv` and CR-2026-034
   `flagged` (it was 50 of 50 before either). 751 of 1239 are still in schemas the struct API
   cannot build - 26 use a `transform` chain, 24 a `bitfield_string`, 15 more cases than
   `SCHEMA_MAX_CASES` allows, 3 `repeat`, 3 a `u32le16` **the interpreter has and the harness

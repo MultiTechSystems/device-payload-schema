@@ -49,11 +49,21 @@ def union_types(values: List[Any]) -> List[str]:
     return types
 
 
+def in_enum(value: Any, members: List[Any]) -> bool:
+    """Whether `value` is already one of `members`, a boolean only as a boolean.
+
+    PS-513: Python's `True == 1` would fold a `true` label into a label of 1 and drop
+    one of them from the enum.
+    """
+    return any(isinstance(m, bool) == isinstance(value, bool) and m == value
+               for m in members)
+
+
 def lookup_json_schema(lookup: Any) -> Optional[Dict[str, Any]]:
     """The schema for a field's reported value once its `lookup` is applied.
 
-    PS-106: lookup values MAY be numbers or strings, so the type comes from the values
-    rather than being assumed. This used to declare a mapping as
+    PS-106: lookup values MAY be numbers, strings or booleans, so the type comes from
+    the values rather than being assumed. This used to declare a mapping as
     `["string", "integer"]` - too loose for the 23 string-valued mappings in the corpus,
     and wrong for a mapping to floats, which it typed as an integer.
 
@@ -91,7 +101,7 @@ def lookup_json_schema(lookup: Any) -> Optional[Dict[str, Any]]:
     schema: Dict[str, Any] = {"type": types[0] if len(types) == 1 else types}
     unique: List[Any] = []
     for value in values:
-        if value not in unique:
+        if not in_enum(value, unique):
             unique.append(value)
     schema['enum'] = unique
     return schema
@@ -243,7 +253,7 @@ def field_to_json_schema(field_def: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     guard = field_def.get('guard')
     if isinstance(guard, dict) and guard.get('else') is not None:
         fallback = guard['else']
-        if 'enum' in schema and fallback not in schema['enum']:
+        if 'enum' in schema and not in_enum(fallback, schema['enum']):
             schema['enum'] = list(schema['enum']) + [fallback]
         declared = schema.get('type')
         if declared is not None:

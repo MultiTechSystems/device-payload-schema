@@ -38,11 +38,12 @@ public class Field {
     private Double mult;
     private Double div;
     private List<Transform> transform;
-    private Map<Integer, String> lookup;
+    /** The lookup's labels, each a String, a Number or a Boolean (PS-106, CR-2026-104). */
+    private Map<Integer, Object> lookup;
     /** True when `lookup` was written as a sequence, indexed from zero (PS-104). */
     private boolean lookupIsSequence;
     /** Fallback for a mapping lookup with no entry for the value (PS-269). */
-    private String lookupDefault;
+    private Object lookupDefault;
     /** Output key template resolved against earlier fields (PS-265). */
     private String nameFrom;
     private String var;
@@ -201,14 +202,14 @@ public class Field {
     public List<Transform> getTransform() { return transform; }
     public void setTransform(List<Transform> transform) { this.transform = transform; }
     
-    public Map<Integer, String> getLookup() { return lookup; }
+    public Map<Integer, Object> getLookup() { return lookup; }
     public boolean isLookupSequence() { return lookupIsSequence; }
     public void setLookupSequence(boolean value) { this.lookupIsSequence = value; }
-    public String getLookupDefault() { return lookupDefault; }
-    public void setLookupDefault(String value) { this.lookupDefault = value; }
+    public Object getLookupDefault() { return lookupDefault; }
+    public void setLookupDefault(Object value) { this.lookupDefault = value; }
     public String getNameFrom() { return nameFrom; }
     public void setNameFrom(String value) { this.nameFrom = value; }
-    public void setLookup(Map<Integer, String> lookup) { this.lookup = lookup; }
+    public void setLookup(Map<Integer, Object> lookup) { this.lookup = lookup; }
     
     public String getVar() { return var; }
     public void setVar(String var) { this.var = var; }
