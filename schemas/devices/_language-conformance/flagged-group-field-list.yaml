@@ -1,0 +1,63 @@
+# A presence group's `fields` is a field list (PS-347, PS-441), decoded as the top level
+# is: a group may hold another presence construct keyed on a mask it reads itself, an
+# internal field and a computed field. This sits inside a nested group, as mutelcor's
+# measurement report does.
+name: probe_flagged_group_field_list
+endian: big
+fields:
+- name: report
+  type: object
+  fields:
+  - name: _mask
+    type: u8
+  - flagged:
+      field: _mask
+      groups:
+      - bit: 0
+        fields:
+        - name: temperature
+          type: s16
+          div: 10
+      - bit: 1
+        fields:
+        - name: _raw
+          type: u8
+        - name: humidity
+          type: number
+          ref: $_raw
+          div: 2
+      - bit: 7
+        fields:
+        - name: _inner
+          type: u8
+        - flagged:
+            field: _inner
+            groups:
+            - bit: 0
+              fields:
+              - name: input_1
+                type: u8
+            - bit: 1
+              fields:
+              - name: input_2
+                type: u8
+test_vectors:
+- name: first_two_groups
+  payload: 03 00EB 64
+  source: spec-example
+  expected:
+    report:
+      temperature: 23.5
+      humidity: 50
+      _raw: null
+      input_1: null
+- name: inner_groups
+  payload: 81 00EB 02 07
+  source: spec-example
+  expected:
+    report:
+      temperature: 23.5
+      input_2: 7
+      input_1: null
+      humidity: null
+      _inner: null

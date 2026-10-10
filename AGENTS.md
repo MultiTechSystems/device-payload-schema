@@ -196,9 +196,9 @@ the same vectors:
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
 | Python | `tests/test_corpus_conformance.py` | every vector | 1775 |
-| Go | `go/schema/corpus_conformance_test.go` | 2593 | 1792 (plain API 1769) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2593 | 1775 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2593 | 1775 |
+| Go | `go/schema/corpus_conformance_test.go` | 2595 | 1792 (plain API 1769) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2595 | 1775 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2595 | 1775 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 546 of 546 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -1087,7 +1087,8 @@ dnt stop at Silver. r718x still reads its device and command bytes through a non
 it adopted before the `_` fix; it can use `$_device_type` directly now.
 
 **Every nested field list is decoded by `_decode_field_list` (2026-10-10).** Python's tlv
-case body and a `type: object`'s members were each their own loop of plain reads, so a number
+case body, a `type: object`'s members and a `flagged` group's fields were each their own loop
+of plain reads (a group holding another `flagged` failed "declares no type" - mutelcor), so a number
 literal there was "unknown type: number", a `match` or `byte_group` member "declares no type",
 `var:`, internal references and `sentinel` were ignored, and a case's `flagged` read a phantom
 byte. Go, Java and C# already decoded all of it. Both now go through `_decode_nested_list`,
@@ -1096,8 +1097,8 @@ and warnings to the decode, as a match case body's are. A name bound inside an o
 bound after it - the spec's "Combining Nested and Conditional" example relies on it, and Go,
 Java and C# all do it. The TS013 generator skipped every nameless object member (a `match`
 or a group of bit ranges decoded nothing and the group's byte was never consumed) and
-reported internal members; both are fixed. `tlv-case-field-list.yaml` and
-`object-member-field-list.yaml` hold all five to it. The validator now descends into an
+reported internal members; both are fixed. `tlv-case-field-list.yaml`,
+`object-member-field-list.yaml` and `flagged-group-field-list.yaml` hold all five to it. The validator now descends into an
 object's members too; it never had, so a typeless member passed.
 
 **A case body is a field list; a bare string is rejected at load (PS-441).** `cases: {5: skip}`

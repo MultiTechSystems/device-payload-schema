@@ -172,3 +172,17 @@ def test_the_generated_codec_reports_a_skip_past_the_end():
         ["node"], input=script, capture_output=True, text=True, check=True
     )
     assert any("Buffer too short for skip" in e for e in json.loads(out.stdout))
+
+
+def test_a_presence_group_field_range_is_checked_once():
+    # Group fields go through the field-list decoder, which range-checks them; the
+    # caller's own check is gone, so the warning is not reported twice.
+    src = (
+        "name: p\nfields:\n- {name: _m, type: u8}\n- flagged:\n    field: _m\n"
+        "    groups:\n    - bit: 0\n      fields:\n"
+        "      - {name: t, type: u8, valid_range: [0, 10]}\n"
+    )
+    result = SchemaInterpreter(yaml.safe_load(src)).decode(bytes([1, 20]))
+    assert result.success
+    assert result.data == {"t": 20, "_quality": {"t": "out_of_range"}}
+    assert result.warnings == ["t: value 20 outside valid range [0, 10]"]
