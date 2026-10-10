@@ -9,8 +9,7 @@ definitions:
       - name: pir
         type: bool
         description: "PIR motion detected (bit-level, use pir_byte for full byte)"
-        semantic:
-          ipso: 3302
+        ipso: {object: 3302}
 
   pir_byte:
     # Use when PIR is a standalone byte (common in many devices)
@@ -18,24 +17,21 @@ definitions:
       - name: pir
         type: u8
         description: "PIR motion detected (0=no, 1=yes)"
-        semantic:
-          ipso: 3302
+        ipso: {object: 3302}
 
   motion:
     fields:
       - name: motion
         type: bool
         description: "Motion detected"
-        semantic:
-          ipso: 3302
+        ipso: {object: 3302}
 
   occupancy:
     fields:
       - name: occupancy
         type: bool
         description: "Space occupied"
-        semantic:
-          ipso: 3302
+        ipso: {object: 3302}
 
   # === PEOPLE COUNTING ===
   

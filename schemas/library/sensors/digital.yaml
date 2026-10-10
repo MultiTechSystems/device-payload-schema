@@ -9,8 +9,7 @@ definitions:
       - name: digital_input
         type: bool
         description: "Digital input state"
-        semantic:
-          ipso: 3200
+        ipso: {object: 3200}
 
   gpio_state:
     fields:
@@ -23,16 +22,14 @@ definitions:
       - name: door_open
         type: bool
         description: "Door/window open state"
-        semantic:
-          ipso: 3302
+        ipso: {object: 3200}
 
   water_leak:
     fields:
       - name: water_leak
         type: bool
         description: "Water leak detected"
-        semantic:
-          ipso: 3302
+        ipso: {object: 3200}
 
   tamper:
     fields:
@@ -47,8 +44,7 @@ definitions:
       - name: pulse_count
         type: u32
         description: "Cumulative pulse count"
-        semantic:
-          ipso: 3200
+        ipso: {object: 3200, resource: 5501}
 
   pulse_count_16:
     fields:
@@ -69,8 +65,7 @@ definitions:
       - name: alarm
         type: bool
         description: "Alarm state"
-        semantic:
-          ipso: 3200
+        ipso: {object: 3200}
 
   temperature_alarm:
     fields:
