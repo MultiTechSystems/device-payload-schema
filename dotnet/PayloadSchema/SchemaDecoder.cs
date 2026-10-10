@@ -1587,8 +1587,9 @@ public static class SchemaDecoder
                 missing.Add(reference);
                 return string.Empty;
             }
-            var (ok, intVal) = Helpers.ToInt(value);
-            return ok ? intVal.ToString() : value?.ToString() ?? string.Empty;
+            return Wave5.RenderTemplateValue(value)
+                ?? throw new InvalidOperationException(
+                    Wave5.TemplateShapeError(field.NameFrom!, reference));
         });
         if (missing.Count > 0)
             throw new InvalidOperationException(

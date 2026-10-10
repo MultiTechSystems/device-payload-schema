@@ -121,6 +121,9 @@ func checkTypeVocabulary(raw map[string]any) error {
 		if !ok {
 			return nil
 		}
+		// Names (and variables) this list has declared an object or repeat under: a key
+		// template cannot write one (PS-532).
+		aggregates := map[string]bool{}
 		for i, entry := range list {
 			field := asStringMap(entry)
 			if field == nil {
@@ -149,6 +152,21 @@ func checkTypeVocabulary(raw map[string]any) error {
 			}
 			if err := checkFieldRules(field, at); err != nil {
 				return err
+			}
+			if template, ok := field["name_from"].(string); ok {
+				for _, m := range nameFromPattern.FindAllStringSubmatch(template, -1) {
+					if aggregates[m[1]] {
+						return fmt.Errorf("%s: template %q references %q, which is not a number, string or boolean and cannot be written into a key (PS-532)", at, template, m[1])
+					}
+				}
+			}
+			if spelling == "object" || spelling == "repeat" {
+				if name != "" {
+					aggregates[name] = true
+				}
+				if v, ok := field["var"].(string); ok && v != "" {
+					aggregates[v] = true
+				}
 			}
 			if err := check(field["fields"], at+".fields"); err != nil {
 				return err

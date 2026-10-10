@@ -122,14 +122,14 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Device schemas
 
-298 schemas under `schemas/devices/`.
-Mean quality score 75.7% (PLATINUM 37, GOLD 39, SILVER 175, BRONZE 26, REJECTED 21). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+299 schemas under `schemas/devices/`.
+Mean quality score 75.7% (PLATINUM 37, GOLD 39, SILVER 176, BRONZE 26, REJECTED 21). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
-| _language-conformance | 86 | 159 | SILVER 65, BRONZE 15, REJECTED 6 |
+| _language-conformance | 87 | 167 | SILVER 66, BRONZE 15, REJECTED 6 |
 | milesight | 84 | 1427 | PLATINUM 21, GOLD 33, SILVER 27, REJECTED 3 |
 | decentlab | 58 | 204 | PLATINUM 13, GOLD 6, SILVER 27, BRONZE 8, REJECTED 4 |
 | _library-composed | 49 | 57 | SILVER 48, BRONZE 1 |
@@ -198,6 +198,7 @@ Mean quality score 75.7% (PLATINUM 37, GOLD 39, SILVER 175, BRONZE 26, REJECTED 
 | `_language-conformance/metadata-enrichment` | 2 | 3 | fields | 75% | SILVER |
 | `_language-conformance/metadata-epoch-calendar` | 2 | 1 | fields | 71% | SILVER |
 | `_language-conformance/minifloat` | 7 | 1 | fields | 75% | SILVER |
+| `_language-conformance/name-from-rendering` | 16 | 8 | ports | 76% | SILVER |
 | `_language-conformance/name-from-var` | 2 | 2 | fields | 71% | SILVER |
 | `_language-conformance/name-from` | 2 | 1 | fields | 71% | SILVER |
 | `_language-conformance/object-member-field-list` | 13 | 2 | fields | 42% | REJECTED |

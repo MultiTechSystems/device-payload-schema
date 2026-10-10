@@ -439,9 +439,13 @@ function encResolveName(f, name, data) {              // _resolve_encode_name
     if (Object.prototype.hasOwnProperty.call(data, ref)) v = data[ref];
     else {
       var src = encDeclaringVar(ref);
-      if (src && Object.prototype.hasOwnProperty.call(data, src.name)) v = encReverseLookup(data[src.name], src.lookup);
+      if (src && Object.prototype.hasOwnProperty.call(data, src.name)) v = data[src.name];
       else { missing = true; return ""; }
     }
+    // The key holds what the field reports, its label included (PS-532).
+    if (v !== null && typeof v === "object")
+      encFail("template " + JSON.stringify(f.name_from) + " references " + JSON.stringify(ref) +
+              ", which is not a number, string or boolean and cannot be written into a key (PS-532)");
     return String(v);
   });
   return missing ? null : resolved;
@@ -1390,9 +1394,9 @@ def name_from_to_js(field: Dict[str, Any], js_name: str) -> Tuple[List[str], str
     encoding use (PS-267).
 
     A reference that has not been decoded throws, which the generated entry point turns
-    into an `errors` entry, matching PS-266 and the interpreter. JavaScript needs no
-    integer coercion here: it has one number type, so `"" + 3` is "3" where Python had to
-    narrow 3.0 first.
+    into an `errors` entry, matching PS-266 and the interpreter. Concatenation writes a
+    value as PS-532 asks - `3` not `3.0`, `1e-7`, `true` - because it is ECMAScript's own
+    Number::toString; an object or array is refused.
     """
     template = field.get('name_from')
     if not template:
@@ -1424,6 +1428,12 @@ def name_from_to_js(field: Dict[str, Any], js_name: str) -> Tuple[List[str], str
                    f"'{reference}', which has not been decoded")
         guards.append(f'if (vars.{reference} === undefined) '
                       f'throw new Error({json.dumps(message)});')
+        # PS-532: concatenation writes a number, string or boolean as the key wants it,
+        # and an object or array has no text to write.
+        shape = (f"template {str(template)!r} references {reference!r}, which is not a "
+                 "number, string or boolean and cannot be written into a key (PS-532)")
+        guards.append(f'if (vars.{reference} !== null && typeof vars.{reference} === '
+                      f'"object") throw new Error({json.dumps(shape)});')
     return guards, 'd[' + ' + '.join(parts) + ']'
 
 

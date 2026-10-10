@@ -165,6 +165,9 @@ public class Schema {
     private static List<Field> parseFields(List<Map<String, Object>> fieldsRaw) {
         List<Field> fields = new ArrayList<>();
         if (fieldsRaw == null) return fields;
+        // Names (and variables) this list declared an object or repeat under: a key
+        // template cannot write one (PS-532).
+        java.util.Set<String> aggregates = new java.util.HashSet<>();
 
         for (Map<String, Object> fm : fieldsRaw) {
             // PS-466 (CR-2026-074): the `object:` key is withdrawn; a nested group is
@@ -190,6 +193,19 @@ public class Schema {
             // sentinel and out_of_range.
             Wave6b.checkField(fm);
             checkArithmetic(fm);               // PS-445, PS-452
+            if (fm.get("name_from") instanceof String template) {
+                java.util.regex.Matcher refs = NAME_FROM_PATTERN.matcher(template);
+                while (refs.find()) {
+                    if (aggregates.contains(refs.group(1))) {
+                        throw new SchemaException("Field '" + fm.get("name") + "': "
+                                + Wave5.templateShapeError(template, refs.group(1)));
+                    }
+                }
+            }
+            if ("object".equals(rawType) || "repeat".equals(rawType)) {
+                if (fm.get("name") instanceof String n && !n.isEmpty()) aggregates.add(n);
+                if (fm.get("var") instanceof String v && !v.isEmpty()) aggregates.add(v);
+            }
             fields.add(parseField(fm));
         }
         return fields;
@@ -2279,11 +2295,11 @@ public class Schema {
             if (value == null) {
                 missing.add(reference);
                 replacement = "";
-            } else if (value instanceof Number
-                    && ((Number) value).doubleValue() == ((Number) value).longValue()) {
-                replacement = String.valueOf(((Number) value).longValue());
             } else {
-                replacement = String.valueOf(value);
+                replacement = Wave5.renderTemplateValue(value);
+                if (replacement == null) {
+                    throw new SchemaException(Wave5.templateShapeError(template, reference));
+                }
             }
             matcher.appendReplacement(resolved, java.util.regex.Matcher.quoteReplacement(replacement));
         }

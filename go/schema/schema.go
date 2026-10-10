@@ -3432,6 +3432,7 @@ func resolveEncodeName(field Field, siblings []Field, data map[string]any) (stri
 		return field.Name, nil
 	}
 	var missing []string
+	var shapeErr error
 	resolved := nameFromPattern.ReplaceAllStringFunc(field.NameFrom, func(match string) string {
 		reference := match[2 : len(match)-1]
 		value, ok := data[reference]
@@ -3449,11 +3450,16 @@ func resolveEncodeName(field Field, siblings []Field, data map[string]any) (stri
 			missing = append(missing, reference)
 			return ""
 		}
-		if number, isNum := toFloat64(value); isNum && number == float64(int64(number)) {
-			return strconv.FormatInt(int64(number), 10)
+		// The data carries what the field reports, its label included (PS-532).
+		text, err := renderTemplateValue(value, reference, field.NameFrom)
+		if err != nil && shapeErr == nil {
+			shapeErr = err
 		}
-		return fmt.Sprintf("%v", value)
+		return text
 	})
+	if shapeErr != nil {
+		return "", shapeErr
+	}
 	if len(missing) > 0 {
 		return "", fmt.Errorf("name_from for %q references %s, which the data does not carry",
 			field.Name, strings.Join(missing, ", "))
@@ -3467,6 +3473,7 @@ func resolveFieldName(field Field, ctx *DecodeContext) (string, error) {
 		return field.Name, nil
 	}
 	var missing []string
+	var shapeErr error
 	resolved := nameFromPattern.ReplaceAllStringFunc(field.NameFrom, func(match string) string {
 		reference := match[2 : len(match)-1]
 		value, ok := ctx.Variables[reference]
@@ -3474,11 +3481,15 @@ func resolveFieldName(field Field, ctx *DecodeContext) (string, error) {
 			missing = append(missing, reference)
 			return ""
 		}
-		if number, ok := toFloat64(value); ok && number == float64(int64(number)) {
-			return strconv.FormatInt(int64(number), 10)
+		text, err := renderTemplateValue(value, reference, field.NameFrom)
+		if err != nil && shapeErr == nil {
+			shapeErr = err
 		}
-		return fmt.Sprintf("%v", value)
+		return text
 	})
+	if shapeErr != nil {
+		return "", shapeErr
+	}
 	if len(missing) > 0 {
 		return "", fmt.Errorf("name_from for %q references %s, which has not been decoded",
 			field.Name, strings.Join(missing, ", "))

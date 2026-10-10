@@ -237,13 +237,13 @@ final class Encoder {
             if (value == null) {
                 return null;
             }
-            Long whole = asLong(value);
-            Double asDouble = asDouble(value);
-            if (whole != null && asDouble != null && asDouble == whole.doubleValue()) {
-                out.append(whole);
-            } else {
-                out.append(value);
+            // The data carries what the field reports, its label included (PS-532).
+            String text = Wave5.renderTemplateValue(value);
+            if (text == null) {
+                throw new SchemaException.EncodeException(
+                        Wave5.templateShapeError(template, reference));
             }
+            out.append(text);
             last = matcher.end();
         }
         out.append(template.substring(last));

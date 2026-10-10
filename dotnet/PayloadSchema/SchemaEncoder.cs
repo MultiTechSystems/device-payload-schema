@@ -288,10 +288,10 @@ public static class SchemaEncoder
                         unresolved = true;
                         return "";
                     }
-                    var (ok, numeric) = Helpers.ToFloat64(value);
-                    if (ok && numeric == Math.Floor(numeric))
-                        return ((long)numeric).ToString(System.Globalization.CultureInfo.InvariantCulture);
-                    return value.ToString() ?? "";
+                    // The data carries what the field reports, its label included (PS-532).
+                    return Wave5.RenderTemplateValue(value)
+                        ?? throw new InvalidOperationException(
+                            Wave5.TemplateShapeError(field.NameFrom!, reference));
                 });
             return unresolved ? null : resolved;
         }

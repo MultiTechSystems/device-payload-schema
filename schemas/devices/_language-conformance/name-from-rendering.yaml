@@ -1,0 +1,120 @@
+# How a templated output key writes the value it substitutes (PS-532, CR-2026-112).
+#
+# A key template substitutes the value the referenced field reports: its label where
+# it has a lookup, a number as a `${value}` default writes it (PS-406, so no `.0` on an
+# integral value and `1e-7` rather than `1e-07`), a string as it is and a boolean as
+# `true` or `false`. One port per case, so each vector exercises one rule.
+name: probe_key_template_rendering
+endian: big
+ports:
+  1:
+    fields:
+      - {name: wet, type: bool, bit: 0, consume: 1}
+      - {name: level, type: u8, name_from: "probe_${wet}"}
+  2:
+    fields:
+      - name: mode
+        type: u8
+        lookup: {1: eco, 2: boost}
+      - {name: power, type: u8, name_from: "power_${mode}"}
+  3:
+    fields:
+      - {name: gain, type: u8, div: 10}
+      - {name: sample, type: u8, name_from: "sample_at_${gain}"}
+  4:
+    fields:
+      - {name: ratio, type: u8, div: 4}
+      - {name: sample, type: u8, name_from: "sample_at_${ratio}"}
+  5:
+    fields:
+      - {name: step, type: u8, div: 10000000}
+      - {name: sample, type: u8, name_from: "sample_at_${step}"}
+  6:
+    fields:
+      - name: side
+        type: u8
+        var: at
+        lookup: {1: left, 2: right}
+      - {name: reading, type: u8, name_from: "reading_${at}"}
+  7:
+    fields:
+      - {name: armed, type: boolean, value: false}
+      - {name: count, type: u8, name_from: "count_${armed}"}
+  8:
+    fields:
+      - name: door
+        type: u8
+        lookup: {0: false, 1: true}
+      - {name: count, type: u8, name_from: "count_${door}"}
+test_vectors:
+  - name: a_boolean_is_written_true
+    payload: "01 07"
+    fPort: 1
+    source: spec-example
+    expected:
+      wet: true
+      probe_true: 7
+      probe_True: null
+      level: null
+  - name: a_lookup_reference_writes_its_label
+    payload: "02 05"
+    fPort: 2
+    source: spec-example
+    expected:
+      mode: boost
+      power_boost: 5
+      power_2: null
+      power: null
+  - name: an_integral_quotient_has_no_fraction
+    payload: "14 09"
+    fPort: 3
+    source: spec-example
+    expected:
+      gain: 2
+      sample_at_2: 9
+      sample_at_2.0: null
+      sample: null
+  - name: a_fraction_is_written_in_decimal
+    payload: "0A 09"
+    fPort: 4
+    source: spec-example
+    expected:
+      ratio: 2.5
+      sample_at_2.5: 9
+      sample: null
+  - name: a_small_number_is_written_as_javascript_writes_it
+    payload: "01 09"
+    fPort: 5
+    source: spec-example
+    expected:
+      step: 0.0000001
+      sample_at_1e-7: 9
+      sample_at_1e-07: null
+      sample: null
+  - name: a_variable_writes_its_field_label
+    payload: "02 05"
+    fPort: 6
+    source: spec-example
+    expected:
+      side: right
+      reading_right: 5
+      reading_2: null
+      reading: null
+  - name: a_boolean_constant_is_written_false
+    payload: "03"
+    fPort: 7
+    source: spec-example
+    expected:
+      armed: false
+      count_false: 3
+      count_False: null
+      count: null
+  - name: a_boolean_label_is_written_true
+    payload: "01 03"
+    fPort: 8
+    source: spec-example
+    expected:
+      door: true
+      count_true: 3
+      count_1: null
+      count: null

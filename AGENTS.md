@@ -188,17 +188,17 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2563 payload vectors in `schemas/devices/` (measured 2026-10-10 with
-`tools/check-floors.py`, after the CR-2026-104 lookup-label fixtures) are the shared
+The 2601 payload vectors in `schemas/devices/` (measured 2026-10-10 with
+`tools/check-floors.py`, after the CR-2026-112 name-from-rendering fixture) are the shared
 cross-language test set. Every implementation has a runner that reads the same YAML and
 the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1775 |
-| Go | `go/schema/corpus_conformance_test.go` | 2593 | 1792 (plain API 1769) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2593 | 1775 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2593 | 1775 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1783 |
+| Go | `go/schema/corpus_conformance_test.go` | 2601 | 1800 (plain API 1777) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2601 | 1783 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2601 | 1783 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 546 of 546 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -755,10 +755,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1775 |
-| Go | `go/schema/corpus_encode_test.go` | 1792 (plain 1769) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1775 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1775 |
+| Python | `tests/test_encode_round_trip.py` | 1783 |
+| Go | `go/schema/corpus_encode_test.go` | 1800 (plain 1777) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1783 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1783 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1461,6 +1461,22 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   detected**: PyYAML and SnakeYAML hand the check a boolean for it, C# (YAML 1.2) a string
   it rejects, and PS-520 permits both, so no shared vector may use one. Fixture:
   `boolean-literal.yaml`.
+- **CR-2026-112 (provisional PS-532): a `name_from` key writes what the field reports.**
+  Its label where it has a lookup; a number as PS-406's `${value}` (one writer per language,
+  `render_template_value` / `renderTemplateValue` / `Wave5.renderTemplateValue` /
+  `Wave5.RenderTemplateValue`, over the existing `format_lookup_value`); a string as is; a
+  boolean as `true`/`false`. Both resolvers in each language use it, and the generated
+  codec needed none: concatenation is ECMAScript's own Number::toString. Measured before:
+  Python wrote `True` and `1e-07`, Go `1e-07`, Java `1.0E-7`, C# `True` and **truncated a
+  fraction** (`2.5` -> `2`, `1e-7` -> `0`, through `ToInt`). The Python and generated-codec
+  encoders reversed the lookup of a field reached through its `var:`, so `reading_${at}`
+  over a labelled `side` decoded as `reading_right` and was looked up as `reading_2` on
+  encode. A reference to an `object` or `repeat` is refused at load in Go,
+  Java and C# where the same field list declares it, and at decode/encode everywhere.
+  No corpus schema's template referenced a lookup, boolean or fraction, so no device
+  vector changed. `senml.name` templates are not rendered by either SenML producer (Python,
+  C#): a record's `n` is the template as written, so PS-532's senml half is open. Fixture:
+  `name-from-rendering.yaml`.
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.
