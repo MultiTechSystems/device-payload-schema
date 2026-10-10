@@ -294,6 +294,10 @@ def field_errors(field: Dict, schema_endian: str = 'big') -> List[str]:
         start, end = map(int, re.match(r'^u8\[(\d+):(\d+)\]$', ftype).groups())
         if not 0 <= start <= end <= 7:
             refuse(f"type {ftype!r}", "not a bit range of one byte")
+    elif ftype == 'boolean':
+        # A boolean literal (PS-519) reads no bytes; this format has no literal record,
+        # so it would have gone out as a u8 and read a byte the payload does not carry.
+        refuse("type 'boolean'", "this format has no literal record")
     elif ftype not in C_REPRESENTABLE_TYPES:
         refuse(f"type {ftype!r}", "this format has no such type, and wrote it as u8",
                "PS-327")

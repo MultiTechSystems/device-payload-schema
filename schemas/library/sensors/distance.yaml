@@ -13,8 +13,7 @@ definitions:
         resolution: 1
         unece: "MMT"
         description: "Distance measurement"
-        semantic:
-          ipso: 3330
+        ipso: {object: 3330}
 
   distance_cm:
     fields:
@@ -36,8 +35,7 @@ definitions:
         resolution: 0.01
         unece: "MTR"
         description: "Distance in meters"
-        semantic:
-          ipso: 3330
+        ipso: {object: 3330}
 
   # === LEVEL/DEPTH ===
   

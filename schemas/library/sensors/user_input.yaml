@@ -9,8 +9,7 @@ definitions:
       - name: button
         type: bool
         description: "Button pressed state"
-        semantic:
-          ipso: 3347
+        ipso: {object: 3347}
 
   button_count:
     fields:

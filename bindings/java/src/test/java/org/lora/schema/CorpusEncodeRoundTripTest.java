@@ -63,7 +63,7 @@ class CorpusEncodeRoundTripTest {
     // classifier filed it under that shape). The leftover vector re-encodes to its first byte only
     // (PS-474) and the omitted out-of-range one has no value to write, both by design.
     // +2 with plain fixed 100 -> 102 (CR-2026-096): the meta-* fixtures that round-trip.
-    private static final int ENCODE_FLOOR_TOTAL = 1773;   // +13: the nine TS013-defect fixtures (tlv-tag-bit-range does not round-trip); +8: CR-2026-104 lookup label fixtures (plain fixed); +3: byte-group-bool; +3: tlv-case-field-list; +2: tlv-case-key-patterns; +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
+    private static final int ENCODE_FLOOR_TOTAL = 1775;   // +2: boolean-literal (CR-2026-107); +13: the nine TS013-defect fixtures (tlv-tag-bit-range does not round-trip); +8: CR-2026-104 lookup label fixtures (plain fixed); +3: byte-group-bool; +3: tlv-case-field-list; +2: tlv-case-key-patterns; +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
 
     /**
      * Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -74,7 +74,7 @@ class CorpusEncodeRoundTripTest {
             "tlv", 1299,   // +3: tlv-case-field-list; +2: tlv-case-key-patterns; +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
             "flagged", 193,
             "plain fixed", 119,   // +8: CR-2026-104 lookup label fixtures; +9: TS013 fixtures
-            "match", 123,
+            "match", 125,
             "byte_group", 25,   // +3: byte-group-bool; +2: wide-group
             // 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas
             // now carry only the definitions they reach, so one no longer contains an

@@ -31,6 +31,8 @@ public enum FieldType
     Bytes,
     Skip,
     String,
+    // A boolean literal (PS-519): reads no bytes; not an alias of Bool (PS-065).
+    Boolean,
     Number,
     Object,
     Match,

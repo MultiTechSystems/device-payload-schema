@@ -57,7 +57,8 @@ final class Wave6a {
 
     private static boolean isLiteral(Map<?, ?> f) {
         Object type = f.get("type");
-        return ("string".equals(type) || "number".equals(type)) && f.containsKey("value");
+        return ("string".equals(type) || "number".equals(type) || "boolean".equals(type))
+                && f.containsKey("value");
     }
 
     /** PS-373, PS-374: a per-element unit, IPSO instance or SenML name, and what it names. */
@@ -288,7 +289,7 @@ final class Wave6a {
             String type = f.get("type") == null ? "" : String.valueOf(f.get("type"));
             if (FIXED_SIZES.containsKey(type)) {
                 total += FIXED_SIZES.get(type);
-            } else if (COMPUTED_TYPES.contains(type) || ("string".equals(type) && f.containsKey("value"))) {
+            } else if (COMPUTED_TYPES.contains(type) || isLiteral(f)) {
                 continue;
             } else if (type.contains("[") || "bool".equals(type)) {
                 Object consume = f.containsKey("consume") ? f.get("consume") : 0;

@@ -80,7 +80,7 @@ var templateReference = regexp.MustCompile(`\$\{([^}]+)\}`)
 // isRawLiteral is is_literal: a `string` or `number` field declaring `value` (PS-357).
 func isRawLiteral(f map[string]any) bool {
 	_, hasValue := f["value"]
-	return hasValue && (f["type"] == "string" || f["type"] == "number")
+	return hasValue && (f["type"] == "string" || f["type"] == "number" || f["type"] == "boolean")
 }
 
 // repeatMemberRefError holds PS-373 and PS-374: a per-element unit, IPSO instance or
@@ -563,7 +563,7 @@ func presentIfBlocksEncode(field Field) bool {
 	}
 	for _, f := range field.Fields {
 		computed := f.Type == TypeNumber || f.Type == "number" || f.IntegerResult
-		literal := f.Value != nil && (f.Type == TypeString || f.Type == TypeStringLower || computed)
+		literal := f.Value != nil && (f.Type == TypeString || f.Type == TypeStringLower || f.Type == TypeBoolean || computed)
 		if !computed && !literal {
 			return true
 		}

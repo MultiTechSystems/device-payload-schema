@@ -9,8 +9,7 @@ definitions:
       - name: smoke
         type: bool
         description: "Smoke detection alarm"
-        semantic:
-          ipso: 3202
+        ipso: {object: 3200}
 
   smoke_density:
     fields:

@@ -52,8 +52,7 @@ definitions:
         resolution: 0.01
         unece: "KGM"
         description: "Load/weight"
-        semantic:
-          ipso: 3322
+        ipso: {object: 3322}
 
   load_n:
     fields:

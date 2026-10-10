@@ -12,8 +12,7 @@ fields:
   - 125
   resolution: 0.1
   unece: CEL
-  semantic:
-    ipso: 3303
+  ipso: {object: 3303}
 - name: humidity
   type: u8
   mult: 0.5
@@ -23,8 +22,7 @@ fields:
   - 100
   resolution: 0.5
   unece: P1
-  semantic:
-    ipso: 3304
+  ipso: {object: 3304}
 - name: pressure
   type: u16
   div: 10
@@ -34,8 +32,7 @@ fields:
   - 1100
   resolution: 0.1
   unece: A97
-  semantic:
-    ipso: 3323
+  ipso: {object: 3323}
 - name: co2
   type: u16
   unit: ppm
@@ -45,8 +42,7 @@ fields:
   resolution: 1
   unece: '59'
   description: CO2 concentration
-  semantic:
-    ipso: 3325
+  ipso: {object: 3325}
 - name: battery
   type: u8
   unit: '%'
@@ -56,8 +52,6 @@ fields:
   resolution: 1
   unece: P1
   description: Battery percentage
-  semantic:
-    ipso: 3316
 - name: distance
   type: u16
   unit: mm
@@ -67,13 +61,11 @@ fields:
   resolution: 1
   unece: MMT
   description: Distance measurement
-  semantic:
-    ipso: 3330
+  ipso: {object: 3330}
 - name: pir
   type: u8
   description: PIR motion detected (0=no, 1=yes)
-  semantic:
-    ipso: 3302
+  ipso: {object: 3302}
 - name: latitude
   type: s24
   div: 10000

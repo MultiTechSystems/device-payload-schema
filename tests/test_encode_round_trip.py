@@ -60,7 +60,8 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # object-unnamed-skip, repeat-count-zero-width (tlv-tag-bit-range does not round-trip).
 # +3: byte-group-bool.
 # +3: tlv-case-field-list.
-FLOOR_TOTAL = 1773
+# +2: boolean-literal (CR-2026-107).
+FLOOR_TOTAL = 1775
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -71,7 +72,7 @@ FLOOR_BY_SHAPE = {
     "tlv": 1299,
     "flagged": 193,
     "plain fixed": 119,
-    "match": 123,
+    "match": 125,
     "byte_group": 25,
     # 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now
     # carry only the definitions they reach, so one no longer has a `repeat` in an

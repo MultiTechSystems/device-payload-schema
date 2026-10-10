@@ -14,8 +14,6 @@ definitions:
         resolution: 1
         unece: "P1"
         description: "Volumetric water content percentage"
-        semantic:
-          ipso: 3304
 
   soil_moisture_vwc:
     fields:
@@ -46,8 +44,7 @@ definitions:
         resolution: 0.1
         unece: "CEL"
         description: "Soil temperature"
-        semantic:
-          ipso: 3303
+        ipso: {object: 3303}
 
   # === SOIL ELECTRICAL PROPERTIES ===
   
