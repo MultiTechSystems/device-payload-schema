@@ -1,0 +1,31 @@
+# Unnamed padding inside a nested group still occupies its bytes (PS-392). The
+# generated codec passed over members with no name there, so the padding consumed
+# nothing and every field after it, inside the group and after it, read from the wrong
+# offset (dnt-lw-dis `device_info`).
+#
+# Round-trips: the padding is zero, so it can be written back.
+name: probe_object_unnamed_skip
+endian: big
+fields:
+- name: device_info
+  type: object
+  fields:
+  - name: device_type
+    type: u24
+  - type: skip
+    length: 3
+  - type: skip
+    length: 3
+  - name: hw_version
+    type: u8
+- name: after
+  type: u8
+test_vectors:
+- name: padded
+  source: spec-example
+  payload: "000102 000000 000000 05 07"
+  expected:
+    device_info:
+      device_type: 258
+      hw_version: 5
+    after: 7

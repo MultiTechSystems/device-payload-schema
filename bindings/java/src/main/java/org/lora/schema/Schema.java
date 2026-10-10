@@ -1609,8 +1609,9 @@ public class Schema {
             case ASCII -> {
                 byte[] data = ctx.read(length);
                 String str = new String(data, StandardCharsets.US_ASCII);
-                // Trailing NUL padding is dropped, as in Python, Go, C# and the generated
-                // codec. This removed every NUL and trimmed whitespace at both ends too.
+                // Trailing NUL padding only, as the reference strips it: this removed
+                // every NUL and then trimmed spaces, so "HC " read as "HC" and "A\0B"
+                // as "AB" where Python, Go and C# keep both.
                 int end = str.length();
                 while (end > 0 && str.charAt(end - 1) == '\0') end--;
                 value = str.substring(0, end);
@@ -2015,7 +2016,8 @@ public class Schema {
         if (field.getTagFields() != null && !field.getTagFields().isEmpty()) {
             tagWidth = 0;
             for (Field tf : field.getTagFields()) {
-                tagWidth += tagFieldWidth(tf);
+                // A bit-range component advances by its `consume` alone (PS-060).
+                tagWidth += tf.getType() == FieldType.BITS ? tf.getConsume() : tagFieldWidth(tf);
             }
         }
 
@@ -2033,8 +2035,24 @@ public class Schema {
             
             if (field.getTagFields() != null && !field.getTagFields().isEmpty()) {
                 for (Field tf : field.getTagFields()) {
-                    byte[] data = ctx.read(tagFieldWidth(tf));
-                    int val = (int) ctx.decodeUnsigned(data, ctx.getEndian());
+                    int val;
+                    if (tf.getType() == FieldType.BITS) {
+                        // A bit range reads its base where it stands and advances by its
+                        // `consume` alone (PS-060), as anywhere else; it was read as a
+                        // whole byte and consumed one (comtac lpn-td1's `[u8, u8[0:3]]`).
+                        int baseBytes = Math.max(1, tf.getBitBaseBytes());
+                        byte[] peeked = ctx.peek(baseBytes, 0);
+                        String tfEndian = tf.getEndian() != null ? tf.getEndian() : ctx.getEndian();
+                        long base = ctx.decodeUnsigned(peeked, tfEndian);
+                        val = (int) extractRange(base, tf.isSignedBits(), tf.getBitOffset(),
+                                tf.getBits() > 0 ? tf.getBits() : 1);
+                        if (tf.getConsume() > 0) {
+                            ctx.read(tf.getConsume());
+                        }
+                    } else {
+                        byte[] data = ctx.read(tagFieldWidth(tf));
+                        val = (int) ctx.decodeUnsigned(data, ctx.getEndian());
+                    }
                     if (tf.getName() != null) {
                         tagValues.put(tf.getName(), val);
                     }
@@ -2507,8 +2525,11 @@ public class Schema {
                 int bitLen = toInt(part.get(1), 0);
                 String format = part.size() >= 3 ? String.valueOf(part.get(2)) : "decimal";
                 
-                long mask = (1L << bitLen) - 1;
-                long raw = (intVal >> bitOff) & mask;
+                // The value is unsigned: a logical shift, and a 64-bit part's mask is all
+                // ones - Java takes a shift count mod 64, so `(1L << 64) - 1` was 0 and
+                // a 64-bit part read 0. Rendered unsigned for the same reason.
+                long mask = bitLen >= 64 ? -1L : (1L << bitLen) - 1;
+                long raw = bitOff >= 64 ? 0 : (intVal >>> bitOff) & mask;
                 
                 // PS-430: hex lower case, hex:upper upper case; any other format is
                 // refused when the schema is loaded.
@@ -2517,7 +2538,7 @@ public class Schema {
                 } else if ("hex:upper".equals(format)) {
                     partStrs.add(Long.toHexString(raw).toUpperCase());
                 } else {
-                    partStrs.add(String.valueOf(raw));
+                    partStrs.add(Long.toUnsignedString(raw));
                 }
             }
         }
