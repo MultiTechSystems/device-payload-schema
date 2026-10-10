@@ -525,6 +525,10 @@ function encByteGroup(out, f, data, ctx) {            // _encode_byte_group
     if (!name) v = g["default"] === undefined ? 0 : g["default"];
     else if (name.charAt(0) === "_") v = encInternalValue(g, data);
     else v = Object.prototype.hasOwnProperty.call(data, name) ? data[name] : (g["default"] === undefined ? 0 : g["default"]);
+    if (g.type === "bool") {                    // its `bit` of the group (PS-364)
+      if (v) packed = encPlace(packed, 1, Number(g.bit || 0), 1);
+      continue;
+    }
     v = encReverseModifiers(v, g);
     if (typeof v === "boolean") v = v ? 1 : 0;
     if (!encIsNumber(v)) continue;
@@ -2211,6 +2215,23 @@ function writeS(buf, pos, size, value, endian) {
                 bname = bf.get('name', '_')
                 btype = bf.get('type', 'u8')
                 bit_m = re.match(r'([us])\d+\[(\d+):(\d+)\]', btype)
+                if btype == 'bool':
+                    # PS-364: a bool member reads its `bit` of the group's value. Members
+                    # other than bit ranges were skipped here with no error, so a group's
+                    # bool flags were missing from the generated codec's output.
+                    bjs = to_js_name(bname)
+                    lines.append(f'{i}  var {bjs}_out = (Math.floor(bgVal / {2 ** int(bf.get("bit", 0))}) % 2) === 1;')
+                    lines.append(f'{i}  vars.{bjs} = {bjs}_out;')
+                    if not bname.startswith('_'):
+                        guards, target = name_from_to_js(bf, bjs)
+                        for guard in guards:
+                            lines.append(f'{i}  {guard}')
+                        lines.append(f'{i}  {target} = {bjs}_out;')
+                    continue
+                if not bit_m:
+                    raise ValueError(
+                        f"byte_group member {bname!r}: type {btype!r} is not a bit range or "
+                        f"bool, which is all the generator emits for a group member")
                 if bit_m:
                     lo, hi = int(bit_m.group(2)), int(bit_m.group(3))
                     width = hi - lo + 1
@@ -3319,9 +3340,9 @@ function writeS(buf, pos, size, value, endian) {
         """The test for one case key, or None where no value could ever satisfy it.
 
         Mirrors the interpreters' `_match_case_pattern`: an integer compares equal,
-        `"2..5"` is an inclusive range, and `"[1, 2]"` matches any element (PS-398). A key
-        that is none of these yields no branch at all rather than an expression that is
-        never true, so the generated codec does not carry a test that cannot fire.
+        `"2..5"` is an inclusive range, `"[1, 2]"` matches any element (PS-398), and any
+        other string compares equal as a string (a lookup label). A key no value could
+        satisfy yields no branch at all rather than an expression that is never true.
         """
         if isinstance(case_key, bool):
             return None
@@ -3345,7 +3366,11 @@ function writeS(buf, pos, size, value, endian) {
             try:
                 return f'{discriminator} === {int(text, 0)}'
             except ValueError:
-                return None
+                # A string key matches a string discriminator by equality, as the
+                # interpreters compare it - typically a lookup label (`Cmd` reads 0x81
+                # and reports "ConfigReportRsp"). These keys yielded no branch, so every
+                # such case body was silently missing from the codec's output.
+                return f'{discriminator} === {json.dumps(case_key)}'
         return None
 
     # ---------------------------------------------------------------

@@ -42,7 +42,7 @@ public class CorpusConformanceTests
     // (4), and match-default-skip.yaml's skipped body now expects the PS-472 warning.
     // All six new vectors decode here, so the floor is the full 2371 (2382 vectors, 11
     // without a payload or an expected block).
-    const int CorpusFloor = 2569;   // +14: the nine TS013-defect fixtures (bitfield-string-wide, wide-bit-range, ...); +5: tlv-case-key-patterns; +1: CR-2026-097 meta-tlv-channels; +9: CR-2026-096 meta fixtures; dl-atm41g2's two vendor vectors (+2); +121: vendor-codec vectors that kill vobo's mutation survivors
+    const int CorpusFloor = 2572;   // +3: byte-group-bool; +14: the nine TS013-defect fixtures (bitfield-string-wide, wide-bit-range, ...); +5: tlv-case-key-patterns; +1: CR-2026-097 meta-tlv-channels; +9: CR-2026-096 meta fixtures; dl-atm41g2's two vendor vectors (+2); +121: vendor-codec vectors that kill vobo's mutation survivors
 
     readonly ITestOutputHelper _output;
 

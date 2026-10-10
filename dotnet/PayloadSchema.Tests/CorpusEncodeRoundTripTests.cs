@@ -52,7 +52,7 @@ public class CorpusEncodeRoundTripTests
     // which the raw-YAML classifier had filed under that shape. Its out_of_range vector
     // omits a field and cannot (bytes differ), and leftover-bytes' second vector
     // re-encodes to its first byte only (PS-474): both by design.
-    const int EncodeFloorTotal = 1759;   // +13: the nine TS013-defect fixtures (tlv-tag-bit-range does not round-trip); +2: tlv-case-key-patterns; +2: CR-2026-096 meta fixtures (meta-port-default, plain fixed); +6 before: trimmed vendor vectors
+    const int EncodeFloorTotal = 1762;   // +3: byte-group-bool; +13: the nine TS013-defect fixtures (tlv-tag-bit-range does not round-trip); +2: tlv-case-key-patterns; +2: CR-2026-096 meta fixtures (meta-port-default, plain fixed); +6 before: trimmed vendor vectors
 
     /// <summary>
     /// Per-shape floors, so a regression in a layout that works cannot hide behind the mass

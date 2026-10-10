@@ -16,6 +16,7 @@ fields:
     type: u16
     div: 10
     unit: "%"
+    senml: {unit: "/100"}
   - name: temperature
     type: s16
     div: 10

@@ -48,7 +48,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 sys.path.insert(0, str(Path(__file__).parent))
 
 from schema_interpreter import SchemaInterpreter
-from validate_schema import validate_schema, ValidationResult, values_match
+from validate_schema import (validate_schema, ValidationResult, values_match,
+                             is_independent_vector, CORRECTED_SOURCE)
 
 #: Tolerance for comparing a decoded value with a test vector's expected value.
 #: Shared with validate_schema.values_match so the two tools cannot disagree
@@ -71,7 +72,7 @@ TIER_REJECTED = 'REJECTED'
 INDEPENDENT_SOURCES = frozenset(
     {'vendor-doc', 'vendor-codec', 'field-capture', 'spec-example'}
 )
-KNOWN_SOURCES = INDEPENDENT_SOURCES | frozenset({'generated', 'unknown'})
+KNOWN_SOURCES = INDEPENDENT_SOURCES | frozenset({'generated', 'unknown', CORRECTED_SOURCE})
 
 #: Minimum test vectors for Gold/Platinum (PS-239).
 MIN_VECTORS_HIGH_TIER = 5
@@ -1190,7 +1191,9 @@ def check_provenance(schema: Dict[str, Any]) -> Dict[str, Any]:
             unknown_sources.append("%s: unrecognised source %r" % (tv.get('name', '?'), source))
             source = 'unknown'
         counts[source] = counts.get(source, 0) + 1
-    independent = sum(counts.get(s, 0) for s in INDEPENDENT_SOURCES)
+    # PS-515: a corrected vendor-codec vector counts unless it corrects everything it asserts.
+    independent = sum(1 for tv in vectors
+                      if isinstance(tv, dict) and is_independent_vector(tv, INDEPENDENT_SOURCES))
     return {
         'counts': counts,
         'independent_vectors': independent,

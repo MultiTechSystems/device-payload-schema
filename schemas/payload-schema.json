@@ -586,9 +586,25 @@
               "vendor-codec",
               "field-capture",
               "spec-example",
-              "generated"
+              "generated",
+              "vendor-codec-corrected"
             ],
-            "description": "Provenance of the expected values (PS-263). Absent means unknown, which certification treats as 'generated'."
+            "description": "Provenance of the expected values (PS-263). Absent means unknown, which certification treats as 'generated'. vendor-codec-corrected requires 'correction' (PS-514)."
+          },
+          "correction": {
+            "type": "array",
+            "description": "For source vendor-codec-corrected: each field whose expected value differs from the vendor codec's output (PS-514)",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {"type": "string", "description": "The reported name"},
+                "codec": {"description": "The value the codec produces, or null where it produces none"},
+                "reason": {"type": "string", "description": "Why the expected value differs"}
+              },
+              "required": ["field", "codec", "reason"],
+              "additionalProperties": false
+            }
           },
           "input": {
             "type": "object",
