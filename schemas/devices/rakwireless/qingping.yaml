@@ -42,7 +42,7 @@ fields:
       - div: 10
     unit: "°C"
     valid_range: [-20, 50]
-    ipso: 3303
+    ipso: {object: 3303}
     senml: {unit: "Cel"}
     semantic: "temperature.ambient"
   - name: humidity
@@ -52,14 +52,14 @@ fields:
       - div: 10
     unit: "%"
     valid_range: [0, 99.9]
-    ipso: 3304
+    ipso: {object: 3304}
     senml: {unit: "%RH"}
     semantic: "humidity.relative"
   - name: co2
     type: u16
     unit: "ppm"
     valid_range: [400, 9999]
-    ipso: 3325
+    ipso: {object: 3325}
     semantic: "gas.co2"
   - name: battery
     type: u8

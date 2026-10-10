@@ -8225,17 +8225,20 @@
     },
     {
       "schema_path": "schemas/devices/mclimate/vicki.yaml",
-      "timestamp": "2026-08-11T08:41:53.035629-05:00",
-      "score": 100.0,
-      "tier": "SILVER",
+      "timestamp": "2026-10-10T11:36:29.077706-05:00",
+      "score": 98.0,
+      "tier": "PLATINUM",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 11,
-        "vector_issues": [],
+        "test_count": 12,
+        "vector_issues": [
+          "Test vector 12: missing 'payload'",
+          "Test vector 12: missing 'expected'"
+        ],
         "python_tests_pass": true,
-        "python_passed": 11,
+        "python_passed": 13,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -8252,8 +8255,10 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 12,
-          "ipso_mapped": 6,
-          "ipso_missing": [],
+          "ipso_mapped": 5,
+          "ipso_missing": [
+            "targetTemperature: add ipso: {object: 3303}"
+          ],
           "senml_mapped": 6,
           "senml_missing": [],
           "semantic_mapped": 6,
@@ -8262,34 +8267,36 @@
         },
         "provenance": {
           "counts": {
-            "unknown": 11
+            "vendor-codec": 10,
+            "unknown": 2,
+            "generated": 1
           },
-          "independent_vectors": 0,
-          "verification": "self",
+          "independent_vectors": 10,
+          "verification": "independent",
           "issues": []
-        },
-        "tier_capped_by": [
-          "no independently sourced test vectors (PS-264)"
-        ]
+        }
       },
       "recommendations": [
-        "No test vector declares an independent source; add `source: vendor-doc|vendor-codec|field-capture` so the score reflects verification rather than self-consistency",
-        "Tier capped: no independently sourced test vectors (PS-264)"
+        "Add IPSO object mappings for standard sensors (1 fields)",
+        "  \u2192 targetTemperature: add ipso: {object: 3303}"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/am102.yaml",
-      "timestamp": "2026-08-11T08:41:53.069934-05:00",
-      "score": 100.0,
+      "timestamp": "2026-10-10T11:36:29.176918-05:00",
+      "score": 97.0,
       "tier": "PLATINUM",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
-        "vector_issues": [],
+        "test_count": 20,
+        "vector_issues": [
+          "Test vector 16: missing 'payload'",
+          "Test vector 16: missing 'expected'"
+        ],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 21,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -8306,8 +8313,11 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 14,
-          "ipso_mapped": 5,
-          "ipso_missing": [],
+          "ipso_mapped": 3,
+          "ipso_missing": [
+            "history.temperature: add ipso: {object: 3303}",
+            "history.humidity: add ipso: {object: 3304}"
+          ],
           "senml_mapped": 5,
           "senml_missing": [],
           "semantic_mapped": 5,
@@ -8317,28 +8327,33 @@
         "provenance": {
           "counts": {
             "vendor-doc": 1,
-            "vendor-codec": 14
+            "vendor-codec": 19,
+            "generated": 1
           },
-          "independent_vectors": 15,
+          "independent_vectors": 20,
           "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": []
+      "recommendations": [
+        "Add IPSO object mappings for standard sensors (2 fields)",
+        "  \u2192 history.temperature: add ipso: {object: 3303}",
+        "  \u2192 history.humidity: add ipso: {object: 3304}"
+      ]
     },
     {
       "schema_path": "schemas/devices/milesight/am102l.yaml",
-      "timestamp": "2026-08-11T08:41:53.097082-05:00",
-      "score": 100.0,
+      "timestamp": "2026-10-10T11:36:29.261698-05:00",
+      "score": 97.0,
       "tier": "PLATINUM",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 19,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 19,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -8355,8 +8370,11 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 14,
-          "ipso_mapped": 5,
-          "ipso_missing": [],
+          "ipso_mapped": 3,
+          "ipso_missing": [
+            "history.temperature: add ipso: {object: 3303}",
+            "history.humidity: add ipso: {object: 3304}"
+          ],
           "senml_mapped": 5,
           "senml_missing": [],
           "semantic_mapped": 5,
@@ -8366,14 +8384,18 @@
         "provenance": {
           "counts": {
             "vendor-doc": 1,
-            "vendor-codec": 14
+            "vendor-codec": 18
           },
-          "independent_vectors": 15,
+          "independent_vectors": 19,
           "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": []
+      "recommendations": [
+        "Add IPSO object mappings for standard sensors (2 fields)",
+        "  \u2192 history.temperature: add ipso: {object: 3303}",
+        "  \u2192 history.humidity: add ipso: {object: 3304}"
+      ]
     },
     {
       "schema_path": "schemas/devices/milesight/am103.yaml",
