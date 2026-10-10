@@ -330,6 +330,24 @@ public static partial class SchemaParser
         }
     }
 
+    /// <summary>
+    /// PS-510 (CR-2026-102): a field's `ipso` is a mapping carrying `object`, and its `senml`
+    /// a mapping. `ipso: 3303` loaded and was dropped, so the author believed the field
+    /// annotated and no consumer saw an annotation. The wording is the spec prototype's, and
+    /// Python, Go and Java give it identically. The legacy `semantic: {ipso: N}` is a
+    /// different key, outside PS-510.
+    /// </summary>
+    static void CheckAnnotations(YamlMappingNode fm)
+    {
+        var name = fm.TryGetValue("name", out var n) && n is YamlScalarNode ? Scalar(n) : "?";
+        if (fm.TryGetValue("ipso", out var ipso)
+            && !(ipso is YamlMappingNode ipsoMap && ipsoMap.Children.ContainsKey(new YamlScalarNode("object"))))
+            throw new InvalidOperationException($"The ipso of '{name}' is a mapping that carries `object`, "
+                + "such as {object: 3303}; a bare object number is not a shorthand (PS-510)");
+        if (fm.TryGetValue("senml", out var senml) && senml is not YamlMappingNode)
+            throw new InvalidOperationException($"The senml of '{name}' is a mapping, such as {{unit: Cel}} (PS-510)");
+    }
+
     /// <summary>PS-358: a literal's value matches its type, and it carries no arithmetic.</summary>
     static void CheckLiteral(YamlMappingNode fm)
     {
@@ -496,6 +514,7 @@ public static partial class SchemaParser
             CheckBytesFormat(fieldMap);
             CheckCaseBodies(fieldMap);        // PS-441
             CheckLiteral(fieldMap);
+            CheckAnnotations(fieldMap);       // PS-510
             CheckWave4(fieldMap);
             CheckLookupTemplate(fieldMap);    // PS-407
             if (fieldMap.TryGetValue("byte_group", out var group))

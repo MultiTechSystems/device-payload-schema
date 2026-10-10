@@ -344,6 +344,10 @@ func checkFieldRules(field map[string]any, at string) error {
 			return fmt.Errorf("%s: encoding applies only to an unsigned integer type uN, not %v (PS-422)", at, field["type"])
 		}
 	}
+	// PS-510 (CR-2026-102): ipso and senml are mappings.
+	if err := checkAnnotations(field); err != nil {
+		return err
+	}
 	// PS-407: a ${value} lookup default needs string labels.
 	if err := checkLookupTemplate(field, at); err != nil {
 		return err
@@ -552,6 +556,28 @@ func checkPortDeclarations(raw map[string]any) error {
 		if key != strconv.Itoa(port) {
 			return fmt.Errorf("top-level %s is %d but ports also declares %s; every ports key must equal it (PS-337)", name, port, key)
 		}
+	}
+	return nil
+}
+
+// checkAnnotations holds PS-510 (CR-2026-102): a field's `ipso` is a mapping carrying
+// `object`, and its `senml` a mapping. `ipso: 3303` loaded and was dropped, so the author
+// believed the field annotated and no consumer saw an annotation. The wording is the spec
+// prototype's, and Python, Java and C# give it identically. The legacy
+// `semantic: {ipso: N}` is a different key, outside PS-510.
+func checkAnnotations(field map[string]any) error {
+	name, ok := field["name"].(string)
+	if !ok {
+		name = "?"
+	}
+	if ipso, has := field["ipso"]; has {
+		m := asStringMap(ipso)
+		if _, hasObject := m["object"]; m == nil || !hasObject {
+			return fmt.Errorf("The ipso of '%s' is a mapping that carries `object`, such as {object: 3303}; a bare object number is not a shorthand (PS-510)", name)
+		}
+	}
+	if senml, has := field["senml"]; has && asStringMap(senml) == nil {
+		return fmt.Errorf("The senml of '%s' is a mapping, such as {unit: Cel} (PS-510)", name)
 	}
 	return nil
 }

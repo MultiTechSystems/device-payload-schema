@@ -196,9 +196,9 @@ the same vectors:
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
 | Python | `tests/test_corpus_conformance.py` | every vector | 1783 |
-| Go | `go/schema/corpus_conformance_test.go` | 2601 | 1800 (plain API 1777) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2601 | 1783 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2601 | 1783 |
+| Go | `go/schema/corpus_conformance_test.go` | 2603 | 1800 (plain API 1777) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2603 | 1783 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2603 | 1783 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 546 of 546 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -1087,7 +1087,8 @@ dnt stop at Silver. r718x still reads its device and command bytes through a non
 it adopted before the `_` fix; it can use `$_device_type` directly now.
 
 **Every nested field list is decoded by `_decode_field_list` (2026-10-10).** Python's tlv
-case body and a `type: object`'s members were each their own loop of plain reads, so a number
+case body, a `type: object`'s members and a `flagged` group's fields were each their own loop
+of plain reads (a group holding another `flagged` failed "declares no type" - mutelcor), so a number
 literal there was "unknown type: number", a `match` or `byte_group` member "declares no type",
 `var:`, internal references and `sentinel` were ignored, and a case's `flagged` read a phantom
 byte. Go, Java and C# already decoded all of it. Both now go through `_decode_nested_list`,
@@ -1096,8 +1097,8 @@ and warnings to the decode, as a match case body's are. A name bound inside an o
 bound after it - the spec's "Combining Nested and Conditional" example relies on it, and Go,
 Java and C# all do it. The TS013 generator skipped every nameless object member (a `match`
 or a group of bit ranges decoded nothing and the group's byte was never consumed) and
-reported internal members; both are fixed. `tlv-case-field-list.yaml` and
-`object-member-field-list.yaml` hold all five to it. The validator now descends into an
+reported internal members; both are fixed. `tlv-case-field-list.yaml`,
+`object-member-field-list.yaml` and `flagged-group-field-list.yaml` hold all five to it. The validator now descends into an
 object's members too; it never had, so a typeless member passed.
 
 **A case body is a field list; a bare string is rejected at load (PS-441).** `cases: {5: skip}`
@@ -1461,6 +1462,19 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   detected**: PyYAML and SnakeYAML hand the check a boolean for it, C# (YAML 1.2) a string
   it rejects, and PS-520 permits both, so no shared vector may use one. Fixture:
   `boolean-literal.yaml`.
+- **CR-2026-102: `ipso` and `senml` are mappings** (PS-510). `ipso` must be a mapping
+  carrying `object`, `senml` a mapping; `ipso: 3303` is not a shorthand and is refused at
+  load, with the spec prototype's wording, identical everywhere: `The ipso of '{name}' is a
+  mapping that carries ``object``, such as {object: 3303}; a bare object number is not a
+  shorthand (PS-510)` / `The senml of '{name}' is a mapping, such as {unit: Cel} (PS-510)`.
+  Python `annotation_schema_errors` (called by the interpreter, `validate_schema.py` on the
+  expanded schema, and the TS013 generator), Go `checkAnnotations` from `checkFieldRules`,
+  Java `checkAnnotations` from `parseFields` plus `checkDefinitionAnnotations`, C#
+  `CheckAnnotations` from `ParseFields`. Every field list is covered, and **unreferenced
+  `definitions` too**, because Go and C# already parse them. The legacy
+  `semantic: {ipso: N}` is a different key and is not checked. No fixture: a rejection
+  cannot be a corpus vector, and the corpus already uses all the accepted forms;
+  `test_cr_2026_102_ipso_senml_mappings.py` also sweeps the corpus, library and examples.
 - **CR-2026-112 (provisional PS-532): a `name_from` key writes what the field reports.**
   Its label where it has a lookup; a number as PS-406's `${value}` (one writer per language,
   `render_template_value` / `renderTemplateValue` / `Wave5.renderTemplateValue` /

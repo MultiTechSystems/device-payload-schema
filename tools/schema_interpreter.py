@@ -770,6 +770,46 @@ def arithmetic_schema_errors(node, _top=True):
     return errors
 
 
+def annotation_errors(field_def):
+    """PS-510 (CR-2026-102): a field's `ipso` is a mapping carrying `object`, and its
+    `senml` a mapping. `ipso: 3303` loaded and every implementation dropped it, so the
+    author believed the field annotated and no consumer saw an annotation. The wording
+    is the spec prototype's, and Go, Java and C# give it identically."""
+    if not isinstance(field_def, dict):
+        return []
+    name = field_def.get('name', '?')
+    errors = []
+    if 'ipso' in field_def and not (isinstance(field_def['ipso'], dict)
+                                    and 'object' in field_def['ipso']):
+        errors.append(f"The ipso of '{name}' is a mapping that carries `object`, such as "
+                      f"{{object: 3303}}; a bare object number is not a shorthand (PS-510)")
+    if 'senml' in field_def and not isinstance(field_def['senml'], dict):
+        errors.append(f"The senml of '{name}' is a mapping, such as {{unit: Cel}} (PS-510)")
+    return errors
+
+
+def annotation_schema_errors(node, _top=True):
+    """annotation_errors() for every field mapping, wherever it sits: a port list, a case
+    body, an object's or repeat's members, a byte_group or flagged group. Walked like
+    arithmetic_schema_errors(), over the schema after its `$ref`s are spliced, and over
+    `definitions` too, referenced or not, as Go and C# parse them. The legacy
+    `semantic: {ipso: N}` is a different key, outside PS-510, and is not descended into."""
+    errors = []
+    if isinstance(node, dict):
+        if not _top:
+            errors.extend(annotation_errors(node))
+        for key, value in node.items():
+            if _top and key == 'test_vectors':
+                continue
+            if key in ('ipso', 'senml', 'semantic'):
+                continue        # their own contents are not fields
+            errors.extend(annotation_schema_errors(value, False))
+    elif isinstance(node, list):
+        for item in node:
+            errors.extend(annotation_schema_errors(item, False))
+    return errors
+
+
 #: The literal types (PS-357). `boolean` is a literal type only (PS-519): it is not
 #: an alias of `bool`, which reads a bit (PS-065).
 LITERAL_TYPES = ('string', 'number', 'boolean')
@@ -1943,6 +1983,7 @@ class SchemaInterpreter:
             self._load_errors.extend(encoding_errors(field_def))
             self._load_errors.extend(lookup_template_errors(field_def))
         self._load_errors.extend(arithmetic_schema_errors(schema))    # PS-445, PS-452
+        self._load_errors.extend(annotation_schema_errors(schema))    # PS-510
         self._load_errors.extend(meta_declaration_errors(schema))      # PS-491
         self._load_errors.extend(timestamp_errors(schema.get('metadata')))
         self._load_errors.extend(schema_iterator_errors(schema))
@@ -3255,49 +3296,18 @@ class SchemaInterpreter:
             raise ValueError(f"Flagged field reference not found: {field_name}")
         flags = int(self._variables[field_name])
         
+        # A present group's fields are a field list (PS-347, PS-441), decoded as the top
+        # level is. They were their own loop of plain reads, so a group holding another
+        # flagged, a match or a byte_group failed with "declares no type" (mutelcor's
+        # nested measurement groups); computed and internal fields, sentinels,
+        # out_of_range and valid_range now behave exactly as they do anywhere else.
         result = {}
         for group in groups:
             bit = group.get('bit', 0)
-            is_present = (flags >> bit) & 1
-            if is_present:
-                for gf in group.get('fields', []):
-                    gf_name = gf.get('name', 'unknown')
-                    gf_type = gf.get('type', 'u8')
-                    
-                    # A leading underscore marks an internal field: it becomes a
-                    # variable that later fields can reference, but is not reported.
-                    # Every other construct already did this; flagged did not, so an
-                    # intermediate used to combine two words appeared in the output.
-                    internal = gf_name.startswith('_')
+            if (flags >> bit) & 1:
+                group_data, pos = self._decode_nested_list(group.get('fields', []), buf, pos)
+                result.update(group_data)
 
-                    # Handle computed fields (type: number)
-                    if gf_type in COMPUTED_TYPES:
-                        value = self._decode_computed_field(gf)
-                        if value is not None:
-                            if not internal:
-                                result[gf_name] = value
-                            self._variables[gf_name] = value
-                        continue
-
-                    start = pos
-                    value, pos = self._decode_field(gf, buf, pos)
-                    if value is not None and self._sentinel_hit(gf, value, buf, start):
-                        self._pending_absent[gf_name] = 'absent'          # PS-427
-                        continue
-                    if value is not None:
-                        if gf.get('formula'):
-                            import warnings
-                            warnings.warn(f"Field '{gf_name}': 'formula' is deprecated.", DeprecationWarning)
-                            value = self._evaluate_formula(gf['formula'], value)
-                        else:
-                            value = self._apply_modifiers(value, gf)
-                        if self._range_omits(gf, value):
-                            self._pending_absent[gf_name] = 'out_of_range'    # PS-428
-                            continue
-                        if not internal:
-                            result[gf_name] = value
-                        self._variables[gf_name] = value
-        
         return result, pos
     
     def _decode_computed_field(self, field_def: Dict[str, Any]) -> Optional[float]:
@@ -4340,16 +4350,8 @@ class SchemaInterpreter:
                     flagged_def = field_def['flagged']
                     flagged_result, pos = self._decode_flagged(flagged_def, payload, pos)
                     result.data.update(flagged_result)
-                    # Store flagged fields as variables and check valid_range
-                    for k, v in flagged_result.items():
-                        self._variables[k] = v
-                    # Check valid_range for fields in flagged groups
-                    for group in flagged_def.get('groups', []):
-                        for gf in group.get('fields', []):
-                            gf_name = gf.get('name')
-                            if gf_name and gf_name in flagged_result and gf.get('valid_range'):
-                                quality = self._check_valid_range(flagged_result[gf_name], gf, result)
-                                result.quality[gf_name] = quality
+                    # The groups' fields are bound and range-checked by the field-list
+                    # decoder that read them.
                 except Exception as e:
                     result.errors.append(f"Error in flagged: {e}")
                 continue
