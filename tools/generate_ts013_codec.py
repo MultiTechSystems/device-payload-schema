@@ -523,10 +523,21 @@ function encBitRun(out, run, data, ctx) {             // _encode_bitfield_run
   encPacked(out, packed, Math.max(1, size), endian);
 }
 
+function encGroupWidth(f) {                          // byte_group_width
+  var group = f.byte_group, members = Array.isArray(group) ? group : (group.fields || []);
+  var declared = Array.isArray(group) ? f["size"] : group["size"];
+  var width = (declared === undefined || declared === null) ? 1 : parseInt(declared, 10);
+  for (var i = 0; i < members.length; i++) {   // PS-070: the widest member's base
+    var t = String((members[i] && members[i].type) || ""), r = /^[us](\d+)\[/.exec(t);
+    var w = r ? Math.max(1, Math.floor(Number(r[1]) / 8)) : (ENC_TYPES[t] ? ENC_TYPES[t][0] : 1);
+    if (w > width) width = w;
+  }
+  return width;
+}
+
 function encByteGroup(out, f, data, ctx) {            // _encode_byte_group
-  var group = f.byte_group, members, size;
-  if (Array.isArray(group)) { members = group; size = parseInt(f.size === undefined ? 1 : f.size, 10); }
-  else { members = group.fields || []; size = parseInt(group.size === undefined ? 1 : group.size, 10); }
+  var group = f.byte_group, members = Array.isArray(group) ? group : (group.fields || []);
+  var size = encGroupWidth(f);
   var packed = {};
   for (var i = 0; i < members.length; i++) {
     var g = members[i];
@@ -546,7 +557,6 @@ function encByteGroup(out, f, data, ctx) {            // _encode_byte_group
     v = encRint(v);
     if (String(g.type || "").indexOf("[") >= 0) {
       var bt = encBitType(g.type);
-      size = Math.max(size, bt[0]);
       packed = encPlace(packed, v, bt[1], bt[2]);
     } else {
       if (v < 0) encFail("can't convert negative int to unsigned");
@@ -2361,9 +2371,11 @@ function writeS(buf, pos, size, value, endian) {
         if 'byte_group' in field:
             bg = field['byte_group']
             bg_fields = bg if isinstance(bg, list) else bg.get('fields', bg)
-            bg_size = field.get('size', 1) if isinstance(bg, dict) else 1
-            if isinstance(bg, dict):
-                bg_size = bg.get('size', 1)
+            # PS-070 (CR-2026-131): the widest member's base, widened by any `size`. The
+            # array form's `size` beside the group was ignored here, and a group with
+            # no `size` read one byte.
+            from schema_interpreter import byte_group_width
+            bg_size = byte_group_width(field)
             # PS-397: overlapping members are a schema error; generating a codec that
             # reported both from the same bits was the generator's version of accepting it.
             from schema_interpreter import byte_group_endian, check_byte_group_overlap

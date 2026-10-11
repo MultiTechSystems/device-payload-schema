@@ -471,6 +471,12 @@ def optional_errors(fields, where='fields'):
     return errors
 
 
+class RaggedTailError(ValueError):
+    """PS-343: a repeat's ragged tail. Reported as its own message, which already names
+    the repeat; the field-list handler's `Error decoding {name}:` prefix stated the name
+    a second time and made the text differ from the other four implementations'."""
+
+
 def ragged_tail_message(field_def, remaining, element_size, offset):
     """The PS-344 error: the repeat, and the tail as a ragged tail, not an underrun."""
     need = f", fewer than the {element_size} an element takes" if element_size else ""
@@ -543,6 +549,47 @@ def check_byte_group_overlap(members):
                     f"byte_group members '{name}' and '{member.get('name', '?')}' "
                     f"overlap (PS-397)")
         seen.append((member.get('name', '?'), bits))
+
+
+def byte_group_member_width(member):
+    """The bytes a byte_group member's base type spans: `u16[0:3]` and `u16` are 2.
+
+    A bool member is one byte; anything unrecognised counts as one, so it never widens
+    the group by itself.
+    """
+    if not isinstance(member, dict):
+        return 1
+    ftype = str(member.get('type', ''))
+    match = _BIT_RANGE.match(ftype)
+    if match:
+        return max(1, int(match.group(1)) // 8)
+    if ftype in INTEGER_TYPE_INFO:
+        return INTEGER_TYPE_INFO[ftype][0]
+    return 1
+
+
+def byte_group_declared_size(field_def):
+    """The `size` a byte_group declares - on the mapping form, or beside the array form -
+    or None."""
+    group = field_def.get('byte_group')
+    size = group.get('size') if isinstance(group, dict) else field_def.get('size')
+    return None if size is None else int(size)
+
+
+def byte_group_width(field_def):
+    """The bytes a byte_group covers (PS-070, CR-2026-131).
+
+    A group that declares no `size` covers its widest member's base type, whichever
+    bytes the member's bits fall in: a `u16[0:3]` member makes it two bytes. `size` may
+    widen it, never narrow it. Every implementation read a sizeless group as one byte,
+    so a `u16[8:15]` member decoded from the wrong byte with nothing reported - while
+    the encoders already widened to the base, so the two directions disagreed.
+    """
+    group = field_def.get('byte_group')
+    members = group.get('fields', []) if isinstance(group, dict) else group
+    widest = max((byte_group_member_width(m) for m in members or []), default=1)
+    declared = byte_group_declared_size(field_def)
+    return max(widest, declared or 1)
 
 
 def parse_list_case_key(text):
@@ -3231,7 +3278,7 @@ class SchemaInterpreter:
             element_size = fixed_element_size(nested_fields)
             while pos < region_end and iterations < max_iterations:
                 if element_size is not None and region_end - pos < element_size:
-                    raise ValueError(ragged_tail_message(
+                    raise RaggedTailError(ragged_tail_message(
                         field_def, region_end - pos, element_size, pos))
                 start_pos = pos
                 try:
@@ -3239,7 +3286,7 @@ class SchemaInterpreter:
                 except ValueError as exc:
                     if 'too short' not in str(exc).lower():
                         raise
-                    raise ValueError(ragged_tail_message(
+                    raise RaggedTailError(ragged_tail_message(
                         field_def, region_end - start_pos, None, start_pos)) from exc
                 # Safety: check we made progress
                 if pos == start_pos:
@@ -4153,11 +4200,11 @@ class SchemaInterpreter:
         if isinstance(byte_group, dict):
             # Format 2: {size: N, fields: [...]}
             group_fields = byte_group.get('fields', [])
-            group_size = byte_group.get('size', 1)
         else:
             # Format 1: list of fields directly
             group_fields = byte_group
-            group_size = field_def.get('size', 1)
+        # PS-070 (CR-2026-131): the widest member's base, widened by any `size`.
+        group_size = byte_group_width(field_def)
         
         if not group_fields:
             return pos
@@ -4944,6 +4991,9 @@ class SchemaInterpreter:
                     # schema-level name is used here, not the resolved output name,
                     # so $references keep working when name_from is in play.
                     self._variables[name] = value
+            except RaggedTailError as e:
+                result.errors.append(str(e))                    # PS-343, bare
+                break
             except Exception as e:
                 result.errors.append(f"Error decoding {name}: {e}")
                 break
@@ -5418,10 +5468,10 @@ class SchemaInterpreter:
         byte_group = field_def.get('byte_group', [])
         if isinstance(byte_group, dict):
             group_fields = byte_group.get('fields', []) or []
-            size = int(byte_group.get('size', 1))
         else:
             group_fields = byte_group or []
-            size = int(field_def.get('size', 1))
+        # PS-070 (CR-2026-131): the same width the decoder reads.
+        size = byte_group_width(field_def)
         check_byte_group_overlap(group_fields)
 
         packed = 0
@@ -5447,8 +5497,7 @@ class SchemaInterpreter:
                 continue
             value = int(round(value))
             if '[' in gtype:
-                base_size, start, width = self._parse_bitfield_type(gtype)
-                size = max(size, base_size)
+                _, start, width = self._parse_bitfield_type(gtype)
                 packed |= (value & ((1 << width) - 1)) << start
             else:
                 # A full-width member: it owns the group's bytes outright.

@@ -334,7 +334,7 @@ public static class SchemaDecoder
 
     static Dictionary<string, object?> DecodeByteGroup(SchemaField field, DecodeContext ctx)
     {
-        int size = field.Size > 0 ? field.Size : 1;
+        int size = Cr131.ByteGroupWidth(field);                    // PS-070, CR-2026-131
         var data = ctx.Read(size);
         var result = new Dictionary<string, object?>();
 

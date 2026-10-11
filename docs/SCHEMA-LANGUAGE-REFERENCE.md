@@ -291,6 +291,12 @@ Shorthand (size inferred from field types):
       type: u8[4:7]
 ```
 
+Without `size`, a group covers its widest member's base type, whichever bytes that
+member's bits fall in: a `u16[0:3]` member makes the group two bytes, a `u32[...]` member
+four (PS-070, CR-2026-131). `size` may widen the group, never narrow it - a `size: 5`
+beside a `u64[...]` member still covers eight bytes, and the validator warns. Every
+implementation used to read a sizeless group as one byte.
+
 ## Arithmetic Modifiers
 
 Bare modifiers are applied in the canonical order **mult, then div, then add**, however

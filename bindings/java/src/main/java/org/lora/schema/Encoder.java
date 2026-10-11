@@ -464,9 +464,7 @@ final class Encoder {
             Long raw = asLong(value);
             if (raw == null) continue;
             if (member.getBits() > 0) {
-                // The base width is part of the member's type: u24[4:23] owns three bytes
-                // of the group, however small the group's own `size` says it is.
-                size = Math.max(size, Math.max(1, member.getBitBaseBytes()));
+                // The width is the group's (PS-070, CR-2026-131), set when it was parsed.
                 long mask = member.getBits() >= 64 ? -1L : (1L << member.getBits()) - 1;
                 packed |= (raw & mask) << member.getBitOffset();
             } else {

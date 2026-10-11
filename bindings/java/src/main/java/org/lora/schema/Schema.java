@@ -361,6 +361,24 @@ public class Schema {
         return bits;
     }
 
+    /**
+     * The bytes a byte_group covers (PS-070, CR-2026-131): with no {@code size}, its widest
+     * member's base type, whichever bytes that member's bits fall in - a {@code u16[0:3]}
+     * member makes it two bytes. A {@code size} may widen it, never narrow it. Decoding
+     * read a group with no size as one byte, so a {@code u16[8:15]} member decoded from
+     * the wrong byte, while encoding already widened to the base.
+     */
+    static int byteGroupWidth(List<Field> members, int declared) {
+        int width = Math.max(1, declared);
+        for (Field member : members == null ? List.<Field>of() : members) {
+            FieldType type = member.getType();
+            int base = type == FieldType.BITS ? Math.max(1, member.getBitBaseBytes())
+                    : type != null && type.isInteger() ? type.defaultLength() : 1;
+            width = Math.max(width, base);
+        }
+        return width;
+    }
+
     /** PS-397: bit ranges within one byte_group must not overlap. They were accepted. */
     @SuppressWarnings("unchecked")
     private static void checkByteGroupOverlap(Object group) {
@@ -1038,11 +1056,11 @@ public class Schema {
             if (groupMap.get("fields") instanceof List<?> groupFields) {
                 f.setByteGroup(parseFields((List<Map<String, Object>>) groupFields));
             }
-            f.setByteGroupSize(toInt(groupMap.get("size"), 1));
+            f.setByteGroupSize(byteGroupWidth(f.getByteGroup(), toInt(groupMap.get("size"), 1)));
             if (groupMap.get("endian") instanceof String groupEndian) f.setGroupEndian(groupEndian);
         } else if (byteGroupRaw instanceof List<?> groupFields) {
             f.setByteGroup(parseFields((List<Map<String, Object>>) groupFields));
-            f.setByteGroupSize(toInt(fm.get("size"), 1));
+            f.setByteGroupSize(byteGroupWidth(f.getByteGroup(), toInt(fm.get("size"), 1)));
         }
 
         // Flagged construct

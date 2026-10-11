@@ -188,18 +188,18 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2646 payload vectors in `schemas/devices/` (measured 2026-10-11 with
+The 2649 payload vectors in `schemas/devices/` (measured 2026-10-11 with
 `tools/check-floors.py`, after the CR-2026-118 and CR-2026-124 fixtures, CR-2026-117's
-guard-absent-operand, the `match-u32-*` and names-mangling-alike fixtures, and CR-2026-127's
-guard-boolean-operand) are the shared cross-language test set. Every implementation has a
+guard-absent-operand, the `match-u32-*` and names-mangling-alike fixtures, CR-2026-127's
+guard-boolean-operand and CR-2026-131's byte-group-width) are the shared cross-language test set. Every implementation has a
 runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1808 |
-| Go | `go/schema/corpus_conformance_test.go` | 2646 | 1825 (plain API 1802) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2646 | 1808 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2646 | 1808 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1811 |
+| Go | `go/schema/corpus_conformance_test.go` | 2649 | 1828 (plain API 1805) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2649 | 1811 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2649 | 1811 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 554 of 554 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -772,10 +772,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1808 |
-| Go | `go/schema/corpus_encode_test.go` | 1825 (plain 1802) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1808 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1808 |
+| Python | `tests/test_encode_round_trip.py` | 1811 |
+| Go | `go/schema/corpus_encode_test.go` | 1828 (plain 1805) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1811 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1811 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1665,6 +1665,19 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     `guard-boolean-operand.yaml`: decode floors 2630 -> 2632; both vectors round-trip, so
     re-encode +2 everywhere (Python, Java, C# 1796 -> 1798; Go 1813 -> 1815, plain 1790 ->
     1792) and `plain fixed` 135 -> 137 in all four.
+- **CR-2026-131: a byte_group covers its widest member's base** (PS-070). With no `size`, a
+  group is as wide as its widest member's base type, whichever bytes the bits fall in -
+  `u16[0:3]` makes it two bytes - and `size` widens it, never narrows it. All five read a
+  sizeless group as one byte while the four encoders already widened a bit range's base,
+  so decode and encode disagreed. One helper per language decides the width for both
+  directions: `byte_group_width` (Python, also used by the TS013 decoder and
+  `payload_size_calc.py`), `byteGroupWidth` (Go `cr131.go`, Java `Schema`), C#
+  `Cr131.ByteGroupWidth`, and `encGroupWidth` in the generated codec's runtime. A full-width
+  integer member counts its own width, a bool one byte. C has no byte_group decode path, so
+  this is a C gap like the construct itself. The validator warns where a declared `size`
+  is narrower than a member's base. **No corpus, library or example schema changed decode**:
+  every group in them declares a `size` at least as wide as its members. Fixture:
+  `byte-group-width.yaml`.
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.

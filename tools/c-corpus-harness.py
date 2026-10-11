@@ -76,7 +76,10 @@ UNREACHABLE_KEYS = {
     # a field type for both now. What remains unreachable about either is size, not shape -
     # see tlv_source() and flagged_source().
     "match": "no inline match support in this harness",
-    "byte_group": "no byte_group support in this harness",
+    # A C gap, not a harness one: FIELD_TYPE_BYTE_GROUP is an enum value with no decode
+    # path in the interpreter, so there is nothing to build (CR-2026-131 widened it in
+    # the other five; C has no group to widen).
+    "byte_group": "the interpreter has no byte_group decode path",
     "object": "no nested object support in this harness",
     "name_from": "no name template in C (fixed-size name buffers)",
     # These say "the interpreter has none" rather than "not built by the struct API",

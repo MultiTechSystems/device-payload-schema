@@ -2219,10 +2219,7 @@ func resolveRef(ref string, ctx *DecodeContext, schema *Schema) (map[string]any,
 
 // decodeByteGroup decodes a byte group (multiple bitfields from shared bytes).
 func decodeByteGroup(field Field, ctx *DecodeContext) (map[string]any, error) {
-	size := field.Size
-	if size == 0 {
-		size = 1
-	}
+	size := byteGroupWidth(field) // PS-070, CR-2026-131
 	
 	data, err := ctx.Read(size)
 	if err != nil {
@@ -4497,10 +4494,7 @@ func encodeMatch(field Field, data map[string]any, ctx *EncodeContext) error {
 // encodeByteGroup packs a group's bit ranges back into their shared byte(s). Encoding had
 // no case for the construct, so it emitted a single zero byte: right length, wrong bits.
 func encodeByteGroup(field Field, data map[string]any, ctx *EncodeContext) error {
-	size := field.Size
-	if size <= 0 {
-		size = 1
-	}
+	size := byteGroupWidth(field) // PS-070, CR-2026-131: the width decoding reads
 	packed := uint64(0)
 	for _, gf := range field.ByteGroup {
 		var value any = 0
@@ -4529,12 +4523,8 @@ func encodeByteGroup(field Field, data map[string]any, ctx *EncodeContext) error
 		}
 		num := uint64(int64(math.Round(raw)))
 		if m := bitRangePattern.FindStringSubmatch(string(gf.Type)); m != nil {
-			bits, _ := strconv.Atoi(strings.TrimLeft(m[1], "usf"))
 			start, _ := strconv.Atoi(m[2])
 			end, _ := strconv.Atoi(m[3])
-			if base := bits / 8; base > size {
-				size = base
-			}
 			width := uint(end - start + 1)
 			packed |= (num & ((1 << width) - 1)) << uint(start)
 		} else {
