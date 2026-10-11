@@ -390,6 +390,13 @@ type DecodeContext struct {
 	// whose members are not top-level keys. See meta.go.
 	metaProducers map[string]map[string]any
 	metaDepth     int
+	// lookupNumber is the number the field just decoded held before its lookup, and
+	// labels what each looked-up name reported beside the number bound for it, for
+	// name_from templates (PS-523, PS-532). See cr109.go.
+	lookupNumber lookupNumber
+	labels       map[string]labelEntry
+	// enumCode is the code an enum just read, for applyLookupAndModifiers (CR-2026-132).
+	enumCode lookupNumber
 	// pendingRecords collects what a repeat element's `records` entry yields (PS-541);
 	// nil outside an element.
 	pendingRecords *[]map[string]any
@@ -561,8 +568,7 @@ func (ctx *DecodeContext) Read(n int) ([]byte, error) {
 		n = ctx.Remaining()
 	}
 	if ctx.Offset+n > len(ctx.Data) {
-		return nil, fmt.Errorf("buffer underflow: need %d bytes at offset %d, but only %d remaining",
-			n, ctx.Offset, ctx.Remaining())
+		return nil, underflowNeed(n, ctx.Offset, len(ctx.Data))
 	}
 	result := ctx.Data[ctx.Offset : ctx.Offset+n]
 	ctx.Offset += n
@@ -576,7 +582,7 @@ func (ctx *DecodeContext) Peek(n int, offset int) ([]byte, error) {
 		return nil, fmt.Errorf("invalid peek of %d bytes at offset %d", n, pos)
 	}
 	if pos+n > len(ctx.Data) {
-		return nil, fmt.Errorf("buffer underflow at peek offset %d", pos)
+		return nil, underflowPeek(pos)
 	}
 	return ctx.Data[pos : pos+n], nil
 }
@@ -1493,6 +1499,16 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 			}
 		}
 	}
+	// The sequence form names codes from 0; it was not read, so every code was reported
+	// as its integer, and one past the end could not be told from one in range (PS-068).
+	if valuesRaw, ok := fm["values"].([]any); ok {
+		f.Values = make(map[int]string)
+		for i, v := range valuesRaw {
+			if str, ok := enumLabel(v); ok {
+				f.Values[i] = str
+			}
+		}
+	}
 
 	// Byte group (inline grouped bitfields) - array format
 	if bgRaw, ok := fm["byte_group"].([]any); ok {
@@ -2072,7 +2088,7 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 			}
 			for k, v := range refResult {
 				result[k] = v
-				ctx.Variables[k] = v
+				ctx.rebindReported(k, v)
 			}
 			continue
 		}
@@ -2085,7 +2101,7 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 			}
 			for k, v := range bgResult {
 				result[k] = v
-				ctx.Variables[k] = v
+				ctx.rebindReported(k, v)
 			}
 			continue
 		}
@@ -2122,7 +2138,7 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 			}
 			for k, v := range flaggedResult {
 				result[k] = v
-				ctx.Variables[k] = v
+				ctx.rebindReported(k, v)
 			}
 			continue
 		}
@@ -2146,7 +2162,7 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 			if matchMap, ok := matchResult.(map[string]any); ok {
 				for k, v := range matchMap {
 					result[k] = v
-					ctx.Variables[k] = v
+					ctx.rebindReported(k, v)
 				}
 			}
 			continue
@@ -2162,9 +2178,12 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 		}
 
 		ctx.rangeStash = rangeStash{}
+		ctx.lookupNumber = lookupNumber{}
 		value, err := ctx.decodeFieldProduced(field)
 		if err != nil {
-			return nil, err
+			// PS-535: the innermost field that read past the end is named; an enclosing
+			// object or repeat passes its member's error through unchanged.
+			return nil, nameUnderflow(err, field.Name, string(field.Type))
 		}
 
 		internal := strings.HasPrefix(field.Name, "_")
@@ -2192,7 +2211,9 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 
 		if value == omitted {
 			// A lookup with no entry and no default: the device reported nothing
-			// this schema can name, so the field is left out (PS-269).
+			// this schema can name, so the field is left out (PS-269). A reference to
+			// it is still bound to the number (PS-523).
+			ctx.bindReference(field.Name, field, omitted)
 			continue
 		}
 
@@ -2212,8 +2233,8 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 				result[outputName] = value
 			}
 			// Keyed by the schema-level name so $references keep working when
-			// name_from is in play (PS-267).
-			ctx.Variables[field.Name] = value
+			// name_from is in play (PS-267). A looked-up field binds as PS-523 says.
+			ctx.bindReference(field.Name, field, value)
 			// Check valid_range and update quality
 			if len(field.ValidRange) >= 2 {
 				ctx.checkValidRange(value, field)
@@ -2246,11 +2267,11 @@ func resolveRef(ref string, ctx *DecodeContext, schema *Schema) (map[string]any,
 
 // decodeByteGroup decodes a byte group (multiple bitfields from shared bytes).
 func decodeByteGroup(field Field, ctx *DecodeContext) (map[string]any, error) {
-	size := field.Size
-	if size == 0 {
-		size = 1
+	size := byteGroupWidth(field) // PS-070, CR-2026-131
+
+	if size > ctx.Remaining() {
+		return nil, byteGroupUnderflow(field, size, ctx)
 	}
-	
 	data, err := ctx.Read(size)
 	if err != nil {
 		return nil, err
@@ -2278,15 +2299,15 @@ func decodeByteGroup(field Field, ctx *DecodeContext) (map[string]any, error) {
 
 	for _, subfield := range field.ByteGroup {
 		ctx.produced(subfield.decl, subfield.Name) // PS-490
+		// PS-070: every member is a range of the group's value, read from its start - a
+		// whole integer is its full range, a bool one bit. A whole integer took the whole
+		// group's value, so a u8 beside a u16[8:11] read both bytes.
 		var raw any
-		if m := bitRangePattern.FindStringSubmatch(string(subfield.Type)); m != nil {
-			start, _ := strconv.Atoi(m[2])
-			end, _ := strconv.Atoi(m[3])
-			raw = extractRange(rawVal, m[1][0] == 's', start, end-start+1)
-		} else if subfield.Type == TypeBoolLower || subfield.Type == TypeBool {
-			raw = (rawVal>>uint(subfield.Bit))&1 == 1
+		r := fieldMemberRange(subfield)
+		if r.isBool {
+			raw = (rawVal>>uint(r.low))&1 == 1
 		} else {
-			raw = float64(rawVal)
+			raw = extractRange(rawVal, r.signed, r.low, r.high-r.low+1)
 		}
 
 		// A member is an ordinary field that happens to share its bytes, so its
@@ -2298,11 +2319,15 @@ func decodeByteGroup(field Field, ctx *DecodeContext) (map[string]any, error) {
 			return nil, err
 		}
 		if value == omitted || subfield.Name == "" {
+			// A lookup miss is not reported but its reference is bound (PS-523).
+			ctx.bindReference(subfield.Name, subfield, value)
 			continue
 		}
+		// Bound here, as PS-523 says, for later references; the caller's copy of the
+		// reported value leaves this binding alone.
+		ctx.bindReference(subfield.Name, subfield, value)
 		if strings.HasPrefix(subfield.Name, "_") {
 			// Internal: bound for later references, not reported.
-			ctx.Variables[subfield.Name] = value
 			continue
 		}
 		result[subfield.Name] = value
@@ -2527,7 +2552,11 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		value = decodeBits(data[0], field.Bit, 1) != 0
 		// Consume bytes if specified
 		if field.Consume > 0 {
-			ctx.Read(field.Consume)
+			// PS-535: consuming past the end is a short read. The error was discarded,
+			// so the bool decoded and the offset stayed short of the end.
+			if _, err := ctx.Read(field.Consume); err != nil {
+				return nil, err
+			}
 		}
 
 	case TypeBits, TypeBitsLower:
@@ -2563,7 +2592,7 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		value = strings.TrimRight(string(data), "\x00")
+		value = decodeASCII(field.Name, data, ctx) // PS-534, PS-538
 
 	case TypeEnum, TypeEnumLower:
 		// Enum: read base type and map to string
@@ -2581,6 +2610,8 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 			return nil, err
 		}
 		intVal := int(decodeUint(data, endian))
+		// PS-523 (CR-2026-132): a reference to an enum binds its code.
+		ctx.enumCode = lookupNumber{owner: field.Name, number: intVal, set: true}
 		if field.Values != nil {
 			if str, ok := field.Values[intVal]; ok {
 				value = str
@@ -2589,7 +2620,10 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 				// the raw integer here ignored the default the schema asked for.
 				value = *field.EnumDefault
 			} else {
-				value = intVal
+				// PS-068 (CR-2026-132): with no default an unmatched code is omitted,
+				// as a lookup miss is (PS-269), so the field keeps one type; a
+				// reference to it still binds the code (PS-523).
+				value = omitted
 			}
 		} else {
 			value = intVal
@@ -2760,7 +2794,19 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 // to skip them, and the compute path's copy forgot the bare modifiers - and before that,
 // the skip forgot compute and dl-blg's voltage_ratio had its stages applied twice.
 func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, error) {
+	// PS-523 (CR-2026-132): an enum's code, recorded where it was read, is the number its
+	// reference binds; any other field starts with none.
+	if isEnumField(field) && ctx.enumCode.set && ctx.enumCode.owner == field.Name {
+		ctx.lookupNumber = ctx.enumCode
+	} else {
+		ctx.lookupNumber = lookupNumber{}
+	}
+	ctx.enumCode = lookupNumber{}
 	if value == omitted {
+		// An unmatched enum code (PS-068): its `var` is still bound to the code (PS-523).
+		if isEnumField(field) && field.Var != "" {
+			ctx.bindReference(field.Var, field, omitted)
+		}
 		return omitted, nil
 	}
 	// Formula takes precedence over top-level modifiers (per spec section 03)
@@ -2834,6 +2880,12 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 		}
 	}
 
+	// PS-523: a reference to a looked-up field binds this number unless the lookup
+	// reports a number; see bindReference.
+	if hasLookup(field) {
+		ctx.lookupNumber = lookupNumber{owner: field.Name, number: value, set: true}
+	}
+
 	// Apply lookup. A mapping is matched on its keys, which need not start at
 	// zero or be contiguous (PS-268); an unmatched value omits the field rather
 	// than reporting the raw integer under a name that promises a label, unless a
@@ -2857,6 +2909,10 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 			} else if field.LookupDefault != nil {
 				value = *field.LookupDefault
 			} else {
+				// PS-269 omits the field; its `var` is still bound to the number (PS-523).
+				if field.Var != "" {
+					ctx.bindReference(field.Var, field, omitted)
+				}
 				return omitted, nil
 			}
 		}
@@ -2887,13 +2943,38 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 // $rsn`, PS-265), and its `var:` binds as a field's does - a `name_from` template such as
 // "temperature_${ch}" reads it. Only `var:` was bound, and only on the whole-byte path, so
 // `ref: $rsn` beside a bit-range component failed with "ref field not found".
-func bindTagComponent(tf Field, val int64, ctx *DecodeContext) {
+//
+// PS-523 (CR-2026-132): a component binds as any field does. One with a lookup or
+// modifiers goes through them, and binds the number under a text or boolean label, or a
+// numeric label as itself, keeping the label for templates. The tag is still matched on
+// the value read.
+func bindTagComponent(tf Field, val int64, ctx *DecodeContext) error {
+	if !hasLookup(tf) && !hasComponentModifiers(tf) {
+		if tf.Name != "" {
+			ctx.Variables[tf.Name] = val
+			delete(ctx.labels, tf.Name)
+		}
+		if tf.Var != "" {
+			ctx.Variables[tf.Var] = val
+			delete(ctx.labels, tf.Var)
+		}
+		return nil
+	}
+	// applyLookupAndModifiers binds the `var` itself (finishComputedValue, or a miss).
+	value, err := applyLookupAndModifiers(val, tf, ctx)
+	if err != nil {
+		return err
+	}
 	if tf.Name != "" {
-		ctx.Variables[tf.Name] = val
+		ctx.bindReference(tf.Name, tf, value)
 	}
-	if tf.Var != "" {
-		ctx.Variables[tf.Var] = val
-	}
+	return nil
+}
+
+// hasComponentModifiers reports whether a tag component declares arithmetic to apply.
+func hasComponentModifiers(tf Field) bool {
+	return tf.Mult != nil || tf.Div != nil || tf.Add != nil || len(tf.Transform) > 0 ||
+		tf.Formula != ""
 }
 
 // computedSource is a computed field's source (PS-443): the referenced value with its
@@ -2939,7 +3020,7 @@ func finishComputedValue(value any, field Field, ctx *DecodeContext) (any, error
 		}
 	}
 	if field.Var != "" {
-		ctx.Variables[field.Var] = value
+		ctx.bindReference(field.Var, field, value)
 	}
 	return value, nil
 }
@@ -3122,7 +3203,9 @@ func decodeMatch(field Field, ctx *DecodeContext) (any, error) {
 		}
 		data, err := ctx.Read(length)
 		if err != nil {
-			return nil, err
+			// PS-535: the discriminator is the field that read, named by the match's
+			// `name` where it declares one.
+			return nil, nameUnderflow(err, field.Name, "match")
 		}
 		matchValue = int(decodeUint(data, ctx.Endian))
 
@@ -3276,7 +3359,9 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 					if tf.Name != "" {
 						tagValues[tf.Name] = int(v.(float64))
 					}
-					bindTagComponent(tf, int64(v.(float64)), ctx)
+					if err := bindTagComponent(tf, int64(v.(float64)), ctx); err != nil {
+						return nil, err
+					}
 					continue
 				}
 				data, err := ctx.Read(tagFieldWidth(tf))
@@ -3287,7 +3372,9 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 				if tf.Name != "" {
 					tagValues[tf.Name] = val
 				}
-				bindTagComponent(tf, int64(val), ctx)
+				if err := bindTagComponent(tf, int64(val), ctx); err != nil {
+					return nil, err
+				}
 			}
 
 			// Build tag key
@@ -3596,7 +3683,15 @@ func resolveFieldName(field Field, ctx *DecodeContext) (string, error) {
 	var shapeErr error
 	resolved := nameFromPattern.ReplaceAllStringFunc(field.NameFrom, func(match string) string {
 		reference := match[2 : len(match)-1]
-		value, ok := ctx.Variables[reference]
+		// The reported value, the label where the field has a lookup (PS-532), not the
+		// number a reference binds (PS-523).
+		value, ok, err := ctx.templateValue(field, reference)
+		if err != nil {
+			if shapeErr == nil {
+				shapeErr = err
+			}
+			return ""
+		}
 		if !ok {
 			missing = append(missing, reference)
 			return ""
@@ -3834,7 +3929,7 @@ func decodeRepeat(field Field, ctx *DecodeContext) ([]any, error) {
 					return raggedTailError(field, ctx.Remaining(), elementSize, start)
 				}
 				if err := elements.element(); err != nil {
-					if strings.Contains(err.Error(), "buffer underflow") {
+					if isBufferUnderflow(err) {
 						return raggedTailError(field, len(ctx.Data)-start, 0, start)
 					}
 					return err
@@ -4579,7 +4674,7 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 // encodeMatch writes a match construct's bytes. An inline match (length: N) read those
 // bytes itself, so encoding writes them back; a match on field: $var read nothing,
 // because the variable came from a field earlier in the list that is encoded on its own.
-func encodeMatch(field Field, data map[string]any, ctx *EncodeContext) error {
+func encodeMatch(field Field, siblings []Field, data map[string]any, ctx *EncodeContext) error {
 	var discriminator any
 	if field.Name != "" {
 		if v, ok := data[field.Name]; ok {
@@ -4589,7 +4684,13 @@ func encodeMatch(field Field, data map[string]any, ctx *EncodeContext) error {
 	if discriminator == nil && field.On != "" {
 		varName := strings.TrimPrefix(field.On, "$")
 		if v, ok := data[varName]; ok {
-			discriminator = v
+			// The data carries the label; the case is keyed by what the reference
+			// binds (PS-523, PS-524).
+			discriminator = encodeDiscriminator(varName, v, siblings)
+		} else if v, ok := dataThroughVar(varName, siblings, data); ok {
+			// `field: $c` names a `var`, which the data does not carry: the field
+			// declaring it does, under its own name (PS-267), as resolveEncodeName reads it.
+			discriminator = encodeDiscriminator(varName, v, siblings)
 		} else if v, ok := ctx.Variables[varName]; ok {
 			discriminator = v
 		}
@@ -4700,10 +4801,7 @@ func encodeMatch(field Field, data map[string]any, ctx *EncodeContext) error {
 // encodeByteGroup packs a group's bit ranges back into their shared byte(s). Encoding had
 // no case for the construct, so it emitted a single zero byte: right length, wrong bits.
 func encodeByteGroup(field Field, data map[string]any, ctx *EncodeContext) error {
-	size := field.Size
-	if size <= 0 {
-		size = 1
-	}
+	size := byteGroupWidth(field) // PS-070, CR-2026-131: the width decoding reads
 	packed := uint64(0)
 	for _, gf := range field.ByteGroup {
 		if isComputedField(gf) || isLiteralField(gf) {
@@ -4737,18 +4835,14 @@ func encodeByteGroup(field Field, data map[string]any, ctx *EncodeContext) error
 			continue
 		}
 		num := uint64(int64(math.Round(raw)))
-		if m := bitRangePattern.FindStringSubmatch(string(gf.Type)); m != nil {
-			bits, _ := strconv.Atoi(strings.TrimLeft(m[1], "usf"))
-			start, _ := strconv.Atoi(m[2])
-			end, _ := strconv.Atoi(m[3])
-			if base := bits / 8; base > size {
-				size = base
-			}
-			width := uint(end - start + 1)
-			packed |= (num & ((1 << width) - 1)) << uint(start)
-		} else {
-			packed |= num
+		// A whole integer is its full range (PS-070), masked like any other member.
+		r := fieldMemberRange(gf)
+		width := uint(r.high - r.low + 1)
+		mask := ^uint64(0)
+		if width < 64 {
+			mask = (1 << width) - 1
 		}
+		packed |= (num & mask) << uint(r.low)
 	}
 	endian := field.GroupEndian
 	if endian == "" {
@@ -5074,7 +5168,7 @@ func encodeFields(fields []Field, data map[string]any, ctx *EncodeContext) error
 		}
 
 		if field.MatchInline != nil {
-			if err := encodeMatch(*field.MatchInline, data, ctx); err != nil {
+			if err := encodeMatch(*field.MatchInline, fields, data, ctx); err != nil {
 				return err
 			}
 			continue
@@ -5602,12 +5696,21 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 			// A literal came from no bytes, so it writes none (PS-359).
 			break
 		}
-		if strVal, ok := value.(string); ok {
-			if length <= 0 {
-				length = len(strVal)
+		if value != nil {
+			// PS-537: a fixed length bounds and pads the value; `remaining` or a
+			// reference has none, and the value supplies the count.
+			fixed := -1
+			if field.Length > 0 && field.LengthRef == "" {
+				fixed = field.Length
 			}
-			data := make([]byte, length)
-			copy(data, []byte(strVal))
+			strVal, ok := value.(string)
+			if !ok {
+				strVal = fmt.Sprintf("%v", value)
+			}
+			data, err := encodeASCII(field.Name, strVal, fixed, ctx)
+			if err != nil {
+				return err
+			}
 			ctx.Write(data)
 		}
 

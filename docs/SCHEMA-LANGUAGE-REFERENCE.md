@@ -96,7 +96,7 @@ the range is an error (PS-420).
 
 | Type | Description |
 |------|-------------|
-| `ascii` | ASCII string (requires `length:`) |
+| `ascii` | Text of `length:` bytes; trailing 0x00 padding dropped, a byte above 0x7F reported as its ISO 8859-1 character with a warning (PS-534, PS-538). Encoding pads with 0x00 and rejects a value too long or above U+00FF (PS-537) |
 | `hex` | Lowercase hex string (requires `length:`) |
 | `bytes` | Raw bytes, reported as declared by `format:` (requires `length:`, PS-456) |
 | `base64` | Base64 encoded output (requires `length:`) |
@@ -290,6 +290,18 @@ Shorthand (size inferred from field types):
     - name: value_b
       type: u8[4:7]
 ```
+
+Without `size`, a group covers its widest member's base type, whichever bytes that
+member's bits fall in: a `u16[0:3]` member makes the group two bytes, a `u32[...]` member
+four (PS-070, CR-2026-131). `size` may widen the group but not narrow it: a `size: 5`
+beside a `u64[...]` member is rejected when the schema is loaded, with `byte_group declares
+size 5, narrower than its widest member's 8 bytes (PS-070)`. Every implementation used to
+read a sizeless group as one byte.
+
+A member is a bit range, a whole integer (`u16` is `u16[0:15]` of the group's value) or a
+`bool` with `bit` (one bit of a `u8`, so `bit` is 0 to 7). Every member reads from the
+group's start, none moves the position, and all of them take part in the width and
+overlap checks; any other member is rejected.
 
 ## Arithmetic Modifiers
 

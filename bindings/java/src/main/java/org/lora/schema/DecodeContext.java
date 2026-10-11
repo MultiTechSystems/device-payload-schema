@@ -17,6 +17,16 @@ public class DecodeContext {
     private String endian;
     private final Map<String, Object> variables;
     /**
+     * The value each looked-up name reported, for a key template (PS-532). The variable
+     * table holds what a reference binds (PS-523): the number under a text or boolean
+     * label, a numeric label as itself. {@link #NO_LABEL} marks a lookup with no entry.
+     */
+    private final Map<String, Object> labels = new HashMap<>();
+    /** The number before the lookup and the value after it, by the field that read them. */
+    private final Map<Field, Object[]> lookedUp = new IdentityHashMap<>();
+    /** A lookup with no entry for its value (PS-269): nothing reported, the number bound. */
+    static final Object NO_LABEL = new Object();
+    /**
      * Things worth telling the caller that do not stop the decode. Encoding already had
      * this channel through {@link EncodeResult}; decoding had none, so an unknown TLV tag
      * had nowhere to surface and a payload that stopped short read as a complete decode
@@ -138,6 +148,61 @@ public class DecodeContext {
         variables.putAll(saved);
     }
 
+    /** A copy of the reported-value table, restored with the variables (PS-368). */
+    Map<String, Object> snapshotLabels() { return new HashMap<>(labels); }
+
+    void restoreLabels(Map<String, Object> saved) {
+        labels.clear();
+        labels.putAll(saved);
+    }
+
+    /** The code each enum field last read, for PS-523's binding (CR-2026-132). */
+    private final Map<Field, Object> enumCodes = new java.util.IdentityHashMap<>();
+
+    void recordEnumCode(Field field, Object code) { enumCodes.put(field, code); }
+
+    Object takeEnumCode(Field field) { return enumCodes.remove(field); }
+
+    /** Forget what this field's last lookup recorded, before it is decoded again. */
+    void clearLookup(Field field) { lookedUp.remove(field); }
+
+    /** Record a field's number before its lookup and the label after it (NO_LABEL: none). */
+    void recordLookup(Field field, Object number, Object label) {
+        lookedUp.put(field, new Object[] {number, label});
+    }
+
+    /**
+     * Bind {@code name} to what a reference to this field reads (PS-523). A looked-up field
+     * binds the number before its lookup where the label is text or a boolean, or where the
+     * lookup had no entry, and the label itself where it is a number; its label is kept for
+     * templates (PS-532). Any other field binds its value.
+     */
+    void bind(String name, Field field, Object value) {
+        Object[] rec = field == null ? null : lookedUp.get(field);
+        if (rec != null) {
+            Object label = rec[1];
+            variables.put(name, label instanceof Number ? label : rec[0]);
+            labels.put(name, label);
+        } else {
+            variables.put(name, value);
+            labels.remove(name);
+        }
+    }
+
+    /** Bind a name whose lookup had no entry: the number, with no label (PS-523, PS-269). */
+    void bindMissed(String name, Field field) {
+        Object[] rec = lookedUp.get(field);
+        if (rec != null && rec[1] == NO_LABEL) bind(name, field, rec[0]);
+    }
+
+    /** Whether this name was bound by a looked-up field, whose binding is its own. */
+    boolean hasLabel(String name) { return labels.containsKey(name); }
+
+    /** The value a template reads for a name: its label where it has one (PS-532). */
+    Object reported(String name) {
+        return labels.containsKey(name) ? labels.get(name) : variables.get(name);
+    }
+
     public byte[] read(int n) {
         if (n < 0) {
             // `length: remaining` (PS-014). Guarded here because `new byte[-1]` throws
@@ -145,9 +210,9 @@ public class DecodeContext {
             n = remaining();
         }
         if (offset + n > limit) {
-            throw new SchemaException.DecodeException(
+            throw new SchemaException.BufferUnderflow(
                 String.format("Buffer underflow: need %d bytes at offset %d, but only %d remaining",
-                    n, offset, remaining()));
+                    n, offset, Math.max(0, remaining())));
         }
         byte[] result = new byte[n];
         System.arraycopy(data, offset, result, 0, n);
@@ -158,7 +223,7 @@ public class DecodeContext {
     public byte[] peek(int n, int relativeOffset) {
         int pos = offset + relativeOffset;
         if (pos + n > limit) {
-            throw new SchemaException.DecodeException(
+            throw new SchemaException.BufferUnderflow(
                 String.format("Buffer underflow at peek offset %d", pos));
         }
         byte[] result = new byte[n];
@@ -270,6 +335,7 @@ public class DecodeContext {
     
     public void setVariable(String name, Object value) {
         variables.put(name, value);
+        labels.remove(name);
     }
     
     public Object getVariable(String name) {

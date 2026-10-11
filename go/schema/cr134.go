@@ -254,6 +254,10 @@ func deriveInputs(fields []Field, data map[string]any, ctx *EncodeContext) (map[
 				set(name, float64(bits))
 				continue
 			}
+			// The groups test what a reference to the mask binds (PS-523, CR-2026-132):
+			// an enum's code, the number under a text label. Compared as reported, an
+			// enum name or a text label passed unchecked.
+			given = encodeDiscriminator(mask, given, fields)
 			if _, isBool := given.(bool); isBool {
 				continue
 			}

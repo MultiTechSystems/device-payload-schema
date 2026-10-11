@@ -220,20 +220,22 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2661 payload vectors in `schemas/devices/` (measured 2026-10-11 with
+The 2684 payload vectors in `schemas/devices/` (measured 2026-10-11 with
 `tools/check-floors.py`, after the CR-2026-118 and CR-2026-124 fixtures, CR-2026-117's
 guard-absent-operand, the `match-u32-*` and names-mangling-alike fixtures, CR-2026-127's
 guard-boolean-operand, the CR-2026-121 and CR-2026-123 fixtures, CR-2026-110's,
-CR-2026-125's and CR-2026-128's tlv-repeat-* fixtures, and the mutation-gate vector in
-round-large-value) are the shared cross-language test set. Every implementation has a
-runner that reads the same YAML and the same vectors:
+CR-2026-125's and CR-2026-128's tlv-repeat-* fixtures, the mutation-gate vector in
+round-large-value, CR-2026-114's ascii-latin1, CR-2026-131's byte-group-width,
+CR-2026-109's lookup-reference-binding and CR-2026-132's
+tag-component-reference-binding) are the shared cross-language test set. Every
+implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1823 |
-| Go | `go/schema/corpus_conformance_test.go` | 2661 | 1840 (plain API 1817) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2661 | 1824 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2661 | 1823 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1841 |
+| Go | `go/schema/corpus_conformance_test.go` | 2684 | 1858 (plain API 1835) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2684 | 1842 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2684 | 1841 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 554 of 554 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -732,8 +734,9 @@ rather than a loss: the value is reported under a templated key (`channel_3_read
 every encoder looked it up under the declared name (`reading`), found nothing, and wrote a
 zero. An unresolvable template is an error now, and the "missing field" warning names the
 resolved key rather than one the schema never reports. Note there are two resolvers per
-implementation, deliberately — decode resolves against its variables, encode against the
-data it was handed. CR-2026-031 added `name-from-var.yaml`, whose `var: idx` sits on a field
+implementation, deliberately — decode resolves against the values its fields *reported*
+(since CR-2026-109 a table kept beside the variables, which hold PS-523's binding), encode
+against the data it was handed. CR-2026-031 added `name-from-var.yaml`, whose `var: idx` sits on a field
 called `channel_id`, so the PS-267 fallback through the declaring field is exercised rather
 than merely written; the corpus's other `name_from` names a field and a variable that agree,
 which a resolver ignoring `var:` would have passed.
@@ -807,10 +810,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1823 |
-| Go | `go/schema/corpus_encode_test.go` | 1840 (plain 1817) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1823 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1824 |
+| Python | `tests/test_encode_round_trip.py` | 1841 |
+| Go | `go/schema/corpus_encode_test.go` | 1858 (plain 1835) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1841 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1842 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1595,7 +1598,75 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   No corpus schema's template referenced a lookup, boolean or fraction, so no device
   vector changed. `senml.name` templates are not rendered by either SenML producer (Python,
   C#): a record's `n` is the template as written, so PS-532's senml half is open. Fixture:
-  `name-from-rendering.yaml`.
+  `name-from-rendering.yaml`. When this landed every variable table held the label, so the
+  template read it from there; CR-2026-109 changed what a reference binds, and the
+  resolvers now read a separate table of reported values (next entry).
+- **CR-2026-109 (PS-523, PS-524): a reference to a looked-up field binds a number.** A `$`
+  reference and a `var` bind the number before the lookup where the lookup reports a text
+  or boolean label, or has no entry (the field is omitted, PS-269, but the name stays bound);
+  where it reports a number they bind that number, so `lookup: [0, 125, 250, 500]` feeds
+  `125` to a `compute`. A sentinel or `out_of_range: omit` leaves the name unbound. A `match`
+  compares its case keys with that binding, so a text key there matches nothing, and
+  `validate_schema.case_key_type_warnings` warns about one (PS-524's SHOULD). A `name_from`
+  template is not a reference: it writes the reported value (PS-532), and a template over a
+  lookup miss is an error, `name_from for 'x' references code, which reported no value
+  (PS-266, PS-532)`.
+  - **CR-2026-132 extends it to an enum and a tag component.** An enum is a lookup by another
+    spelling: a reference binds its code, its `default` name included, and a template writes
+    its name. A tlv `tag_fields` component binds its name and `var` as any field does,
+    through its modifiers and lookup, while the tag is still matched on the value read (so a
+    component's sequence lookup out of range is now a PS-105 error). Measured before on 17
+    probes: every implementation bound an enum's name (Go, Java and C# bound the raw value
+    only where no name matched and none was a default) and bound a tag component's raw read,
+    so a template over it wrote `reading_2` for `right`. The C interpreter binds an enum's
+    code already; it binds every field's raw read, before modifiers and lookup, which is
+    PS-523 only where there are neither. Counted before changing it: three schemas in the
+    corpus, library, examples and private registry declare an enum (two fixtures and
+    `library/sensors/user_input.yaml`) and none references one, so no vector outside the
+    fixtures changed. Fixtures: ports 8 and 9 of `lookup-reference-binding.yaml`, and
+    `tag-component-reference-binding.yaml`: decode floors +4 in Go, Java and C#, re-encode
+    and `match` +1 everywhere (only the enum's mapped vector round-trips).
+  - **PS-068 as CR-2026-132 amends it: an enum code with no name and no `default` is omitted**,
+    as PS-269 omits a lookup miss, so the field keeps one type; a reference still binds the
+    code. Before, Python reported `unknown(N)` and Go, Java, C# and the generated codec the
+    raw integer - a string or a number by payload. Go and Java also never read `values`
+    written as a list, so every such enum reported its integer; both read it now. Encoding
+    an omitted enum takes the missing-field path, as a lookup miss does; `unknown(N)` input
+    is still accepted. The output schema now enumerates an enum without a default. No corpus,
+    example or registry vector reports an unnamed code, so only port 10 of
+    `lookup-reference-binding.yaml` changed (decode floors +1). C already omitted it (see
+    `src/test_comprehensive.c` above, whose stale `unknown(N)` assertions the spec now
+    contradicts as well).
+  - **Measured before, the CR's own table was wrong:** it said Go, Java and C# already bound
+    the number. On 81 probes (6 lookup kinds x compute/match/var/template, at the top level,
+    in a tlv case and in a match body) **all five bound the label**: a text label failed
+    every `compute` (Python `could not convert string`, Go and C# `operand field not found`,
+    Java read 0), no numeric case key matched, and a miss left the name unbound
+    (`Variable not found`). Python's boolean probes passed only because `True == 1`.
+  - **Where each language keeps the two values.** Python: `_bind` and the `_labels` /
+    `_lookup_numbers` tables in `schema_interpreter.py`, the number recorded in
+    `_apply_modifiers`. Go: `go/schema/cr109.go` (`bindReference`, `rebindReported`,
+    `templateValue`). Java: `DecodeContext.bind` / `reported` / `bindMissed`. C#:
+    `DecodeContext.Bind` / `Reported` / `BindOutput`. TS013: `_bind_js`, the `lv` and `lbl`
+    objects and `refValue()`. Each scopes the reported table with a repeat element, as PS-368
+    scopes the variables. **The copy loops that re-bind a construct's merged output** (Go,
+    Java and C#, after a byte_group, flagged group, match or `$ref`) would overwrite the
+    number with the label; each skips a name its own field already bound.
+  - **Encoding.** Every encoder took a `match: {field: $x}` discriminator straight from the
+    data, which is the label, and reversed it through the lookup only when reached via a
+    `var` - turning a numeric label back into its index. All now reverse a text or boolean
+    label and use a numeric one as it is (`_encode_reference`, `encReference`,
+    `encodeDiscriminator`, `boundFromReported`, `ReferenceBinding`), and look for the field
+    in the port being encoded before the rest of the schema, since two ports may declare one
+    name with different tables. Go's encoder had no `$var` discriminator at all before.
+  - Fixture `lookup-reference-binding.yaml`, one port per case: decode floors +7 in Go,
+    Java and C#, re-encode +5 everywhere and `match` +5 in all four (its miss and plain
+    `default` vectors carry no value to write back). No device schema and no
+    vector of the private registry changed decode or encode output, and no schema in either
+    keys a case by a label. A string case key is matched as nothing rather than refused at
+    load, as the spec prototype does; PS-524 asks only for "matches nothing".
+  - The generated codec took `default` for a `match` on an unbound name; it now throws, as
+    every interpreter does.
 - **Registry divergences (2026-10-10).** The private registry's 29,541 vectors, run through
   all five at cd874f1, found six defects the corpus could not see. Each has a fixture in
   `_language-conformance/`:
@@ -1900,6 +1971,81 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     and `tlv-repeat-merge-shared-last` (the shared `last` member in both written cases).
     CR-2026-128 moved decode +1 and re-encode +2 in all four: shared-last, and
     tlv-repeat-object-collect, which now round-trips.
+- **CR-2026-115 (PS-535): a read or skip past the end names the field**, in the spec
+  prototype's words, identical in Python, Go, Java, C#, the generated codec and C (spec main
+  c932961): `Field 'n': Buffer underflow: need 2 bytes at offset 0, but only 1 remaining
+  (PS-535)`, `Field an unnamed skip: ...` where there is no name, and `Field 'b': Buffer
+  underflow at peek offset 0 (PS-535)` for a bit range or bool (a `consume` past the end
+  takes the need form). "Remaining" is to the end less any `reserve`.
+  - **The innermost field is named, and nothing prefixes it.** Python's `Error decoding o:
+    Error decoding x: Buffer too short...` is gone: the read raises an unnamed underflow,
+    the field that made it names it once (`name_underflow`, Go `nameUnderflow`, Java
+    `SchemaException.BufferUnderflow`, C# `BufferUnderflowException`, TS013 `_fld`), and
+    every enclosing object, repeat, case body, flag group or `$ref` passes it through. An
+    enum names itself, not its base; an inline match discriminator is named by the match's
+    `name`, else `an unnamed match` (the prototype names nothing there).
+  - **A byte_group** names the first member whose own base does not fit, as the prototype's
+    per-member peek does; where every base fits and the group's `size` does not, `an unnamed
+    byte_group`. Note that a group with no `size` is one byte wide in all five, where the
+    prototype derives the span from the members - outside PS-535, still open.
+  - Unchanged, as PS-535 excepts them: `remaining`, PS-403's optional message, PS-477/486
+    for a tlv entry, and PS-343's ragged tail for an `until: end` element.
+  - Found on the way: Go's `bool` discarded its `consume` read's error, and Python and the
+    generated codec never bounded `consume` on a bit range or bool, so both decoded
+    successfully past the end.
+  - C puts the same text in `error_msg` (`schema_underflow_message`); the worst case is 141
+    characters, inside the 152-byte buffer. An unnamed C bit range reads `an unnamed bit
+    range`, since the binary schema does not keep the type's spelling. C's `consume` is a
+    flag advancing one byte, so a `consume: 2` past the end cannot arise there - and the
+    harness turns any `consume >= 1` into that flag, which would build such a schema
+    advancing one byte instead of two. No corpus vector reaches it; open.
+  - No vector kind expects a failure, so the messages are pinned by unit tests in each
+    language: `test_cr_2026_114_115.py`, `test_cr_2026_114_115_ts013.py`,
+    `cr114_115_test.go`, `CR2026114115Test.java`, `CR2026_114_115Tests.cs`, and
+    `selftest_schema.c`.
+- **CR-2026-114 (PS-534, PS-537, PS-538): `ascii` is ISO 8859-1, padded with 0x00.**
+  - Decode keeps every byte as the character of the same number and drops trailing 0x00
+    only, warning `Field '<name>': a byte above 0x7F in an ascii value (PS-073, PS-538)`.
+    Before it: U+FFFD in Python and Java, `?` in C#, raw bytes (invalid JSON text) in Go;
+    the generated codec was already Latin-1 and only gained the warning.
+  - Encode rejects `Field '<name>': an ascii value holds a character above U+00FF, which has
+    no byte (PS-537)` and `Field '<name>': an ascii value of {n} bytes is longer than its
+    length of {length} (PS-537)`, writes U+0080..U+00FF as its byte with `Field '<name>': a
+    character above U+007F in an ascii value (PS-537)` in the encode warnings, and pads to
+    a fixed `length`. A length that is not fixed (`remaining`, a reference) is neither padded
+    nor bounded. All five wrote UTF-8 and truncated, so `"ABCé"` became `414243c3`. The
+    rejections reach `errors` verbatim, with no `Error encoding x:` prefix.
+  - One helper pair per language: `decode_ascii`/`encode_ascii` (Python), `decodeASCII`/
+    `encodeASCII` (Go, `cr114_115.go`), Java `Encoder.encodeAscii` and the ascii case of
+    `Schema.decodeFieldBody`, C# `Helpers.DecodeAscii`/`EncodeAscii`, TS013 `encField` in
+    `ENCODER_RUNTIME_JS`.
+  - **C holds text as a C string**, so it stops at the first 0x00 and reports a high byte as
+    itself, and it cannot encode `ascii` at all: PS-534, PS-538 and PS-537 are C gaps. The
+    harness skips a schema whose vectors expect such text as an interpreter gap
+    (`expects_text_c_cannot_hold`), which today is `ascii-latin1.yaml` alone.
+  - No corpus vector relied on U+FFFD, `?`, raw bytes or truncation: every implementation's
+    counts rose by exactly the new fixture's four vectors. Fixture: `ascii-latin1.yaml`
+    (high bytes, interior 0x00, all 0x00, each round-tripping).
+- **CR-2026-131: a byte_group covers its widest member's base** (PS-070). With no `size`, a
+  group is as wide as its widest member's base type, whichever bytes the bits fall in -
+  `u16[0:3]` makes it two bytes. `size` widens it, and a `size` narrower than a member is
+  **rejected at load**: `byte_group declares size 5, narrower than its widest member's 8
+  bytes (PS-070)`, the spec prototype's text. A member is a bit range, a whole integer
+  (`u16` is `u16[0:15]` of the group's value) or a `bool` with `bit` 0 to 7 (one bit of a
+  `u8`); anything else is rejected, and every member reads from the group's start without
+  moving it. All five read a sizeless group as one byte while the four encoders already
+  widened a bit range's base, so decode and encode disagreed; Go and C# also gave a whole
+  integer member the entire group's value, and Python and Java read it as a field of its
+  own. Where the rules live: `byte_group_member_range`/`byte_group_width`/`byte_group_errors`
+  (Python; the validator and the TS013 generator call them), `go/schema/cr131.go`
+  (`checkByteGroup` from `checkFieldRules`), Java `Schema.checkByteGroup`, C#
+  `SchemaParser.CheckByteGroup` and `Cr131`, and `encGroupWidth` in the generated codec's
+  runtime. **Overlap is now counted in the group's assembled value** (PS-364) in all four;
+  it was counted most-significant-first within each member's own base, which disagreed with
+  every decoder for members of different widths, and C# skipped signed ranges entirely. C
+  has no byte_group decode path, so this is a C gap like the construct itself. **No corpus,
+  library, example or registry schema is rejected or changes decode** (registry yabby-edge
+  was rewritten as one 8-byte group, 69e1023). Fixture: `byte-group-width.yaml`.
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.
@@ -1943,6 +2089,17 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     a byte_length of {b} (PS-551)` and `Flagged field '{mask}' is given {v}, and the groups
     given set {bits} (PS-551)` (compared on the groups' declared bits only). A supplied
     match discriminator naming a case whose fields are absent fails on those fields.
+  - **With CR-2026-109/132's reference binding.** What is derived is the value a
+    reference binds, the raw code: an enum takes it as a code, and a looked-up field's own
+    reversal turns it into the code for a text or a numeric label alike. A supplied mask is
+    checked as a reference binds it, through `_encode_reference` and its ports
+    (`encodeDiscriminator`, `boundFromReported`, `ReferenceBinding`, `encReference`): read
+    as reported, an enum name or a text label skipped the check, and `{"mask": "one"}` with
+    both groups given wrote `01 01 02`. The cases are in `tests/cr-2026-134-cases.yaml`. The
+    two together re-encode `lookup-reference-binding`'s `an_unnamed_enum_code_is_omitted_but_bound`,
+    which neither did alone: the code reports no name, so the discriminator is derived.
+    Decoding a flagged block whose mask is an enum or looked-up field still fails with
+    `Flagged field reference not found`, on master too; not fixed here.
   - **Also fixed on the way:** Python and the runtime refused a `flagged` block inside a
     match, tlv or repeat ("declares no type"), and every encoder passed over a construct
     nested in a flagged group as nameless, dropping its values silently

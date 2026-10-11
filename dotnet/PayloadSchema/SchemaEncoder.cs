@@ -407,7 +407,9 @@ public static class SchemaEncoder
                     catch (Exception e)
                     {
                         if (!topLevel) throw;
-                        _result.Errors.Add($"Error encoding {Describe(field)}: {e.Message}");
+                        // A FieldErrorException already names its field in full (PS-537).
+                        _result.Errors.Add(e is FieldErrorException ? e.Message
+                            : $"Error encoding {Describe(field)}: {e.Message}");
                     }
                     continue;
                 }
@@ -645,7 +647,8 @@ public static class SchemaEncoder
                 else if (f.Flagged is { } flagged)
                 {
                     var mask = flagged.Field.TrimStart('$');
-                    var name = SizeSource(fields, mask)?.Name ?? mask;
+                    var maskSource = SizeSource(fields, mask);
+                    var name = maskSource?.Name ?? mask;
                     long bits = 0, declared = 0;
                     foreach (var group in flagged.Groups)
                     {
@@ -657,6 +660,10 @@ public static class SchemaEncoder
                         derived[name] = bits;
                         continue;
                     }
+                    // The groups test what a reference to the mask binds (PS-523,
+                    // CR-2026-132): an enum's code, the number under a text label.
+                    // Compared as reported, an enum name or a text label passed unchecked.
+                    given = ReferenceBinding(given, maskSource);
                     if (given is bool || given is string) continue;
                     var (ok, numeric) = Helpers.ToFloat64(given);
                     if (!ok || numeric != Math.Floor(numeric)) continue;
@@ -720,7 +727,7 @@ public static class SchemaEncoder
         byte[] EncodeByteGroup(SchemaField group, Dictionary<string, object?> data)
         {
             ulong packed = 0;
-            int size = group.Size > 0 ? group.Size : 1;
+            int size = Cr131.ByteGroupWidth(group);    // PS-070, CR-2026-131: as decoded
 
             foreach (var member in group.ByteGroup)
             {
@@ -756,9 +763,6 @@ public static class SchemaEncoder
                 {
                     bitStart = bitRange.Value.start;
                     bitLen = bitRange.Value.end - bitRange.Value.start + 1;
-                    // The base width is part of the member's type: u24[4:23] owns three
-                    // bytes of the group, however small the group's own `size` says it is.
-                    size = Math.Max(size, Math.Max(1, member.BitBaseBytes));
                 }
                 if (bitLen > 0)
                 {
@@ -767,8 +771,9 @@ public static class SchemaEncoder
                 }
                 else
                 {
-                    // A full-width member owns the group's bytes outright.
-                    packed |= (ulong)raw;
+                    // A whole integer is its full range (PS-070), masked like any other member.
+                    int bits = Cr131.MemberRange(member).high + 1;
+                    packed |= bits >= 64 ? (ulong)raw : (ulong)raw & ((1UL << bits) - 1);
                 }
             }
             return Helpers.EncodeUint(packed, Math.Max(1, size), group.GroupEndian ?? _endian);
@@ -936,7 +941,10 @@ public static class SchemaEncoder
                 var varName = match.On.TrimStart('$');
                 if (data.TryGetValue(varName, out var byVar))
                 {
-                    discriminator = byVar;
+                    // The output holds what the field reported. Where that is a text or
+                    // boolean label, the reference bound the number under it (PS-523), and
+                    // the cases are keyed by that number (PS-524).
+                    discriminator = ReferenceBinding(byVar, FieldNamed(varName));
                 }
                 else
                 {
@@ -948,7 +956,7 @@ public static class SchemaEncoder
                     var source = FieldDeclaringVar(varName);
                     if (source != null && !string.IsNullOrEmpty(source.Name)
                         && data.TryGetValue(source.Name, out var byField))
-                        discriminator = ReverseLookup(byField, source.Lookup);
+                        discriminator = ReferenceBinding(byField, source);
                 }
             }
 
@@ -1468,34 +1476,75 @@ public static class SchemaEncoder
             return WriteUint(single.Value, tagSize, _endian);
         }
 
-        /// <summary>The field that declared `var: name`, searched anywhere in the schema.</summary>
-        SchemaField? FieldDeclaringVar(string varName)
+        /// <summary>
+        /// The value a `$` reference bound for a field that reported <paramref name="reported"/>
+        /// (PS-523): a numeric label as itself, else the number its lookup maps from - the key
+        /// of a label, or the value a `${value}` default wrote. A label only a plain `default`
+        /// carries has no number to recover and is returned as it is, matching no case.
+        /// </summary>
+        static object? ReferenceBinding(object? reported, SchemaField? source)
         {
-            var found = SearchForVar(_schema.Fields, varName);
+            // CR-2026-132: an enum bound its code; the data carries its name.
+            if (source?.Type == FieldType.Enum && reported is string name)
+                return ReverseEnum(name, source);
+            if (source?.Lookup is not { Count: > 0 } || DecodeContext.IsNumericLabel(reported))
+                return reported;
+            var reversed = ReverseLookup(reported, source.Lookup);
+            if (reversed is string text && Wave5.Template(source) is { } template
+                && Wave5.MatchTemplate(template, text) is { } recovered)
+                return recovered;
+            return reversed;
+        }
+
+        /// <summary>The code an enum reported <paramref name="name"/> for, else the name.</summary>
+        static object? ReverseEnum(string name, SchemaField field)
+        {
+            if (field.Values != null)
+                foreach (var kv in field.Values)
+                    if (kv.Value == name) return (double)kv.Key;
+            if (field.EnumDefault == name) return name;
+            if (name.StartsWith("unknown(") && name.EndsWith(")")
+                && int.TryParse(name[8..^1], out var n))
+                return (double)n;
+            return name;
+        }
+
+        /// <summary>The field declaring <paramref name="name"/>, searched anywhere in the schema.</summary>
+        SchemaField? FieldNamed(string name) =>
+            SearchSchema(f => f.Name == name);
+
+        /// <summary>The field that declared `var: name`, searched anywhere in the schema.</summary>
+        SchemaField? FieldDeclaringVar(string varName) =>
+            SearchSchema(f => f.Var == varName && !string.IsNullOrEmpty(f.Name));
+
+        SchemaField? SearchSchema(Func<SchemaField, bool> wanted)
+        {
+            // The fields being encoded first: a ports schema may declare one name per port.
+            var found = Search(_fields, wanted) ?? Search(_schema.Fields, wanted);
             if (found != null) return found;
             if (_schema.Ports != null)
                 foreach (var port in _schema.Ports.Values)
                 {
-                    found = SearchForVar(port.Fields, varName);
+                    found = Search(port.Fields, wanted);
                     if (found != null) return found;
                 }
             if (_schema.Definitions != null)
                 foreach (var def in _schema.Definitions.Values)
                 {
-                    found = SearchForVar(def.Fields, varName);
+                    found = Search(def.Fields, wanted);
                     if (found != null) return found;
                 }
             return null;
         }
 
-        static SchemaField? SearchForVar(List<SchemaField> fields, string varName)
+        static SchemaField? Search(List<SchemaField> fields, Func<SchemaField, bool> wanted)
         {
             foreach (var f in fields)
             {
-                if (f.Var == varName && !string.IsNullOrEmpty(f.Name)) return f;
+                if (wanted(f)) return f;
                 foreach (var nested in NestedFieldLists(f))
                 {
-                    var found = SearchForVar(nested, varName);
+                    var found = Search(nested, wanted);
                     if (found != null) return found;
                 }
             }
@@ -1771,10 +1820,11 @@ public static class SchemaEncoder
                     // A literal came from no bytes, so it writes none.
                     return Array.Empty<byte>();
                 case FieldType.Ascii or FieldType.String:
-                {
-                    var raw = System.Text.Encoding.UTF8.GetBytes(value?.ToString() ?? "");
-                    return Pad(raw, EncodeLength(field, raw.Length));
-                }
+                    // PS-537. A fixed `length` pads and bounds the value; `remaining` or a
+                    // reference has no fixed count, so the value supplies it.
+                    return Helpers.EncodeAscii(field.Name, value?.ToString() ?? "",
+                        field.Length > 0 && field.LengthRef == null ? field.Length : null,
+                        _result.Warnings);
             }
 
             throw new InvalidOperationException($"Cannot encode type: {field.Type}");

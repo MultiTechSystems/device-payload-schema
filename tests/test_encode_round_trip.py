@@ -83,11 +83,20 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # +6: repeat-element-null-sentinel, -internal-name, repeat-identity-sibling (2) and
 # repeat-count-computed (CR-2026-121, CR-2026-123), plus the null fixture's
 # reserved-value vector, whose null now writes the sentinel (PS-544); all repeat.
+# +6: lookup-reference-binding (CR-2026-109, CR-2026-132), match; the miss, default
+# and unnamed-enum vectors carry no value to write back.
+# +4: lookup-reference-binding vectors added for the mutation gate, match.
+# (merged with master's +6 tlv-repeat/mutation-gate vectors)
+# +4: ascii-latin1 (CR-2026-114), all plain fixed: a byte above 0x7F re-encodes to itself.
+# +3: byte-group-width (CR-2026-131), byte_group.
 # +3: CR-2026-134 (PS-551) derives what the input fixes. internal-discriminator's two
 # vectors (match) derive `_kind` from the case whose fields are given, and
 # flagged-group-field-list's inner_groups (flagged) derives both masks and now encodes a
 # flagged block nested in a group, which was passed over as nameless.
-FLOOR_TOTAL = 1823
+# +1: the merge of the two. lookup-reference-binding's an_unnamed_enum_code_is_omitted_
+# but_bound (match) reports no discriminator, so neither side re-encoded it alone; with
+# PS-551 the code is derived from the case whose fields are given.
+FLOOR_TOTAL = 1841
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -97,9 +106,12 @@ FLOOR_BY_SHAPE = {
     # for an internal field with no value. It now reports such a field instead.
     "tlv": 1305,   # +2: CR-2026-128; +3: CR-2026-125 fixtures; +1: tlv-repeat-merge (CR-2026-110)
     "flagged": 194,  # +1: CR-2026-134 (see FLOOR_TOTAL)
-    "plain fixed": 143,
-    "match": 131,  # +4: match-u32-inline-discriminator; +2: CR-2026-134
-    "byte_group": 25,
+    "plain fixed": 147,
+    # +1: CR-2026-132 enum port; +5: lookup-reference-binding (CR-2026-109);
+    # +4: match-u32-inline-discriminator; +2: CR-2026-134; +1: both together (see
+    # FLOOR_TOTAL)
+    "match": 142,
+    "byte_group": 28,  # +3: byte-group-width (CR-2026-131)
     # 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now
     # carry only the definitions they reach, so one no longer has a `repeat` in an
     # unreferenced definition for the classifier to find.

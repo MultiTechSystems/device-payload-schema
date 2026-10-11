@@ -416,6 +416,8 @@ final class Encoder {
                             && missing.field.equals(resolveEncodeNameOrNull(field, data))) {
                         // The field itself is missing: said as the reference says it.
                         errors.add(e.getMessage());
+                    } else if (e instanceof SchemaException.FieldEncodeException) {
+                        errors.add(e.getMessage());
                     } else {
                         errors.add("Error encoding " + describe(field) + ": " + e.getMessage());
                     }
@@ -535,14 +537,13 @@ final class Encoder {
             Long raw = asLong(value);
             if (raw == null) continue;
             if (member.getBits() > 0) {
-                // The base width is part of the member's type: u24[4:23] owns three bytes
-                // of the group, however small the group's own `size` says it is.
-                size = Math.max(size, Math.max(1, member.getBitBaseBytes()));
+                // The width is the group's (PS-070, CR-2026-131), set when it was parsed.
                 long mask = member.getBits() >= 64 ? -1L : (1L << member.getBits()) - 1;
                 packed |= (raw & mask) << member.getBitOffset();
             } else {
-                // A full-width member owns the group's bytes outright.
-                packed |= raw;
+                // A whole integer is its full range (PS-070), masked like any other member.
+                int bits = member.getType().defaultLength() * 8;
+                packed |= bits >= 64 ? raw : raw & ((1L << bits) - 1);
             }
         }
         String groupEndian = group.getGroupEndian();
@@ -859,6 +860,10 @@ final class Encoder {
                     derived.put(name, bits);
                     continue;
                 }
+                // The groups test what a reference to the mask binds (PS-523,
+                // CR-2026-132): an enum's code, the number under a text label. Compared as
+                // reported, an enum name or a text label passed unchecked.
+                given = boundFromReported(source, given);
                 if (given instanceof Number n && !(given instanceof Boolean)
                         && n.doubleValue() == Math.rint(n.doubleValue())
                         && (n.longValue() & declared) != bits) {
@@ -891,7 +896,9 @@ final class Encoder {
             String varName = match.getOn().startsWith("$")
                     ? match.getOn().substring(1) : match.getOn();
             if (data.containsKey(varName)) {
-                discriminator = data.get(varName);
+                // The output holds what the field reported; the match compared what a
+                // reference to it binds (PS-523), the number under a text label.
+                discriminator = boundFromReported(fieldNamed(varName), data.get(varName));
             } else {
                 // The variable's name is often not the field's: rbs30x has
                 // `name: event_type` with `var: evt`, and matches on `$evt`. Decoded
@@ -900,7 +907,7 @@ final class Encoder {
                 Field source = fieldDeclaringVar(varName);
                 if (source != null && source.getName() != null
                         && data.containsKey(source.getName())) {
-                    discriminator = reverseLookup(data.get(source.getName()), source.getLookup());
+                    discriminator = boundFromReported(source, data.get(source.getName()));
                 }
             }
         }
@@ -1452,11 +1459,76 @@ final class Encoder {
      * The field that declared {@code var: <name>}, searched anywhere in the schema.
      */
     private Field fieldDeclaringVar(String varName) {
-        Field found = searchForVar(schema.getFields(), varName);
+        Field found = searchForVar(fields, varName);
+        if (found != null) return found;
+        found = searchForVar(schema.getFields(), varName);
         if (found != null) return found;
         if (schema.getPorts() != null) {
             for (Schema.PortDef port : schema.getPorts().values()) {
                 found = searchForVar(port.getFields(), varName);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * What a reference to {@code source} bound when it reported {@code reported} (PS-523):
+     * a numeric label as itself, and the number under a text or boolean label, recovered
+     * through the lookup or its {@code ${value}} default.
+     */
+    private static Object boundFromReported(Field source, Object reported) {
+        if (source != null && source.getType() == FieldType.ENUM && reported instanceof String name) {
+            // CR-2026-132: a reference to an enum bound its code.
+            if (source.getValues() != null) {
+                for (Map.Entry<Integer, String> e : source.getValues().entrySet()) {
+                    if (name.equals(e.getValue())) return (long) e.getKey();
+                }
+            }
+            if (name.startsWith("unknown(") && name.endsWith(")")) {
+                try {
+                    return Long.parseLong(name.substring(8, name.length() - 1));
+                } catch (NumberFormatException ignored) {
+                    return reported;
+                }
+            }
+            return reported;
+        }
+        if (source == null || source.getLookup() == null || source.getLookup().isEmpty()
+                || reported instanceof Number) {
+            return reported;
+        }
+        Object reversed = reverseLookup(reported, source.getLookup());
+        String template = Wave5.template(source);
+        if (reversed instanceof String text && template != null) {
+            Double recovered = Wave5.matchTemplate(template, text);
+            if (recovered != null) return recovered;
+        }
+        return reversed;
+    }
+
+    /** The field a name refers to, wherever in the schema it is declared. */
+    private Field fieldNamed(String name) {
+        // The fields being encoded first: in a ports schema each port may declare the name.
+        Field found = searchForName(fields, name);
+        if (found != null) return found;
+        found = searchForName(schema.getFields(), name);
+        if (found != null) return found;
+        if (schema.getPorts() != null) {
+            for (Schema.PortDef port : schema.getPorts().values()) {
+                found = searchForName(port.getFields(), name);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private static Field searchForName(List<Field> list, String name) {
+        if (list == null) return null;
+        for (Field f : list) {
+            if (name.equals(f.getName())) return f;
+            for (List<Field> nested : nestedFieldLists(f)) {
+                Field found = searchForName(nested, name);
                 if (found != null) return found;
             }
         }
@@ -1764,8 +1836,7 @@ final class Encoder {
             return new byte[0];
         }
         if (type == FieldType.ASCII || type == FieldType.STRING) {
-            byte[] raw = String.valueOf(value).getBytes(StandardCharsets.UTF_8);
-            return pad(raw, encodeLength(field, raw.length));
+            return encodeAscii(field, String.valueOf(value));
         }
 
         if (type == FieldType.BASE64) {
@@ -1853,6 +1924,39 @@ final class Encoder {
     private static final byte[] EMPTY = new byte[0];
 
     /** The byte count to write for a variable-length field. */
+    /**
+     * PS-537: a character above U+00FF, or a value longer than a fixed {@code length}, is
+     * rejected naming the field; U+0080..U+00FF is written as the byte of the same number
+     * with a warning; a short value is padded with 0x00. A length that is not fixed
+     * ({@code remaining}, a reference) lets the value supply it. This wrote UTF-8 and
+     * truncated, which could split a character ("ABCé" became 414243c3).
+     */
+    private byte[] encodeAscii(Field field, String text) {
+        String name = field.getName();
+        for (int i = 0; i < text.length(); i++) {
+            // A character outside the BMP is a surrogate pair, each half above U+00FF.
+            if (text.charAt(i) > 0xFF) {
+                throw new SchemaException.FieldEncodeException("Field '" + name
+                        + "': an ascii value holds a character above U+00FF, which has no byte (PS-537)");
+            }
+        }
+        byte[] raw = text.getBytes(StandardCharsets.ISO_8859_1);
+        Object declared = field.getRaw() != null ? field.getRaw().get("length") : null;
+        Integer fixed = declared instanceof Integer n && n >= 0 ? n : null;
+        if (fixed != null && raw.length > fixed) {
+            throw new SchemaException.FieldEncodeException(String.format(
+                    "Field '%s': an ascii value of %d bytes is longer than its length of %d (PS-537)",
+                    name, raw.length, fixed));
+        }
+        for (byte b : raw) {
+            if ((b & 0xFF) > 0x7F) {
+                warnings.add("Field '" + name + "': a character above U+007F in an ascii value (PS-537)");
+                break;
+            }
+        }
+        return fixed == null ? raw : pad(raw, fixed);
+    }
+
     private static int encodeLength(Field field, int natural) {
         // `length: remaining` has no fixed count when encoding (PS-014) - the value
         // supplies it. It arrives as the negative sentinel the parser stores.

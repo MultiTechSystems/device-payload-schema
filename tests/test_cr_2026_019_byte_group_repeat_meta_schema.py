@@ -326,20 +326,17 @@ class TestTheCorpusConforms:
         found = list(constructs("byte_group"))
         assert len(found) > 10, f"only {len(found)} byte_groups found"
 
-    def test_the_corpus_uses_only_the_object_spelling(self):
-        """Recorded rather than asserted as a rule: the array form is still described.
-
-        If this ever fails it is not a defect - it means a schema started using the
-        array form, and the `size`-beside-it path finally has corpus coverage.
+    def test_the_corpus_uses_the_array_spelling(self):
+        """The array form had no corpus coverage until CR-2026-131's fixture used it
+        for a group with no `size`, which is the case that ruling settles (PS-070). Keep
+        it covered: it is the spelling whose `size` sits beside the group, and the TS013
+        generator ignored that `size` while nothing exercised it.
         """
         arrays = [
             path.name for field, path in constructs("byte_group")
             if isinstance(field["byte_group"], list)
         ]
-        assert not arrays, (
-            "the array form now has corpus coverage, which it did not before: "
-            + ", ".join(arrays)
-        )
+        assert "byte-group-width.yaml" in arrays, arrays
 
 
 class TestTheGeneratorStillCannotClobberIt:

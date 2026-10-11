@@ -587,6 +587,145 @@ cases:
   input: '{"kind": 1, "t": 9}'
   payload: "010109"
 
+# --- Derived and supplied values meet CR-2026-109/132's reference binding -----------
+#
+# A reference to an enum binds its code, and one to a looked-up field the number under a
+# text label or a numeric label as itself (PS-523). What is derived is that bound value,
+# and a supplied value is checked against the rest of the input as a reference binds it,
+# not as reported - else an enum name or a text label passed the check unseen.
+
+- name: derived_enum_match_discriminator
+  schema: |
+    name: t
+    fields:
+      - name: kind
+        type: enum
+        base: u8
+        values: {1: alpha, 2: beta}
+      - match:
+          field: $kind
+          cases:
+            1:
+              - {name: a, type: u8}
+            2:
+              - {name: b, type: u16}
+  input: '{"b": 5}'
+  payload: "020005"
+
+- name: enum_match_discriminator_by_name
+  schema: |
+    name: t
+    fields:
+      - name: kind
+        type: enum
+        base: u8
+        values: {1: alpha, 2: beta}
+      - match:
+          field: $kind
+          cases:
+            1:
+              - {name: a, type: u8}
+            2:
+              - {name: b, type: u16}
+  input: '{"kind": "beta", "b": 5}'
+  payload: "020005"
+
+- name: numeric_label_match_discriminator
+  schema: |
+    name: t
+    fields:
+      - name: kind
+        type: u8
+        lookup: {1: 10, 2: 20}
+      - match:
+          field: $kind
+          cases:
+            10:
+              - {name: a, type: u8}
+            20:
+              - {name: b, type: u16}
+  input: '{"kind": 20, "b": 5}'
+  payload: "020005"
+
+- name: derived_enum_flagged_mask
+  schema: |
+    name: t
+    fields:
+      - name: mask
+        type: enum
+        base: u8
+        values: {1: one, 2: two, 3: both}
+      - flagged:
+          field: mask
+          groups:
+            - bit: 0
+              fields:
+                - {name: a, type: u8}
+            - bit: 1
+              fields:
+                - {name: b, type: u8}
+  input: '{"a": 1, "b": 2}'
+  payload: "030102"
+
+- name: enum_flagged_mask_by_name
+  schema: |
+    name: t
+    fields:
+      - name: mask
+        type: enum
+        base: u8
+        values: {1: one, 2: two, 3: both}
+      - flagged:
+          field: mask
+          groups:
+            - bit: 0
+              fields:
+                - {name: a, type: u8}
+            - bit: 1
+              fields:
+                - {name: b, type: u8}
+  input: '{"mask": "both", "a": 1, "b": 2}'
+  payload: "030102"
+
+- name: disagreeing_enum_flagged_mask
+  schema: |
+    name: t
+    fields:
+      - name: mask
+        type: enum
+        base: u8
+        values: {1: one, 2: two, 3: both}
+      - flagged:
+          field: mask
+          groups:
+            - bit: 0
+              fields:
+                - {name: a, type: u8}
+            - bit: 1
+              fields:
+                - {name: b, type: u8}
+  input: '{"mask": "one", "a": 1, "b": 2}'
+  error: "Flagged field 'mask' is given 1, and the groups given set 3 (PS-551)"
+
+- name: disagreeing_text_label_flagged_mask
+  schema: |
+    name: t
+    fields:
+      - name: mask
+        type: u8
+        lookup: {1: one, 2: two, 3: both}
+      - flagged:
+          field: mask
+          groups:
+            - bit: 0
+              fields:
+                - {name: a, type: u8}
+            - bit: 1
+              fields:
+                - {name: b, type: u8}
+  input: '{"mask": "one", "a": 1, "b": 2}'
+  error: "Flagged field 'mask' is given 1, and the groups given set 3 (PS-551)"
+
 # --- Defined absence is still allowed ------------------------------------------------
 
 - name: optional_literal_internal_skip

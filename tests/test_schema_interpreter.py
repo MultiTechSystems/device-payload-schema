@@ -648,7 +648,9 @@ class TestEnumType:
         
         result = interpreter.decode(bytes([0xFF]))
         assert result.success
-        assert result.data['status'] == 'unknown(255)'
+        # PS-068 as CR-2026-132 amends it: omitted, as a lookup miss is (PS-269). It
+        # was reported as 'unknown(255)'.
+        assert 'status' not in result.data
     
     def test_encode_enum(self):
         """Test encoding enum back to integer."""

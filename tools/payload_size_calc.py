@@ -18,6 +18,9 @@ import yaml
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from schema_interpreter import byte_group_width  # noqa: E402
+
 
 def type_size(t: str) -> Optional[int]:
     basic = {
@@ -54,11 +57,7 @@ def fields_size(fields: List[Dict]) -> int:
     total = 0
     for f in fields:
         if 'byte_group' in f:
-            bg = f['byte_group']
-            if isinstance(bg, dict):
-                total += bg.get('size', 1)
-            else:
-                total += 1
+            total += byte_group_width(f)       # PS-070, CR-2026-131
         elif 'match' in f:
             # Take max case size
             match = f['match']
@@ -151,8 +150,7 @@ def get_min_max(fields: List[Dict]) -> Tuple[int, int]:
                 total += tag_sz + fields_size(case_fields)
             flag_groups.append(total)  # treat like optional
         elif 'byte_group' in f:
-            bg = f['byte_group']
-            fixed += bg.get('size', 1) if isinstance(bg, dict) else 1
+            fixed += byte_group_width(f)       # PS-070, CR-2026-131
         elif 'match' in f:
             pass  # variable
         else:
@@ -183,9 +181,7 @@ def analyze_fields(fields: List[Dict], indent: str) -> None:
                 cs = fields_size(case_fields)
                 print(f"{indent}  case {case_key}: {tag_sz + cs} bytes ({tag_sz} tag + {cs} data)")
         elif 'byte_group' in f:
-            bg = f['byte_group']
-            sz = bg.get('size', 1) if isinstance(bg, dict) else 1
-            fixed += sz
+            fixed += byte_group_width(f)       # PS-070, CR-2026-131
         elif 'match' in f:
             pass
         else:
