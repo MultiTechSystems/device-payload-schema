@@ -220,7 +220,7 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2684 payload vectors in `schemas/devices/` (measured 2026-10-11 with
+The 2688 payload vectors in `schemas/devices/` (measured 2026-10-11 with
 `tools/check-floors.py`, after the CR-2026-118 and CR-2026-124 fixtures, CR-2026-117's
 guard-absent-operand, the `match-u32-*` and names-mangling-alike fixtures, CR-2026-127's
 guard-boolean-operand, the CR-2026-121 and CR-2026-123 fixtures, CR-2026-110's,
@@ -232,10 +232,10 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1841 |
-| Go | `go/schema/corpus_conformance_test.go` | 2684 | 1858 (plain API 1835) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2684 | 1842 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2684 | 1841 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1845 |
+| Go | `go/schema/corpus_conformance_test.go` | 2688 | 1862 (plain API 1839) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2688 | 1846 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2688 | 1845 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 554 of 554 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -810,10 +810,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1841 |
-| Go | `go/schema/corpus_encode_test.go` | 1858 (plain 1835) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1841 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1842 |
+| Python | `tests/test_encode_round_trip.py` | 1845 |
+| Go | `go/schema/corpus_encode_test.go` | 1862 (plain 1839) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1845 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1846 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -2098,8 +2098,19 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     both groups given wrote `01 01 02`. The cases are in `tests/cr-2026-134-cases.yaml`. The
     two together re-encode `lookup-reference-binding`'s `an_unnamed_enum_code_is_omitted_but_bound`,
     which neither did alone: the code reports no name, so the discriminator is derived.
-    Decoding a flagged block whose mask is an enum or looked-up field still fails with
-    `Flagged field reference not found`, on master too; not fixed here.
+    Decoding a flagged block whose mask is an enum or looked-up field failed with
+    `Flagged field reference not found` - fixed since, and the lookup was not the cause
+    (next entry).
+  - **A flagged mask written `$mask` was never resolved.** Every decoder looked the
+    `field:` text up as written, while names bind bare, so `field: $m` failed in Python,
+    Go, Java and C# for any mask - plain, looked-up or enum - and the generated codec read
+    `vars._m`, never bound, skipped every group and reported success. The corpus spells
+    all 75 masks bare, which is why nothing saw it; the spec prototype strips the `$`, and
+    every encoder already did. All five now strip it and read the PS-523 binding, so a
+    text label's mask is its number, an enum's its code and a numeric label itself; the
+    generated codec throws the same error where the mask is unbound. C stripped it
+    already. Fixture: `mask-reference-binding.yaml` (decode floors +4 in Go, Java and C#,
+    re-encode and `flagged` +4 everywhere).
   - **Also fixed on the way:** Python and the runtime refused a `flagged` block inside a
     match, tlv or repeat ("declares no type"), and every encoder passed over a construct
     nested in a flagged group as nameless, dropping its values silently

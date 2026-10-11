@@ -1657,7 +1657,12 @@ public class Schema {
     }
 
     private Map<String, Object> decodeFlagged(Field.FlaggedDef fd, DecodeContext ctx) {
-        Object flagsVal = ctx.getVariable(fd.getField());
+        // The mask is a reference like any other, so it reads the PS-523 binding that
+        // DecodeContext.bind made: the number under a text or boolean label, a numeric
+        // label itself, an enum's code. Written `$mask` it found nothing.
+        String maskName = fd.getField() == null ? "" : fd.getField();
+        if (maskName.startsWith("$")) maskName = maskName.substring(1);
+        Object flagsVal = ctx.getVariable(maskName);
         if (flagsVal == null) {
             throw new SchemaException.DecodeException("Flagged field reference not found: " + fd.getField());
         }

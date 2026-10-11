@@ -4358,9 +4358,13 @@ class SchemaInterpreter:
         field_name = flagged_def.get('field', '')
         groups = flagged_def.get('groups', [])
         
-        if field_name not in self._variables:
+        # The mask is a reference like any other, so it reads the PS-523 binding: the
+        # number under a text or boolean label, a numeric label itself, an enum's code.
+        # Written `$mask`, it found nothing, because the variables are bound by name.
+        var_name = str(field_name).lstrip('$')
+        if var_name not in self._variables:
             raise ValueError(f"Flagged field reference not found: {field_name}")
-        flags = int(self._variables[field_name])
+        flags = int(self._variables[var_name])
         
         # A present group's fields are a field list (PS-347, PS-441), decoded as the top
         # level is. They were their own loop of plain reads, so a group holding another

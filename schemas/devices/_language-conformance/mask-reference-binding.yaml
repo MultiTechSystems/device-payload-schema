@@ -1,0 +1,80 @@
+# PS-523 (CR-2026-109, CR-2026-132): a presence mask is a reference like any other, so
+# it binds what every `$` reference binds for a labelled field.
+#
+# - A text label: the mask is the number under the label (port 1).
+# - An enum: the mask is the code (port 2).
+# - A numeric label: the mask is the label itself (port 3). The table maps code 1 to 2,
+#   so binding the code would select bit 0 and read `a`, where the label selects bit 1
+#   and reads `b`.
+# - Written without `$`, the name resolves to the same binding (port 4).
+#
+# Bit 0 adds `a` and bit 1 adds `b`. Every vector re-encodes to its payload: the encoder
+# reverses the label to the code it writes and checks it against the groups given.
+name: probe_mask_reference_binding
+endian: big
+ports:
+  1:
+    fields:
+      - {name: mask, type: u8, lookup: {2: two}}
+      - flagged:
+          field: $mask
+          groups:
+            - {bit: 0, fields: [{name: a, type: u8}]}
+            - {bit: 1, fields: [{name: b, type: u8}]}
+  2:
+    fields:
+      - {name: mask, type: enum, base: u8, values: {3: both}}
+      - flagged:
+          field: $mask
+          groups:
+            - {bit: 0, fields: [{name: a, type: u8}]}
+            - {bit: 1, fields: [{name: b, type: u8}]}
+  3:
+    fields:
+      - {name: mask, type: u8, lookup: [0, 2, 1]}
+      - flagged:
+          field: $mask
+          groups:
+            - {bit: 0, fields: [{name: a, type: u8}]}
+            - {bit: 1, fields: [{name: b, type: u8}]}
+  4:
+    fields:
+      - {name: mask, type: u8, lookup: {2: two}}
+      - flagged:
+          field: mask
+          groups:
+            - {bit: 0, fields: [{name: a, type: u8}]}
+            - {bit: 1, fields: [{name: b, type: u8}]}
+test_vectors:
+  - name: a_text_label_binds_its_number
+    payload: "02 07"
+    fPort: 1
+    source: spec-example
+    expected:
+      mask: two
+      a: null
+      b: 7
+  - name: an_enum_binds_its_code
+    payload: "03 07 08"
+    fPort: 2
+    source: spec-example
+    expected:
+      mask: both
+      a: 7
+      b: 8
+  - name: a_numeric_label_binds_itself
+    payload: "01 07"
+    fPort: 3
+    source: spec-example
+    expected:
+      mask: 2
+      a: null
+      b: 7
+  - name: a_bare_name_binds_the_same
+    payload: "02 07"
+    fPort: 4
+    source: spec-example
+    expected:
+      mask: two
+      a: null
+      b: 7

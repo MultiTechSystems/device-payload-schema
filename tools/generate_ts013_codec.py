@@ -2926,10 +2926,17 @@ function writeS(buf, pos, size, value, endian) {
         if 'flagged' in field:
             fg = field['flagged']
             flag_field = fg['field']
+            # The mask is a reference like any other, so it reads the PS-523 binding in
+            # `vars` (refValue): the number under a text or boolean label, a numeric label
+            # itself, an enum's code. Written `$mask` it read `vars._mask`, which is never
+            # bound, so every group was skipped with no error.
+            mask_js = to_js_name(str(flag_field).lstrip('$'))
             lines.append(f'{i}  // flagged on {flag_field}')
+            lines.append(f'{i}  if (vars.{mask_js} === undefined) throw new Error('
+                         f'{json.dumps("Flagged field reference not found: " + str(flag_field))});')
             for group in fg.get('groups', []):
                 bit = group['bit']
-                lines.append(f'{i}  if (vars.{to_js_name(flag_field)} & (1 << {bit})) {{')
+                lines.append(f'{i}  if (vars.{mask_js} & (1 << {bit})) {{')
                 self.indent += 1
                 for gf in group.get('fields', []):
                     lines.extend(self._gen_decode_field(gf))

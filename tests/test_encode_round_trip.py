@@ -96,7 +96,8 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # +1: the merge of the two. lookup-reference-binding's an_unnamed_enum_code_is_omitted_
 # but_bound (match) reports no discriminator, so neither side re-encoded it alone; with
 # PS-551 the code is derived from the case whose fields are given.
-FLOOR_TOTAL = 1841
+# +4: mask-reference-binding (flagged): a `$mask` reference resolves to its binding.
+FLOOR_TOTAL = 1845
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -105,7 +106,7 @@ FLOOR_BY_SHAPE = {
     # only because their internal byte halves were all zero, which the encoder wrote
     # for an internal field with no value. It now reports such a field instead.
     "tlv": 1305,   # +2: CR-2026-128; +3: CR-2026-125 fixtures; +1: tlv-repeat-merge (CR-2026-110)
-    "flagged": 194,  # +1: CR-2026-134 (see FLOOR_TOTAL)
+    "flagged": 198,  # +1: CR-2026-134; +4: mask-reference-binding (see FLOOR_TOTAL)
     "plain fixed": 147,
     # +1: CR-2026-132 enum port; +5: lookup-reference-binding (CR-2026-109);
     # +4: match-u32-inline-discriminator; +2: CR-2026-134; +1: both together (see
