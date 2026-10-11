@@ -218,6 +218,8 @@ C_UNSUPPORTED_KEYS = {
     # `type: repeat` is refused already; these name the keys where they appear.
     "element": "this format has no repeat record (PS-528)",
     "index_base": "this format has no repeat record (PS-530)",
+    # CR-2026-118: several records from one repeat element (PS-541).
+    "records": "this format has no repeat record (PS-541)",
     "fields": "this format has no nested object record",
     "name_from": "this format has no name template",
     # Read only in a tlv case, which is already refused above; listed so a field

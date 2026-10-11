@@ -578,6 +578,15 @@ public static class SchemaEncoder
         /// earlier in the list, which the main loop encodes from its own value, and
         /// `until: end` needs no header at all.
         /// </remarks>
+        /// <summary>
+        /// Whether an element's fields reach a `records` entry (PS-541): directly, or through
+        /// a match case or default (records_reachable in the reference).
+        /// </summary>
+        static bool RecordsReachable(IEnumerable<SchemaField> fields) =>
+            fields.Any(f => f.Records != null
+                || (f.MatchInline is { } m && (m.Cases.Any(c => RecordsReachable(c.Fields))
+                    || (m.MatchDefault is List<SchemaField> d && RecordsReachable(d)))));
+
         byte[] EncodeRepeat(SchemaField field, Dictionary<string, object?> data)
         {
             if (string.IsNullOrEmpty(field.Name) || !data.TryGetValue(field.Name, out var records)
@@ -591,6 +600,10 @@ public static class SchemaEncoder
                 _ => throw new InvalidOperationException(
                     $"repeat field '{field.Name}': expected a list of records, got {records.GetType().Name}")
             };
+            if (RecordsReachable(field.Fields))
+                // PS-542: the records do not say which element they came from.
+                throw new InvalidOperationException($"Repeat '{field.Name}' has elements that yield "
+                    + "several records, which cannot be encoded (PS-542)");
             if (field.ElementName != null)
             {
                 // PS-529: each value is encoded as the element, wrapped as it was decoded.

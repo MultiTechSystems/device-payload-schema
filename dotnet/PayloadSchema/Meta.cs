@@ -204,6 +204,12 @@ public static class Meta
         {
             foreach (var f in items)
             {
+                if (Get(f, "records") is YamlSequenceNode recordBodies && !Has(f, "type"))
+                {
+                    foreach (var body in recordBodies.Children)
+                        Visit(Items(body));                                         // PS-541
+                    continue;
+                }
                 var group = Get(f, "byte_group");
                 if (group != null && !IsNullNode(group))
                     Visit(Items(group is YamlMappingNode gm ? Get(gm, "fields") : group));
@@ -507,6 +513,12 @@ public static class Meta
             {
                 foreach (var f in items)
                 {
+                    if (Get(f, "records") is YamlSequenceNode recordBodies && !Has(f, "type"))
+                    {
+                        foreach (var body in recordBodies.Children)
+                            Visit(Items(body));                                     // PS-541
+                        continue;
+                    }
                     var group = Get(f, "byte_group");
                     if (group != null && !IsNullNode(group))
                         Visit(Items(group is YamlMappingNode gm ? Get(gm, "fields") : group));

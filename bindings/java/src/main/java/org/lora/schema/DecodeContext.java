@@ -100,6 +100,12 @@ public class DecodeContext {
     public void setLimit(int limit) { this.limit = limit; }
 
     void setRepeatOnlyNames(Set<String> names) { this.repeatOnlyNames = names == null ? Set.of() : names; }
+    /** The records the current repeat element yields (PS-541); null outside an element. */
+    private List<Map<String, Object>> pendingRecords;
+
+    List<Map<String, Object>> getPendingRecords() { return pendingRecords; }
+    void setPendingRecords(List<Map<String, Object>> records) { this.pendingRecords = records; }
+
     Set<String> getElementNames() { return elementNames; }
     void setElementNames(Set<String> names) { this.elementNames = names; }
 

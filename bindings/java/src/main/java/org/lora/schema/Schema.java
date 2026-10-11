@@ -713,7 +713,7 @@ public class Schema {
 
     /** The keys that make a field a construct, so it declares no type of its own. */
     private static final List<String> CONSTRUCT_KEYS =
-            List.of("$ref", "flagged", "tlv", "byte_group", "match");
+            List.of("$ref", "flagged", "tlv", "byte_group", "match", "records");
 
     private static boolean hasConstruct(Map<String, Object> fm) {
         for (String key : CONSTRUCT_KEYS) {
@@ -1124,6 +1124,18 @@ public class Schema {
             f.setMatchInline(matchField);
         }
 
+        // PS-541: field lists, each yielding one record of the enclosing repeat element.
+        // Where it may appear and its shape are Wave6a.recordsErrors', checked at load.
+        if (fm.get("records") instanceof List<?> bodies && fm.get("type") == null) {
+            List<List<Field>> parsed = new ArrayList<>();
+            for (Object body : bodies) {
+                if (body instanceof List<?> list) {
+                    parsed.add(parseFields((List<Map<String, Object>>) list));
+                }
+            }
+            f.setRecords(parsed);
+        }
+
         // TLV inline
         Object tlvRaw = fm.get("tlv");
         if (tlvRaw instanceof Map) {
@@ -1455,6 +1467,19 @@ public class Schema {
                         result.put(key, entry.getValue());
                         ctx.setVariable(key, entry.getValue());
                     }
+                }
+                continue;
+            }
+
+            // PS-541: each field list yields one record, which the enclosing repeat
+            // reports in place of the element.
+            if (field.getRecords() != null) {
+                if (ctx.getPendingRecords() == null) {
+                    throw new SchemaException.DecodeException("`records` belongs in a repeat's element, "
+                            + "or a match case within it (PS-541)");
+                }
+                for (List<Field> body : field.getRecords()) {
+                    ctx.getPendingRecords().add(decodeFields(body, ctx));
                 }
                 continue;
             }
@@ -2601,6 +2626,10 @@ public class Schema {
         ctx.getVariables().putAll(carryState);                              // PS-379
         Map<String, Object> element;
         boolean keep;
+        // PS-541: the records this element's `records` entry yields, if it reaches one.
+        List<Map<String, Object>> savedRecords = ctx.getPendingRecords();
+        List<Map<String, Object>> records = new ArrayList<>();
+        ctx.setPendingRecords(records);
         try {
             element = decodeFields(members, ctx);
             for (String carried : carryState.keySet()) {
@@ -2613,9 +2642,18 @@ public class Schema {
             // PS-368: an element's names do not outlive it.
             ctx.restoreVariables(outer);
             ctx.setElementNames(savedNames);
+            ctx.setPendingRecords(savedRecords);
         }
         iterations[0]++;
-        if (keep) {                                                         // PS-386
+        if (keep && !records.isEmpty()) {
+            // PS-541: the records, as consecutive elements, in place of the element; the
+            // element's other reported fields go into each, before its own.
+            for (Map<String, Object> record : records) {
+                Map<String, Object> merged = new LinkedHashMap<>(element);
+                merged.putAll(record);
+                result.add(merged);
+            }
+        } else if (keep) {                                                  // PS-386
             // PS-528: an element repeat reports the value, or null where it was omitted.
             result.add(repeat.getElementName() == null ? element : elementValue(element));
         }
@@ -2810,7 +2848,8 @@ public class Schema {
     }
 
     /** The comparison operators a guard condition may carry, in precedence order. */
-    private static final List<String> GUARD_OPS = List.of("gt", "gte", "lt", "lte", "eq", "ne");
+    private static final List<String> GUARD_OPS =
+            List.of("gt", "gte", "lt", "lte", "eq", "ne", "in", "not_in");     // PS-543
 
     private static Field.Guard parseGuard(Map<?, ?> guardRaw) {
         Field.Guard guard = new Field.Guard();
@@ -2828,7 +2867,13 @@ public class Schema {
                     Field.Condition condition = new Field.Condition();
                     condition.setField(reference);
                     condition.setOp(op);
-                    condition.setOperand(toDouble(cm.get(op)));
+                    if (cm.get(op) instanceof List<?> values) {                  // PS-543
+                        List<Double> operands = new ArrayList<>();
+                        for (Object v : values) operands.add(toDouble(v));
+                        condition.setOperands(operands);
+                    } else {
+                        condition.setOperand(toDouble(cm.get(op)));
+                    }
                     guard.getWhen().add(condition);
                     break;
                 }
@@ -3088,6 +3133,8 @@ public class Schema {
                 case "lte" -> value <= operand;
                 case "eq" -> value == operand;
                 case "ne" -> value != operand;
+                case "in" -> condition.getOperands().contains(value);          // PS-543
+                case "not_in" -> !condition.getOperands().contains(value);
                 default -> true;
             };
             if (!passed) return false;

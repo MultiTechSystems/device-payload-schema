@@ -251,6 +251,12 @@ public class Field {
     /** Fields decoded from a repeat's reserved bytes (PS-383). */
     private List<Field> trailer;
 
+    /** A {@code records} entry (PS-541): field lists, each yielding one record. */
+    private List<List<Field>> records;
+
+    public List<List<Field>> getRecords() { return records; }
+    public void setRecords(List<List<Field>> records) { this.records = records; }
+
     /**
      * A repeat of single values (PS-528): the name its one element field is decoded under,
      * the element's own name or "element". Null for a repeat declaring {@code fields}.
@@ -555,6 +561,11 @@ public class Field {
         private String field;
         private String op;
         private Double operand;
+        /** The numbers of an {@code in} or {@code not_in} condition (PS-543). */
+        private List<Double> operands;
+
+        public List<Double> getOperands() { return operands; }
+        public void setOperands(List<Double> operands) { this.operands = operands; }
 
         public String getField() { return field; }
         public void setField(String field) { this.field = field; }

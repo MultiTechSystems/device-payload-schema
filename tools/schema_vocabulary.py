@@ -143,6 +143,7 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "on_repeat": (_DECODERS, "collect | merge | last, in a tlv case (PS-525)"),
         "flagged": (_DECODERS, "bitmask-gated groups"),
         "byte_group": (_DECODERS, "fields sharing bytes"),
+        "records": (_DECODERS, "field lists, each one element of a repeat (PS-541)"),
         "size": (_DECODERS, "byte count of the array `byte_group` spelling"),
         "$ref": (_DECODERS, "splices a definition"),
         "bit": (_DECODERS, "bit index of a `type: bool`"),
@@ -245,6 +246,8 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "lte": (_DECODERS, "comparison"),
         "eq": (_DECODERS, "comparison"),
         "ne": (_DECODERS, "comparison"),
+        "in": (_DECODERS, "a list of numbers, one of which the value equals (PS-543)"),
+        "not_in": (_DECODERS, "a list of numbers the value equals none of (PS-543)"),
     },
     "ipso": {
         "object": (("py", "score"), "IPSO object id, checked by the scorer"),
@@ -449,6 +452,10 @@ def iter_keys(schema: Any) -> Iterator[Tuple[str, str, str]]:
             elif key == "element" and isinstance(value, dict):
                 # A repeat of single values: one field definition (PS-528).
                 yield from field(value, kpath)
+            elif key == "records" and isinstance(value, list):
+                # Several field lists, each yielding one element (PS-541).
+                for i, body in enumerate(value):
+                    yield from field_list(body, "%s[%d]" % (kpath, i))
             elif key == "present_if" and isinstance(value, dict):
                 # One guard condition (PS-386), with the guard condition's keys.
                 yield from rec("guard_when", value, kpath)

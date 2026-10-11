@@ -227,6 +227,9 @@ type Field struct {
 	// Carry is a computed element field's value before the first element: a number or a
 	// `$name` (PS-378). nil when the field carries nothing.
 	Carry any `json:"-" yaml:"-"`
+	// Records is a `records` entry's field lists, each yielding one element of the
+	// enclosing repeat (PS-541; see cr118.go). nil where the field is not one.
+	Records [][]Field `json:"-" yaml:"-"`
 
 	// The field-level rules of 0.5.2 wave 6b (see wave6b.go). LengthRef is a `length`
 	// naming a preceding field, without its `$` (PS-464). Optional fields end a list
@@ -291,6 +294,12 @@ type GuardCondition struct {
 	Lte   *float64 `json:"lte,omitempty" yaml:"lte,omitempty"`
 	Eq    *float64 `json:"eq,omitempty" yaml:"eq,omitempty"`
 	Ne    *float64 `json:"ne,omitempty" yaml:"ne,omitempty"`
+	// In and NotIn are the set operators (PS-543), each a list of numbers; HasIn and
+	// HasNotIn record that the key was written, since an empty list is still one.
+	In       []float64 `json:"-" yaml:"-"`
+	NotIn    []float64 `json:"-" yaml:"-"`
+	HasIn    bool      `json:"-" yaml:"-"`
+	HasNotIn bool      `json:"-" yaml:"-"`
 }
 
 // GuardDef represents conditional evaluation with fallback.
@@ -378,6 +387,9 @@ type DecodeContext struct {
 	// whose members are not top-level keys. See meta.go.
 	metaProducers map[string]map[string]any
 	metaDepth     int
+	// pendingRecords collects what a repeat element's `records` entry yields (PS-541);
+	// nil outside an element.
+	pendingRecords *[]map[string]any
 }
 
 // EncodeContext maintains state during encoding.
@@ -910,6 +922,10 @@ func ParseSchema(data string) (*Schema, error) {
 	}
 	// 0.5.2 wave 6a: the repeat iterator's and the tlv reserve's schema rules.
 	if err := checkIteratorRules(raw); err != nil {
+		return nil, err
+	}
+	// CR-2026-118: where `records` may appear (PS-541), and the set conditions (PS-543).
+	if err := checkRecordsRules(raw); err != nil {
 		return nil, err
 	}
 	// 0.5.2 wave 6b: optional fields end their list (PS-404), and the names reserved
@@ -1655,6 +1671,7 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 						nef := float64(ne)
 						gc.Ne = &nef
 					}
+					parseSetConditions(&gc, wm) // PS-543
 					gd.When = append(gd.When, gc)
 				}
 			}
@@ -1698,6 +1715,11 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 			tlvField.TLVCases = parseTLVCases(tlvRaw)
 		}
 		f.TLVInline = &tlvField
+	}
+
+	// PS-541: several field lists, each yielding one element of the enclosing repeat.
+	if bodies, ok := fm["records"].([]any); ok && fm["type"] == nil {
+		f.Records = parseRecords(bodies)
 	}
 
 	// Match inline (for Option B syntax: `- match: { field: $var, cases: {...} }`)
@@ -2092,6 +2114,16 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 			for k, v := range flaggedResult {
 				result[k] = v
 				ctx.Variables[k] = v
+			}
+			continue
+		}
+
+		// PS-541: each field list yields one record, which the enclosing repeat reports
+		// in place of the element. checkRecordsRules confines it, at load, to a repeat's
+		// element or a match case within it.
+		if field.Records != nil {
+			if err := decodeRecords(field, ctx, schema); err != nil {
+				return nil, err
 			}
 			continue
 		}
@@ -4628,6 +4660,10 @@ func encodeRepeat(field Field, data map[string]any, ctx *EncodeContext) error {
 
 // encodeRepeatRecords writes a repeat's records back to back.
 func encodeRepeatRecords(field Field, records []any, ctx *EncodeContext) error {
+	if recordsReachable(field.Fields) {
+		// PS-542: the records do not say which element they came from.
+		return fmt.Errorf("Repeat '%s' has elements that yield several records, which cannot be encoded (PS-542)", field.Name)
+	}
 	if presentIfBlocksEncode(field) {
 		return fmt.Errorf("repeat field %q declares present_if and its elements read payload "+
 			"bytes, so the elements it dropped cannot be encoded (PS-387)", field.Name)
@@ -5998,6 +6034,9 @@ func guardConditionsHold(gd *GuardDef, ctx *DecodeContext) bool {
 			return false
 		}
 		if cond.Ne != nil && !(fv != *cond.Ne) {
+			return false
+		}
+		if !setConditionHolds(cond, fv) { // PS-543
 			return false
 		}
 	}
