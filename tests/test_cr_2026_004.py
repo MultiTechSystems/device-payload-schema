@@ -151,8 +151,15 @@ class TestComputedFieldNames:
         assert "region_7_avg_dwell" in decoded(NAMED, "070100")
 
     def test_unresolved_reference_is_an_error(self):
+        # A name the schema never declares is refused before decoding (PS-539,
+        # CR-2026-117); one declared but not yet decoded is the decode error.
         schema = 'name: bad\nfields:\n  - {name: v, type: u8, name_from: "x_${nope}"}\n'
         result = decode(schema, "01")
+        assert not result.success
+        assert "PS-539" in result.errors[0]
+        schema = ('name: bad\nfields:\n  - {name: v, type: u8, name_from: "x_${later}"}\n'
+                  '  - {name: later, type: u8}\n')
+        result = decode(schema, "0102")
         assert not result.success
         assert "not been decoded" in result.errors[0]
 

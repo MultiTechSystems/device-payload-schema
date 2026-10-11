@@ -1,0 +1,76 @@
+# A condition on a value the payload did not yield fails (PS-540, CR-2026-117). The
+# operand is never read as 0: here every condition is `gte: 0`, which a 0 would pass.
+#
+# A zero divisor leaves `ratio` without a value (PS-278, PS-314). `level` then takes
+# its fallback, as when any condition fails (PS-444); `level_or_absent` has no
+# fallback, so it is omitted (PS-400). In `slots`, an element whose `share` divides by
+# a zero id has no `share`, its condition fails, and the element is dropped (PS-386).
+#
+# The second vector has a divisor and no zero id, so everything is reported.
+#
+# The array's dropped element cannot be re-encoded (PS-387), so no vector here
+# round-trips.
+name: probe_guard_absent_operand
+endian: big
+fields:
+- name: reading
+  type: u8
+- name: divisor
+  type: u8
+- name: ratio
+  type: number
+  compute: {op: div, a: $reading, b: $divisor}
+- name: level
+  type: number
+  ref: $reading
+  guard:
+    when:
+    - field: $ratio
+      gte: 0
+    else: -1
+- name: level_or_absent
+  type: number
+  ref: $reading
+  guard:
+    when:
+    - field: $ratio
+      gte: 0
+- name: slots
+  type: repeat
+  count: 2
+  present_if:
+    field: $share
+    gte: 0
+  fields:
+  - name: id
+    type: u8
+  - name: share
+    type: number
+    compute: {op: div, a: 12, b: $id}
+test_vectors:
+- name: absent_operand
+  source: spec-example
+  payload: "0A 00 00 04"
+  expected:
+    reading: 10
+    divisor: 0
+    ratio: null
+    level: -1
+    level_or_absent: null
+    slots:
+    - id: 4
+      share: 3
+- name: operand_present
+  source: spec-example
+  payload: "0A 05 06 04"
+  expected:
+    reading: 10
+    divisor: 5
+    ratio: 2
+    level: 10
+    level_or_absent: 10
+    slots:
+    - id: 6
+      share: 2
+    - id: 4
+      share: 3

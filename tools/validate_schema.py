@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from schema_interpreter import (SchemaInterpreter, DecodeResult, check_byte_group_overlap,
                                 byte_group_endian,
                                 encoding_errors, expand_refs, fport_declaration_errors,
-                                annotation_schema_errors,
+                                annotation_schema_errors, reference_errors,
                                 arithmetic_schema_errors, case_body_errors,
                                 internal_name_errors, meta_declaration_errors,
                                 literal_errors,
@@ -1321,6 +1321,8 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
         # PS-510: ipso and senml are mappings. Checked after the `$ref`s are spliced, as
         # every loader checks it, so a definition's fields are held to it where used.
         errors.extend(annotation_schema_errors(expand_refs(schema)[0]))
+        # PS-539: every `$` reference names something the schema declares.
+        errors.extend(reference_errors(expand_refs(schema)[0]))
         errors.extend(meta_declaration_errors(schema))           # PS-491
         # PS-350, PS-366 to PS-387, PS-471: the repeat iterator and reserve.
         errors.extend(schema_iterator_errors(schema))
