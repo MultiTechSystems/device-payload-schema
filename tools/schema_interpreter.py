@@ -1266,7 +1266,7 @@ def iterator_errors(fields, enclosing=(), in_elements=False, where='fields'):
             if present_if is not None and not (
                     isinstance(present_if, dict)
                     and isinstance(present_if.get('field'), str)
-                    and any(op in present_if for op in ('gt', 'gte', 'lt', 'lte', 'eq', 'ne'))):
+                    and any(op in present_if for op in CONDITION_OPS)):
                 errors.append(f"{at}: present_if must be one guard condition, "
                               f"{{field: $name, <op>: value}} (PS-386)")
             identity = f.get('identity')
@@ -1377,6 +1377,131 @@ def case_body_errors(schema):
     return errors
 
 
+#: The comparison operators of a guard condition and `present_if` (PS-126, PS-543).
+CONDITION_OPS = ('gt', 'gte', 'lt', 'lte', 'eq', 'ne', 'in', 'not_in')
+
+#: The set operators (PS-543): each takes a list of numbers.
+SET_OPS = ('in', 'not_in')
+
+
+def records_reachable(fields):
+    """Whether a field list reaches a `records` entry (PS-541): directly, or through a
+    match case or default, which merge into the list. Nothing else is descended into: a
+    `records` entry anywhere else is rejected at load (records_errors)."""
+    for item in fields or []:
+        if not isinstance(item, dict):
+            continue
+        if 'records' in item and not item.get('type'):
+            return True
+        match = item.get('match')
+        if isinstance(match, dict) and not item.get('type'):
+            cases = match.get('cases') if isinstance(match.get('cases'), dict) else {}
+            bodies = list(cases.values()) + [match.get('default')]
+            if any(isinstance(b, list) and records_reachable(b) for b in bodies):
+                return True
+    return False
+
+
+def records_errors(schema):
+    """PS-541: a `records` entry is a non-empty list of field lists, in a repeat's
+    element or a match case within it, and never reached from an `element` (PS-528).
+
+    The wording is shared by Go, Java, C# and the TS013 generator."""
+    errors = []
+
+    def walk(fields, in_element):
+        for item in fields if isinstance(fields, list) else []:
+            if not isinstance(item, dict):
+                continue
+            if 'records' in item and not item.get('type'):
+                if not in_element:
+                    errors.append("`records` belongs in a repeat's element, or a match "
+                                  "case within it (PS-541)")
+                bodies = item['records']
+                if not (isinstance(bodies, list) and bodies
+                        and all(isinstance(b, list) for b in bodies)):
+                    errors.append(
+                        "`records` is a non-empty list of field lists (PS-541)")
+                    continue
+                for body in bodies:
+                    walk(body, False)
+                continue
+            if item.get('type') == 'repeat':
+                element = item.get('element')
+                if isinstance(element, dict):
+                    if records_reachable([element]):
+                        label = item.get('name', '<unnamed>')
+                        errors.append(f"Repeat '{label}': an `element` cannot reach a "
+                                      f"`records` entry (PS-541)")
+                    else:
+                        walk([element], False)
+                walk(item.get('fields'), True)
+                walk(item.get('trailer'), False)
+                continue
+            match = item.get('match')
+            if isinstance(match, dict) and not item.get('type'):
+                cases = match.get('cases')
+                cases = cases if isinstance(cases, dict) else {}
+                for body in list(cases.values()) + [match.get('default')]:
+                    walk(body, in_element)
+            if isinstance(item.get('cases'), dict):
+                for body in item['cases'].values():
+                    walk(body, False)
+            walk(item.get('fields'), False)
+            tlv = item.get('tlv')
+            if isinstance(tlv, dict) and isinstance(tlv.get('cases'), dict):
+                for body in tlv['cases'].values():
+                    walk(body, False)
+            flagged = item.get('flagged')
+            if isinstance(flagged, dict):
+                for group in flagged.get('groups') or []:
+                    if isinstance(group, dict):
+                        walk(group.get('fields'), False)
+            group = item.get('byte_group')
+            walk(group.get('fields') if isinstance(group, dict) else group, False)
+
+    walk(schema.get('fields'), False)
+    for entry in (schema.get('ports') or {}).values():
+        walk(entry.get('fields') if isinstance(entry, dict) else entry, False)
+    return errors
+
+
+def condition_errors(schema):
+    """PS-543: a condition's `in` or `not_in` is a list of numbers, and it is the
+    condition's one operator (PS-126). Over every guard condition and `present_if`."""
+    errors = []
+
+    def check(cond):
+        if not isinstance(cond, dict) or not any(op in cond for op in SET_OPS):
+            return
+        if sum(op in cond for op in CONDITION_OPS) != 1:
+            errors.append("a condition with `in` or `not_in` has no other comparison "
+                          "operator (PS-126, PS-543)")
+        for op in SET_OPS:
+            values = cond.get(op)
+            if op in cond and not (isinstance(values, list) and all(
+                    isinstance(v, (int, float)) and not isinstance(v, bool)
+                    for v in values)):
+                errors.append(f"a condition's `{op}` is a list of numbers (PS-543)")
+
+    def walk(node):
+        if isinstance(node, dict):
+            check(node.get('present_if'))
+            guard = node.get('guard')
+            if isinstance(guard, dict) and isinstance(guard.get('when'), list):
+                for cond in guard['when']:
+                    check(cond)
+            for key, value in node.items():
+                if key != 'test_vectors':
+                    walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(schema)
+    return errors
+
+
 def schema_iterator_errors(schema):
     """iterator_errors over the top-level and port field lists, and every tlv's reserve."""
     errors = iterator_errors(schema.get('fields'))
@@ -1397,6 +1522,8 @@ def schema_iterator_errors(schema):
 
     for node in tlvs(schema):
         errors.extend(tlv_reserve_errors(node))
+    errors.extend(records_errors(schema))                            # PS-541
+    errors.extend(condition_errors(schema))                          # PS-543
     return errors
 
 
@@ -1860,6 +1987,10 @@ def meta_declarations(fields):
                 for g in f['flagged'].get('groups') or []:
                     if isinstance(g, dict):
                         visit(g.get('fields'))
+            if isinstance(f.get('records'), list) and not f.get('type'):
+                for body in f['records']:                            # PS-541
+                    visit(body)
+                continue
             match = f.get('match')
             if isinstance(match, dict):
                 for body in (match.get('cases') if isinstance(match.get('cases'), dict) else {}).values():
@@ -2053,6 +2184,10 @@ def meta_declaration_errors(schema):
                     for g in f['flagged'].get('groups') or []:
                         if isinstance(g, dict):
                             visit(g.get('fields'))
+                if isinstance(f.get('records'), list) and not f.get('type'):
+                    for body in f['records']:                        # PS-541
+                        visit(body)
+                    continue
                 match = f.get('match')
                 if isinstance(match, dict):
                     for body in (match.get('cases') if isinstance(match.get('cases'), dict) else {}).values():
@@ -2121,6 +2256,9 @@ class SchemaInterpreter:
     - Semantic mappings (IPSO, SenML)
     """
     
+    #: PS-541: the records the current repeat element yields; None outside an element.
+    _pending_records = None
+
     def __init__(self, schema: Dict[str, Any]):
         # Every `$ref` is spliced before anything reads the schema (PS-346, PS-347), so
         # a reference works in any field list - a port entry, an object, a repeat, a
@@ -2913,10 +3051,14 @@ class SchemaInterpreter:
             self._variables.update(carry_state)                      # PS-379
             scratch = DecodeResult(data={}, bytes_consumed=0)
             self._current_data = scratch.data
+            # PS-541: the records this element's `records` entry yields, if any.
+            saved_records = self._pending_records
+            self._pending_records = []
             try:
                 new_pos = self._decode_field_list(nested_fields, region, at, scratch)
                 if scratch.errors:
                     raise ValueError(scratch.errors[0])
+                records = self._pending_records
                 for carried in carry_state:
                     if carried in self._variables:
                         carry_state[carried] = self._variables[carried]
@@ -2930,8 +3072,13 @@ class SchemaInterpreter:
                 self._variables = outer
                 self._current_data = saved_current
                 self._element_names = saved_names
+                self._pending_records = saved_records
             iterations += 1
-            if keep:                                                 # PS-386
+            if keep and records:
+                # PS-541: the records, as consecutive elements, in place of the element;
+                # the element's other reported fields go into each, before its own.
+                result.extend({**scratch.data, **record} for record in records)
+            elif keep:                                               # PS-386
                 # PS-528: an element repeat reports the value, or None where omitted.
                 result.append(scratch.data if element_name is None
                               else element_value(scratch.data))
@@ -3739,6 +3886,10 @@ class SchemaInterpreter:
                 passed = field_value == float(condition['eq'])
             elif 'ne' in condition:
                 passed = field_value != float(condition['ne'])
+            elif 'in' in condition:                                          # PS-543
+                passed = field_value in [float(v) for v in condition['in']]
+            elif 'not_in' in condition:
+                passed = field_value not in [float(v) for v in condition['not_in']]
             
             if not passed:
                 return (False, else_value)
@@ -4330,6 +4481,8 @@ class SchemaInterpreter:
         self._current_data = result.data
         # Variable storage for Option B match references
         self._variables = {}
+        # PS-541: the records the current repeat element yields; None outside one.
+        self._pending_records = None
         # Readings omitted under PS-427/PS-428, for `_quality` if it is produced.
         self._pending_absent = {}
         # `_quality` from match case bodies, which decode into a scratch result.
@@ -4525,6 +4678,23 @@ class SchemaInterpreter:
                     break
                 continue
             
+            # PS-541: each field list yields one record, which the enclosing repeat
+            # reports in place of the element. records_errors() confines it, at load, to
+            # a repeat's element or a match case within it.
+            if 'records' in field_def and not field_def.get('type'):
+                if self._pending_records is None:
+                    result.errors.append("`records` belongs in a repeat's element, or "
+                                         "a match case within it (PS-541)")
+                    break
+                try:
+                    for body in field_def['records']:
+                        record, pos = self._decode_nested_list(body, payload, pos)
+                        self._pending_records.append(record)
+                except Exception as e:
+                    result.errors.append(f"Error in records: {e}")
+                    break
+                continue
+
             # Option B: match: as top-level key
             if 'match' in field_def and not field_def.get('type'):
                 try:
@@ -5562,6 +5732,10 @@ class SchemaInterpreter:
                 f"repeat field {name!r}: expected a list of records, got "
                 f"{type(records).__name__}")
         record_fields, element_name = repeat_members(field_def)
+        if records_reachable(record_fields):
+            # PS-542: the records do not say which element they came from.
+            raise ValueError(f"Repeat '{name}' has elements that yield several "
+                             f"records, which cannot be encoded (PS-542)")
         if element_name is not None:
             # PS-529: each value is encoded as the element, wrapped as it was decoded.
             # CR-2026-111 leaves open what a null position encodes as; the spec

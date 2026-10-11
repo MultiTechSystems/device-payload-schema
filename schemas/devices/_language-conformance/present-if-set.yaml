@@ -1,0 +1,39 @@
+# A condition may test one value against a list of numbers: `in` holds where the value
+# equals one of them, `not_in` where it equals none (PS-543, CR-2026-118).
+#
+# Encoders refuse this schema (PS-387): a dropped element's bytes are not in the output.
+name: probe_present_if_set
+endian: big
+fields:
+- name: kept
+  type: repeat
+  count: 3
+  present_if:
+    field: $a
+    in: [1, 3]
+  fields:
+  - name: a
+    type: u8
+- name: dropped
+  type: repeat
+  count: 3
+  present_if:
+    field: $b
+    not_in: [1, 3]
+  fields:
+  - name: b
+    type: u8
+test_vectors:
+- name: in_keeps_listed_values
+  source: spec-example
+  payload: "01 02 03 01 02 03"
+  expected:
+    kept:
+    - a: 1
+    - a: 3
+- name: not_in_keeps_unlisted_values
+  source: spec-example
+  payload: "01 02 03 01 02 03"
+  expected:
+    dropped:
+    - b: 2

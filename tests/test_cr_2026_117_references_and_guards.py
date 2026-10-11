@@ -267,3 +267,32 @@ class TestGuardOnAnAbsentValue:
             ["node"], input=script, capture_output=True, text=True, check=True
         )
         assert json.loads(done.stdout)["c"] == expected
+
+
+class TestSetConditionOnAnAbsentValue:
+    """CR-2026-118's `not_in` holds for no value at all: an absent operand fails it."""
+
+    FIELDS = GUARDED + [
+        {
+            "name": "c",
+            "type": "number",
+            "ref": "$a",
+            "guard": {"when": [{"field": "$r", "not_in": [3]}], "else": -1},
+        }
+    ]
+
+    def test_the_interpreter(self):
+        assert decode(self.FIELDS, "0800") == {"a": 8, "d": 0, "c": -1}
+
+    def test_the_generated_codec(self):
+        code = TS013Generator(schema_of(self.FIELDS), slim=True).generate()
+        script = (
+            code
+            + "\nprocess.stdout.write(JSON.stringify(decodeUplink("
+            + json.dumps({"bytes": [8, 0], "fPort": 1})
+            + ").data));"
+        )
+        done = subprocess.run(
+            ["node"], input=script, capture_output=True, text=True, check=True
+        )
+        assert json.loads(done.stdout)["c"] == -1

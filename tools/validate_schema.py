@@ -33,6 +33,7 @@ from schema_interpreter import (SchemaInterpreter, DecodeResult, check_byte_grou
                                 internal_name_errors, meta_declaration_errors,
                                 literal_errors,
                                 lookup_template_errors, optional_errors, repeat_members,
+                                CONDITION_OPS,
                                 schema_iterator_errors,
                                 timestamp_errors,
                                 typed_field_dicts)
@@ -790,6 +791,21 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                     known_field_names.append(bgf['name'])
             continue
         
+        # PS-541: several field lists, each yielding one element of the enclosing
+        # repeat. Where it may appear, and its shape, are schema_iterator_errors'
+        # (records_errors, the wording shared with every implementation).
+        if 'records' in fld and not fld.get('type'):
+            bodies = fld['records'] if isinstance(fld['records'], list) else []
+            for ri, body in enumerate(bodies):
+                if isinstance(body, list):
+                    validate_field_list(body, f"{path}[{i}].records[{ri}]", errors,
+                                        list(known_field_names))
+            for body in bodies:
+                for rf in body if isinstance(body, list) else []:
+                    if isinstance(rf, dict) and isinstance(rf.get('name'), str):
+                        known_field_names.append(rf['name'])
+            continue
+
         # Every construct the interpreters dispatch on at field level. `$ref` was
         # missing, so a schema pulling its header in from `definitions` was reported
         # invalid (ref-header.yaml). `flagged` was missing from the condition while
@@ -1040,7 +1056,7 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                         if not isinstance(when, list):
                             errors.append(f"{path}[{i}] ({name}): guard 'when' must be an array")
                         else:
-                            valid_ops = ('gt', 'gte', 'lt', 'lte', 'eq', 'ne')
+                            valid_ops = CONDITION_OPS              # PS-126, PS-543
                             for ci, cond in enumerate(when):
                                 if not isinstance(cond, dict):
                                     errors.append(f"{path}[{i}] ({name}): guard.when[{ci}] must be an object")

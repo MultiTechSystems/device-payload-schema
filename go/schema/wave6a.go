@@ -48,6 +48,7 @@ func parseGuardCondition(raw map[string]any) *GuardCondition {
 	}
 	gc.Gt, gc.Gte, gc.Lt = bound("gt"), bound("gte"), bound("lt")
 	gc.Lte, gc.Eq, gc.Ne = bound("lte"), bound("eq"), bound("ne")
+	parseSetConditions(gc, raw) // PS-543
 	return gc
 }
 
@@ -148,7 +149,7 @@ func elementValue(record map[string]any) any {
 
 var computedTypeNames = map[string]bool{"number": true, "integer": true}
 
-var guardOps = []string{"gt", "gte", "lt", "lte", "eq", "ne"}
+var guardOps = []string{"gt", "gte", "lt", "lte", "eq", "ne", "in", "not_in"}
 
 var templateReference = regexp.MustCompile(`\$\{([^}]+)\}`)
 
@@ -585,7 +586,12 @@ func (r *repeatElements) element() error {
 		ctx.Variables[name] = r.carry[name]
 	}
 
+	// PS-541: the records this element's `records` entry yields, if it reaches one.
+	savedRecords := ctx.pendingRecords
+	records := []map[string]any{}
+	ctx.pendingRecords = &records
 	element, err := decodeFields(r.field.Fields, ctx)
+	ctx.pendingRecords = savedRecords
 	keep := true
 	if err == nil {
 		for _, name := range r.carryOrder {
@@ -612,7 +618,20 @@ func (r *repeatElements) element() error {
 		return err
 	}
 	r.iterations++
-	if keep {
+	if keep && len(records) > 0 {
+		// PS-541: the records, as consecutive elements, in place of the element; the
+		// element's other reported fields go into each, before its own.
+		for _, record := range records {
+			merged := make(map[string]any, len(element)+len(record))
+			for k, v := range element {
+				merged[k] = v
+			}
+			for k, v := range record {
+				merged[k] = v
+			}
+			r.result = append(r.result, merged)
+		}
+	} else if keep {
 		if r.field.ElementName != "" {
 			// PS-528: the element's value, or nil where it was omitted.
 			r.result = append(r.result, elementValue(element))

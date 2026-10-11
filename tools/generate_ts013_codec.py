@@ -737,6 +737,10 @@ function encRepeat(out, f, data, ctx) {               // _encode_repeat
       var w = {}; w[en] = v; return w;
     });
   }
+  if (encReachesRecords(rf)) {
+    // PS-542: the records do not say which element they came from.
+    encFail("Repeat '" + name + "' has elements that yield several records, which cannot be encoded (PS-542)");
+  }
   if (f.present_if && rf.some(function (r) { return r && ENC_COMPUTED.indexOf(r.type) < 0 && !encIsLiteral(r); })) {
     encFail("repeat field " + JSON.stringify(name) + " declares present_if and its elements read payload bytes, so the elements it dropped cannot be encoded (PS-387)");
   }
@@ -747,6 +751,19 @@ function encRepeat(out, f, data, ctx) {               // _encode_repeat
     encList(out, rf, rec, ctx);
   }
   if (f.trailer) encList(out, f.trailer, data, ctx);
+}
+
+function encReachesRecords(fields) {                  // records_reachable
+  return (fields || []).some(function (f) {
+    if (!f || typeof f !== "object") return false;
+    if ("records" in f && !f.type) return true;
+    var m = f.match;
+    if (!m || typeof m !== "object" || f.type) return false;
+    var bodies = [];
+    for (var k in (m.cases || {})) bodies.push(m.cases[k]);
+    bodies.push(m["default"]);
+    return bodies.some(function (b) { return Array.isArray(b) && encReachesRecords(b); });
+  });
 }
 
 function encClaimable(fields) {                       // _claimable_fields
@@ -1239,7 +1256,17 @@ def condition_to_js(cond: Dict[str, Any]) -> str:
             # PS-540: an absent operand fails the condition. JS would compare
             # `undefined !== 3` as true and `null >= 0` as true.
             return f'({field_js} != null && {field_js} {js} {cond[op]})'
+    if 'in' in cond or 'not_in' in cond:
+        # PS-540: an absent operand fails `not_in` too.
+        return f'({field_js} != null && {set_condition_to_js(field_js, cond)})'
     return 'true'
+
+
+def set_condition_to_js(field_js: str, cond: Dict[str, Any]) -> str:
+    """`in` / `not_in` (PS-543): the value equals one of a list of numbers, or none."""
+    op = 'in' if 'in' in cond else 'not_in'
+    values = json.dumps([v for v in cond[op]])
+    return f'{values}.indexOf({field_js}) {">=" if op == "in" else "<"} 0'
 
 
 def guard_to_js(guard: Dict[str, Any], value_expr: str, else_hook: str = '') -> str:
@@ -1260,7 +1287,7 @@ def guard_to_js(guard: Dict[str, Any], value_expr: str, else_hook: str = '') -> 
             continue
         # PS-540: an absent operand fails the condition; JS would pass `undefined !== 3`
         # and `null >= 0`.
-        if any(op in cond for op in ('gt', 'gte', 'lt', 'lte', 'eq', 'ne')):
+        if any(op in cond for op in ('gt', 'gte', 'lt', 'lte', 'eq', 'ne', 'in', 'not_in')):
             conditions.append(f'{field_js} != null')
         if 'gt' in cond:
             conditions.append(f'{field_js} > {cond["gt"]}')
@@ -1274,6 +1301,8 @@ def guard_to_js(guard: Dict[str, Any], value_expr: str, else_hook: str = '') -> 
             conditions.append(f'{field_js} === {cond["eq"]}')
         elif 'ne' in cond:
             conditions.append(f'{field_js} !== {cond["ne"]}')
+        elif 'in' in cond or 'not_in' in cond:                          # PS-543
+            conditions.append(set_condition_to_js(field_js, cond))
     
     if not conditions:
         return value_expr
@@ -2166,7 +2195,8 @@ function writeS(buf, pos, size, value, endian) {
         # rv: a looked-up field's value before its lookup, which valid_range compares
         # (PS-475); rvs: fields whose guard reported `else`, which it does not. _leftDone:
         # a PS-302 warning already reported the bytes left over (PS-472).
-        lines.append('  var rv = {}, rvs = {}, _leftDone = false;')
+        # rcs: the records the current repeat element yields (PS-541); null outside one.
+        lines.append('  var rv = {}, rvs = {}, _leftDone = false, rcs = null;')
         lines.append(f'  endian = endian || "{self.endian}";')
         self.indent = 1
         for field in self._expand_refs(fields):
@@ -2235,6 +2265,23 @@ function writeS(buf, pos, size, value, endian) {
         problems = encoding_errors(field) if isinstance(field, dict) and 'type' in field else []
         if problems:
             raise ValueError(problems[0])
+
+        # PS-541: each field list yields one record of the enclosing repeat element,
+        # decoded into a fresh `d` and collected in `rcs`; the element reports them.
+        if 'records' in field and not field.get('type'):
+            lines.append(f'{i}  if (rcs === null) throw new Error("`records` belongs '
+                         f'in a repeat\'s element, or a match case within it '
+                         f'(PS-541)");')
+            for body in field['records']:
+                outer = f'_ro{self._next_uid()}'
+                lines.append(f'{i}  var {outer} = d; d = {{}};')
+                for member in body:
+                    if isinstance(member, dict):
+                        lines.extend(self._gen_decode_field(member))
+                lines.append(f"{i}  for (var _k in d) {{ if (_k.charAt(0) === '_') "
+                             f"delete d[_k]; }}")
+                lines.append(f'{i}  rcs.push(d); d = {outer};')
+            return lines
 
         # byte_group
         if 'byte_group' in field:
@@ -2347,7 +2394,7 @@ function writeS(buf, pos, size, value, endian) {
         # Members decode into the flat `d`, then each iteration lifts them into a record
         # and deletes them, the same approach the nested `object` support uses - so their
         # modifiers, lookups and bitfields keep working through the existing generators.
-        from schema_interpreter import index_base, repeat_members
+        from schema_interpreter import index_base, records_reachable, repeat_members
         # PS-528: `element` decodes as a one-field record under its name (or `element`),
         # and the repeat reports the record's value - null where it was omitted.
         element_members, element_name = (repeat_members(field) if field.get('type') == 'repeat'
@@ -2447,6 +2494,11 @@ function writeS(buf, pos, size, value, endian) {
             lines.append(f'{i}    var {arr}_outer = d; d = {{}};')
             # PS-368: an element's names do not outlive it; `vars` is restored after it.
             lines.append(f'{i}    var {arr}_vars = Object.assign({{}}, vars);')
+            # PS-541: an element reaching `records` collects them in `rcs`, and reports
+            # them in its place. Emitted only where the element can reach one.
+            yields_records = records_reachable(members)
+            if yields_records:
+                lines.append(f'{i}    var {arr}_rcs = rcs; rcs = [];')
             if field.get('index'):
                 # PS-366, PS-530: the position counted from index_base.
                 base = index_base(field)    # the field's 'index_base' (PS-530)
@@ -2477,6 +2529,8 @@ function writeS(buf, pos, size, value, endian) {
                 if str(member.get('name', '')).startswith('_'):
                     # Internal members stay out of the record.
                     lines.append(f'{i}    delete {arr}_rec.{to_js_name(member["name"])};')
+            if yields_records:
+                lines.append(f'{i}    var {arr}_rs = rcs; rcs = {arr}_rcs;')
             if ragged:
                 lines.append(f'{i}    if (pos > buf.length) {{ {ragged} }}')
             for name, _ in carried:
@@ -2484,7 +2538,14 @@ function writeS(buf, pos, size, value, endian) {
             keep = condition_to_js(field['present_if']) if field.get('present_if') else 'true'
             lines.append(f'{i}    var {arr}_keep = {keep};')
             lines.append(f'{i}    vars = {arr}_vars; {arr}_i++;')
-            if element_name is None:
+            if yields_records:
+                # PS-541: each record, after the element's other reported fields.
+                r = f'{arr}_r'
+                lines.append(f'{i}    if ({arr}_keep && {arr}_rs.length) {{ '
+                             f'for (var {r} = 0; {r} < {arr}_rs.length; {r}++) '
+                             f'{arr}.push(Object.assign({{}}, {arr}_rec, {arr}_rs[{r}])); }}')
+                lines.append(f'{i}    else if ({arr}_keep) {arr}.push({arr}_rec);')
+            elif element_name is None:
                 lines.append(f'{i}    if ({arr}_keep) {arr}.push({arr}_rec);')
             else:
                 # PS-528: the record's one value, or null where it was omitted, so the
