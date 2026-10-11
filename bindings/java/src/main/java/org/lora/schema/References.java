@@ -69,9 +69,20 @@ final class References {
         }
         walk(raw.get("header"), null, false, declared, ahead);
         walk(raw.get("fields"), null, false, declared, ahead);
+        // Each port is a decode of its own (CR-2026-130): what one port declares is never
+        // bound while another is decoded, so each starts from what the top level declares.
+        Set<String> shared = new HashSet<>(declared);
+        Set<String> seen = new HashSet<>(declared);
         if (raw.get("ports") instanceof Map<?, ?> groups) {
-            for (Object group : groups.values()) walk(group, null, false, declared, ahead);
+            for (Object group : groups.values()) {
+                declared.clear();
+                declared.addAll(shared);
+                walk(group, null, false, declared, ahead);
+                seen.addAll(declared);
+            }
         }
+        declared.clear();
+        declared.addAll(seen);   // to tell "never declared" from "declared too late"
         List<String> errors = new ArrayList<>();
         for (String[] reference : ahead) {
             String message = declared.contains(reference[0]) ? orderMessage(reference[0], reference[1])

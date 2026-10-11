@@ -188,20 +188,20 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2660 payload vectors in `schemas/devices/` (measured 2026-10-11 with
+The 2661 payload vectors in `schemas/devices/` (measured 2026-10-11 with
 `tools/check-floors.py`, after the CR-2026-118 and CR-2026-124 fixtures, CR-2026-117's
 guard-absent-operand, the `match-u32-*` and names-mangling-alike fixtures, CR-2026-127's
-guard-boolean-operand, the CR-2026-121 and CR-2026-123 fixtures, and CR-2026-110's,
-CR-2026-125's and CR-2026-128's tlv-repeat-* fixtures) are the shared cross-language
-test set. Every implementation has a runner that reads the same YAML and the same
-vectors:
+guard-boolean-operand, the CR-2026-121 and CR-2026-123 fixtures, CR-2026-110's,
+CR-2026-125's and CR-2026-128's tlv-repeat-* fixtures, and the mutation-gate vector in
+round-large-value) are the shared cross-language test set. Every implementation has a
+runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
 | Python | `tests/test_corpus_conformance.py` | every vector | 1820 |
-| Go | `go/schema/corpus_conformance_test.go` | 2660 | 1837 (plain API 1814) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2660 | 1821 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2660 | 1820 |
+| Go | `go/schema/corpus_conformance_test.go` | 2661 | 1837 (plain API 1814) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2661 | 1821 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2661 | 1820 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 554 of 554 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -1210,6 +1210,27 @@ value is not in the data.
   temperature (the vendor uses sign-magnitude, we use `s8`), and qingping decoding frames
   that the vendor rejects.
 
+  **Three new fixtures sat below the 0.80 floor for new schemas (fixed 2026-10-11).**
+  Two needed a vector; one needed the harness to stop scoring what no payload reaches:
+  - *A modifier behind a guard that never passes* - unkillable, now unscored. PS-444
+    reports a failed guard's `else` as declared, skipping the modifiers, the stages and
+    the lookup. A guard with a boolean operand fails on every payload (PS-549), so
+    `guard-boolean-operand`'s inserted `add: 1` could not change any decode. The reach pass now records a guarded
+    field's pipeline as reached only where its guard passed, and a SCALE/ADD/DROP-MOD/
+    LOOKUP mutant of an unreached pipeline is `unreached`, not a survivor.
+  - *A transform that changes nothing at that magnitude* - `round-large-value`'s
+    `decimals: 6` on 3.4e38. It dies on an exact integer: 3F800001 rounds to exactly 1.
+  - *Leftover bytes with no warning asserted* - `wide-bit-range`'s `consume: 8 -> 0`.
+    `expected_warnings: []` kills it (PS-472).
+
+  **Six vobo survivors are equivalent since PS-314/PS-429 (b05fc20, #93).** Each
+  `_cfg_mask add N -> N+1` on port 71 subgroup 5 also sets the flagged mask's bit 0,
+  whose `cycleTime` computes from `_ct_lo`/`_ct_hi` - bound only by subgroup 0, a
+  different case of the same dispatch, so never in the same frame. They used to be
+  killed because an unbound operand read 0 and the vectors assert `cycleTime: null`;
+  an operand with no value now makes the field absent, so no payload separates them.
+  The baseline accepts 20345 killed and 6 survived.
+
   Three lessons for the next pass:
   - **A tolerance survivor dies on an exact integer.** A +1 raw-unit mutant under a
     fine scale moves the value by less than 0.001, so no float expectation can see it.
@@ -1641,9 +1662,17 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     schemas (watteco's `report_body` reads the `_clu` its port declares). Within a mapping,
     `tag_fields`, `trailer`, `fields` and `element` are walked first, so tag components
     precede cases and elements precede `present_if`/`identity`; the rest in source order,
-    except in Go, whose maps keep none - it walks scalars before nested values, which
-    differs only where a reference names something declared in a later sibling of its own
-    mapping. Declared: every `name`, `var`, `index`, `count_as` (a `byte_group`/`flagged`
+    ports included, in all four. Go's maps keep no order, so `checkReferences` takes it
+    from the YAML node tree (`buildKeyOrder`, as `_meta` does for lookup labels); it used
+    to walk sorted keys, scalars before nested values, and ports sorted as strings, which
+    accepted a match whose `default` read a name its later `cases` declared and refused
+    one whose `cases` declared what a later `field:` read. `ps539_walk_order_test.go` and
+    its Python, Java and C# mirrors pin it with pairs differing only in key order. **Each
+    port is a decode of its own (CR-2026-130)**: a port's field list sees what the top level
+    declares (metadata names, `header`/`fields`) and its own names, never another port's,
+    in either source order; such a reference gets the "referenced before" message. All four
+    used to carry one port's names into the next. Measured before the change: no corpus,
+    library, example or registry schema (6 and 335 with `ports`) refers across ports. Declared: every `name`, `var`, `index`, `count_as` (a `byte_group`/`flagged`
     member and a tag component included) and `metadata` include/timestamp names. **A
     nameless element declares no name**: `$element` needs `element: {name: element, ...}`.
     A name declared earlier in a branch not taken is absent at decode (PS-314), not an

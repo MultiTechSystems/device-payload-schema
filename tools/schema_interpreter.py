@@ -1026,7 +1026,11 @@ def reference_errors(schema):
     tag components before its cases, a repeat's `trailer` and elements before its
     `present_if` and `identity`. The schema is walked with every `$ref` already spliced,
     so a definition's references are checked where it is used, after the fields declared
-    before the splice, and an unused definition is never checked. A nameless repeat
+    before the splice, and an unused definition is never checked. Each port's field list
+    is a decode of its own (CR-2026-130): it sees what the top level declares and its own
+    names, never another port's; such a reference reads as declared too late. Within a
+    mapping, `tag_fields`, `trailer`, `fields` and `element` come first, then the rest in
+    source order (CR-2026-127). A nameless repeat
     element declares no name (PS-528). `metadata` include and timestamp names count as
     declared first; a `metadata.include` `source` names runtime input (PS-315) and is not
     checked. Whether a name declared earlier is bound when it is read is a decode matter
@@ -1077,9 +1081,17 @@ def reference_errors(schema):
                 declared.add(entry['name'])
     for part in ('header', 'fields'):
         walk(schema.get(part))
+    # Each port is a decode of its own (CR-2026-130): what one port declares is never bound
+    # while another is decoded, so each starts from what the top level declares.
+    shared, seen = set(declared), set(declared)
     if isinstance(schema.get('ports'), dict):
         for group in schema['ports'].values():
+            declared.clear()
+            declared.update(shared)
             walk(group)
+            seen |= declared
+    declared.clear()
+    declared.update(seen)       # to tell "never declared" from "declared too late"
     errors = []
     for name, key in ahead:
         message = (reference_error_message(name, key) if name not in declared

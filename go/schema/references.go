@@ -19,7 +19,8 @@ import (
 //
 // The walk is the spec prototype's `key_vocabulary.check_references` and
 // reference_errors in the reference implementation; Java and C# walk the same way and all
-// four give the messages identically.
+// four give the messages identically. Every mapping, the ports included, is walked in
+// source order (referenceWalkOrder).
 
 // referenceKeys are the keys whose string value may be a `$` reference.
 var referenceKeys = map[string]bool{"ref": true, "a": true, "b": true, "field": true,
@@ -54,42 +55,40 @@ func referenceOrderMessage(name, key string) string {
 
 type schemaReference struct{ name, key string }
 
-// referenceWalkOrder is the order a mapping's keys are walked in. The other three
-// languages walk the rest in source order, which a Go map does not keep; scalars before
-// nested values is the order a schema is written in, and the two differ only where a
-// reference names something declared inside a later sibling of its own mapping.
-func referenceWalkOrder(m map[string]any) []string {
-	var order []string
+// referenceWalkOrder is the order a mapping's keys are walked in, PS-539's decode order:
+// referenceFirstKeys first, in that order, then the rest in source order. A Go map keeps
+// no order, so the source order comes from the YAML node tree (buildKeyOrder), as _meta
+// takes a lookup's labels; a mapping with none recorded falls back to keyOrder.keys's
+// sorted order.
+func referenceWalkOrder(node any, order keyOrder) []string {
+	m := asStringMap(node)
+	var out []string
 	for _, k := range referenceFirstKeys {
 		if _, ok := m[k]; ok {
-			order = append(order, k)
+			out = append(out, k)
 		}
 	}
-	isFirst := func(k string) bool {
-		for _, f := range referenceFirstKeys {
-			if f == k {
-				return true
-			}
-		}
-		return false
-	}
-	var nested []string
-	for _, k := range sortedKeys(m) {
-		if isFirst(k) {
-			continue
-		}
-		if _, scalar := m[k].(string); scalar {
-			order = append(order, k)
-		} else {
-			nested = append(nested, k)
+	for _, k := range order.keys(node) {
+		if !referenceFirstKey(k) {
+			out = append(out, k)
 		}
 	}
-	return append(order, nested...)
+	return out
+}
+
+func referenceFirstKey(k string) bool {
+	for _, f := range referenceFirstKeys {
+		if f == k {
+			return true
+		}
+	}
+	return false
 }
 
 // checkReferences rejects the first reference that names nothing, or that precedes every
-// declaration of its name. `raw` is the document after expandRawRefs.
-func checkReferences(raw map[string]any) error {
+// declaration of its name. `raw` is the document after expandRawRefs, and `order` its
+// source key order.
+func checkReferences(raw map[string]any, order keyOrder) error {
 	declared := map[string]bool{}
 	var ahead []schemaReference
 
@@ -112,7 +111,7 @@ func checkReferences(raw map[string]any) error {
 				}
 			}
 		}
-		for _, k := range referenceWalkOrder(m) {
+		for _, k := range referenceWalkOrder(node, order) {
 			v := m[k]
 			if referenceDataKeys[k] {
 				continue
@@ -162,11 +161,26 @@ func checkReferences(raw map[string]any) error {
 	}
 	walk(raw["header"], "", false)
 	walk(raw["fields"], "", false)
+	// Each port is a decode of its own (CR-2026-130): what one port declares is never bound
+	// while another is decoded, so each starts from what the top level declares.
+	shared := map[string]bool{}
+	seen := map[string]bool{}
+	for n := range declared {
+		shared[n], seen[n] = true, true
+	}
 	if ports := asStringMap(raw["ports"]); ports != nil {
-		for _, k := range sortedKeys(ports) {
+		for _, k := range order.keys(raw["ports"]) {
+			declared = map[string]bool{}
+			for n := range shared {
+				declared[n] = true
+			}
 			walk(ports[k], "", false)
+			for n := range declared {
+				seen[n] = true
+			}
 		}
 	}
+	declared = seen // to tell "never declared" from "declared too late"
 	for _, r := range ahead {
 		if !declared[r.name] {
 			return fmt.Errorf("%s", referenceErrorMessage(r.name, r.key))
