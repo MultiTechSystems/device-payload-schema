@@ -90,6 +90,9 @@ public class GuardCondition
     public double? Lte { get; set; }
     public double? Eq { get; set; }
     public double? Ne { get; set; }
+    /// <summary>`in` / `not_in`: the value equals one of these, or none (PS-543).</summary>
+    public double[]? In { get; set; }
+    public double[]? NotIn { get; set; }
 }
 
 public class GuardDef
@@ -211,6 +214,11 @@ public class SchemaField
     public string? ElementName { get; set; }
     /// <summary>The number <see cref="Index"/> counts from (PS-530), 0 by default.</summary>
     public int IndexBase { get; set; }
+    /// <summary>
+    /// A `records` entry (PS-541): field lists, each yielding one record that the enclosing
+    /// repeat reports in place of its element. Null where the entry is not one.
+    /// </summary>
+    public List<List<SchemaField>>? Records { get; set; }
     /// <summary>An element is reported only where this holds (PS-386).</summary>
     public GuardCondition? PresentIf { get; set; }
     /// <summary>

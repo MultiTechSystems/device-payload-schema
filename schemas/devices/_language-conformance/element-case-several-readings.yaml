@@ -1,0 +1,67 @@
+# A case selected inside an element yields several readings (PS-541, CR-2026-118), as one
+# vendor packs a battery level and an upload interval into one message with id 7.
+#
+# `index` counts the source elements, so both readings from the first element are at
+# position 0; `count_as` counts the elements reported, three here from two read.
+#
+# Encoders refuse this schema (PS-542): a reading does not say which element it came from.
+name: probe_element_case_several_readings
+endian: big
+fields:
+- name: messages
+  type: repeat
+  until: end
+  index: i
+  count_as: n
+  fields:
+  - name: _id
+    type: u8
+  - name: position
+    type: number
+    ref: $i
+  - match:
+      field: $_id
+      cases:
+        7:
+        - records:
+          - - name: measurement
+              type: string
+              value: upload_battery
+            - name: battery
+              type: u16
+          - - name: measurement
+              type: string
+              value: upload_interval
+            - name: interval
+              type: u16
+              mult: 60
+        0:
+        - name: hardware
+          type: u8
+- name: messages_reported
+  type: number
+  ref: $n
+test_vectors:
+- name: case_yields_two_then_one
+  source: spec-example
+  payload: "07 0064 003C 00 0A"
+  expected:
+    messages:
+    - measurement: upload_battery
+      battery: 100
+    - measurement: upload_interval
+      interval: 3600
+    - hardware: 10
+- name: index_counts_source_elements
+  source: spec-example
+  payload: "07 0064 003C 00 0A"
+  expected:
+    messages:
+    - position: 0
+    - position: 0
+    - position: 1
+- name: count_as_counts_reported_elements
+  source: spec-example
+  payload: "07 0064 003C 00 0A"
+  expected:
+    messages_reported: 3

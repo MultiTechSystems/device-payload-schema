@@ -205,6 +205,19 @@ public static class SchemaDecoder
                 continue;
             }
 
+            // PS-541: each field list yields one record, which the enclosing repeat
+            // reports in place of the element. RecordsErrors confines it, at load, to a
+            // repeat's element or a match case within it.
+            if (field.Records != null)
+            {
+                if (ctx.PendingRecords == null)
+                    throw new InvalidOperationException(
+                        "`records` belongs in a repeat's element, or a match case within it (PS-541)");
+                foreach (var body in field.Records)
+                    ctx.PendingRecords.Add(DecodeFields(body, ctx, schema));
+                continue;
+            }
+
             // Byte group
             if (field.ByteGroup.Count > 0)
             {
@@ -1214,6 +1227,8 @@ public static class SchemaDecoder
             if (cond.Lte.HasValue && !(fv <= cond.Lte.Value)) return false;
             if (cond.Eq.HasValue && fv != cond.Eq.Value) return false;
             if (cond.Ne.HasValue && fv == cond.Ne.Value) return false;
+            if (cond.In != null && !cond.In.Contains(fv)) return false;            // PS-543
+            if (cond.NotIn != null && cond.NotIn.Contains(fv)) return false;
         }
         return true;
     }
@@ -1735,6 +1750,10 @@ public static class SchemaDecoder
                 ctx.Variables[kv.Key] = kv.Value;                                  // PS-379
             Dictionary<string, object?> element;
             bool keep;
+            // PS-541: the records this element's `records` entry yields, if it reaches one.
+            var savedRecords = ctx.PendingRecords;
+            var records = new List<Dictionary<string, object?>>();
+            ctx.PendingRecords = records;
             try
             {
                 element = DecodeFields(field.Fields, ctx, schema);
@@ -1750,9 +1769,21 @@ public static class SchemaDecoder
                 foreach (var kv in outer)
                     ctx.Variables[kv.Key] = kv.Value;
                 ctx.ElementNames = savedNames;
+                ctx.PendingRecords = savedRecords;
             }
             iterations++;
-            if (keep)
+            if (keep && records.Count > 0)
+            {
+                // PS-541: the records, as consecutive elements, in place of the element;
+                // the element's other reported fields go into each, before its own.
+                foreach (var record in records)
+                {
+                    var merged = new Dictionary<string, object?>(element);
+                    foreach (var kv in record) merged[kv.Key] = kv.Value;
+                    result.Add(merged);
+                }
+            }
+            else if (keep)
                 // PS-528: a repeat of single values reports the element's value, or null
                 // where it was omitted, so the values after it keep their position.
                 result.Add(field.ElementName == null ? element : ElementValue(element));
@@ -1993,6 +2024,8 @@ public static class SemanticFormatter
                 if (f.Flagged != null)
                     foreach (var g in f.Flagged.Groups) Visit(g.Fields);
                 foreach (var c in f.Cases) Visit(c.Fields);
+                if (f.Records != null)
+                    foreach (var body in f.Records) Visit(body);                  // PS-541
                 if (f.MatchDefault is List<SchemaField> fallback) Visit(fallback);
                 if (f.MatchInline != null) Visit(new[] { f.MatchInline });
                 var tlv = f.TLVInline ?? f;
@@ -2117,6 +2150,9 @@ public static class SemanticFormatter
             }
             foreach (var c in f.Cases)
                 result.AddRange(FlattenFields(c.Fields));
+            if (f.Records != null)
+                foreach (var body in f.Records)
+                    result.AddRange(FlattenFields(body));                         // PS-541
         }
         return result;
     }
