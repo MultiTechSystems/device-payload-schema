@@ -63,6 +63,10 @@ Outcomes, and what is and is not counted:
                        original with an instrumented interpreter; a mutation of an
                        unreached site that nonetheless changes some decode (a case swap
                        that routes a reached tag into it) is judged like any other.
+                       A computed field's modifiers, `transform` and lookup are a site
+                       of their own when it has a `guard`: a failed guard reports its
+                       `else` as declared, skipping all of them (PS-444), so where the
+                       guard failed on every vector they were never applied.
   equivalent           statically unable to change any decode, so never generated: byte
                        order on a one-byte type or on a bit range (which always reads its
                        base big-endian), SIGN on a field with an `encoding` (read
@@ -137,6 +141,10 @@ TIMEOUT = "timeout"
 
 #: Key the reach pass stores on each field dict of its own marked copy of the schema.
 MARK = "__mutation_site__"
+
+#: Appended to a guarded field's path when its guard passes, so the modifiers, stages
+#: and lookup behind it - which a failed guard skips (PS-444) - count as reached.
+PIPELINE = "<guard passed>"
 
 #: Relabel at most this many entries of one lookup table.
 MAX_RELABELS = 8
@@ -393,8 +401,12 @@ def field_mutants(site: Site, field: Dict[str, Any], equivalent: Dict[str, int])
     base_int = int_type(base)
     base_bits = bit_range(base)
 
+    # A guarded field applies its modifiers only where its guard passes (PS-444).
+    pipeline_reach = [path + (PIPELINE,)] if "guard" in field else reach
+
     def add(operator, detail, apply):
-        out.append(Mutant(operator, site.label, detail, reach, apply))
+        where = pipeline_reach if operator in _MODIFIER_OPERATORS else reach
+        out.append(Mutant(operator, site.label, detail, where, apply))
 
     # ENDIAN
     size = None
@@ -803,7 +815,15 @@ class _ReachInterpreter(SchemaInterpreter):
 
     def _decode_computed_field(self, field_def):
         self._note(field_def)
-        return SchemaInterpreter._decode_computed_field(self, field_def)
+        value = SchemaInterpreter._decode_computed_field(self, field_def)
+        if (
+            isinstance(field_def, dict)
+            and MARK in field_def
+            and "guard" in field_def
+            and id(field_def) not in self._guard_else
+        ):
+            self._reached.add(field_def[MARK] + (PIPELINE,))
+        return value
 
     def _decode_bitfield_string(self, field_def, buf, pos):
         self._note(field_def)
