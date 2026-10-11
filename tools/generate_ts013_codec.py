@@ -4101,8 +4101,11 @@ function writeS(buf, pos, size, value, endian) {
         ])
         tail = code[entry:]
         # omitAbsent still runs first: dropping it reported an omitted reading as null.
-        tail = tail.replace('data: omitAbsent(r.data),',
-                            'data: renameKeys(omitAbsent(r.data), OUTPUT_KEYS),')
+        # Every entry point's result, whatever its local is called: matching `r.data`
+        # alone missed a `default` port's `rd.data`, so a schema decoding through one
+        # reported `d_` and `e_`, at the top level and in every nested object.
+        tail = re.sub(r'data: omitAbsent\((\w+)\.data\),',
+                      r'data: renameKeys(omitAbsent(\1.data), OUTPUT_KEYS),', tail)
         return code[:entry] + helper + tail
 
 
