@@ -80,13 +80,15 @@ class TestTheFixtureRoundTripsOnTheReference:
         # `idx` absent, so `channel_${idx}_reading` cannot be rebuilt.
         result = SchemaInterpreter(loaded).encode({"channel_3_reading": 42})
         assert result.errors, "an unresolvable template must not encode as zero"
-        assert "name_from" in result.errors[0], result.errors
+        # PS-551 (CR-2026-134) also rejects the missing `idx` itself, first.
+        assert any("name_from" in e for e in result.errors), result.errors
 
     def test_a_missing_value_names_the_resolved_key(self):
-        """The warning has to name the key a caller would actually supply."""
+        """The rejection has to name the key a caller would actually supply. It was a
+        warning until CR-2026-134 (PS-551) made a missing value an error."""
         loaded = schema()
         result = SchemaInterpreter(loaded).encode({"idx": 7})
-        assert any("channel_7_reading" in w for w in result.warnings), result.warnings
+        assert "Missing required field: channel_7_reading" in result.errors, result.errors
 
 
 class TestEveryEncoderResolvesTheTemplate:

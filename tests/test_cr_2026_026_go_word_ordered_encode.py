@@ -116,13 +116,17 @@ class TestTheGoEncoderHandlesTheWordOrderedType:
 
 
 class TestTheGoEncoderRoundsRatherThanTruncates:
+    # CR-2026-135 (PS-552) moved the rounding into one helper, roundToInteger in
+    # cr135.go, which every integer case calls before its PS-168 fit check.
     def test_the_unsigned_case_rounds(self):
         text = GO.read_text()
-        assert "encodeUint(uint64(math.RoundToEven(numVal))" in text
+        assert "raw := roundToInteger(numVal) // PS-552, before any encoding" in text
 
     def test_the_signed_case_rounds(self):
         text = GO.read_text()
-        assert "encodeSint(int64(math.RoundToEven(numVal))" in text
+        assert text.count("roundToInteger(numVal)") >= 3
+        helper = (GO.parent / "cr135.go").read_text()
+        assert "return math.RoundToEven(v)" in helper
 
     def test_no_truncating_conversion_is_left_in_the_integer_cases(self):
         text = GO.read_text()
@@ -136,8 +140,8 @@ class TestTheGoEncoderRoundsRatherThanTruncates:
         # and read the wrong function, which is the same substring trap that made a
         # CR-2026-024 test fail on correct code.
         start = text.index("func encodeField(")
-        body = text[start:start + 4000]
-        assert "RoundToEven" in body
+        body = text[start:start + 6000]
+        assert "roundToInteger" in body       # math.RoundToEven, in cr135.go
         assert "int64(math.Round(numVal))" not in body, (
             "half-away-from-zero would disagree with the reference at .5"
         )

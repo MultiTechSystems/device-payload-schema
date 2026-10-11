@@ -21,64 +21,30 @@ fields:
     type: u16
 `
 
-// A field the input omits is written as zero, so the fields after it stay where
-// the device expects them.
+// A field the input omits is rejected, naming it (PS-551, CR-2026-134).
 //
-// Skipping it wrote no bytes at all: the payload came out short and everything
-// following the gap shifted down by the width of the missing field. `third` was
-// then read out of `second`'s byte and one byte of its own, which is a corrupt
-// frame returned as a success.
-func TestMissingFieldIsZeroFilledNotSkipped(t *testing.T) {
+// It was first skipped, writing no bytes, so everything after the gap shifted; then
+// written as a zero placeholder with a "Missing field" warning, which kept the layout
+// but put a value on the wire the caller never gave. A zero is indistinguishable from
+// a real reading, so neither is a payload: the encode fails and returns none.
+func TestMissingFieldIsRejectedNotZeroFilled(t *testing.T) {
 	s, err := ParseSchema(missingFieldSchema)
 	if err != nil {
 		t.Fatalf("parse failed: %v", err)
 	}
 
 	payload, err := s.Encode(map[string]any{"first": 0x1111, "third": 0x3333})
-	if err != nil {
-		t.Fatalf("encode failed: %v", err)
+	if err == nil || err.Error() != "Missing required field: second" {
+		t.Fatalf("error = %v, want %q", err, "Missing required field: second")
+	}
+	if payload != nil {
+		t.Errorf("payload = % x, want none with the error", payload)
+	}
+	if result, err := s.EncodeToResult(map[string]any{"first": 1, "third": 3}, 0); err == nil || result != nil {
+		t.Errorf("EncodeToResult = %v, %v, want the same rejection", result, err)
 	}
 
-	// 5 bytes: u16 + u8 + u16, with the omitted `second` as a zero placeholder.
-	want := []byte{0x11, 0x11, 0x00, 0x33, 0x33}
-	if string(payload) != string(want) {
-		t.Fatalf("payload = % x, want % x", payload, want)
-	}
-
-	// The point of the placeholder: `third` decodes back to what was asked for.
-	decoded, err := s.Decode(payload)
-	if err != nil {
-		t.Fatalf("decode failed: %v", err)
-	}
-	if got, _ := toFloat64(decoded["third"]); got != 0x3333 {
-		t.Errorf("third round-tripped as %v, want %d — the payload is misaligned",
-			decoded["third"], 0x3333)
-	}
-}
-
-// Zero is a placeholder, not a value the caller supplied, so it is reported.
-func TestMissingFieldIsReported(t *testing.T) {
-	s, err := ParseSchema(missingFieldSchema)
-	if err != nil {
-		t.Fatalf("parse failed: %v", err)
-	}
-
-	result, err := s.EncodeToResult(map[string]any{"first": 1, "third": 3}, 0)
-	if err != nil {
-		t.Fatalf("encode failed: %v", err)
-	}
-	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "second") {
-		t.Errorf("warnings = %v, want one naming the omitted field %q",
-			result.Warnings, "second")
-	}
-
-	// The wording matches Python, Java and C#, so a cross-language diff of
-	// warnings compares equal strings.
-	if want := "Missing field: second"; result.Warnings[0] != want {
-		t.Errorf("warning = %q, want %q", result.Warnings[0], want)
-	}
-
-	// Nothing was supplied on the caller's behalf here, so there is nothing to say.
+	// Nothing omitted, nothing to say.
 	full, err := s.EncodeToResult(map[string]any{"first": 1, "second": 2, "third": 3}, 0)
 	if err != nil {
 		t.Fatalf("encode failed: %v", err)
@@ -242,13 +208,11 @@ fields:
 }
 
 // A tlv case is encoded into its own buffer so its length prefix can be measured
-// before it is written. Warnings raised in there belong to the same encode, so
-// the branch merges them back — without that they were silently dropped, which
-// would have made the tlv path look clean by construction.
-func TestWarningsEscapeATLVCase(t *testing.T) {
-	// PS-527 (CR-2026-128) writes a case only once the input supplies every field it
-	// declares, so a case is never zero-filled; a record inside one still can be, and its
-	// warning must still escape the case's own buffer.
+// before it is written. A value missing inside it - here in a record of a repeat
+// in the case (PS-527 writes a case only once the input supplies every field it
+// declares) - is rejected from in there as at the top level (PS-551); it used to
+// be a zero with a warning the branch had to carry back out.
+func TestMissingValueInATLVCaseIsRejected(t *testing.T) {
 	s, err := ParseSchema(`
 name: tlv-warning
 endian: big
@@ -273,18 +237,10 @@ fields:
 		t.Fatalf("parse failed: %v", err)
 	}
 
-	// The record omits humidity, so the repeat encodes a zero for it.
 	result, err := s.EncodeToResult(map[string]any{
 		"samples": []any{map[string]any{"temperature": 20}}}, 0)
-	if err != nil {
-		t.Fatalf("encode failed: %v", err)
-	}
-	if want := []byte{0x03, 0x14, 0x00}; string(result.Payload) != string(want) {
-		t.Fatalf("payload = % x, want % x", result.Payload, want)
-	}
-	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "humidity") {
-		t.Errorf("warnings = %v, want one naming humidity from inside the tlv case",
-			result.Warnings)
+	if err == nil || !strings.Contains(err.Error(), "Missing required field: humidity") || result != nil {
+		t.Fatalf("EncodeToResult = %v, %v, want the rejection naming humidity", result, err)
 	}
 }
 
@@ -511,14 +467,9 @@ func TestEncodeToResultCarriesWarningsOnPortedSchema(t *testing.T) {
 		t.Fatalf("parse failed: %v", err)
 	}
 
+	// humidity is omitted: rejected on the default port's path as anywhere (PS-551).
 	result, err := s.EncodeToResult(map[string]any{"temperature": 100}, 0)
-	if err != nil {
-		t.Fatalf("encode failed: %v", err)
-	}
-	if len(result.Payload) != 3 {
-		t.Errorf("payload = % x, want 3 bytes with humidity zero-filled", result.Payload)
-	}
-	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "humidity") {
-		t.Errorf("warnings = %v, want one naming humidity", result.Warnings)
+	if err == nil || !strings.Contains(err.Error(), "Missing required field: humidity") || result != nil {
+		t.Errorf("EncodeToResult = %v, %v, want the rejection naming humidity", result, err)
 	}
 }

@@ -1,0 +1,230 @@
+# CR-2026-135 (PS-552, PS-168): an encoder rounds an integer field's value to the nearest
+# integer, a tie to even, on the binary64 value its arithmetic produced, and rejects a
+# value that rounds outside the field's type - a bit range's type being its width.
+#
+# One case list, read by the reference and the generated codec's runtime encoder
+# (tests/test_cr_2026_135_encoder_rounding.py), Go (go/schema/cr135_test.go), Java
+# (CR2026135Test.java) and C# (CR2026_135Tests.cs). C holds the same figures in
+# src/selftest_schema.c, since it builds a schema through its struct API.
+#
+# Each case gives `schema` (YAML text), `input` (JSON text) and either `payload` (hex) or
+# `error` (text one of the errors contains; no payload is returned). The overflow text is
+# the spec prototype's:
+#   Field '{name}': {value given} encodes as {rounded}, outside {low} to {high} (PS-168)
+# with the value given written as JavaScript's String(number) writes it.
+
+cases:
+
+# --- A tie goes to the even integer -------------------------------------------------
+
+- name: tie_2_5
+  schema: "name: t\nfields:\n  - {name: x, type: u8}\n"
+  input: '{"x": 2.5}'
+  payload: "02"
+
+- name: tie_3_5
+  schema: "name: t\nfields:\n  - {name: x, type: u8}\n"
+  input: '{"x": 3.5}'
+  payload: "04"
+
+- name: tie_0_5
+  schema: "name: t\nfields:\n  - {name: x, type: u8}\n"
+  input: '{"x": 0.5}'
+  payload: "00"
+
+- name: not_a_tie
+  schema: "name: t\nfields:\n  - {name: x, type: u8}\n"
+  input: '{"x": 2.7}'
+  payload: "03"
+
+- name: negative_tie
+  schema: "name: t\nfields:\n  - {name: x, type: s8}\n"
+  input: '{"x": -2.5}'
+  payload: "fe"
+
+- name: negative_odd_tie
+  schema: "name: t\nfields:\n  - {name: x, type: s8}\n"
+  input: '{"x": -3.5}'
+  payload: "fc"
+
+- name: scaled_tie
+  schema: "name: t\nfields:\n  - {name: x, type: u16, div: 10}\n"
+  input: '{"x": 0.15}'
+  payload: "0002"
+
+- name: scaled_tie_up
+  schema: "name: t\nfields:\n  - {name: x, type: u16, div: 10}\n"
+  input: '{"x": 0.25}'
+  payload: "0002"
+
+- name: scaled_negative_tie
+  schema: "name: t\nfields:\n  - {name: x, type: s8, div: 2}\n"
+  input: '{"x": -1.25}'
+  payload: "fe"
+
+# --- The binary64 value is rounded, not a decimal reading of the input --------------
+
+- name: binary64_div
+  schema: "name: t\nfields:\n  - {name: x, type: u16, div: 10}\n"
+  input: '{"x": 23.45}'
+  payload: "00ea"
+
+- name: binary64_mult
+  schema: "name: t\nfields:\n  - {name: x, type: u16, mult: 0.1}\n"
+  input: '{"x": 23.45}'
+  payload: "00ea"
+
+- name: binary64_stage
+  schema: "name: t\nfields:\n  - {name: x, type: u16, transform: [{div: 10}]}\n"
+  input: '{"x": 23.45}'
+  payload: "00ea"
+
+- name: span_to_percent
+  schema: "name: t\nfields:\n  - {name: x, type: u16, transform: [{add: -2800}, {div: 1400}, {mult: 100}]}\n"
+  input: '{"x": 50}'
+  payload: "0dac"
+
+# --- Bit ranges are integer fields --------------------------------------------------
+
+- name: bit_range_tie
+  schema: "name: t\nfields:\n  - {name: hi, type: \"u8[4:7]\"}\n  - {name: lo, type: \"u8[0:3]\", consume: 1}\n"
+  input: '{"hi": 2.5, "lo": 1}'
+  payload: "21"
+
+- name: byte_group_tie
+  schema: "name: t\nfields:\n  - byte_group:\n      size: 1\n      fields:\n        - {name: hi, type: \"u8[4:7]\"}\n        - {name: lo, type: \"u8[0:3]\"}\n"
+  input: '{"hi": 2.5, "lo": 1}'
+  payload: "21"
+
+# --- Rounded before an encoding, and a float is not rounded -------------------------
+
+- name: before_encoding
+  schema: "name: t\nfields:\n  - {name: x, type: u8, encoding: bcd}\n"
+  input: '{"x": 12.5}'
+  payload: "12"
+
+- name: word_ordered
+  schema: "name: t\nfields:\n  - {name: x, type: u32le16}\n"
+  input: '{"x": 2.5}'
+  payload: "00020000"
+
+- name: float_not_rounded
+  schema: "name: t\nfields:\n  - {name: x, type: f32}\n"
+  input: '{"x": 2.5}'
+  payload: "40200000"
+
+# --- A value that rounds outside its type is a PS-168 error -------------------------
+
+- name: rounds_over
+  schema: "name: t\nfields:\n  - {name: x, type: u8, div: 10}\n"
+  input: '{"x": 25.55}'
+  error: "Field 'x': 25.55 encodes as 256, outside 0 to 255 (PS-168)"
+
+- name: tie_rounds_over
+  schema: "name: t\nfields:\n  - {name: x, type: u8}\n"
+  input: '{"x": 255.5}'
+  error: "Field 'x': 255.5 encodes as 256, outside 0 to 255 (PS-168)"
+
+- name: largest_that_fits
+  schema: "name: t\nfields:\n  - {name: x, type: u8}\n"
+  input: '{"x": 255.4}'
+  payload: "ff"
+
+- name: whole_over
+  schema: "name: t\nfields:\n  - {name: x, type: u8}\n"
+  input: '{"x": 256}'
+  error: "Field 'x': 256 encodes as 256, outside 0 to 255 (PS-168)"
+
+- name: negative_unsigned
+  schema: "name: t\nfields:\n  - {name: x, type: u8}\n"
+  input: '{"x": -1}'
+  error: "Field 'x': -1 encodes as -1, outside 0 to 255 (PS-168)"
+
+- name: signed_under
+  schema: "name: t\nfields:\n  - {name: x, type: s8}\n"
+  input: '{"x": -128.6}'
+  error: "Field 'x': -128.6 encodes as -129, outside -128 to 127 (PS-168)"
+
+- name: u16_over
+  schema: "name: t\nfields:\n  - {name: x, type: u16}\n"
+  input: '{"x": 65536}'
+  error: "Field 'x': 65536 encodes as 65536, outside 0 to 65535 (PS-168)"
+
+- name: bit_range_over
+  schema: "name: t\nfields:\n  - {name: hi, type: \"u8[4:7]\"}\n  - {name: lo, type: \"u8[0:3]\", consume: 1}\n"
+  input: '{"hi": 16, "lo": 1}'
+  error: "Field 'hi': 16 encodes as 16, outside 0 to 15 for u8[4:7] (PS-168)"
+
+- name: bit_range_tie_over
+  schema: "name: t\nfields:\n  - {name: hi, type: \"u8[4:7]\"}\n  - {name: lo, type: \"u8[0:3]\", consume: 1}\n"
+  input: '{"hi": 1, "lo": 15.5}'
+  error: "Field 'lo': 15.5 encodes as 16, outside 0 to 15 for u8[0:3] (PS-168)"
+
+- name: bit_range_negative
+  schema: "name: t\nfields:\n  - {name: hi, type: \"u8[4:7]\"}\n  - {name: lo, type: \"u8[0:3]\", consume: 1}\n"
+  input: '{"hi": -1, "lo": 1}'
+  error: "Field 'hi': -1 encodes as -1, outside 0 to 15 for u8[4:7] (PS-168)"
+
+- name: byte_group_over
+  schema: "name: t\nfields:\n  - byte_group:\n      size: 1\n      fields:\n        - {name: hi, type: \"u8[4:7]\"}\n        - {name: lo, type: \"u8[0:3]\"}\n"
+  input: '{"hi": 1, "lo": 16}'
+  error: "Field 'lo': 16 encodes as 16, outside 0 to 15 for u8[0:3] (PS-168)"
+
+- name: scaled_bit_range_over
+  schema: "name: t\nfields:\n  - {name: hi, type: \"u8[4:7]\", div: 10}\n  - {name: lo, type: \"u8[0:3]\", consume: 1}\n"
+  input: '{"hi": 1.55, "lo": 1}'
+  error: "Field 'hi': 1.55 encodes as 16, outside 0 to 15 for u8[4:7] (PS-168)"
+
+# --- CR-2026-136 (PS-064, PS-062): bit ranges and bools are laid out as a decoder reads
+# them, and a value the range cannot hold is rejected rather than masked. The prototype's
+# TestCR2026136BitRangesOnEncode, case for case, then two of this repository's. ---------
+
+- name: ranges_share_a_byte_until_one_consumes_it
+  schema: "name: t\nfields:\n  - {name: a, type: \"u8[0:3]\"}\n  - {name: b, type: \"u8[4:7]\", consume: 1}\n  - {name: c, type: u8}\n"
+  input: '{"a": 1, "b": 2, "c": 9}'
+  payload: "2109"
+
+- name: signed_range_twos_complement
+  schema: "name: t\nfields:\n  - {name: a, type: \"s8[0:3]\"}\n  - {name: b, type: \"u8[4:7]\", consume: 1}\n"
+  input: '{"a": -3, "b": 15}'
+  payload: "fd"
+
+- name: little_endian_base
+  schema: "name: t\nfields:\n  - {name: a, type: \"u16[4:11]\", endian: little, consume: 2}\n"
+  input: '{"a": 171}'
+  payload: "b00a"
+
+- name: bools_share_the_byte_they_peek
+  schema: "name: t\nfields:\n  - {name: x, type: bool, bit: 0}\n  - {name: y, type: bool, bit: 7, consume: 1}\n  - {name: z, type: u8}\n"
+  input: '{"x": true, "y": true, "z": 5}'
+  payload: "8105"
+
+- name: range_cannot_hold_is_rejected
+  schema: "name: t\nfields:\n  - {name: a, type: \"u8[0:3]\"}\n  - {name: b, type: \"u8[4:7]\", consume: 1}\n"
+  input: '{"a": 16, "b": 2}'
+  error: "Field 'a': 16 encodes as 16, outside 0 to 15 for u8[0:3] (PS-168)"
+
+- name: signed_range_cannot_hold_is_rejected
+  schema: "name: t\nfields:\n  - {name: a, type: \"s8[0:3]\", consume: 1}\n"
+  input: '{"a": 8}'
+  error: "Field 'a': 8 encodes as 8, outside -8 to 7 for s8[0:3] (PS-168)"
+
+- name: range_rounds_ties_to_even
+  schema: "name: t\nfields:\n  - {name: a, type: \"u8[0:3]\", consume: 1}\n"
+  input: '{"a": 2.5}'
+  payload: "02"
+
+- name: range_rounds_after_its_modifiers
+  schema: "name: t\nfields:\n  - {name: a, type: \"u8[0:3]\", div: 2, consume: 1}\n"
+  input: '{"a": 3.6}'
+  payload: "07"
+
+- name: peeked_range_then_whole_byte
+  schema: "name: t\nfields:\n  - {name: hi, type: \"u8[4:7]\"}\n  - {name: whole, type: u8}\n"
+  input: '{"hi": 3, "whole": 5}'
+  payload: "35"
+
+- name: unconsumed_range_at_the_end_is_written
+  schema: "name: t\nfields:\n  - {name: a, type: u8}\n  - {name: b, type: \"u8[0:3]\"}\n"
+  input: '{"a": 1, "b": 2}'
+  payload: "0102"

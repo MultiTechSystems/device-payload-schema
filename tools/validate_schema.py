@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 
 # Add tools to path
 sys.path.insert(0, str(Path(__file__).parent))
-from schema_interpreter import (SchemaInterpreter, DecodeResult, check_byte_group_overlap,
+from schema_interpreter import (SchemaInterpreter, DecodeResult, byte_group_errors,
                                 byte_group_endian,
                                 encoding_errors, expand_refs, fport_declaration_errors,
                                 annotation_schema_errors, reference_errors,
@@ -212,6 +212,81 @@ def check_vocabulary(schema: Any) -> Tuple[List[str], List[str]]:
         for path, key, why in schema_vocabulary.divergent_keys(schema)
     ]
     return errors, warnings_
+
+
+_NUMERIC_TYPE = re.compile(r'^(?:[usfi]\d|u?int\d|number$|integer$|[us]dec$)')
+
+
+def case_key_type_warnings(schema: Any) -> List[str]:
+    """PS-524: a warning for every `match` case key that cannot equal its discriminator.
+
+    A `$` reference to a field with a lookup binds a number (PS-523), and so does one to
+    a numeric field, so a text case key there - a label such as "ReportRsp" - matches
+    nothing. Such a schema decoded the case in Python and the TS013 codec, which bound
+    the label, and not in Go, Java or C#; now it decodes it nowhere.
+    """
+    found: List[str] = []
+
+    def binds_number(decl: Dict[str, Any]) -> bool:
+        if decl.get('lookup') is not None:
+            return True
+        return bool(_NUMERIC_TYPE.match(str(decl.get('type', ''))))
+
+    def text_key(key: Any) -> bool:
+        if not isinstance(key, str) or key == 'default':
+            return False
+        text = key.strip()
+        if text.startswith('[') or '..' in text:
+            return False
+        try:
+            int(text, 0)
+            return False
+        except ValueError:
+            return True
+
+    def visit_list(fields: Any, path: str, scope: Dict[str, Any]) -> None:
+        if not isinstance(fields, list):
+            return
+        for i, fld in enumerate(fields):
+            if not isinstance(fld, dict):
+                continue
+            here = f"{path}[{i}]"
+            match = fld.get('match')
+            if isinstance(match, dict):
+                ref = match.get('field')
+                decl = scope.get(ref[1:]) if isinstance(ref, str) and ref.startswith('$') \
+                    else None
+                cases = match.get('cases')
+                if decl is not None and binds_number(decl) and isinstance(cases, dict):
+                    for key in cases:
+                        if text_key(key):
+                            found.append(
+                                f"{here}.match: case key {key!r} is text, and {ref} binds a "
+                                f"number (PS-523), so the case never matches (PS-524)")
+            visit_node(fld, here, scope)
+            for key in ('name', 'var'):
+                if isinstance(fld.get(key), str):
+                    scope[fld[key]] = fld
+
+    def visit_node(node: Any, path: str, scope: Dict[str, Any]) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if isinstance(value, list) and value and all(isinstance(v, dict) for v in value):
+                    visit_list(value, f"{path}.{key}", dict(scope))
+                elif isinstance(value, (dict, list)):
+                    visit_node(value, f"{path}.{key}", scope)
+        elif isinstance(node, list):
+            for i, value in enumerate(node):
+                visit_node(value, f"{path}[{i}]", scope)
+
+    if isinstance(schema, dict):
+        visit_list(schema.get('fields'), 'fields', {})
+        ports = schema.get('ports')
+        if isinstance(ports, dict):
+            for port, entry in ports.items():
+                if isinstance(entry, dict):
+                    visit_list(entry.get('fields'), f"ports.{port}.fields", {})
+    return found
 
 
 @dataclass
@@ -794,7 +869,11 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
         name = fld.get('name')
         if name:
             known_field_names.append(name)
-        
+        # A `var` binds a name a later `$` reference may use (PS-143, PS-523), as a
+        # match's `var` already did above.
+        if isinstance(fld.get('var'), str):
+            known_field_names.append(fld['var'])
+
         # Handle byte_group - add contained fields to known_field_names
         if 'byte_group' in fld:
             bg = fld['byte_group']
@@ -822,8 +901,9 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
             if span is not None and (not isinstance(span, int)
                                      or isinstance(span, bool) or span < 1):
                 errors.append(f"{bgpath}: 'size' must be an integer of at least 1")
+            # PS-070 and PS-397 (member kinds, overlap, a size no narrower than the widest
+            # member) are byte_group_errors', over every group wherever it sits.
             try:
-                check_byte_group_overlap(bg_fields)
                 byte_group_endian(fld, None)       # PS-364: no member endian
             except ValueError as exc:
                 errors.append(f"{bgpath}: {exc}")
@@ -1388,6 +1468,7 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
             group = entry.get('fields') if isinstance(entry, dict) else entry
             errors.extend(optional_errors(group, f"ports[{port}].fields"))
         errors.extend(internal_name_errors(schema))
+        errors.extend(byte_group_errors(schema))                 # PS-070, PS-397
         for field_def in typed_field_dicts(schema):
             # PS-427: a list of integers. PS-428: omit or flag.
             sentinel = field_def.get('sentinel')
@@ -1755,16 +1836,19 @@ def check_best_practices(schema: Dict[str, Any], result: ValidationResult) -> No
                         )
                     break
             
-            # Multiple bare modifiers: the arithmetic is applied in the canonical
-            # order (mult, div, add) whatever order the keys appear in, so a
-            # reader cannot tell the intent from the source. PS-262.
-            bare_modifiers = [key for key in ('mult', 'div', 'add') if key in fld]
-            if len(bare_modifiers) >= 2:
+            # PS-262 (amended by CR-2026-135): bare modifiers apply in the canonical
+            # order mult, div, add whatever order the keys are written in (PS-101), so
+            # keys written in another order suggest an author who meant that order,
+            # which is a transform (PS-102). Keys written canonically - `div: 10` then
+            # `add: -40`, the pattern Clause 3 recommends - are not warned about.
+            written = [key for key in fld if key in ('mult', 'div', 'add')]
+            canonical = [key for key in ('mult', 'div', 'add') if key in fld]
+            if written != canonical:
                 result.add_warning(
-                    "Uses %s together; these apply in the canonical order "
-                    "mult, div, add regardless of key order. Write the intended "
-                    "sequence as a transform array to make it explicit."
-                    % ", ".join(bare_modifiers),
+                    "Writes %s in that order; they apply in the canonical order %s "
+                    "regardless of key order (PS-101). Write the intended sequence as a "
+                    "transform array, or the keys in the canonical order (PS-262)."
+                    % (", ".join(written), ", ".join(canonical)),
                     f"{name}"
                 )
 
@@ -1860,7 +1944,7 @@ def validate_schema(schema: Dict[str, Any], strict_keys: bool = True) -> Validat
             result.messages.append(ValidationMessage(ValidationLevel.ERROR, err))
         return result
     
-    for warning in key_warnings:
+    for warning in key_warnings + case_key_type_warnings(schema):
         result.add_warning(warning)
 
     # Check best practices (warnings and info)

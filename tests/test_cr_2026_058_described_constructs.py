@@ -132,7 +132,9 @@ def test_no_field_after_an_exceeded_repeat_is_decoded():
 
 @pytest.mark.parametrize("members", [
     [{"name": "a", "type": "u8[0:3]"}, {"name": "b", "type": "u8[2:5]"}],
-    [{"name": "a", "type": "u16[8:15]"}, {"name": "b", "type": "u8[0:3]"}],
+    # Members of different widths compare in the group's assembled value (PS-364,
+    # CR-2026-131): u16[0:3] and u8[2:5] share bits 2 and 3.
+    [{"name": "a", "type": "u16[0:3]"}, {"name": "b", "type": "u8[2:5]"}],
     [{"name": "a", "type": "u8[0:0]"}, {"name": "b", "type": "bool", "bit": 0}],
 ])
 def test_overlapping_members_are_rejected(members):
@@ -141,6 +143,16 @@ def test_overlapping_members_are_rejected(members):
     assert any("PS-397" in e for e in validate_schema_structure(schema))
     with pytest.raises(ValueError, match="PS-397"):
         TS013Generator(schema).generate()
+
+
+def test_members_of_different_widths_on_different_bits_are_permitted():
+    # u16[8:15] and u8[0:3] are bits 8-15 and 0-3 of the one assembled value, which is
+    # how every decoder reads them. The check used to number each member's bits
+    # most-significant-first within its own base, and rejected this pair as overlapping.
+    schema = one({"byte_group": {"size": 2, "fields": [
+        {"name": "a", "type": "u16[8:15]"}, {"name": "b", "type": "u8[0:3]"}]}})
+    assert decode(schema, "AB05").data == {"a": 0xAB, "b": 5}
+    assert validate_schema_structure(schema) == []
 
 
 def test_a_gap_between_members_is_permitted():

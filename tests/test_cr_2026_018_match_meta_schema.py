@@ -323,9 +323,11 @@ class TestTheGeneratorStillCannotClobberIt:
 def test_the_generator_branches_on_a_string_case_key():
     """A string case key that is not a number, a range or a list compares equal as a
     string, as the reference interpreter compares it. It used to yield no branch, so a
-    match keyed by a lookup label lost every case body in the generated codec. Whether a
-    looked-up field binds its label or its raw value is not yet settled by the
-    specification, so this is a unit test rather than a shared-corpus fixture."""
+    match on a text discriminator lost every case body in the generated codec.
+
+    CR-2026-109 settled the other half: a reference to a looked-up field binds the number
+    under its label (PS-523), so a label key there matches nothing (PS-524), in the
+    codec as in every interpreter."""
     import json as _json
     import subprocess
     import sys as _sys
@@ -334,18 +336,33 @@ def test_the_generator_branches_on_a_string_case_key():
     _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent / "tools"))
     from generate_ts013_codec import TS013Generator
 
-    schema = {
+    def run(schema, payload):
+        code = TS013Generator(schema).generate()
+        out = subprocess.run(
+            ["node", "-e", code + "console.log(JSON.stringify(decodeUplink({bytes:%s,fPort:1})))"
+             % _json.dumps(payload)], capture_output=True, text=True, check=True).stdout
+        return _json.loads(out)["data"]
+
+    text = {
+        "name": "t",
+        "fields": [
+            {"name": "Cmd", "type": "ascii", "length": 1},
+            {"match": {"field": "$Cmd", "default": "skip", "cases": {
+                "A": [{"name": "x", "type": "u8"}],
+                "B": [{"name": "y", "type": "u8"}]}}},
+        ],
+    }
+    assert run(text, [0x41, 5]) == {"Cmd": "A", "x": 5}
+    assert run(text, [0x42, 7]) == {"Cmd": "B", "y": 7}
+
+    labelled = {
         "name": "t",
         "fields": [
             {"name": "Cmd", "type": "u8", "lookup": {1: "A", 129: "ARsp"}},
             {"match": {"field": "$Cmd", "default": "skip", "cases": {
                 "A": [{"name": "x", "type": "u8"}],
-                "ARsp": [{"name": "y", "type": "u8"}]}}},
+                129: [{"name": "y", "type": "u8"}]}}},
         ],
     }
-    code = TS013Generator(schema).generate()
-    for payload, want in (([1, 5], {"Cmd": "A", "x": 5}), ([129, 7], {"Cmd": "ARsp", "y": 7})):
-        out = subprocess.run(
-            ["node", "-e", code + "console.log(JSON.stringify(decodeUplink({bytes:%s,fPort:1})))"
-             % _json.dumps(payload)], capture_output=True, text=True, check=True).stdout
-        assert _json.loads(out)["data"] == want
+    assert run(labelled, [1, 5]) == {"Cmd": "A"}
+    assert run(labelled, [129, 7]) == {"Cmd": "ARsp", "y": 7}

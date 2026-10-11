@@ -83,9 +83,33 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # +6: repeat-element-null-sentinel, -internal-name, repeat-identity-sibling (2) and
 # repeat-count-computed (CR-2026-121, CR-2026-123), plus the null fixture's
 # reserved-value vector, whose null now writes the sentinel (PS-544); all repeat.
+# +6: lookup-reference-binding (CR-2026-109, CR-2026-132), match; the miss, default
+# and unnamed-enum vectors carry no value to write back.
+# +4: lookup-reference-binding vectors added for the mutation gate, match.
 # (merged with master's +6 tlv-repeat/mutation-gate vectors)
 # +4: ascii-latin1 (CR-2026-114), all plain fixed: a byte above 0x7F re-encodes to itself.
-FLOOR_TOTAL = 1824
+# +3: byte-group-width (CR-2026-131), byte_group.
+# +3: CR-2026-134 (PS-551) derives what the input fixes. internal-discriminator's two
+# vectors (match) derive `_kind` from the case whose fields are given, and
+# flagged-group-field-list's inner_groups (flagged) derives both masks and now encodes a
+# flagged block nested in a group, which was passed over as nameless.
+# +1: the merge of the two. lookup-reference-binding's an_unnamed_enum_code_is_omitted_
+# but_bound (match) reports no discriminator, so neither side re-encoded it alone; with
+# PS-551 the code is derived from the case whose fields are given.
+# +1: CR-2026-135's encoder-rounding fixture, its decode vector (plain fixed). Its two
+# encode vectors are no round trip, and arithmetic-worked-examples' omits a field.
+# +264: CR-2026-136 lays bit ranges and bools out as a decoder reads them. A range that
+# does not consume shares its byte with the next field - also across a construct's end,
+# and inside a flagged group - instead of writing it twice, so the peeks in vobo (150),
+# dnt-lw-wsci (75) and milesight ct10x/ct30x/gs301/ws515 (39) round-trip; all tlv.
+# -26 deliberately, merging CR-2026-136 with CR-2026-134: 2132 combined (2079 + 1841 -
+# 1814) less 26 tlv vectors of milesight ct10x (12), ct30x (6), gs301 (6) and ws515 (2)
+# that CR-2026-136 round-tripped by leaving a status peek's bits zero. The peek is a
+# `u16[0:15]` whose lookup misses on an ordinary reading, so the decode omits it
+# (PS-269), and PS-551 makes it a required value the input does not give: the encode is
+# rejected naming the status. Not derivable either - a peek's bytes are written by the
+# field after it (_is_peek).
+FLOOR_TOTAL = 2080
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -93,11 +117,14 @@ FLOOR_BY_SHAPE = {
     # 1283 -> 1281 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped
     # only because their internal byte halves were all zero, which the encoder wrote
     # for an internal field with no value. It now reports such a field instead.
-    "tlv": 1305,   # +2: CR-2026-128; +3: CR-2026-125 fixtures; +1: tlv-repeat-merge (CR-2026-110)
-    "flagged": 193,
-    "plain fixed": 147,
-    "match": 129,  # +4: match-u32-inline-discriminator
-    "byte_group": 25,
+    "tlv": 1543,  # -26: CR-2026-136 with CR-2026-134 (see FLOOR_TOTAL); +264: CR-2026-136 (see FLOOR_TOTAL); +2: CR-2026-128; +3: CR-2026-125 fixtures; +1: tlv-repeat-merge (CR-2026-110)
+    "flagged": 194,  # +1: CR-2026-134 (see FLOOR_TOTAL)
+    "plain fixed": 148,  # +1: CR-2026-135 (see FLOOR_TOTAL); +4: ascii-latin1 (CR-2026-114)
+    # +1: CR-2026-132 enum port; +5: lookup-reference-binding (CR-2026-109);
+    # +4: match-u32-inline-discriminator; +2: CR-2026-134; +1: both together (see
+    # FLOOR_TOTAL)
+    "match": 142,
+    "byte_group": 28,  # +3: byte-group-width (CR-2026-131)
     # 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now
     # carry only the definitions they reach, so one no longer has a `repeat` in an
     # unreferenced definition for the classifier to find.

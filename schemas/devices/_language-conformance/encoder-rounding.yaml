@@ -1,0 +1,50 @@
+# PS-552 (CR-2026-135): an encoder rounds an integer field's value to the nearest
+# integer, a tie to even, on the binary64 value its arithmetic produced. The encode rows
+# of Clause 3's worked examples: 23.45 * 10 is 234.49999999999997, so 234 and not the
+# 235 a decimal reading gives; 0.15 * 10 is 1.5, so 2; -1.25 * 2 is -2.5, so -2; and a
+# whole field given 2.5 writes 2. The span row writes 50 % back as 3500 mV.
+name: probe_encoder_rounding
+endian: big
+fields:
+- name: tenths
+  type: u16
+  div: 10
+- name: halves
+  type: s8
+  div: 2
+- name: whole
+  type: u8
+- name: percent_of_span
+  type: u16
+  transform:
+  - add: -2800
+  - div: 1400
+  - mult: 100
+test_vectors:
+- name: binary64_value_is_rounded
+  source: spec-example
+  description: "23.45 -> 234, -1.25 -> -2, 2.5 -> 2, 50 -> 3500"
+  input:
+    tenths: 23.45
+    halves: -1.25
+    whole: 2.5
+    percent_of_span: 50
+  expected_payload: "00EA FE 02 0DAC"
+- name: ties_go_to_even
+  source: spec-example
+  description: "0.15 -> 2, -2.5 * 2 is -5 exactly, 3.5 -> 4"
+  input:
+    tenths: 0.15
+    halves: -2.5
+    whole: 3.5
+    percent_of_span: 50
+  expected_payload: "0002 FB 04 0DAC"
+- name: round_trip
+  source: spec-example
+  description: "26.0 with div 10 is 260; the decode reads the same values back"
+  payload: "0104 FB 02 0DAC"
+  expected:
+    tenths: 26.0
+    halves: -2.5
+    whole: 2
+    percent_of_span: 50.0

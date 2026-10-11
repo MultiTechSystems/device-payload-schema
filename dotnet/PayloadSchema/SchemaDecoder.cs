@@ -202,7 +202,7 @@ public static class SchemaDecoder
                 var refResult = ResolveRef(field.Ref2, ctx, schema);
                 MergeTo(result, refResult);
                 foreach (var kv in refResult)
-                    ctx.Variables[kv.Key] = kv.Value;
+                    ctx.BindOutput(kv.Key, kv.Value);
                 continue;
             }
 
@@ -225,7 +225,7 @@ public static class SchemaDecoder
                 var bgResult = DecodeByteGroup(field, ctx);
                 MergeTo(result, bgResult);
                 foreach (var kv in bgResult)
-                    ctx.Variables[kv.Key] = kv.Value;
+                    ctx.BindOutput(kv.Key, kv.Value);
                 continue;
             }
 
@@ -249,7 +249,7 @@ public static class SchemaDecoder
                 var flaggedResult = DecodeFlagged(field.Flagged, ctx);
                 MergeTo(result, flaggedResult);
                 foreach (var kv in flaggedResult)
-                    ctx.Variables[kv.Key] = kv.Value;
+                    ctx.BindOutput(kv.Key, kv.Value);
                 continue;
             }
 
@@ -261,7 +261,7 @@ public static class SchemaDecoder
                 {
                     MergeTo(result, matchMap);
                     foreach (var kv in matchMap)
-                        ctx.Variables[kv.Key] = kv.Value;
+                        ctx.BindOutput(kv.Key, kv.Value);
                 }
                 continue;
             }
@@ -274,7 +274,7 @@ public static class SchemaDecoder
                 {
                     MergeTo(result, matchMap);
                     foreach (var kv in matchMap)
-                        ctx.Variables[kv.Key] = kv.Value;
+                        ctx.BindOutput(kv.Key, kv.Value);
                 }
                 continue;
             }
@@ -293,7 +293,12 @@ public static class SchemaDecoder
             if (ReferenceEquals(value, Omitted))
             {
                 // A mapping lookup with no entry and no default: the device
-                // reported nothing this schema can name (PS-269).
+                // reported nothing this schema can name (PS-269). The reference stays
+                // bound to the number (PS-523).
+                if ((field.Lookup != null || field.Type == FieldType.Enum)
+                    && !string.IsNullOrEmpty(field.Name)
+                    && ctx.LookupBinding.ContainsKey(field))
+                    ctx.Bind(field, field.Name, Omitted);
                 continue;
             }
 
@@ -311,8 +316,9 @@ public static class SchemaDecoder
                     result[outputName] = value;
                 }
                 // Keyed by the schema-level name in Variables so $references keep
-                // working when name_from is in play (PS-267).
-                ctx.Variables[field.Name] = value;
+                // working when name_from is in play (PS-267). A looked-up field binds
+                // PS-523's value and keeps its label for templates (PS-532).
+                ctx.Bind(field, field.Name, value);
                 if (field.ValidRange is { Length: >= 2 })
                     ctx.CheckValidRange(value, field);
             }
@@ -335,7 +341,7 @@ public static class SchemaDecoder
 
     static Dictionary<string, object?> DecodeByteGroup(SchemaField field, DecodeContext ctx)
     {
-        int size = field.Size > 0 ? field.Size : 1;
+        int size = Cr131.ByteGroupWidth(field);                    // PS-070, CR-2026-131
         if (ctx.Remaining < size)
         {
             // PS-535: the group is read as one value (CR-2026-131), so the failing read is
@@ -356,25 +362,31 @@ public static class SchemaDecoder
         foreach (var subfield in field.ByteGroup)
         {
             ctx.Produced(subfield);                                            // PS-490
+            // PS-070: every member is a range of the group's value, read from its start - a
+            // whole integer is its full range, a bool one bit. A whole integer took the
+            // whole group's value, so a u8 beside a u16[8:11] read both bytes.
             object raw;
-            var bitRange = Helpers.ParseBitRange(subfield.RawType);
-            if (bitRange != null)
-                raw = ExtractRange(rawVal, subfield.SignedBits, bitRange.Value.start,
-                    bitRange.Value.end - bitRange.Value.start + 1);
-            else if (subfield.Type == FieldType.Bool)
+            var range = Cr131.MemberRange(subfield);
+            if (subfield.Type == FieldType.Bool)
                 raw = ((rawVal >> subfield.Bit) & 1) == 1;
             else
-                raw = (double)rawVal;
+                raw = ExtractRange(rawVal, range.signed, range.low, range.high - range.low + 1);
 
             var value = ApplyPostRead(raw, subfield, ctx);
-            if (ReferenceEquals(value, Omitted) || string.IsNullOrEmpty(subfield.Name))
+            if (string.IsNullOrEmpty(subfield.Name))
                 continue;
-            if (subfield.Name.StartsWith("_"))
+            if (ReferenceEquals(value, Omitted))
             {
-                // Internal: bound for later references, not reported.
-                ctx.Variables[subfield.Name] = value;
+                // PS-269 omits it; PS-523 leaves its reference bound to the number.
+                if (subfield.Lookup != null && ctx.LookupBinding.ContainsKey(subfield))
+                    ctx.Bind(subfield, subfield.Name, Omitted);
                 continue;
             }
+            // Bound here, as PS-523 says, before the group's output is merged: an internal
+            // member is bound and not reported.
+            ctx.Bind(subfield, subfield.Name, value);
+            if (subfield.Name.StartsWith("_"))
+                continue;
             result[subfield.Name] = value;
         }
 
@@ -593,6 +605,9 @@ public static class SchemaDecoder
                 };
                 var data = ctx.Read(baseLen);
                 int intVal = (int)Helpers.DecodeUint(data, endian);
+                // PS-523 (CR-2026-132): an enum is a lookup by another spelling, so a
+                // reference binds its code and a template reads its name.
+                ctx.EnumCodes[field] = (double)intVal;
                 if (field.Values != null && field.Values.TryGetValue(intVal, out var enumStr))
                     value = enumStr;
                 // An unmapped value takes the declared default (PS-068). Returning
@@ -600,7 +615,9 @@ public static class SchemaDecoder
                 else if (field.EnumDefault != null)
                     value = field.EnumDefault;
                 else
-                    value = (double)intVal;
+                    // With no default the field is omitted, as a lookup miss is (PS-068,
+                    // PS-269, CR-2026-132); a reference still binds the code (PS-523).
+                    value = Omitted;
                 break;
             }
 
@@ -777,6 +794,7 @@ public static class SchemaDecoder
         bool asDeclared = false;
         ctx.GuardElse.Remove(field);
         ctx.PreLookup.Remove(field);
+        ctx.LookupBinding.Remove(field);
         if (value is DeclaredElse declared)
         {
             value = declared.Value;
@@ -864,6 +882,9 @@ public static class SchemaDecoder
                         $"lookup index {numVal.ToString(CultureInfo.InvariantCulture)} is not an index "
                         + $"of a {field.Lookup.Count}-entry sequence (PS-105)");
                 var template = Wave5.Template(field);
+                // PS-523: the number before the lookup, which a reference binds under a
+                // text or boolean label and where the mapping has no entry.
+                var number = value;
                 if (integral && field.Lookup.TryGetValue(intVal, out var lookupStr))
                     value = lookupStr;
                 else if (template != null)
@@ -878,13 +899,24 @@ public static class SchemaDecoder
                     throw new InvalidOperationException(
                         $"lookup index {intVal} out of bounds for {field.Lookup.Count} entries");
                 else
+                {
+                    // PS-269 omits the field; PS-523 leaves its reference bound to the number.
+                    ctx.LookupBinding[field] = number;
+                    if (field.Var != null)
+                        ctx.Bind(field, field.Var, Omitted);
                     return Omitted;
+                }
+                ctx.LookupBinding[field] = DecodeContext.IsNumericLabel(value) ? value : number;
             }
         }
 
-        // Store variable
+        // An enum binds its code under its name (CR-2026-132).
+        if (field.Type == FieldType.Enum && ctx.EnumCodes.Remove(field, out var code))
+            ctx.LookupBinding[field] = DecodeContext.IsNumericLabel(value) ? value : code;
+
+        // Store variable: PS-523's binding, keeping the label for templates (PS-532).
         if (field.Var != null)
-            ctx.Variables[field.Var] = value;
+            ctx.Bind(field, field.Var, value);
 
         return value;
     }
@@ -1474,17 +1506,35 @@ public static class SchemaDecoder
                         val = (int)Helpers.DecodeUint(data, ctx.Endian);
                     }
                     if (!string.IsNullOrEmpty(tf.Name))
-                    {
                         tagValues[tf.Name] = val;
-                        // A component is a field decoded earlier in the payload, so its
-                        // name is a reference the case body may make (`ref: $rsn`,
-                        // PS-265). Only `var:` was bound: "Ref field not found: rsn".
+                    if (tf.Lookup != null || tf.Mult != null || tf.Div != null || tf.Add != null
+                        || tf.Transform.Count > 0)
+                    {
+                        // PS-523 (CR-2026-132): a component binds as any field does -
+                        // through its modifiers, and a lookup's number under a text
+                        // label, the label kept for templates. ApplyPostRead binds its
+                        // `var`; the tag is still matched on the value read.
+                        var bound = ApplyPostRead((double)val, tf, ctx);
+                        if (!string.IsNullOrEmpty(tf.Name)
+                            && (!ReferenceEquals(bound, Omitted) || ctx.LookupBinding.ContainsKey(tf)))
+                            ctx.Bind(tf, tf.Name, bound);
+                        continue;
+                    }
+                    // A component is a field decoded earlier in the payload, so its name is
+                    // a reference the case body may make (`ref: $rsn`, PS-265). Only `var:`
+                    // was bound: "Ref field not found: rsn".
+                    if (!string.IsNullOrEmpty(tf.Name))
+                    {
                         ctx.Variables[tf.Name] = (long)val;
+                        ctx.Reported.Remove(tf.Name);
                     }
                     // A component's `var:` binds for the case body, as a field's does; a
                     // name_from template such as "temperature_${ch}" reads it.
                     if (!string.IsNullOrEmpty(tf.Var))
+                    {
                         ctx.Variables[tf.Var] = (long)val;
+                        ctx.Reported.Remove(tf.Var);
+                    }
                 }
 
                 if (field.TagKey is List<object?> tkList)
@@ -1712,6 +1762,16 @@ public static class SchemaDecoder
                 missing.Add(reference);
                 return string.Empty;
             }
+            // A template writes the value reported, the label where there is a lookup
+            // (PS-532), not the number a reference binds (PS-523).
+            if (ctx.Reported.TryGetValue(reference, out var reported))
+            {
+                if (ReferenceEquals(reported, Omitted))
+                    throw new InvalidOperationException(
+                        $"name_from for '{field.Name}' references {reference}, which reported "
+                        + "no value (PS-266, PS-532)");
+                value = reported;
+            }
             return Wave5.RenderTemplateValue(value)
                 ?? throw new InvalidOperationException(
                     Wave5.TemplateShapeError(field.NameFrom!, reference));
@@ -1805,6 +1865,7 @@ public static class SchemaDecoder
         void Element()
         {
             var outer = new Dictionary<string, object?>(ctx.Variables);
+            var outerReported = new Dictionary<string, object?>(ctx.Reported);
             var savedNames = ctx.ElementNames;
             ctx.ElementNames = elementNames;
             if (!string.IsNullOrEmpty(field.Index))
@@ -1832,6 +1893,9 @@ public static class SchemaDecoder
                 ctx.Variables.Clear();
                 foreach (var kv in outer)
                     ctx.Variables[kv.Key] = kv.Value;
+                ctx.Reported.Clear();
+                foreach (var kv in outerReported)
+                    ctx.Reported[kv.Key] = kv.Value;
                 ctx.ElementNames = savedNames;
                 ctx.PendingRecords = savedRecords;
             }

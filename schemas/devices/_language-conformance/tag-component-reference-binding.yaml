@@ -1,0 +1,63 @@
+# PS-523 (CR-2026-109, CR-2026-132): a composite tag's component binds its name and its
+# `var` as any field does. Through a table of text labels it binds the number under the
+# label; through a table of numbers it binds the number reported. A key template writes
+# the reported value (PS-532). The tag itself is still matched on the value read.
+#
+# One port per table. In each entry the body reports a reading keyed by the component,
+# doubles the component by name, and selects a case on its `var`.
+name: probe_tag_component_reference_binding
+endian: big
+ports:
+  1:
+    fields:
+      - tlv:
+          tag_fields:
+            - {name: side, type: u8, var: s, lookup: {1: left, 2: right}}
+            - {name: kind, type: u8}
+          tag_key: [side, kind]
+          cases:
+            "[*, 0x10]":
+              - {name: reading, type: u8, name_from: "reading_${s}"}
+              - {name: doubled, type: number, compute: {op: mul, a: $side, b: 2}}
+              - match:
+                  field: $s
+                  cases:
+                    2: [{name: hit, type: u8}]
+                  default: [{name: other, type: u8}]
+  2:
+    fields:
+      - tlv:
+          tag_fields:
+            - {name: side, type: u8, var: s, lookup: [0, 125, 250]}
+            - {name: kind, type: u8}
+          tag_key: [side, kind]
+          cases:
+            "[*, 0x10]":
+              - {name: reading, type: u8, name_from: "reading_${s}"}
+              - {name: doubled, type: number, compute: {op: mul, a: $side, b: 2}}
+              - match:
+                  field: $s
+                  cases:
+                    125: [{name: hit, type: u8}]
+                  default: [{name: other, type: u8}]
+test_vectors:
+  - name: a_text_label_component_binds_its_number
+    payload: "02 10 07 05"
+    fPort: 1
+    source: spec-example
+    expected:
+      reading_right: 7
+      doubled: 4
+      hit: 5
+      other: null
+      reading_2: null
+  - name: a_numeric_label_component_binds_itself
+    payload: "01 10 07 05"
+    fPort: 2
+    source: spec-example
+    expected:
+      reading_125: 7
+      doubled: 250
+      hit: 5
+      other: null
+      reading_1: null
