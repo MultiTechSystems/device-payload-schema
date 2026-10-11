@@ -76,7 +76,17 @@ public static partial class SchemaParser
                     var v = scalar.Value ?? "";
                     var names = new List<string>();
                     if (ReferenceKeys.Contains(k) && v.StartsWith("$"))
-                        names.Add(v.Substring(1));
+                    {
+                        // PS-546: `$name[i]` names a sibling repeat and this one's index.
+                        var indexed = Regex.Match(v.Substring(1), @"^(\w+)\[(\w+)\]$");
+                        if (indexed.Success)
+                        {
+                            names.Add(indexed.Groups[1].Value);
+                            names.Add(indexed.Groups[2].Value);
+                        }
+                        else
+                            names.Add(v.Substring(1));
+                    }
                     else if (k == "name_from" || (inSenml && k == "name"))
                         foreach (Match m in TemplateReference.Matches(v))
                             names.Add(m.Groups[1].Value);

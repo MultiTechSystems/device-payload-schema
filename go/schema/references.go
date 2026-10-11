@@ -38,6 +38,9 @@ var referenceFirstKeys = []string{"tag_fields", "trailer", "fields", "element"}
 
 var declaredNameTemplate = regexp.MustCompile(`\$\{(\w+)\}`)
 
+// indexedReference is a `$name[i]` sibling reference (PS-546), read as its two names.
+var indexedReference = regexp.MustCompile(`^(\w+)\[(\w+)\]$`)
+
 // referenceErrorMessage is PS-539's wording, the spec prototype's.
 func referenceErrorMessage(name, key string) string {
 	return fmt.Sprintf("`$%s` (%s) names no field, var, tag component, index or count_as "+
@@ -116,7 +119,12 @@ func checkReferences(raw map[string]any, order keyOrder) error {
 			if s, ok := v.(string); ok {
 				var names []string
 				if referenceKeys[k] && strings.HasPrefix(s, "$") {
-					names = []string{s[1:]}
+					// PS-546: `$name[i]` names a sibling repeat and this one's index.
+					if m := indexedReference.FindStringSubmatch(s[1:]); m != nil {
+						names = []string{m[1], m[2]}
+					} else {
+						names = []string{s[1:]}
+					}
 				} else if k == "name_from" || (inSenml && k == "name") {
 					for _, match := range declaredNameTemplate.FindAllStringSubmatch(s, -1) {
 						names = append(names, match[1])

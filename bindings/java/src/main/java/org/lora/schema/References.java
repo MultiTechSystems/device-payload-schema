@@ -36,6 +36,8 @@ final class References {
 
     private static final Pattern TEMPLATE_REFERENCE = Pattern.compile("\\$\\{(\\w+)\\}");
 
+    private static final Pattern INDEXED_REFERENCE = Pattern.compile("(\\w+)\\[(\\w+)\\]");
+
     /** PS-539's wording, the spec prototype's. */
     static String message(String name, String key) {
         return "`$" + name + "` (" + key + ") names no field, var, tag component, index or "
@@ -118,7 +120,14 @@ final class References {
             if (v instanceof String s) {
                 List<String> names = new ArrayList<>();
                 if (REFERENCE_KEYS.contains(k) && s.startsWith("$")) {
-                    names.add(s.substring(1));
+                    // PS-546: `$name[i]` names a sibling repeat and this one's index.
+                    Matcher indexed = INDEXED_REFERENCE.matcher(s.substring(1));
+                    if (indexed.matches()) {
+                        names.add(indexed.group(1));
+                        names.add(indexed.group(2));
+                    } else {
+                        names.add(s.substring(1));
+                    }
                 } else if (k.equals("name_from") || (inSenml && k.equals("name"))) {
                     Matcher m = TEMPLATE_REFERENCE.matcher(s);
                     while (m.find()) names.add(m.group(1));

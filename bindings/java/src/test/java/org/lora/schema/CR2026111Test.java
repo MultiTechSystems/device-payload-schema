@@ -117,7 +117,7 @@ public class CR2026111Test {
         EncodeResult result = Schema.fromYaml(INCREMENTS).encode(data);
         assertFalse(result.isSuccess());
         assertTrue(String.join("; ", result.getErrors()).contains(
-                "Repeat 'increments' has null at position 1, which has no encoding (PS-529)"),
+                "Repeat 'increments' has null at position 1, and its element declares no `sentinel` to write for it (PS-544)"),
                 result.getErrors().toString());
     }
 
