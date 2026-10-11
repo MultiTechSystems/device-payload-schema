@@ -1283,13 +1283,38 @@ schema against its own vectors. Five gates close that, each a ratchet against a 
 baseline - a regression fails, an improvement is reported and locked in with the gate's
 `--update`/`-update` target, deliberately, in its own commit:
 
-| Gate | Fails when | Baseline |
-|---|---|---|
-| `gate-validator-strict` | a YAML/JSON mapping has a duplicate key (a colliding case key used to vanish silently), or a key no implementation reads (`sub:` in a transform, `count_field`, `match_value`, ...) | vocabulary in `tools/schema_vocabulary.py` |
-| `gate-provenance` | a changed device schema has no independently sourced vector, or an added vector lacks `source:` | none: the diff against `BASE` |
-| `gate-crossval` | a schema stops agreeing with its vendor's own decoder (TTN declared examples + vendor JS, Decentlab decoders), or a new one does not agree | `tools/crossval-baseline.json`, oracle commits pinned |
-| `gate-mutation` | a schema's vectors notice fewer one-step mutations than before (score or killed count), or a new schema scores below 0.80 | `tools/mutation-baseline.json` |
-| `gate-verdicts` | a changed schema's vector fails in any of Python, Go, Java, C#, TS013, or a vector the reference passes fails elsewhere | `tools/verdicts-baseline.json` (empty: all five agree on every vector) |
+| Gate | Fails when | Baseline | On a pull request | On master and nightly |
+|---|---|---|---|---|
+| `gate-validator-strict` | a YAML/JSON mapping has a duplicate key (a colliding case key used to vanish silently), or a key no implementation reads (`sub:` in a transform, `count_field`, `match_value`, ...) | vocabulary in `tools/schema_vocabulary.py` | whole corpus | whole corpus |
+| `gate-provenance` | a changed device schema has no independently sourced vector, or an added vector lacks `source:` | none: the diff against `BASE` | the PR's changed schemas | not run (no diff) |
+| `gate-crossval` | a schema stops agreeing with its vendor's own decoder (TTN declared examples + vendor JS, Decentlab decoders), or a new one does not agree | `tools/crossval-baseline.json`, oracle commits pinned | whole corpus (seconds) | whole corpus |
+| `gate-mutation` | a schema's vectors notice fewer one-step mutations than before (score or killed count), or a new schema scores below 0.80 | `tools/mutation-baseline.json` | the schemas the PR adds or modifies (`--only-changed`), or the full sweep if it touches the harness, the gate, the baseline, `requirements.txt` or a `tools/` module the harness loads | full sweep |
+| `gate-verdicts` | a changed schema's vector fails in any of Python, Go, Java, C#, TS013, or a vector the reference passes fails elsewhere | `tools/verdicts-baseline.json` (empty: all five agree on every vector) | whole corpus, changed schemas strictly | whole corpus |
+
+The nightly run is `gates.yml`'s `schedule` (03:30 UTC). Outside the gates, the plain
+`pytest tests/` run (Quality's "Python tests") is the PR's test check; the same suite
+under coverage (Fuzz Testing's "Test Coverage", about 2.5 times slower for an identical
+test set) runs on master and nightly only, as does the full fuzz.
+
+**Mutation on a PR is the PR's own schemas, not the corpus.** The full sweep cost about
+84 minutes on one runner, so `--only-changed` scores only what the diff from the merge base
+adds or modifies, under the full sweep's rules (a baselined schema against its entry, a new
+one against the 0.80 floor, a deleted baselined one as missing). A change that can move every
+schema's score - `FULL_SWEEP_FILES` in `tools/mutation-gate.py`, plus whatever `tools/`
+module the harness imports at run time - runs the full sweep instead. If you make the
+harness read a new file outside `tools/`, add it to `FULL_SWEEP_FILES`, or a PR changing it
+will be judged on its schemas alone.
+
+**One schema is nearly all of the sweep, so the sweep splits schemas, not just the corpus.**
+`volley-boast/vobo` has about 25,000 mutants each replayed against 436 vectors; every other
+schema together takes about one CPU-minute, so sharding by schema alone would leave one
+shard holding vobo for the whole run. The gate plans *units* - a schema, or a contiguous
+part of a heavy schema's mutant list (`plan_parts`) - and `schema-mutation.py merge_parts`
+reassembles the parts into exactly the report one run gives, which a test holds it to. In
+CI six `mutation-shard` jobs each run a slice (`--shard I/6 --parts-out`) and upload it
+unjudged, and the `mutation` job reassembles and judges them (`--parts-in`), failing if any
+schema in scope, or any part of one, is missing. Locally `make gate-mutation` does the same
+in one process pool. Keep the matrix list and `MUTATION_SHARDS` in step.
 
 The mutation gate ratchets the killed count as well as the score on purpose: deleting
 vectors makes the mutants only they reached "unreached", which *raises* the score.
