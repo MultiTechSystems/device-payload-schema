@@ -131,9 +131,11 @@ public class Wave6aTest {
     @Test
     public void anOtherwiseUnboundReferenceIsAbsent() {
         // PS-314, PS-429: a reference with no value cannot be resolved, so the field is
-        // left out. It read 0, which reported a value the payload never carried.
+        // left out. It read 0, which reported a value the payload never carried. The name
+        // is declared (PS-539) and its optional field is not in the payload.
         Schema schema = Schema.fromYaml("name: p\nfields:\n"
-            + "  - {name: v, type: u8}\n  - {name: w, type: number, ref: $nowhere}\n");
+            + "  - {name: v, type: u8}\n  - {name: w, type: number, ref: $nowhere}\n"
+            + "  - {name: nowhere, type: u8, optional: true}\n");
         Map<String, Object> out = schema.decode(hex("05"));
         assertFalse(out.containsKey("w"), out.toString());
         assertEquals(5L, out.get("v"));
