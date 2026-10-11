@@ -66,7 +66,7 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # round-trip: its cases match a range of tags).
 # +5: repeat-element-named, -unnamed, -object, repeat-index-base and the null fixture's
 # vector with no null (CR-2026-111), all repeat. Its two null vectors are refused.
-FLOOR_TOTAL = 1794
+FLOOR_TOTAL = 1798  # +4: match-u32-inline-discriminator
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -77,7 +77,7 @@ FLOOR_BY_SHAPE = {
     "tlv": 1299,
     "flagged": 193,
     "plain fixed": 133,
-    "match": 125,
+    "match": 129,  # +4: match-u32-inline-discriminator
     "byte_group": 25,
     # 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now
     # carry only the definitions they reach, so one no longer has a `repeat` in an

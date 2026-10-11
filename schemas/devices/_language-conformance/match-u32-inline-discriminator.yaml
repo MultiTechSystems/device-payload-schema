@@ -1,0 +1,48 @@
+# A four-byte inline `match` discriminator whose top bit is set.
+#
+# Java and C# read the discriminator as an unsigned value and then cast it to a 32-bit
+# int, so 0x80000001 was reported under `name` as -2147483647, and 0xFFFFFFFF as -1.
+# Neither could match the case key 4294967295 either: C#'s parser holds it as a double
+# and narrowed it to int.MinValue, and Java holds it as text and parsed it with
+# Integer.parseInt, which rejects it. Both fell through to the default, which read past
+# the payload's end. Python, Go and the generated codec keep the discriminator unsigned.
+#
+# Each vector asserts one key, so a runner stopping at its first mismatch cannot hide a
+# second.
+name: probe_match_u32_inline_discriminator
+endian: big
+fields:
+  - match:
+      length: 4
+      name: kind
+      cases:
+        4294967295:
+          - {name: marker, type: string, value: all_ones}
+      default:
+        - name: reading
+          type: u8
+test_vectors:
+  - name: all_ones_is_reported_unsigned
+    description: "0xFFFFFFFF is reported as 4294967295, not -1"
+    payload: "FFFFFFFF"
+    source: generated
+    expected:
+      kind: 4294967295
+  - name: all_ones_selects_its_case
+    description: "0xFFFFFFFF equals the case key 4294967295"
+    payload: "FFFFFFFF"
+    source: generated
+    expected:
+      marker: all_ones
+  - name: top_bit_is_reported_unsigned
+    description: "0x80000001 matches no case and is reported as 2147483649"
+    payload: "8000000107"
+    source: generated
+    expected:
+      kind: 2147483649
+  - name: default_reads_after_the_discriminator
+    description: "an unmatched discriminator leaves the default's byte after its four"
+    payload: "8000000107"
+    source: generated
+    expected:
+      reading: 7

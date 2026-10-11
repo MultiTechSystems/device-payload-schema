@@ -188,18 +188,18 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2618 payload vectors in `schemas/devices/` (measured 2026-10-10 with
-`tools/check-floors.py`, after the CR-2026-111 element-repeat and registry divergence
-fixtures) are the shared
+The 2626 payload vectors in `schemas/devices/` (measured 2026-10-10 with
+`tools/check-floors.py`, after the CR-2026-111 element-repeat, registry divergence and
+`match-u32-*` fixtures) are the shared
 cross-language test set. Every implementation has a runner that reads the same YAML and
 the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1794 |
-| Go | `go/schema/corpus_conformance_test.go` | 2618 | 1811 (plain API 1788) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2618 | 1794 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2618 | 1794 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1798 |
+| Go | `go/schema/corpus_conformance_test.go` | 2626 | 1815 (plain API 1792) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2626 | 1798 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2626 | 1798 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 550 of 550 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -510,6 +510,22 @@ encoder has one run packer, wired through its field list, its construct bodies a
 `flagged` path, and `test_cr_2026_024_encode_bitfield_parity.py` reads all three sources
 so a removal shows up there rather than as a puzzling floor break.
 
+**A `match` discriminator above 0x7FFFFFFF is compared as a 64-bit integer in Java and
+C#.** Both narrowed it to a 32-bit int, and the private registry found the two ways
+that goes wrong in one vendor family's "not available" sentinel - peek a word with
+`u32[0:31]`, take case `2147483648` if it is 0x80000000, else read it as a value.
+Java holds case keys as text (`expandNode` stringifies every mapping key while splicing
+references) and parsed them with `Integer.parseInt`, which rejects 2147483648, so the
+sentinel never matched. C# holds such a key as a double, and `(int)` of an out-of-range
+double is `int.MinValue` on x64 - so the key, 0xFFFFFFFF and 0x80000001 all compared
+equal and two ordinary values decoded as the sentinel. Both also cast an inline
+four-byte discriminator to int and reported 0x80000001 under `name` as -2147483647.
+A discriminator that is no integer at all (a u64 peek above 2^63-1) now matches no
+case in either, rather than the 0 a default conversion would give.
+`match-u32-peek-discriminator.yaml` and `match-u32-inline-discriminator.yaml` hold all
+five to it. Still open: a fractional discriminator truncates to a key in Java and C#,
+where Python compares it exactly.
+
 **Read `make check-floors`, not any table here.** The per-implementation counts in this
 file have gone stale three times; the corpus-table figures above were measured
 2026-09-24.
@@ -756,10 +772,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1794 |
-| Go | `go/schema/corpus_encode_test.go` | 1811 (plain 1788) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1794 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1794 |
+| Python | `tests/test_encode_round_trip.py` | 1798 |
+| Go | `go/schema/corpus_encode_test.go` | 1815 (plain 1792) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1798 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1798 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
