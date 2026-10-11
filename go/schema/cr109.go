@@ -3,6 +3,8 @@ package schema
 import (
 	"fmt"
 	"reflect"
+	"strconv"
+	"strings"
 )
 
 // CR-2026-109 (PS-523, PS-524): what a `$` reference and a `var` bind for a field with a
@@ -33,6 +35,32 @@ func hasLookup(field Field) bool {
 	return field.Lookup != nil || field.LookupArray != nil
 }
 
+// isEnumField reports a `type: enum`, which PS-523 treats as a lookup by another spelling
+// (CR-2026-132): a reference binds its code, a template reads its name.
+func isEnumField(field Field) bool {
+	return field.Type == TypeEnum || field.Type == TypeEnumLower
+}
+
+// reverseEnumLabel is the code an enum reported `value` for (CR-2026-132), including the
+// "unknown(N)" marker; false where none is found.
+func reverseEnumLabel(field Field, value any) (int, bool) {
+	text, ok := value.(string)
+	if !ok {
+		return 0, false
+	}
+	for k, v := range field.Values {
+		if v == text {
+			return k, true
+		}
+	}
+	if strings.HasPrefix(text, "unknown(") && strings.HasSuffix(text, ")") {
+		if n, err := strconv.Atoi(text[8 : len(text)-1]); err == nil {
+			return n, true
+		}
+	}
+	return 0, false
+}
+
 // sameValue compares two bound values without panicking on an uncomparable type.
 func sameValue(a, b any) bool {
 	if a == nil || b == nil {
@@ -52,7 +80,8 @@ func (ctx *DecodeContext) bindReference(name string, field Field, reported any) 
 	if name == "" {
 		return
 	}
-	looked := hasLookup(field) && ctx.lookupNumber.set && ctx.lookupNumber.owner == field.Name
+	looked := (hasLookup(field) || isEnumField(field)) && ctx.lookupNumber.set &&
+		ctx.lookupNumber.owner == field.Name
 	if !looked {
 		if reported == omitted {
 			return
@@ -125,6 +154,12 @@ func encodeDiscriminator(varName string, value any, siblings []Field) any {
 		if (sibling.Name == varName || sibling.Var == varName) && hasLookup(sibling) {
 			if number, err := reverseLookupLabel(sibling, value); err == nil {
 				return number
+			}
+			return value
+		}
+		if (sibling.Name == varName || sibling.Var == varName) && isEnumField(sibling) {
+			if code, ok := reverseEnumLabel(sibling, value); ok {
+				return code
 			}
 			return value
 		}

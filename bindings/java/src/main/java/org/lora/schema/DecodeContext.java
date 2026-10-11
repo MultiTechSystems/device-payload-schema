@@ -156,6 +156,13 @@ public class DecodeContext {
         labels.putAll(saved);
     }
 
+    /** The code each enum field last read, for PS-523's binding (CR-2026-132). */
+    private final Map<Field, Object> enumCodes = new java.util.IdentityHashMap<>();
+
+    void recordEnumCode(Field field, Object code) { enumCodes.put(field, code); }
+
+    Object takeEnumCode(Field field) { return enumCodes.remove(field); }
+
     /** Forget what this field's last lookup recorded, before it is decoded again. */
     void clearLookup(Field field) { lookedUp.remove(field); }
 

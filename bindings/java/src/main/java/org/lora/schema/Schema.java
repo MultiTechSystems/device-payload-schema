@@ -1816,6 +1816,8 @@ public class Schema {
                 };
                 byte[] data = ctx.read(baseLength);
                 int raw = (int) ctx.decodeUnsigned(data, fieldEndian);
+                // PS-523 (CR-2026-132): a reference to an enum binds its code.
+                ctx.recordEnumCode(field, (long) raw);
                 Map<Integer, String> values = field.getValues();
                 if (values != null && values.containsKey(raw)) {
                     value = values.get(raw);
@@ -1947,6 +1949,13 @@ public class Schema {
                 return OMITTED;
             }
             ctx.recordLookup(field, number, value);
+        }
+
+        // PS-523 (CR-2026-132): an enum is a lookup by another spelling - its code is the
+        // number a reference binds, its name the label a template writes.
+        if (field.getType() == FieldType.ENUM) {
+            Object code = ctx.takeEnumCode(field);
+            if (code != null) ctx.recordLookup(field, code, value);
         }
         
         // PS-428: outside the range is no reading, not a flagged one, so the field is
@@ -2203,17 +2212,21 @@ public class Schema {
                         byte[] data = ctx.read(tagFieldWidth(tf));
                         val = (int) ctx.decodeUnsigned(data, ctx.getEndian());
                     }
+                    // A component is a field decoded earlier in the payload, so its name
+                    // is a reference the case body may make (`ref: $rsn`, PS-265), and its
+                    // `var:` binds for the case body, as a field's does; a name_from
+                    // template such as "temperature_${ch}" reads it. PS-523 (CR-2026-132):
+                    // both bind as any field's do - through its modifiers, and a lookup's
+                    // number under a text label, the label kept for templates.
+                    // applyGroupMember binds the `var`. The tag is matched on `val`.
+                    Object bound = applyGroupMember((long) val, tf, ctx);
                     if (tf.getName() != null) {
                         tagValues.put(tf.getName(), val);
-                        // A component is a field decoded earlier in the payload, so its
-                        // name is a reference the case body may make (`ref: $rsn`,
-                        // PS-265). Only `var:` was bound, so `$rsn` read 0.
-                        ctx.setVariable(tf.getName(), (long) val);
-                    }
-                    // A component's `var:` binds for the case body, as a field's does; a
-                    // name_from template such as "temperature_${ch}" reads it.
-                    if (tf.getVar() != null) {
-                        ctx.setVariable(tf.getVar(), (long) val);
+                        if (bound == OMITTED) {
+                            ctx.bindMissed(tf.getName(), tf);
+                        } else {
+                            ctx.bind(tf.getName(), tf, bound);
+                        }
                     }
                 }
                 

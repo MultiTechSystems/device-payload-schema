@@ -451,14 +451,36 @@ function encFind(node, test) {                        // the walk in _field_decl
 
 function encDeclaringVar(name) {                      // _field_declaring_var
   var f = encFind(ENC_SCOPE, function (n) { return n["var"] === name && n.name; });
-  return f ? { name: f.name, lookup: f.lookup } : (ENC_VARS[name] || null);
+  return f ? { name: f.name, lookup: f.lookup, type: f.type, values: f.values }
+           : (ENC_VARS[name] || null);
 }
 
 function encNamed(name) {                             // _field_named
   var f = encFind(ENC_SCOPE, function (n) {
-    return n.name === name && n.lookup !== undefined && n.lookup !== null;
+    return n.name === name && ((n.lookup !== undefined && n.lookup !== null) || n.type === "enum");
   });
-  return f ? { name: f.name, lookup: f.lookup } : (ENC_NAMED[name] || null);
+  return f ? { name: f.name, lookup: f.lookup, type: f.type, values: f.values }
+           : (ENC_NAMED[name] || null);
+}
+
+function encReverseEnum(value, f) {                   // reverse_enum
+  var values = f.values || {}, k;
+  if (Array.isArray(values)) {
+    var labels = values.map(encEnumLabel);
+    if (labels.indexOf(value) >= 0) return labels.indexOf(value);
+  } else {
+    for (k in values) {
+      if (Object.prototype.hasOwnProperty.call(values, k) && encEnumLabel(values[k]) === value) {
+        var n = Number(k);
+        return isFinite(n) ? n : value;
+      }
+    }
+  }
+  if (typeof value === "string" && value.indexOf("unknown(") === 0 && value.slice(-1) === ")") {
+    var u = parseInt(value.slice(8, -1), 10);
+    if (isFinite(u)) return u;
+  }
+  return value;
 }
 
 function encReference(ref, data) {                    // _encode_reference
@@ -473,6 +495,8 @@ function encReference(ref, data) {                    // _encode_reference
   }
   if (src && src.lookup !== null && src.lookup !== undefined &&
       (typeof value === "string" || typeof value === "boolean")) return encReverseLookup(value, src.lookup);
+  // CR-2026-132: an enum bound its code.
+  if (src && src.type === "enum" && typeof value === "string") return encReverseEnum(value, src);
   return value;
 }
 
@@ -2196,7 +2220,8 @@ function writeS(buf, pos, size, value, endian) {
             if isinstance(node, dict):
                 var = node.get('var')
                 if isinstance(var, str) and node.get('name') and var not in found:
-                    found[var] = {'name': node['name'], 'lookup': node.get('lookup')}
+                    found[var] = {'name': node['name'], 'lookup': node.get('lookup'),
+                                  'type': node.get('type'), 'values': node.get('values')}
                 for value in node.values():
                     visit(value)
             elif isinstance(node, list):
@@ -2213,9 +2238,10 @@ function writeS(buf, pos, size, value, endian) {
         def visit(node):
             if isinstance(node, dict):
                 name = node.get('name')
-                if isinstance(name, str) and node.get('lookup') is not None \
-                        and name not in found:
-                    found[name] = {'name': name, 'lookup': node['lookup']}
+                if isinstance(name, str) and name not in found and (
+                        node.get('lookup') is not None or node.get('type') == 'enum'):
+                    found[name] = {'name': name, 'lookup': node.get('lookup'),
+                                   'type': node.get('type'), 'values': node.get('values')}
                 for value in node.values():
                     visit(value)
             elif isinstance(node, list):
@@ -2949,9 +2975,10 @@ function writeS(buf, pos, size, value, endian) {
             default_js = json.dumps(default) if default else f'{js_name}_raw'
             lines.append(f'{i}  var {js_name}_map = {val_json};')
             lines.append(f'{i}  var {js_name}_out = {js_name}_map[{js_name}_raw] !== undefined ? {js_name}_map[{js_name}_raw] : {default_js};')
-            # The interpreters store an enum's mapped label in their variable table, so
-            # record it here too. PS-523's number binding is for a `lookup`, not an enum.
-            lines.append(f'{i}  vars.{js_name} = {js_name}_out;')
+            # PS-523 (CR-2026-132): an enum is a lookup by another spelling, so a reference
+            # binds its code and a template reads its name.
+            lines.extend(f'{i}  {s}' for s in self._bind_js(
+                field, js_name, f'{js_name}_out', number=f'{js_name}_raw'))
             guards, target = name_from_to_js(field, js_name)
             for guard in guards:
                 lines.append(f'{i}  {guard}')
@@ -3163,7 +3190,8 @@ function writeS(buf, pos, size, value, endian) {
                 + ' '.join(self._bind_js(field, name, tmp, False)) + ' }']
 
     @staticmethod
-    def _bind_js(field: Dict, js_name: str, value: str, with_var: bool = True) -> List[str]:
+    def _bind_js(field: Dict, js_name: str, value: str, with_var: bool = True,
+                 number: Optional[str] = None) -> List[str]:
         """Statements binding a field's names in `vars`, as PS-523 says.
 
         A looked-up field binds its label where that is a number and otherwise the number
@@ -3174,10 +3202,11 @@ function writeS(buf, pos, size, value, endian) {
         names = [js_name]
         if with_var and field.get('var'):
             names.insert(0, to_js_name(field['var']))
-        if 'lookup' not in field:
+        if number is None and 'lookup' not in field:
             return [f'vars.{n} = {value};' for n in names]
-        key = json.dumps(field.get('name', ''))
-        return [f'vars.{n} = refValue({value}, lv[{key}]); lbl.{n} = {value};'
+        if number is None:
+            number = f'lv[{json.dumps(field.get("name", ""))}]'
+        return [f'vars.{n} = refValue({value}, {number}); lbl.{n} = {value};'
                 for n in names]
 
     def _emit_tail(self, lines: List[str], i: str, field: Dict, js_name: str, name: str,
@@ -3406,9 +3435,11 @@ function writeS(buf, pos, size, value, endian) {
             # (rakwireless standardized payload). Its name is bound too: a component is
             # a field decoded earlier in the payload, so `ref: $rsn` in a case reads it
             # (PS-265), where the codec read an undefined value.
-            lines.append(f'{i}    vars.{tfname} = {tfname};')
-            if tf.get('var'):
-                lines.append(f'{i}    vars.{to_js_name(str(tf["var"]))} = {tfname};')
+            # PS-523 (CR-2026-132): both bind as any field's do - through its modifiers,
+            # and a lookup's number under a text label, the label kept for templates. The
+            # tag is still matched on the value read.
+            lines.append(f'{i}    var {tfname}_out = {self._apply_modifiers_expr(tfname, tf)};')
+            lines.extend(f'{i}    {s}' for s in self._bind_js(tf, tfname, f'{tfname}_out'))
         if not tag_fields:
             lines.append(f'{i}    var _tlvTag = readU(buf, pos, {tag_size}, endian);')
             lines.append(f'{i}    pos += {tag_size};')

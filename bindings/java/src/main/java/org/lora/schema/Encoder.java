@@ -967,6 +967,22 @@ final class Encoder {
      * through the lookup or its {@code ${value}} default.
      */
     private static Object boundFromReported(Field source, Object reported) {
+        if (source != null && source.getType() == FieldType.ENUM && reported instanceof String name) {
+            // CR-2026-132: a reference to an enum bound its code.
+            if (source.getValues() != null) {
+                for (Map.Entry<Integer, String> e : source.getValues().entrySet()) {
+                    if (name.equals(e.getValue())) return (long) e.getKey();
+                }
+            }
+            if (name.startsWith("unknown(") && name.endsWith(")")) {
+                try {
+                    return Long.parseLong(name.substring(8, name.length() - 1));
+                } catch (NumberFormatException ignored) {
+                    return reported;
+                }
+            }
+            return reported;
+        }
         if (source == null || source.getLookup() == null || source.getLookup().isEmpty()
                 || reported instanceof Number) {
             return reported;

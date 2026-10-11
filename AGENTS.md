@@ -188,18 +188,19 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2653 payload vectors in `schemas/devices/` (measured 2026-10-11 with
+The 2657 payload vectors in `schemas/devices/` (measured 2026-10-11 with
 `tools/check-floors.py`, after the CR-2026-118 and CR-2026-124 fixtures, CR-2026-117's
 guard-absent-operand, the `match-u32-*` and names-mangling-alike fixtures, CR-2026-127's
-guard-boolean-operand and CR-2026-109's lookup-reference-binding) are the shared cross-language test set. Every implementation has a
+guard-boolean-operand, CR-2026-109's lookup-reference-binding and CR-2026-132's
+tag-component-reference-binding) are the shared cross-language test set. Every implementation has a
 runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1813 |
-| Go | `go/schema/corpus_conformance_test.go` | 2653 | 1830 (plain API 1807) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2653 | 1813 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2653 | 1813 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1814 |
+| Go | `go/schema/corpus_conformance_test.go` | 2657 | 1831 (plain API 1808) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2657 | 1814 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2657 | 1814 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 554 of 554 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -773,10 +774,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1813 |
-| Go | `go/schema/corpus_encode_test.go` | 1830 (plain 1807) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1813 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1813 |
+| Python | `tests/test_encode_round_trip.py` | 1814 |
+| Go | `go/schema/corpus_encode_test.go` | 1831 (plain 1808) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1814 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1814 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1525,7 +1526,22 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   `validate_schema.case_key_type_warnings` warns about one (PS-524's SHOULD). A `name_from`
   template is not a reference: it writes the reported value (PS-532), and a template over a
   lookup miss is an error, `name_from for 'x' references code, which reported no value
-  (PS-266, PS-532)`. `type: enum` is outside PS-523 and still binds its label.
+  (PS-266, PS-532)`.
+  - **CR-2026-132 extends it to an enum and a tag component.** An enum is a lookup by another
+    spelling: a reference binds its code, its `default` name included, and a template writes
+    its name. A tlv `tag_fields` component binds its name and `var` as any field does,
+    through its modifiers and lookup, while the tag is still matched on the value read (so a
+    component's sequence lookup out of range is now a PS-105 error). Measured before on 17
+    probes: every implementation bound an enum's name (Go, Java and C# bound the raw value
+    only where no name matched and none was a default) and bound a tag component's raw read,
+    so a template over it wrote `reading_2` for `right`. The C interpreter binds an enum's
+    code already; it binds every field's raw read, before modifiers and lookup, which is
+    PS-523 only where there are neither. Counted before changing it: three schemas in the
+    corpus, library, examples and private registry declare an enum (two fixtures and
+    `library/sensors/user_input.yaml`) and none references one, so no vector outside the
+    fixtures changed. Fixtures: ports 8 and 9 of `lookup-reference-binding.yaml`, and
+    `tag-component-reference-binding.yaml`: decode floors +4 in Go, Java and C#, re-encode
+    and `match` +1 everywhere (only the enum's mapped vector round-trips).
   - **Measured before, the CR's own table was wrong:** it said Go, Java and C# already bound
     the number. On 81 probes (6 lookup kinds x compute/match/var/template, at the top level,
     in a tlv case and in a match body) **all five bound the label**: a text label failed

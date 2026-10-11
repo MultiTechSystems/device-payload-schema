@@ -195,3 +195,119 @@ fields:
 		t.Fatalf("encode(%#v) = %x, %v; want %x", out, back, err, payload)
 	}
 }
+
+// CR-2026-132: an enum is a lookup by another spelling. A reference binds its code, its
+// `default` name included, and a template writes its name.
+func TestCR132EnumBindsItsCode(t *testing.T) {
+	cases := []struct {
+		name, values, key string
+		payload           []byte
+		want              map[string]any
+	}{
+		{"mapped", `{1: "on", 2: "off"}`, "2", []byte{2, 7},
+			map[string]any{"code": "off", "doubled": 4.0, "held": 2.0, "reading_off": 7}},
+		{"default", `{1: "on", 2: "off"}, default: spare`, "5", []byte{5, 7},
+			map[string]any{"code": "spare", "doubled": 10.0, "held": 5.0, "reading_spare": 7}},
+	}
+	for _, c := range cases {
+		out, err := cr109Decode(t, `
+name: cr132
+endian: big
+fields:
+  - {name: code, type: enum, base: u8, var: c, values: `+c.values+`}
+  - {name: doubled, type: number, compute: {op: mul, a: $code, b: 2}}
+  - {name: held, type: number, ref: $c}
+  - match:
+      field: $code
+      cases:
+        `+c.key+`: [{name: reading, type: u8, name_from: "reading_${code}"}]
+      default: [{name: other, type: u8}]
+`, c.payload)
+		if err != nil {
+			t.Errorf("%s: decode: %v", c.name, err)
+			continue
+		}
+		if len(out) != len(c.want) {
+			t.Errorf("%s: got %#v, want %#v", c.name, out, c.want)
+			continue
+		}
+		for k, w := range c.want {
+			got := out[k]
+			gf, gok := toFloat64(got)
+			wf, wok := toFloat64(w)
+			if (gok && wok && gf != wf) || (!(gok && wok) && !reflect.DeepEqual(got, w)) {
+				t.Errorf("%s: %s = %#v, want %#v", c.name, k, got, w)
+			}
+		}
+	}
+}
+
+func TestCR132EnumEncodeSelectsTheCaseFromItsName(t *testing.T) {
+	s, err := ParseSchema(`
+name: cr132
+endian: big
+fields:
+  - {name: code, type: enum, base: u8, values: {1: "on", 2: "off"}}
+  - match:
+      field: $code
+      cases:
+        2: [{name: status, type: u8}]
+      default: [{name: other, type: u8}]
+`)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	payload := []byte{0x02, 0x07}
+	out, err := s.Decode(payload)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out["status"] == nil {
+		t.Fatalf("the case keyed by the code was not selected: %#v", out)
+	}
+	back, err := s.Encode(out)
+	if err != nil || !bytes.Equal(back, payload) {
+		t.Fatalf("encode(%#v) = %x, %v; want %x", out, back, err, payload)
+	}
+}
+
+// CR-2026-132: a tag component's name and `var` bind as any field's do.
+func TestCR132TagComponentBindsAsAField(t *testing.T) {
+	for _, c := range []struct {
+		lookup, key string
+		payload     []byte
+		reading     string
+		doubled     float64
+	}{
+		{"{1: left, 2: right}", "2", []byte{2, 0x10, 7, 5}, "reading_right", 4},
+		{"[0, 125, 250]", "125", []byte{1, 0x10, 7, 5}, "reading_125", 250},
+	} {
+		out, err := cr109Decode(t, `
+name: cr132
+endian: big
+fields:
+  - tlv:
+      tag_fields:
+        - {name: side, type: u8, var: s, lookup: `+c.lookup+`}
+        - {name: kind, type: u8}
+      tag_key: [side, kind]
+      cases:
+        "[*, 0x10]":
+          - {name: reading, type: u8, name_from: "reading_${s}"}
+          - {name: doubled, type: number, compute: {op: mul, a: $side, b: 2}}
+          - match:
+              field: $s
+              cases:
+                `+c.key+`: [{name: hit, type: u8}]
+              default: [{name: other, type: u8}]
+`, c.payload)
+		if err != nil {
+			t.Errorf("%s: decode: %v", c.lookup, err)
+			continue
+		}
+		d, _ := toFloat64(out["doubled"])
+		if out[c.reading] == nil || d != c.doubled || out["hit"] == nil || out["other"] != nil {
+			t.Errorf("%s: got %#v", c.lookup, out)
+		}
+	}
+}

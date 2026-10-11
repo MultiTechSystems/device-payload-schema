@@ -974,6 +974,29 @@ def encoding_errors(field_def):
     return errors
 
 
+def reverse_enum(value, field_def):
+    """The code an enum reported `value` for, or `value` where none is found
+    (CR-2026-132: a reference to an enum binds its code)."""
+    values = field_def.get('values') or {}
+    if isinstance(values, dict):
+        for key, entry in values.items():
+            if enum_label(entry) == value:
+                try:
+                    return int(key, 0) if isinstance(key, str) else int(key)
+                except ValueError:
+                    return value
+    elif isinstance(values, list):
+        labels = [enum_label(entry) for entry in values]
+        if value in labels:
+            return labels.index(value)
+    if isinstance(value, str) and value.startswith('unknown(') and value.endswith(')'):
+        try:
+            return int(value[8:-1])
+        except ValueError:
+            return value
+    return value
+
+
 def enum_label(entry):
     """What an enum value reports: its `name` where it is the description form (PS-394).
 
@@ -3049,6 +3072,10 @@ class SchemaInterpreter:
         # Decode the base integer type
         base_field = {'type': base_type}
         raw_value, new_pos = self._decode_field(base_field, buf, pos)
+        # PS-523 (CR-2026-132): an enum is a lookup by another spelling, so a reference
+        # binds its code and a template reads its name.
+        if hasattr(self, '_lookup_numbers'):
+            self._lookup_numbers[id(field_def)] = raw_value
         
         # Map to string value
         # Values can be dict {0: 'idle', 1: 'running'} or list ['idle', 'running']
@@ -3472,7 +3499,7 @@ class SchemaInterpreter:
     def _bind(self, field_def: Dict[str, Any], names: List[Optional[str]], value: Any) -> None:
         """Bind a decoded field's value under each of `names`, as PS-523 says.
 
-        A field with a lookup binds the label where the lookup reports a number - a
+        A field with a lookup, or an enum (CR-2026-132), binds the label where it is a number - a
         table of sizes or exponents feeds arithmetic - and otherwise the number before
         the lookup: under a text or boolean label, and where the mapping had no entry
         and the field is omitted (PS-269). A `match` therefore selects on the number
@@ -3484,7 +3511,7 @@ class SchemaInterpreter:
         name unbound altogether.
         """
         names = [n for n in names if n]
-        if field_def.get('lookup') is not None:
+        if field_def.get('lookup') is not None or field_def.get('type') == 'enum':
             number = self._lookup_numbers.pop(id(field_def), OMITTED)
             numeric = (value is not OMITTED and isinstance(value, (int, float))
                        and not isinstance(value, bool))
@@ -4309,13 +4336,14 @@ class SchemaInterpreter:
                     # is a reference the case body may make (`ref: $rsn`, PS-265), as a
                     # field's is. It was bound only under `var:`, so `$rsn` read the 0 an
                     # unbound name reads here and Go and C# failed the decode.
-                    if tf.get('name'):
-                        self._variables[tf['name']] = tf_value
                     # A component's `var:` binds for the case body (a `name_from`
                     # template, a `match`), as a field's does; it bound nothing, so
                     # `name_from: "temperature_${ch}"` failed in every case.
-                    if tf.get('var'):
-                        self._variables[tf['var']] = tf_value
+                    # PS-523 (CR-2026-132): both bind as any field's do - through its
+                    # modifiers, and a lookup's number under a text label, with the
+                    # label kept for templates. The tag is still matched on the value read.
+                    self._bind(tf, [tf.get('name'), tf.get('var')],
+                               self._apply_modifiers(tf_value, tf))
                 
                 # Build composite key for matching
                 if isinstance(tag_key, list):
@@ -5636,11 +5664,12 @@ class SchemaInterpreter:
         return found if found is not None else visit(self.schema)
 
     def _field_named(self, name: str) -> Optional[Dict[str, Any]]:
-        """A field named `name` that carries a lookup: in the fields being encoded, else
-        anywhere in the schema."""
+        """A field named `name` that carries a lookup or is an enum: in the fields being
+        encoded, else anywhere in the schema."""
         def visit(node):
             if isinstance(node, dict):
-                if node.get('name') == name and node.get('lookup') is not None:
+                if node.get('name') == name and (node.get('lookup') is not None
+                                                 or node.get('type') == 'enum'):
                     return node
                 for value in node.values():
                     found = visit(value)
@@ -5674,6 +5703,8 @@ class SchemaInterpreter:
         lookup = source.get('lookup') if source else None
         if lookup is not None and isinstance(value, (str, bool)):
             return reverse_lookup(value, lookup)
+        if source and source.get('type') == 'enum' and isinstance(value, str):
+            return reverse_enum(value, source)      # its code (CR-2026-132)
         return value
 
     def _case_fields_present(self, cases: Dict[Any, Any], data: Dict[str, Any]):

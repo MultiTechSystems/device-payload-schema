@@ -1043,6 +1043,9 @@ public static class SchemaEncoder
         /// </summary>
         static object? ReferenceBinding(object? reported, SchemaField? source)
         {
+            // CR-2026-132: an enum bound its code; the data carries its name.
+            if (source?.Type == FieldType.Enum && reported is string name)
+                return ReverseEnum(name, source);
             if (source?.Lookup is not { Count: > 0 } || DecodeContext.IsNumericLabel(reported))
                 return reported;
             var reversed = ReverseLookup(reported, source.Lookup);
@@ -1050,6 +1053,19 @@ public static class SchemaEncoder
                 && Wave5.MatchTemplate(template, text) is { } recovered)
                 return recovered;
             return reversed;
+        }
+
+        /// <summary>The code an enum reported <paramref name="name"/> for, else the name.</summary>
+        static object? ReverseEnum(string name, SchemaField field)
+        {
+            if (field.Values != null)
+                foreach (var kv in field.Values)
+                    if (kv.Value == name) return (double)kv.Key;
+            if (field.EnumDefault == name) return name;
+            if (name.StartsWith("unknown(") && name.EndsWith(")")
+                && int.TryParse(name[8..^1], out var n))
+                return (double)n;
+            return name;
         }
 
         /// <summary>The field declaring <paramref name="name"/>, searched anywhere in the schema.</summary>

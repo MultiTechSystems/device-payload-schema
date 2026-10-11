@@ -21,6 +21,10 @@ public class DecodeContext
     /// the label where it is a number, else the number before the lookup.
     /// </summary>
     internal Dictionary<SchemaField, object?> LookupBinding { get; } = new(ReferenceEqualityComparer.Instance);
+    /// <summary>
+    /// CR-2026-132: the code an enum read, by field definition, which its reference binds.
+    /// </summary>
+    internal Dictionary<SchemaField, object?> EnumCodes { get; } = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>
     /// Binds <paramref name="name"/> for <paramref name="field"/> as PS-523 says, keeping
@@ -29,7 +33,8 @@ public class DecodeContext
     /// </summary>
     internal void Bind(SchemaField field, string name, object? reported)
     {
-        if (field.Lookup != null && LookupBinding.TryGetValue(field, out var binding))
+        if ((field.Lookup != null || field.Type == FieldType.Enum)
+            && LookupBinding.TryGetValue(field, out var binding))
         {
             Variables[name] = binding;
             Reported[name] = reported;

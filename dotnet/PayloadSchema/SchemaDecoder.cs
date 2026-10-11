@@ -586,6 +586,9 @@ public static class SchemaDecoder
                 };
                 var data = ctx.Read(baseLen);
                 int intVal = (int)Helpers.DecodeUint(data, endian);
+                // PS-523 (CR-2026-132): an enum is a lookup by another spelling, so a
+                // reference binds its code and a template reads its name.
+                ctx.EnumCodes[field] = (double)intVal;
                 if (field.Values != null && field.Values.TryGetValue(intVal, out var enumStr))
                     value = enumStr;
                 // An unmapped value takes the declared default (PS-068). Returning
@@ -885,6 +888,10 @@ public static class SchemaDecoder
                 ctx.LookupBinding[field] = DecodeContext.IsNumericLabel(value) ? value : number;
             }
         }
+
+        // An enum binds its code under its name (CR-2026-132).
+        if (field.Type == FieldType.Enum && ctx.EnumCodes.Remove(field, out var code))
+            ctx.LookupBinding[field] = DecodeContext.IsNumericLabel(value) ? value : code;
 
         // Store variable: PS-523's binding, keeping the label for templates (PS-532).
         if (field.Var != null)
@@ -1473,17 +1480,35 @@ public static class SchemaDecoder
                         val = (int)Helpers.DecodeUint(data, ctx.Endian);
                     }
                     if (!string.IsNullOrEmpty(tf.Name))
-                    {
                         tagValues[tf.Name] = val;
-                        // A component is a field decoded earlier in the payload, so its
-                        // name is a reference the case body may make (`ref: $rsn`,
-                        // PS-265). Only `var:` was bound: "Ref field not found: rsn".
+                    if (tf.Lookup != null || tf.Mult != null || tf.Div != null || tf.Add != null
+                        || tf.Transform.Count > 0)
+                    {
+                        // PS-523 (CR-2026-132): a component binds as any field does -
+                        // through its modifiers, and a lookup's number under a text
+                        // label, the label kept for templates. ApplyPostRead binds its
+                        // `var`; the tag is still matched on the value read.
+                        var bound = ApplyPostRead((double)val, tf, ctx);
+                        if (!string.IsNullOrEmpty(tf.Name)
+                            && (!ReferenceEquals(bound, Omitted) || ctx.LookupBinding.ContainsKey(tf)))
+                            ctx.Bind(tf, tf.Name, bound);
+                        continue;
+                    }
+                    // A component is a field decoded earlier in the payload, so its name is
+                    // a reference the case body may make (`ref: $rsn`, PS-265). Only `var:`
+                    // was bound: "Ref field not found: rsn".
+                    if (!string.IsNullOrEmpty(tf.Name))
+                    {
                         ctx.Variables[tf.Name] = (long)val;
+                        ctx.Reported.Remove(tf.Name);
                     }
                     // A component's `var:` binds for the case body, as a field's does; a
                     // name_from template such as "temperature_${ch}" reads it.
                     if (!string.IsNullOrEmpty(tf.Var))
+                    {
                         ctx.Variables[tf.Var] = (long)val;
+                        ctx.Reported.Remove(tf.Var);
+                    }
                 }
 
                 if (field.TagKey is List<object?> tkList)

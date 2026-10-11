@@ -159,4 +159,67 @@ public class CR2026_109Tests
         Assert.Empty(back.Errors);
         Assert.Equal(hex, Convert.ToHexString(back.Payload));
     }
+
+    // CR-2026-132: an enum is a lookup by another spelling, and a tag component binds as
+    // any field does.
+
+    const string EnumFields =
+        "  - {name: mode, type: enum, base: u8, var: m, values: {1: \"on\", 2: \"off\"}, default: spare}\n"
+        + "  - {name: doubled, type: number, compute: {op: mul, a: $mode, b: 2}}\n"
+        + "  - {name: held, type: number, ref: $m}\n"
+        + "  - match: {field: $mode, cases: {2: [{name: hit, type: u8}]}, default: [{name: other, type: u8}]}\n"
+        + "  - {name: k, type: u8, name_from: \"m_${mode}\"}\n";
+
+    [Theory]
+    [InlineData("02050709", "off", 4.0, 2.0)]
+    [InlineData("05050709", "spare", 10.0, 5.0)]
+    public void AnEnumBindsItsCodeAndATemplateItsName(string hex, string name, double doubled,
+        double held)
+    {
+        var output = Decode(EnumFields, hex);
+        Assert.Equal(name, output["mode"]);
+        Assert.Equal(doubled, Convert.ToDouble(output["doubled"]));
+        Assert.Equal(held, Convert.ToDouble(output["held"]));
+        Assert.Equal(name == "off", output.ContainsKey("hit"));
+        Assert.True(output.ContainsKey("m_" + name));
+    }
+
+    [Fact]
+    public void AMatchOnAnEnumRoundTrips()
+    {
+        var schema = SchemaParser.Parse("name: p\nfields:\n"
+            + "  - {name: mode, type: enum, base: u8, values: {1: \"on\", 2: \"off\"}}\n"
+            + "  - match: {field: $mode, cases: {2: [{name: hit, type: u8}], "
+            + "1: [{name: low, type: u8}]}}\n");
+        foreach (var hex in new[] { "0207", "0107" })
+        {
+            var data = SchemaDecoder.Decode(schema, Convert.FromHexString(hex));
+            var back = SchemaEncoder.Encode(schema, data);
+            Assert.Empty(back.Errors);
+            Assert.Equal(hex, Convert.ToHexString(back.Payload));
+        }
+    }
+
+    static string Component(string lookup, int key) =>
+        "  - tlv:\n      tag_fields:\n"
+        + $"        - {{name: side, type: u8, var: s, lookup: {lookup}}}\n"
+        + "        - {name: kind, type: u8}\n"
+        + "      tag_key: [side, kind]\n      cases:\n        \"[*, 0x10]\":\n"
+        + "          - {name: reading, type: u8, name_from: \"reading_${s}\"}\n"
+        + "          - {name: doubled, type: number, compute: {op: mul, a: $side, b: 2}}\n"
+        + $"          - match: {{field: $s, cases: {{{key}: [{{name: hit, type: u8}}]}}, "
+        + "default: [{name: other, type: u8}]}\n";
+
+    [Theory]
+    [InlineData("{1: left, 2: right}", 2, "02100705", "reading_right", 4.0)]
+    [InlineData("[0, 125, 250]", 125, "01100705", "reading_125", 250.0)]
+    public void ATagComponentBindsAsAnyFieldDoes(string lookup, int key, string hex,
+        string reading, double doubled)
+    {
+        var output = Decode(Component(lookup, key), hex);
+        Assert.Equal(7L, Convert.ToInt64(output[reading]));
+        Assert.Equal(doubled, Convert.ToDouble(output["doubled"]));
+        Assert.Equal(5L, Convert.ToInt64(output["hit"]));
+        Assert.False(output.ContainsKey("other"));
+    }
 }

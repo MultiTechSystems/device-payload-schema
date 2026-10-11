@@ -137,4 +137,68 @@ public class CR2026109Test {
         byte[] payload = {(byte) 0x81, 0x07};
         assertArrayEquals(payload, schema.encode(schema.decode(payload)).getPayload());
     }
+
+    // CR-2026-132: an enum binds its code, and a tag component binds as any field does.
+
+    private static Map<String, Object> decodeEnum(String extra, String sites, int... payload) {
+        byte[] b = new byte[payload.length];
+        for (int i = 0; i < payload.length; i++) b[i] = (byte) payload[i];
+        return Schema.fromYaml("name: p\nendian: big\nfields:\n"
+                + "  - {name: code, type: enum, base: u8, var: c, values: {1: \"on\", 2: \"off\"}"
+                + extra + "}\n" + sites).decode(b);
+    }
+
+    @Test
+    public void anEnumBindsItsCode() {
+        assertNum(4, decodeEnum("", COMPUTE, 2).get("doubled"));
+        assertNum(2, decodeEnum("", VAR, 2).get("held"));
+        assertNum(7, decodeEnum("", select(2), 2, 7).get("hit"));
+        Map<String, Object> m = decodeEnum("", TEMPLATE, 2, 7);
+        assertEquals("off", m.get("code"));
+        assertNum(7, m.get("reading_off"));
+        // A default name binds the code read.
+        assertNum(10, decodeEnum(", default: spare", COMPUTE, 5).get("doubled"));
+        assertNum(7, decodeEnum(", default: spare", TEMPLATE, 5, 7).get("reading_spare"));
+    }
+
+    @Test
+    public void anEnumSelectsItsCaseOnEncode() {
+        Schema schema = Schema.fromYaml("name: p\nendian: big\nfields:\n"
+                + "  - {name: code, type: enum, base: u8, values: {1: \"on\", 2: \"off\"}}\n"
+                + select(2));
+        byte[] payload = {0x02, 0x07};
+        assertArrayEquals(payload, schema.encode(schema.decode(payload)).getPayload());
+    }
+
+    private static Map<String, Object> decodeTag(String lookup, int key, int... payload) {
+        byte[] b = new byte[payload.length];
+        for (int i = 0; i < payload.length; i++) b[i] = (byte) payload[i];
+        return Schema.fromYaml("name: p\nendian: big\nfields:\n"
+                + "  - tlv:\n      tag_fields:\n"
+                + "        - {name: side, type: u8, var: s, lookup: " + lookup + "}\n"
+                + "        - {name: kind, type: u8}\n"
+                + "      tag_key: [side, kind]\n      cases:\n        \"[*, 0x10]\":\n"
+                + "          - {name: reading, type: u8, name_from: \"reading_${s}\"}\n"
+                + "          - {name: doubled, type: number, compute: {op: mul, a: $side, b: 2}}\n"
+                + "          - match:\n              field: $s\n              cases:\n"
+                + "                " + key + ": [{name: hit, type: u8}]\n"
+                + "              default: [{name: other, type: u8}]\n").decode(b);
+    }
+
+    @Test
+    public void aTagComponentWithATextLabelBindsItsNumber() {
+        Map<String, Object> m = decodeTag("{1: left, 2: right}", 2, 2, 0x10, 7, 5);
+        assertNum(7, m.get("reading_right"));
+        assertNum(4, m.get("doubled"));
+        assertNum(5, m.get("hit"));
+        assertFalse(m.containsKey("other"));
+    }
+
+    @Test
+    public void aTagComponentWithANumericLabelBindsIt() {
+        Map<String, Object> m = decodeTag("[0, 125, 250]", 125, 1, 0x10, 7, 5);
+        assertNum(7, m.get("reading_125"));
+        assertNum(250, m.get("doubled"));
+        assertNum(5, m.get("hit"));
+    }
 }

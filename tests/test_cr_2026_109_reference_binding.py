@@ -355,3 +355,85 @@ def test_a_text_key_on_a_text_field_does_not_warn():
         {"match": {"field": "$tag", "cases": {"OK": [{"name": "x", "type": "u8"}]}}},
     )
     assert case_key_type_warnings(doc) == []
+
+
+# CR-2026-132: an enum binds its code; a tag component binds as any field ---------
+
+ENUM = {"name": "mode", "type": "enum", "base": "u8", "values": {1: "on", 2: "off"}}
+
+
+@BOTH
+def test_an_enum_binds_its_code_and_a_template_reads_its_name(run):
+    # The spec prototype's TestCR2026132EnumBindsItsCode.
+    doc = schema(
+        ENUM,
+        {"name": "c", "type": "number", "ref": "$mode"},
+        {"match": {"field": "$mode", "cases": {2: [{"name": "x", "type": "u8"}]}}},
+        {"name": "k", "type": "u8", "name_from": "m_${mode}"},
+    )
+    assert run(doc, "020507") == ({"mode": "off", "c": 2, "x": 5, "m_off": 7}, [])
+
+
+@BOTH
+def test_an_enum_default_binds_the_code(run):
+    doc = schema(
+        dict(ENUM, default="spare", var="m"),
+        {"name": "c", "type": "number", "ref": "$m"},
+    )
+    assert run(doc, "09") == ({"mode": "spare", "c": 9}, [])
+
+
+def test_encode_selects_the_case_from_an_enum_name():
+    doc = schema(
+        ENUM,
+        {
+            "match": {
+                "field": "$mode",
+                "cases": {
+                    2: [{"name": "x", "type": "u8"}],
+                    1: [{"name": "y", "type": "u8"}],
+                },
+            }
+        },
+    )
+    result = SchemaInterpreter(doc).encode({"mode": "off", "x": 5})
+    assert result.payload.hex() == "0205"
+
+
+TAGGED = {
+    "tlv": {
+        "tag_fields": [
+            {
+                "name": "side",
+                "type": "u8",
+                "var": "s",
+                "lookup": {1: "left", 2: "right"},
+            },
+            {"name": "kind", "type": "u8"},
+        ],
+        "tag_key": ["side", "kind"],
+        "cases": {
+            "[*, 0x10]": [
+                {"name": "reading", "type": "u8", "name_from": "reading_${s}"},
+                {"name": "n", "type": "number", "ref": "$side"},
+            ]
+        },
+    }
+}
+
+
+@BOTH
+def test_a_tag_component_binds_the_number_under_its_label(run):
+    assert run(schema(TAGGED), "021007") == ({"reading_right": 7, "n": 2}, [])
+
+
+@BOTH
+def test_a_numeric_tag_component_label_binds_itself(run):
+    tlv = dict(
+        TAGGED["tlv"],
+        tag_fields=[
+            {"name": "side", "type": "u8", "var": "s", "lookup": [0, 125, 250]},
+            {"name": "kind", "type": "u8"},
+        ],
+    )
+    assert run(schema({"tlv": tlv}), "011007") == ({"reading_125": 7, "n": 125}, [])

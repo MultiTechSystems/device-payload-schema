@@ -392,6 +392,8 @@ type DecodeContext struct {
 	// name_from templates (PS-523, PS-532). See cr109.go.
 	lookupNumber lookupNumber
 	labels       map[string]labelEntry
+	// enumCode is the code an enum just read, for applyLookupAndModifiers (CR-2026-132).
+	enumCode lookupNumber
 	// pendingRecords collects what a repeat element's `records` entry yields (PS-541);
 	// nil outside an element.
 	pendingRecords *[]map[string]any
@@ -2566,6 +2568,8 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 			return nil, err
 		}
 		intVal := int(decodeUint(data, endian))
+		// PS-523 (CR-2026-132): a reference to an enum binds its code.
+		ctx.enumCode = lookupNumber{owner: field.Name, number: intVal, set: true}
 		if field.Values != nil {
 			if str, ok := field.Values[intVal]; ok {
 				value = str
@@ -2745,7 +2749,14 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 // to skip them, and the compute path's copy forgot the bare modifiers - and before that,
 // the skip forgot compute and dl-blg's voltage_ratio had its stages applied twice.
 func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, error) {
-	ctx.lookupNumber = lookupNumber{}
+	// PS-523 (CR-2026-132): an enum's code, recorded where it was read, is the number its
+	// reference binds; any other field starts with none.
+	if isEnumField(field) && ctx.enumCode.set && ctx.enumCode.owner == field.Name {
+		ctx.lookupNumber = ctx.enumCode
+	} else {
+		ctx.lookupNumber = lookupNumber{}
+	}
+	ctx.enumCode = lookupNumber{}
 	if value == omitted {
 		return omitted, nil
 	}
@@ -2883,13 +2894,38 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 // $rsn`, PS-265), and its `var:` binds as a field's does - a `name_from` template such as
 // "temperature_${ch}" reads it. Only `var:` was bound, and only on the whole-byte path, so
 // `ref: $rsn` beside a bit-range component failed with "ref field not found".
-func bindTagComponent(tf Field, val int64, ctx *DecodeContext) {
+//
+// PS-523 (CR-2026-132): a component binds as any field does. One with a lookup or
+// modifiers goes through them, and binds the number under a text or boolean label, or a
+// numeric label as itself, keeping the label for templates. The tag is still matched on
+// the value read.
+func bindTagComponent(tf Field, val int64, ctx *DecodeContext) error {
+	if !hasLookup(tf) && !hasComponentModifiers(tf) {
+		if tf.Name != "" {
+			ctx.Variables[tf.Name] = val
+			delete(ctx.labels, tf.Name)
+		}
+		if tf.Var != "" {
+			ctx.Variables[tf.Var] = val
+			delete(ctx.labels, tf.Var)
+		}
+		return nil
+	}
+	// applyLookupAndModifiers binds the `var` itself (finishComputedValue, or a miss).
+	value, err := applyLookupAndModifiers(val, tf, ctx)
+	if err != nil {
+		return err
+	}
 	if tf.Name != "" {
-		ctx.Variables[tf.Name] = val
+		ctx.bindReference(tf.Name, tf, value)
 	}
-	if tf.Var != "" {
-		ctx.Variables[tf.Var] = val
-	}
+	return nil
+}
+
+// hasComponentModifiers reports whether a tag component declares arithmetic to apply.
+func hasComponentModifiers(tf Field) bool {
+	return tf.Mult != nil || tf.Div != nil || tf.Add != nil || len(tf.Transform) > 0 ||
+		tf.Formula != ""
 }
 
 // computedSource is a computed field's source (PS-443): the referenced value with its
@@ -3268,7 +3304,9 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 					if tf.Name != "" {
 						tagValues[tf.Name] = int(v.(float64))
 					}
-					bindTagComponent(tf, int64(v.(float64)), ctx)
+					if err := bindTagComponent(tf, int64(v.(float64)), ctx); err != nil {
+						return nil, err
+					}
 					continue
 				}
 				data, err := ctx.Read(tagFieldWidth(tf))
@@ -3279,7 +3317,9 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 				if tf.Name != "" {
 					tagValues[tf.Name] = val
 				}
-				bindTagComponent(tf, int64(val), ctx)
+				if err := bindTagComponent(tf, int64(val), ctx); err != nil {
+					return nil, err
+				}
 			}
 
 			// Build tag key
