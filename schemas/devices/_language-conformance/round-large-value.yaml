@@ -3,6 +3,11 @@
 # is 45 significant digits, more than Python's decimal arithmetic holds by default, and
 # the reference failed the decode with InvalidOperation where the other four reported
 # the value.
+#
+# `just_above_one` is the other half: 3F800001 is 1.00000011920928955078125, whose
+# seventh decimal is the first non-zero one, so six places give exactly 1. Written as an
+# integer it is compared exactly (PS-039), which no float tolerance would do for a
+# difference of 1.2e-7.
 name: probe_round_large_value
 endian: big
 fields:
@@ -18,4 +23,10 @@ test_vectors:
   payload: "7F 7F C9 9E 05"
   expected:
     big: 3.3999999521443642e+38
+    small: 5
+- name: just_above_one
+  source: spec-example
+  payload: "3F 80 00 01 05"
+  expected:
+    big: 1
     small: 5

@@ -129,7 +129,7 @@ Mean quality score 75.8% (PLATINUM 37, GOLD 40, SILVER 207, BRONZE 27, REJECTED 
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
-| _language-conformance | 114 | 229 | SILVER 97, BRONZE 17 |
+| _language-conformance | 114 | 230 | SILVER 97, BRONZE 17 |
 | milesight | 84 | 1427 | PLATINUM 21, GOLD 33, SILVER 27, REJECTED 3 |
 | decentlab | 58 | 204 | PLATINUM 13, GOLD 6, SILVER 27, BRONZE 8, REJECTED 4 |
 | _library-composed | 49 | 57 | SILVER 48, BRONZE 1 |
@@ -245,7 +245,7 @@ Mean quality score 75.8% (PLATINUM 37, GOLD 40, SILVER 207, BRONZE 27, REJECTED 
 | `_language-conformance/repeat-reserve` | 3 | 2 | fields | 71% | SILVER |
 | `_language-conformance/repeat-trailer` | 4 | 1 | fields | 69% | BRONZE |
 | `_language-conformance/round-half-to-even` | 5 | 1 | fields | 71% | SILVER |
-| `_language-conformance/round-large-value` | 2 | 1 | fields | 69% | BRONZE |
+| `_language-conformance/round-large-value` | 2 | 2 | fields | 69% | BRONZE |
 | `_language-conformance/round-ties-away` | 4 | 1 | fields | 71% | SILVER |
 | `_language-conformance/sentinel` | 2 | 2 | fields | 69% | BRONZE |
 | `_language-conformance/skip-type` | 3 | 1 | fields | 71% | SILVER |
