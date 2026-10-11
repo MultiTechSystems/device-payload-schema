@@ -129,10 +129,14 @@ public class Wave6aTest {
     }
 
     @Test
-    public void anOtherwiseUnboundReferenceStillReadsAsZero() {
+    public void anOtherwiseUnboundReferenceIsAbsent() {
+        // PS-314, PS-429: a reference with no value cannot be resolved, so the field is
+        // left out. It read 0, which reported a value the payload never carried.
         Schema schema = Schema.fromYaml("name: p\nfields:\n"
             + "  - {name: v, type: u8}\n  - {name: w, type: number, ref: $nowhere}\n");
-        assertEquals(0L, schema.decode(hex("05")).get("w"));
+        Map<String, Object> out = schema.decode(hex("05"));
+        assertFalse(out.containsKey("w"), out.toString());
+        assertEquals(5L, out.get("v"));
     }
 
     @Test
@@ -141,7 +145,8 @@ public class Wave6aTest {
         Schema schema = Schema.fromYaml("name: p\nfields:\n"
             + "  - {name: r, type: repeat, count: 1, count_as: n, fields: [{name: v, type: u8}, "
             + "{name: seen, type: number, ref: $n}]}\n");
-        assertEquals(List.of(Map.of("v", 5L, "seen", 0L)), schema.decode(hex("05")).get("r"));
+        // A reference to it from inside has no value, so `seen` is absent (PS-314).
+        assertEquals(List.of(Map.of("v", 5L)), schema.decode(hex("05")).get("r"));
     }
 
     @Test

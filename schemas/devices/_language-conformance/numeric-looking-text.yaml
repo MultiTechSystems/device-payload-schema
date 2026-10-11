@@ -1,0 +1,23 @@
+# Text that reads like a number is still text. Upper-case hex of the bytes 3E 63 88 is
+# "3E6388", which parses as a double overflowing to Infinity, and the three bytes "NaN"
+# parse as NaN. The Java and C# corpus runners compared both as numbers - and an
+# infinity minus itself, or NaN, is never within tolerance - so a decode that produced
+# exactly the expected text was reported as a mismatch. A string expectation compared
+# with a decoded string is compared as text (PS-044).
+name: probe_numeric_looking_text
+endian: big
+fields:
+- name: code
+  type: bytes
+  length: 3
+  format: "hex:upper"
+- name: word
+  type: ascii
+  length: 3
+test_vectors:
+- name: overflowing_and_nan
+  source: spec-example
+  payload: "3E 63 88 4E 61 4E"
+  expected:
+    code: "3E6388"
+    word: "NaN"

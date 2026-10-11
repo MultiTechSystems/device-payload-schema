@@ -137,7 +137,8 @@ def test_count_as_is_not_bound_inside_the_elements():
                                             {"name": "v", "type": "u8"},
                                             {"name": "seen", "type": "number", "ref": "$n"}]}]}
     result = decode(schema, "05")
-    assert result.data["r"] == [{"v": 5, "seen": 0}]
+    # A reference to it from inside has no value, so `seen` is absent (PS-314, PS-429).
+    assert result.data["r"] == [{"v": 5}]
 
 
 def test_neither_index_nor_count_as_is_reported():

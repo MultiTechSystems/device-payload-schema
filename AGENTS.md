@@ -188,18 +188,19 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2610 payload vectors in `schemas/devices/` (measured 2026-10-10 with
-`tools/check-floors.py`, after the CR-2026-111 element-repeat fixtures) are the shared
+The 2618 payload vectors in `schemas/devices/` (measured 2026-10-10 with
+`tools/check-floors.py`, after the CR-2026-111 element-repeat and registry divergence
+fixtures) are the shared
 cross-language test set. Every implementation has a runner that reads the same YAML and
 the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1788 |
-| Go | `go/schema/corpus_conformance_test.go` | 2610 | 1805 (plain API 1782) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2610 | 1788 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2610 | 1788 |
-| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 546 of 546 attempted | n/a |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1794 |
+| Go | `go/schema/corpus_conformance_test.go` | 2618 | 1811 (plain API 1788) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2618 | 1794 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2618 | 1794 |
+| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 550 of 550 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
 its own implementation's actual; trust it over this table.
@@ -755,10 +756,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1788 |
-| Go | `go/schema/corpus_encode_test.go` | 1805 (plain 1782) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1788 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1788 |
+| Python | `tests/test_encode_round_trip.py` | 1794 |
+| Go | `go/schema/corpus_encode_test.go` | 1811 (plain 1788) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1794 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1794 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1282,8 +1283,9 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   computed fields, internal fields and constructs, in a scope of its own (PS-368). An
   element's names are restored away after it; a reference to one from after the array,
   or to a field of the element not yet decoded, is an error. Every other unbound
-  reference keeps its old behaviour, which differs: Python reads 0, Go and C# error,
-  Java reads 0. `index`, `count_as` (after `present_if`, CR-2026-080), `present_if` and
+  reference from a `ref` or a `compute` operand makes its field absent in all five
+  (PS-314, PS-429; see the registry divergences below); a guard condition on one still
+  differs - Python and Java read 0, Go fails the condition. `index`, `count_as` (after `present_if`, CR-2026-080), `present_if` and
   `carry` follow; `reserve` on a repeat and on a `tlv` is a buffer cut at the region's
   end with absolute positions, so nothing inside can read the trailer, and a repeat's
   `trailer` decodes first into the enclosing scope. Schema rules are rejected at load by
@@ -1491,6 +1493,37 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   vector changed. `senml.name` templates are not rendered by either SenML producer (Python,
   C#): a record's `n` is the template as written, so PS-532's senml half is open. Fixture:
   `name-from-rendering.yaml`.
+- **Registry divergences (2026-10-10).** The private registry's 29,541 vectors, run through
+  all five at cd874f1, found six defects the corpus could not see. Each has a fixture in
+  `_language-conformance/`:
+  - **A tag component's name is a reference** (`tag-component-ref.yaml`). A `ref: $rsn` in
+    a case read the 0 every unbound name read in Python and Java, and was "not found" in
+    Go and C#; only `var:` was bound. All five bind the name now, and Go binds a
+    bit-range component's `var:`, which it skipped. dnt lw-ats's reason, 16 vectors, had
+    failed in four implementations - Python "passed" five of them only because their
+    expected value was the lookup's miss. CR-2026-116 covers `var:` alone.
+  - **A reference with no value makes its field absent** (`reference-to-absent.yaml`,
+    PS-314, PS-429). A `ref` or `compute` operand naming a field omitted upstream - a zero
+    divisor, a log of 0, a sentinel - read 0 in Python and Java and failed the decode in
+    Go and C#. The generated codec already omitted it, through NaN. A reference to a name
+    the schema never declares now omits too, silently; no validator check catches that
+    typo yet.
+  - **`length: 0` reads nothing** (`zero-length.yaml`, PS-392). Go, Java and C# took 0
+    for no length and read the type's one byte; each now records whether `length` was
+    declared (`LengthDeclared` / `isLengthDeclared`). The C interpreter's skip did the
+    same (`size ? size : 1`); the one-byte default for an absent length is the builder's.
+  - **Java's and C#'s runners compared numeric-looking text as numbers**
+    (`numeric-looking-text.yaml`): `"3E6388"` is Infinity and `"NaN"` NaN, and neither is
+    within tolerance of itself. Equal strings now match first, and non-finite text is not
+    a number.
+  - **The generated codec ignored `name_from` on a `type: object`**, and Python's, Java's,
+    C#'s and the codec's encoders read such an object back by its declared name
+    (`name-from-object.yaml`). Go's general path already resolved it.
+  - **Python's `round` raised InvalidOperation on a large value** (`round-large-value.yaml`):
+    `quantize` needs every digit, and 3.4e38 to six places is 45, past the default 28.
+  Left open: `elv/elv-bm-trx1` [164] (two tags report one name; four collect into a list,
+  the codec keeps the last), Python's computed path ignoring `name_from`, and Python
+  writing a huge integral float as a 39-digit integer where JavaScript writes `3.4e+38`.
 - **CR-2026-111 (PS-528 to PS-531): `element` and `index_base` on a repeat.**
   - **What it does:** `element`, one field in place of `fields`, reports an array of values.
     Each element is decoded as a one-field record under its own `name`, or `element` where it
@@ -1732,7 +1765,7 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   (CR-2026-032).** `make test-c` builds the three previously-orphaned C test files and runs
   `tools/c-corpus-harness.py`, which generates C that builds each expressible corpus schema
   through the struct API, compiles it, and compares the decode against the vectors.
-  **546 of 546 attempted vectors pass** (2026-10-10) since CR-2026-033 added `tlv` and CR-2026-034
+  **550 of 550 attempted vectors pass** (2026-10-10) since CR-2026-033 added `tlv` and CR-2026-034
   `flagged` (it was 50 of 50 before either). 751 of 1239 are still in schemas the struct API
   cannot build - 26 use a `transform` chain, 24 a `bitfield_string`, 15 more cases than
   `SCHEMA_MAX_CASES` allows, 3 `repeat`, 3 a `u32le16` **the interpreter has and the harness

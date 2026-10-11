@@ -130,6 +130,12 @@ public class SchemaField
     public string RawType { get; set; } = "";
     public int Length { get; set; }
     /// <summary>
+    /// Whether <c>length</c> was written as a number, so that <c>length: 0</c> - a field
+    /// of no bytes (PS-392) - is told apart from no length at all, which takes the type's
+    /// width.
+    /// </summary>
+    public bool LengthDeclared { get; set; }
+    /// <summary>
     /// `length` naming a preceding field, with or without `$`, whose decoded value is the
     /// count (PS-464, PS-465). Stored without the `$`; Length is then 0.
     /// </summary>

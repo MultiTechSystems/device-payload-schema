@@ -898,7 +898,7 @@ def round_decimal(value, decimals=0, ties='even'):
     exact tie such as 78.125 is recognised as one - rounding value * 10**d instead would
     invent ties. `away` exists for vendor decoders that use JavaScript's toFixed.
     """
-    from decimal import Decimal, ROUND_HALF_EVEN, ROUND_HALF_UP
+    from decimal import Decimal, ROUND_HALF_EVEN, ROUND_HALF_UP, localcontext
     if ties not in ('even', 'away'):
         raise ValueError(f"round `ties` must be 'even' or 'away', got {ties!r} (PS-390)")
     if isinstance(decimals, bool) or not isinstance(decimals, int) or decimals < 0:
@@ -909,7 +909,13 @@ def round_decimal(value, decimals=0, ties='even'):
     if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
         return value
     mode = ROUND_HALF_EVEN if ties == 'even' else ROUND_HALF_UP
-    rounded = float(Decimal(value).quantize(Decimal(1).scaleb(-decimals), rounding=mode))
+    exact = Decimal(value)
+    # quantize needs every digit of the result, and the default context holds 28: an f32
+    # near its maximum, 3.4e38, to 6 places is 45 digits, so it raised InvalidOperation
+    # and failed the decode where every other implementation reported the value.
+    with localcontext() as context:
+        context.prec = max(context.prec, exact.adjusted() + decimals + 2)
+        rounded = float(exact.quantize(Decimal(1).scaleb(-decimals), rounding=mode))
     return 0.0 if rounded == 0 else rounded
 
 
@@ -2967,6 +2973,21 @@ class SchemaInterpreter:
                              f"has no value here (PS-368)")
         return 0
 
+    def _ref_value(self, name: str) -> Any:
+        """A computed field's `$name` source or operand, or OMITTED where it has none.
+
+        PS-314: a value that cannot be resolved is omitted, and PS-429 makes a reference
+        to an omitted field a reference to an absent one. So a `ref` or `compute` naming
+        a field that was not reported - a zero divisor upstream, a log of 0 - is absent
+        itself. It read 0 here, where Go and C# failed the whole decode: dragino
+        wsc2-lb's `rain` was reported as 0 for a zero divisor rather than left out. The
+        PS-368 scope errors stay errors.
+        """
+        value = self._ref(name)
+        if name not in self._variables:
+            return OMITTED
+        return value
+
     def _sentinel_hit(self, field_def: Dict[str, Any], raw: Any, buf: bytes,
                       start: int) -> bool:
         """PS-427: the integer read, before any modifier or encoding, is a sentinel."""
@@ -3546,12 +3567,17 @@ class SchemaInterpreter:
         # Resolve operands
         def resolve_operand(spec):
             if isinstance(spec, str) and spec.startswith('$'):
-                field_name = spec[1:]
-                return float(self._ref(field_name))
+                value = self._ref_value(spec[1:])
+                return value if value is OMITTED else float(value)
             return float(spec)
-        
+
         a = resolve_operand(a_spec)
         b = resolve_operand(b_spec)
+        # PS-314/PS-429: an operand with no value - a field omitted earlier, by a zero
+        # divisor, a log of x <= 0, a sentinel or a lookup with no entry - cannot be
+        # computed with, so this field is absent too.
+        if a is OMITTED or b is OMITTED:
+            return OMITTED
         
         # Apply operation
         if op == 'add':
@@ -3626,7 +3652,10 @@ class SchemaInterpreter:
         """A `ref` field's source: the referenced value with its `polynomial` (PS-443)."""
         ref_field = field_def['ref']
         if isinstance(ref_field, str) and ref_field.startswith('$'):
-            value = float(self._ref(ref_field[1:]))
+            value = self._ref_value(ref_field[1:])
+            if value is OMITTED:
+                return OMITTED  # PS-314/PS-429: the referenced field has no value
+            value = float(value)
         else:
             value = float(ref_field)
         coeffs = field_def.get('polynomial')
@@ -3914,6 +3943,12 @@ class SchemaInterpreter:
                     tf_name = tf.get('name', 'unknown')
                     tf_value, pos = self._decode_field(tf, buf, pos)
                     tag_parts[tf_name] = tf_value
+                    # A component is a field decoded earlier in the payload, so its name
+                    # is a reference the case body may make (`ref: $rsn`, PS-265), as a
+                    # field's is. It was bound only under `var:`, so `$rsn` read the 0 an
+                    # unbound name reads here and Go and C# failed the decode.
+                    if tf.get('name'):
+                        self._variables[tf['name']] = tf_value
                     # A component's `var:` binds for the case body (a `name_from`
                     # template, a `match`), as a field's does; it bound nothing, so
                     # `name_from: "temperature_${ch}"` failed in every case.
@@ -4835,7 +4870,16 @@ class SchemaInterpreter:
 
             if field_def.get('type') == 'object':
                 # Encoding had no top-level object case: "Cannot encode type: object".
-                nested = data.get(field_def.get('name'))
+                # A `name_from` object was reported under its templated key, so that is
+                # the key to read it back from (CR-2026-030), as for any other field.
+                try:
+                    key = self._resolve_encode_name(
+                        field_def, field_def.get('name'), data)
+                except ValueError as e:
+                    result.errors.append(
+                        f"Error encoding object {field_def.get('name')!r}: {e}")
+                    continue
+                nested = data.get(key) if key is not None else None
                 try:
                     output.extend(self._encode_field_list(
                         field_def.get('fields') or [],

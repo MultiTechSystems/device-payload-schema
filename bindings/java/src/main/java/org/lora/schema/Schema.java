@@ -734,6 +734,7 @@ public class Schema {
             f.setLengthRef(Wave6b.lengthRef(lengthSpec));
         } else {
             f.setLength(toInt(lengthSpec, 0));
+            f.setLengthDeclared(lengthSpec instanceof Number);
         }
         // Wave 6b: optional (PS-402), sentinel (PS-427), out_of_range: omit (PS-428).
         f.setOptional(Boolean.TRUE.equals(fm.get("optional")));
@@ -2147,6 +2148,10 @@ public class Schema {
                     }
                     if (tf.getName() != null) {
                         tagValues.put(tf.getName(), val);
+                        // A component is a field decoded earlier in the payload, so its
+                        // name is a reference the case body may make (`ref: $rsn`,
+                        // PS-265). Only `var:` was bound, so `$rsn` read 0.
+                        ctx.setVariable(tf.getName(), (long) val);
                     }
                     // A component's `var:` binds for the case body, as a field's does; a
                     // name_from template such as "temperature_${ch}" reads it.
@@ -2892,6 +2897,10 @@ public class Schema {
         // `compute` was dropped with success.
         if (field.getRef() != null) {
             double value = resolveOperand(field.getRef(), ctx);
+            // PS-314/PS-429: the referenced field has no value, so this one is absent.
+            if (isComputeOmitted(value)) {
+                return null;
+            }
             if (field.getPolynomial() != null && !field.getPolynomial().isEmpty()) {
                 value = evaluatePolynomial(field.getPolynomial(), value);
             }
@@ -3003,6 +3012,11 @@ public class Schema {
     private double evaluateCompute(Field.Compute compute, DecodeContext ctx) {
         double a = resolveOperand(compute.getA(), ctx);
         double b = resolveOperand(compute.getB(), ctx);
+        // PS-314/PS-429: an operand with no value makes the field absent, as a zero
+        // divisor does. NaN arithmetic is not relied on to carry the sentinel through.
+        if (isComputeOmitted(a) || isComputeOmitted(b)) {
+            return COMPUTE_OMITTED;
+        }
         return switch (compute.getOp()) {
             case "add" -> a + b;
             case "sub" -> a - b;
@@ -3026,6 +3040,13 @@ public class Schema {
     private double resolveOperand(Object spec, DecodeContext ctx) {
         if (spec instanceof String text && text.startsWith("$")) {
             Object value = ctx.ref(text.substring(1));     // PS-368
+            // PS-314/PS-429: a reference with no value - a field omitted earlier by a
+            // zero divisor, a log of x <= 0, a sentinel or a lookup with no entry - cannot
+            // be resolved. It read 0, so dragino wsc2-lb's `rain` was reported as 0
+            // where its divisor was 0 and the field should be absent.
+            if (value == null) {
+                return COMPUTE_OMITTED;
+            }
             return value instanceof Number number ? number.doubleValue() : 0.0;
         }
         Double literal = toDouble(spec);
