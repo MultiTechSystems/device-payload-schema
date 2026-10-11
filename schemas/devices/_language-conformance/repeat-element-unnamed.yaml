@@ -1,0 +1,18 @@
+# A repeat of single values whose element declares no name (PS-528, CR-2026-111). It is
+# decoded under the name `element`, which is not reported: the array holds the values.
+# This is the specification's own example.
+#
+# Round-trips: each value is written as the element, in order (PS-529).
+name: probe_repeat_element_unnamed
+endian: big
+fields:
+- name: increments
+  type: repeat
+  until: end
+  element: {type: u16, div: 10}
+test_vectors:
+- name: three_values
+  source: spec-example
+  payload: "0078 0096 005A"
+  expected:
+    increments: [12, 15, 9]

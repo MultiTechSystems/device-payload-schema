@@ -1846,6 +1846,8 @@ fields:
       when:
         - field: $raw_temp
           gt: 0
+        # PS-126 (CR-2026-124): one operator per condition, so a range is two.
+        - field: $raw_temp
           lt: 2000
       else: -999
 `
@@ -4026,22 +4028,43 @@ fields:
 	}
 }
 
+// A reference with no value cannot be resolved, so the field is absent (PS-314,
+// PS-429) and the decode carries on - as Python and Java did. This used to assert an
+// error, which failed the whole decode where an upstream field was merely omitted
+// (dragino wsc2-lb's zero divisor); see reference-to-absent.yaml.
 func TestRefFieldNotFound(t *testing.T) {
 	schemaYAML := `
 name: ref_not_found_test
 fields:
+  - name: nonexistent
+    type: u8
+    sentinel: [255]
   - name: result
     type: number
     ref: $nonexistent
+  - name: total
+    type: number
+    compute: {op: add, a: $nonexistent, b: 1}
+  - name: after
+    type: u8
 `
+	// The name is declared first (PS-539, CR-2026-117/127); its sentinel omits it.
 	schema, err := ParseSchema(schemaYAML)
 	if err != nil {
 		t.Fatalf("ParseSchema() error = %v", err)
 	}
 
-	_, err = schema.Decode([]byte{})
-	if err == nil {
-		t.Error("expected ref not found error")
+	out, err := schema.Decode([]byte{0xFF, 7})
+	if err != nil {
+		t.Fatalf("expected the fields to be absent, not an error: %v", err)
+	}
+	for _, name := range []string{"result", "total"} {
+		if _, present := out[name]; present {
+			t.Errorf("%s: expected absent, got %v", name, out[name])
+		}
+	}
+	if mustNum(out["after"]) != 7 {
+		t.Errorf("decoding should continue past the absent fields, got after = %v", out["after"])
 	}
 }
 

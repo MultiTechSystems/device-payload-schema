@@ -130,7 +130,10 @@ final class Encoder {
             // A nested object is reported under its own name (PS-139), so its members
             // are read from that mapping. They were looked up in the enclosing data,
             // where they are not, and every member encoded as a zero.
-            Object nested = field.getName() == null ? null : data.get(field.getName());
+            // A `name_from` object was reported under its templated key, so that is the
+            // key to read it back from (CR-2026-030), as for any other field.
+            String key = field.getName() == null ? null : resolveEncodeName(field, data);
+            Object nested = key == null ? null : data.get(key);
             @SuppressWarnings("unchecked")
             Map<String, Object> members = nested instanceof Map<?, ?> m ? (Map<String, Object>) m : data;
             return encodeFieldList(field.getFields(), members);
@@ -499,6 +502,28 @@ final class Encoder {
             throw new SchemaException.EncodeException("repeat field '" + name
                     + "': expected a list of records, got " + records.getClass().getSimpleName());
         }
+        if (field.getRaw() != null && Wave6a.recordsReachable(Wave6a.repeatMembers(field.getRaw()))) {
+            // PS-542: the records do not say which element they came from.
+            throw new SchemaException.EncodeException("Repeat '" + name + "' has elements that yield "
+                    + "several records, which cannot be encoded (PS-542)");
+        }
+        if (field.getElementName() != null) {
+            // PS-529: each value is encoded as the element, wrapped as it was decoded.
+            // CR-2026-111 leaves open what a null position encodes as; the spec prototype
+            // refuses it rather than guess, and so does every encoder here.
+            List<Object> wrapped = new ArrayList<>();
+            for (int position = 0; position < list.size(); position++) {
+                Object item = list.get(position);
+                if (item == null) {
+                    throw new SchemaException.EncodeException("Repeat '" + name + "' has null at position "
+                            + position + ", which has no encoding (PS-529)");
+                }
+                Map<String, Object> record = new LinkedHashMap<>();
+                record.put(field.getElementName(), item);
+                wrapped.add(record);
+            }
+            list = wrapped;
+        }
 
         // PS-387: an element present_if dropped is not in the data, and its bytes were in
         // the payload, so they cannot be written back. Only elements that read nothing
@@ -530,7 +555,7 @@ final class Encoder {
                 // PS-370: the index is bound while each element is encoded, as it was
                 // while each was decoded, so a name_from template resolves the same way.
                 element = new LinkedHashMap<>(element);
-                element.put(index, (long) position);
+                element.put(index, (long) position + field.getIndexBase());   // PS-530
             }
             out.write(encodeFieldList(field.getFields(), element));
         }

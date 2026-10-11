@@ -455,9 +455,16 @@ plausible byte. The same applies to an `enum` `default` (PS-068).
   guard:
     when:
       - field: $denominator
-        gt: 0          # gt, gte, lt, lte, eq, ne
+        gt: 0          # gt, gte, lt, lte, eq, ne, in, not_in
     else: 0            # Fallback if condition fails
 ```
+
+`in` and `not_in` take a list of numbers and hold where the value equals one of them, or
+none of them (PS-543): `{field: $mode, in: [2, 4]}`. An empty `in` never holds, and an
+empty `not_in` always does; a boolean is not a number. Every condition has exactly one
+operator (PS-126), so a range of values is two conditions, not one, and a condition with
+none or two is rejected. The same conditions serve
+`present_if`.
 
 ### Formula (Deprecated)
 
@@ -710,6 +717,62 @@ element to one of its fields not yet decoded.
 dropped element still advances `index` and consumes its bytes, and `count_as` counts the
 elements reported, not read (CR-2026-080). A repeat with `present_if` over elements that
 read bytes cannot be encoded - the dropped elements are not in the output (PS-387).
+
+`index_base`, an integer (default 0), is the number `index` starts at: vendors that count
+from 1 declare `index_base: 1`, so `name_from: "Device${i}ID"` gives `Device1ID` first.
+`count_as` is unaffected, and anything but an integer is rejected (PS-530).
+
+### Values rather than records (`element`)
+
+```yaml
+- name: increments
+  type: repeat
+  until: end
+  element: {type: u16, div: 10}     # in place of fields (PS-528)
+# 0078 0096 005A  ->  {"increments": [12, 15, 9]}
+```
+
+A repeat declares exactly one of `fields` and `element`. Each element is decoded as that
+one field and the array holds its values. An omitted value - a sentinel, a lookup miss, a
+value that cannot be computed - is `null` in its position, so later values keep their
+index; this is the one place a decoded value is `null`. The element's `name` (default
+`element`) is how `present_if` refers to the current value and is never reported. An
+encoder takes the array of values back (PS-529) and refuses a `null` position, whose
+encoding CR-2026-111 leaves open.
+
+### Several records from one element (`records`)
+
+```yaml
+- name: messages
+  type: repeat
+  until: end
+  present_if: {field: $_dataId, not_in: [1, 2, 3, 4, 5, 6]}
+  fields:
+    - {name: _dataId, type: u8}
+    - match:
+        field: $_dataId
+        cases:
+          7:
+            - records:
+                - [{name: type, type: string, value: upload_battery},
+                   {name: battery, type: u16}]
+                - [{name: type, type: string, value: upload_interval},
+                   {name: interval, type: u16, mult: 60}]
+# 07 0064 003C  ->  {"messages": [{"type": "upload_battery", "battery": 100},
+#                                  {"type": "upload_interval", "interval": 3600}]}
+```
+
+A `records` entry, in a repeat's element or a `match` case within it, is a non-empty list
+of field lists. Each is decoded in order from the read position and yields one record, and
+the repeat reports the records as consecutive elements in place of the element (PS-541).
+The element's other reported fields are copied into each record, before the record's own;
+`_` fields are not reported, so they are not copied. A record field may not share a name
+with a field the element reports outside `records` (CR-2026-124). `index` counts source elements, and
+`count_as` counts the records reported. `records` anywhere else - the top level, an
+object's members, a tlv case, a flagged group, a byte_group, a trailer, another record -
+and under `element` is rejected at load. An encoder refuses
+a repeat whose elements can reach one, since a record does not say which element it came
+from (PS-542). `_meta`'s `elements` describes every record's fields, keyed by name.
 
 ### Running values (`carry`)
 

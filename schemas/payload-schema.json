@@ -263,15 +263,35 @@
           },
           "index": {
             "type": "string",
-            "description": "`type: repeat`: a name bound to each element's zero-based position while it is decoded and encoded (PS-366, PS-370)."
+            "description": "`type: repeat`: a name bound to each element's position, counted from `index_base`, while it is decoded and encoded (PS-366, PS-370)."
+          },
+          "index_base": {
+            "type": "integer",
+            "default": 0,
+            "description": "`type: repeat`: the number `index` starts at; `index` is bound to the element's position plus this. `count_as` is unaffected. Anything but an integer is rejected (PS-530)."
+          },
+          "element": {
+            "$ref": "#/definitions/field",
+            "description": "`type: repeat`: one field, in place of `fields`. The repeat reports an array of its values rather than of records, with `null` at a position whose value was omitted (PS-528); an encoder takes the array of values (PS-529). Its `name`, defaulting to `element`, is how a reference inside it names the current value, and is not reported. A repeat declares exactly one of `fields` and `element` (PS-083)."
           },
           "count_as": {
             "type": "string",
-            "description": "`type: repeat`: a name bound after the repeat to the number of elements it reports, after present_if (PS-367)."
+            "description": "`type: repeat`: a name bound after the repeat to the number of elements it reports, after present_if (PS-367). Each record a `records` entry yields counts as one (PS-541)."
+          },
+          "records": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/field"
+              }
+            },
+            "description": "A field-list entry in a repeat's element, or in a match case within it: a non-empty list of field lists, each decoded in order and yielding one record. The repeat reports the records as consecutive elements in place of the element, each with the element's other reported fields first. `index` counts source elements. Rejected anywhere else and under `element` (PS-541); an encoder refuses a repeat whose elements reach one (PS-542)."
           },
           "present_if": {
             "type": "object",
-            "description": "`type: repeat`: one guard condition evaluated after each element; an element for which it is false is omitted, still advancing the index (PS-386). Such a repeat cannot be encoded where its elements read bytes (PS-387)."
+            "description": "`type: repeat`: one guard condition evaluated after each element; an element for which it is false is omitted, still advancing the index (PS-386). Its operator is one of `gt`, `gte`, `lt`, `lte`, `eq`, `ne`, or `in` / `not_in` with a list of numbers (PS-543). Such a repeat cannot be encoded where its elements read bytes (PS-387)."
           },
           "carry": {
             "oneOf": [

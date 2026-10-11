@@ -182,8 +182,12 @@ public static class SchemaEncoder
                     // A nested object is reported under its own name (PS-139), so its
                     // members are read from that mapping. They were looked up in the
                     // enclosing data, where they are not, and every member encoded as zero.
+                    // A `name_from` object was reported under its templated key, so that
+                    // is the key to read it back from (CR-2026-030).
+                    var objectKey = ResolveEncodeName(field, data);
                     return EncodeFieldList(field.Fields,
-                        data.TryGetValue(field.Name, out var nested) && nested is Dictionary<string, object?> members
+                        objectKey != null && data.TryGetValue(objectKey, out var nested)
+                        && nested is Dictionary<string, object?> members
                             ? members : data);
                 case FieldType.Number:
                     // Derived from other fields: no bytes of its own.
@@ -576,6 +580,15 @@ public static class SchemaEncoder
         /// earlier in the list, which the main loop encodes from its own value, and
         /// `until: end` needs no header at all.
         /// </remarks>
+        /// <summary>
+        /// Whether an element's fields reach a `records` entry (PS-541): directly, or through
+        /// a match case or default (records_reachable in the reference).
+        /// </summary>
+        static bool RecordsReachable(IEnumerable<SchemaField> fields) =>
+            fields.Any(f => f.Records != null
+                || (f.MatchInline is { } m && (m.Cases.Any(c => RecordsReachable(c.Fields))
+                    || (m.MatchDefault is List<SchemaField> d && RecordsReachable(d)))));
+
         byte[] EncodeRepeat(SchemaField field, Dictionary<string, object?> data)
         {
             if (string.IsNullOrEmpty(field.Name) || !data.TryGetValue(field.Name, out var records)
@@ -589,6 +602,22 @@ public static class SchemaEncoder
                 _ => throw new InvalidOperationException(
                     $"repeat field '{field.Name}': expected a list of records, got {records.GetType().Name}")
             };
+            if (RecordsReachable(field.Fields))
+                // PS-542: the records do not say which element they came from.
+                throw new InvalidOperationException($"Repeat '{field.Name}' has elements that yield "
+                    + "several records, which cannot be encoded (PS-542)");
+            if (field.ElementName != null)
+            {
+                // PS-529: each value is encoded as the element, wrapped as it was decoded.
+                // CR-2026-111 leaves open what a null position encodes as; the spec
+                // prototype refuses it rather than guess, and so does every encoder here.
+                for (int p = 0; p < list.Count; p++)
+                    if (list[p] == null)
+                        throw new InvalidOperationException(
+                            $"Repeat '{field.Name}' has null at position {p}, which has no encoding (PS-529)");
+                list = list.Select(v => (object?)new Dictionary<string, object?> { [field.ElementName] = v })
+                    .ToList();
+            }
 
             // PS-387: an element present_if dropped is not in the data, and its bytes were
             // in the payload, so they cannot be written back. Only elements that read
@@ -610,7 +639,7 @@ public static class SchemaEncoder
                 {
                     // PS-370: the index is bound while each element is encoded, as it was
                     // while each was decoded, so a name_from template resolves the same way.
-                    asMap = new Dictionary<string, object?>(asMap) { [field.Index!] = position };
+                    asMap = new Dictionary<string, object?>(asMap) { [field.Index!] = position + field.IndexBase };
                 }
                 output.AddRange(EncodeFieldList(field.Fields, asMap));
                 position++;

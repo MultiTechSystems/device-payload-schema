@@ -164,7 +164,10 @@ class TestTheValidatorNowChecksRepeat:
     @pytest.mark.parametrize("bound", [{"count": 2}, {"byte_length": 4},
                                        {"until": "end"}, {"count": "$n"}])
     def test_each_bound_alone_is_accepted(self, bound):
-        assert validate_schema_structure(schema_with(repeat_field(**bound))) == []
+        schema = schema_with(repeat_field(**bound))
+        # `$n` names a declared field (PS-539, CR-2026-117).
+        schema["fields"].insert(0, {"name": "n", "type": "u8"})
+        assert validate_schema_structure(schema) == []
 
     def test_no_bound_is_refused(self):
         errors = validate_schema_structure(schema_with(repeat_field()))

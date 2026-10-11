@@ -122,17 +122,23 @@ public class Wave6aTest {
 
     @Test
     public void aReferenceToAFieldNotYetDecodedIsAnError() {
-        Schema schema = Schema.fromYaml("name: p\nfields:\n"
-            + "  - {name: r, type: repeat, count: 1, fields: [{name: early, type: number, ref: $v}, {name: v, type: u8}]}\n");
-        Exception e = assertThrows(SchemaException.DecodeException.class, () -> schema.decode(hex("05")));
-        assertTrue(e.getMessage().contains("PS-368"), e.getMessage());
+        // Refused at load as a forward reference (PS-539, PS-122, CR-2026-127).
+        Exception e = assertThrows(SchemaException.class, () -> Schema.fromYaml("name: p\nfields:\n"
+            + "  - {name: r, type: repeat, count: 1, fields: [{name: early, type: number, ref: $v}, {name: v, type: u8}]}\n"));
+        assertTrue(e.getMessage().contains("PS-122"), e.getMessage());
     }
 
     @Test
-    public void anOtherwiseUnboundReferenceStillReadsAsZero() {
+    public void anOtherwiseUnboundReferenceIsAbsent() {
+        // PS-314, PS-429: a reference with no value cannot be resolved, so the field is
+        // left out. It read 0, which reported a value the payload never carried. The name
+        // is declared first (PS-539) and its sentinel omits it.
         Schema schema = Schema.fromYaml("name: p\nfields:\n"
+            + "  - {name: nowhere, type: u8, sentinel: [255]}\n"
             + "  - {name: v, type: u8}\n  - {name: w, type: number, ref: $nowhere}\n");
-        assertEquals(0L, schema.decode(hex("05")).get("w"));
+        Map<String, Object> out = schema.decode(hex("FF05"));
+        assertFalse(out.containsKey("w"), out.toString());
+        assertEquals(5L, out.get("v"));
     }
 
     @Test
@@ -141,7 +147,8 @@ public class Wave6aTest {
         Schema schema = Schema.fromYaml("name: p\nfields:\n"
             + "  - {name: r, type: repeat, count: 1, count_as: n, fields: [{name: v, type: u8}, "
             + "{name: seen, type: number, ref: $n}]}\n");
-        assertEquals(List.of(Map.of("v", 5L, "seen", 0L)), schema.decode(hex("05")).get("r"));
+        // A reference to it from inside has no value, so `seen` is absent (PS-314).
+        assertEquals(List.of(Map.of("v", 5L)), schema.decode(hex("05")).get("r"));
     }
 
     @Test

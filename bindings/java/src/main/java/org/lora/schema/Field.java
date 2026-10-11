@@ -161,6 +161,14 @@ public class Field {
     
     public int getLength() { return length; }
     public void setLength(int length) { this.length = length; }
+
+    /**
+     * Whether `length` was written as a number, so that `length: 0` - a field of no
+     * bytes (PS-392) - is told apart from no length at all, which takes the type's width.
+     */
+    private boolean lengthDeclared;
+    public boolean isLengthDeclared() { return lengthDeclared; }
+    public void setLengthDeclared(boolean lengthDeclared) { this.lengthDeclared = lengthDeclared; }
     
     public int getByteOffset() { return byteOffset; }
     public void setByteOffset(int byteOffset) { this.byteOffset = byteOffset; }
@@ -240,6 +248,26 @@ public class Field {
     private int reserve;
     /** Fields decoded from a repeat's reserved bytes (PS-383). */
     private List<Field> trailer;
+
+    /** A {@code records} entry (PS-541): field lists, each yielding one record. */
+    private List<List<Field>> records;
+
+    public List<List<Field>> getRecords() { return records; }
+    public void setRecords(List<List<Field>> records) { this.records = records; }
+
+    /**
+     * A repeat of single values (PS-528): the name its one element field is decoded under,
+     * the element's own name or "element". Null for a repeat declaring {@code fields}.
+     */
+    private String elementName;
+    /** The number a repeat's index starts at (PS-530). */
+    private long indexBase;
+
+    public String getElementName() { return elementName; }
+    public void setElementName(String elementName) { this.elementName = elementName; }
+
+    public long getIndexBase() { return indexBase; }
+    public void setIndexBase(long indexBase) { this.indexBase = indexBase; }
 
     public String getIndex() { return index; }
     public void setIndex(String index) { this.index = index; }
@@ -371,6 +399,14 @@ public class Field {
             // resolves it against the payload rather than falling back to the type
             // default, which would read a single byte.
             return length;
+        }
+        // `length: 0` on a type that reads `length` bytes reads nothing (PS-392 for a
+        // skip). It was taken as no length and one byte was read, so a zero-length skip
+        // in a tlv case swallowed the next entry's tag (milesight gs601's 0xEE request).
+        if (lengthDeclared && (type == FieldType.SKIP || type == FieldType.BYTES
+                || type == FieldType.ASCII || type == FieldType.STRING
+                || type == FieldType.HEX || type == FieldType.BASE64)) {
+            return 0;
         }
         return type.defaultLength();
     }
@@ -521,6 +557,11 @@ public class Field {
         private String field;
         private String op;
         private Double operand;
+        /** The numbers of an {@code in} or {@code not_in} condition (PS-543). */
+        private List<Double> operands;
+
+        public List<Double> getOperands() { return operands; }
+        public void setOperands(List<Double> operands) { this.operands = operands; }
 
         public String getField() { return field; }
         public void setField(String field) { this.field = field; }

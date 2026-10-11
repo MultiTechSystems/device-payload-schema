@@ -56,6 +56,11 @@ public class DecodeContext
     public int Offset { get; set; }
     public string Endian { get; }
     public Dictionary<string, object?> Variables { get; } = new();
+    /// <summary>
+    /// The records the current repeat element yields through `records` (PS-541); null
+    /// outside an element.
+    /// </summary>
+    internal List<Dictionary<string, object?>>? PendingRecords { get; set; }
     public Dictionary<string, string> Quality { get; } = new();
     public List<string> Warnings { get; } = new();
     /// <summary>

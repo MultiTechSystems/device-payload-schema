@@ -132,6 +132,7 @@ public static partial class SchemaParser
         // over the whole document so an enclosing repeat's names are known.
         CheckIterator(root);
         CheckWave6b(root);    // PS-404, PS-433
+        CheckReferences(root);    // PS-539 (CR-2026-117)
         schema.RepeatOnlyNames = RepeatOnlyNames(root);
         // PS-491 (CR-2026-096): one reported name's declarations in one field list agree
         // on unit, senml and ipso, or `_meta` could not describe the name.
@@ -450,7 +451,7 @@ public static partial class SchemaParser
     }
 
     /// <summary>The keys that make a field a construct, declaring no type of its own.</summary>
-    static readonly string[] ConstructKeys = { "$ref", "flagged", "tlv", "byte_group", "match" };
+    static readonly string[] ConstructKeys = { "$ref", "flagged", "tlv", "byte_group", "match", "records" };
 
     /// <summary>
     /// PS-347, PS-441: a <c>match</c> or <c>tlv</c> case body is a field list, <c>[]</c> for a
@@ -621,7 +622,10 @@ public static partial class SchemaParser
                 f.Length = -1;
             else if (System.Text.RegularExpressions.Regex.IsMatch(lengthText, @"^-?\d+$")
                      || lengthText.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            {
                 f.Length = Int(len);
+                f.LengthDeclared = true;
+            }
             else
                 // PS-464: the name of a preceding field, with or without `$`, resolved
                 // when the field is decoded (PS-465). Int() read it as 0 bytes.
@@ -816,6 +820,16 @@ public static partial class SchemaParser
         // checked over the whole document by CheckIterator once the fields are parsed.
         if (fm.TryGetValue("index", out var indexNode)) f.Index = Scalar(indexNode);
         if (fm.TryGetValue("count_as", out var countAsNode)) f.CountAs = Scalar(countAsNode);
+        // PS-528, PS-530: a repeat of single values, and the base its index counts from.
+        // Their rules are checked by CheckIterator; an invalid value never reaches here.
+        if (fm.TryGetValue("index_base", out var indexBaseNode) && YamlInt(indexBaseNode) is { } ib)
+            f.IndexBase = (int)ib;
+        if (f.Type == FieldType.Repeat && !fm.Children.ContainsKey(new YamlScalarNode("fields"))
+            && RepeatMembers(fm) is ({ } elementSeq, { } elementName))
+        {
+            f.Fields = ParseFields(elementSeq);
+            f.ElementName = elementName;
+        }
         if (fm.TryGetValue("identity", out var identityNode)) f.Identity = Scalar(identityNode);
         if (fm.TryGetValue("reserve", out var reserveNode)) f.Reserve = Int(reserveNode);
         if (fm.TryGetValue("trailer", out var trailerNode) && trailerNode is YamlSequenceNode trailerSeq)
@@ -991,6 +1005,14 @@ public static partial class SchemaParser
             f.TLVInline = tlvField;
         }
 
+        // PS-541: `records`, field lists each yielding one record of the enclosing repeat
+        // element. Where it may appear, and its shape, are checked by RecordsErrors.
+        if (fm.TryGetValue("records", out var recordsNode) && recordsNode is YamlSequenceNode recordsSeq
+            && !fm.Children.ContainsKey(new YamlScalarNode("type")))
+        {
+            f.Records = recordsSeq.Children.OfType<YamlSequenceNode>().Select(ParseFields).ToList();
+        }
+
         // Match inline (Option B: `- match: { field: $var, cases: {...} }`)
         if (fm.TryGetValue("match", out var matchNode) && matchNode is YamlMappingNode matchMap)
         {
@@ -1056,6 +1078,11 @@ public static partial class SchemaParser
         // fail: vicki's _tempStandard stayed live on the firmware 3.5 path and was added
         // to _tempFw35, reporting 46.95 where the vendor gives 14.76.
         if (wm.TryGetValue("ne", out var ne)) gc.Ne = Double(ne);
+        // PS-543: a list of numbers; its form is checked at load (ConditionErrors).
+        if (wm.TryGetValue("in", out var inNode) && inNode is YamlSequenceNode inSeq)
+            gc.In = inSeq.Children.Select(Double).ToArray();
+        if (wm.TryGetValue("not_in", out var notInNode) && notInNode is YamlSequenceNode notInSeq)
+            gc.NotIn = notInSeq.Children.Select(Double).ToArray();
         return gc;
     }
 

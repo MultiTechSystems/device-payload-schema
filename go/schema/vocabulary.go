@@ -78,7 +78,7 @@ func isKnownTypeSpelling(spelling string) bool {
 
 // fieldConstructKeys are the keys that make a field a construct rather than a typed
 // read, so it carries no `type` of its own.
-var fieldConstructKeys = []string{"$ref", "flagged", "tlv", "byte_group", "match"}
+var fieldConstructKeys = []string{"$ref", "flagged", "tlv", "byte_group", "match", "records"}
 
 // checkTypeVocabulary walks every field list of a raw schema and reports the first
 // field whose type is unknown (PS-327) or absent with no construct to stand in for
@@ -173,6 +173,20 @@ func checkTypeVocabulary(raw map[string]any) error {
 			}
 			if err := check(field["trailer"], at+".trailer"); err != nil {
 				return err
+			}
+			// PS-541: each of a `records` entry's field lists, held to the same rules.
+			if bodies, ok := field["records"].([]any); ok {
+				for r, body := range bodies {
+					if err := check(body, fmt.Sprintf("%s.records[%d]", at, r)); err != nil {
+						return err
+					}
+				}
+			}
+			// PS-528: a repeat's `element` is one field definition, held to the same rules.
+			if element := asStringMap(field["element"]); element != nil {
+				if err := check([]any{element}, at+".element"); err != nil {
+					return err
+				}
 			}
 			switch group := field["byte_group"].(type) {
 			case []any:

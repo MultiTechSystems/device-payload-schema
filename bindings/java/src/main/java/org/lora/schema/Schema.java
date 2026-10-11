@@ -108,6 +108,8 @@ public class Schema {
         // Wave 6b (CR-2026-059, -067): optional fields form the tail of their list (PS-404)
         // and no field takes a name reserved for interpreter metadata (PS-433).
         Wave6b.checkSchema(raw);
+        // CR-2026-117: every `$` reference names something the schema declares (PS-539).
+        References.check(raw);
         Schema schema = new Schema();
         schema.repeatOnlyNames = Wave6a.repeatOnlyNames(raw);
         schema.metaName = raw.get("name");
@@ -692,7 +694,7 @@ public class Schema {
 
     /** The keys that make a field a construct, so it declares no type of its own. */
     private static final List<String> CONSTRUCT_KEYS =
-            List.of("$ref", "flagged", "tlv", "byte_group", "match");
+            List.of("$ref", "flagged", "tlv", "byte_group", "match", "records");
 
     private static boolean hasConstruct(Map<String, Object> fm) {
         for (String key : CONSTRUCT_KEYS) {
@@ -734,6 +736,7 @@ public class Schema {
             f.setLengthRef(Wave6b.lengthRef(lengthSpec));
         } else {
             f.setLength(toInt(lengthSpec, 0));
+            f.setLengthDeclared(lengthSpec instanceof Number);
         }
         // Wave 6b: optional (PS-402), sentinel (PS-427), out_of_range: omit (PS-428).
         f.setOptional(Boolean.TRUE.equals(fm.get("optional")));
@@ -913,8 +916,20 @@ public class Schema {
         Object fieldsRaw = fm.get("fields");
         if (fieldsRaw instanceof List) {
             f.setFields(parseFields((List<Map<String, Object>>) fieldsRaw));
+        } else if ("repeat".equals(fm.get("type")) && fm.get("element") instanceof Map<?, ?> element) {
+            // PS-528: a repeat of single values decodes its element as a one-field record
+            // under the element's name, or "element", and reports the value. Wave6a has
+            // already rejected both, neither, and a non-mapping element.
+            Map<String, Object> member = new LinkedHashMap<>((Map<String, Object>) element);
+            String elementName = member.get("name") instanceof String n && !n.isEmpty() ? n : "element";
+            member.put("name", elementName);
+            List<Map<String, Object>> one = new ArrayList<>();
+            one.add(member);
+            f.setFields(parseFields(one));
+            f.setElementName(elementName);
         }
-        
+        if (fm.get("index_base") instanceof Number base) f.setIndexBase(base.longValue());  // PS-530
+
         // Cases (for match/switch)
         Object casesRaw = fm.get("cases");
         if (casesRaw instanceof List) {
@@ -1098,6 +1113,18 @@ public class Schema {
             }
             matchField.setCases(parseCaseMap(matchMap.get("cases")));
             f.setMatchInline(matchField);
+        }
+
+        // PS-541: field lists, each yielding one record of the enclosing repeat element.
+        // Where it may appear and its shape are Wave6a.recordsErrors', checked at load.
+        if (fm.get("records") instanceof List<?> bodies && fm.get("type") == null) {
+            List<List<Field>> parsed = new ArrayList<>();
+            for (Object body : bodies) {
+                if (body instanceof List<?> list) {
+                    parsed.add(parseFields((List<Map<String, Object>>) list));
+                }
+            }
+            f.setRecords(parsed);
         }
 
         // TLV inline
@@ -1427,6 +1454,19 @@ public class Schema {
                         result.put(key, entry.getValue());
                         ctx.setVariable(key, entry.getValue());
                     }
+                }
+                continue;
+            }
+
+            // PS-541: each field list yields one record, which the enclosing repeat
+            // reports in place of the element.
+            if (field.getRecords() != null) {
+                if (ctx.getPendingRecords() == null) {
+                    throw new SchemaException.DecodeException("`records` belongs in a repeat's element, "
+                            + "or a match case within it (PS-541)");
+                }
+                for (List<Field> body : field.getRecords()) {
+                    ctx.getPendingRecords().add(decodeFields(body, ctx));
                 }
                 continue;
             }
@@ -1953,7 +1993,14 @@ public class Schema {
     }
 
     private Object decodeMatch(Field field, DecodeContext ctx) {
-        int matchValue;
+        // A long, not an int. A bit-range peek reports a Double, and narrowing a Double
+        // above Integer.MAX_VALUE saturates to 2147483647 while narrowing the Long case
+        // key 2147483648 wraps to -2147483648 - so a u32 discriminator of 0x80000000 never
+        // equalled the key that spells it, and the construct took its default instead.
+        // Null where the discriminator is no integer at all - a u64 above 2^63-1, say -
+        // which then matches no case rather than the 0 a default conversion would give.
+        Long matchValue;
+        Object discriminator;
         // What this construct contributes on its own: the discriminator under `name`,
         // where it was read here and named. Null where there is nothing to report.
         Map<String, Object> inline = null;
@@ -1961,14 +2008,16 @@ public class Schema {
         if (field.isMatchRemaining()) {
             // PS-414: the bytes from here to the end of the region, which a reserving
             // repeat or tlv has already narrowed. Nothing is read.
-            matchValue = ctx.remaining();
+            matchValue = (long) ctx.remaining();
+            discriminator = matchValue;
         } else if (field.getOn() != null && !field.getOn().isEmpty()) {
             String varName = field.getOn().startsWith("$") ? field.getOn().substring(1) : field.getOn();
             Object val = ctx.getVariable(varName);
             if (val == null) {
                 throw new SchemaException.DecodeException("Variable not found: $" + varName);
             }
-            matchValue = toInt(val, 0);
+            matchValue = asLong(val);
+            discriminator = val;
         } else {
             int length = field.getLength() > 0 ? field.getLength() : 1;
             byte[] data;
@@ -1979,7 +2028,8 @@ public class Schema {
                 // match's `name`, where it declares one.
                 throw e.named(field.getName(), "match");
             }
-            matchValue = (int) ctx.decodeUnsigned(data, ctx.getEndian());
+            matchValue = ctx.decodeUnsigned(data, ctx.getEndian());
+            discriminator = matchValue;
 
             // A discriminator read from the payload is reported where `name` asks for it
             // and stored where `var` does (CR-2026-020). Both were parsed and then
@@ -2006,7 +2056,7 @@ public class Schema {
             Object caseVal = c.getCaseValue();
             if (caseVal == null) continue;
 
-            if (matchesCase(matchValue, caseVal)) {
+            if (matchValue != null && matchesCase(matchValue, caseVal)) {
                 return mergeMatch(inline, decodeFields(c.getFields(), ctx));
             }
         }
@@ -2021,7 +2071,8 @@ public class Schema {
         }
         if (fallback == null || !"skip".equals(String.valueOf(fallback))) {
             throw new SchemaException.DecodeException(
-                    "No matching case for value " + matchValue);
+                    "No matching case for value "
+                    + (matchValue != null ? matchValue : discriminator));
         }
         return inline;
     }
@@ -2034,17 +2085,18 @@ public class Schema {
      * {@code {min,max}} maps were compared, so a range key matched nothing at all and the
      * construct decoded silently empty (CR-2026-020).
      */
-    private int rangeBound(String text) {
-        return Integer.parseInt(text.trim());
+    private long rangeBound(String text) {
+        return Long.parseLong(text.trim());
     }
 
-    private boolean matchesCase(int matchValue, Object caseVal) {
+    private boolean matchesCase(long matchValue, Object caseVal) {
         if (caseVal instanceof Number number) {
-            return matchValue == number.intValue();
+            Long key = asLong(number);
+            return key != null && key == matchValue;
         }
         if (caseVal instanceof String text && parseListCaseKey(text) != null) {
             // A quoted flow sequence, "[1, 2, 3]", matches any element (PS-398).
-            return parseListCaseKey(text).contains((long) matchValue);
+            return parseListCaseKey(text).contains(matchValue);
         }
         if (caseVal instanceof String text) {
             int separator = text.indexOf("..");
@@ -2064,15 +2116,16 @@ public class Schema {
         }
         if (caseVal instanceof List<?> list) {
             for (Object item : list) {
-                if (item instanceof Number number && matchValue == number.intValue()) {
+                if (item instanceof Number number && asLong(number) != null
+                        && asLong(number) == matchValue) {
                     return true;
                 }
             }
             return false;
         }
         if (caseVal instanceof Map<?, ?> rangeMap) {
-            int minVal = toInt(rangeMap.get("min"), Integer.MIN_VALUE);
-            int maxVal = toInt(rangeMap.get("max"), Integer.MAX_VALUE);
+            long minVal = toLong(rangeMap.get("min"), Long.MIN_VALUE);
+            long maxVal = toLong(rangeMap.get("max"), Long.MAX_VALUE);
             return matchValue >= minVal && matchValue <= maxVal;
         }
         return false;
@@ -2169,6 +2222,10 @@ public class Schema {
                     }
                     if (tf.getName() != null) {
                         tagValues.put(tf.getName(), val);
+                        // A component is a field decoded earlier in the payload, so its
+                        // name is a reference the case body may make (`ref: $rsn`,
+                        // PS-265). Only `var:` was bound, so `$rsn` read 0.
+                        ctx.setVariable(tf.getName(), (long) val);
                     }
                     // A component's `var:` binds for the case body, as a field's does; a
                     // name_from template such as "temperature_${ch}" reads it.
@@ -2443,11 +2500,11 @@ public class Schema {
      * count_as is bound to the number reported once the array is complete (PS-367,
      * CR-2026-080). Mirrors _decode_repeat in tools/schema_interpreter.py.
      */
-    private List<Map<String, Object>> decodeRepeat(Field field, DecodeContext ctx) {
+    private List<Object> decodeRepeat(Field field, DecodeContext ctx) {
         int maxIterations = field.getMax() > 0 ? field.getMax() : 1000;
         int minIterations = field.getMin();
 
-        List<Map<String, Object>> result = new ArrayList<>();
+        List<Object> result = new ArrayList<>();
         int[] iterations = {0};
 
         // PS-378, PS-380: a carried field starts again from its `carry` value each time
@@ -2583,7 +2640,7 @@ public class Schema {
      * The iteration count advances either way (PS-386).
      */
     private void decodeElement(Field repeat, DecodeContext ctx, int[] iterations,
-                               Map<String, Object> carryState, List<Map<String, Object>> result) {
+                               Map<String, Object> carryState, List<Object> result) {
         Map<String, Object> outer = ctx.snapshotVariables();
         Set<String> savedNames = ctx.getElementNames();
         List<Field> members = repeat.getFields() == null ? List.of() : repeat.getFields();
@@ -2591,11 +2648,16 @@ public class Schema {
         for (Field member : members) names.add(member.getName());
         ctx.setElementNames(names);
         if (repeat.getIndex() != null) {
-            ctx.setVariable(repeat.getIndex(), (long) iterations[0]);      // PS-366
+            // PS-366, PS-530: the position counted from index_base.
+            ctx.setVariable(repeat.getIndex(), (long) iterations[0] + repeat.getIndexBase());
         }
         ctx.getVariables().putAll(carryState);                              // PS-379
         Map<String, Object> element;
         boolean keep;
+        // PS-541: the records this element's `records` entry yields, if it reaches one.
+        List<Map<String, Object>> savedRecords = ctx.getPendingRecords();
+        List<Map<String, Object>> records = new ArrayList<>();
+        ctx.setPendingRecords(records);
         try {
             element = decodeFields(members, ctx);
             for (String carried : carryState.keySet()) {
@@ -2603,14 +2665,43 @@ public class Schema {
                     carryState.put(carried, ctx.getVariable(carried));
                 }
             }
-            keep = repeat.getPresentIf() == null || guardPasses(repeat.getPresentIf(), ctx);
+            // The element is whole here, so a name of it with no value is absent, not
+            // "not yet decoded", and the condition fails (PS-540).
+            keep = repeat.getPresentIf() == null || guardPasses(repeat.getPresentIf(), ctx, true);
         } finally {
             // PS-368: an element's names do not outlive it.
             ctx.restoreVariables(outer);
             ctx.setElementNames(savedNames);
+            ctx.setPendingRecords(savedRecords);
         }
         iterations[0]++;
-        if (keep) result.add(element);                                      // PS-386
+        if (keep && !records.isEmpty()) {
+            // PS-541: the records, as consecutive elements, in place of the element; the
+            // element's other reported fields go into each, before its own.
+            for (Map<String, Object> record : records) {
+                Map<String, Object> merged = new LinkedHashMap<>(element);
+                merged.putAll(record);
+                result.add(merged);
+            }
+        } else if (keep) {                                                  // PS-386
+            // PS-528: an element repeat reports the value, or null where it was omitted.
+            result.add(repeat.getElementName() == null ? element : elementValue(element));
+        }
+    }
+
+    /**
+     * The value a repeat of single values reports for one element: the record's one
+     * reported value, or null where it was omitted (PS-528), so positions keep their index.
+     * Interpreter metadata beside it is not the value. Mirrors element_value.
+     */
+    static Object elementValue(Map<String, Object> record) {
+        for (Map.Entry<String, Object> e : record.entrySet()) {
+            if (!"_quality".equals(e.getKey()) && !"_warnings".equals(e.getKey())
+                    && !"_meta".equals(e.getKey())) {
+                return e.getValue();
+            }
+        }
+        return null;
     }
 
     /** A carried field's value before the first element (PS-378). */
@@ -2806,7 +2897,8 @@ public class Schema {
     }
 
     /** The comparison operators a guard condition may carry, in precedence order. */
-    private static final List<String> GUARD_OPS = List.of("gt", "gte", "lt", "lte", "eq", "ne");
+    private static final List<String> GUARD_OPS =
+            List.of("gt", "gte", "lt", "lte", "eq", "ne", "in", "not_in");     // PS-543
 
     private static Field.Guard parseGuard(Map<?, ?> guardRaw) {
         Field.Guard guard = new Field.Guard();
@@ -2824,7 +2916,13 @@ public class Schema {
                     Field.Condition condition = new Field.Condition();
                     condition.setField(reference);
                     condition.setOp(op);
-                    condition.setOperand(toDouble(cm.get(op)));
+                    if (cm.get(op) instanceof List<?> values) {                  // PS-543
+                        List<Double> operands = new ArrayList<>();
+                        for (Object v : values) operands.add(toDouble(v));
+                        condition.setOperands(operands);
+                    } else {
+                        condition.setOperand(toDouble(cm.get(op)));
+                    }
                     guard.getWhen().add(condition);
                     break;
                 }
@@ -2886,10 +2984,9 @@ public class Schema {
         if (value instanceof List<?> list) {
             List<Object> out = new ArrayList<>(list.size());
             for (Object item : list) {
-                Object v = normalizeOutput(item);
-                if (v != null) {
-                    out.add(v);
-                }
+                // PS-528: a null in an array is an `element` repeat's omitted value, and
+                // keeps its position; dropping it would move every later value.
+                out.add(normalizeOutput(item));
             }
             return out;
         }
@@ -2902,7 +2999,7 @@ public class Schema {
         }
 
         boolean computed = field.getRef() != null || field.getCompute() != null;
-        if (computed && field.getGuard() != null && !guardPasses(field.getGuard(), ctx)) {
+        if (computed && field.getGuard() != null && !guardPasses(field.getGuard(), ctx, false)) {
             // PS-444: a failing guard reports the declared fallback untouched - no
             // modifiers, no transform, no lookup; the wrapper is what keeps the lookup
             // in applyGroupMember off it. Checking the guard first is also what keeps a
@@ -2916,6 +3013,10 @@ public class Schema {
         // `compute` was dropped with success.
         if (field.getRef() != null) {
             double value = resolveOperand(field.getRef(), ctx);
+            // PS-314/PS-429: the referenced field has no value, so this one is absent.
+            if (isComputeOmitted(value)) {
+                return null;
+            }
             if (field.getPolynomial() != null && !field.getPolynomial().isEmpty()) {
                 value = evaluatePolynomial(field.getPolynomial(), value);
             }
@@ -3027,6 +3128,11 @@ public class Schema {
     private double evaluateCompute(Field.Compute compute, DecodeContext ctx) {
         double a = resolveOperand(compute.getA(), ctx);
         double b = resolveOperand(compute.getB(), ctx);
+        // PS-314/PS-429: an operand with no value makes the field absent, as a zero
+        // divisor does. NaN arithmetic is not relied on to carry the sentinel through.
+        if (isComputeOmitted(a) || isComputeOmitted(b)) {
+            return COMPUTE_OMITTED;
+        }
         return switch (compute.getOp()) {
             case "add" -> a + b;
             case "sub" -> a - b;
@@ -3050,17 +3156,35 @@ public class Schema {
     private double resolveOperand(Object spec, DecodeContext ctx) {
         if (spec instanceof String text && text.startsWith("$")) {
             Object value = ctx.ref(text.substring(1));     // PS-368
+            // PS-314/PS-429: a reference with no value - a field omitted earlier by a
+            // zero divisor, a log of x <= 0, a sentinel or a lookup with no entry - cannot
+            // be resolved. It read 0, so dragino wsc2-lb's `rain` was reported as 0
+            // where its divisor was 0 and the field should be absent.
+            if (value == null) {
+                return COMPUTE_OMITTED;
+            }
             return value instanceof Number number ? number.doubleValue() : 0.0;
         }
         Double literal = toDouble(spec);
         return literal == null ? 0.0 : literal;
     }
 
-    private boolean guardPasses(Field.Guard guard, DecodeContext ctx) {
+    /**
+     * PS-540 (CR-2026-117): a condition whose field is absent (PS-314) or unbound fails, so
+     * the guard's {@code else} applies, or the field is omitted without one (PS-400). It was
+     * read as 0, which passed {@code gte: 0} on a value the device never sent. The PS-368
+     * scope errors stay errors, except for a repeat's {@code present_if}, evaluated once its
+     * element is whole ({@code elementComplete}).
+     */
+    private boolean guardPasses(Field.Guard guard, DecodeContext ctx, boolean elementComplete) {
         for (Field.Condition condition : guard.getWhen()) {
             if (!condition.getField().startsWith("$")) continue;
-            Object raw = ctx.ref(condition.getField().substring(1));     // PS-368
-            double value = raw instanceof Number number ? number.doubleValue() : 0.0;
+            String name = condition.getField().substring(1);
+            Object raw = elementComplete ? ctx.getVariables().get(name) : ctx.ref(name); // PS-368
+            // PS-540: an absent operand fails. PS-549 (CR-2026-127): so does a boolean one -
+            // comparisons take numbers, and `true` is not 1 (PS-513).
+            if (!(raw instanceof Number number)) return false;
+            double value = number.doubleValue();
             double operand = condition.getOperand() == null ? 0.0 : condition.getOperand();
             boolean passed = switch (condition.getOp()) {
                 case "gt" -> value > operand;
@@ -3069,11 +3193,50 @@ public class Schema {
                 case "lte" -> value <= operand;
                 case "eq" -> value == operand;
                 case "ne" -> value != operand;
+                case "in" -> condition.getOperands().contains(value);          // PS-543
+                case "not_in" -> !condition.getOperands().contains(value);
                 default -> true;
             };
             if (!passed) return false;
         }
         return true;
+    }
+
+    /**
+     * A value as a 64-bit integer, for comparing a discriminator with a case key, or null
+     * where it has none. {@code intValue()} cannot do it: a Double above
+     * Integer.MAX_VALUE saturates while a Long wraps, so the same number read two ways
+     * compared unequal. Integral types convert exactly; a Double truncates as {@code
+     * toInt} does; one outside long's range, NaN, or text that is not an integer is null.
+     */
+    private static Long asLong(Object obj) {
+        if (obj instanceof Long || obj instanceof Integer || obj instanceof Short
+                || obj instanceof Byte) {
+            return ((Number) obj).longValue();
+        }
+        if (obj instanceof java.math.BigInteger big) {
+            return big.bitLength() < 64 ? big.longValue() : null;
+        }
+        if (obj instanceof Number number) {
+            double d = number.doubleValue();
+            if (Double.isNaN(d) || d < -9.2233720368547758E18 || d >= 9.2233720368547758E18) {
+                return null;
+            }
+            return (long) d;
+        }
+        if (obj instanceof String text) {
+            try {
+                return Long.parseLong(text.trim());
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private static long toLong(Object obj, long defaultValue) {
+        Long value = asLong(obj);
+        return value != null ? value : defaultValue;
     }
 
     private static int toInt(Object obj, int defaultValue) {

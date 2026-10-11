@@ -25,7 +25,9 @@ final class Wave6a {
     private Wave6a() {}
 
     private static final List<String> ITERATOR_KEYS = List.of("index", "count_as");
-    private static final List<String> GUARD_OPS = List.of("gt", "gte", "lt", "lte", "eq", "ne");
+    private static final List<String> GUARD_OPS =
+            List.of("gt", "gte", "lt", "lte", "eq", "ne", "in", "not_in");     // PS-126, PS-543
+    private static final List<String> SET_OPS = List.of("in", "not_in");
     private static final List<String> COMPUTED_TYPES = List.of("number", "integer");
     private static final Pattern TEMPLATE_REF = Pattern.compile("\\$\\{([^}]+)\\}");
 
@@ -47,7 +49,228 @@ final class Wave6a {
             }
         }
         collectTlvReserveErrors(raw, errors);
+        errors.addAll(recordsErrors(raw));                                  // PS-541
+        collectConditionErrors(raw, errors);                                // PS-543
         return errors;
+    }
+
+    /** A construct entry: a mapping carrying {@code key} and no {@code type}. */
+    private static boolean isConstruct(Map<?, ?> item, String key) {
+        return item.containsKey(key) && item.get("type") == null;
+    }
+
+    /**
+     * Whether a field list reaches a {@code records} entry (PS-541): directly, or through a
+     * match case or default, which merge into the list. Mirrors records_reachable.
+     */
+    static boolean recordsReachable(Object fieldsRaw) {
+        if (!(fieldsRaw instanceof List<?> fields)) return false;
+        for (Object o : fields) {
+            if (!(o instanceof Map<?, ?> item)) continue;
+            if (isConstruct(item, "records")) return true;
+            if (isConstruct(item, "match") && item.get("match") instanceof Map<?, ?> match) {
+                List<Object> bodies = new ArrayList<>();
+                if (match.get("cases") instanceof Map<?, ?> cases) bodies.addAll(cases.values());
+                bodies.add(match.get("default"));
+                for (Object body : bodies) {
+                    if (body instanceof List<?> && recordsReachable(body)) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * PS-541: a {@code records} entry is a non-empty list of field lists, in a repeat's
+     * element or a match case within it, and never reached from an {@code element}
+     * (PS-528). Mirrors records_errors, with its wording.
+     */
+    static List<String> recordsErrors(Map<String, Object> raw) {
+        List<String> errors = new ArrayList<>();
+        walkRecords(raw.get("fields"), false, errors);
+        if (raw.get("ports") instanceof Map<?, ?> ports) {
+            for (Object entry : ports.values()) {
+                walkRecords(entry instanceof Map<?, ?> e ? e.get("fields") : entry, false, errors);
+            }
+        }
+        return errors;
+    }
+
+    private static void walkRecords(Object fieldsRaw, boolean inElement, List<String> errors) {
+        if (!(fieldsRaw instanceof List<?> fields)) return;
+        for (Object o : fields) {
+            if (!(o instanceof Map<?, ?> item)) continue;
+            if (isConstruct(item, "records")) {
+                if (!inElement) {
+                    errors.add("`records` belongs in a repeat's element, or a match case within it (PS-541)");
+                }
+                boolean wellFormed = item.get("records") instanceof List<?> bodies && !bodies.isEmpty();
+                if (wellFormed) {
+                    for (Object body : (List<?>) item.get("records")) {
+                        if (!(body instanceof List)) wellFormed = false;
+                    }
+                }
+                if (!wellFormed) {
+                    errors.add("`records` is a non-empty list of field lists (PS-541)");
+                    continue;
+                }
+                for (Object body : (List<?>) item.get("records")) walkRecords(body, false, errors);
+                continue;
+            }
+            if ("repeat".equals(item.get("type"))) {
+                if (item.get("element") instanceof Map<?, ?> element) {
+                    if (recordsReachable(List.of(element))) {
+                        errors.add("Repeat '" + (item.containsKey("name") ? item.get("name") : "<unnamed>")
+                                + "': an `element` cannot reach a `records` entry (PS-541)");
+                    } else {
+                        walkRecords(List.of(element), false, errors);
+                    }
+                }
+                walkRecords(item.get("fields"), true, errors);
+                walkRecords(item.get("trailer"), false, errors);
+                List<String> clash = recordsClash(item.get("fields"));
+                if (!clash.isEmpty()) {
+                    StringBuilder listed = new StringBuilder("[");
+                    for (int i = 0; i < clash.size(); i++) {
+                        if (i > 0) listed.append(", ");
+                        listed.append('\'').append(clash.get(i)).append('\'');
+                    }
+                    listed.append(']');
+                    errors.add("Repeat '" + (item.containsKey("name") ? item.get("name") : "<unnamed>")
+                            + "': " + listed + " is reported both by a record and by the element"
+                            + " outside `records` (PS-541)");
+                }
+                continue;
+            }
+            if (isConstruct(item, "match") && item.get("match") instanceof Map<?, ?> match) {
+                if (match.get("cases") instanceof Map<?, ?> cases) {
+                    for (Object body : cases.values()) walkRecords(body, inElement, errors);
+                }
+                walkRecords(match.get("default"), inElement, errors);
+            }
+            if (item.get("cases") instanceof Map<?, ?> cases) {
+                for (Object body : cases.values()) walkRecords(body, false, errors);
+            }
+            walkRecords(item.get("fields"), false, errors);
+            if (item.get("tlv") instanceof Map<?, ?> tlv && tlv.get("cases") instanceof Map<?, ?> cases) {
+                for (Object body : cases.values()) walkRecords(body, false, errors);
+            }
+            if (item.get("flagged") instanceof Map<?, ?> flagged && flagged.get("groups") instanceof List<?> groups) {
+                for (Object g : groups) {
+                    if (g instanceof Map<?, ?> group) walkRecords(group.get("fields"), false, errors);
+                }
+            }
+            Object group = item.get("byte_group");
+            walkRecords(group instanceof Map<?, ?> g ? g.get("fields") : group, false, errors);
+        }
+    }
+
+    /**
+     * The names a field list reports at its own level: named fields, and those of the
+     * constructs merging into it (match and tlv cases and default, flagged groups,
+     * byte_group members). An object or repeat contributes its own name; internal and
+     * name_from fields, and {@code records} bodies, contribute none. Mirrors level_names.
+     */
+    static java.util.Set<String> levelNames(Object fieldsRaw) {
+        java.util.Set<String> found = new java.util.TreeSet<>();
+        if (!(fieldsRaw instanceof List<?> fields)) return found;
+        for (Object o : fields) {
+            if (!(o instanceof Map<?, ?> item)) continue;
+            if (isConstruct(item, "records")) continue;
+            Object type = item.get("type");
+            if (type != null && !"".equals(type)) {
+                if (item.get("name") instanceof String name && !name.startsWith("_")
+                        && item.get("name_from") == null) {
+                    found.add(name);
+                }
+                continue;
+            }
+            for (String key : List.of("match", "tlv")) {
+                if (item.get(key) instanceof Map<?, ?> spec) {
+                    if (spec.get("cases") instanceof Map<?, ?> cases) {
+                        for (Object body : cases.values()) found.addAll(levelNames(body));
+                    }
+                    found.addAll(levelNames(spec.get("default")));
+                }
+            }
+            if (item.get("flagged") instanceof Map<?, ?> flagged && flagged.get("groups") instanceof List<?> groups) {
+                for (Object g : groups) {
+                    if (g instanceof Map<?, ?> group) found.addAll(levelNames(group.get("fields")));
+                }
+            }
+            Object group = item.get("byte_group");
+            found.addAll(levelNames(group instanceof Map<?, ?> g ? g.get("fields") : group));
+        }
+        return found;
+    }
+
+    /**
+     * PS-541 (CR-2026-124): the names a record shares with a field the element reports
+     * outside {@code records}, sorted. Mirrors records_clash.
+     */
+    static List<String> recordsClash(Object fieldsRaw) {
+        java.util.Set<String> outside = levelNames(fieldsRaw);
+        java.util.Set<String> inside = new java.util.TreeSet<>();
+        collectRecordNames(fieldsRaw, inside);
+        inside.retainAll(outside);
+        return new ArrayList<>(inside);
+    }
+
+    private static void collectRecordNames(Object fieldsRaw, java.util.Set<String> inside) {
+        if (!(fieldsRaw instanceof List<?> fields)) return;
+        for (Object o : fields) {
+            if (!(o instanceof Map<?, ?> item)) continue;
+            if (isConstruct(item, "records") && item.get("records") instanceof List<?> bodies) {
+                for (Object body : bodies) inside.addAll(levelNames(body));
+            }
+            if (isConstruct(item, "match") && item.get("match") instanceof Map<?, ?> match) {
+                if (match.get("cases") instanceof Map<?, ?> cases) {
+                    for (Object body : cases.values()) collectRecordNames(body, inside);
+                }
+                collectRecordNames(match.get("default"), inside);
+            }
+        }
+    }
+
+    /**
+     * PS-543: a condition's {@code in} or {@code not_in} is a list of numbers, and the
+     * condition's one operator (PS-126). Over every guard condition and present_if, as
+     * condition_errors does.
+     */
+    private static void collectConditionErrors(Object node, List<String> errors) {
+        if (node instanceof Map<?, ?> map) {
+            Object name = map.containsKey("name") ? map.get("name") : "?";
+            checkCondition(map.get("present_if"), "the present_if of '" + name + "'", errors);
+            if (map.get("guard") instanceof Map<?, ?> guard && guard.get("when") instanceof List<?> when) {
+                for (Object cond : when) checkCondition(cond, "a guard condition of '" + name + "'", errors);
+            }
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                if (!"test_vectors".equals(e.getKey())) collectConditionErrors(e.getValue(), errors);
+            }
+        } else if (node instanceof List<?> list) {
+            for (Object item : list) collectConditionErrors(item, errors);
+        }
+    }
+
+    private static void checkCondition(Object raw, String where, List<String> errors) {
+        if (!(raw instanceof Map<?, ?> cond)) return;
+        int ops = 0;
+        for (String op : GUARD_OPS) {
+            if (cond.containsKey(op)) ops++;
+        }
+        if (ops != 1) {                                                     // PS-126
+            errors.add(where + " has " + ops + " comparison operators; a condition has exactly one (PS-126)");
+        }
+        for (String op : SET_OPS) {
+            if (!cond.containsKey(op)) continue;
+            boolean numbers = cond.get(op) instanceof List<?> values;
+            if (numbers) {
+                for (Object v : (List<?>) cond.get(op)) {
+                    if (!(v instanceof Number)) numbers = false;
+                }
+            }
+            if (!numbers) errors.add("`" + op + "` in " + where + " is a list of numbers (PS-543)");
+        }
     }
 
     private static boolean isInt(Object v) {
@@ -65,10 +288,8 @@ final class Wave6a {
     private static List<String> memberRefErrors(Map<?, ?> repeat, Map<?, ?> member, String where) {
         List<String> errors = new ArrayList<>();
         Map<Object, Map<?, ?>> byName = new HashMap<>();
-        if (repeat.get("fields") instanceof List<?> members) {
-            for (Object m : members) {
-                if (m instanceof Map<?, ?> mm) byName.put(mm.get("name"), mm);
-            }
+        for (Object m : repeatMembers(repeat)) {
+            if (m instanceof Map<?, ?> mm) byName.put(mm.get("name"), mm);
         }
         Object index = repeat.get("index");
         List<String[]> refs = new ArrayList<>();
@@ -128,7 +349,9 @@ final class Wave6a {
                 }
             }
             if ("repeat".equals(f.get("type"))) {
-                List<?> members = f.get("fields") instanceof List<?> l ? l : List.of();
+                errors.addAll(elementRepeatErrors(f));                          // PS-528, PS-530
+                List<?> members = repeatMembers(f);
+                String memberKey = isElementRepeat(f) ? "element" : "fields";
                 Set<Object> names = new HashSet<>();
                 for (Object m : members) {
                     if (m instanceof Map<?, ?> mm) names.add(mm.get("name"));
@@ -182,13 +405,13 @@ final class Wave6a {
                 }
                 for (int j = 0; j < members.size(); j++) {
                     if (members.get(j) instanceof Map<?, ?> member) {
-                        errors.addAll(memberRefErrors(f, member, at + ".fields[" + j + "] ("
+                        errors.addAll(memberRefErrors(f, member, at + "." + memberKey + "[" + j + "] ("
                                 + (member.containsKey("name") ? member.get("name") : "?") + ")"));
                     }
                 }
                 List<String> deeper = new ArrayList<>(enclosing);
                 deeper.addAll(own);
-                errors.addAll(iteratorErrors(members, deeper, true, at + ".fields"));
+                errors.addAll(iteratorErrors(members, deeper, true, at + "." + memberKey));
                 if (f.get("trailer") instanceof List<?> trailer) {
                     errors.addAll(iteratorErrors(trailer, enclosing, false, at + ".trailer"));
                 }
@@ -216,6 +439,49 @@ final class Wave6a {
                     }
                 }
             }
+        }
+        return errors;
+    }
+
+    /** The name an {@code element} (PS-528) is decoded under where it declares none. */
+    static final String ELEMENT_NAME = "element";
+
+    /** A repeat that declares {@code element}, a mapping, and no {@code fields} (PS-528). */
+    static boolean isElementRepeat(Map<?, ?> repeat) {
+        return repeat.get("element") instanceof Map<?, ?> && !repeat.containsKey("fields");
+    }
+
+    /**
+     * A repeat's element fields: its {@code fields}, or for a repeat of single values its one
+     * element under its own name or {@link #ELEMENT_NAME}. Mirrors repeat_members.
+     */
+    static List<?> repeatMembers(Map<?, ?> repeat) {
+        if (isElementRepeat(repeat)) {
+            Map<Object, Object> member = new java.util.LinkedHashMap<>((Map<?, ?>) repeat.get("element"));
+            Object name = member.get("name");
+            member.put("name", name instanceof String s && !s.isEmpty() ? s : ELEMENT_NAME);
+            return List.of(member);
+        }
+        return repeat.get("fields") instanceof List<?> l ? l : List.of();
+    }
+
+    /**
+     * PS-083, PS-528, PS-530: a repeat declares exactly one of {@code fields} and
+     * {@code element}, an element is one field definition, and {@code index_base} is an
+     * integer. The wording is the spec prototype's, as element_repeat_errors gives it.
+     */
+    static List<String> elementRepeatErrors(Map<?, ?> f) {
+        String label = "Repeat '" + (f.containsKey("name") ? f.get("name") : "<unnamed>") + "'";
+        List<String> errors = new ArrayList<>();
+        boolean hasFields = f.containsKey("fields");
+        if (hasFields == f.containsKey("element")) {
+            errors.add(label + " declares " + (hasFields ? "both" : "neither") + " of `fields` and `element`; "
+                    + "it declares exactly one (PS-083, PS-528)");
+        } else if (f.containsKey("element") && !(f.get("element") instanceof Map<?, ?>)) {
+            errors.add(label + ": `element` is a single field definition (PS-528)");
+        }
+        if (f.containsKey("index_base") && !isInt(f.get("index_base"))) {
+            errors.add(label + ": `index_base` is an integer (PS-530)");
         }
         return errors;
     }
@@ -258,7 +524,8 @@ final class Wave6a {
             for (Map.Entry<?, ?> e : map.entrySet()) {
                 if ("test_vectors".equals(e.getKey()) || "definitions".equals(e.getKey())) continue;
                 walkNames(e.getValue(),
-                        inElements || ("fields".equals(e.getKey()) && "repeat".equals(map.get("type"))),
+                        inElements || (("fields".equals(e.getKey()) || "element".equals(e.getKey()))
+                                && "repeat".equals(map.get("type"))),
                         inside, outside);
             }
         } else if (node instanceof List<?> list) {

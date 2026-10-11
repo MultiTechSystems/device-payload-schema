@@ -1,0 +1,49 @@
+# An index that counts from 1 (PS-530, CR-2026-111). `index_base: 1` binds `index` to
+# each element's position plus 1, so the first record is Device1ID and its slot is 1.
+# `count_as` is unaffected: it is the number of elements, 2.
+#
+# `_meta` lists the index identity with its base beside the count, naming identities 1
+# and 2 (PS-375); a base of 0 adds nothing to the listing.
+#
+# Round-trips: the index is bound while encoding as it was while decoding (PS-370), so
+# the name_from key resolves to the same name, and the slot is computed.
+name: probe_repeat_index_base
+endian: big
+fields:
+- name: devices
+  type: repeat
+  count: 2
+  index: i
+  index_base: 1
+  count_as: device_count
+  identity: i
+  fields:
+  - name: id
+    type: u16
+    name_from: "Device${i}ID"
+  - name: slot
+    type: number
+    ref: $i
+- name: devices_reported
+  type: number
+  ref: $device_count
+test_vectors:
+- name: counted_from_one
+  source: spec-example
+  payload: "000A 000B"
+  expected:
+    devices:
+    - Device1ID: 10
+      slot: 1
+    - Device2ID: 11
+      slot: 2
+    devices_reported: 2
+  expected_meta:
+    schema: probe_repeat_index_base
+    fields:
+      devices:
+        type: repeat
+        elements:
+          slot: {type: number}
+        identity: {index: i, count: 2, index_base: 1}
+      devices_reported: {type: number}
