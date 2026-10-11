@@ -188,18 +188,17 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2618 payload vectors in `schemas/devices/` (measured 2026-10-10 with
-`tools/check-floors.py`, after the CR-2026-111 element-repeat and registry divergence
-fixtures) are the shared
+The 2628 payload vectors in `schemas/devices/` (measured 2026-10-10 with
+`tools/check-floors.py`, after the CR-2026-118 fixtures) are the shared
 cross-language test set. Every implementation has a runner that reads the same YAML and
 the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1794 |
-| Go | `go/schema/corpus_conformance_test.go` | 2618 | 1811 (plain API 1788) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2618 | 1794 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2618 | 1794 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1796 |
+| Go | `go/schema/corpus_conformance_test.go` | 2628 | 1813 (plain API 1790) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2628 | 1796 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2628 | 1796 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 550 of 550 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -756,10 +755,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1794 |
-| Go | `go/schema/corpus_encode_test.go` | 1811 (plain 1788) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1794 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1794 |
+| Python | `tests/test_encode_round_trip.py` | 1796 |
+| Go | `go/schema/corpus_encode_test.go` | 1813 (plain 1790) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1796 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1796 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1559,6 +1558,43 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   - **C:** has no repeat. `schema_binary.py` refuses `element` and `index_base` by name.
   - **Fixtures:** `repeat-element-named`, `-unnamed`, `-null` and `-object`, and
     `repeat-index-base`.
+- **CR-2026-118 (PS-541 to PS-543): `records`, and `in` / `not_in`.**
+  - **What it does:** a `records` entry in a repeat's element, or in a match case within it,
+    is a non-empty list of field lists. Each one decodes in order, in the element's scope,
+    and yields one record. The repeat reports the records as consecutive elements in place
+    of the element. The element's other reported fields go into each record first, so `_`
+    fields are copied nowhere, and a record's own key wins over the element's. `present_if`
+    drops all of an element's records. `index` counts source elements and `count_as`
+    counts the records reported.
+  - **Where it is checked:** load-time, in Python `records_errors` and `condition_errors`
+    (reached from `schema_iterator_errors`, so the validator and the TS013 generator give
+    the same errors), Go `cr118.go`, Java `Wave6a` and C# `Wave6a`. Each gives the same
+    wording: "\`records\` belongs in a repeat's element, or a match case within it
+    (PS-541)", "\`records\` is a non-empty list of field lists (PS-541)", "Repeat '{name}':
+    an \`element\` cannot reach a \`records\` entry (PS-541)", "a condition's \`in\` is a
+    list of numbers (PS-543)" and "a condition with \`in\` or \`not_in\` has no other
+    comparison operator (PS-126, PS-543)".
+  - **Rejected, deliberately stricter than the spec prototype:** `records` in an object's
+    members, a tlv case, a flagged group, a byte_group, a trailer or another record, even
+    inside an element. The prototype accepts an object member within an element at decode
+    time. The spec text says "a repeat's element, or a match case within it", and that
+    question has gone back to the spec session.
+  - **Encoding:** every encoder, the generated codec's included, refuses a repeat whose
+    elements can reach `records` (directly or through a match case or default): "Repeat
+    '{name}' has elements that yield several records, which cannot be encoded (PS-542)".
+    `encode-round-trip.py` files it as `several-records`, which is inherent, like
+    `dropped-element`.
+  - **`_meta`:** the repeat's `elements` lists every record's fields, keyed by name, in
+    declaration order. The PS-491 agreement check also walks record bodies.
+  - **Generated codec:** a `rcs` stack holds the current element's records. It is emitted
+    only where an element can reach `records`, so no other generated codec changes.
+  - **C:** has no repeat. `schema_binary.py` refuses `records` by name, and the harness
+    files all four fixtures as C gaps (repeat, guard).
+  - **Fixtures:** `element-several-readings`, `element-case-several-readings`,
+    `present-if-set` and `guard-set`, 10 vectors, one assertion each. Only `guard-set`
+    round-trips. Floors: decode 2618 -> 2628 in Go, Java and C#; re-encode +2 everywhere
+    (Python, Java, C# 1794 -> 1796; Go 1811 -> 1813, plain 1788 -> 1790); `plain fixed`
+    133 -> 135 in all four.
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.

@@ -500,6 +500,11 @@ final class Encoder {
             throw new SchemaException.EncodeException("repeat field '" + name
                     + "': expected a list of records, got " + records.getClass().getSimpleName());
         }
+        if (field.getRaw() != null && Wave6a.recordsReachable(Wave6a.repeatMembers(field.getRaw()))) {
+            // PS-542: the records do not say which element they came from.
+            throw new SchemaException.EncodeException("Repeat '" + name + "' has elements that yield "
+                    + "several records, which cannot be encoded (PS-542)");
+        }
         if (field.getElementName() != null) {
             // PS-529: each value is encoded as the element, wrapped as it was decoded.
             // CR-2026-111 leaves open what a null position encodes as; the spec prototype

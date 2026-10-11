@@ -90,6 +90,10 @@ final class Meta {
                     if (g instanceof Map<?, ?> gm) visitDeclarations(gm.get("fields"), found);
                 }
             }
+            if (f.get("records") instanceof List<?> bodies && f.get("type") == null) {
+                for (Object body : bodies) visitDeclarations(body, found);          // PS-541
+                continue;
+            }
             if (f.get("match") instanceof Map<?, ?> match) {
                 if (match.get("cases") instanceof Map<?, ?> cases) {
                     for (Object body : cases.values()) {
@@ -369,6 +373,10 @@ final class Meta {
                 for (Object g : listOrEmpty(flagged.get("groups"))) {
                     if (g instanceof Map<?, ?> gm) visitAgreement(gm.get("fields"), where, seen, errors);
                 }
+            }
+            if (f.get("records") instanceof List<?> bodies && f.get("type") == null) {
+                for (Object body : bodies) visitAgreement(body, where, seen, errors);  // PS-541
+                continue;
             }
             if (f.get("match") instanceof Map<?, ?> match) {
                 if (match.get("cases") instanceof Map<?, ?> cases) {
