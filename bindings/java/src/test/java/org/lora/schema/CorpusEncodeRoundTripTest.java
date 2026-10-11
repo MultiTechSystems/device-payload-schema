@@ -63,7 +63,7 @@ class CorpusEncodeRoundTripTest {
     // classifier filed it under that shape). The leftover vector re-encodes to its first byte only
     // (PS-474) and the omitted out-of-range one has no value to write, both by design.
     // +2 with plain fixed 100 -> 102 (CR-2026-096): the meta-* fixtures that round-trip.
-    private static final int ENCODE_FLOOR_TOTAL = 1814;   // +6: CR-2026-121/123 fixtures, all repeat (five new vectors, and repeat-element-null reserved_value now writes its sentinel back, PS-544); +2: CR-2026-124 guard-set empty in/not_in (plain fixed); +4: match-u32-inline-discriminator (the peek fixture's internal word has no value to write back); +4: names-mangling-alike; +2: CR-2026-127 guard-boolean-operand; +2: CR-2026-118 guard-set (plain fixed; the records and present_if fixtures are refused, PS-542, PS-387); +6: registry divergence fixtures, all plain fixed (tag-component-ref does not round-trip); +5: CR-2026-111 element and index_base fixtures (repeat; the two null vectors are refused, PS-529); +8: name-from-rendering (CR-2026-112); +2: boolean-literal (CR-2026-107); +13: the nine TS013-defect fixtures (tlv-tag-bit-range does not round-trip); +8: CR-2026-104 lookup label fixtures (plain fixed); +3: byte-group-bool; +3: tlv-case-field-list; +2: tlv-case-key-patterns; +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
+    private static final int ENCODE_FLOOR_TOTAL = 2079;   // +265: CR-2026-136 lays a frame out as the decoder reads it - a bit-range peek no longer writes its byte twice, a flagged block is one field list, and a nested list carries its pending tail to the field after it (tlv +264: vobo 150, dnt 75, milesight 39) - and CR-2026-135 encoder-rounding adds 1 (plain fixed); the same set as the reference; +6: CR-2026-121/123 fixtures, all repeat (five new vectors, and repeat-element-null reserved_value now writes its sentinel back, PS-544); +6: CR-2026-121/123 fixtures, all repeat (five new vectors, and repeat-element-null reserved_value now writes its sentinel back, PS-544); +2: CR-2026-124 guard-set empty in/not_in (plain fixed); +4: match-u32-inline-discriminator (the peek fixture's internal word has no value to write back); +4: names-mangling-alike; +2: CR-2026-127 guard-boolean-operand; +2: CR-2026-118 guard-set (plain fixed; the records and present_if fixtures are refused, PS-542, PS-387); +6: registry divergence fixtures, all plain fixed (tag-component-ref does not round-trip); +5: CR-2026-111 element and index_base fixtures (repeat; the two null vectors are refused, PS-529); +8: name-from-rendering (CR-2026-112); +2: boolean-literal (CR-2026-107); +13: the nine TS013-defect fixtures (tlv-tag-bit-range does not round-trip); +8: CR-2026-104 lookup label fixtures (plain fixed); +3: byte-group-bool; +3: tlv-case-field-list; +2: tlv-case-key-patterns; +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
 
     /**
      * Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -71,9 +71,9 @@ class CorpusEncodeRoundTripTest {
      */
     private static final Map<String, Integer> ENCODE_FLOOR_BY_SHAPE = Map.of(
             // 1283 -> 1281 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped only because their internal byte halves were all zero, which the encoder wrote for an internal field with no value. It now reports such a field instead.
-            "tlv", 1299,   // +3: tlv-case-field-list; +2: tlv-case-key-patterns; +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
+            "tlv", 1563,   // +264: CR-2026-136 frame layout (vobo 150, dnt 75, milesight 39); +3: tlv-case-field-list; +2: tlv-case-key-patterns; +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
             "flagged", 193,
-            "plain fixed", 143,   // +2: CR-2026-124 guard-set; +4: names-mangling-alike; +2: CR-2026-127 guard-boolean-operand; +2: CR-2026-118 guard-set; +6: registry divergence fixtures; +8: name-from-rendering (CR-2026-112); +8: CR-2026-104 lookup label fixtures; +9: TS013 fixtures
+            "plain fixed", 144,   // +1: CR-2026-135 encoder-rounding; +2: CR-2026-124 guard-set; +4: names-mangling-alike; +2: CR-2026-127 guard-boolean-operand; +2: CR-2026-118 guard-set; +6: registry divergence fixtures; +8: name-from-rendering (CR-2026-112); +8: CR-2026-104 lookup label fixtures; +9: TS013 fixtures
             "match", 129,   // +4: match-u32-inline-discriminator
             "byte_group", 25,   // +3: byte-group-bool; +2: wide-group
             // 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas
@@ -105,6 +105,7 @@ class CorpusEncodeRoundTripTest {
 
         Map<String, Map<String, Integer>> byShape = new TreeMap<>();
         Map<String, Integer> errorDetail = new LinkedHashMap<>();
+        List<String> passing = new ArrayList<>();
         int decoded = 0;
 
         for (Path file : files) {
@@ -167,12 +168,21 @@ class CorpusEncodeRoundTripTest {
                             1, Integer::sum);
                 } else if (java.util.Arrays.equals(result.getPayload(), payload)) {
                     counts.merge("round-trips", 1, Integer::sum);
+                    passing.add(file.getFileName() + "::" + vector.get("name"));
                 } else if (result.getPayload().length != payload.length) {
                     counts.merge("length differs", 1, Integer::sum);
                 } else {
                     counts.merge("bytes differ", 1, Integer::sum);
                 }
             }
+        }
+
+        // Opt-in: the sorted `schema::vector` list of round trips, for diffing the set
+        // against another implementation's rather than comparing totals.
+        String listPath = System.getenv("ENCODE_ROUND_TRIP_LIST");
+        if (listPath != null && !listPath.isEmpty()) {
+            java.util.Collections.sort(passing);
+            java.nio.file.Files.write(java.nio.file.Path.of(listPath), passing);
         }
 
         int exact = 0;

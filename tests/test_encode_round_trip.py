@@ -75,7 +75,13 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # +6: repeat-element-null-sentinel, -internal-name, repeat-identity-sibling (2) and
 # repeat-count-computed (CR-2026-121, CR-2026-123), plus the null fixture's
 # reserved-value vector, whose null now writes the sentinel (PS-544); all repeat.
-FLOOR_TOTAL = 1814
+# +1: CR-2026-135's encoder-rounding fixture, its decode vector (plain fixed). Its two
+# encode vectors are no round trip, and arithmetic-worked-examples' omits a field.
+# +264: CR-2026-136 lays bit ranges and bools out as a decoder reads them. A range that
+# does not consume shares its byte with the next field - also across a construct's end,
+# and inside a flagged group - instead of writing it twice, so the peeks in vobo (150),
+# dnt-lw-wsci (75) and milesight ct10x/ct30x/gs301/ws515 (39) round-trip; all tlv.
+FLOOR_TOTAL = 2079
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -83,9 +89,9 @@ FLOOR_BY_SHAPE = {
     # 1283 -> 1281 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped
     # only because their internal byte halves were all zero, which the encoder wrote
     # for an internal field with no value. It now reports such a field instead.
-    "tlv": 1299,
+    "tlv": 1563,  # +264: CR-2026-136 (see FLOOR_TOTAL)
     "flagged": 193,
-    "plain fixed": 143,
+    "plain fixed": 144,  # +1: CR-2026-135 (see FLOOR_TOTAL)
     "match": 129,  # +4: match-u32-inline-discriminator
     "byte_group": 25,
     # 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now

@@ -198,10 +198,10 @@ the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1814 |
-| Go | `go/schema/corpus_conformance_test.go` | 2652 | 1831 (plain API 1808) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2652 | 1814 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2652 | 1814 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2079 |
+| Go | `go/schema/corpus_conformance_test.go` | 2654 | 2097 (plain API 2070) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2654 | 2079 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2654 | 2079 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 554 of 554 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -774,10 +774,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1814 |
-| Go | `go/schema/corpus_encode_test.go` | 1831 (plain 1808) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1814 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1814 |
+| Python | `tests/test_encode_round_trip.py` | 2079 |
+| Go | `go/schema/corpus_encode_test.go` | 2097 (plain 2070) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2079 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2079 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1784,6 +1784,76 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.
+
+- **CR-2026-135 (PS-552, PS-262) and CR-2026-136 (PS-064, PS-062): how an encoder rounds,
+  what it rejects, and how it lays out bit ranges.**
+  - **Rounding.** An integer field's value - a bit range's included - is rounded after its
+    arithmetic is inverted to the nearest integer, a tie to even, on the binary64 value
+    (`div: 10` given 23.45 is 234.49999999999997, so 234), before any `encoding`; a float
+    field is not rounded. Python, the runtime, Java and C# already did this on whole
+    integers. Go rounded bit ranges half up (2.5 wrote 3). C rounded `(int64_t)(v ± 0.5)`,
+    half away from zero and twice (0.49999999999999994 wrote 1, 23.45 wrote 235); it now
+    uses `schema_round_half_even`, which needs no libm. Python's `int()` on the integer
+    path truncated a fraction that reached it without modifiers.
+  - **A value that rounds outside its type is a PS-168 error**, in the prototype's words:
+    `Field 'x': 25.55 encodes as 256, outside 0 to 255 (PS-168)` - the value as given,
+    before any arithmetic is undone, written as JavaScript's `String(number)` writes it. A
+    bit range's type is its width (`uN`: 0 to 2^w - 1, `sN`: two's complement), and its
+    message names it: `... outside 0 to 15 for u8[0:3] (PS-168)`. Before: Go and C wrapped
+    silently (u8 256 wrote 00, u8 -1 ff, s8 -128.6 7f); Python and the runtime said `int too
+    big to convert`; Java and C# `256 does not fit 1 unsigned bytes`; and all six masked a
+    bit range into its width, so 16 in `u8[4:7]` wrote 0 and left the neighbour untouched -
+    or, unmasked, spilled into it. The mask (PS-062) now only keeps a signed value's two's
+    complement within the width, after the check. One helper per language holds the
+    bit-range rule (Python `check_fits(..., bit_range)`, runtime `encFits`, Go
+    `bitRangeFitError`, Java `checkBitRange`, C# `CheckBitRange`, C `schema_check_fits`).
+  - **Layout: an encoder writes the bytes a decoder reads** (CR-2026-136). A bit range or a
+    `bool` that does not `consume` leaves its bytes pending; the next field's bits or bytes
+    are ORed into them; bytes still pending at the end of a field list are written. Python's
+    `FrameBuffer`, the runtime's `encEmit`/`encPlaceBits`, and each port's equivalent; C ORs
+    into its zeroed buffer and counts a non-consuming range's byte in the length. Before, a
+    run was written whole and the next field after it, so a peek - a range read again by
+    the field after it - came out two bytes where the decoder reads one, and a `bool` was
+    written as a whole byte of 0 or 1, ignoring `bit` and `consume`. An inline match with no
+    discriminator in the input now takes it from `data[var]` (dnt's presence mask, which the
+    top level fills from the flagged groups) or from the bytes pending before it (the peek),
+    and a known inline discriminator under `default: skip` writes its bytes.
+  - **Frame carry.** A construct's field list (case body, object, flagged members, match
+    body) hands back the bytes still pending at its end, and the enclosing list keeps them
+    pending: Python's `Frame.pending`, the runtime's `encList` return value, Go's
+    `endFieldList`, Java's `carriedTail`, C#'s `CarriedBy`. A tlv value and a repeat element
+    carry nothing - their bytes are concatenated or measured whole. A flagged block's given
+    groups are now one field list, so a bool, a bit range or an object in a group is laid out
+    like any other member (vobo's `digital_*`, dnt's `*_ack_then_hall`).
+  - **Corpus:** round trips 1814 -> 2079 in Python, Java and C# (+264 `tlv`: vobo 150,
+    dnt-lw-wsci 75, milesight ct10x/ct30x/gs301/ws515 39 - each a peek that now shares its
+    byte - and +1 `plain fixed` from the `encoder-rounding` fixture), no loss, the same set in
+    all three (C# also counts `am102::encode_vendor_reference`, an encode vector, and still
+    misses `vobo::modbus_generic_one_register_blocks`, a C#-only length defect that predates
+    both CRs). Go ordered 1831 -> 2097, plain 1808 -> 2070, `tlv` 1316 -> 1581; a superset of
+    the reference. Decode floors 2652 -> 2654 for the two fixtures.
+    Rounding moved none: no corpus vector puts a tie or an out-of-range value into an
+    integer field. `encode-round-trip.py` reports 0 unexplained.
+  - **Registry (read only):** Python +333 round trips (Go ordered +362), -2 (truvami tag-s-l, enless: each
+    vector carries a trailing byte the schema does not describe, which the old double write
+    happened to reproduce). Rounding moved none; 14 vectors that already failed now fail
+    with a PS-168 error naming a decoded value its field cannot hold (yabby-edge
+    `initialBatV`, r718b2 `Channel`, nexelec `datalogMeasureRepetition`, loraboatmonitor
+    `temperature`, teneo `distance`, tektelic `voltage`) - schema findings, not encoder ones.
+    C's ties (fludia fm432ir x5, netvox r718ea_eb, nexelec origin-plus) are not run by any
+    C corpus encode harness.
+  - **PS-262** now warns only when `mult`, `div` and `add` are written out of the canonical
+    order; `div: 10` then `add: -40`, the pattern Clause 3 recommends, no longer warns.
+  - **Fixtures:** `arithmetic-worked-examples.yaml` (Clause 3's table, decoded) and
+    `encoder-rounding.yaml` (its encode rows, as encode vectors, which only Python and the
+    runtime check); the case list `tests/cr-2026-135-cases.yaml` (rounding, PS-168, and
+    the prototype's TestCR2026136BitRangesOnEncode case for case) drives
+    `test_cr_2026_135_encoder_rounding.py`, Go `cr135_test.go`, Java `CR2026135Test`, C#
+    `CR2026_135Tests`; C has `test_an_encoder_rounds_ties_to_even`,
+    `test_a_value_that_does_not_fit_is_named` and `test_bit_ranges_are_laid_out_as_decoded`.
+  - **Open:** C's bit range is one byte, unsigned; an `sN[...]` or a multi-byte base is not
+    built by its struct API. An enum given a number, `udec`/`sdec` and a byte_group's
+    full-width member keep their own range checks.
 
 ## Converting a vendor codec
 
