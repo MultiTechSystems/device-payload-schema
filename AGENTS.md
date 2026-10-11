@@ -188,19 +188,20 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2651 payload vectors in `schemas/devices/` (measured 2026-10-11 with
+The 2652 payload vectors in `schemas/devices/` (measured 2026-10-11 with
 `tools/check-floors.py`, after the CR-2026-118 and CR-2026-124 fixtures, CR-2026-117's
 guard-absent-operand, the `match-u32-*` and names-mangling-alike fixtures, CR-2026-127's
-guard-boolean-operand, and the CR-2026-121 and CR-2026-123 fixtures) are the shared
+guard-boolean-operand, the CR-2026-121 and CR-2026-123 fixtures, and the mutation-gate
+vector in round-large-value) are the shared
 cross-language test set. Every implementation has a runner that reads the same YAML and
 the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
 | Python | `tests/test_corpus_conformance.py` | every vector | 1814 |
-| Go | `go/schema/corpus_conformance_test.go` | 2651 | 1831 (plain API 1808) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2651 | 1814 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2651 | 1814 |
+| Go | `go/schema/corpus_conformance_test.go` | 2652 | 1831 (plain API 1808) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2652 | 1814 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2652 | 1814 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 554 of 554 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -1208,6 +1209,27 @@ value is not in the data.
   (the vendor uses `toFixed`, which rounds half up), rbs30x's high-precision tilt
   temperature (the vendor uses sign-magnitude, we use `s8`), and qingping decoding frames
   that the vendor rejects.
+
+  **Three new fixtures sat below the 0.80 floor for new schemas (fixed 2026-10-11).**
+  Two needed a vector; one needed the harness to stop scoring what no payload reaches:
+  - *A modifier behind a guard that never passes* - unkillable, now unscored. PS-444
+    reports a failed guard's `else` as declared, skipping the modifiers, the stages and
+    the lookup. A guard with a boolean operand fails on every payload (PS-549), so
+    `guard-boolean-operand`'s inserted `add: 1` could not change any decode. The reach pass now records a guarded
+    field's pipeline as reached only where its guard passed, and a SCALE/ADD/DROP-MOD/
+    LOOKUP mutant of an unreached pipeline is `unreached`, not a survivor.
+  - *A transform that changes nothing at that magnitude* - `round-large-value`'s
+    `decimals: 6` on 3.4e38. It dies on an exact integer: 3F800001 rounds to exactly 1.
+  - *Leftover bytes with no warning asserted* - `wide-bit-range`'s `consume: 8 -> 0`.
+    `expected_warnings: []` kills it (PS-472).
+
+  **Six vobo survivors are equivalent since PS-314/PS-429 (b05fc20, #93).** Each
+  `_cfg_mask add N -> N+1` on port 71 subgroup 5 also sets the flagged mask's bit 0,
+  whose `cycleTime` computes from `_ct_lo`/`_ct_hi` - bound only by subgroup 0, a
+  different case of the same dispatch, so never in the same frame. They used to be
+  killed because an unbound operand read 0 and the vectors assert `cycleTime: null`;
+  an operand with no value now makes the field absent, so no payload separates them.
+  The baseline accepts 20345 killed and 6 survived.
 
   Three lessons for the next pass:
   - **A tolerance survivor dies on an exact integer.** A +1 raw-unit mutant under a

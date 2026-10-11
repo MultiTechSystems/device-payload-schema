@@ -3,7 +3,8 @@
 # as a decimal string past 2^53 and divided it, so every range of FF..F6 came out as 0
 # where the reference gives -10.
 #
-# Round-trips: the three ranges cover all 64 bits.
+# Round-trips: the three ranges cover all 64 bits. The last range consumes the eight
+# bytes, so nothing is left over and no warning is reported (PS-472).
 name: probe_wide_bit_range
 endian: big
 fields:
@@ -22,6 +23,7 @@ test_vectors:
     low_word: -10
     low_53: -10
     high_word: 4294967295
+  expected_warnings: []
 - name: positive
   source: spec-example
   payload: "12 24 56 78 00 00 00 2A"
@@ -29,3 +31,4 @@ test_vectors:
     low_word: 42
     low_53: 1220973302906922
     high_word: 304371320
+  expected_warnings: []
