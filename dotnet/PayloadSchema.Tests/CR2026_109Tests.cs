@@ -104,10 +104,13 @@ public class CR2026_109Tests
     [Fact]
     public void ASentinelLeavesTheReferenceUnbound()
     {
-        var error = Assert.ThrowsAny<Exception>(() => Decode(
+        // Unbound, so the computed field reading it is absent (PS-314, PS-429), rather
+        // than 510 from a number the sentinel withheld.
+        var data = Decode(
             "  - {name: code, type: u8, sentinel: [255], lookup: {1: report}}\n"
-            + "  - {name: doubled, type: number, compute: {op: mul, a: $code, b: 2}}\n", "FF"));
-        Assert.Contains("code", error.Message);
+            + "  - {name: doubled, type: number, compute: {op: mul, a: $code, b: 2}}\n", "FF");
+        Assert.False(data.ContainsKey("code"));
+        Assert.False(data.ContainsKey("doubled"));
     }
 
     [Fact]
