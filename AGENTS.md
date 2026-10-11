@@ -2568,9 +2568,10 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
 - **Units come from TTN's payload schema, not from guesswork.** `lib/payload.json`
   in the device repository documents each normalized measurement and its unit, and
   the vendor's raw values are already in those units. Note that TTN's normalized
-  `battery` is a *voltage* while the milesight raw field is a percentage 0-100, so
-  those fields declare `sensor: percentage` to stop the scorer detecting them as
-  IPSO 3316 voltage. Quantities whose SenML unit is a different scale (pressure in
+  `battery` is a *voltage* while the milesight raw field is a percentage 0-100.
+  Those fields still declare `sensor: percentage`, which once stopped the scorer
+  detecting them as IPSO 3316 voltage. The scorer now follows IL-204 (below), so the
+  word `battery` asks for no object at all, and the key is inert. Quantities whose SenML unit is a different scale (pressure in
   hPa against SenML's Pa, distance in mm against m) carry a `unit:` but no
   annotation, because a mismatched annotation misdeclares the value.
 - **Flags packed into a byte need `consume: 1` on the last field.** An explicit bit
@@ -2580,9 +2581,24 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   reason. One case remains unsolved: `em320-tilt` packs a flag into bit 0 of bytes
   already consumed by its angle fields, which no current construct expresses.
 - **Milesight units.** None of these schemas declare `unit:`, so they
-  carry no semantic annotations and stop at Silver; the scorer's keyword heuristic
-  would read milesight `battery` as IPSO 3316 voltage when it is a percentage, so
-  units have to be established per device before annotating.
+  carry no semantic annotations; units have to be established per device before
+  annotating.
+- **The scorer's detectable sensor fields are IL-204's.** `tools/score_schema.py`
+  expects an IPSO annotation only where the Integration Layer's TTN classification
+  rule (IL-204, la-integration-layer `docs/guides/protocol-mappings/ttn-normalized.md`)
+  places a field from its name: one of `temperature`, `humidity`, `pressure`,
+  `precipitation` or `moisture`, with no qualifier word (`max`, `threshold`, `target`,
+  `raw`, ...) and no medium that lacks a TTN path (`internal`, `leaf`, `board`, ...).
+  The old name-to-object table, under which `battery`, `voltage`, `current` or
+  `latitude` each demanded an object, is gone. A unit never selects an object (IL-203).
+  A generic object (3300, 3320, 3325, 3332) is never a mismatch (IL-199). A
+  name-silent field's annotation is neither expected nor flagged. See
+  `docs/IPSO-REFERENCE.md`. **A schema with no field IL-204 places gets no semantic
+  points**, because `calculate_score` awards none at zero detectable fields. That
+  cost 12 Platinum schemas their tier when the rule landed (laq4, uc50x, ws301, the
+  single-probe Decentlab models). laq4 is among them because the scan does not
+  descend into a field-level `match:`, so its temperature and humidity are never
+  seen.
 - **The TS013 generator's shared-byte bug is fixed**: bare bit ranges, `consume` and
   `bool` with `bit:` decode correctly in generated JavaScript, and
   `tools/vector-verdicts.py` holds both paths to every corpus vector. What remains is
