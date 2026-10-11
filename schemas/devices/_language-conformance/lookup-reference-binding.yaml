@@ -224,3 +224,41 @@ test_vectors:
       held: 5
       unlisted: 7
       other: null
+  - name: the_other_text_label
+    payload: "01 07"
+    fPort: 1
+    source: spec-example
+    expected:
+      code: report
+      doubled: 2
+      held: 1
+      other: 7
+      reading_report: null
+  - name: another_numeric_sequence_label
+    payload: "02 07"
+    fPort: 3
+    source: spec-example
+    expected:
+      code: 250
+      doubled: 500
+      held: 250
+      other: 7
+  - name: the_other_enum_name
+    payload: "01 07"
+    fPort: 8
+    source: spec-example
+    expected:
+      code: "on"
+      doubled: 2
+      held: 1
+      other: 7
+  - name: a_named_enum_code_beside_the_unnamed_one
+    payload: "01 07"
+    fPort: 10
+    source: spec-example
+    expected:
+      code: "on"
+      doubled: 2
+      held: 1
+      other: 7
+      unlisted: null

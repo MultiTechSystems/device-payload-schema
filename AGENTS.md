@@ -188,7 +188,7 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2664 payload vectors in `schemas/devices/` (measured 2026-10-11 with
+The 2668 payload vectors in `schemas/devices/` (measured 2026-10-11 with
 `tools/check-floors.py`, after the CR-2026-118 and CR-2026-124 fixtures, CR-2026-117's
 guard-absent-operand, the `match-u32-*` and names-mangling-alike fixtures, CR-2026-127's
 guard-boolean-operand, the CR-2026-121 and CR-2026-123 fixtures, the mutation-gate
@@ -198,10 +198,10 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1820 |
-| Go | `go/schema/corpus_conformance_test.go` | 2664 | 1837 (plain API 1814) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2664 | 1820 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2664 | 1820 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1824 |
+| Go | `go/schema/corpus_conformance_test.go` | 2668 | 1841 (plain API 1818) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2668 | 1824 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2668 | 1824 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 554 of 554 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -775,10 +775,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1820 |
-| Go | `go/schema/corpus_encode_test.go` | 1837 (plain 1814) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1820 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1820 |
+| Python | `tests/test_encode_round_trip.py` | 1824 |
+| Go | `go/schema/corpus_encode_test.go` | 1841 (plain 1818) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1824 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1824 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
