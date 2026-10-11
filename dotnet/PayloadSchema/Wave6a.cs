@@ -64,6 +64,66 @@ public static partial class SchemaParser
         node is YamlScalarNode s && s.Style == ScalarStyle.Plain && (YamlInt(node) != null
             || double.TryParse(s.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out _));
 
+    /// <summary>What an `element` may not be (PS-545): it is one data field, not a construct entry.</summary>
+    static readonly string[] ElementConstructs = { "match", "byte_group", "flagged", "tlv", "records" };
+
+    /// <summary>
+    /// `$name[i]`: the value a sibling repeat of single values reported at this position
+    /// (PS-546), in a repeat's `identity` or an element's `unit` or `ipso.instance`.
+    /// </summary>
+    internal static readonly Regex SiblingReference = new(@"^\$(\w+)\[(\w+)\]$");
+
+    /// <summary>
+    /// The `$name[i]` references a repeat declares (PS-546): its identity, and its
+    /// elements' `unit` and `ipso.instance`, as (key, sibling, index) triples. Mirrors
+    /// sibling_references.
+    /// </summary>
+    internal static List<(string key, string name, string index)> SiblingReferences(YamlMappingNode repeat)
+    {
+        var refs = new List<(string, YamlNode?)> { ("identity", Get(repeat, "identity")) };
+        foreach (var m in RepeatMembers(repeat).members?.Children.OfType<YamlMappingNode>()
+                          ?? Enumerable.Empty<YamlMappingNode>())
+        {
+            refs.Add(("unit", Get(m, "unit")));
+            refs.Add(("ipso.instance", Get(m, "ipso") is YamlMappingNode ipso ? Get(ipso, "instance") : null));
+        }
+        var found = new List<(string, string, string)>();
+        foreach (var (key, node) in refs)
+            if (YamlString(node) is { } text && SiblingReference.Match(text) is { Success: true } m)
+                found.Add((key, m.Groups[1].Value, m.Groups[2].Value));
+        return found;
+    }
+
+    /// <summary>
+    /// PS-546: each `$name[i]` names a repeat declaring `element`, decoded earlier in the
+    /// same field list, and `i` is this repeat's `index`; the sibling's element carries a
+    /// lookup or is a literal (PS-374). Worded as sibling_errors.
+    /// </summary>
+    static void SiblingErrors(YamlMappingNode repeat, Dictionary<string, YamlMappingNode> earlier,
+        string at, List<string> errors)
+    {
+        var index = YamlString(Get(repeat, "index"));
+        foreach (var (key, name, ix) in SiblingReferences(repeat))
+        {
+            var label = $"{at}: {key} `${name}[{ix}]`";
+            if (ix != index)
+            {
+                errors.Add($"{label} must index by the repeat's own `index` (PS-546)");
+                continue;
+            }
+            if (!earlier.TryGetValue(name, out var sibling))
+            {
+                errors.Add($"{label} names no repeat declaring `element` earlier in the same "
+                    + "field list (PS-546)");
+                continue;
+            }
+            var element = (YamlMappingNode)Get(sibling, "element")!;
+            if (!(Has(element, "lookup") || IsLiteralNode(element)))
+                errors.Add($"{label}: the elements of '{name}' identify values but carry no "
+                    + "lookup and are not a literal (PS-374, PS-546)");
+        }
+    }
+
     /// <summary>The name an `element` (PS-528) is decoded under where it declares none.</summary>
     public const string ElementName = "element";
 
@@ -79,7 +139,16 @@ public static partial class SchemaParser
         {
             var name = YamlString(Get(element, "name")) is { Length: > 0 } n ? n : ElementName;
             var copy = new YamlMappingNode();
-            copy.Add("name", name);
+            if (name.StartsWith('_'))
+            {
+                // PS-545: the element's name is never reported, so an internal name hides
+                // nothing. It is decoded under ElementName, and `var` keeps `$_x` bound.
+                copy.Add("name", ElementName);
+                if (!Has(element, "var")) copy.Add("var", name);
+                name = ElementName;
+            }
+            else
+                copy.Add("name", name);
             foreach (var kv in element.Children)
                 if (Scalar(kv.Key) != "name") copy.Add(kv.Key, kv.Value);
             return (new YamlSequenceNode(copy), name);
@@ -100,6 +169,10 @@ public static partial class SchemaParser
                 + "it declares exactly one (PS-083, PS-528)");
         else if (hasElement && Get(f, "element") is not YamlMappingNode)
             errors.Add($"{label}: `element` is a single field definition (PS-528)");
+        else if (hasElement && Get(f, "element") is YamlMappingNode element
+                 && (!Has(element, "type") || ElementConstructs.Any(c => Has(element, c))))
+            errors.Add($"{label}: `element` is a data field that declares `type`, not a "
+                + "construct (PS-545)");
         if (Get(f, "index_base") is { } ib && YamlInt(ib) == null)
             errors.Add($"{label}: `index_base` is an integer (PS-530)");
     }
@@ -129,6 +202,7 @@ public static partial class SchemaParser
             TlvReserveErrors(node, errors);
         RecordsErrors(root, errors);                                               // PS-541
         ConditionErrors(root, errors);                                             // PS-543
+        IpsoInstanceErrors(root, errors);                                          // PS-548
         if (errors.Count > 0)
             throw new InvalidOperationException(string.Join("; ", errors));
     }
@@ -283,6 +357,7 @@ public static partial class SchemaParser
         string where, List<string> errors)
     {
         if (fields == null) return;
+        var earlier = new Dictionary<string, YamlMappingNode>();   // PS-546: element repeats before this field
         int i = -1;
         foreach (var item in fields.Children)
         {
@@ -361,11 +436,13 @@ public static partial class SchemaParser
                     errors.Add($"{at}: present_if must be one guard condition, "
                         + "{field: $name, <op>: value} (PS-386)");
 
+                SiblingErrors(f, earlier, at, errors);                             // PS-546
                 if (Get(f, "identity") is { } identityNode)
                 {
                     var identity = Scalar(identityNode);
                     var index = Get(f, "index") is { } ix ? Scalar(ix) : null;
                     var ok = identity == index
+                             || (YamlString(identityNode) is { } sid && SiblingReference.IsMatch(sid))
                              || (YamlString(identityNode) is { } id && id.StartsWith('$')
                                  && names.Contains(id[1..]));
                     if (!ok)
@@ -387,6 +464,8 @@ public static partial class SchemaParser
                 IteratorErrors(members, enclosing.Concat(own).ToList(), true, $"{at}.{memberKey}", errors);
                 if (Get(f, "trailer") is YamlSequenceNode trailerList)
                     IteratorErrors(trailerList, enclosing, false, $"{at}.trailer", errors);
+                if (Get(f, "element") is YamlMappingNode && YamlString(Get(f, "name")) is { } repeatName)
+                    earlier[repeatName] = f;
                 continue;
             }
 
@@ -428,10 +507,11 @@ public static partial class SchemaParser
                 byName[Scalar(n)] = m;
         var index = Get(repeat, "index") is { } ix ? Scalar(ix) : null;
         var refs = new List<(string key, string name)>();
-        if (YamlString(Get(member, "unit")) is { } unit && unit.StartsWith('$'))
+        // A `$name[i]` names a sibling repeat (PS-546), which SiblingErrors checks.
+        if (YamlString(Get(member, "unit")) is { } unit && unit.StartsWith('$') && !SiblingReference.IsMatch(unit))
             refs.Add(("unit", unit[1..]));
         if (Get(member, "ipso") is YamlMappingNode ipso && YamlString(Get(ipso, "instance")) is { } inst
-            && inst.StartsWith('$'))
+            && inst.StartsWith('$') && !SiblingReference.IsMatch(inst))
             refs.Add(("ipso.instance", inst[1..]));
         if (Get(member, "senml") is YamlMappingNode senml && YamlString(Get(senml, "name")) is { } sname)
             foreach (Match m in Regex.Matches(sname, @"\$\{([^}]+)\}"))
@@ -483,5 +563,90 @@ public static partial class SchemaParser
         Walk(root, false);
         inside.ExceptWith(outside);
         return inside;
+    }
+}
+
+public static partial class SchemaParser
+{
+    /// <summary>The largest LwM2M object instance ID; 65535 is reserved (PS-548).</summary>
+    const long IpsoInstanceMax = 65534;
+
+    /// <summary>
+    /// PS-548: an `ipso.instance` is an integer from 0 to 65534, or a reference every value
+    /// of which is one - a repeat's index whose range from `index_base` fits, a literal
+    /// such integer, or a lookup whose labels are all such integers with no `${value}`
+    /// default. Checked through the listing `_meta` would carry (PS-375, PS-547), so an
+    /// own-element reference (PS-373) and a sibling's `$name[i]` (PS-546) are held to the
+    /// same rule. Mirrors ipso_instance_errors.
+    /// </summary>
+    static void IpsoInstanceErrors(YamlMappingNode root, List<string> errors)
+    {
+        static bool Valid(object? v) => v is long n && n >= 0 && n <= IpsoInstanceMax;
+
+        void Check(YamlMappingNode field, YamlMappingNode? repeat, Dictionary<string, YamlMappingNode> siblings)
+        {
+            var ipso = (YamlMappingNode)Get(field, "ipso")!;
+            var listing = Meta.Reference(Meta.FromYaml(Get(ipso, "instance")), repeat, siblings: siblings);
+            bool ok;
+            if (listing is Dictionary<string, object?> d && d.ContainsKey("index"))
+            {
+                if (d["count"] is not long count) return;   // PS-374 reports an index with no literal count or max
+                var low = d.TryGetValue("index_base", out var b) && b is long lb ? lb : 0L;
+                ok = Valid(low) && Valid(low + Math.Max(count, 1) - 1);
+            }
+            else if (listing is Dictionary<string, object?> l)
+                ok = !(l.TryGetValue("open", out var o) && o is true)
+                     && (l.TryGetValue("values", out var vs) && vs is List<object?> values ? values.All(Valid) : true);
+            else
+                ok = Valid(listing);
+            if (!ok)
+            {
+                var name = YamlString(Get(field, "name")) is { } n ? n : "<unnamed>";
+                errors.Add($"Field '{name}': its ipso.instance can be other than an integer from 0 "
+                    + $"to {IpsoInstanceMax} (PS-548)");
+            }
+        }
+
+        void Walk(YamlNode? node, YamlMappingNode? repeat, Dictionary<string, YamlMappingNode> siblings)
+        {
+            if (node is YamlSequenceNode seq)
+            {
+                var here = Meta.ElementRepeats(seq.Children.OfType<YamlMappingNode>());
+                foreach (var item in seq.Children)
+                    WalkItem(item, repeat, siblings, here);
+            }
+            else if (node is YamlMappingNode)
+                WalkItem(node, repeat, siblings, siblings);
+        }
+
+        void WalkItem(YamlNode item, YamlMappingNode? repeat, Dictionary<string, YamlMappingNode> siblings,
+            Dictionary<string, YamlMappingNode> here)
+        {
+            if (item is not YamlMappingNode map)
+            {
+                Walk(item, repeat, siblings);
+                return;
+            }
+            if (Get(map, "ipso") is YamlMappingNode ipso && Has(ipso, "instance"))
+                Check(map, repeat, siblings);
+            var isRepeat = YamlString(Get(map, "type")) == "repeat";
+            foreach (var kv in map.Children)
+            {
+                var key = Scalar(kv.Key);
+                if (key is "test_vectors" or "definitions" or "ipso" or "senml" or "lookup") continue;
+                if (isRepeat && key is "fields" or "element")
+                {
+                    // A member's references name this repeat's index and fields, and the
+                    // element repeats beside it (PS-546).
+                    Walk(kv.Value is YamlSequenceNode ? kv.Value : new YamlSequenceNode(kv.Value), map, here);
+                }
+                else if (kv.Value is YamlMappingNode)
+                    WalkItem(kv.Value, repeat, siblings, here);
+                else
+                    Walk(kv.Value, repeat, siblings);
+            }
+        }
+
+        WalkItem(root, null, new Dictionary<string, YamlMappingNode>(), new Dictionary<string, YamlMappingNode>());
     }
 }

@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -48,6 +49,7 @@ final class Wave6a {
                 errors.addAll(iteratorErrors(group, List.of(), false, "ports[" + e.getKey() + "].fields"));
             }
         }
+        errors.addAll(ipsoInstanceErrors(raw));                             // PS-548
         collectTlvReserveErrors(raw, errors);
         errors.addAll(recordsErrors(raw));                                  // PS-541
         collectConditionErrors(raw, errors);                                // PS-543
@@ -214,11 +216,13 @@ final class Wave6a {
         }
         Object index = repeat.get("index");
         List<String[]> refs = new ArrayList<>();
-        if (member.get("unit") instanceof String unit && unit.startsWith("$")) {
+        // A `$name[i]` names a sibling repeat (PS-546), which siblingErrors checks.
+        if (member.get("unit") instanceof String unit && unit.startsWith("$")
+                && !SIBLING_REFERENCE.matcher(unit).matches()) {
             refs.add(new String[] {"unit", unit.substring(1)});
         }
         if (member.get("ipso") instanceof Map<?, ?> ipso && ipso.get("instance") instanceof String instance
-                && instance.startsWith("$")) {
+                && instance.startsWith("$") && !SIBLING_REFERENCE.matcher(instance).matches()) {
             refs.add(new String[] {"ipso.instance", instance.substring(1)});
         }
         if (member.get("senml") instanceof Map<?, ?> senml && senml.get("name") instanceof String name) {
@@ -256,6 +260,7 @@ final class Wave6a {
                                        String where) {
         List<String> errors = new ArrayList<>();
         if (!(fieldsRaw instanceof List<?> fields)) return errors;
+        Map<String, Map<?, ?>> earlier = new HashMap<>();   // PS-546: element repeats before this field
         for (int i = 0; i < fields.size(); i++) {
             if (!(fields.get(i) instanceof Map<?, ?> f)) continue;
             String at = where + "[" + i + "] (" + (f.containsKey("name") ? f.get("name") : "?") + ")";
@@ -318,8 +323,10 @@ final class Wave6a {
                     errors.add(at + ": present_if must be one guard condition, {field: $name, <op>: value} "
                             + "(PS-386)");
                 }
+                errors.addAll(siblingErrors(f, earlier, at));                   // PS-546
                 Object identity = f.get("identity");
                 if (identity != null && !(identity.equals(f.get("index"))
+                        || (identity instanceof String sid && SIBLING_REFERENCE.matcher(sid).matches())
                         || (identity instanceof String id && id.startsWith("$") && names.contains(id.substring(1))))) {
                     errors.add(at + ": identity must be the repeat's index or a $ reference to a field "
                             + "of its elements (PS-372)");
@@ -335,6 +342,9 @@ final class Wave6a {
                 errors.addAll(iteratorErrors(members, deeper, true, at + "." + memberKey));
                 if (f.get("trailer") instanceof List<?> trailer) {
                     errors.addAll(iteratorErrors(trailer, enclosing, false, at + ".trailer"));
+                }
+                if (f.get("element") instanceof Map<?, ?> && f.get("name") instanceof String rn) {
+                    earlier.put(rn, f);
                 }
                 continue;
             }
@@ -378,12 +388,199 @@ final class Wave6a {
      */
     static List<?> repeatMembers(Map<?, ?> repeat) {
         if (isElementRepeat(repeat)) {
-            Map<Object, Object> member = new java.util.LinkedHashMap<>((Map<?, ?>) repeat.get("element"));
-            Object name = member.get("name");
-            member.put("name", name instanceof String s && !s.isEmpty() ? s : ELEMENT_NAME);
-            return List.of(member);
+            return List.of(elementMember((Map<?, ?>) repeat.get("element")));
         }
         return repeat.get("fields") instanceof List<?> l ? l : List.of();
+    }
+
+    /**
+     * The one field an {@code element} decodes as: under its own name, or
+     * {@link #ELEMENT_NAME}. PS-545: the element's name is never reported, so an internal
+     * name hides nothing; an element named with {@code _} is decoded under ELEMENT_NAME and
+     * keeps {@code $_x} bound through {@code var}.
+     */
+    static Map<String, Object> elementMember(Map<?, ?> element) {
+        Map<String, Object> member = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> e : element.entrySet()) member.put(String.valueOf(e.getKey()), e.getValue());
+        String name = member.get("name") instanceof String s && !s.isEmpty() ? s : ELEMENT_NAME;
+        if (name.startsWith("_")) {
+            if (!member.containsKey("var")) member.put("var", name);
+            name = ELEMENT_NAME;
+        }
+        member.put("name", name);
+        return member;
+    }
+
+    /** What an {@code element} may not be (PS-545): it is one data field, not a construct. */
+    static final List<String> ELEMENT_CONSTRUCTS = List.of("match", "byte_group", "flagged", "tlv", "records");
+
+    /** {@code $name[i]}: a sibling repeat's value at this position (PS-546). */
+    static final Pattern SIBLING_REFERENCE = Pattern.compile("^\\$(\\w+)\\[(\\w+)\\]$");
+
+    /**
+     * The {@code $name[i]} references a repeat declares (PS-546): its identity, and its
+     * elements' unit and ipso.instance, as {key, sibling, index}. Mirrors sibling_references.
+     */
+    static List<String[]> siblingReferences(Map<?, ?> repeat) {
+        List<Object[]> refs = new ArrayList<>();
+        refs.add(new Object[] {"identity", repeat.get("identity")});
+        for (Object m : repeatMembers(repeat)) {
+            if (m instanceof Map<?, ?> member) {
+                Object instance = member.get("ipso") instanceof Map<?, ?> ipso ? ipso.get("instance") : null;
+                refs.add(new Object[] {"unit", member.get("unit")});
+                refs.add(new Object[] {"ipso.instance", instance});
+            }
+        }
+        List<String[]> found = new ArrayList<>();
+        for (Object[] ref : refs) {
+            if (ref[1] instanceof String text) {
+                Matcher m = SIBLING_REFERENCE.matcher(text);
+                if (m.matches()) found.add(new String[] {(String) ref[0], m.group(1), m.group(2)});
+            }
+        }
+        return found;
+    }
+
+    /**
+     * PS-546: each {@code $name[i]} names a repeat declaring {@code element} earlier in the
+     * same field list, {@code i} is this repeat's index, and the sibling's element carries a
+     * lookup or is a literal (PS-374). Mirrors sibling_errors, with its wording.
+     */
+    static List<String> siblingErrors(Map<?, ?> repeat, Map<String, Map<?, ?>> earlier, String at) {
+        List<String> errors = new ArrayList<>();
+        for (String[] ref : siblingReferences(repeat)) {
+            String label = at + ": " + ref[0] + " `$" + ref[1] + "[" + ref[2] + "]`";
+            if (!ref[2].equals(repeat.get("index"))) {
+                errors.add(label + " must index by the repeat's own `index` (PS-546)");
+                continue;
+            }
+            Map<?, ?> sibling = earlier.get(ref[1]);
+            if (sibling == null) {
+                errors.add(label + " names no repeat declaring `element` earlier in the same field list (PS-546)");
+                continue;
+            }
+            Map<?, ?> element = (Map<?, ?>) sibling.get("element");
+            if (!(element.containsKey("lookup") || isLiteral(element))) {
+                errors.add(label + ": the elements of '" + ref[1] + "' identify values but carry no lookup "
+                        + "and are not a literal (PS-374, PS-546)");
+            }
+        }
+        return errors;
+    }
+
+    /**
+     * Name to declaration of each repeat declaring {@code element} in one field list, the
+     * siblings a {@code $name[i]} can name (PS-546); match and tlv cases and flagged groups
+     * are part of the list. Mirrors element_repeats.
+     */
+    static Map<String, Map<?, ?>> elementRepeats(Object fieldsRaw) {
+        Map<String, Map<?, ?>> found = new LinkedHashMap<>();
+        visitElementRepeats(fieldsRaw, found);
+        return found;
+    }
+
+    private static void visitElementRepeats(Object fieldsRaw, Map<String, Map<?, ?>> found) {
+        if (!(fieldsRaw instanceof List<?> items)) return;
+        for (Object o : items) {
+            if (!(o instanceof Map<?, ?> f)) continue;
+            if ("repeat".equals(f.get("type"))) {
+                if (f.get("element") instanceof Map<?, ?> && f.get("name") instanceof String n) {
+                    found.putIfAbsent(n, f);
+                }
+                continue;
+            }
+            for (String construct : List.of("match", "tlv")) {
+                if (f.get(construct) instanceof Map<?, ?> body) {
+                    if (body.get("cases") instanceof Map<?, ?> cases) {
+                        for (Object c : cases.values()) visitElementRepeats(c, found);
+                    }
+                    visitElementRepeats(body.get("default"), found);
+                }
+            }
+            if (f.get("flagged") instanceof Map<?, ?> flagged && flagged.get("groups") instanceof List<?> groups) {
+                for (Object g : groups) {
+                    if (g instanceof Map<?, ?> gm) visitElementRepeats(gm.get("fields"), found);
+                }
+            }
+        }
+    }
+
+    /** The largest LwM2M object instance ID; 65535 is reserved (PS-548). */
+    static final long IPSO_INSTANCE_MAX = 65534;
+
+    private static boolean validInstance(Object v) {
+        return isInt(v) && ((Number) v).longValue() >= 0 && ((Number) v).longValue() <= IPSO_INSTANCE_MAX;
+    }
+
+    /**
+     * PS-548: an ipso.instance is an integer from 0 to 65534, or a reference every value of
+     * which is one, checked through the listing _meta would carry (PS-375, PS-547). Mirrors
+     * ipso_instance_errors, with its wording.
+     */
+    static List<String> ipsoInstanceErrors(Map<String, Object> raw) {
+        List<String> errors = new ArrayList<>();
+        walkInstanceItem(raw, null, Map.of(), Map.of(), errors);
+        return errors;
+    }
+
+    private static void walkInstanceList(Object node, Map<?, ?> repeat, Map<String, Map<?, ?>> siblings,
+                                         List<String> errors) {
+        if (!(node instanceof List<?> list)) return;
+        Map<String, Map<?, ?>> here = elementRepeats(list);
+        for (Object item : list) walkInstanceItem(item, repeat, siblings, here, errors);
+    }
+
+    private static void walkInstanceItem(Object item, Map<?, ?> repeat, Map<String, Map<?, ?>> siblings,
+                                         Map<String, Map<?, ?>> here, List<String> errors) {
+        if (!(item instanceof Map<?, ?> f)) {
+            walkInstanceList(item, repeat, siblings, errors);
+            return;
+        }
+        if (f.get("ipso") instanceof Map<?, ?> ipso && ipso.containsKey("instance")) {
+            checkInstance(f, ipso.get("instance"), repeat, siblings, errors);
+        }
+        for (Map.Entry<?, ?> e : f.entrySet()) {
+            Object key = e.getKey();
+            if (List.of("test_vectors", "definitions", "ipso", "senml", "lookup").contains(key)) continue;
+            Object value = e.getValue();
+            if ("repeat".equals(f.get("type")) && ("fields".equals(key) || "element".equals(key))) {
+                // A member's references name this repeat's index and fields, and the
+                // element repeats beside it (PS-546).
+                walkInstanceList(value instanceof List<?> ? value : java.util.Collections.singletonList(value),
+                        f, here, errors);
+            } else if (value instanceof Map<?, ?>) {
+                walkInstanceItem(value, repeat, siblings, here, errors);
+            } else {
+                walkInstanceList(value, repeat, siblings, errors);
+            }
+        }
+    }
+
+    private static void checkInstance(Map<?, ?> field, Object instance, Map<?, ?> repeat,
+                                      Map<String, Map<?, ?>> siblings, List<String> errors) {
+        Object listing = Meta.reference(instance, repeat, false, siblings);
+        boolean ok;
+        if (listing instanceof Map<?, ?> l && l.containsKey("index")) {
+            Object count = l.get("count");
+            if (!isInt(count)) return;              // PS-374 reports an index with no literal count or max
+            long low = l.get("index_base") instanceof Number b ? b.longValue() : 0;
+            long high = low + Math.max(((Number) count).longValue(), 1) - 1;
+            ok = low >= 0 && low <= IPSO_INSTANCE_MAX && high >= 0 && high <= IPSO_INSTANCE_MAX;
+        } else if (listing instanceof Map<?, ?> l) {
+            ok = !Boolean.TRUE.equals(l.get("open"));
+            if (l.get("values") instanceof List<?> values) {
+                for (Object v : values) {
+                    if (!validInstance(v)) ok = false;
+                }
+            }
+        } else {
+            ok = validInstance(listing);
+        }
+        if (!ok) {
+            errors.add("Field '" + (field.containsKey("name") ? field.get("name") : "<unnamed>")
+                    + "': its ipso.instance can be other than an integer from 0 to " + IPSO_INSTANCE_MAX
+                    + " (PS-548)");
+        }
     }
 
     /**
@@ -400,6 +597,9 @@ final class Wave6a {
                     + "it declares exactly one (PS-083, PS-528)");
         } else if (f.containsKey("element") && !(f.get("element") instanceof Map<?, ?>)) {
             errors.add(label + ": `element` is a single field definition (PS-528)");
+        } else if (f.get("element") instanceof Map<?, ?> element
+                && (!element.containsKey("type") || ELEMENT_CONSTRUCTS.stream().anyMatch(element::containsKey))) {
+            errors.add(label + ": `element` is a data field that declares `type`, not a construct (PS-545)");
         }
         if (f.containsKey("index_base") && !isInt(f.get("index_base"))) {
             errors.add(label + ": `index_base` is an integer (PS-530)");

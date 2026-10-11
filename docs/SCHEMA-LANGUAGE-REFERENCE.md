@@ -734,9 +734,18 @@ A repeat declares exactly one of `fields` and `element`. Each element is decoded
 one field and the array holds its values. An omitted value - a sentinel, a lookup miss, a
 value that cannot be computed - is `null` in its position, so later values keep their
 index; this is the one place a decoded value is `null`. The element's `name` (default
-`element`) is how `present_if` refers to the current value and is never reported. An
-encoder takes the array of values back (PS-529) and refuses a `null` position, whose
-encoding CR-2026-111 leaves open.
+`element`) is how `present_if` refers to the current value and is never reported, so a
+leading `_` hides nothing: the value is still reported, and `$_x` still reads it (PS-545).
+The element is one data field: it declares `type` and is not a `match`, `byte_group`,
+`flagged`, `tlv` or `records` entry, which is rejected at load; a `type: object` element
+reports one object per position. An encoder takes the array of values back (PS-529) and
+writes the element's first `sentinel` for a `null` position; with no sentinel it reports
+an error naming the repeat and the position (PS-544).
+
+```yaml
+- {name: probes, type: repeat, count: 3, element: {type: u16, sentinel: [0xFFFF]}}
+# 0001 FFFF 0003  ->  {"probes": [1, null, 3]}  ->  encodes back to 0001 FFFF 0003
+```
 
 ### Several records from one element (`records`)
 
@@ -836,7 +845,35 @@ Fewer bytes than `reserve` at the start of the repeat is an error (PS-351).
 
 These are annotations: they change no decoded value (PS-376). A field they name must
 carry a `lookup` or be a literal, so its values are known from the schema, and the index
-needs a literal `count` or a `max` (PS-374).
+needs a literal `count` or a `max` (PS-374). An `ipso.instance` must be an integer from 0
+to 65534, or a reference every value of which is one: an index whose range from
+`index_base` fits, a literal, or a lookup whose labels are all such integers with no
+`${value}` default; anything else is rejected at load (PS-548).
+
+One array can identify another, position by position. Where a device sends a list of
+codes and then one reading per code, `$name[i]` names an earlier sibling repeat declaring
+`element`, indexed by this repeat's own `index` (PS-546):
+
+```yaml
+- {name: _n, type: u8}
+- {name: _regs, type: integer, compute: {op: sub, a: $_n, b: 2}}   # a computed count
+- name: codes
+  type: repeat
+  count: $_regs
+  element: {type: u8, lookup: {1: "1.8.1", 2: "2.8.1", default: "${value}"}}
+- name: values
+  type: repeat
+  count: $_regs
+  index: i
+  identity: $codes[i]
+  element: {type: u32}
+# 04 01 02 0000007B 000001C8  ->  {"codes": ["1.8.1", "2.8.1"], "values": [123, 456]}
+```
+
+The decoded output is two arrays; `_meta` lists the identity as `{"repeat": "codes",
+"values": [...]}` (PS-547). The sibling's element must carry a `lookup` or be a literal, and
+two arrays of different lengths are a decode error naming both. A per-element `unit` or
+`ipso.instance` may name a sibling the same way.
 
 ## Nested Objects
 

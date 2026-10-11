@@ -68,7 +68,10 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # vector with no null (CR-2026-111), all repeat. Its two null vectors are refused.
 # +2: guard-set (CR-2026-118), plain fixed. The other three CR-2026-118 fixtures are
 # refused (PS-542, PS-387).
-FLOOR_TOTAL = 1796
+# +6: repeat-element-null-sentinel, -internal-name, repeat-identity-sibling (2) and
+# repeat-count-computed (CR-2026-121, CR-2026-123), plus the null fixture's
+# reserved-value vector, whose null now writes the sentinel (PS-544); all repeat.
+FLOOR_TOTAL = 1802
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -84,7 +87,8 @@ FLOOR_BY_SHAPE = {
     # 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now
     # carry only the definitions they reach, so one no longer has a `repeat` in an
     # unreferenced definition for the classifier to find.
-    "repeat": 19,
+    # 19 -> 25: CR-2026-121 and CR-2026-123 (see FLOOR_TOTAL).
+    "repeat": 25,
 }
 
 #: Encoding must never raise. It used to, 26 times: "Cannot encode type: number" for any

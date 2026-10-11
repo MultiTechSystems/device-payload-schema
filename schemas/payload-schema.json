@@ -272,7 +272,7 @@
           },
           "element": {
             "$ref": "#/definitions/field",
-            "description": "`type: repeat`: one field, in place of `fields`. The repeat reports an array of its values rather than of records, with `null` at a position whose value was omitted (PS-528); an encoder takes the array of values (PS-529). Its `name`, defaulting to `element`, is how a reference inside it names the current value, and is not reported. A repeat declares exactly one of `fields` and `element` (PS-083)."
+            "description": "`type: repeat`: one field, in place of `fields`. The repeat reports an array of its values rather than of records, with `null` at a position whose value was omitted (PS-528); an encoder takes the array of values (PS-529) and writes the element's first `sentinel` for a `null`, refusing one where it declares none (PS-544). It is a data field declaring `type`, not a construct (PS-545). Its `name`, defaulting to `element`, is how a reference inside it names the current value, and is not reported, so a leading `_` hides nothing (PS-545). A repeat declares exactly one of `fields` and `element` (PS-083)."
           },
           "count_as": {
             "type": "string",
@@ -307,7 +307,7 @@
           },
           "identity": {
             "type": "string",
-            "description": "`type: repeat`: its `index`, or a `$` reference to a field of its elements, identifying the metric each element carries (PS-372). An annotation; decoding ignores it (PS-376)."
+            "description": "`type: repeat`: its `index`, a `$` reference to a field of its elements, or `$name[i]` naming an earlier sibling repeat declaring `element` at the same position (PS-546), identifying the metric each element carries (PS-372). An annotation; decoding ignores it (PS-376)."
           },
           "optional": {
             "const": true,

@@ -42,7 +42,7 @@ Generated inventory of this repository: what lives where, what each document cov
 | [`LANGUAGE-ANALYSIS.md`](LANGUAGE-ANALYSIS.md) | This document explains the design decisions behind the Payload Schema language. | 390 |
 | [`OUTPUT-FORMATS.md`](OUTPUT-FORMATS.md) | The Payload Schema decoder can output data in multiple formats for different platforms and... | 602 |
 | [`SCHEMA-DEVELOPMENT-GUIDE.md`](SCHEMA-DEVELOPMENT-GUIDE.md) | Best practices for creating complete, validated payload schemas. | 215 |
-| [`SCHEMA-LANGUAGE-REFERENCE.md`](SCHEMA-LANGUAGE-REFERENCE.md) | Complete reference for the LoRa Alliance Payload Schema specification (v0.5.0). | 1668 |
+| [`SCHEMA-LANGUAGE-REFERENCE.md`](SCHEMA-LANGUAGE-REFERENCE.md) | Complete reference for the LoRa Alliance Payload Schema specification (v0.5.0). | 1705 |
 | [`SESSION-NOTES-2026-02-25.md`](SESSION-NOTES-2026-02-25.md) | The prototype tests were using a custom REQ-xxx-yyy numbering scheme that was inconsistent with the... | 78 |
 | [`SPEC-IMPLEMENTATION-STATUS.md`](SPEC-IMPLEMENTATION-STATUS.md) | Feature support matrix across the reference implementations. | 353 |
 | [`TTN-CODEC-CONVERSION-GUIDE.md`](TTN-CODEC-CONVERSION-GUIDE.md) | Complete guide for AI-assisted conversion of The Things Network device repository codecs to Payload... | 575 |
@@ -122,14 +122,14 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Device schemas
 
-315 schemas under `schemas/devices/`.
-Mean quality score 75.3% (PLATINUM 37, GOLD 39, SILVER 185, BRONZE 30, REJECTED 24). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+319 schemas under `schemas/devices/`.
+Mean quality score 75.2% (PLATINUM 37, GOLD 39, SILVER 188, BRONZE 31, REJECTED 24). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
-| _language-conformance | 103 | 194 | SILVER 75, BRONZE 19, REJECTED 9 |
+| _language-conformance | 107 | 199 | SILVER 78, BRONZE 20, REJECTED 9 |
 | milesight | 84 | 1427 | PLATINUM 21, GOLD 33, SILVER 27, REJECTED 3 |
 | decentlab | 58 | 204 | PLATINUM 13, GOLD 6, SILVER 27, BRONZE 8, REJECTED 4 |
 | _library-composed | 49 | 57 | SILVER 48, BRONZE 1 |
@@ -219,12 +219,16 @@ Mean quality score 75.3% (PLATINUM 37, GOLD 39, SILVER 185, BRONZE 30, REJECTED 
 | `_language-conformance/repeat-byte-length-span` | 4 | 1 | fields | 73% | SILVER |
 | `_language-conformance/repeat-byte-length` | 4 | 1 | fields | 73% | SILVER |
 | `_language-conformance/repeat-carry` | 4 | 1 | fields | 69% | BRONZE |
+| `_language-conformance/repeat-count-computed` | 3 | 1 | fields | 69% | BRONZE |
 | `_language-conformance/repeat-count-zero-width` | 3 | 1 | fields | 69% | BRONZE |
 | `_language-conformance/repeat-count` | 3 | 1 | fields | 71% | SILVER |
+| `_language-conformance/repeat-element-internal-name` | 2 | 1 | fields | 71% | SILVER |
 | `_language-conformance/repeat-element-named` | 3 | 1 | fields | 71% | SILVER |
+| `_language-conformance/repeat-element-null-sentinel` | 1 | 1 | fields | 73% | SILVER |
 | `_language-conformance/repeat-element-null` | 1 | 3 | fields | 75% | SILVER |
 | `_language-conformance/repeat-element-object` | 3 | 1 | fields | 71% | SILVER |
 | `_language-conformance/repeat-element-unnamed` | 1 | 1 | fields | 71% | SILVER |
+| `_language-conformance/repeat-identity-sibling` | 3 | 2 | repeat | 71% | SILVER |
 | `_language-conformance/repeat-identity` | 4 | 1 | fields | 69% | BRONZE |
 | `_language-conformance/repeat-index-base` | 4 | 1 | fields | 69% | BRONZE |
 | `_language-conformance/repeat-index-count-as` | 4 | 1 | fields | 69% | BRONZE |

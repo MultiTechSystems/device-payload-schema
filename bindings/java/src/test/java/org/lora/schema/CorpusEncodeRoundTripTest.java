@@ -63,7 +63,7 @@ class CorpusEncodeRoundTripTest {
     // classifier filed it under that shape). The leftover vector re-encodes to its first byte only
     // (PS-474) and the omitted out-of-range one has no value to write, both by design.
     // +2 with plain fixed 100 -> 102 (CR-2026-096): the meta-* fixtures that round-trip.
-    private static final int ENCODE_FLOOR_TOTAL = 1796;   // +2: CR-2026-118 guard-set (plain fixed; the records and present_if fixtures are refused, PS-542, PS-387); +6: registry divergence fixtures, all plain fixed (tag-component-ref does not round-trip); +5: CR-2026-111 element and index_base fixtures (repeat; the two null vectors are refused, PS-529); +8: name-from-rendering (CR-2026-112); +2: boolean-literal (CR-2026-107); +13: the nine TS013-defect fixtures (tlv-tag-bit-range does not round-trip); +8: CR-2026-104 lookup label fixtures (plain fixed); +3: byte-group-bool; +3: tlv-case-field-list; +2: tlv-case-key-patterns; +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
+    private static final int ENCODE_FLOOR_TOTAL = 1802;   // +6: CR-2026-121/123 fixtures, all repeat (five new vectors, and repeat-element-null reserved_value now writes its sentinel back, PS-544); +2: CR-2026-118 guard-set (plain fixed; the records and present_if fixtures are refused, PS-542, PS-387); +6: registry divergence fixtures, all plain fixed (tag-component-ref does not round-trip); +5: CR-2026-111 element and index_base fixtures (repeat; the two null vectors are refused, PS-529); +8: name-from-rendering (CR-2026-112); +2: boolean-literal (CR-2026-107); +13: the nine TS013-defect fixtures (tlv-tag-bit-range does not round-trip); +8: CR-2026-104 lookup label fixtures (plain fixed); +3: byte-group-bool; +3: tlv-case-field-list; +2: tlv-case-key-patterns; +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
 
     /**
      * Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -79,7 +79,7 @@ class CorpusEncodeRoundTripTest {
             // 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas
             // now carry only the definitions they reach, so one no longer contains an
             // unreferenced definition's `repeat` text for the classifier to find.
-            "repeat", 19);   // +5: CR-2026-111 element and index_base fixtures; +2: TS013 fixtures
+            "repeat", 25);   // +6: CR-2026-121/123 fixtures and repeat-element-null reserved_value (PS-544); +5: CR-2026-111 element and index_base fixtures; +2: TS013 fixtures
 
     /** The construct that dominates a schema's layout. */
     private static String schemaShape(String raw) {

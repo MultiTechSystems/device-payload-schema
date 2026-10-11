@@ -362,7 +362,9 @@ def test_a_malformed_schema_is_refused_on_every_path(label):
     assert message in validate_schema_structure(
         load_schema_text(yaml.safe_dump(schema))
     )
-    with pytest.raises(ValueError, match="PS-54[13]"):
+    # The generator raises the first error it finds; an element that is a construct is
+    # refused under PS-545 (CR-2026-121) before PS-541 is reached.
+    with pytest.raises(ValueError, match="PS-54[135]"):
         TS013Generator(schema).generate()
 
 

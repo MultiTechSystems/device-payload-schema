@@ -72,6 +72,10 @@ func parseIteratorKeys(f *Field, fm map[string]any) {
 	if base, ok := intValue(fm["index_base"]); ok {
 		f.IndexBase = base
 	}
+	// PS-546: the sibling repeats whose values identify this one's, position by position.
+	if fm["type"] == "repeat" {
+		f.Siblings = siblingNames(fm)
+	}
 	// PS-528: a repeat of single values decodes its element as a one-field record.
 	if members, name := rawRepeatMembers(fm); name != "" {
 		f.Fields = parseFieldsRaw(members)
@@ -93,9 +97,17 @@ func rawRepeatMembers(f map[string]any) ([]any, string) {
 		if name == "" {
 			name = elementName
 		}
-		named := make(map[string]any, len(element)+1)
+		named := make(map[string]any, len(element)+2)
 		for k, v := range element {
 			named[k] = v
+		}
+		if strings.HasPrefix(name, "_") {
+			// PS-545: the element's name is never reported, so an internal name hides
+			// nothing. It is decoded under "element", and `var` keeps `$_x` bound.
+			if _, hasVar := element["var"]; !hasVar {
+				named["var"] = name
+			}
+			name = elementName
 		}
 		named["name"] = name
 		return []any{named}, name
@@ -124,6 +136,13 @@ func elementRepeatError(f map[string]any) error {
 	}
 	if hasElement && asStringMap(element) == nil {
 		return fmt.Errorf("%s: `element` is a single field definition (PS-528)", label)
+	}
+	if hasElement {
+		em := asStringMap(element)
+		_, typed := em["type"]
+		if !typed || hasAnyKey(em, elementConstructs) {
+			return fmt.Errorf("%s: `element` is a data field that declares `type`, not a construct (PS-545)", label)
+		}
 	}
 	if base, present := f["index_base"]; present {
 		if _, ok := intValue(base); !ok {
@@ -175,11 +194,12 @@ func repeatMemberRefError(repeat, member map[string]any, where string) error {
 	index, _ := repeat["index"].(string)
 	type ref struct{ key, name string }
 	var refs []ref
-	if unit, ok := member["unit"].(string); ok && strings.HasPrefix(unit, "$") {
+	// A `$name[i]` names a sibling repeat (PS-546), which siblingError checks.
+	if unit, ok := member["unit"].(string); ok && strings.HasPrefix(unit, "$") && !isSiblingReference(unit) {
 		refs = append(refs, ref{"unit", unit[1:]})
 	}
 	if ipso := asStringMap(member["ipso"]); ipso != nil {
-		if instance, ok := ipso["instance"].(string); ok && strings.HasPrefix(instance, "$") {
+		if instance, ok := ipso["instance"].(string); ok && strings.HasPrefix(instance, "$") && !isSiblingReference(instance) {
 			refs = append(refs, ref{"ipso.instance", instance[1:]})
 		}
 	}
@@ -219,6 +239,7 @@ func repeatMemberRefError(repeat, member map[string]any, where string) error {
 // lists so an enclosing repeat's names are known.
 func iteratorError(fields any, enclosing []string, inElements bool, where string) error {
 	list, _ := fields.([]any)
+	earlier := map[string]map[string]any{} // PS-546: the element repeats decoded before
 	for i, raw := range list {
 		f := asStringMap(raw)
 		if f == nil {
@@ -305,10 +326,13 @@ func iteratorError(fields any, enclosing []string, inElements bool, where string
 					return fmt.Errorf("%s: present_if must be one guard condition, {field: $name, <op>: value} (PS-386)", at)
 				}
 			}
+			if err := siblingError(f, earlier, at); err != nil { // PS-546
+				return err
+			}
 			if identity, ok := f["identity"]; ok && identity != nil {
 				text, isString := identity.(string)
 				index, _ := f["index"].(string)
-				valid := isString && ((index != "" && text == index) ||
+				valid := isString && ((index != "" && text == index) || isSiblingReference(text) ||
 					(strings.HasPrefix(text, "$") && names[text[1:]]))
 				if !valid {
 					return fmt.Errorf("%s: identity must be the repeat's index or a $ reference to a field of its elements (PS-372)", at)
@@ -333,6 +357,9 @@ func iteratorError(fields any, enclosing []string, inElements bool, where string
 				if err := iteratorError(trailer, enclosing, false, at+".trailer"); err != nil {
 					return err
 				}
+			}
+			if rawName, ok := f["name"].(string); ok && rawName != "" && asStringMap(f["element"]) != nil {
+				earlier[rawName] = f
 			}
 			continue
 		}
@@ -411,6 +438,9 @@ func tlvReserveError(node map[string]any) error {
 // port field lists, and every tlv's reserve.
 func checkIteratorRules(raw map[string]any) error {
 	if err := iteratorError(raw["fields"], nil, false, "fields"); err != nil {
+		return err
+	}
+	if err := ipsoInstanceError(raw); err != nil { // PS-548
 		return err
 	}
 	for port, entry := range asStringMap(raw["ports"]) {

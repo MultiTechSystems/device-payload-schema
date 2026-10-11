@@ -79,8 +79,9 @@ func TestCR118LoadErrors(t *testing.T) {
 			"`records` is a non-empty list of field lists (PS-541)"},
 		{"  - {name: m, type: repeat, count: 1, fields: [{records: [{name: a, type: u8}]}]}\n",
 			"`records` is a non-empty list of field lists (PS-541)"},
+		// A construct element is refused by PS-545 (CR-2026-121) before PS-541 is reached.
 		{"  - {name: m, type: repeat, count: 1, element: {match: {length: 1, cases: {1: [{records: [[{name: a, type: u8}]]}]}}}}\n",
-			"Repeat 'm': an `element` cannot reach a `records` entry (PS-541)"},
+			"Repeat 'm': `element` is a data field that declares `type`, not a construct (PS-545)"},
 		{"  - {name: m, type: repeat, count: 1, present_if: {field: $a, in: [1, x]}, fields: [{name: a, type: u8}]}\n",
 			"a condition's `in` is a list of numbers (PS-543)"},
 		{"  - {name: m, type: repeat, count: 1, present_if: {field: $a, not_in: 3}, fields: [{name: a, type: u8}]}\n",

@@ -52,7 +52,7 @@ public class CorpusEncodeRoundTripTests
     // which the raw-YAML classifier had filed under that shape. Its out_of_range vector
     // omits a field and cannot (bytes differ), and leftover-bytes' second vector
     // re-encodes to its first byte only (PS-474): both by design.
-    const int EncodeFloorTotal = 1796;   // +2: CR-2026-118 guard-set (plain fixed; the records and present_if fixtures are refused, PS-542, PS-387); +6: registry divergence fixtures, all plain fixed (tag-component-ref does not round-trip); +5: CR-2026-111 fixtures (repeat-element-null's two null vectors are refused, PS-529); +8: name-from-rendering (CR-2026-112); +2: boolean-literal (CR-2026-107); +13: the nine TS013-defect fixtures (tlv-tag-bit-range does not round-trip); +8: CR-2026-104 lookup label fixtures (plain fixed); +3: byte-group-bool; +3: tlv-case-field-list; +2: tlv-case-key-patterns; +2: CR-2026-096 meta fixtures (meta-port-default, plain fixed); +6 before: trimmed vendor vectors
+    const int EncodeFloorTotal = 1802;   // +6: CR-2026-121/123 fixtures (all five vectors) and repeat-element-null reserved_value, whose null now encodes as the sentinel (PS-544); +2: CR-2026-118 guard-set (plain fixed; the records and present_if fixtures are refused, PS-542, PS-387); +6: registry divergence fixtures, all plain fixed (tag-component-ref does not round-trip); +5: CR-2026-111 fixtures (repeat-element-null's two null vectors are refused, PS-529); +8: name-from-rendering (CR-2026-112); +2: boolean-literal (CR-2026-107); +13: the nine TS013-defect fixtures (tlv-tag-bit-range does not round-trip); +8: CR-2026-104 lookup label fixtures (plain fixed); +3: byte-group-bool; +3: tlv-case-field-list; +2: tlv-case-key-patterns; +2: CR-2026-096 meta fixtures (meta-port-default, plain fixed); +6 before: trimmed vendor vectors
 
     /// <summary>
     /// Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -69,7 +69,7 @@ public class CorpusEncodeRoundTripTests
         // 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now
         // carry only the definitions they reach, so one no longer contains an
         // unreferenced definition's `repeat` text for the classifier to find.
-        ["repeat"] = 19,   // +5: CR-2026-111 fixtures; +2: TS013 fixtures
+        ["repeat"] = 25,   // +6: CR-2026-121/123 fixtures and repeat-element-null reserved_value (PS-544); +5: CR-2026-111 fixtures; +2: TS013 fixtures
     };
 
     readonly ITestOutputHelper _output;

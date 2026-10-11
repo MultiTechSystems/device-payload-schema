@@ -93,7 +93,9 @@ public class CR2026_118Tests
         "`records` belongs in a repeat's element, or a match case within it (PS-541)")]
     [InlineData("  - name: m\n    type: repeat\n    count: 1\n    element:\n      match:\n        length: 1\n"
         + "        cases:\n          1: [{records: [[{name: a, type: u8}]]}]\n",
-        "Repeat 'm': an `element` cannot reach a `records` entry (PS-541)")]
+        // PS-545 (CR-2026-121): an element that is a construct is refused as such, before
+        // PS-541 is reached; Python reports both and its test looks for PS-541.
+        "Repeat 'm': `element` is a data field that declares `type`, not a construct (PS-545)")]
     [InlineData("  - name: m\n    type: repeat\n    count: 1\n    present_if: {field: $a, in: [1, x]}\n"
         + "    fields: [{name: a, type: u8}]\n",
         "a condition's `in` is a list of numbers (PS-543)")]
