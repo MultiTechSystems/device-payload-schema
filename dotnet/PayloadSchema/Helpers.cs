@@ -202,6 +202,32 @@ public static class Helpers
         return ok ? (true, (int)d) : (false, 0);
     }
 
+    /// <summary>
+    /// A value as a 64-bit integer, for comparing a discriminator with a case key. A
+    /// u32 above 0x7FFFFFFF does not fit an int, and (int) of an out-of-range double is
+    /// int.MinValue on x64, so ToInt made 0xFFFFFFFF, 0x80000001 and 2147483648 equal.
+    /// Integral types convert exactly; a double truncates as ToInt does, and one outside
+    /// long's range is not converted.
+    /// </summary>
+    public static (bool ok, long value) ToLong(object? v)
+    {
+        switch (v)
+        {
+            case long l: return (true, l);
+            case int i: return (true, i);
+            case uint ui: return (true, ui);
+            case ulong ul when ul <= long.MaxValue: return (true, (long)ul);
+            case short s: return (true, s);
+            case ushort us: return (true, us);
+            case byte b: return (true, b);
+            case sbyte sb: return (true, sb);
+        }
+        var (ok, d) = ToFloat64(v);
+        if (!ok || double.IsNaN(d) || d < -9.2233720368547758E18 || d >= 9.2233720368547758E18)
+            return (false, 0);
+        return (true, (long)d);
+    }
+
     public static object FormatBytes(byte[] data, string? format, string? separator)
     {
         format ??= "hex";

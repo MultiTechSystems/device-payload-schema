@@ -69,7 +69,8 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # +2: guard-set (CR-2026-118), plain fixed. The other three CR-2026-118 fixtures are
 # refused (PS-542, PS-387).
 # +2: guard-set's empty `in` and `not_in` vectors (CR-2026-124), plain fixed.
-FLOOR_TOTAL = 1798
+# +4: match-u32-inline-discriminator.
+FLOOR_TOTAL = 1802
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -80,7 +81,7 @@ FLOOR_BY_SHAPE = {
     "tlv": 1299,
     "flagged": 193,
     "plain fixed": 137,
-    "match": 125,
+    "match": 129,  # +4: match-u32-inline-discriminator
     "byte_group": 25,
     # 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now
     # carry only the definitions they reach, so one no longer has a `repeat` in an
