@@ -255,9 +255,20 @@ public class Wave6bTest {
     }
 
     @Test
-    public void anInternalMatchDiscriminatorIsNotInferred() {
+    public void anInternalMatchDiscriminatorIsDerivedFromTheCaseGiven() {
+        // It was not inferred, pending the spec's answer; PS-551 (CR-2026-134) is that
+        // answer: the one case whose fields are given fixes it.
         Schema schema = Schema.fromYaml("name: p\nfields:\n  - {name: _kind, type: u8}\n"
             + "  - match: {field: $_kind, cases: {1: [{name: t, type: u8}]}}\n");
+        EncodeResult result = schema.encode(data("t", 5L));
+        assertTrue(result.isSuccess(), result.getErrors().toString());
+        assertArrayEquals(hex("0105"), result.getPayload());
+    }
+
+    @Test
+    public void anInternalDiscriminatorNoCaseFixesIsStillAnError() {
+        Schema schema = Schema.fromYaml("name: p\nfields:\n  - {name: _kind, type: u8}\n"
+            + "  - match: {field: $_kind, cases: {1: [{name: t, type: u8}], 2: [{name: t, type: u16}]}}\n");
         EncodeResult result = schema.encode(data("t", 5L));
         assertTrue(result.getErrors().stream().anyMatch(e -> e.contains("PS-434")), result.getErrors().toString());
     }

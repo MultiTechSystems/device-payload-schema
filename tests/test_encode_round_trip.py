@@ -75,7 +75,11 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # +6: repeat-element-null-sentinel, -internal-name, repeat-identity-sibling (2) and
 # repeat-count-computed (CR-2026-121, CR-2026-123), plus the null fixture's
 # reserved-value vector, whose null now writes the sentinel (PS-544); all repeat.
-FLOOR_TOTAL = 1814
+# +3: CR-2026-134 (PS-551) derives what the input fixes. internal-discriminator's two
+# vectors (match) derive `_kind` from the case whose fields are given, and
+# flagged-group-field-list's inner_groups (flagged) derives both masks and now encodes a
+# flagged block nested in a group, which was passed over as nameless.
+FLOOR_TOTAL = 1817
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -84,9 +88,9 @@ FLOOR_BY_SHAPE = {
     # only because their internal byte halves were all zero, which the encoder wrote
     # for an internal field with no value. It now reports such a field instead.
     "tlv": 1299,
-    "flagged": 193,
+    "flagged": 194,  # +1: CR-2026-134 (see FLOOR_TOTAL)
     "plain fixed": 143,
-    "match": 129,  # +4: match-u32-inline-discriminator
+    "match": 131,  # +4: match-u32-inline-discriminator; +2: CR-2026-134
     "byte_group": 25,
     # 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now
     # carry only the definitions they reach, so one no longer has a `repeat` in an

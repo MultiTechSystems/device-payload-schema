@@ -456,13 +456,17 @@ class TestEncoder:
         result = interpreter.encode({'temp': 23.45})
         assert result.payload == bytes([0x09, 0x29])
     
-    def test_encode_missing_field_warning(self, simple_schema):
-        """Test warning for missing field."""
+    def test_encode_missing_field_is_rejected(self, simple_schema):
+        """A missing field is an error, not a warning."""
         interpreter = SchemaInterpreter(simple_schema)
         
         result = interpreter.encode({'temp': 256})  # Missing 'hum'
         
-        assert 'hum' in ''.join(result.warnings)
+        # PS-551 (CR-2026-134): rejected, naming the field, with no payload. It was a
+        # warning and a zero.
+        assert result.errors == ['Missing required field: hum']
+        assert result.payload == b''
+        assert result.warnings == []
     
     def test_encode_decode_roundtrip(self, simple_schema):
         """Test encode/decode roundtrip."""

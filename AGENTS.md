@@ -198,10 +198,10 @@ the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1814 |
-| Go | `go/schema/corpus_conformance_test.go` | 2652 | 1831 (plain API 1808) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2652 | 1814 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2652 | 1814 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1817 |
+| Go | `go/schema/corpus_conformance_test.go` | 2652 | 1834 (plain API 1811) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2652 | 1817 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2652 | 1817 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 554 of 554 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -774,10 +774,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1814 |
-| Go | `go/schema/corpus_encode_test.go` | 1831 (plain 1808) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1814 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1814 |
+| Python | `tests/test_encode_round_trip.py` | 1817 |
+| Go | `go/schema/corpus_encode_test.go` | 1834 (plain 1811) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1817 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1817 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -870,6 +870,8 @@ warnings; for a three-field layout missing its middle field both emit `11 11 00 
 with `Missing field: second`; and for a `_`-prefixed `number` both emit two bytes. Three of
 the four implementations already agreed before these fixes and Go was the outlier, which
 is what settled "should this error?" — it should not; it should zero-fill and say so.
+**CR-2026-134 (PS-551) reversed that ruling**: a missing value is now an error naming the
+field, with no payload, in all five; see its entry under 0.5.2.
 
 **Go had nowhere to put a warning, which is why it was the silent one.** The other four
 return a result type carrying `warnings`; Go returned bare bytes. `EncodeContext` now has
@@ -904,8 +906,8 @@ including `tlv` at 905/7/37/0, decode 1191/1191. What it changed:
   `TLVOrder` — a nested tlv has no recovered order of its own, and passing the outer one
   down would reorder its channels to match a sequence that was never about them.
 
-**Warning volume was measured, not assumed: 1 warning across all 1190 encodable corpus
-vectors**, and it is a true positive — `_language-conformance/name-from.yaml` reports
+**Warning volume was measured, not assumed (superseded by PS-551, which made the warning an
+error): 1 warning across all 1190 encodable corpus vectors**, and it is a true positive — `_language-conformance/name-from.yaml` reports
 `Missing field: reading`, because a `name_from` key is not the field's name, which is
 already listed above as an unrecoverable round-trip case. The tlv path, whose newly
 enabled warnings were the thing to worry about, produces none.
@@ -1350,7 +1352,7 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   the input's, else it is an error naming the field. Encoders wrote its `default` or 0 -
   and Python alone inferred a match's internal discriminator from the case the data fit;
   that is gone pending the spec's answer (internal-discriminator.yaml no longer
-  round-trips). laq4's reserved bit and encode-padding's reserved byte declare `value: 0`.
+  round-tripped; CR-2026-134's PS-551 answered, and all five derive it now). laq4's reserved bit and encode-padding's reserved byte declare `value: 0`.
   Two vobo vectors (`standard_zero`, `heartbeat2_zero`) round-tripped only because their
   internal byte halves were all zero, so the tlv floors dropped by 2 in every language,
   deliberately. A sentinel is compared on the bits before an `encoding` and written back
@@ -1725,7 +1727,7 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     in Python `_encode_repeat`, Go `encodeRepeat` (via `Field.Siblings`), Java
     `Encoder.encodeRepeat`, C# `SchemaEncoder.EncodeRepeat` (`SiblingNames`) and the
     runtime's `encRepeat` (`encSiblings` mirrors `sibling_references`). An absent repeat
-    still encodes to nothing, so the check runs only when the identified repeat is given.
+    is rejected as a missing value since CR-2026-134 (PS-551).
     No vector can expect a rejection, so no floor moves; `test_cr_2026_133_*`, Go
     `cr133_test.go`, Java `CR2026133Test`, C# `CR2026_133Tests` hold the text.
   - **`_meta`:** `{"repeat": name, "values": [...], "open": true}` in that key order, the
@@ -1759,6 +1761,76 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.
+
+- **CR-2026-134 (PS-551): an encoder rejects missing input and derives what the input
+  fixes.** Every encoder used to write zeros for a required value its input omitted (a
+  `Missing field: x` warning at the top level, silence inside a construct), and for a few
+  shapes wrote nothing at all, so every later field shifted (PS-442). Now:
+  - **Rejected, naming the field, with no payload.** The prototype's text, `Missing required
+    field: {name}` (the resolved key for `name_from`), from Python, Go, Java, C#, the TS013
+    runtime, the generated `encodeCommand`, Python's `encode_command`, and C's
+    `encode_result_t.error_msg` (new, 56 bytes). It covers a scalar at any depth, `ascii`,
+    `hex`, `bytes`, `bitfield_string`, a whole `type: object`, a member of a flagged group the
+    input gives, a byte_group or bit-range member, and a repeat whose list is absent (a
+    framed one wrote nothing; an `until: end` one with a trailer returned before the
+    trailer). Python, Java and C# returned the bytes written before an error; every encoder
+    now returns none, as Go always did. Not required: an optional field (PS-405), a literal
+    (PS-359), a field with `value` (PS-360), an internal field (PS-434, which keeps its own
+    message), a skip, a nameless field (padding, as a skip is), and an absent value with a
+    `sentinel` (written as the sentinel, PS-427).
+  - **Derived** where the input omits it, by `_derive_inputs` and its port in each language
+    (Go `cr134.go`, Java/C# `deriveInputs`/`DeriveInputs`, runtime `encDerive`), run on every
+    field list:
+    - a repeat's `count: $n` / `byte_length: $n` field, from the list (byte_length by
+      encoding the elements) - the field named by `name:` or `var:`, also inside a
+      byte_group. The prototype derives only these;
+    - a `match: {field: $d}` discriminator, from the one case whose fields the input gives:
+      not where two cases tie, and not for a list or range key. `internal-discriminator.yaml`
+      round-trips again in all five, so the inference CR-2026-067 removed "pending the
+      spec's answer" is back as PS-551's rule;
+    - a named inline (`length:`) discriminator, from the same case, as before;
+    - a flagged mask, from the groups given. This one always existed, but overwrote a
+      supplied mask; a supplied one is now kept, undeclared bits included (`0x81` with one
+      group at bit 0 stays `0x81`, where it was rewritten `0x01`).
+    A derived value goes into a field with no arithmetic, lookup, `value` or `name_from`
+    between its bytes and what a reference binds, and never into a bit range that no
+    `consume` closes - see the peek below.
+  - **A disagreement is rejected:** `Repeat '{name}' is given {n} values for a count of {c}
+    (PS-551)` for a literal or supplied count (checked after PS-550/542/544/387); two texts
+    the prototype states the rule for and gives none: `Repeat '{name}' encodes to {n} bytes for
+    a byte_length of {b} (PS-551)` and `Flagged field '{mask}' is given {v}, and the groups
+    given set {bits} (PS-551)` (compared on the groups' declared bits only). A supplied
+    match discriminator naming a case whose fields are absent fails on those fields.
+  - **Also fixed on the way:** Python and the runtime refused a `flagged` block inside a
+    match, tlv or repeat ("declares no type"), and every encoder passed over a construct
+    nested in a flagged group as nameless, dropping its values silently
+    (`flagged-group-field-list.yaml`'s `inner_groups` now round-trips). Python let a
+    `bitfield_string` ValueError escape `encode()`.
+  - **Left as it was: the non-advancing peek.** r718x, dnt and registry mutelcor, wt303 and wt304 read a
+    byte with a bit range that no `consume` closes, then read it again with a nameless inline
+    match (`length: 1`, `var:` only). The encoder writes the run's byte *and* would write the
+    match's, so it has always written nothing for such a match, and still does when the
+    discriminator is unknown and the match has no name or a `skip` default. A named inline
+    match with no discriminator is rejected. Writing the peek correctly (the run writes
+    nothing, or the match takes its value from it) is open; so is deriving a discriminator
+    into a peek, which `_is_peek` declines for the same reason (`match-u32-peek-discriminator`
+    and vobo would otherwise gain bytes).
+  - **Corpus effect, all five identical:** round trips 1814 -> 1817 (Go 1831 -> 1834, plain
+    1808 -> 1811), `match` +2 (internal-discriminator), `flagged` +1 (flagged-group-field-list
+    `inner_groups`), no loss. Every other change is a vector that already failed now failing
+    by name instead of silently: milesight ct10x/ct30x/ws515/gs301 `*_sensor_status` and dnt
+    `value` (decoded as absent, so zero-filled), and the `_language-conformance` absent-value
+    fixtures (`value-absent`, `out-of-range-omit`, `range-before-lookup`, `minifloat`,
+    `log-of-non-positive`). No fixture expectation changed. `encode-round-trip.py` files an
+    otherwise unexplained `Missing required field` under `absent-value`; there are none today.
+  - **Registry (Python, read only):** 371 round trips gained (internal discriminators
+    derived: radio-bridge's `_event` 180, arwin's `_sensor_type` 84, `_version` 26, ...) and
+    25 lost, every one a value the decode omitted - a lookup miss on 0 (dragino
+    `SENSOR_MODEL`, terabee's `{1: 1}` flag bits, nwave `reset_cause`, b-meters `vif`, dnt
+    `device_orientation`) - that the zero it was filled with happened to reproduce.
+  - **Tests:** `tests/cr-2026-134-cases.yaml` is one case list read by
+    `test_cr_2026_134_missing_input.py` (reference and runtime), Go `cr134_test.go`, Java
+    `CR2026134Test`, C# `CR2026_134Tests`; C's `test_a_missing_input_is_named`.
 
 ## Converting a vendor codec
 

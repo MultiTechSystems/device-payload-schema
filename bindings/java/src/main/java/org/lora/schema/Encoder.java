@@ -62,30 +62,49 @@ final class Encoder {
         Map<String, Object> input = data == null ? Map.of() : data;
         ByteBuf out = new ByteBuf();
 
-        // A `flagged` block's flags byte is not in the decoded output as a number a
-        // caller would supply: it is implied by which groups are present. Computed here
-        // so the plain field that carries it gets the right value when its turn comes.
-        Map<String, Integer> flagsPatches = new LinkedHashMap<>();
-        for (Field field : fields) {
-            if (field.getFlagged() == null) continue;
-            Field.FlaggedDef fd = field.getFlagged();
-            int flags = 0;
-            for (Field.FlaggedGroup group : fd.getGroups()) {
-                if (groupHasData(group, input)) {
-                    flags |= (1 << group.getBit());
-                }
-            }
-            if (fd.getField() != null) {
-                flagsPatches.put(fd.getField(), flags);
-            }
+        // PS-551: a value the input omits but the rest of it fixes - a repeat's count or
+        // byte_length field, a match's discriminator, a flagged mask - is derived before
+        // anything is written, and a supplied one that disagrees is rejected. The flagged
+        // mask was the one derivation already made, and it overwrote a supplied mask.
+        try {
+            input = deriveInputs(fields, input);
+        } catch (RuntimeException e) {
+            errors.add(e.getMessage());
+            return new EncodeResult(EMPTY, warnings, errors);
         }
 
         // Bit ranges sharing a byte are packed together rather than a byte apiece
         // (CR-2026-024), so the whole list is walked at once: a run cannot be found by
         // looking at one field in isolation.
-        out.write(encodeWithBitfieldRuns(fields, input, flagsPatches, true));
+        out.write(encodeWithBitfieldRuns(fields, input, true));
 
-        return new EncodeResult(out.toArray(), warnings, errors);
+        // A rejected input produces no payload: the bytes written before the error are a
+        // frame short of the rest, as Go has always returned nothing.
+        return new EncodeResult(errors.isEmpty() ? out.toArray() : EMPTY, warnings, errors);
+    }
+
+    /** PS-551: what every encoder says for a required value the input omits. */
+    static String missingFieldMessage(String name) {
+        return "Missing required field: " + name;
+    }
+
+    /** A required value the input omits (PS-551), naming the field. */
+    static final class MissingFieldException extends SchemaException.EncodeException {
+        final String field;
+
+        MissingFieldException(String field) {
+            super(missingFieldMessage(field));
+            this.field = field;
+        }
+    }
+
+    private static boolean isComputed(Field f) {
+        return f.getType() == FieldType.NUMBER || f.getType() == FieldType.INTEGER;
+    }
+
+    private static boolean isLiteral(Field f) {
+        return (f.getType() == FieldType.STRING || f.getType() == FieldType.BOOLEAN
+                || isComputed(f)) && f.getValue() != null;
     }
 
     private static String describe(Field field) {
@@ -103,11 +122,10 @@ final class Encoder {
      * Encode one entry of a field list. Shared by the top-level loop and by the bodies of
      * the constructs, so a case body may itself hold a construct.
      *
-     * @param topLevel whether a missing value is worth a warning; a construct's body
-     *                 supplies zero silently, as the reference interpreter does
+     * @param siblings the field list this entry belongs to, where a repeat's
+     *                 {@code count: $n} or {@code byte_length: $n} is found
      */
-    private byte[] encodeOne(Field field, Map<String, Object> data,
-                             Map<String, Integer> flagsPatches, boolean topLevel) {
+    private byte[] encodeOne(Field field, Map<String, Object> data, List<Field> siblings) {
         if (field.getTlvInline() != null) {
             return encodeTLV(field.getTlvInline(), data);
         }
@@ -124,7 +142,7 @@ final class Encoder {
         FieldType type = field.getType();
 
         if (type == FieldType.REPEAT) {
-            return encodeRepeat(field, data);
+            return encodeRepeat(field, data, siblings);
         }
         if (type == FieldType.OBJECT) {
             // A nested object is reported under its own name (PS-139), so its members
@@ -132,13 +150,20 @@ final class Encoder {
             // where they are not, and every member encoded as a zero.
             // A `name_from` object was reported under its templated key, so that is the
             // key to read it back from (CR-2026-030), as for any other field.
-            String key = field.getName() == null ? null : resolveEncodeName(field, data);
-            Object nested = key == null ? null : data.get(key);
-            @SuppressWarnings("unchecked")
-            Map<String, Object> members = nested instanceof Map<?, ?> m ? (Map<String, Object>) m : data;
-            return encodeFieldList(field.getFields(), members);
+            if (field.getName() == null || field.getName().isEmpty()) {
+                return encodeFieldList(field.getFields(), data);
+            }
+            String key = resolveEncodeName(field, data);
+            if (key == null) key = field.getName();
+            Object nested = data.get(key);
+            if (!(nested instanceof Map<?, ?> m)) {
+                // PS-551: a whole object the input omits. Its members were written as
+                // zeros - looked up in the enclosing data, where they are not.
+                throw new MissingFieldException(key);
+            }
+            return encodeFieldList(field.getFields(), stringKeyed(m));
         }
-        if (type == FieldType.NUMBER) {
+        if (isComputed(field)) {
             // Derived from other fields: no bytes of its own.
             return EMPTY;
         }
@@ -160,20 +185,14 @@ final class Encoder {
 
         String name = field.getName();
 
-        if (type == FieldType.BITFIELD_STRING) {
-            Object value = name == null ? null : data.get(name);
-            return encodeBitfieldString(field, value == null ? "" : String.valueOf(value));
-        }
-
         Object value;
         if (name == null || name.isEmpty()) {
+            // Nothing can be supplied for a field with no name; it is padding, as a skip is.
             value = 0L;
         } else if (name.startsWith("_")) {
             // PS-434: an internal field that reads bytes writes its value, else the
             // input's, else it is an error naming the field. It wrote 0.
             value = Wave6b.internalEncodeValue(field, data);
-        } else if (flagsPatches.containsKey(name)) {
-            value = flagsPatches.get(name);
         } else {
             // `name_from` reports the value under a templated key, so that is the key to
             // read it back from (CR-2026-030).
@@ -183,20 +202,22 @@ final class Encoder {
                         + field.getNameFrom() + "' references a field the data does not "
                         + "carry, so its output key cannot be rebuilt");
             }
-            if (data.containsKey(lookupName)) {
+            if (data.get(lookupName) != null) {
                 value = data.get(lookupName);
             } else if (field.getSentinel() != null && !field.getSentinel().isEmpty()) {
                 // A reading the decode omitted as "no reading" (PS-427) goes back as the
                 // sentinel it was, not as zero: the raw value, with no modifier reversed.
                 return encodeSentinel(field);
             } else {
-                if (topLevel) {
-                    warnings.add("Missing field: " + lookupName);
-                }
-                value = 0L;
+                // PS-551: rejected, naming the field. This warned "Missing field" at the
+                // top level, and wrote a zero there and silently everywhere else.
+                throw new MissingFieldException(lookupName);
             }
         }
 
+        if (type == FieldType.BITFIELD_STRING) {
+            return encodeBitfieldString(field, String.valueOf(value));
+        }
         return encodeField(field, reverseModifiers(value, field));
     }
 
@@ -253,6 +274,15 @@ final class Encoder {
         return out.toString();
     }
 
+    /** {@link #resolveEncodeName}, or null where it cannot be resolved. */
+    private String resolveEncodeNameOrNull(Field field, Map<String, Object> data) {
+        try {
+            return resolveEncodeName(field, data);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
     /**
      * The first sentinel, as the raw bits the decoder compared it with (PS-427): never
      * through an {@code encoding}, which would write gray(255) = 0x80 for a sentinel of
@@ -271,7 +301,7 @@ final class Encoder {
     /** Encode a list of fields - a TLV case's value bytes, a match case's body. */
     private byte[] encodeFieldList(List<Field> list, Map<String, Object> data) {
         if (list == null || list.isEmpty()) return EMPTY;
-        return encodeWithBitfieldRuns(list, data, Map.of(), false);
+        return encodeWithBitfieldRuns(list, deriveInputs(list, data), false);
     }
 
     // --- constructs ----------------------------------------------------------------
@@ -282,6 +312,11 @@ final class Encoder {
                 return true;
             }
         }
+        // A construct in the group - a nested flagged block, a byte_group - carries its
+        // names in its own fields.
+        for (Field f : claimableFields(group.getFields())) {
+            if (data.containsKey(f.getName())) return true;
+        }
         return false;
     }
 
@@ -290,6 +325,17 @@ final class Encoder {
         ByteBuf out = new ByteBuf();
         for (Field.FlaggedGroup group : fd.getGroups()) {
             if (!groupHasData(group, data)) continue;
+            boolean hasConstruct = false;
+            for (Field gf : group.getFields()) {
+                if (gf.getName() == null || gf.getName().isEmpty()) hasConstruct = true;
+            }
+            if (hasConstruct) {
+                // A construct in the group - a nested flagged block, a byte_group - is
+                // encoded as any field list is. It was passed over as nameless, so a nested
+                // group's values were dropped without a word.
+                out.write(encodeFieldList(group.getFields(), data));
+                continue;
+            }
             // Routed through the run packing for consistency with every other field
             // list, not because anything needs it today: no `flagged` group in the corpus
             // holds a bit range - they are u16, u32le16 and computed members. A group
@@ -301,10 +347,12 @@ final class Encoder {
             for (Field gf : group.getFields()) {
                 String name = gf.getName();
                 if (name == null || name.isEmpty()) continue;
-                if (gf.getType() == FieldType.NUMBER) continue;
+                if (isComputed(gf)) continue;
                 emit.add(gf);
             }
-            out.write(encodeWithBitfieldRuns(emit, data, Map.of(), false));
+            // A given group's members are each required (PS-551): encodeOne rejects one the
+            // input omits, which was written as zero.
+            out.write(encodeWithBitfieldRuns(emit, data, false));
         }
         return out.toArray();
     }
@@ -335,7 +383,7 @@ final class Encoder {
      * decoding stops reading from the same offset.
      */
     private byte[] encodeWithBitfieldRuns(List<Field> list, Map<String, Object> data,
-                                          Map<String, Integer> patches, boolean topLevel) {
+                                          boolean topLevel) {
         ByteBuf out = new ByteBuf();
         List<Field> run = new ArrayList<>();
         String omittedOptional = null;      // the first optional field the input left out
@@ -361,10 +409,16 @@ final class Encoder {
                     }
                 }
                 try {
-                    out.write(encodeOne(field, data, patches, topLevel));
+                    out.write(encodeOne(field, data, list));
                 } catch (RuntimeException e) {
                     if (!topLevel) throw e;
-                    errors.add("Error encoding " + describe(field) + ": " + e.getMessage());
+                    if (e instanceof MissingFieldException missing
+                            && missing.field.equals(resolveEncodeNameOrNull(field, data))) {
+                        // The field itself is missing: said as the reference says it.
+                        errors.add(e.getMessage());
+                    } else {
+                        errors.add("Error encoding " + describe(field) + ": " + e.getMessage());
+                    }
                 }
                 continue;
             }
@@ -403,9 +457,17 @@ final class Encoder {
         int size = 1;
         for (Field member : run) {
             String name = member.getName();
-            Object value = name == null || name.isEmpty() ? Long.valueOf(0)
-                    : name.startsWith("_") ? Wave6b.internalEncodeValue(member, data)   // PS-434
-                    : data.getOrDefault(name, Long.valueOf(0));
+            Object value;
+            if (name == null || name.isEmpty()) {
+                value = Long.valueOf(0);
+            } else if (member.getValue() != null || name.startsWith("_")) {
+                value = Wave6b.internalEncodeValue(member, data);   // PS-360, PS-434
+            } else if (data.get(name) == null) {
+                // PS-551. A range was written as zero bits, which read back as a value.
+                throw new MissingFieldException(name);
+            } else {
+                value = data.get(name);
+            }
             value = reverseModifiers(value, member);
             Long raw = asLong(value);
             if (raw == null) {
@@ -452,9 +514,18 @@ final class Encoder {
 
         for (Field member : group.getByteGroup()) {
             String name = member.getName();
-            Object value = name == null || name.isEmpty() ? Long.valueOf(0)
-                    : name.startsWith("_") ? Wave6b.internalEncodeValue(member, data)   // PS-434
-                    : data.getOrDefault(name, Long.valueOf(0));
+            if (isComputed(member) || isLiteral(member)) continue;   // no bits of its own
+            Object value;
+            if (name == null || name.isEmpty()) {
+                value = Long.valueOf(0);
+            } else if (member.getValue() != null || name.startsWith("_")) {
+                value = Wave6b.internalEncodeValue(member, data);   // PS-360, PS-434
+            } else if (data.get(name) == null) {
+                // PS-551. A member was written as zero bits, which read back as a value.
+                throw new MissingFieldException(name);
+            } else {
+                value = data.get(name);
+            }
             if (member.getType() == FieldType.BOOL) {
                 // A bool member is one bit of the group's value (PS-364).
                 if (Boolean.TRUE.equals(value)) packed |= 1L << Math.max(0, member.getBoolBit());
@@ -485,21 +556,66 @@ final class Encoder {
      * name a field earlier in the list, which the main loop encodes from its own value,
      * and {@code until: end} needs no header at all.
      */
-    @SuppressWarnings("unchecked")
-    private byte[] encodeRepeat(Field field, Map<String, Object> data) {
+    private byte[] encodeRepeat(Field field, Map<String, Object> data, List<Field> siblings) {
         String name = field.getName();
         Object records = name == null ? null : data.get(name);
-        if (records == null) return EMPTY;
-
-        List<Object> list;
-        if (records instanceof Map<?, ?>) {
-            list = List.of(records);
-        } else if (records instanceof List<?> asList) {
-            list = (List<Object>) asList;
-        } else {
+        if (records != null && !(records instanceof Map<?, ?>) && !(records instanceof List<?>)) {
             throw new SchemaException.EncodeException("repeat field '" + name
                     + "': expected a list of records, got " + records.getClass().getSimpleName());
         }
+        List<Object> list = repeatRecords(field, data);
+        if (list == null) {
+            // PS-551: an absent list is a missing value. It wrote nothing, leaving the frame
+            // short of the elements a count or byte_length field still declared (PS-442).
+            throw new MissingFieldException(name);
+        }
+        Long count = repeatSize(field, field.getCount(), data, siblings);
+        ByteBuf out = new ByteBuf();
+        out.write(encodeRepeatElements(field, data, list, count));
+        Long byteLength = repeatSize(field, field.getByteLength(), data, siblings);
+        if (byteLength != null && out.toArray().length != byteLength) {
+            throw new SchemaException.EncodeException("Repeat '" + name + "' encodes to "
+                    + out.toArray().length + " bytes for a byte_length of " + byteLength
+                    + " (PS-551)");
+        }
+        // PS-385: the elements, then the trailer, whose values sit beside the repeat.
+        if (field.getTrailer() != null && !field.getTrailer().isEmpty()) {
+            out.write(encodeFieldList(field.getTrailer(), data));
+        }
+        return out.toArray();
+    }
+
+    /** A repeat's list as the input gives it, or null where it gives none. */
+    @SuppressWarnings("unchecked")
+    private static List<Object> repeatRecords(Field field, Map<String, Object> data) {
+        Object records = field.getName() == null ? null : data.get(field.getName());
+        if (records instanceof Map<?, ?>) return List.of(records);
+        if (records instanceof List<?> asList) return (List<Object>) asList;
+        return null;
+    }
+
+    /** A repeat's {@code count} or {@code byte_length} as the schema or the input states it. */
+    private static Long repeatSize(Field field, Object size, Map<String, Object> data,
+                                   List<Field> siblings) {
+        Object value = size;
+        if (size instanceof String text && text.startsWith("$")) {
+            Field source = sizeSource(siblings, text.substring(1));
+            value = data.get(source != null ? source.getName() : text.substring(1));
+        }
+        if (value instanceof Boolean || !(value instanceof Number n)) return null;
+        double d = n.doubleValue();
+        if (d != Math.rint(d)) return null;
+        return (long) d;
+    }
+
+    /**
+     * A repeat's elements back to back: no framing, no trailer. {@code count}, where the
+     * schema or the input states one, is checked after the refusals that concern the schema
+     * rather than the input (PS-550, PS-542, PS-544, PS-387).
+     */
+    private byte[] encodeRepeatElements(Field field, Map<String, Object> data,
+                                        List<Object> list, Long count) {
+        String name = field.getName();
         // PS-550: a sibling identifying these values position by position is given as many
         // values as this repeat, as a decoder requires (PS-546).
         if (field.getRaw() != null) {
@@ -561,6 +677,11 @@ final class Encoder {
                 }
             }
         }
+        if (count != null && list.size() != count) {
+            // PS-551: the count and the list must agree; nothing is padded or cut.
+            throw new SchemaException.EncodeException("Repeat '" + name + "' is given "
+                    + list.size() + " values for a count of " + count + " (PS-551)");
+        }
 
         String index = field.getIndex();
         ByteBuf out = new ByteBuf();
@@ -580,11 +701,174 @@ final class Encoder {
             }
             out.write(encodeFieldList(field.getFields(), element));
         }
-        // PS-385: the elements, then the trailer, whose values sit beside the repeat.
-        if (field.getTrailer() != null && !field.getTrailer().isEmpty()) {
-            out.write(encodeFieldList(field.getTrailer(), data));
-        }
         return out.toArray();
+    }
+
+    // --- PS-551: what the input fixes ------------------------------------------------
+
+    /**
+     * The field of this list a {@code $ref} names, by its name or its {@code var:}.
+     * Searched into a byte_group's members, since a count is often a few bits of a shared
+     * byte, and into no other construct.
+     */
+    private static Field sizeSource(List<Field> fields, String ref) {
+        if (fields == null) return null;
+        for (Field f : fields) {
+            if (f.getByteGroup() != null && !f.getByteGroup().isEmpty()) {
+                Field found = sizeSource(f.getByteGroup(), ref);
+                if (found != null) return found;
+                continue;
+            }
+            if (f.getName() != null && !f.getName().isEmpty()
+                    && (ref.equals(f.getName()) || ref.equals(f.getVar()))) {
+                return f;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Whether a field's value can be derived and written as it stands: it reads bytes of
+     * its own and reports them unchanged, with no arithmetic or lookup between the bytes
+     * and the value a reference binds.
+     */
+    private static boolean derivable(Field source) {
+        if (source == null || source.getName() == null || source.getName().isEmpty()) return false;
+        if (isComputed(source) || isLiteral(source)) return false;
+        return source.getValue() == null && source.getNameFrom() == null
+                && (source.getLookup() == null || source.getLookup().isEmpty())
+                && source.getMult() == null && source.getDiv() == null && source.getAdd() == null
+                && (source.getTransform() == null || source.getTransform().isEmpty())
+                && (source.getPolynomial() == null || source.getPolynomial().isEmpty())
+                && source.getEncoding() == null && source.getCompute() == null
+                && source.getRef() == null && source.getGuard() == null;
+    }
+
+    /**
+     * Whether {@code source} is a bit range in a run nothing closes with {@code consume}.
+     * Such a run reads bytes the fields after it read again, and the encoder writes them
+     * twice, so a value derived into it would add bytes rather than fix them.
+     */
+    private static boolean isPeek(List<Field> fields, Field source) {
+        List<Field> run = new ArrayList<>();
+        for (Field field : fields) {
+            if (!isBareBitfield(field)) {
+                if (run.contains(source)) return run.get(run.size() - 1).getConsume() < 1;
+                run.clear();
+                continue;
+            }
+            run.add(field);
+            if (field.getConsume() >= 1) {
+                if (run.contains(source)) return false;
+                run.clear();
+            }
+        }
+        return run.contains(source) && run.get(run.size() - 1).getConsume() < 1;
+    }
+
+    /** The field a {@code $ref} names, where a value can be derived into it. */
+    private static Field derivedSource(List<Field> fields, Object ref) {
+        if (!(ref instanceof String text) || !text.startsWith("$")) return null;
+        Field source = sizeSource(fields, text.substring(1));
+        if (!derivable(source) || isPeek(fields, source)) return null;
+        return source;
+    }
+
+    /** The one discriminator a match case key stands for, or null. */
+    private static Long exactCaseValue(Object key) {
+        if (key == null || key instanceof Boolean) return null;
+        if (key instanceof Number n) {
+            double d = n.doubleValue();
+            return d == Math.rint(d) ? (long) d : null;
+        }
+        if (key instanceof String text) return parseIntAny(text);
+        return null;
+    }
+
+    /**
+     * The discriminator of the one match case whose fields the input gives: null where no
+     * case's fields are given, where two cases explain the input equally well, or where the
+     * case stands for more than one value.
+     */
+    private static Long soleCaseGiven(List<Field.Case> cases, Map<String, Object> data) {
+        Field.Case best = null;
+        int bestHits = 0;
+        boolean tied = false;
+        for (Field.Case c : cases) {
+            if (c.isDefault() || c.getFields() == null) continue;
+            int hits = 0;
+            for (Field f : claimableFields(c.getFields())) {
+                if (data.containsKey(f.getName())) hits++;
+            }
+            if (hits > bestHits) {
+                best = c;
+                bestHits = hits;
+                tied = false;
+            } else if (hits > 0 && hits == bestHits) {
+                tied = true;
+            }
+        }
+        if (best == null || tied) return null;
+        return exactCaseValue(best.getCaseValue());
+    }
+
+    /**
+     * PS-551: the values this field list's input omits but the rest of it fixes - a
+     * repeat's {@code count: $n} or {@code byte_length: $n} field from the list given, a
+     * match's {@code field: $d} discriminator from the one case whose fields are given, a
+     * flagged construct's mask from the groups given. A supplied value is kept: the
+     * construct checks it agrees, and the input is rejected where it does not. The input
+     * itself is not modified.
+     */
+    private Map<String, Object> deriveInputs(List<Field> list, Map<String, Object> data) {
+        Map<String, Object> derived = new LinkedHashMap<>(data);
+        for (Field f : list) {
+            if (f.getType() == FieldType.REPEAT && f.getMatchInline() == null) {
+                List<Object> records = repeatRecords(f, data);
+                if (records == null) continue;
+                for (Object ref : new Object[]{f.getCount(), f.getByteLength()}) {
+                    Field source = derivedSource(list, ref);
+                    if (source == null || derived.get(source.getName()) != null) continue;
+                    if (ref == f.getCount()) {
+                        derived.put(source.getName(), (long) records.size());
+                    } else {
+                        derived.put(source.getName(),
+                                (long) encodeRepeatElements(f, data, records, null).length);
+                    }
+                }
+            } else if (f.getMatchInline() != null) {
+                Field match = f.getMatchInline();
+                Field source = derivedSource(list, match.getOn());
+                if (source == null || derived.get(source.getName()) != null) continue;
+                Long key = soleCaseGiven(match.getCases() == null ? List.of() : match.getCases(), data);
+                if (key != null) derived.put(source.getName(), key);
+            } else if (f.getFlagged() != null) {
+                Field.FlaggedDef fd = f.getFlagged();
+                String mask = fd.getField() == null ? "" : fd.getField();
+                if (mask.startsWith("$")) mask = mask.substring(1);
+                Field source = sizeSource(list, mask);
+                String name = source != null ? source.getName() : mask;
+                long bits = 0;
+                long declared = 0;
+                for (Field.FlaggedGroup group : fd.getGroups()) {
+                    declared |= 1L << group.getBit();
+                    if (groupHasData(group, data)) bits |= 1L << group.getBit();
+                }
+                Object given = data.get(name);
+                if (given == null) {
+                    derived.put(name, bits);
+                    continue;
+                }
+                if (given instanceof Number n && !(given instanceof Boolean)
+                        && n.doubleValue() == Math.rint(n.doubleValue())
+                        && (n.longValue() & declared) != bits) {
+                    throw new SchemaException.EncodeException("Flagged field '" + name
+                            + "' is given " + n.longValue() + ", and the groups given set "
+                            + bits + " (PS-551)");
+                }
+            }
+        }
+        return derived;
     }
 
     /**
@@ -665,8 +949,23 @@ final class Encoder {
             }
         }
         if (matched == null && fallbackFields == null) {
-            // Nothing in the data belongs to any case.
-            return EMPTY;
+            if (discriminator == null && ("skip".equals(match.getMatchDefault())
+                    || (match.getLength() > 0 && (name == null || name.isEmpty())))) {
+                // Nothing given and nothing the input could give: an inline match with no
+                // name reports no discriminator, and a `skip` default none for an unmatched
+                // value. This is the corpus's non-advancing peek (r718x, dnt, and registry
+                // schemas), whose byte the bit range before it already wrote. Left as it
+                // was; see AGENTS.md.
+                return EMPTY;
+            }
+            if (match.getLength() > 0 && discriminator == null) {
+                // PS-551: an inline discriminator the input neither gives nor fixes through
+                // a case's fields. This returned no bytes at all, dropping the
+                // discriminator's own (PS-442).
+                throw new MissingFieldException(name != null ? name : "match");
+            }
+            // 'skip': the discriminator, and nothing for the case.
+            fallbackFields = List.of();
         }
         if (fallbackFields != null) {
             ByteBuf fallbackOut = new ByteBuf();
@@ -683,6 +982,9 @@ final class Encoder {
         if (match.getLength() > 0) {
             Long value = asLong(discriminator);
             if (value == null) {
+                if (matched.isDefault()) {
+                    throw new MissingFieldException(name != null ? name : "match");
+                }
                 Object key = matched.getCaseValue();
                 Long fromKey = key == null ? null : parseIntAny(String.valueOf(key));
                 if (fromKey == null) {
@@ -1487,7 +1789,7 @@ final class Encoder {
     private static String payloadName(Field f) {
         String name = f.getName();
         if (name == null || name.isEmpty() || name.startsWith("_")) return null;
-        if (f.getType() == FieldType.NUMBER) return null;
+        if (isComputed(f)) return null;
         return name;
     }
 

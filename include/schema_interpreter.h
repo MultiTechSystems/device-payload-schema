@@ -1386,6 +1386,9 @@ typedef struct {
     uint8_t data[SCHEMA_MAX_PAYLOAD];
     int len;
     int error_code;
+    /* PS-551: "Missing required field: {name}", the text every other encoder gives, where
+     * an input is missing. Room for the prefix (24) and the longest name. */
+    char error_msg[24 + SCHEMA_MAX_NAME_LEN];
 } encode_result_t;
 
 /* Input values for encoding */
@@ -1639,9 +1642,18 @@ static inline int schema_encode_direction(
             continue;
         }
         
+        if (field->type != FIELD_TYPE_SKIP && !find_input(inputs, field->name)) {
+            /* PS-551: rejected, naming the field, and no payload. encode_field reported
+             * the code alone; nothing said which field was missing. */
+            snprintf(result->error_msg, sizeof(result->error_msg),
+                     "Missing required field: %s", field->name);
+            result->error_code = SCHEMA_ERR_PARSE;
+            return SCHEMA_ERR_PARSE;
+        }
         int rc = encode_field(field, inputs, result->data, &pos, schema->endian);
         if (rc != SCHEMA_OK) {
             result->error_code = rc;
+            memset(result->data, 0, sizeof(result->data));   /* no partial payload */
             return rc;
         }
     }
