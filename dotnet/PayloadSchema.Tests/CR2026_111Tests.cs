@@ -113,7 +113,8 @@ public class CR2026_111Tests
             new Dictionary<string, object?> { ["increments"] = new List<object?> { 12, null } });
         Assert.False(result.Success);
         Assert.Contains(result.Errors, e =>
-            e.Contains("Repeat 'increments' has null at position 1, which has no encoding (PS-529)"));
+            e.Contains("Repeat 'increments' has null at position 1, and its element declares no "
+                + "`sentinel` to write for it (PS-544)"));
     }
 
     [Fact]

@@ -506,17 +506,25 @@ final class Encoder {
         }
         if (field.getElementName() != null) {
             // PS-529: each value is encoded as the element, wrapped as it was decoded.
-            // CR-2026-111 leaves open what a null position encodes as; the spec prototype
-            // refuses it rather than guess, and so does every encoder here.
+            // PS-544: a null is written as the element's first sentinel - an absent value,
+            // which the field list writes as the sentinel's raw bits - and is an error
+            // where the element declares none.
+            Field element = field.getFields() == null || field.getFields().isEmpty()
+                    ? null : field.getFields().get(0);
+            boolean hasSentinel = element != null && element.getSentinel() != null
+                    && !element.getSentinel().isEmpty();
             List<Object> wrapped = new ArrayList<>();
             for (int position = 0; position < list.size(); position++) {
                 Object item = list.get(position);
-                if (item == null) {
-                    throw new SchemaException.EncodeException("Repeat '" + name + "' has null at position "
-                            + position + ", which has no encoding (PS-529)");
-                }
                 Map<String, Object> record = new LinkedHashMap<>();
-                record.put(field.getElementName(), item);
+                if (item == null) {
+                    if (!hasSentinel) {
+                        throw new SchemaException.EncodeException("Repeat '" + name + "' has null at position "
+                                + position + ", and its element declares no `sentinel` to write for it (PS-544)");
+                    }
+                } else {
+                    record.put(field.getElementName(), item);
+                }
                 wrapped.add(record);
             }
             list = wrapped;

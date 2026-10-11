@@ -954,7 +954,9 @@ def reference_errors(schema):
             if isinstance(v, str):
                 names = []
                 if k in REFERENCE_KEYS and v.startswith('$'):
-                    names = [v[1:]]
+                    # PS-546: `$name[i]` names a sibling repeat and this one's index.
+                    indexed = re.fullmatch(r'(\w+)\[(\w+)\]', v[1:])
+                    names = list(indexed.groups()) if indexed else [v[1:]]
                 elif k in TEMPLATE_KEYS or (in_senml and k == 'name'):
                     names = TEMPLATE_REFERENCE.findall(v)
                 ahead.extend((n, k) for n in names if n not in declared)
@@ -1227,6 +1229,52 @@ _ITERATOR_KEYS = ('index', 'count_as')
 ELEMENT_NAME = 'element'
 
 
+#: What an `element` may not be (PS-545): it is one data field, not a construct entry.
+ELEMENT_CONSTRUCTS = ('match', 'byte_group', 'flagged', 'tlv', 'records')
+
+#: `$name[i]`: the value a sibling repeat of single values reported at this position
+#: (PS-546), in a repeat's `identity` or an element's `unit` or `ipso.instance`.
+SIBLING_REFERENCE = re.compile(r'^\$(\w+)\[(\w+)\]$')
+
+
+def sibling_references(repeat):
+    """The `$name[i]` references a repeat declares (PS-546): its identity, and its
+    elements' `unit` and `ipso.instance`, as (key, sibling name, index name) triples."""
+    refs = [('identity', repeat.get('identity'))]
+    for member in repeat_members(repeat)[0]:
+        if isinstance(member, dict):
+            ipso = member.get('ipso') if isinstance(member.get('ipso'), dict) else {}
+            refs += [('unit', member.get('unit')), ('ipso.instance', ipso.get('instance'))]
+    found = []
+    for key, ref in refs:
+        m = SIBLING_REFERENCE.match(ref) if isinstance(ref, str) else None
+        if m:
+            found.append((key, m.group(1), m.group(2)))
+    return found
+
+
+def sibling_errors(repeat, earlier, at):
+    """PS-546: each `$name[i]` names a repeat declaring `element`, decoded earlier in the
+    same field list (`earlier`, by name), and `i` is this repeat's `index`; the sibling's
+    element carries a lookup or is a literal (PS-374)."""
+    errors = []
+    for key, name, index in sibling_references(repeat):
+        label = f"{at}: {key} `${name}[{index}]`"
+        if index != repeat.get('index'):
+            errors.append(f"{label} must index by the repeat's own `index` (PS-546)")
+            continue
+        sibling = earlier.get(name)
+        if sibling is None:
+            errors.append(f"{label} names no repeat declaring `element` earlier in the "
+                          f"same field list (PS-546)")
+            continue
+        element = sibling['element']
+        if not ('lookup' in element or is_literal(element)):
+            errors.append(f"{label}: the elements of '{name}' identify values but carry no "
+                          f"lookup and are not a literal (PS-374, PS-546)")
+    return errors
+
+
 def repeat_members(field_def):
     """A repeat's element fields and, for a repeat of single values, the element's name.
 
@@ -1239,6 +1287,11 @@ def repeat_members(field_def):
     element = field_def.get('element')
     if isinstance(element, dict) and 'fields' not in field_def:
         name = element.get('name') or ELEMENT_NAME
+        if name.startswith('_'):
+            # PS-545: the element's name is never reported, so an internal name hides
+            # nothing. It is decoded under ELEMENT_NAME, and `var` keeps `$_x` bound.
+            return [dict(element, name=ELEMENT_NAME, var=element.get('var', name))], \
+                ELEMENT_NAME
         return [dict(element, name=name)], name
     fields = field_def.get('fields')
     return (fields if isinstance(fields, list) else []), None
@@ -1269,6 +1322,10 @@ def element_repeat_errors(field_def):
                       f"exactly one (PS-083, PS-528)")
     elif not isinstance(field_def.get('element', {}), dict):
         errors.append(f"{label}: `element` is a single field definition (PS-528)")
+    elif 'element' in field_def and ('type' not in field_def['element'] or any(
+            key in field_def['element'] for key in ELEMENT_CONSTRUCTS)):
+        errors.append(f"{label}: `element` is a data field that declares `type`, not a "
+                      f"construct (PS-545)")
     base = field_def.get('index_base', 0)
     if isinstance(base, bool) or not isinstance(base, int):
         errors.append(f"{label}: `index_base` is an integer (PS-530)")
@@ -1281,11 +1338,13 @@ def _repeat_member_ref_errors(repeat, member, where):
     by_name = {f.get('name'): f for f in repeat_members(repeat)[0] if isinstance(f, dict)}
     index = repeat.get('index')
     refs = []
-    if isinstance(member.get('unit'), str) and member['unit'].startswith('$'):
+    # A `$name[i]` names a sibling repeat (PS-546), which sibling_errors() checks.
+    if isinstance(member.get('unit'), str) and member['unit'].startswith('$') \
+            and not SIBLING_REFERENCE.match(member['unit']):
         refs.append(('unit', member['unit'][1:]))
     ipso = member.get('ipso')
     if isinstance(ipso, dict) and isinstance(ipso.get('instance'), str):
-        if ipso['instance'].startswith('$'):
+        if ipso['instance'].startswith('$') and not SIBLING_REFERENCE.match(ipso['instance']):
             refs.append(('ipso.instance', ipso['instance'][1:]))
     senml = member.get('senml')
     if isinstance(senml, dict) and isinstance(senml.get('name'), str):
@@ -1316,6 +1375,7 @@ def iterator_errors(fields, enclosing=(), in_elements=False, where='fields'):
     form (PS-386). Walks nested field lists so an enclosing repeat's names are known.
     """
     errors = []
+    earlier = {}                     # PS-546: the element repeats decoded before this field
     for i, f in enumerate(fields or []):
         if not isinstance(f, dict):
             continue
@@ -1371,9 +1431,11 @@ def iterator_errors(fields, enclosing=(), in_elements=False, where='fields'):
                     and any(op in present_if for op in CONDITION_OPS)):
                 errors.append(f"{at}: present_if must be one guard condition, "
                               f"{{field: $name, <op>: value}} (PS-386)")
+            errors.extend(sibling_errors(f, earlier, at))           # PS-546
             identity = f.get('identity')
             if identity is not None and not (
                     identity == f.get('index')
+                    or (isinstance(identity, str) and SIBLING_REFERENCE.match(identity))
                     or (isinstance(identity, str) and identity.startswith('$')
                         and identity[1:] in names)):
                 errors.append(f"{at}: identity must be the repeat's index or a $ reference "
@@ -1388,6 +1450,8 @@ def iterator_errors(fields, enclosing=(), in_elements=False, where='fields'):
             if isinstance(f.get('trailer'), list):
                 errors.extend(iterator_errors(f['trailer'], enclosing, False,
                                               f"{at}.trailer"))
+            if isinstance(f.get('element'), dict) and isinstance(f.get('name'), str):
+                earlier[f['name']] = f
             continue
         for key in ('fields',):
             if isinstance(f.get(key), list):
@@ -1669,9 +1733,70 @@ def condition_errors(schema):
     return errors
 
 
+#: The largest LwM2M object instance ID; 65535 is reserved (PS-548).
+IPSO_INSTANCE_MAX = 65534
+
+
+def ipso_instance_errors(schema):
+    """PS-548: an `ipso.instance` is an integer from 0 to 65534, or a reference every value
+    of which is one - a repeat's index whose range from `index_base` fits, a literal such
+    integer, or a lookup whose labels are all such integers with no `${value}` default.
+    Checked through the listing `_meta` would carry (PS-375, PS-547), so an own-element
+    reference (PS-373) and a sibling's `$name[i]` (PS-546) are held to the same rule."""
+    def valid(v):
+        return isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= IPSO_INSTANCE_MAX
+
+    errors = []
+
+    def check(field, repeat, siblings):
+        listing = meta_reference(field['ipso']['instance'], repeat, siblings=siblings)
+        if isinstance(listing, dict) and 'index' in listing:
+            count = listing.get('count')
+            if not isinstance(count, int) or isinstance(count, bool):
+                return              # PS-374 reports an index with no literal count or max
+            low = listing.get('index_base', 0)
+            ok = valid(low) and valid(low + max(count, 1) - 1)
+        elif isinstance(listing, dict):
+            ok = not listing.get('open') and all(valid(v) for v in listing.get('values', []))
+        else:
+            ok = valid(listing)
+        if not ok:
+            errors.append(f"Field '{field.get('name', '<unnamed>')}': its ipso.instance can "
+                          f"be other than an integer from 0 to {IPSO_INSTANCE_MAX} (PS-548)")
+
+    def walk(node, repeat, siblings):
+        if isinstance(node, list):
+            here = element_repeats(node)
+            for item in node:
+                walk_item(item, repeat, siblings, here)
+
+    def walk_item(item, repeat, siblings, here):
+        if not isinstance(item, dict):
+            walk(item, repeat, siblings)
+            return
+        ipso = item.get('ipso')
+        if isinstance(ipso, dict) and 'instance' in ipso:
+            check(item, repeat, siblings)
+        for key, value in item.items():
+            if key in ('test_vectors', 'definitions', 'ipso', 'senml', 'lookup'):
+                continue
+            if item.get('type') == 'repeat' and key in ('fields', 'element'):
+                # A member's references name this repeat's index and fields, and the
+                # element repeats beside it (PS-546).
+                walk(value if isinstance(value, list) else [value], item, here)
+            elif isinstance(value, dict):
+                walk_item(value, repeat, siblings, here)
+            else:
+                walk(value, repeat, siblings)
+
+    walk_item(schema, None, {}, {})
+    return errors
+
+
 def schema_iterator_errors(schema):
     """iterator_errors over the top-level and port field lists, and every tlv's reserve."""
     errors = iterator_errors(schema.get('fields'))
+    errors.extend(ipso_instance_errors(schema))                      # PS-548
     for port, entry in (schema.get('ports') or {}).items():
         group = entry.get('fields') if isinstance(entry, dict) else entry
         errors.extend(iterator_errors(group, where=f"ports[{port}].fields"))
@@ -2196,15 +2321,54 @@ def meta_declarations(fields):
     return found
 
 
-def meta_reference(value, repeat=None, bare=False):
+def element_repeats(fields):
+    """Name -> declaration of each repeat declaring `element` in one field list, the
+    sibling a `$name[i]` reference can name (PS-546). A construct that merges into its
+    parent (`match`, `tlv`, `flagged`) is part of the list; an object or repeat is not."""
+    found = {}
+
+    def visit(items):
+        for f in items if isinstance(items, list) else []:
+            if not isinstance(f, dict):
+                continue
+            if f.get('type') == 'repeat':
+                if isinstance(f.get('element'), dict) and isinstance(f.get('name'), str):
+                    found.setdefault(f['name'], f)
+                continue
+            for construct in ('match', 'tlv'):
+                body = f.get(construct)
+                if isinstance(body, dict):
+                    cases = body.get('cases')
+                    for case in (cases.values() if isinstance(cases, dict) else []):
+                        visit(case)
+                    visit(body.get('default'))
+            if isinstance(f.get('flagged'), dict):
+                for g in f['flagged'].get('groups') or []:
+                    if isinstance(g, dict):
+                        visit(g.get('fields'))
+
+    visit(fields)
+    return found
+
+
+def meta_reference(value, repeat=None, bare=False, siblings=None):
     """A per-element `unit`, `ipso.instance` or `identity` as PS-375 lists it: the repeat's
     index as {index, count}, or an element field as {field, values} with a lookup's
     `default` last, marked `open` where that default carries `${value}` (PS-489). A
-    literal is itself. PS-374, checked at load, restricts what a reference may name."""
+    literal is itself. PS-374, checked at load, restricts what a reference may name.
+    A `$name[i]` names the sibling repeat `name` in `siblings` (PS-546), and is listed
+    as {repeat, values} from that repeat's element (PS-547)."""
     if repeat is None or not isinstance(value, str):
         return value
     if not (bare or value.startswith('$')):
         return value
+    sibling = SIBLING_REFERENCE.match(value)
+    if sibling:
+        target = (siblings or {}).get(sibling.group(1))
+        element = dict(target['element'], name=ELEMENT_NAME) if target else {}
+        listing = meta_reference('$' + ELEMENT_NAME, {'element': element})
+        listing.pop('field', None)
+        return {'repeat': sibling.group(1), **listing}               # PS-547
     name = value[1:] if value.startswith('$') else value
     if name == repeat.get('index'):
         count = repeat.get('count')
@@ -2233,10 +2397,11 @@ def meta_reference(value, repeat=None, bare=False):
     return listing
 
 
-def field_meta(field_def, repeat=None):
+def field_meta(field_def, repeat=None, siblings=None):
     """One `_meta.fields` entry, derived from one declaration (PS-178, PS-493, PS-480,
     PS-371, PS-481). `repeat` is the repeat whose elements the field belongs to, for the
-    per-element references of PS-373 and PS-375."""
+    per-element references of PS-373 and PS-375. `siblings` are the element repeats of
+    the field list the field is declared in, which a `$name[i]` names (PS-546)."""
     entry = {}
     declared_type = meta_type(field_def)
     if declared_type is not None:
@@ -2244,11 +2409,12 @@ def field_meta(field_def, repeat=None):
     senml = field_def.get('senml') if isinstance(field_def.get('senml'), dict) else {}
     unit = senml.get('unit') or field_def.get('unit')          # PS-178, no conversion
     if unit is not None:
-        entry['unit'] = meta_reference(unit, repeat)
+        entry['unit'] = meta_reference(unit, repeat, siblings=siblings)
     ipso = field_def.get('ipso')
     if isinstance(ipso, dict) and 'object' in ipso:
         entry['ipso'] = {'object': ipso['object'],
-                         'instance': meta_reference(ipso.get('instance', 0), repeat),
+                         'instance': meta_reference(ipso.get('instance', 0), repeat,
+                                                    siblings=siblings),
                          'resource': ipso.get('resource', 5700)}
     if isinstance(senml.get('name'), str):
         entry['senml'] = {'name': senml['name']}               # PS-480; a template, PS-373
@@ -2258,17 +2424,21 @@ def field_meta(field_def, repeat=None):
         # PS-531: the element's own entry, nested, without its name; the repeat keeps
         # `type: repeat` and its identity.
         element = {k: v for k, v in field_def['element'].items() if k != 'name'}
-        entry['element'] = field_meta(element, field_def)
+        entry['element'] = field_meta(element, field_def, siblings)
         if 'identity' in field_def:
-            entry['identity'] = meta_reference(field_def['identity'], field_def, bare=True)
+            entry['identity'] = meta_reference(field_def['identity'], field_def, bare=True,
+                                               siblings=siblings)
     elif declared_type == 'repeat':
-        entry['elements'] = {name: field_meta(member, field_def)            # PS-371
+        inner = element_repeats(field_def.get('fields'))
+        entry['elements'] = {name: field_meta(member, field_def, inner)     # PS-371
                              for name, member in meta_declarations(
                                  field_def.get('fields')).items()}
         if 'identity' in field_def:
-            entry['identity'] = meta_reference(field_def['identity'], field_def, bare=True)
+            entry['identity'] = meta_reference(field_def['identity'], field_def, bare=True,
+                                               siblings=siblings)
     elif declared_type == 'object':
-        entry['fields'] = {name: field_meta(member)                          # PS-481
+        inner = element_repeats(field_def.get('fields'))
+        entry['fields'] = {name: field_meta(member, siblings=inner)          # PS-481
                            for name, member in meta_declarations(
                                field_def.get('fields')).items()}
     return entry
@@ -3348,6 +3518,16 @@ class SchemaInterpreter:
         # Validate minimum iterations
         if len(result) < min_iterations:
             raise ValueError(f"repeat produced {len(result)} elements, but minimum is {min_iterations}")
+
+        # PS-546: a sibling identifying these values position by position reported as
+        # many values as this repeat, or the pairing names nothing.
+        for name in dict.fromkeys(n for _, n, _ in sibling_references(field_def)):
+            reported = (self._current_data or {}).get(name, self._variables.get(name))
+            if not isinstance(reported, list) or len(reported) != len(result):
+                have = len(reported) if isinstance(reported, list) else 'none'
+                raise ValueError(f"Repeat '{field_def.get('name')}' has {len(result)} "
+                                 f"values and '{name}', which identifies them, has {have} "
+                                 f"(PS-546)")
 
         # PS-367: the number of elements reported, bound for every later field only.
         if field_def.get('count_as'):
@@ -4754,12 +4934,14 @@ class SchemaInterpreter:
             meta['fPort'] = fPort                          # PS-340, PS-342: as supplied
 
         declared = meta_declarations(self._resolve_fields(fPort))
+        siblings = element_repeats(self._resolve_fields(fPort))       # PS-546
         meta['fields'] = {}
         for key in result.data:
             if key.startswith('_'):
                 continue                                   # `_quality`, `_warnings`
             source = self._producers.get(key) or declared.get(key)
-            meta['fields'][key] = field_meta(source) if source is not None else {}
+            meta['fields'][key] = (field_meta(source, siblings=siblings)
+                                   if source is not None else {})
         result.data = dict(result.data, _meta=meta)
         return result
 
@@ -5899,12 +6081,14 @@ class SchemaInterpreter:
                              f"records, which cannot be encoded (PS-542)")
         if element_name is not None:
             # PS-529: each value is encoded as the element, wrapped as it was decoded.
-            # CR-2026-111 leaves open what a null position encodes as; the spec
-            # prototype refuses it rather than guess, and so does every encoder here.
-            for position, item in enumerate(records):
-                if item is None:
-                    raise ValueError(f"Repeat '{name}' has null at position {position}, "
-                                     f"which has no encoding (PS-529)")
+            # PS-544: a null is written as the element's first sentinel, which the field
+            # list writes as raw bits for a None value; with no sentinel it is an error.
+            if not record_fields[0].get('sentinel'):
+                for position, item in enumerate(records):
+                    if item is None:
+                        raise ValueError(
+                            f"Repeat '{name}' has null at position {position}, and its "
+                            f"element declares no `sentinel` to write for it (PS-544)")
             records = [{element_name: item} for item in records]
         # PS-387: an element present_if dropped is not in the data, and its bytes were in
         # the payload, so they cannot be written back. Only elements that read nothing

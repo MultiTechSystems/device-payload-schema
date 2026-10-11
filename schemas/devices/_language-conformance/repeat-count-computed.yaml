@@ -1,0 +1,26 @@
+# An array's count may name an integer computed field (PS-084, CR-2026-123): here a
+# device's header byte holds the number of entries plus two, and an internal computed
+# field subtracts the two.
+#
+# The computed field reads no bytes, so the vector round-trips: `total` is written from
+# its own value, and the array writes its entries.
+name: probe_repeat_count_computed
+endian: big
+fields:
+- name: total
+  type: u8
+- name: _entries
+  type: integer
+  compute: {op: sub, a: $total, b: 2}
+- name: entries
+  type: repeat
+  count: $_entries
+  element:
+    type: u8
+test_vectors:
+- name: two_entries
+  source: spec-example
+  payload: "04 0A 0B"
+  expected:
+    total: 4
+    entries: [10, 11]

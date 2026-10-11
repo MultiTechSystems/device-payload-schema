@@ -7,8 +7,10 @@
 # In `expected`, null at a position asserts that null was reported there (PS-043 as
 # amended), not that the array is shorter.
 #
-# Neither round-trips: what an encoder writes for null is left open by the CR, and every
-# encoder here refuses it, naming the position. The third vector has no null and does.
+# An encoder writes the element's first reserved raw value for null (PS-544,
+# CR-2026-121), so the first vector round-trips. The second does not: its null came from
+# a value the label table lacks, and writing the reserved value for it is a different
+# byte. The third vector has no null and round-trips.
 name: probe_repeat_element_null
 endian: big
 fields:

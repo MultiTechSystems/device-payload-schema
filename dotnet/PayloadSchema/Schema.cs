@@ -212,6 +212,11 @@ public class SchemaField
     /// reports each element's value rather than a record. Null for a `fields` repeat.
     /// </summary>
     public string? ElementName { get; set; }
+    /// <summary>
+    /// The sibling repeats a `$name[i]` in this repeat's identity, or its element's unit or
+    /// ipso.instance, names (PS-546); each must report as many values as this repeat.
+    /// </summary>
+    public List<string> SiblingNames { get; set; } = new();
     /// <summary>The number <see cref="Index"/> counts from (PS-530), 0 by default.</summary>
     public int IndexBase { get; set; }
     /// <summary>

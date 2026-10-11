@@ -842,10 +842,18 @@ public static partial class SchemaParser
         if (f.Type == FieldType.Repeat && !fm.Children.ContainsKey(new YamlScalarNode("fields"))
             && RepeatMembers(fm) is ({ } elementSeq, { } elementName))
         {
+            // PS-545: refused here, before the element is parsed as a field - a typeless
+            // element would otherwise fail as "declares no type", naming no repeat.
+            if (Get(fm, "element") is YamlMappingNode element
+                && (!Has(element, "type") || ElementConstructs.Any(c => Has(element, c))))
+                throw new InvalidOperationException($"Repeat '{f.Name}': `element` is a data field "
+                    + "that declares `type`, not a construct (PS-545)");
             f.Fields = ParseFields(elementSeq);
             f.ElementName = elementName;
         }
         if (fm.TryGetValue("identity", out var identityNode)) f.Identity = Scalar(identityNode);
+        if (f.Type == FieldType.Repeat)
+            f.SiblingNames = SiblingReferences(fm).Select(r => r.name).Distinct().ToList();   // PS-546
         if (fm.TryGetValue("reserve", out var reserveNode)) f.Reserve = Int(reserveNode);
         if (fm.TryGetValue("trailer", out var trailerNode) && trailerNode is YamlSequenceNode trailerSeq)
             f.Trailer = ParseFields(trailerSeq);

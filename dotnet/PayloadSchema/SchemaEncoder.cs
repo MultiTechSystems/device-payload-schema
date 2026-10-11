@@ -605,12 +605,14 @@ public static class SchemaEncoder
             if (field.ElementName != null)
             {
                 // PS-529: each value is encoded as the element, wrapped as it was decoded.
-                // CR-2026-111 leaves open what a null position encodes as; the spec
-                // prototype refuses it rather than guess, and so does every encoder here.
-                for (int p = 0; p < list.Count; p++)
-                    if (list[p] == null)
-                        throw new InvalidOperationException(
-                            $"Repeat '{field.Name}' has null at position {p}, which has no encoding (PS-529)");
+                // PS-544: a null is written as the element's first sentinel, which the field
+                // list writes as raw bits for a null value; with no sentinel it is an error.
+                if (field.Fields.Count == 0 || field.Fields[0].Sentinel is not { Count: > 0 })
+                    for (int p = 0; p < list.Count; p++)
+                        if (list[p] == null)
+                            throw new InvalidOperationException(
+                                $"Repeat '{field.Name}' has null at position {p}, and its element "
+                                + "declares no `sentinel` to write for it (PS-544)");
                 list = list.Select(v => (object?)new Dictionary<string, object?> { [field.ElementName] = v })
                     .ToList();
             }
