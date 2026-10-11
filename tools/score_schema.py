@@ -323,7 +323,16 @@ const tests = {json.dumps(test_cases)};
 // Structural comparison. `actVal !== expVal` compared object identity, so two
 // structurally equal objects never matched and any nested expectation failed with
 // "[object Object], expected [object Object]" - the same defect the Java and C# corpus
-// runners had (PS-044, PS-045).
+// runners had (PS-044, PS-045). A null expectation asserts absence at every depth
+// (PS-043), as validate_schema.expected_fields_match has it: the top level and every
+// nested object go through matchFields, so `{{bytes: {{vol: null}}}}` passes when the
+// decoder omits `vol` and fails when it reports one.
+function matchFields(exp, act, tol) {{
+    return Object.keys(exp).every(function (k) {{
+        if (exp[k] === null) return !(k in act) || act[k] === undefined;
+        return k in act && act[k] !== undefined && deepMatch(exp[k], act[k], tol);
+    }});
+}}
 function deepMatch(exp, act, tol) {{
     if (typeof exp === 'number') {{
         return typeof act === 'number' && Math.abs(act - exp) <= tol;
@@ -333,10 +342,8 @@ function deepMatch(exp, act, tol) {{
         return exp.every(function (e, i) {{ return deepMatch(e, act[i], tol); }});
     }}
     if (exp && typeof exp === 'object') {{
-        if (!act || typeof act !== 'object') return false;
-        return Object.keys(exp).every(function (k) {{
-            return k in act && deepMatch(exp[k], act[k], tol);
-        }});
+        if (!act || typeof act !== 'object' || Array.isArray(act)) return false;
+        return matchFields(exp, act, tol);
     }}
     return act === exp;
 }}
@@ -437,6 +444,77 @@ console.log(JSON.stringify({{ passed, failed, errors }}));
         return 'generator-gap', [f"JS test error: {e}"]
 
 
+def _match_selector(match_def: Dict[str, Any]) -> str:
+    """The name a match's branches are listed under: its `field` (or legacy `on`)
+    without the `$`, else the `name` an inline discriminator reports under."""
+    on_field = match_def.get('on', match_def.get('field')) or match_def.get('name', '')
+    return str(on_field).lstrip('$')
+
+
+class _BranchRecorder:
+    """Records which match cases and flagged groups a decode actually entered.
+
+    Wraps the interpreter's own match and flagged decoders on one instance, so a
+    branch counts wherever it sits - inside a repeat element, a `records` body, a
+    nested object or a case body - and whatever its discriminator is, including an
+    internal `_` field whose value lives in the decoder's variables and never reaches
+    its output. Reading the selector's value back out of the output, as this scorer
+    did, saw none of those: a match inside a repeat element reported every branch
+    untested however many vectors entered it.
+    """
+
+    def __init__(self, interpreter: Any):
+        self.hits = set()  # type: Set[Tuple[str, str, str]]
+        self._stack = []  # type: List[Dict[str, Any]]
+        self._interp = interpreter
+        self._orig_match = interpreter._decode_match_option_b
+        self._orig_pattern = interpreter._match_case_pattern
+        self._orig_flagged = interpreter._decode_flagged
+        interpreter._decode_match_option_b = self._match
+        interpreter._match_case_pattern = self._pattern
+        interpreter._decode_flagged = self._flagged
+
+    def _match(self, match_def, buf, pos):
+        frame = {'def': match_def, 'hit': None}
+        self._stack.append(frame)
+        try:
+            out = self._orig_match(match_def, buf, pos)
+        finally:
+            self._stack.pop()
+        cases = match_def.get('cases') or {}
+        hit = frame['hit']
+        if hit is None and isinstance(cases, dict) and 'default' in cases:
+            hit = 'default'
+        if hit is not None:
+            self.hits.add(('match', _match_selector(match_def), str(hit)))
+        return out
+
+    def _pattern(self, value, pattern):
+        matched = self._orig_pattern(value, pattern)
+        if matched and self._stack:
+            frame = self._stack[-1]
+            cases = frame['def'].get('cases') or {}
+            # Only the selecting loop of the innermost match: a tlv in a case body
+            # calls this too, after the case has been chosen.
+            if frame['hit'] is None and isinstance(cases, dict) and pattern in cases:
+                frame['hit'] = pattern
+        return matched
+
+    def _flagged(self, flagged_def, buf, pos):
+        name = flagged_def.get('field', '')
+        try:
+            flags = int((getattr(self._interp, '_variables', None) or {})[name])
+        except (KeyError, TypeError, ValueError):
+            flags = None
+        out = self._orig_flagged(flagged_def, buf, pos)
+        if flags is not None:
+            for group in flagged_def.get('groups', []) or []:
+                bit = group.get('bit', 0) if isinstance(group, dict) else 0
+                if (flags >> int(bit)) & 1:
+                    self.hits.add(('flagged', str(name), str(bit)))
+        return out
+
+
 def analyze_branch_coverage(schema: Dict[str, Any]) -> Tuple[float, List[str]]:
     """Analyze test vector coverage of switch/flagged branches."""
     vectors = schema.get('test_vectors', [])
@@ -446,25 +524,32 @@ def analyze_branch_coverage(schema: Dict[str, Any]) -> Tuple[float, List[str]]:
     # Collect every branch in the schema as (kind, selector, value).
     branches = set()
 
-    def scan_fields(fields: List[Dict], port: Optional[str] = None):
+    def scan_fields(fields: Any, port: Optional[str] = None):
+        if not isinstance(fields, list):
+            return
         for field in fields:
             if not isinstance(field, dict):
                 continue
             # Switch/match branches
             if 'match' in field or field.get('type') == 'match':
                 match_def = field.get('match', field)
-                on_field = match_def.get('on', match_def.get('field', ''))
-                on_field = str(on_field).lstrip('$')
-                for case_val in (match_def.get('cases', {}) or {}).keys():
-                    branches.add(('match', on_field, str(case_val)))
-                for case_def in (match_def.get('cases', {}) or {}).values():
-                    if isinstance(case_def, dict) and 'fields' in case_def:
-                        scan_fields(case_def['fields'], port)
-                    elif isinstance(case_def, list):
-                        scan_fields(case_def, port)
+                if not isinstance(match_def, dict):
+                    match_def = {}
+                on_field = _match_selector(match_def)
+                cases = match_def.get('cases', {}) or {}
+                if isinstance(cases, dict):
+                    for case_val in cases.keys():
+                        branches.add(('match', on_field, str(case_val)))
+                    for case_def in cases.values():
+                        if isinstance(case_def, dict) and 'fields' in case_def:
+                            scan_fields(case_def['fields'], port)
+                        elif isinstance(case_def, list):
+                            scan_fields(case_def, port)
+                if isinstance(match_def.get('default'), list):
+                    scan_fields(match_def['default'], port)
 
             # Flagged groups
-            if 'flagged' in field:
+            if isinstance(field.get('flagged'), dict):
                 fg = field['flagged']
                 flag_field = str(fg.get('field', ''))
                 for group in fg.get('groups', []):
@@ -472,8 +557,15 @@ def analyze_branch_coverage(schema: Dict[str, Any]) -> Tuple[float, List[str]]:
                     if isinstance(group, dict) and 'fields' in group:
                         scan_fields(group['fields'], port)
 
+            # Members of a nested object or a repeat element, a repeat's single
+            # `element` (PS-528), and the records an element yields (PS-541).
             if 'fields' in field:
                 scan_fields(field['fields'], port)
+            if isinstance(field.get('element'), dict):
+                scan_fields([field['element']], port)
+            if isinstance(field.get('records'), list):
+                for body in field['records']:
+                    scan_fields(body, port)
             if 'byte_group' in field:
                 bg = field['byte_group']
                 bg_fields = bg if isinstance(bg, list) else bg.get('fields', [])
@@ -499,22 +591,28 @@ def analyze_branch_coverage(schema: Dict[str, Any]) -> Tuple[float, List[str]]:
         interpreter = SchemaInterpreter(schema)
     except Exception:
         return 0.0, ["Could not build interpreter for branch analysis"]
+    recorder = _BranchRecorder(interpreter)
 
     for tv in vectors:
         payload_hex = str(tv.get('payload', '')).replace(' ', '')
         fport = tv.get('fPort') or tv.get('fport')
         observed = dict(tv.get('expected', {}) or {})
+        recorder.hits = set()
         try:
             result = interpreter.decode(bytes.fromhex(payload_hex), fPort=fport)
             if result.success:
                 # Decoded values win: `expected` may only list a subset.
                 observed.update(result.data)
+                # The branches the decoder entered, at any depth (_BranchRecorder).
+                covered |= recorder.hits
         except Exception:
             pass
 
         if fport is not None:
             covered.add(('port', 'fPort', str(fport)))
 
+        # A top-level selector's value in the output, for the forms the recorder
+        # does not see (the legacy `type: match` with `on:`).
         for kind, selector, value in branches:
             if kind == 'port':
                 continue
@@ -1024,10 +1122,16 @@ _WIRE_WIDTHS = {
 
 
 def _iter_field_defs(node: Any):
-    """Yield every field definition anywhere in a schema."""
+    """Yield every field definition anywhere in a schema.
+
+    A repeat's `element` (PS-528) is a field definition whose `name` is optional.
+    """
     if isinstance(node, dict):
         if 'name' in node and 'type' in node:
             yield node
+        element = node.get('element')
+        if isinstance(element, dict) and 'type' in element and 'name' not in element:
+            yield element
         for value in node.values():
             for found in _iter_field_defs(value):
                 yield found
@@ -1114,16 +1218,27 @@ def check_edge_cases(
     has_max = False
     has_negative = False
 
-    # Values a vector actually produced.
+    # Values a vector actually produced, at any depth: a reading inside a repeat
+    # element, a record or a nested object is as much a value as a top-level one.
+    def numbers(node: Any):
+        if isinstance(node, dict):
+            for key, val in node.items():
+                if not str(key).startswith('_'):
+                    for found in numbers(val):
+                        yield found
+        elif isinstance(node, list):
+            for item in node:
+                for found in numbers(item):
+                    yield found
+        elif isinstance(node, (int, float)) and not isinstance(node, bool):
+            yield node
+
     for _tv, data in decoded:
-        for key, val in data.items():
-            if key.startswith('_') or isinstance(val, bool):
-                continue
-            if isinstance(val, (int, float)):
-                if val == 0:
-                    has_zero = True
-                if val < 0:
-                    has_negative = True
+        for val in numbers(data):
+            if val == 0:
+                has_zero = True
+            if val < 0:
+                has_negative = True
 
     payload_lengths = set()
     for tv in vectors:
