@@ -455,6 +455,12 @@ function encMissing(name) {                           // missing_field_message
   return "Missing required field: " + name;
 }
 
+function encHasDefault(f) {                           // field_default
+  // PS-554: a declared `default` is a defined absence, in reported form, encoded as
+  // input. An enum's is its unmapped label (PS-068), a legacy match's its fallback case.
+  return "default" in f && f.type !== "enum" && f.type !== "match";
+}
+
 function encIsLiteral(f) {                            // is_literal
   return (f.type === "string" || f.type === "number" || f.type === "boolean") && "value" in f;
 }
@@ -462,6 +468,7 @@ function encIsLiteral(f) {                            // is_literal
 function encInternalValue(f, data) {                  // _internal_encode_value
   if ("value" in f) return f.value;
   if (Object.prototype.hasOwnProperty.call(data, f.name)) return data[f.name];
+  if (encHasDefault(f)) return f["default"];         // PS-554
   encFail("internal field " + JSON.stringify(f.name) + " reads payload bytes and declares no " +
           "value, and the input does not supply it (PS-434)");
 }
@@ -623,6 +630,7 @@ function encBitRun(fr, run, data, ctx) {              // _encode_bitfield_run
     var f = run[i], name = f.name || "", v;
     if (!name) v = f["default"] === undefined ? 0 : f["default"];
     else if ("value" in f || name.charAt(0) === "_") v = encInternalValue(f, data);
+    else if (!encHas(data, name) && encHasDefault(f)) v = f["default"];   // PS-554
     else if (!encHas(data, name)) encFail(encMissing(name));   // PS-551
     else v = data[name];
     v = encReverseModifiers(v, f);
@@ -661,6 +669,7 @@ function encByteGroup(out, f, data, ctx) {            // _encode_byte_group
     var name = g.name || "", v;
     if (!name) v = g["default"] === undefined ? 0 : g["default"];
     else if ("value" in g || name.charAt(0) === "_") v = encInternalValue(g, data);
+    else if (!encHas(data, name) && encHasDefault(g)) v = g["default"];   // PS-554
     else if (!encHas(data, name)) encFail(encMissing(name));   // PS-551
     else v = data[name];
     if (g.type === "bool") {                    // its `bit` of the group (PS-364)
@@ -1384,11 +1393,15 @@ function encList(out, fields, data, ctx, top) {
         if (top) encFail("Error encoding " + name + ": name_from " + JSON.stringify(f.name_from) + " references a field the data does not carry, so its output key cannot be rebuilt");
         key = name;
       }
-      if (!encHas(data, key)) {
-        if (f.sentinel) { encField(out, encRawBits(f), f.sentinel[0], ctx); return; }
-        encFail(encMissing(key));                // PS-551: this wrote a zero
+      if (!encHas(data, key) && encHasDefault(f)) {
+        value = f["default"];                    // PS-554: encoded as input
+      } else {
+        if (!encHas(data, key)) {
+          if (f.sentinel) { encField(out, encRawBits(f), f.sentinel[0], ctx); return; }
+          encFail(encMissing(key));              // PS-551: this wrote a zero
+        }
+        value = data[key];
       }
-      value = data[key];
     }
     if (type === "bitfield_string") { encBitfieldString(out, f, value, ctx); return; }
     if (type === "bool") {                       // its bit of the byte it peeks
@@ -4338,8 +4351,15 @@ function writeS(buf, pos, size, value, endian) {
                     # reference's encode_command does. It was written as 0.
                     src = f'data.{js_name}'
                     rev = self._reverse_modifiers_expr(f'({src})', field)
-                    lines.append(f'    if (data.{js_name} === undefined || data.{js_name} === null) '
-                                 f'throw new Error({json.dumps("Missing required field: " + fname)});')
+                    from schema_interpreter import field_default
+                    has_default, default = field_default(field)
+                    if has_default:
+                        # PS-554: an omitted value takes the declared default.
+                        lines.append(f'    if (data.{js_name} === undefined || data.{js_name} === null) '
+                                     f'data.{js_name} = {json.dumps(default)};')
+                    else:
+                        lines.append(f'    if (data.{js_name} === undefined || data.{js_name} === null) '
+                                     f'throw new Error({json.dumps("Missing required field: " + fname)});')
                     lines.append(f'    {write_fn}(buf, pos, {sz}, {rev}, endian);')
                     lines.append(f'    pos += {sz};')
         

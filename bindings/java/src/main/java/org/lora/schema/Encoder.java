@@ -208,6 +208,8 @@ final class Encoder {
             }
             if (data.get(lookupName) != null) {
                 value = data.get(lookupName);
+            } else if (Wave6b.hasFieldDefault(field)) {
+                value = Wave6b.fieldDefault(field);   // PS-554: a declared default, as input
             } else if (field.getSentinel() != null && !field.getSentinel().isEmpty()) {
                 // A reading the decode omitted as "no reading" (PS-427) goes back as the
                 // sentinel it was, not as zero: the raw value, with no modifier reversed.
@@ -520,6 +522,8 @@ final class Encoder {
                 value = Long.valueOf(0);
             } else if (member.getValue() != null || name.startsWith("_")) {
                 value = Wave6b.internalEncodeValue(member, data);   // PS-360, PS-434
+            } else if (data.get(name) == null && Wave6b.hasFieldDefault(member)) {
+                value = Wave6b.fieldDefault(member);                // PS-554
             } else if (data.get(name) == null) {
                 // PS-551. A range was written as zero bits, which read back as a value.
                 throw new MissingFieldException(name);
@@ -576,6 +580,8 @@ final class Encoder {
                 value = Long.valueOf(0);
             } else if (member.getValue() != null || name.startsWith("_")) {
                 value = Wave6b.internalEncodeValue(member, data);   // PS-360, PS-434
+            } else if (data.get(name) == null && Wave6b.hasFieldDefault(member)) {
+                value = Wave6b.fieldDefault(member);                // PS-554
             } else if (data.get(name) == null) {
                 // PS-551. A member was written as zero bits, which read back as a value.
                 throw new MissingFieldException(name);

@@ -2059,6 +2059,28 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.
 
+- **CR-2026-139 (PS-554, PS-551 amended): a field's `default` is written where the input
+  omits it.** A declared `default` is a defined absence. It is in the field's reported
+  form (after modifiers, `transform` and lookup) and is encoded exactly as that value
+  given as input: `{div: 10, default: 2.5}` writes `0x19`, `{lookup: {1: eco, 2: boost},
+  default: boost}` writes `0x02`, and one that cannot be encoded is rejected as such input
+  is (`Field 'x': 300 encodes as 300, outside 0 to 255 (PS-168)`). A decoder ignores it.
+  An enum's `default` is its unmapped label (PS-068) and a legacy `type: match`'s its
+  fallback case; neither is ever written, so an omitted enum is still `Missing required
+  field`. This reverses #116, which rejected a declared default as a missing value.
+  - **Where:** one predicate per language - Python `field_default`, Go `fieldDefault`
+    (`cr134.go`), Java `Wave6b.hasFieldDefault`, C# `SchemaEncoder.HasFieldDefault`, the
+    runtime's `encHasDefault` - consulted at every missing-input site: a field list, the
+    top level, a byte_group member, a bit run, an internal field (before PS-434's error),
+    and Python's `encode_command` and the generated `encodeCommand`. Go, Java and C# read
+    the key from the declaration as written, since their typed models keep only an enum's.
+    The default comes after `optional` (an omitted optional field stays omitted) and before
+    a `sentinel`; a CR-2026-134 derivation, which runs first, wins over it.
+  - **C** has no field default (`field_def_t` has no slot), and `tools/schema_binary.py`
+    already refused every `default`; its reason now says so.
+  - Counted before: 0 field-level non-enum defaults in the corpus, the library, the
+    examples and the private registry, so no vector and no floor moves. Cases: the
+    CR-2026-139 section of `tests/cr-2026-134-cases.yaml`, read by all five encoders.
 - **CR-2026-134 (PS-551): an encoder rejects missing input and derives what the input
   fixes.** Every encoder used to write zeros for a required value its input omitted (a
   `Missing field: x` warning at the top level, silence inside a construct), and for a few
@@ -2071,7 +2093,7 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     input gives, a byte_group or bit-range member, and a repeat whose list is absent (a
     framed one wrote nothing; an `until: end` one with a trailer returned before the
     trailer). Python, Java and C# returned the bytes written before an error; every encoder
-    now returns none, as Go always did. Not required: an optional field (PS-405), a literal
+    now returns none, as Go always did. Not required: an optional field (PS-405), a field declaring `default` (PS-554, CR-2026-139, next entry above), a literal
     (PS-359), a field with `value` (PS-360), an internal field (PS-434, which keeps its own
     message), a skip, a nameless field (padding, as a skip is), and an absent value with a
     `sentinel` (written as the sentinel, PS-427).

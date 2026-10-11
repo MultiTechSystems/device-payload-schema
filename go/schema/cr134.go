@@ -19,6 +19,26 @@ func missingFieldError(name string) error {
 	return fmt.Errorf("Missing required field: %s", name)
 }
 
+// fieldDefault is a field's declared `default` where the input omits it (PS-554,
+// CR-2026-139): in the field's reported form, encoded exactly as that value given as
+// input, so one that cannot be encoded is rejected as such input is (PS-168). A declared
+// default is a defined absence (PS-551 as amended). An enum's `default` is its unmapped
+// label (PS-068) and a legacy `type: match`'s its fallback case, so neither is written.
+// Read from the declaration as written: the typed model keeps only the enum's.
+func fieldDefault(f Field) (any, bool) {
+	if f.decl == nil {
+		return nil, false
+	}
+	v, ok := f.decl["default"]
+	if !ok {
+		return nil, false
+	}
+	if t, _ := f.decl["type"].(string); t == "enum" || t == "match" {
+		return nil, false
+	}
+	return v, true
+}
+
 // isComputedField reports a field computed from others, which has no bytes of its own.
 func isComputedField(f Field) bool {
 	return f.Type == TypeNumber || f.Type == "number" || f.Type == TypeInteger ||

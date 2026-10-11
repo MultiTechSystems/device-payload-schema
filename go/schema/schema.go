@@ -4836,8 +4836,12 @@ func encodeByteGroup(field Field, data map[string]any, ctx *EncodeContext) error
 		} else if gf.Name != "" {
 			v, ok := data[gf.Name]
 			if !ok || v == nil {
-				// PS-551. A member was written as zero bits, which read back as a value.
-				return missingFieldError(gf.Name)
+				if d, has := fieldDefault(gf); has {
+					v = d // PS-554: a declared default, encoded as input
+				} else {
+					// PS-551. A member was written as zero bits, which read back as a value.
+					return missingFieldError(gf.Name)
+				}
 			}
 			value = v
 		}
@@ -5068,8 +5072,12 @@ func encodeBitfieldRun(run []Field, data map[string]any, ctx *EncodeContext) err
 		} else if gf.Name != "" {
 			v, ok := data[gf.Name]
 			if !ok || v == nil {
-				// PS-551. A range was written as zero bits, which read back as a value.
-				return missingFieldError(gf.Name)
+				if d, has := fieldDefault(gf); has {
+					v = d // PS-554: a declared default, encoded as input
+				} else {
+					// PS-551. A range was written as zero bits, which read back as a value.
+					return missingFieldError(gf.Name)
+				}
 			}
 			value = v
 		}
@@ -5344,6 +5352,12 @@ func encodeFieldList(fields []Field, data map[string]any, ctx *EncodeContext) er
 			return nameErr
 		}
 		value, exists := data[lookupName]
+		if !exists || value == nil {
+			// PS-554: a declared default is a defined absence, encoded as input.
+			if d, has := fieldDefault(field); has {
+				value, exists = d, true
+			}
+		}
 		if !exists || value == nil {
 			if len(field.Sentinel) > 0 {
 				// A reading the decode omitted as "no reading" (PS-427) goes back as
