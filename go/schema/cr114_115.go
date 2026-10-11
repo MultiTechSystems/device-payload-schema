@@ -81,16 +81,10 @@ func isBufferUnderflow(err error) bool {
 	return errors.As(err, &under)
 }
 
-// memberBaseBytes is the bytes a byte_group member's own base reads: `u16[0:3]` two.
+// memberBaseBytes is the bytes a byte_group member's own base reads: `u16[0:3]` two, a
+// whole `u16` two, a bool one (PS-070, CR-2026-131).
 func memberBaseBytes(member Field) int {
-	if m := bitRangePattern.FindStringSubmatch(string(member.Type)); m != nil {
-		var bits int
-		fmt.Sscanf(m[1][1:], "%d", &bits)
-		if bits/8 > 0 {
-			return bits / 8
-		}
-	}
-	return 1
+	return fieldMemberRange(member).baseBytes
 }
 
 // byteGroupUnderflow names a byte_group's short read as the spec prototype does: each

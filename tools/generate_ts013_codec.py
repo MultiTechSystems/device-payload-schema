@@ -530,10 +530,21 @@ function encBitRun(out, run, data, ctx) {             // _encode_bitfield_run
   encPacked(out, packed, Math.max(1, size), endian);
 }
 
+function encGroupWidth(f) {                          // byte_group_width
+  var group = f.byte_group, members = Array.isArray(group) ? group : (group.fields || []);
+  var declared = Array.isArray(group) ? f["size"] : group["size"];
+  var width = (declared === undefined || declared === null) ? 1 : parseInt(declared, 10);
+  for (var i = 0; i < members.length; i++) {   // PS-070: the widest member's base
+    var t = String((members[i] && members[i].type) || ""), r = /^[us](\d+)\[/.exec(t);
+    var w = r ? Math.max(1, Math.floor(Number(r[1]) / 8)) : (ENC_TYPES[t] ? ENC_TYPES[t][0] : 1);
+    if (w > width) width = w;
+  }
+  return width;
+}
+
 function encByteGroup(out, f, data, ctx) {            // _encode_byte_group
-  var group = f.byte_group, members, size;
-  if (Array.isArray(group)) { members = group; size = parseInt(f.size === undefined ? 1 : f.size, 10); }
-  else { members = group.fields || []; size = parseInt(group.size === undefined ? 1 : group.size, 10); }
+  var group = f.byte_group, members = Array.isArray(group) ? group : (group.fields || []);
+  var size = encGroupWidth(f);
   var packed = {};
   for (var i = 0; i < members.length; i++) {
     var g = members[i];
@@ -553,11 +564,9 @@ function encByteGroup(out, f, data, ctx) {            // _encode_byte_group
     v = encRint(v);
     if (String(g.type || "").indexOf("[") >= 0) {
       var bt = encBitType(g.type);
-      size = Math.max(size, bt[0]);
       packed = encPlace(packed, v, bt[1], bt[2]);
-    } else {
-      if (v < 0) encFail("can't convert negative int to unsigned");
-      packed = encPlace(packed, v, 0, 53);       // a full-width member owns the bytes
+    } else {                                    // a whole integer is its full range (PS-070)
+      packed = encPlace(packed, v, 0, ENC_TYPES[String(g.type)][0] * 8);
     }
   }
   var endian = (!Array.isArray(group) && group.endian) ? group.endian : ctx.endian;
@@ -2599,13 +2608,14 @@ function writeS(buf, pos, size, value, endian) {
         if 'byte_group' in field:
             bg = field['byte_group']
             bg_fields = bg if isinstance(bg, list) else bg.get('fields', bg)
-            bg_size = field.get('size', 1) if isinstance(bg, dict) else 1
-            if isinstance(bg, dict):
-                bg_size = bg.get('size', 1)
-            # PS-397: overlapping members are a schema error; generating a codec that
-            # reported both from the same bits was the generator's version of accepting it.
-            from schema_interpreter import byte_group_endian, check_byte_group_overlap
-            check_byte_group_overlap(bg_fields)
+            # PS-070 (CR-2026-131): the widest member's base, widened by any `size`. The
+            # array form's `size` beside the group was ignored here, and a group with
+            # no `size` read one byte.
+            # PS-397 and PS-070: overlapping members, a member of another kind and a size
+            # narrower than a member are schema errors, raised here as in the interpreter.
+            from schema_interpreter import (byte_group_endian, byte_group_member_range,
+                                            byte_group_width)
+            bg_size = byte_group_width(field)
             byte_group_endian(field, None)        # PS-364: a member's endian is refused
             group_endian = f'"{bg["endian"]}"' if isinstance(bg, dict) and bg.get('endian') else 'endian'
             lines.append(f'{i}  // byte_group')
@@ -2633,7 +2643,6 @@ function writeS(buf, pos, size, value, endian) {
             for bf in (bg_fields if isinstance(bg_fields, list) else []):
                 bname = bf.get('name', '_')
                 btype = bf.get('type', 'u8')
-                bit_m = re.match(r'([us])\d+\[(\d+):(\d+)\]', btype)
                 if btype == 'bool':
                     # PS-364: a bool member reads its `bit` of the group's value. Members
                     # other than bit ranges were skipped here with no error, so a group's
@@ -2647,30 +2656,27 @@ function writeS(buf, pos, size, value, endian) {
                             lines.append(f'{i}  {guard}')
                         lines.append(f'{i}  {target} = {bjs}_out;')
                     continue
-                if not bit_m:
-                    raise ValueError(
-                        f"byte_group member {bname!r}: type {btype!r} is not a bit range or "
-                        f"bool, which is all the generator emits for a group member")
-                if bit_m:
-                    lo, hi = int(bit_m.group(2)), int(bit_m.group(3))
-                    width = hi - lo + 1
-                    bjs = to_js_name(bname)
-                    if wide_group:
-                        lines.append(f'{i}  var {bjs} = bitRange(bgVal, {lo}, {width}, '
-                                     f'{json.dumps(bit_m.group(1) == "s")});')
-                    else:
-                        lines.append(f'{i}  var {bjs} = Math.floor(bgVal / {2 ** lo}) % {2 ** width};')
-                    if bit_m.group(1) == 's' and not wide_group:
-                        lines.append(f'{i}  if ({bjs} >= {2 ** (width - 1)}) {bjs} -= {2 ** width};')
-                    # `vars` records the post-modifier value - see _apply_modifiers_expr.
-                    bval = self._apply_modifiers_expr(bjs, bf)
-                    lines.append(f'{i}  var {bjs}_out = {bval};')
-                    lines.append(f'{i}  vars.{bjs} = {bjs}_out;')
-                    if not bname.startswith('_'):
-                        guards, target = name_from_to_js(bf, bjs)
-                        for guard in guards:
-                            lines.append(f'{i}  {guard}')
-                        lines.append(f'{i}  {target} = {bjs}_out;')
+                # PS-070: a bit range, or a whole integer as its full range (`u16` is
+                # `u16[0:15]`); either reads from the group's start.
+                _, lo, hi, signed = byte_group_member_range(bf)
+                width = hi - lo + 1
+                bjs = to_js_name(bname)
+                if wide_group:
+                    lines.append(f'{i}  var {bjs} = bitRange(bgVal, {lo}, {width}, '
+                                 f'{json.dumps(signed)});')
+                else:
+                    lines.append(f'{i}  var {bjs} = Math.floor(bgVal / {2 ** lo}) % {2 ** width};')
+                if signed and not wide_group:
+                    lines.append(f'{i}  if ({bjs} >= {2 ** (width - 1)}) {bjs} -= {2 ** width};')
+                # `vars` records the post-modifier value - see _apply_modifiers_expr.
+                bval = self._apply_modifiers_expr(bjs, bf)
+                lines.append(f'{i}  var {bjs}_out = {bval};')
+                lines.append(f'{i}  vars.{bjs} = {bjs}_out;')
+                if not bname.startswith('_'):
+                    guards, target = name_from_to_js(bf, bjs)
+                    for guard in guards:
+                        lines.append(f'{i}  {guard}')
+                    lines.append(f'{i}  {target} = {bjs}_out;')
             lines.append(f'{i}  pos = bgStart + {bg_size};')
             return lines
 

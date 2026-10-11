@@ -193,7 +193,7 @@ public class Schema {
                 throw new SchemaException("Field '" + fm.get("name") + "' declares no type");
             }
             checkBytesFormat(fm);
-            if (fm.containsKey("byte_group")) checkByteGroupOverlap(fm.get("byte_group"));
+            if (fm.containsKey("byte_group")) checkByteGroup(fm);        // PS-070, PS-397
             checkCaseBodies(fm);               // PS-441
             checkLiteral(fm);
             checkAnnotations(fm);              // PS-510
@@ -360,50 +360,98 @@ public class Schema {
         }
     }
 
+    /** The whole-integer types a byte_group member may name (PS-070): u16 is u16[0:15]. */
+    private static final Map<String, Integer> WHOLE_INTEGER_BYTES = Map.ofEntries(
+            Map.entry("u8", 1), Map.entry("u16", 2), Map.entry("u24", 3), Map.entry("u32", 4),
+            Map.entry("u64", 8), Map.entry("uint8", 1), Map.entry("uint16", 2),
+            Map.entry("uint24", 3), Map.entry("uint32", 4), Map.entry("uint64", 8),
+            Map.entry("s8", 1), Map.entry("s16", 2), Map.entry("s24", 3), Map.entry("s32", 4),
+            Map.entry("s64", 8), Map.entry("i8", 1), Map.entry("i16", 2), Map.entry("i24", 3),
+            Map.entry("i32", 4), Map.entry("i64", 8), Map.entry("int8", 1),
+            Map.entry("int16", 2), Map.entry("int24", 3), Map.entry("int32", 4),
+            Map.entry("int64", 8));
+
     /**
-     * The bits a byte_group member covers, counted from the group's first bit (most
-     * significant bit of its first byte), or null for a member that is neither a bit range
-     * nor a bool. Mapping onto the group lets members of different widths be compared.
+     * A byte_group member's {base bytes, low bit, high bit} (PS-070, CR-2026-131). A member
+     * is a bit range; a whole integer, its full range; or a bool with {@code bit}, one bit
+     * of a u8. Its bits are numbered in the group's assembled value (PS-364), so members of
+     * any width compare directly. They were mapped most-significant-first within each
+     * member's own base, which disagreed with decoding for members of different widths.
      */
-    private static Set<Integer> byteGroupMemberBits(Map<String, Object> member) {
+    static int[] byteGroupMemberRange(Map<String, Object> member) {
         Object type = member.get("type");
-        int width, start, end;
-        Matcher m = BIT_RANGE.matcher(type == null ? "" : type.toString());
+        String typ = type == null ? "" : type.toString();
+        Object name = member.get("name");
+        Matcher m = BIT_RANGE.matcher(typ);
         if (m.matches()) {
-            width = Integer.parseInt(m.group(2));
-            start = Integer.parseInt(m.group(3));
-            end = Integer.parseInt(m.group(4));
-        } else if ("bool".equals(type)) {
-            width = 8;
-            start = toInt(member.get("bit"), 0);
-            end = start;
-        } else {
-            return null;
+            int lo = Integer.parseInt(m.group(3));
+            int hi = Integer.parseInt(m.group(4));
+            return new int[] {Math.max(1, Integer.parseInt(m.group(2)) / 8),
+                    Math.min(lo, hi), Math.max(lo, hi)};
         }
-        Set<Integer> bits = new HashSet<>();
-        for (int b = start; b <= end; b++) bits.add(width - 1 - b);
-        return bits;
+        Integer whole = WHOLE_INTEGER_BYTES.get(typ);
+        if (whole != null) return new int[] {whole, 0, whole * 8 - 1};
+        if ("bool".equals(typ) && member.get("bit") instanceof Number bitNumber) {
+            int bit = bitNumber.intValue();
+            if (bit < 0 || bit > 7) {
+                throw new SchemaException("byte_group member '" + name + "' is a bool at bit " + bit
+                        + "; a bool member is one bit of a u8, 0 to 7 (PS-070)");
+            }
+            return new int[] {1, bit, bit};
+        }
+        throw new SchemaException("byte_group member '" + name
+                + "' is not a bit range, a whole integer or a bool with `bit` (PS-364)");
     }
 
-    /** PS-397: bit ranges within one byte_group must not overlap. They were accepted. */
+    /**
+     * The bytes a byte_group covers (PS-070, CR-2026-131): with no {@code size}, its widest
+     * member's base type, whichever bytes that member's bits fall in - a {@code u16[0:3]}
+     * member makes it two bytes. A {@code size} may widen it; a narrower one is rejected at load
+     * ({@link #checkByteGroup}). Decoding
+     * read a group with no size as one byte, so a {@code u16[8:15]} member decoded from
+     * the wrong byte, while encoding already widened to the base.
+     */
+    static int byteGroupWidth(List<Field> members, int declared) {
+        int width = Math.max(1, declared);
+        for (Field member : members == null ? List.<Field>of() : members) {
+            FieldType type = member.getType();
+            int base = type == FieldType.BITS ? Math.max(1, member.getBitBaseBytes())
+                    : type != null && type.isInteger() ? type.defaultLength() : 1;
+            width = Math.max(width, base);
+        }
+        return width;
+    }
+
+    /**
+     * A byte_group's load-time rules: every member a kind PS-070 admits, no two members on
+     * the same bits (PS-397), and a {@code size} no narrower than the widest member's base
+     * (PS-070, CR-2026-131), which used to be widened silently.
+     */
     @SuppressWarnings("unchecked")
-    private static void checkByteGroupOverlap(Object group) {
+    private static void checkByteGroup(Map<String, Object> fm) {
+        Object group = fm.get("byte_group");
         List<?> members = group instanceof List<?> list ? list
                 : group instanceof Map<?, ?> map && map.get("fields") instanceof List<?> fl ? fl
                 : List.of();
-        List<Map.Entry<Object, Set<Integer>>> seen = new ArrayList<>();
+        Object size = group instanceof Map<?, ?> map ? map.get("size") : fm.get("size");
+        List<Map.Entry<Object, int[]>> seen = new ArrayList<>();
+        int widest = 1;
         for (Object raw : members) {
             if (!(raw instanceof Map)) continue;
             Map<String, Object> member = (Map<String, Object>) raw;
-            Set<Integer> bits = byteGroupMemberBits(member);
-            if (bits == null) continue;
-            for (Map.Entry<Object, Set<Integer>> other : seen) {
-                if (!Collections.disjoint(other.getValue(), bits)) {
+            int[] range = byteGroupMemberRange(member);
+            for (Map.Entry<Object, int[]> other : seen) {
+                if (range[1] <= other.getValue()[2] && other.getValue()[1] <= range[2]) {
                     throw new SchemaException("byte_group members '" + other.getKey() + "' and '"
                             + member.get("name") + "' overlap (PS-397)");
                 }
             }
-            seen.add(Map.entry(String.valueOf(member.get("name")), bits));
+            seen.add(Map.entry(String.valueOf(member.get("name")), range));
+            widest = Math.max(widest, range[0]);
+        }
+        if (size instanceof Number declared && declared.intValue() < widest) {
+            throw new SchemaException("byte_group declares size " + declared.intValue()
+                    + ", narrower than its widest member's " + widest + " bytes (PS-070)");
         }
     }
 
@@ -1053,11 +1101,11 @@ public class Schema {
             if (groupMap.get("fields") instanceof List<?> groupFields) {
                 f.setByteGroup(parseFields((List<Map<String, Object>>) groupFields));
             }
-            f.setByteGroupSize(toInt(groupMap.get("size"), 1));
+            f.setByteGroupSize(byteGroupWidth(f.getByteGroup(), toInt(groupMap.get("size"), 1)));
             if (groupMap.get("endian") instanceof String groupEndian) f.setGroupEndian(groupEndian);
         } else if (byteGroupRaw instanceof List<?> groupFields) {
             f.setByteGroup(parseFields((List<Map<String, Object>>) groupFields));
-            f.setByteGroupSize(toInt(fm.get("size"), 1));
+            f.setByteGroupSize(byteGroupWidth(f.getByteGroup(), toInt(fm.get("size"), 1)));
         }
 
         // Flagged construct
@@ -2865,8 +2913,9 @@ public class Schema {
             // prototype names it. Where every base fits and the group's size does not, the
             // group itself made the read.
             for (Field member : group.getByteGroup()) {
-                int base = member.getType() == FieldType.BITS
-                        ? Math.max(1, member.getBitBaseBytes()) : 1;
+                // A member's base is CR-2026-131's: a bit range's base, a whole
+                // integer's width, one byte for a bool.
+                int base = byteGroupWidth(List.of(member), 1);
                 if (base > ctx.remaining()) {
                     throw new SchemaException.BufferUnderflow(String.format(
                             "Buffer underflow at peek offset %d", start))
@@ -2894,7 +2943,10 @@ public class Schema {
                     int bit = Math.max(0, member.getBoolBit());
                     value = ((groupValue >>> bit) & 1) == 1;
                 } else {
-                    value = decodeField(member, ctx, false);
+                    // PS-070: a whole integer is its full range of the group's value, read
+                    // from the group's start. It was read as a field of its own.
+                    value = applyGroupMember(extractRange(groupValue, member.getType().isSigned(),
+                            0, member.getType().defaultLength() * 8), member, ctx);
                 }
                 if (value == OMITTED || value == null) continue;
                 ctx.setVariable(name, value);

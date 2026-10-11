@@ -220,20 +220,21 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2665 payload vectors in `schemas/devices/` (measured 2026-10-11 with
+The 2668 payload vectors in `schemas/devices/` (measured 2026-10-11 with
 `tools/check-floors.py`, after the CR-2026-118 and CR-2026-124 fixtures, CR-2026-117's
 guard-absent-operand, the `match-u32-*` and names-mangling-alike fixtures, CR-2026-127's
 guard-boolean-operand, the CR-2026-121 and CR-2026-123 fixtures, CR-2026-110's,
 CR-2026-125's and CR-2026-128's tlv-repeat-* fixtures, the mutation-gate vector in
-round-large-value and CR-2026-114's ascii-latin1) are the shared cross-language test set.
-Every implementation has a runner that reads the same YAML and the same vectors:
+round-large-value, CR-2026-114's ascii-latin1 and CR-2026-131's byte-group-width) are the
+shared cross-language test set. Every implementation has a runner that reads the same YAML
+and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1824 |
-| Go | `go/schema/corpus_conformance_test.go` | 2665 | 1841 (plain API 1818) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2665 | 1825 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2665 | 1824 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1827 |
+| Go | `go/schema/corpus_conformance_test.go` | 2668 | 1844 (plain API 1821) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2668 | 1828 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2668 | 1827 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 554 of 554 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -807,10 +808,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1824 |
-| Go | `go/schema/corpus_encode_test.go` | 1841 (plain 1818) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1824 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1825 |
+| Python | `tests/test_encode_round_trip.py` | 1827 |
+| Go | `go/schema/corpus_encode_test.go` | 1844 (plain 1821) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1827 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1828 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1953,6 +1954,26 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   - No corpus vector relied on U+FFFD, `?`, raw bytes or truncation: every implementation's
     counts rose by exactly the new fixture's four vectors. Fixture: `ascii-latin1.yaml`
     (high bytes, interior 0x00, all 0x00, each round-tripping).
+- **CR-2026-131: a byte_group covers its widest member's base** (PS-070). With no `size`, a
+  group is as wide as its widest member's base type, whichever bytes the bits fall in -
+  `u16[0:3]` makes it two bytes. `size` widens it, and a `size` narrower than a member is
+  **rejected at load**: `byte_group declares size 5, narrower than its widest member's 8
+  bytes (PS-070)`, the spec prototype's text. A member is a bit range, a whole integer
+  (`u16` is `u16[0:15]` of the group's value) or a `bool` with `bit` 0 to 7 (one bit of a
+  `u8`); anything else is rejected, and every member reads from the group's start without
+  moving it. All five read a sizeless group as one byte while the four encoders already
+  widened a bit range's base, so decode and encode disagreed; Go and C# also gave a whole
+  integer member the entire group's value, and Python and Java read it as a field of its
+  own. Where the rules live: `byte_group_member_range`/`byte_group_width`/`byte_group_errors`
+  (Python; the validator and the TS013 generator call them), `go/schema/cr131.go`
+  (`checkByteGroup` from `checkFieldRules`), Java `Schema.checkByteGroup`, C#
+  `SchemaParser.CheckByteGroup` and `Cr131`, and `encGroupWidth` in the generated codec's
+  runtime. **Overlap is now counted in the group's assembled value** (PS-364) in all four;
+  it was counted most-significant-first within each member's own base, which disagreed with
+  every decoder for members of different widths, and C# skipped signed ranges entirely. C
+  has no byte_group decode path, so this is a C gap like the construct itself. **No corpus,
+  library, example or registry schema is rejected or changes decode** (registry yabby-edge
+  was rewritten as one 8-byte group, 69e1023). Fixture: `byte-group-width.yaml`.
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.

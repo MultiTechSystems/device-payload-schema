@@ -335,18 +335,17 @@ public static class SchemaDecoder
 
     static Dictionary<string, object?> DecodeByteGroup(SchemaField field, DecodeContext ctx)
     {
-        int size = field.Size > 0 ? field.Size : 1;
+        int size = Cr131.ByteGroupWidth(field);                    // PS-070, CR-2026-131
         if (ctx.Remaining < size)
         {
             // PS-535: a member reads the group's bytes from its start, so the first
             // member whose own base does not fit is the field that read past the end, as
             // the spec prototype names it. Where every base fits and the group's `size`
-            // does not, the group itself made the read.
+            // does not, the group itself made the read. A member's base is CR-2026-131's:
+            // a bit range's base, a whole integer's width, one byte for a bool.
             foreach (var member in field.ByteGroup)
             {
-                int baseBytes = member.Type == FieldType.Bits && member.BitBaseBytes > 0
-                    ? member.BitBaseBytes : 1;
-                if (baseBytes > ctx.Remaining)
+                if (Cr131.MemberRange(member).baseBytes > ctx.Remaining)
                     throw BufferUnderflowException.PeekAt(ctx.Offset).Name(member.Name, member.RawType);
             }
             throw BufferUnderflowException.Need(size, ctx.Offset, ctx.Data.Length).Name(null, "byte_group");
@@ -363,15 +362,15 @@ public static class SchemaDecoder
         foreach (var subfield in field.ByteGroup)
         {
             ctx.Produced(subfield);                                            // PS-490
+            // PS-070: every member is a range of the group's value, read from its start - a
+            // whole integer is its full range, a bool one bit. A whole integer took the
+            // whole group's value, so a u8 beside a u16[8:11] read both bytes.
             object raw;
-            var bitRange = Helpers.ParseBitRange(subfield.RawType);
-            if (bitRange != null)
-                raw = ExtractRange(rawVal, subfield.SignedBits, bitRange.Value.start,
-                    bitRange.Value.end - bitRange.Value.start + 1);
-            else if (subfield.Type == FieldType.Bool)
+            var range = Cr131.MemberRange(subfield);
+            if (subfield.Type == FieldType.Bool)
                 raw = ((rawVal >> subfield.Bit) & 1) == 1;
             else
-                raw = (double)rawVal;
+                raw = ExtractRange(rawVal, range.signed, range.low, range.high - range.low + 1);
 
             var value = ApplyPostRead(raw, subfield, ctx);
             if (ReferenceEquals(value, Omitted) || string.IsNullOrEmpty(subfield.Name))

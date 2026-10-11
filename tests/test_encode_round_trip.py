@@ -85,7 +85,8 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # reserved-value vector, whose null now writes the sentinel (PS-544); all repeat.
 # (merged with master's +6 tlv-repeat/mutation-gate vectors)
 # +4: ascii-latin1 (CR-2026-114), all plain fixed: a byte above 0x7F re-encodes to itself.
-FLOOR_TOTAL = 1824
+# +3: byte-group-width (CR-2026-131), byte_group.
+FLOOR_TOTAL = 1827
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -97,7 +98,7 @@ FLOOR_BY_SHAPE = {
     "flagged": 193,
     "plain fixed": 147,
     "match": 129,  # +4: match-u32-inline-discriminator
-    "byte_group": 25,
+    "byte_group": 28,  # +3: byte-group-width (CR-2026-131)
     # 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now
     # carry only the definitions they reach, so one no longer has a `repeat` in an
     # unreferenced definition for the classifier to find.

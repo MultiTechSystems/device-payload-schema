@@ -525,7 +525,7 @@ public static class SchemaEncoder
         byte[] EncodeByteGroup(SchemaField group, Dictionary<string, object?> data)
         {
             ulong packed = 0;
-            int size = group.Size > 0 ? group.Size : 1;
+            int size = Cr131.ByteGroupWidth(group);    // PS-070, CR-2026-131: as decoded
 
             foreach (var member in group.ByteGroup)
             {
@@ -554,9 +554,6 @@ public static class SchemaEncoder
                 {
                     bitStart = bitRange.Value.start;
                     bitLen = bitRange.Value.end - bitRange.Value.start + 1;
-                    // The base width is part of the member's type: u24[4:23] owns three
-                    // bytes of the group, however small the group's own `size` says it is.
-                    size = Math.Max(size, Math.Max(1, member.BitBaseBytes));
                 }
                 if (bitLen > 0)
                 {
@@ -565,8 +562,9 @@ public static class SchemaEncoder
                 }
                 else
                 {
-                    // A full-width member owns the group's bytes outright.
-                    packed |= (ulong)raw;
+                    // A whole integer is its full range (PS-070), masked like any other member.
+                    int bits = Cr131.MemberRange(member).high + 1;
+                    packed |= bits >= 64 ? (ulong)raw : (ulong)raw & ((1UL << bits) - 1);
                 }
             }
             return Helpers.EncodeUint(packed, Math.Max(1, size), group.GroupEndian ?? _endian);
