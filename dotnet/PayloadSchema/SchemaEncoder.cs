@@ -187,8 +187,6 @@ public static class SchemaEncoder
                     // enclosing data, where they are not, and every member encoded as zero.
                     // A `name_from` object was reported under its templated key, so that
                     // is the key to read it back from (CR-2026-030).
-                    if (string.IsNullOrEmpty(field.Name))
-                        return EncodeFieldList(field.Fields, data);
                     var objectKey = ResolveEncodeName(field, data) ?? field.Name;
                     if (!data.TryGetValue(objectKey, out var nested)
                         || nested is not Dictionary<string, object?> members)
@@ -213,12 +211,10 @@ public static class SchemaEncoder
             if (field.Value != null)
                 return EncodeField(field, field.Value);
 
+            // A nameless field other than a skip is refused at load (PS-553, CR-2026-138);
+            // it was written here as zero padding.
             object? value;
-            if (string.IsNullOrEmpty(field.Name))
-                // Nothing can be supplied for a field with no name; it is padding, as a
-                // skip is.
-                value = 0.0;
-            else if (field.Name.StartsWith("_"))
+            if ((field.Name ?? "").StartsWith("_"))
                 // PS-434: an internal field that reads bytes writes its value (handled
                 // above), else the input's, else it is an error naming the field. This
                 // wrote 0, which reads back as a value the device never sent.
@@ -427,8 +423,8 @@ public static class SchemaEncoder
             int size = 1;
             foreach (var member in run)
             {
-                object? value = string.IsNullOrEmpty(member.Name) ? 0.0
-                    : member.Value != null || member.Name.StartsWith("_")
+                // A nameless range is refused at load (PS-553); it was written as zero bits.
+                object? value = member.Value != null || (member.Name ?? "").StartsWith("_")
                         ? InternalEncodeValue(member, data)                    // PS-360, PS-434
                     : data.TryGetValue(member.Name, out var v) && v != null ? v
                     // PS-551. A range was written as zero bits, which read back as a value.

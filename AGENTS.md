@@ -2050,6 +2050,32 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.
 
+- **CR-2026-138 (PS-553): a field has a name; padding is a skip.** A schema with a
+  nameless field other than a `skip` is refused at load, in the spec prototype's text:
+  `Schema 't': field 1, a u8, has no name; a field that reads or reports a value is named,
+  and padding is a `skip` (PS-553)` - the position is 1-based within its list, the type
+  is as written (`a field` where there is none), and an object's or repeat's members add
+  `, in 'o'`; a port adds `, port N`. Exempt: constructs (`match` - the older `type: match`
+  spelling too - `byte_group`, `flagged`, `tlv`, `records`), a byte_group member (reserved
+  bits), a repeat's `element`, and the withdrawn `object:` key, which PS-466 names.
+  - **Where:** Python `field_name_errors`, run by `schema_iterator_errors`, so the
+    interpreter, the validator and the TS013 generator all refuse it; Go `cr138.go`,
+    Java `FieldNames`, C# `FieldNames.cs`, each over the raw document after its `$ref`s
+    are spliced. Go and Java visit ports and case keys in sorted order, Python and C# in
+    source order; that only changes which error comes first when there are several.
+  - **What it replaced, measured before:** Python decoded such a field under the key
+    `unknown`, Go, Java, C# and the generated codec read its bytes
+    and dropped them, every encoder wrote it as zero padding, and C's struct API decoded
+    it as the others did and refused to encode it (`Missing required field: ` with an
+    empty name). No decoder failed to read it, so nothing shifted. The `unknown` key
+    and every zero-padding branch are gone, Python's nameless byte_group member with
+    them: it too was reported as `unknown`.
+  - **C:** the binary format carries no names - each field is a 2-byte IPSO object id
+    and `schema_load_binary` invents its name with `ipso_to_name` - so C cannot check
+    this. `tools/schema_binary.py` refuses the YAML before conversion. A recorded C gap.
+  - Counted before: 0 such fields in the corpus, the library, the examples and the
+    private registry, so no floor moves. Cases: `tests/cr-2026-138-cases.yaml`, read by
+    all four.
 - **CR-2026-134 (PS-551): an encoder rejects missing input and derives what the input
   fixes.** Every encoder used to write zeros for a required value its input omitted (a
   `Missing field: x` warning at the top level, silence inside a construct), and for a few
@@ -2064,7 +2090,7 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     trailer). Python, Java and C# returned the bytes written before an error; every encoder
     now returns none, as Go always did. Not required: an optional field (PS-405), a literal
     (PS-359), a field with `value` (PS-360), an internal field (PS-434, which keeps its own
-    message), a skip, a nameless field (padding, as a skip is), and an absent value with a
+    message), a skip, a nameless field (padding, as a skip is - since CR-2026-138 a schema with one is refused at load), and an absent value with a
     `sentinel` (written as the sentinel, PS-427).
   - **Derived** where the input omits it, by `_derive_inputs` and its port in each language
     (Go `cr134.go`, Java/C# `deriveInputs`/`DeriveInputs`, runtime `encDerive`), run on every
