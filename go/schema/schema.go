@@ -932,6 +932,10 @@ func ParseSchema(data string) (*Schema, error) {
 	if err := checkWave6bRules(raw); err != nil {
 		return nil, err
 	}
+	// CR-2026-117: every `$` reference names something the schema declares (PS-539).
+	if err := checkReferences(raw); err != nil {
+		return nil, err
+	}
 
 	// CR-2026-096: the source order of every mapping, for _meta, and PS-491 at load.
 	order := buildKeyOrder(raw, &rootNode)

@@ -108,6 +108,8 @@ public class Schema {
         // Wave 6b (CR-2026-059, -067): optional fields form the tail of their list (PS-404)
         // and no field takes a name reserved for interpreter metadata (PS-433).
         Wave6b.checkSchema(raw);
+        // CR-2026-117: every `$` reference names something the schema declares (PS-539).
+        References.check(raw);
         Schema schema = new Schema();
         schema.repeatOnlyNames = Wave6a.repeatOnlyNames(raw);
         schema.metaName = raw.get("name");
@@ -2633,7 +2635,9 @@ public class Schema {
                     carryState.put(carried, ctx.getVariable(carried));
                 }
             }
-            keep = repeat.getPresentIf() == null || guardPasses(repeat.getPresentIf(), ctx);
+            // The element is whole here, so a name of it with no value is absent, not
+            // "not yet decoded", and the condition fails (PS-540).
+            keep = repeat.getPresentIf() == null || guardPasses(repeat.getPresentIf(), ctx, true);
         } finally {
             // PS-368: an element's names do not outlive it.
             ctx.restoreVariables(outer);
@@ -2946,7 +2950,7 @@ public class Schema {
         }
 
         boolean computed = field.getRef() != null || field.getCompute() != null;
-        if (computed && field.getGuard() != null && !guardPasses(field.getGuard(), ctx)) {
+        if (computed && field.getGuard() != null && !guardPasses(field.getGuard(), ctx, false)) {
             // PS-444: a failing guard reports the declared fallback untouched - no
             // modifiers, no transform, no lookup; the wrapper is what keeps the lookup
             // in applyGroupMember off it. Checking the guard first is also what keeps a
@@ -3116,11 +3120,22 @@ public class Schema {
         return literal == null ? 0.0 : literal;
     }
 
-    private boolean guardPasses(Field.Guard guard, DecodeContext ctx) {
+    /**
+     * PS-540 (CR-2026-117): a condition whose field is absent (PS-314) or unbound fails, so
+     * the guard's {@code else} applies, or the field is omitted without one (PS-400). It was
+     * read as 0, which passed {@code gte: 0} on a value the device never sent. The PS-368
+     * scope errors stay errors, except for a repeat's {@code present_if}, evaluated once its
+     * element is whole ({@code elementComplete}).
+     */
+    private boolean guardPasses(Field.Guard guard, DecodeContext ctx, boolean elementComplete) {
         for (Field.Condition condition : guard.getWhen()) {
             if (!condition.getField().startsWith("$")) continue;
-            Object raw = ctx.ref(condition.getField().substring(1));     // PS-368
-            double value = raw instanceof Number number ? number.doubleValue() : 0.0;
+            String name = condition.getField().substring(1);
+            Object raw = elementComplete ? ctx.getVariables().get(name) : ctx.ref(name); // PS-368
+            double value;
+            if (raw instanceof Number number) value = number.doubleValue();
+            else if (raw instanceof Boolean flag) value = flag ? 1.0 : 0.0;
+            else return false;                                    // absent: PS-540
             double operand = condition.getOperand() == null ? 0.0 : condition.getOperand();
             boolean passed = switch (condition.getOp()) {
                 case "gt" -> value > operand;

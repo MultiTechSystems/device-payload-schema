@@ -132,6 +132,7 @@ public static partial class SchemaParser
         // over the whole document so an enclosing repeat's names are known.
         CheckIterator(root);
         CheckWave6b(root);    // PS-404, PS-433
+        CheckReferences(root);    // PS-539 (CR-2026-117)
         schema.RepeatOnlyNames = RepeatOnlyNames(root);
         // PS-491 (CR-2026-096): one reported name's declarations in one field list agree
         // on unit, senml and ipso, or `_meta` could not describe the name.
