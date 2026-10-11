@@ -1649,13 +1649,14 @@ class BufferUnderflow(FieldError):
         return cls(f"Buffer underflow at peek offset {pos}")
 
 
-def _member_base_bytes(member: Dict[str, Any]) -> int:
-    """The bytes a byte_group member's own base reads: `u16[0:3]` reads two, a whole `u16`
-    two, a bool one (PS-070, CR-2026-131)."""
-    try:
-        return byte_group_member_range(member)[0]
-    except ValueError:
-        return 1
+def byte_group_label(members: Any) -> str:
+    """How PS-535 identifies a byte_group: by its members, as the spec prototype does -
+    `byte_group of 'f', 'w'`, every named member in declaration order, internal `_` members
+    included - else `an unnamed byte_group` (CR-2026-131)."""
+    names = [m.get('name') for m in members or [] if isinstance(m, dict) and m.get('name')]
+    if not names:
+        return 'an unnamed byte_group'
+    return 'byte_group of ' + ', '.join(f"'{n}'" for n in names)
 
 
 def underflow_label(name: Any, kind: Any) -> str:
@@ -5124,16 +5125,13 @@ class SchemaInterpreter:
         # that value. Each member used to read its own base from the group's start, which
         # agrees only where every member is as wide as the group.
         if pos + group_size > len(buf):
-            # PS-535: a member reads the group's bytes from its start, so the first
-            # member whose base does not fit is the field that read past the end, as the
-            # spec prototype names it. Where every base fits and the group's `size` does
-            # not, the group itself made the read.
-            for gf in group_fields:
-                if _member_base_bytes(gf) > len(buf) - pos:
-                    raise name_underflow(BufferUnderflow.peek(pos), gf.get('name'),
-                                         gf.get('type'))
-            raise name_underflow(BufferUnderflow.need(group_size, pos, len(buf)), None,
-                                 'byte_group')
+            # PS-535: the group is read as one value (CR-2026-131), so the failing read
+            # is the group's and every member is lost; it is identified by its members.
+            exc = BufferUnderflow(f"Field {byte_group_label(group_fields)}: "
+                                  f"{BufferUnderflow.peek(pos)} (PS-535)")
+            exc.named = True
+            exc.detail = str(BufferUnderflow.peek(pos))
+            raise exc
         group_value = int.from_bytes(buf[pos:pos + group_size],
                                      'little' if self.endian == Endian.LITTLE else 'big')
         for gf in group_fields:

@@ -106,7 +106,15 @@ public class CR2026114115Test {
                 "Field 'bo': " + String.format(need, 2, 0, 1)),
             Arguments.of(schema("- byte_group:\n    size: 2\n    fields:\n"
                     + "    - {name: a, type: 'u16[0:3]'}\n    - {name: c, type: 'u16[4:7]'}\n"),
-                "01", "Field 'a': Buffer underflow at peek offset 0 (PS-535)")
+                "01", "Field byte_group of 'a', 'c': Buffer underflow at peek offset 0 (PS-535)"),
+            // CR-2026-131: the group is one read, named by every member in order, internal
+            // ones included, whichever member's base would have fitted.
+            Arguments.of(schema("- byte_group:\n    size: 2\n    fields:\n"
+                    + "    - {name: a, type: 'u8[0:3]'}\n    - {name: _r, type: 'u8[4:7]'}\n"),
+                "01", "Field byte_group of 'a', '_r': Buffer underflow at peek offset 0 (PS-535)"),
+            Arguments.of(schema("- byte_group:\n    size: 2\n    fields:\n"
+                    + "    - {type: 'u8[0:3]'}\n"),
+                "01", "Field an unnamed byte_group: Buffer underflow at peek offset 0 (PS-535)")
         );
     }
 
