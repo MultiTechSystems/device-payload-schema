@@ -280,6 +280,11 @@ def compare(schema, payload, fport, expected):
     expected, got = skip_corrected(expected or {}, got, skip)
     problems = []
     for key, want in expected.items():
+        if want is None and key not in got:
+            # PS-043: a null is absence, so a vendor null against a key we omit is
+            # agreement. Nested nulls reach expected_fields_match through values_match,
+            # which applies the same rule; a null against a value we report is not.
+            continue
         if key not in got:
             problems.append("%s: vendor %r, ours <missing>" % (key, want))
             continue
