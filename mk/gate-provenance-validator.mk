@@ -24,15 +24,9 @@ gate-provenance:
 gate-provenance-all:
 	$(PROVENANCE_PYTHON) tools/provenance-gate.py --all
 
-# The three examples skipped by validate-examples need preprocessing (library
-# resolution / renames) before they are schemas at all; their *_resolved forms are
-# validated instead.
 gate-validator-strict:
 	@status=0; n=0; \
 	for schema in $$(find schemas/devices -name '*.yaml' | sort) examples/*.yaml; do \
-		case "$$schema" in \
-			*_with_lib.yaml|*_rename.yaml|examples/lib_sensors_test.yaml) continue;; \
-		esac; \
 		n=$$((n + 1)); \
 		out=$$($(PROVENANCE_PYTHON) tools/validate_schema.py "$$schema" 2>&1) || { \
 			echo "FAILED: $$schema"; echo "$$out" | sed 's/^/    /'; status=1; }; \

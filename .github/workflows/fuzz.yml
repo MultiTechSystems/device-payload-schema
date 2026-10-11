@@ -187,24 +187,11 @@ jobs:
       - name: Install dependencies
         run: pip install pyyaml
       
-      - name: Preprocess schemas with $ref
-        run: |
-          for schema in examples/*_with_lib.yaml examples/*_rename.yaml examples/lib_sensors_test.yaml; do
-            if [ -f "$schema" ]; then
-              resolved="${schema%.yaml}_resolved.yaml"
-              echo "Preprocessing: $schema -> $resolved"
-              PYTHONPATH=tools python tools/schema_preprocessor.py "$schema" -o "$resolved"
-            fi
-          done
-      
+      # Every example is a schema as written: a $ref names #/definitions/<name> in
+      # its own document (PS-461), so nothing is preprocessed and nothing skipped.
       - name: Validate schemas
         run: |
           for schema in examples/*.yaml; do
-            # Skip unresolved schemas (those with $ref that need preprocessing)
-            if [[ "$schema" == *"_with_lib.yaml" ]] || [[ "$schema" == *"_rename.yaml" ]] || [[ "$schema" == "examples/lib_sensors_test.yaml" ]]; then
-              echo "Skipping unresolved: $schema"
-              continue
-            fi
             echo "Validating: $schema"
             PYTHONPATH=tools python tools/validate_schema.py "$schema"
           done
