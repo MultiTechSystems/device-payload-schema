@@ -1646,7 +1646,12 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     to walk sorted keys, scalars before nested values, and ports sorted as strings, which
     accepted a match whose `default` read a name its later `cases` declared and refused
     one whose `cases` declared what a later `field:` read. `ps539_walk_order_test.go` and
-    its Python, Java and C# mirrors pin it with pairs differing only in key order. Declared: every `name`, `var`, `index`, `count_as` (a `byte_group`/`flagged`
+    its Python, Java and C# mirrors pin it with pairs differing only in key order. **Each
+    port is a decode of its own (CR-2026-130)**: a port's field list sees what the top level
+    declares (metadata names, `header`/`fields`) and its own names, never another port's,
+    in either source order; such a reference gets the "referenced before" message. All four
+    used to carry one port's names into the next. Measured before the change: no corpus,
+    library, example or registry schema (6 and 335 with `ports`) refers across ports. Declared: every `name`, `var`, `index`, `count_as` (a `byte_group`/`flagged`
     member and a tag component included) and `metadata` include/timestamp names. **A
     nameless element declares no name**: `$element` needs `element: {name: element, ...}`.
     A name declared earlier in a branch not taken is absent at decode (PS-314), not an

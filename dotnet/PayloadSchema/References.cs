@@ -103,9 +103,20 @@ public static partial class SchemaParser
                             declared.Add(n.Value);
         Walk(Get(root, "header"), null, false);
         Walk(Get(root, "fields"), null, false);
+        // Each port is a decode of its own (CR-2026-130): what one port declares is never
+        // bound while another is decoded, so each starts from what the top level declares.
+        var shared = new HashSet<string>(declared);
+        var seen = new HashSet<string>(declared);
         if (Get(root, "ports") is YamlMappingNode ports)
             foreach (var kv in ports.Children)
+            {
+                declared.Clear();
+                declared.UnionWith(shared);
                 Walk(kv.Value, null, false);
+                seen.UnionWith(declared);
+            }
+        declared.Clear();
+        declared.UnionWith(seen);   // to tell "never declared" from "declared too late"
 
         var errors = new List<string>();
         foreach (var (name, key) in ahead)

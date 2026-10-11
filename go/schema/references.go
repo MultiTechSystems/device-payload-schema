@@ -153,11 +153,26 @@ func checkReferences(raw map[string]any, order keyOrder) error {
 	}
 	walk(raw["header"], "", false)
 	walk(raw["fields"], "", false)
+	// Each port is a decode of its own (CR-2026-130): what one port declares is never bound
+	// while another is decoded, so each starts from what the top level declares.
+	shared := map[string]bool{}
+	seen := map[string]bool{}
+	for n := range declared {
+		shared[n], seen[n] = true, true
+	}
 	if ports := asStringMap(raw["ports"]); ports != nil {
 		for _, k := range order.keys(raw["ports"]) {
+			declared = map[string]bool{}
+			for n := range shared {
+				declared[n] = true
+			}
 			walk(ports[k], "", false)
+			for n := range declared {
+				seen[n] = true
+			}
 		}
 	}
+	declared = seen // to tell "never declared" from "declared too late"
 	for _, r := range ahead {
 		if !declared[r.name] {
 			return fmt.Errorf("%s", referenceErrorMessage(r.name, r.key))

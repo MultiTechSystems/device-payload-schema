@@ -4,8 +4,9 @@ order. Each schema below differs from its pair only in the order two keys are wr
 that order alone decides whether the reference follows its declaration.
 
 Mirrors go/schema/ps539_walk_order_test.go, Java's ReferenceWalkOrderTest and C#'s
-ReferenceWalkOrderTests. Go walked sorted keys, scalars before nested values, and got
-four of these wrong.
+ReferenceWalkOrderTests. Go walked sorted keys, scalars before nested values, and ports
+sorted as strings. Each port is a decode of its own (CR-2026-130), so a name only another
+port declares is never in scope; all four had carried names from one port into the next.
 """
 
 import json
@@ -47,16 +48,38 @@ CASES = [
         "cases: {1: [{name: x, type: u8}]}}\n",
         "`$x` (ref) " + ORDER,
     ),
-    # Ports in source order, not sorted as strings ("10" < "9") or as numbers.
+    # Each port is a decode of its own (CR-2026-130): a name only another port declares
+    # is out of scope in either source order, and within a port the source order decides.
     (
         "ports:\n  9: {fields: [{name: x, type: u8}]}\n"
         "  10: {fields: [{name: y, type: number, ref: $x}]}\n",
-        None,
+        "`$x` (ref) " + ORDER,
     ),
     (
         "ports:\n  2: {fields: [{name: y, type: number, ref: $x}]}\n"
         "  1: {fields: [{name: x, type: u8}]}\n",
         "`$x` (ref) " + ORDER,
+    ),
+    (
+        "ports:\n  9: {fields: [{name: x, type: u8}]}\n"
+        "  10: {fields: [{name: x, type: u8}, {name: y, type: number, ref: $x}]}\n",
+        None,
+    ),
+    (
+        "ports:\n  10: {fields: [{name: x, type: u8}, {name: y, type: number, ref: $x}]}\n"
+        "  9: {fields: [{name: z, type: u8}]}\n",
+        None,
+    ),
+    (
+        "ports:\n  10: {fields: [{name: y, type: number, ref: $x}, {name: x, type: u8}]}\n"
+        "  9: {fields: [{name: z, type: u8}]}\n",
+        "`$x` (ref) " + ORDER,
+    ),
+    (
+        "metadata: {include: [{name: eui, source: $device_eui}]}\n"
+        "ports:\n  1: {fields: [{name: a, type: number, ref: $eui}]}\n"
+        "  2: {fields: [{name: b, type: number, ref: $eui}]}\n",
+        None,
     ),
 ]
 

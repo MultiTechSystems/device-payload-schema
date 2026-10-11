@@ -9,7 +9,9 @@ import static org.junit.jupiter.api.Assertions.*;
  * {@code tag_fields}, {@code trailer}, {@code fields} and {@code element} first, then the
  * remaining keys in source order. Each schema below differs from its pair only in the order
  * two keys are written, and that order alone decides whether the reference follows its
- * declaration. Mirrors tests/test_ps539_walk_order.py and go/schema/ps539_walk_order_test.go.
+ * declaration. Each port is a decode of its own (CR-2026-130), so a name only another port
+ * declares is never in scope. Mirrors tests/test_ps539_walk_order.py and
+ * go/schema/ps539_walk_order_test.go.
  */
 public class ReferenceWalkOrderTest {
     static final String ORDER = "is referenced before the schema declares it (PS-539, PS-122)";
@@ -27,11 +29,21 @@ public class ReferenceWalkOrderTest {
                     + "cases: {1: [{name: y, type: number, ref: $x}]}}\n", null},
             {"fields:\n  - {name: k, type: u8}\n  - match: {field: $k, default: [{name: y, type: number, ref: $x}], "
                     + "cases: {1: [{name: x, type: u8}]}}\n", "`$x` (ref) " + ORDER},
-            // Ports in source order, not sorted as strings ("10" < "9") or as numbers.
+            // Each port is a decode of its own (CR-2026-130): a name only another port declares
+            // is out of scope in either source order, and within a port the source order decides.
             {"ports:\n  9: {fields: [{name: x, type: u8}]}\n"
-                    + "  10: {fields: [{name: y, type: number, ref: $x}]}\n", null},
+                    + "  10: {fields: [{name: y, type: number, ref: $x}]}\n", "`$x` (ref) " + ORDER},
             {"ports:\n  2: {fields: [{name: y, type: number, ref: $x}]}\n"
                     + "  1: {fields: [{name: x, type: u8}]}\n", "`$x` (ref) " + ORDER},
+            {"ports:\n  9: {fields: [{name: x, type: u8}]}\n"
+                    + "  10: {fields: [{name: x, type: u8}, {name: y, type: number, ref: $x}]}\n", null},
+            {"ports:\n  10: {fields: [{name: x, type: u8}, {name: y, type: number, ref: $x}]}\n"
+                    + "  9: {fields: [{name: z, type: u8}]}\n", null},
+            {"ports:\n  10: {fields: [{name: y, type: number, ref: $x}, {name: x, type: u8}]}\n"
+                    + "  9: {fields: [{name: z, type: u8}]}\n", "`$x` (ref) " + ORDER},
+            {"metadata: {include: [{name: eui, source: $device_eui}]}\n"
+                    + "ports:\n  1: {fields: [{name: a, type: number, ref: $eui}]}\n"
+                    + "  2: {fields: [{name: b, type: number, ref: $eui}]}\n", null},
     };
 
     @Test

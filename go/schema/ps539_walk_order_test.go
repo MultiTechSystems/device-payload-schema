@@ -9,7 +9,8 @@ import "testing"
 // tag_fields, trailer, fields and element first, then the remaining keys in source order.
 // Each schema below differs from its pair only in the order two keys are written, and
 // that order alone decides whether the reference follows its declaration. Go walked
-// sorted keys, scalars before nested values, and got four of them wrong. Mirrors
+// sorted keys, scalars before nested values, and ports sorted as strings. Each port is a
+// decode of its own (CR-2026-130), so a name another port declares is never in scope. Mirrors
 // tests/test_ps539_walk_order.py, Java's ReferenceWalkOrderTest and C#'s
 // ReferenceWalkOrderTests.
 
@@ -33,13 +34,27 @@ var ps539WalkOrderCases = []struct {
 	{"default reads before cases declare",
 		"fields:\n  - {name: k, type: u8}\n  - match: {field: $k, default: [{name: y, type: number, ref: $x}], cases: {1: [{name: x, type: u8}]}}\n",
 		"`$x` (ref) " + ps539OrderMessage},
-	// Ports in source order, not sorted as strings ("10" < "9") or as numbers.
-	{"port 9 declares before port 10 reads",
+	// Each port is a decode of its own (CR-2026-130): a name only another port declares
+	// is out of scope in either source order, and within a port the source order decides.
+	{"port 10 reads what port 9, written first, declares",
 		"ports:\n  9: {fields: [{name: x, type: u8}]}\n  10: {fields: [{name: y, type: number, ref: $x}]}\n",
-		""},
-	{"port 2 reads before port 1 declares",
+		"`$x` (ref) " + ps539OrderMessage},
+	{"port 2, written first, reads what port 1 declares",
 		"ports:\n  2: {fields: [{name: y, type: number, ref: $x}]}\n  1: {fields: [{name: x, type: u8}]}\n",
 		"`$x` (ref) " + ps539OrderMessage},
+	{"each port declares its own",
+		"ports:\n  9: {fields: [{name: x, type: u8}]}\n  10: {fields: [{name: x, type: u8}, {name: y, type: number, ref: $x}]}\n",
+		""},
+	{"within a port, declared before read",
+		"ports:\n  10: {fields: [{name: x, type: u8}, {name: y, type: number, ref: $x}]}\n  9: {fields: [{name: z, type: u8}]}\n",
+		""},
+	{"within a port, read before declared",
+		"ports:\n  10: {fields: [{name: y, type: number, ref: $x}, {name: x, type: u8}]}\n  9: {fields: [{name: z, type: u8}]}\n",
+		"`$x` (ref) " + ps539OrderMessage},
+	{"a metadata name is in scope in every port",
+		"metadata: {include: [{name: eui, source: $device_eui}]}\n" +
+			"ports:\n  1: {fields: [{name: a, type: number, ref: $eui}]}\n  2: {fields: [{name: b, type: number, ref: $eui}]}\n",
+		""},
 }
 
 func TestPS539WalksInSourceOrder(t *testing.T) {
