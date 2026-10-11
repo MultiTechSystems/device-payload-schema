@@ -82,14 +82,32 @@ func TestCR118LoadErrors(t *testing.T) {
 		{"  - {name: m, type: repeat, count: 1, element: {match: {length: 1, cases: {1: [{records: [[{name: a, type: u8}]]}]}}}}\n",
 			"Repeat 'm': an `element` cannot reach a `records` entry (PS-541)"},
 		{"  - {name: m, type: repeat, count: 1, present_if: {field: $a, in: [1, x]}, fields: [{name: a, type: u8}]}\n",
-			"a condition's `in` is a list of numbers (PS-543)"},
+			"`in` in the present_if of 'm' is a list of numbers (PS-543)"},
 		{"  - {name: m, type: repeat, count: 1, present_if: {field: $a, not_in: 3}, fields: [{name: a, type: u8}]}\n",
-			"a condition's `not_in` is a list of numbers (PS-543)"},
+			"`not_in` in the present_if of 'm' is a list of numbers (PS-543)"},
 		{"  - {name: a, type: u8}\n  - {name: b, type: number, ref: $a, guard: {when: [{field: $a, in: [1], gt: 0}]}}\n",
-			"a condition with `in` or `not_in` has no other comparison operator (PS-126, PS-543)"},
+			"a guard condition of 'b' has 2 comparison operators; a condition has exactly one (PS-126)"},
+		// CR-2026-124: PS-126 holds for every condition, and booleans are not numbers.
+		{"  - {name: m, type: repeat, count: 1, present_if: {field: $a, gt: 0, lt: 3}, fields: [{name: a, type: u8}]}\n",
+			"the present_if of 'm' has 2 comparison operators; a condition has exactly one (PS-126)"},
+		{"  - {name: a, type: u8}\n  - {name: b, type: number, ref: $a, guard: {when: [{field: $a}], else: 0}}\n",
+			"a guard condition of 'b' has 0 comparison operators; a condition has exactly one (PS-126)"},
+		{"  - {name: a, type: u8}\n  - {name: b, type: number, ref: $a, guard: {when: [{field: $a, in: [true]}], else: 0}}\n",
+			"`in` in a guard condition of 'b' is a list of numbers (PS-543)"},
+		// CR-2026-124: a record field may not share a name the element reports outside.
+		{"  - {name: m, type: repeat, count: 1, fields: [{name: channel, type: u8}, {match: {length: 1, cases: {1: [{name: kind, type: u8}]}}}, {records: [[{name: kind, type: u8}], [{name: channel, type: u8}]]}]}\n",
+			"Repeat 'm': ['channel', 'kind'] is reported both by a record and by the element outside `records` (PS-541)"},
+		{"  - {name: m, type: repeat, count: 1, fields: [{name: _c, type: u8}, {name: o, type: object, fields: [{name: b, type: u8}]}, {records: [[{name: _c, type: u8}], [{name: b, type: u8}]]}]}\n",
+			""},
 	}
 	for _, c := range cases {
 		_, err := ParseSchema("name: t\nfields:\n" + c.fields)
+		if c.want == "" {
+			if err != nil {
+				t.Errorf("%s: an internal or object-member name is no clash, got %v", c.fields, err)
+			}
+			continue
+		}
 		if err == nil || err.Error() != c.want {
 			t.Errorf("%s: got %v\nwant %s", c.fields, err, c.want)
 		}
@@ -116,8 +134,16 @@ func TestCR118InAndNotIn(t *testing.T) {
 	for _, c := range []struct{ op, want string }{
 		{"in", `{"v":[{"x":1},{"x":3}]}`},
 		{"not_in", `{"v":[{"x":2}]}`},
+		// CR-2026-124 (PS-543): an empty `in` never holds, an empty `not_in` always.
+		{"in: [], x", `{"v":[]}`},
+		{"not_in: [], x", `{"v":[{"x":1},{"x":2},{"x":3}]}`},
 	} {
-		s := cr111Parse(t, "  - {name: v, type: repeat, count: 3, present_if: {field: $x, "+c.op+": [1, 3]}, fields: [{name: x, type: u8}]}\n")
+		list := ": [1, 3]"
+		op := c.op
+		if strings.HasSuffix(op, ", x") {
+			op, list = strings.TrimSuffix(op, ", x"), ""
+		}
+		s := cr111Parse(t, "  - {name: v, type: repeat, count: 3, present_if: {field: $x, "+op+list+"}, fields: [{name: x, type: u8}]}\n")
 		if got := asJSON(t, cr111Decode(t, s, "010203")); got != c.want {
 			t.Errorf("%s: got %s want %s", c.op, got, c.want)
 		}

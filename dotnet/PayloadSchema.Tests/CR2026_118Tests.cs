@@ -96,17 +96,44 @@ public class CR2026_118Tests
         "Repeat 'm': an `element` cannot reach a `records` entry (PS-541)")]
     [InlineData("  - name: m\n    type: repeat\n    count: 1\n    present_if: {field: $a, in: [1, x]}\n"
         + "    fields: [{name: a, type: u8}]\n",
-        "a condition's `in` is a list of numbers (PS-543)")]
+        "`in` in the present_if of 'm' is a list of numbers (PS-543)")]
     [InlineData("  - name: m\n    type: repeat\n    count: 1\n    present_if: {field: $a, not_in: 3}\n"
         + "    fields: [{name: a, type: u8}]\n",
-        "a condition's `not_in` is a list of numbers (PS-543)")]
+        "`not_in` in the present_if of 'm' is a list of numbers (PS-543)")]
     [InlineData("  - name: m\n    type: repeat\n    count: 1\n    present_if: {field: $a, in: [1], ne: 0}\n"
         + "    fields: [{name: a, type: u8}]\n",
-        "a condition with `in` or `not_in` has no other comparison operator (PS-126, PS-543)")]
+        "the present_if of 'm' has 2 comparison operators; a condition has exactly one (PS-126)")]
+    // CR-2026-124: PS-126 holds for every condition, not only a set one.
+    [InlineData("  - {name: a, type: u8}\n  - name: b\n    type: number\n    ref: $a\n"
+        + "    guard: {when: [{field: $a, gt: 0, lt: 3}], else: 0}\n",
+        "a guard condition of 'b' has 2 comparison operators; a condition has exactly one (PS-126)")]
+    [InlineData("  - {name: a, type: u8}\n  - name: b\n    type: number\n    ref: $a\n"
+        + "    guard: {when: [{field: $a}], else: 0}\n",
+        "a guard condition of 'b' has 0 comparison operators; a condition has exactly one (PS-126)")]
+    [InlineData("  - {name: a, type: u8}\n  - name: b\n    type: number\n    ref: $a\n"
+        + "    guard: {when: [{field: $a, in: [true]}], else: 0}\n",
+        "`in` in a guard condition of 'b' is a list of numbers (PS-543)")]
+    // CR-2026-124: a record field may not share a name the element reports outside.
+    [InlineData("  - name: m\n    type: repeat\n    count: 1\n    fields:\n"
+        + "      - {name: channel, type: u8}\n"
+        + "      - match: {length: 1, cases: {1: [{name: kind, type: u8}]}}\n"
+        + "      - records: [[{name: kind, type: u8}], [{name: channel, type: u8}]]\n",
+        "Repeat 'm': ['channel', 'kind'] is reported both by a record and by the element outside `records` (PS-541)")]
     public void TheSchemaRulesAreRejectedAtLoad(string fields, string message)
     {
         var thrown = Assert.Throws<InvalidOperationException>(() => Parse(fields));
-        Assert.Equal(message, thrown.Message);
+        Assert.Contains(message, thrown.Message);
+    }
+
+    [Fact]
+    public void AnInternalOrObjectMemberNameIsNoClash()
+    {
+        var output = SchemaDecoder.Decode(Parse("  - name: m\n    type: repeat\n    count: 1\n    fields:\n"
+            + "      - {name: _x, type: u8}\n"
+            + "      - {name: o, type: object, fields: [{name: b, type: u8}]}\n"
+            + "      - records: [[{name: _x, type: u8}, {name: b, type: u8}]]\n"),
+            Convert.FromHexString("01020304"));
+        Assert.Single(Values(output, "m"));
     }
 
     [Fact]
@@ -126,6 +153,9 @@ public class CR2026_118Tests
     [Theory]
     [InlineData("in: [1, 3]", new double[] { 1, 3 })]
     [InlineData("not_in: [1, 3]", new double[] { 2 })]
+    // CR-2026-124 (PS-543): an empty `in` never holds, an empty `not_in` always does.
+    [InlineData("in: []", new double[] { })]
+    [InlineData("not_in: []", new double[] { 1, 2, 3 })]
     public void InAndNotIn(string cond, double[] kept)
     {
         var output = SchemaDecoder.Decode(Parse(

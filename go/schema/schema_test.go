@@ -1846,6 +1846,8 @@ fields:
       when:
         - field: $raw_temp
           gt: 0
+        # PS-126 (CR-2026-124): one operator per condition, so a range is two.
+        - field: $raw_temp
           lt: 2000
       else: -999
 `

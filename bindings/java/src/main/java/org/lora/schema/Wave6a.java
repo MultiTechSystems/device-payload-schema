@@ -128,6 +128,18 @@ final class Wave6a {
                 }
                 walkRecords(item.get("fields"), true, errors);
                 walkRecords(item.get("trailer"), false, errors);
+                List<String> clash = recordsClash(item.get("fields"));
+                if (!clash.isEmpty()) {
+                    StringBuilder listed = new StringBuilder("[");
+                    for (int i = 0; i < clash.size(); i++) {
+                        if (i > 0) listed.append(", ");
+                        listed.append('\'').append(clash.get(i)).append('\'');
+                    }
+                    listed.append(']');
+                    errors.add("Repeat '" + (item.containsKey("name") ? item.get("name") : "<unnamed>")
+                            + "': " + listed + " is reported both by a record and by the element"
+                            + " outside `records` (PS-541)");
+                }
                 continue;
             }
             if (isConstruct(item, "match") && item.get("match") instanceof Map<?, ?> match) {
@@ -154,15 +166,83 @@ final class Wave6a {
     }
 
     /**
+     * The names a field list reports at its own level: named fields, and those of the
+     * constructs merging into it (match and tlv cases and default, flagged groups,
+     * byte_group members). An object or repeat contributes its own name; internal and
+     * name_from fields, and {@code records} bodies, contribute none. Mirrors level_names.
+     */
+    static java.util.Set<String> levelNames(Object fieldsRaw) {
+        java.util.Set<String> found = new java.util.TreeSet<>();
+        if (!(fieldsRaw instanceof List<?> fields)) return found;
+        for (Object o : fields) {
+            if (!(o instanceof Map<?, ?> item)) continue;
+            if (isConstruct(item, "records")) continue;
+            Object type = item.get("type");
+            if (type != null && !"".equals(type)) {
+                if (item.get("name") instanceof String name && !name.startsWith("_")
+                        && item.get("name_from") == null) {
+                    found.add(name);
+                }
+                continue;
+            }
+            for (String key : List.of("match", "tlv")) {
+                if (item.get(key) instanceof Map<?, ?> spec) {
+                    if (spec.get("cases") instanceof Map<?, ?> cases) {
+                        for (Object body : cases.values()) found.addAll(levelNames(body));
+                    }
+                    found.addAll(levelNames(spec.get("default")));
+                }
+            }
+            if (item.get("flagged") instanceof Map<?, ?> flagged && flagged.get("groups") instanceof List<?> groups) {
+                for (Object g : groups) {
+                    if (g instanceof Map<?, ?> group) found.addAll(levelNames(group.get("fields")));
+                }
+            }
+            Object group = item.get("byte_group");
+            found.addAll(levelNames(group instanceof Map<?, ?> g ? g.get("fields") : group));
+        }
+        return found;
+    }
+
+    /**
+     * PS-541 (CR-2026-124): the names a record shares with a field the element reports
+     * outside {@code records}, sorted. Mirrors records_clash.
+     */
+    static List<String> recordsClash(Object fieldsRaw) {
+        java.util.Set<String> outside = levelNames(fieldsRaw);
+        java.util.Set<String> inside = new java.util.TreeSet<>();
+        collectRecordNames(fieldsRaw, inside);
+        inside.retainAll(outside);
+        return new ArrayList<>(inside);
+    }
+
+    private static void collectRecordNames(Object fieldsRaw, java.util.Set<String> inside) {
+        if (!(fieldsRaw instanceof List<?> fields)) return;
+        for (Object o : fields) {
+            if (!(o instanceof Map<?, ?> item)) continue;
+            if (isConstruct(item, "records") && item.get("records") instanceof List<?> bodies) {
+                for (Object body : bodies) inside.addAll(levelNames(body));
+            }
+            if (isConstruct(item, "match") && item.get("match") instanceof Map<?, ?> match) {
+                if (match.get("cases") instanceof Map<?, ?> cases) {
+                    for (Object body : cases.values()) collectRecordNames(body, inside);
+                }
+                collectRecordNames(match.get("default"), inside);
+            }
+        }
+    }
+
+    /**
      * PS-543: a condition's {@code in} or {@code not_in} is a list of numbers, and the
      * condition's one operator (PS-126). Over every guard condition and present_if, as
      * condition_errors does.
      */
     private static void collectConditionErrors(Object node, List<String> errors) {
         if (node instanceof Map<?, ?> map) {
-            checkCondition(map.get("present_if"), errors);
+            Object name = map.containsKey("name") ? map.get("name") : "?";
+            checkCondition(map.get("present_if"), "the present_if of '" + name + "'", errors);
             if (map.get("guard") instanceof Map<?, ?> guard && guard.get("when") instanceof List<?> when) {
-                for (Object cond : when) checkCondition(cond, errors);
+                for (Object cond : when) checkCondition(cond, "a guard condition of '" + name + "'", errors);
             }
             for (Map.Entry<?, ?> e : map.entrySet()) {
                 if (!"test_vectors".equals(e.getKey())) collectConditionErrors(e.getValue(), errors);
@@ -172,15 +252,14 @@ final class Wave6a {
         }
     }
 
-    private static void checkCondition(Object raw, List<String> errors) {
+    private static void checkCondition(Object raw, String where, List<String> errors) {
         if (!(raw instanceof Map<?, ?> cond)) return;
-        if (!cond.containsKey("in") && !cond.containsKey("not_in")) return;
         int ops = 0;
         for (String op : GUARD_OPS) {
             if (cond.containsKey(op)) ops++;
         }
-        if (ops != 1) {
-            errors.add("a condition with `in` or `not_in` has no other comparison operator (PS-126, PS-543)");
+        if (ops != 1) {                                                     // PS-126
+            errors.add(where + " has " + ops + " comparison operators; a condition has exactly one (PS-126)");
         }
         for (String op : SET_OPS) {
             if (!cond.containsKey(op)) continue;
@@ -190,7 +269,7 @@ final class Wave6a {
                     if (!(v instanceof Number)) numbers = false;
                 }
             }
-            if (!numbers) errors.add("a condition's `" + op + "` is a list of numbers (PS-543)");
+            if (!numbers) errors.add("`" + op + "` in " + where + " is a list of numbers (PS-543)");
         }
     }
 
