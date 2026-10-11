@@ -203,6 +203,8 @@ test-c: $(VENV)/bin/activate
 	done
 	@echo "C interpreter tests pass."
 	$(PYTHON) tools/c-corpus-harness.py
+	$(PYTHON) tools/c-corpus-harness.py --from-blob names
+	$(PYTHON) tools/c-corpus-harness.py --from-blob nameless
 
 ci: test validate-examples docs-index-check score-check hypothesis test-c test-go test-java test-dotnet
 	@echo "All CI checks passed."

@@ -2274,7 +2274,7 @@ func decodeByteGroup(field Field, ctx *DecodeContext) (map[string]any, error) {
 	size := byteGroupWidth(field) // PS-070, CR-2026-131
 
 	if size > ctx.Remaining() {
-		return nil, byteGroupUnderflow(field, size, ctx)
+		return nil, byteGroupUnderflow(field, ctx)
 	}
 	data, err := ctx.Read(size)
 	if err != nil {

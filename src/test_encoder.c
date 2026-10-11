@@ -76,10 +76,13 @@ void test_device_uplink(void) {
     
     /* Device has schema loaded from binary */
     static const uint8_t binary_schema[] = {
-        0x50, 0x53, 0x01, 0x00, 0x03,
-        0x12, 0xFE, 0xE7, 0x0C,  /* temperature */
-        0x01, 0x81, 0xE8, 0x0C,  /* humidity */
-        0x02, 0x00, 0xF4, 0x0C,  /* voltage */
+        0x50, 0x53, 0x03, 0x00, 0x83,   /* format 3, names follow, 3 fields */
+        0x12, 0xFE, 0xE7, 0x0C,  /* s16 x 0.01, IPSO 3303 */
+        0x01, 0x81, 0xE8, 0x0C,  /* u8 x 0.5, IPSO 3304 */
+        0x02, 0x00, 0xF4, 0x0C,  /* u16, IPSO 3316 */
+        11, 't', 'e', 'm', 'p', 'e', 'r', 'a', 't', 'u', 'r', 'e',
+        8, 'h', 'u', 'm', 'i', 'd', 'i', 't', 'y',
+        10, 'b', 'a', 't', 't', 'e', 'r', 'y', '_', 'm', 'v',
     };
     
     schema_t schema;
@@ -90,12 +93,12 @@ void test_device_uplink(void) {
     double humidity_percent = 55.0;
     uint16_t battery_mv = 3250;
     
-    /* Encode for uplink - use IPSO names from binary schema */
+    /* Encode for uplink - by the names the binary schema carries (PS-555) */
     encode_inputs_t inputs;
     encode_inputs_init(&inputs);
     encode_inputs_add_double(&inputs, "temperature", temp_celsius);
     encode_inputs_add_double(&inputs, "humidity", humidity_percent);
-    encode_inputs_add_double(&inputs, "voltage", battery_mv);  /* IPSO 3316 = voltage */
+    encode_inputs_add_double(&inputs, "battery_mv", battery_mv);
     
     encode_result_t result;
     schema_encode(&schema, &inputs, &result);

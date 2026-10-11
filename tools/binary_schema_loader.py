@@ -31,21 +31,6 @@ class TypeCode(IntEnum):
     SKIP = 0x8
 
 
-# IPSO Smart Object IDs
-IPSO_NAMES = {
-    3303: 'temperature',
-    3304: 'humidity',
-    3315: 'pressure',
-    3316: 'voltage',
-    3317: 'current',
-    3328: 'power',
-    3331: 'energy',
-    3330: 'distance',
-    3301: 'illuminance',
-    3302: 'presence',
-}
-
-
 @dataclass
 class BinaryField:
     """Pre-parsed field for fast decoding."""
@@ -97,147 +82,60 @@ def exp_to_mult(exp: int) -> float:
     return 10.0 ** exp
 
 
-def load_binary_field(data: bytes, offset: int) -> Tuple[BinaryField, int]:
-    """Load a single field from binary. Returns (field, new_offset)."""
-    type_byte = data[offset]
-    has_lookup = bool(type_byte & 0x80)
-    type_code_raw = (type_byte >> 4) & 0x0F
-    # Handle lookup flag in high bit of type nibble
-    if type_code_raw > 8:
-        type_code_raw &= 0x07
-        has_lookup = True
-    try:
-        type_code = TypeCode(type_code_raw)
-    except ValueError:
-        type_code = TypeCode.UINT  # Default
-    size = type_byte & 0x0F
-    offset += 1
-    
-    # Multiplier
-    mult_exp = data[offset]
-    mult = exp_to_mult(mult_exp)
-    offset += 1
-    
-    # Field ID
-    field_id = struct.unpack_from('<H', data, offset)[0]
-    offset += 2
-    
-    # Name from IPSO or generate
-    if field_id in IPSO_NAMES:
-        name = IPSO_NAMES[field_id]
-    elif field_id & 0x8000:
-        name = f'field_{field_id & 0x7FFF:04x}'
+def _field_from_dict(field: Dict[str, Any]) -> BinaryField:
+    """A BinaryField from one field of schema_binary.decode_schema()'s output."""
+    import re
+    type_str = field['type']
+    bits = re.match(r'^u8\[(\d+):(\d+)\]$', type_str)
+    sizes = {'8': 1, '16': 2, '24': 3, '32': 4, '64': 8}
+    if bits:
+        start, end = int(bits.group(1)), int(bits.group(2))
+        code, size = TypeCode.BITFIELD, end - start + 1
+    elif type_str in ('skip', 'bytes'):
+        code = TypeCode.SKIP if type_str == 'skip' else TypeCode.BYTES
+        size = field.get('length', 0)
+    elif type_str in ('bool', 'enum'):
+        code, size = (TypeCode.BOOL if type_str == 'bool' else TypeCode.UINT), 1
     else:
-        name = f'ipso_{field_id}'
-    
-    bf_start, bf_width = 0, 0
-    consume = True
-    add = 0.0
-    
-    # Bitfield info
-    if type_code == TypeCode.BITFIELD:
-        bf_byte = data[offset]
-        bf_start = (bf_byte >> 4) & 0x0F
-        bf_width = bf_byte & 0x0F
-        offset += 1
-        if offset < len(data) and data[offset] == 0x01:
-            consume = True
-            offset += 1
-        else:
-            consume = False
-    
-    # Add marker
-    if offset < len(data) and data[offset] == 0xA0:
-        offset += 1
-        add = struct.unpack_from('<h', data, offset)[0] / 100.0
-        offset += 2
-    
-    # Lookup table
-    lookup = None
-    if has_lookup and offset < len(data):
-        lookup_count = data[offset]
-        offset += 1
-        lookup = {}
-        for _ in range(lookup_count):
-            key = data[offset]
-            offset += 1
-            str_len = data[offset]
-            offset += 1
-            value = data[offset:offset + str_len].decode('utf-8')
-            offset += str_len
-            lookup[key] = value
-    
+        code = {'u': TypeCode.UINT, 's': TypeCode.SINT, 'f': TypeCode.FLOAT}[type_str[0]]
+        size = sizes[type_str[1:]]
+    lookup = field.get('lookup')
+    if isinstance(lookup, list):
+        lookup = dict(enumerate(lookup))
     return BinaryField(
-        name=name,
-        type_code=type_code,
+        name=field.get('name', ''),
+        type_code=code,
         size=size,
-        mult=mult,
-        add=add,
-        field_id=field_id,
-        bitfield_start=bf_start,
-        bitfield_width=bf_width,
-        consume=consume,
+        mult=field.get('mult', 1.0),
+        add=field.get('add', 0.0),
+        field_id=(field.get('ipso') or {}).get('object', 0),
+        bitfield_start=int(bits.group(1)) if bits else 0,
+        bitfield_width=size if bits else 0,
+        consume=bool(field.get('consume')) if bits else True,
         lookup=lookup,
-    ), offset
+    )
 
 
 def load_binary_schema(data: bytes) -> BinarySchema:
-    """Load schema from binary format."""
-    if len(data) < 5 or data[0:2] != b'PS':
-        raise ValueError("Invalid binary schema format")
-    
-    version = data[2]
-    endian = 'little' if data[3] & 0x01 else 'big'
-    field_count = data[4]
-    
-    fields = []
-    offset = 5
-    
-    for _ in range(field_count):
-        if offset >= len(data):
-            break
-        
-        type_peek = data[offset]
-        type_code = (type_peek >> 4) & 0x0F
-        
-        if type_code == TypeCode.MATCH:
-            # Match field - complex parsing
-            offset += 1
-            var_len = data[offset]
-            offset += 1
-            var_name = data[offset:offset + var_len].decode('utf-8')
-            offset += var_len
-            
-            case_count = data[offset]
-            offset += 1
-            
-            cases = []
-            for _ in range(case_count):
-                case_val = data[offset]
-                offset += 1
-                
-                case_field_count = data[offset]
-                offset += 1
-                
-                case_fields = []
-                for _ in range(case_field_count):
-                    cf, offset = load_binary_field(data, offset)
-                    case_fields.append(cf)
-                
-                cases.append((case_val if case_val != 0xFF else -1, case_fields))
-            
-            fields.append(BinaryField(
-                name='_match',
-                type_code=TypeCode.MATCH,
-                size=0,
-                match_var=var_name,
-                cases=cases,
-            ))
-        else:
-            bf, offset = load_binary_field(data, offset)
-            fields.append(bf)
-    
-    return BinarySchema(version=version, endian=endian, fields=fields)
+    """Load a schema from tools/schema_binary.py's binary form.
+
+    The blob is parsed by schema_binary.decode_schema(), so there is one reader of the
+    format: names come from its name table (PS-555, CR-2026-142). This module used to
+    parse the records itself and name each field from its IPSO object - 3316 became
+    "voltage" - or "field_xxxx". A blob without the name table is refused, because this
+    decoder reports the decoded object, which needs the names.
+    """
+    from schema_binary import decode_schema
+
+    decoded = decode_schema(data)
+    if not decoded['names']:
+        raise ValueError("binary schema carries no names; a decoder reporting the "
+                         "decoded object cannot use it (PS-555)")
+    return BinarySchema(
+        version=data[2],
+        endian=decoded['endian'],
+        fields=[_field_from_dict(f) for f in decoded['fields']],
+    )
 
 
 def binary_schema_to_dict(schema: BinarySchema) -> Dict[str, Any]:

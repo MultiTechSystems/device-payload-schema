@@ -100,10 +100,15 @@ SHORT_READS = [
                             {'byte_group': {'size': 2, 'fields': [
                                 {'name': 'a', 'type': 'u8[0:3]'},
                                 {'name': 'c', 'type': 'u16[4:7]'}]}}],
-     '0101', peek("'c'", 1)),
+     '0101', peek("byte_group of 'a', 'c'", 1)),
+    # CR-2026-131: the group is one read, so it is named by every member, in order,
+    # internal ones included, whichever member's base would have fitted.
     ('shared bytes wider than every member', [{'byte_group': {'size': 2, 'fields': [
-        {'name': 'a', 'type': 'u8[0:3]'}]}}], '01',
-     underflow('an unnamed byte_group', 2, 0, 1)),
+        {'name': 'a', 'type': 'u8[0:3]'}, {'name': '_r', 'type': 'u8[4:7]'}]}}], '01',
+     peek("byte_group of 'a', '_r'", 0)),
+    ('byte_group with no named member', [{'byte_group': {'size': 2, 'fields': [
+        {'type': 'u8[0:3]'}]}}], '01',
+     peek('an unnamed byte_group', 0)),
 ]
 
 

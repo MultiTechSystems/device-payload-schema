@@ -55,11 +55,29 @@ public class SchemaException extends RuntimeException {
             return "an unnamed " + (kind == null || kind.isEmpty() ? "field" : kind);
         }
 
+        /**
+         * How PS-535 identifies a byte_group: by its members, as the spec prototype does -
+         * {@code byte_group of 'f', 'w'}, every named member in declaration order, internal
+         * {@code _} members included - else {@code an unnamed byte_group} (CR-2026-131).
+         */
+        public static String byteGroupLabel(java.util.List<String> memberNames) {
+            java.util.List<String> quoted = new java.util.ArrayList<>();
+            for (String name : memberNames) {
+                if (name != null && !name.isEmpty()) quoted.add("'" + name + "'");
+            }
+            return quoted.isEmpty() ? "an unnamed byte_group"
+                    : "byte_group of " + String.join(", ", quoted);
+        }
+
         /** This error as the field's, unless an inner field has already named it. */
         public BufferUnderflow named(String name, String kind) {
+            return namedAs(label(name, kind));
+        }
+
+        /** This error identified by a ready-made PS-535 label. */
+        public BufferUnderflow namedAs(String label) {
             if (named) return this;
-            return new BufferUnderflow("Field " + label(name, kind) + ": " + detail + " (PS-535)",
-                    detail);
+            return new BufferUnderflow("Field " + label + ": " + detail + " (PS-535)", detail);
         }
     }
 

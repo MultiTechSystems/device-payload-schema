@@ -1984,10 +1984,19 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     every enclosing object, repeat, case body, flag group or `$ref` passes it through. An
     enum names itself, not its base; an inline match discriminator is named by the match's
     `name`, else `an unnamed match` (the prototype names nothing there).
-  - **A byte_group** names the first member whose own base does not fit, as the prototype's
-    per-member peek does; where every base fits and the group's `size` does not, `an unnamed
-    byte_group`. Note that a group with no `size` is one byte wide in all five, where the
-    prototype derives the span from the members - outside PS-535, still open.
+  - **A byte_group is named by its members** (CR-2026-131's ruling): `Field byte_group of
+    'f', 'w': Buffer underflow at peek offset 0 (PS-535)`, every named member in declaration
+    order, `_` internal members included, each single-quoted and separated by `, ` - the
+    spec prototype's form (spec main 06a5103) - else `Field an unnamed byte_group: ...`
+    where no member has a name (the prototype writes `byte_group of :` there; the ruling
+    takes the unnamed form). The group is one read of one value, so the read is the
+    group's, always the peek form, and every member is lost - not only the first whose own
+    base reaches past the end, which is what all five named until this change, with the
+    need form where only the group's `size` did not fit. One helper per language:
+    `byte_group_label` (Python; the TS013 generator calls it), Go `byteGroupLabel`, Java
+    `BufferUnderflow.byteGroupLabel`, C# `BufferUnderflowException.ByteGroupLabel`. C has
+    no byte_group decode path (`FIELD_TYPE_BYTE_GROUP` is an enum value only), so there is
+    nothing to name there.
   - Unchanged, as PS-535 excepts them: `remaining`, PS-403's optional message, PS-477/486
     for a tlv entry, and PS-343's ragged tail for an `until: end` element.
   - Found on the way: Go's `bool` discarded its `consume` read's error, and Python and the
@@ -2046,6 +2055,23 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   has no byte_group decode path, so this is a C gap like the construct itself. **No corpus,
   library, example or registry schema is rejected or changes decode** (registry yabby-edge
   was rewritten as one 8-byte group, 69e1023). Fixture: `byte-group-width.yaml`.
+- **CR-2026-142 (PS-555): the binary schema form carries its names.** `schema_load_binary`
+  used to name each field from its IPSO object (`ipso_to_name`: 3303 was "temperature",
+  anything unlisted `field_xxxx`), so a schema reported different keys from its blob than
+  from its YAML. Format version 3 (`tools/schema_binary.py`, the header's "Binary Schema
+  Loading" block): byte 2 is the *format* version and anything else is refused (1 held
+  the schema's own `version`; 2 is `binary_schema_v2.py`'s unrelated layout under the same
+  magic); count bit 7 announces a name table of one length byte plus UTF-8 per record,
+  0 only for a skip; `skip` moved to type code 0x7, so it has a record at all. Without the
+  table (`--no-names`, `encode_schema(names=False)`) the C loader sets `schema_t.nameless`,
+  every name stays empty, values are reached with `result_get_index()` by schema index,
+  and `result_to_json()` refuses. `SCHEMA_MAX_NAME_LEN` (32, so 31 bytes) is a load error
+  naming the field, never a truncation; the encoder refuses the same, and a count over
+  127. `schema_load_binary_msg()` gives the reason for any refusal. `make test-c`'s
+  harness runs either form with `--from-blob names|nameless` and requires the reference's
+  keys exactly. `schema_interpreter.hpp` and `binary_schema_loader.py` lost their own IPSO
+  name tables the same way; `binary_schema.py` and `binary_schema_v2.py` feed no C reader
+  and were left as they were.
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.
