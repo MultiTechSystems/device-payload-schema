@@ -323,17 +323,23 @@ Example with `mult: 0.01`:
 // Binary schemas (python3 tools/schema_binary.py encode <schema.yaml> -o <out.bin>)
 // Uplink: the sensor_uplink schema above
 static const uint8_t UPLINK_SCHEMA[] = {
-    0x50, 0x53, 0x01, 0x00, 0x03,  // Header
-    0x12, 0xFE, 0xE7, 0x0C,        // temperature: s16, mult=0.01
-    0x01, 0x81, 0xE8, 0x0C,        // humidity: u8, mult=0.5
-    0x02, 0x00, 0xF9, 0x89,        // battery: u16
+    0x50, 0x53, 0x03, 0x00, 0x83,  // Header: format 3, names follow, 3 fields
+    0x12, 0xFE, 0xE7, 0x0C,        // s16, mult=0.01, IPSO 3303
+    0x01, 0x81, 0xE8, 0x0C,        // u8, mult=0.5, IPSO 3304
+    0x02, 0x00, 0x00, 0x00,        // u16, no IPSO object
+    // Name table (PS-555): the keys, never derived from the IPSO objects
+    11, 't', 'e', 'm', 'p', 'e', 'r', 'a', 't', 'u', 'r', 'e',
+    8, 'h', 'u', 'm', 'i', 'd', 'i', 't', 'y',
+    7, 'b', 'a', 't', 't', 'e', 'r', 'y',
 };
 
 // Downlink: command u8 + parameter u16 (the device_config schema without its lookup)
 static const uint8_t DOWNLINK_SCHEMA[] = {
-    0x50, 0x53, 0x01, 0x00, 0x02,  // Header
-    0x01, 0x00, 0x42, 0x8C,        // command: u8
-    0x02, 0x00, 0x14, 0xFE,        // parameter: u16
+    0x50, 0x53, 0x03, 0x00, 0x82,  // Header: format 3, names follow, 2 fields
+    0x01, 0x00, 0x00, 0x00,        // u8
+    0x02, 0x00, 0x00, 0x00,        // u16
+    7, 'c', 'o', 'm', 'm', 'a', 'n', 'd',
+    9, 'p', 'a', 'r', 'a', 'm', 'e', 't', 'e', 'r',
 };
 
 static schema_t uplink_schema;
