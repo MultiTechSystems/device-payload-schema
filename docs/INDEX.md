@@ -123,13 +123,13 @@ Generated inventory of this repository: what lives where, what each document cov
 ## Device schemas
 
 320 schemas under `schemas/devices/`.
-Mean quality score 75.1% (PLATINUM 37, GOLD 39, SILVER 188, BRONZE 31, REJECTED 25). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+Mean quality score 75.2% (PLATINUM 37, GOLD 39, SILVER 189, BRONZE 31, REJECTED 24). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
-| _language-conformance | 108 | 201 | SILVER 78, BRONZE 20, REJECTED 10 |
+| _language-conformance | 108 | 201 | SILVER 79, BRONZE 20, REJECTED 9 |
 | milesight | 84 | 1427 | PLATINUM 21, GOLD 33, SILVER 27, REJECTED 3 |
 | decentlab | 58 | 204 | PLATINUM 13, GOLD 6, SILVER 27, BRONZE 8, REJECTED 4 |
 | _library-composed | 49 | 57 | SILVER 48, BRONZE 1 |
@@ -229,7 +229,7 @@ Mean quality score 75.1% (PLATINUM 37, GOLD 39, SILVER 188, BRONZE 31, REJECTED 
 | `_language-conformance/repeat-element-null` | 1 | 3 | fields | 75% | SILVER |
 | `_language-conformance/repeat-element-object` | 3 | 1 | fields | 71% | SILVER |
 | `_language-conformance/repeat-element-unnamed` | 1 | 1 | fields | 71% | SILVER |
-| `_language-conformance/repeat-identity-sibling` | 3 | 2 | repeat | 28% | REJECTED |
+| `_language-conformance/repeat-identity-sibling` | 3 | 2 | repeat | 71% | SILVER |
 | `_language-conformance/repeat-identity` | 4 | 1 | fields | 69% | BRONZE |
 | `_language-conformance/repeat-index-base` | 4 | 1 | fields | 69% | BRONZE |
 | `_language-conformance/repeat-index-count-as` | 4 | 1 | fields | 69% | BRONZE |
