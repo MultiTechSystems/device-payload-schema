@@ -52,7 +52,8 @@ def test_a_number_with_a_unit_suffix_is_compared_by_value():
 
 
 def test_only_a_plain_decimal_against_a_number_is_converted():
-    for text in ("0x1A", "1e3", "3.1(low battery)", "0x0a 10 Min", "on", "", "12 34"):
+    # CR-2026-108 made the 0x-prefixed forms renderings; see test_cr_2026_108_comparison.py.
+    for text in ("1e3", "3.1(low battery)", "on", "", "12 34", "0x", "0xZZ 10"):
         assert as_number(text, 3.1) == text
     assert as_number("3.10", "3.10") == "3.10"     # string against string stays a string
     assert as_number("1", True) == "1"            # a boolean is not a number here

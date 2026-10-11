@@ -126,8 +126,12 @@ console.log(JSON.stringify(out));
         # (dragino's -LB codecs), which no engine loads as written. The intent is plain, so
         # the escapes are undone, as the registry's oracle does; otherwise the vendor
         # decoder silently never ran for these units.
-        code = (code.replace("\\r\\n", "\n").replace("\\n", "\n")
-                .replace("\\t", "\t").replace('\\"', '"'))
+        code = (
+            code.replace("\\r\\n", "\n")
+            .replace("\\n", "\n")
+            .replace("\\t", "\t")
+            .replace('\\"', '"')
+        )
     script = "%s\nconst REQUESTS = %s;\n%s" % (
         code,
         json.dumps(requests),
@@ -150,19 +154,44 @@ console.log(JSON.stringify(out));
 
 
 # PS-512: a vendor codec's string rendering of a number - `(x / 10).toFixed(2)` - is
-# compared by value. Only a plain decimal is taken as one: "0x1A", "1e3" and "3.1(low
-# battery)" stay strings, and so does every string compared against a string.
+# compared by value. "1e3" and "3.1(low battery)" stay strings, and so does every string
+# compared against a string.
 _DECIMAL = re.compile(r"-?\d+(\.\d+)?\Z")
 # PS-512 as amended: a decimal followed only by a unit symbol ("257mm", "18℃", "-70dBm",
-# "80 %"). Letters, °, ℃, %, / and whitespace only - "3.1(low battery)" and "0x0a 10 Min"
-# stay strings.
+# "80 %"). Letters, °, ℃, %, / and whitespace only - "3.1(low battery)" stays a string.
 _DECIMAL_UNIT = re.compile(r"(-?\d+(?:\.\d+)?)\s*[A-Za-z°℃%/]+\Z")
+# PS-512 as amended by CR-2026-108: "0x" and hex digits followed by a decimal, optionally
+# with a unit symbol ("0x0a 10 Min", "0x07 7"), renders the decimal; a bare "0x01" renders
+# its integer value.
+_HEX_DECIMAL = re.compile(
+    r"0[xX][0-9A-Fa-f]+\s+(-?\d+(?:\.\d+)?)(?:\s*[A-Za-z°℃%/]+)?\Z"
+)
+_HEX_BARE = re.compile(r"0[xX]([0-9A-Fa-f]+)\Z")
+
+
+def _is_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def as_number(want, got):
-    """`want` as the number it denotes where it is a decimal string and `got` a number."""
-    if isinstance(got, (int, float)) and not isinstance(got, bool) and isinstance(want, str):
+    """`want` as the number it denotes where it is a PS-512 rendering and `got` a number.
+
+    Descends into objects and lists, so a rendering nested inside a reported object
+    (`{"unit": "W", "value": "1.70"}`) is compared by value too.
+    """
+    if isinstance(want, dict) and isinstance(got, dict):
+        return {k: as_number(v, got[k]) if k in got else v for k, v in want.items()}
+    if isinstance(want, list) and isinstance(got, list) and len(want) == len(got):
+        return [as_number(w, g) for w, g in zip(want, got)]
+    if _is_number(got) and isinstance(want, str):
         text = want.strip()
+        # The 0x forms first: "0xff" would otherwise read as 0 with the unit "xff".
+        h = _HEX_BARE.match(text)
+        if h:
+            return float(int(h.group(1), 16))
+        if text[:2].lower() == "0x":
+            m = _HEX_DECIMAL.match(text)
+            return float(m.group(1)) if m else want
         if _DECIMAL.match(text):
             return float(text)
         m = _DECIMAL_UNIT.match(text)
@@ -186,7 +215,9 @@ def corrections(schema):
         if not isinstance(vec, dict) or vec.get("source") != "vendor-codec-corrected":
             continue
         port = vec.get("fPort", vec.get("fport", vec.get("port")))
-        names = {c.get("field") for c in vec.get("correction") or [] if isinstance(c, dict)}
+        names = {
+            c.get("field") for c in vec.get("correction") or [] if isinstance(c, dict)
+        }
         out.setdefault((_hex(vec.get("payload", "")), port), set()).update(names)
     return out
 
@@ -208,7 +239,9 @@ def compare(schema, payload, fport, expected):
         if key not in got:
             problems.append("%s: vendor %r, ours <missing>" % (key, want))
             continue
-        match, _message = values_match(as_number(want, got[key]), got[key], CONFORMANCE_TOLERANCE)
+        match, _message = values_match(
+            as_number(want, got[key]), got[key], CONFORMANCE_TOLERANCE
+        )
         if not match:
             problems.append("%s: vendor %r, ours %r" % (key, want, got[key]))
     return problems
@@ -235,13 +268,18 @@ def check_schema(path, vendor_dir, use_decoder):
             # was compared as data instead, so every port-based schema "disagreed" with
             # the vendor's own unknown-FPort example.
             try:
-                succeeded = SchemaInterpreter(schema).decode(payload, fPort=fport).success
-            except Exception:  # noqa: BLE001 - an undeclared fPort raises; that is a failure
+                succeeded = (
+                    SchemaInterpreter(schema).decode(payload, fPort=fport).success
+                )
+            except (
+                Exception
+            ):  # noqa: BLE001 - an undeclared fPort raises; that is a failure
                 succeeded = False
             if succeeded:
                 problems.append(
                     "%s (declared example): the vendor declares an error (%s), and our "
-                    "decode succeeded" % (payload.hex(), declared["errors"][0]))
+                    "decode succeeded" % (payload.hex(), declared["errors"][0])
+                )
             continue
         expected = declared.get("data") or {}
         problems += [
