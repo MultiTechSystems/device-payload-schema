@@ -16,6 +16,7 @@ fields:
   type: s16
   div: 10
   unit: °C
+  senml: {unit: Cel}
   valid_range:
   - -40
   - 85
@@ -48,6 +49,7 @@ fields:
   - add: -1800
   - div: 12
   unit: '%'
+  senml: {unit: /100}
   valid_range:
   - 0
   - 100
