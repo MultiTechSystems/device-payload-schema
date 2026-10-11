@@ -188,18 +188,18 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2646 payload vectors in `schemas/devices/` (measured 2026-10-11 with
+The 2653 payload vectors in `schemas/devices/` (measured 2026-10-11 with
 `tools/check-floors.py`, after the CR-2026-118 and CR-2026-124 fixtures, CR-2026-117's
-guard-absent-operand, the `match-u32-*` and names-mangling-alike fixtures, and CR-2026-127's
-guard-boolean-operand) are the shared cross-language test set. Every implementation has a
+guard-absent-operand, the `match-u32-*` and names-mangling-alike fixtures, CR-2026-127's
+guard-boolean-operand and CR-2026-109's lookup-reference-binding) are the shared cross-language test set. Every implementation has a
 runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1808 |
-| Go | `go/schema/corpus_conformance_test.go` | 2646 | 1825 (plain API 1802) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2646 | 1808 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2646 | 1808 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1813 |
+| Go | `go/schema/corpus_conformance_test.go` | 2653 | 1830 (plain API 1807) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2653 | 1813 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2653 | 1813 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 554 of 554 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -773,10 +773,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1808 |
-| Go | `go/schema/corpus_encode_test.go` | 1825 (plain 1802) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1808 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1808 |
+| Python | `tests/test_encode_round_trip.py` | 1813 |
+| Go | `go/schema/corpus_encode_test.go` | 1830 (plain 1807) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1813 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1813 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1548,7 +1548,9 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     `encodeDiscriminator`, `boundFromReported`, `ReferenceBinding`), and look for the field
     in the port being encoded before the rest of the schema, since two ports may declare one
     name with different tables. Go's encoder had no `$var` discriminator at all before.
-  - Fixture `lookup-reference-binding.yaml`, one port per case. No device schema and no
+  - Fixture `lookup-reference-binding.yaml`, one port per case: decode floors +7 in Go,
+    Java and C#, re-encode +5 everywhere and `match` +5 in all four (its miss and plain
+    `default` vectors carry no value to write back). No device schema and no
     vector of the private registry changed decode or encode output, and no schema in either
     keys a case by a label. A string case key is matched as nothing rather than refused at
     load, as the spec prototype does; PS-524 asks only for "matches nothing".
