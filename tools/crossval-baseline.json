@@ -895,7 +895,7 @@
     "digital-matter/oyster.yaml": {
       "ttn": {
         "status": "disagrees",
-        "problems": 30,
+        "problems": 26,
         "decode_failures": 0,
         "notes": 0
       }
