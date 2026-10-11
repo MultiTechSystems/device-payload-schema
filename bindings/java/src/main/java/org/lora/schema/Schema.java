@@ -108,6 +108,9 @@ public class Schema {
         // Wave 6b (CR-2026-059, -067): optional fields form the tail of their list (PS-404)
         // and no field takes a name reserved for interpreter metadata (PS-433).
         Wave6b.checkSchema(raw);
+        // CR-2026-110/125: PS-525 and PS-526 over every tlv, and an `on_repeat` where it
+        // has no effect, refused wherever it sits.
+        OnRepeat.checkPlacement(raw);
         // CR-2026-117: every `$` reference names something the schema declares (PS-539).
         References.check(raw);
         Schema schema = new Schema();
@@ -216,6 +219,27 @@ public class Schema {
             fields.add(parseField(fm));
         }
         return fields;
+    }
+
+    /**
+     * A tlv block's cases, insertion-ordered: encoding ranks the candidate cases for a
+     * channel and needs that ranking to be reproducible, which a HashMap's iteration order
+     * is not, and PS-527 writes a merged object's entries in case declaration order. Its
+     * {@code on_repeat} modes are resolved here, so a schema breaking PS-525/PS-526 is
+     * rejected at load.
+     */
+    @SuppressWarnings("unchecked")
+    private static void parseTlvCases(Field f, Map<String, Object> fm) {
+        if (!(fm.get("cases") instanceof Map<?, ?> casesRaw)) return;
+        Map<String, List<Field>> tlvCases = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : casesRaw.entrySet()) {
+            String key = String.valueOf(entry.getKey());
+            if (entry.getValue() instanceof List) {
+                tlvCases.put(key, parseFields((List<Map<String, Object>>) entry.getValue()));
+            }
+        }
+        f.setTlvCases(tlvCases);
+        f.setRepeatModes(OnRepeat.of(fm));
     }
 
     /**
@@ -966,17 +990,7 @@ public class Schema {
         if ((f.getType() == FieldType.TLV || fm.containsKey("tag_fields")
                 || fm.containsKey("tag_key") || fm.containsKey("tag_size"))
                 && casesRaw instanceof Map) {
-            // Insertion-ordered: encoding ranks the candidate cases for a channel and
-            // needs that ranking to be reproducible, which a HashMap's iteration order is
-            // not.
-            Map<String, List<Field>> tlvCases = new LinkedHashMap<>();
-            for (Map.Entry<?, ?> entry : ((Map<?, ?>) casesRaw).entrySet()) {
-                String key = String.valueOf(entry.getKey());
-                if (entry.getValue() instanceof List) {
-                    tlvCases.put(key, parseFields((List<Map<String, Object>>) entry.getValue()));
-                }
-            }
-            f.setTlvCases(tlvCases);
+            parseTlvCases(f, fm);
         }
         
         // Repeat fields
@@ -1133,6 +1147,10 @@ public class Schema {
         if (tlvRaw instanceof Map) {
             Field tlvField = parseField((Map<String, Object>) tlvRaw);
             tlvField.setType(FieldType.TLV);
+            // A block with a one-byte tag need declare none of tag_size, tag_fields and
+            // tag_key, and then nothing above marked it as a tlv, so its cases were never
+            // parsed and every tag was unknown.
+            if (tlvField.getTlvCases() == null) parseTlvCases(tlvField, (Map<String, Object>) tlvRaw);
             f.setTlvInline(tlvField);
         }
         
@@ -2179,6 +2197,7 @@ public class Schema {
         
         Map<String, Object> result = new LinkedHashMap<>();
         List<Map<String, Object>> channels = new ArrayList<>();
+        Set<String> collected = new HashSet<>();       // names turned into arrays (PS-157)
         
         // A composite tag's width is its tag_fields' summed widths.
         int tagWidth = tagSize;
@@ -2281,21 +2300,27 @@ public class Schema {
                 Map<String, Object> caseResult = decodeFields(caseFields, ctx);
                 
                 if (merge) {
+                    OnRepeat.Modes modes = field.getRepeatModes();
                     for (Map.Entry<String, Object> entry : caseResult.entrySet()) {
                         String k = entry.getKey();
                         Object v = entry.getValue();
-                        if (result.containsKey(k)) {
-                            Object existing = result.get(k);
-                            if (existing instanceof List) {
-                                ((List<Object>) existing).add(v);
-                            } else {
-                                List<Object> arr = new ArrayList<>();
-                                arr.add(existing);
-                                arr.add(v);
-                                result.put(k, arr);
-                            }
-                        } else {
+                        String mode = modes.mode(k);
+                        if (!result.containsKey(k)) {
                             result.put(k, v);
+                        } else if (!"collect".equals(mode)) {               // PS-525
+                            result.put(k, OnRepeat.combine(k, result.get(k), v, mode, modes.last(k)));
+                        } else if (collected.contains(k)) {                 // PS-157
+                            ((List<Object>) result.get(k)).add(v);
+                        } else {
+                            // A name reported again becomes an array. Whether it already is
+                            // one is not the test: a value that is itself a list (a repeat)
+                            // was appended into, splicing its second report among the
+                            // first's elements.
+                            List<Object> arr = new ArrayList<>();
+                            arr.add(result.get(k));
+                            arr.add(v);
+                            result.put(k, arr);
+                            collected.add(k);
                         }
                     }
                 } else {

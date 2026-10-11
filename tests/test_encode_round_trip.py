@@ -68,6 +68,14 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # vector with no null (CR-2026-111), all repeat. Its two null vectors are refused.
 # +2: guard-set (CR-2026-118), plain fixed. The other three CR-2026-118 fixtures are
 # refused (PS-542, PS-387).
+# +1: tlv-repeat-merge's object_members_combine (CR-2026-110), tlv. The other
+# tlv-repeat-* vectors are lossy by design (last) or ambiguous (which tag carried an
+# element is not in the output).
+# +3: CR-2026-125 writes a collected array per element under the first declaring case
+# and a shared merged member once: tlv-repeat-merge number_keeps_collecting,
+# tlv-repeat-collect-first-case and tlv-repeat-merge-shared-member, all tlv.
+# +2: CR-2026-128, tlv-repeat-merge-shared-last and tlv-repeat-object-collect (each
+# collected object now finds the case whose members it supplies), both tlv.
 # +2: guard-set's empty `in` and `not_in` vectors (CR-2026-124), plain fixed.
 # +4: match-u32-inline-discriminator.
 # +4: names-mangling-alike, plain fixed.
@@ -75,8 +83,9 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # +6: repeat-element-null-sentinel, -internal-name, repeat-identity-sibling (2) and
 # repeat-count-computed (CR-2026-121, CR-2026-123), plus the null fixture's
 # reserved-value vector, whose null now writes the sentinel (PS-544); all repeat.
+# (merged with master's +6 tlv-repeat/mutation-gate vectors)
 # +4: ascii-latin1 (CR-2026-114), all plain fixed: a byte above 0x7F re-encodes to itself.
-FLOOR_TOTAL = 1818
+FLOOR_TOTAL = 1824
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -84,7 +93,7 @@ FLOOR_BY_SHAPE = {
     # 1283 -> 1281 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped
     # only because their internal byte halves were all zero, which the encoder wrote
     # for an internal field with no value. It now reports such a field instead.
-    "tlv": 1299,
+    "tlv": 1305,   # +2: CR-2026-128; +3: CR-2026-125 fixtures; +1: tlv-repeat-merge (CR-2026-110)
     "flagged": 193,
     "plain fixed": 147,
     "match": 129,  # +4: match-u32-inline-discriminator

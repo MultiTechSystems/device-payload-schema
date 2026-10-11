@@ -188,19 +188,20 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2655 payload vectors in `schemas/devices/` (measured 2026-10-11 with
+The 2665 payload vectors in `schemas/devices/` (measured 2026-10-11 with
 `tools/check-floors.py`, after the CR-2026-118 and CR-2026-124 fixtures, CR-2026-117's
 guard-absent-operand, the `match-u32-*` and names-mangling-alike fixtures, CR-2026-127's
-guard-boolean-operand, the CR-2026-121 and CR-2026-123 fixtures and CR-2026-114's
-ascii-latin1) are the shared cross-language test set. Every implementation has a runner
-that reads the same YAML and the same vectors:
+guard-boolean-operand, the CR-2026-121 and CR-2026-123 fixtures, CR-2026-110's,
+CR-2026-125's and CR-2026-128's tlv-repeat-* fixtures, the mutation-gate vector in
+round-large-value and CR-2026-114's ascii-latin1) are the shared cross-language test set.
+Every implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1818 |
-| Go | `go/schema/corpus_conformance_test.go` | 2655 | 1835 (plain API 1812) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2655 | 1818 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2655 | 1818 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1824 |
+| Go | `go/schema/corpus_conformance_test.go` | 2665 | 1841 (plain API 1818) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2665 | 1825 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2665 | 1824 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 554 of 554 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -773,10 +774,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1818 |
-| Go | `go/schema/corpus_encode_test.go` | 1835 (plain 1812) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1818 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1818 |
+| Python | `tests/test_encode_round_trip.py` | 1824 |
+| Go | `go/schema/corpus_encode_test.go` | 1841 (plain 1818) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1824 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1825 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1209,6 +1210,27 @@ value is not in the data.
   temperature (the vendor uses sign-magnitude, we use `s8`), and qingping decoding frames
   that the vendor rejects.
 
+  **Three new fixtures sat below the 0.80 floor for new schemas (fixed 2026-10-11).**
+  Two needed a vector; one needed the harness to stop scoring what no payload reaches:
+  - *A modifier behind a guard that never passes* - unkillable, now unscored. PS-444
+    reports a failed guard's `else` as declared, skipping the modifiers, the stages and
+    the lookup. A guard with a boolean operand fails on every payload (PS-549), so
+    `guard-boolean-operand`'s inserted `add: 1` could not change any decode. The reach pass now records a guarded
+    field's pipeline as reached only where its guard passed, and a SCALE/ADD/DROP-MOD/
+    LOOKUP mutant of an unreached pipeline is `unreached`, not a survivor.
+  - *A transform that changes nothing at that magnitude* - `round-large-value`'s
+    `decimals: 6` on 3.4e38. It dies on an exact integer: 3F800001 rounds to exactly 1.
+  - *Leftover bytes with no warning asserted* - `wide-bit-range`'s `consume: 8 -> 0`.
+    `expected_warnings: []` kills it (PS-472).
+
+  **Six vobo survivors are equivalent since PS-314/PS-429 (b05fc20, #93).** Each
+  `_cfg_mask add N -> N+1` on port 71 subgroup 5 also sets the flagged mask's bit 0,
+  whose `cycleTime` computes from `_ct_lo`/`_ct_hi` - bound only by subgroup 0, a
+  different case of the same dispatch, so never in the same frame. They used to be
+  killed because an unbound operand read 0 and the vectors assert `cycleTime: null`;
+  an operand with no value now makes the field absent, so no payload separates them.
+  The baseline accepts 20345 killed and 6 survived.
+
   Three lessons for the next pass:
   - **A tolerance survivor dies on an exact integer.** A +1 raw-unit mutant under a
     fine scale moves the value by less than 0.001, so no float expectation can see it.
@@ -1228,13 +1250,38 @@ schema against its own vectors. Five gates close that, each a ratchet against a 
 baseline - a regression fails, an improvement is reported and locked in with the gate's
 `--update`/`-update` target, deliberately, in its own commit:
 
-| Gate | Fails when | Baseline |
-|---|---|---|
-| `gate-validator-strict` | a YAML/JSON mapping has a duplicate key (a colliding case key used to vanish silently), or a key no implementation reads (`sub:` in a transform, `count_field`, `match_value`, ...) | vocabulary in `tools/schema_vocabulary.py` |
-| `gate-provenance` | a changed device schema has no independently sourced vector, or an added vector lacks `source:` | none: the diff against `BASE` |
-| `gate-crossval` | a schema stops agreeing with its vendor's own decoder (TTN declared examples + vendor JS, Decentlab decoders), or a new one does not agree | `tools/crossval-baseline.json`, oracle commits pinned |
-| `gate-mutation` | a schema's vectors notice fewer one-step mutations than before (score or killed count), or a new schema scores below 0.80 | `tools/mutation-baseline.json` |
-| `gate-verdicts` | a changed schema's vector fails in any of Python, Go, Java, C#, TS013, or a vector the reference passes fails elsewhere | `tools/verdicts-baseline.json` (empty: all five agree on every vector) |
+| Gate | Fails when | Baseline | On a pull request | On master and nightly |
+|---|---|---|---|---|
+| `gate-validator-strict` | a YAML/JSON mapping has a duplicate key (a colliding case key used to vanish silently), or a key no implementation reads (`sub:` in a transform, `count_field`, `match_value`, ...) | vocabulary in `tools/schema_vocabulary.py` | whole corpus | whole corpus |
+| `gate-provenance` | a changed device schema has no independently sourced vector, or an added vector lacks `source:` | none: the diff against `BASE` | the PR's changed schemas | not run (no diff) |
+| `gate-crossval` | a schema stops agreeing with its vendor's own decoder (TTN declared examples + vendor JS, Decentlab decoders), or a new one does not agree | `tools/crossval-baseline.json`, oracle commits pinned | whole corpus (seconds) | whole corpus |
+| `gate-mutation` | a schema's vectors notice fewer one-step mutations than before (score or killed count), or a new schema scores below 0.80 | `tools/mutation-baseline.json` | the schemas the PR adds or modifies (`--only-changed`), or the full sweep if it touches the harness, the gate, the baseline, `requirements.txt` or a `tools/` module the harness loads | full sweep |
+| `gate-verdicts` | a changed schema's vector fails in any of Python, Go, Java, C#, TS013, or a vector the reference passes fails elsewhere | `tools/verdicts-baseline.json` (empty: all five agree on every vector) | whole corpus, changed schemas strictly | whole corpus |
+
+The nightly run is `gates.yml`'s `schedule` (03:30 UTC). Outside the gates, the plain
+`pytest tests/` run (Quality's "Python tests") is the PR's test check; the same suite
+under coverage (Fuzz Testing's "Test Coverage", about 2.5 times slower for an identical
+test set) runs on master and nightly only, as does the full fuzz.
+
+**Mutation on a PR is the PR's own schemas, not the corpus.** The full sweep cost about
+84 minutes on one runner, so `--only-changed` scores only what the diff from the merge base
+adds or modifies, under the full sweep's rules (a baselined schema against its entry, a new
+one against the 0.80 floor, a deleted baselined one as missing). A change that can move every
+schema's score - `FULL_SWEEP_FILES` in `tools/mutation-gate.py`, plus whatever `tools/`
+module the harness imports at run time - runs the full sweep instead. If you make the
+harness read a new file outside `tools/`, add it to `FULL_SWEEP_FILES`, or a PR changing it
+will be judged on its schemas alone.
+
+**One schema is nearly all of the sweep, so the sweep splits schemas, not just the corpus.**
+`volley-boast/vobo` has about 25,000 mutants each replayed against 436 vectors; every other
+schema together takes about one CPU-minute, so sharding by schema alone would leave one
+shard holding vobo for the whole run. The gate plans *units* - a schema, or a contiguous
+part of a heavy schema's mutant list (`plan_parts`) - and `schema-mutation.py merge_parts`
+reassembles the parts into exactly the report one run gives, which a test holds it to. In
+CI six `mutation-shard` jobs each run a slice (`--shard I/6 --parts-out`) and upload it
+unjudged, and the `mutation` job reassembles and judges them (`--parts-in`), failing if any
+schema in scope, or any part of one, is missing. Locally `make gate-mutation` does the same
+in one process pool. Keep the matrix list and `MUTATION_SHARDS` in step.
 
 The mutation gate ratchets the killed count as well as the score on purpose: deleting
 vectors makes the mutants only they reached "unreached", which *raises* the score.
@@ -1640,9 +1687,17 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     schemas (watteco's `report_body` reads the `_clu` its port declares). Within a mapping,
     `tag_fields`, `trailer`, `fields` and `element` are walked first, so tag components
     precede cases and elements precede `present_if`/`identity`; the rest in source order,
-    except in Go, whose maps keep none - it walks scalars before nested values, which
-    differs only where a reference names something declared in a later sibling of its own
-    mapping. Declared: every `name`, `var`, `index`, `count_as` (a `byte_group`/`flagged`
+    ports included, in all four. Go's maps keep no order, so `checkReferences` takes it
+    from the YAML node tree (`buildKeyOrder`, as `_meta` does for lookup labels); it used
+    to walk sorted keys, scalars before nested values, and ports sorted as strings, which
+    accepted a match whose `default` read a name its later `cases` declared and refused
+    one whose `cases` declared what a later `field:` read. `ps539_walk_order_test.go` and
+    its Python, Java and C# mirrors pin it with pairs differing only in key order. **Each
+    port is a decode of its own (CR-2026-130)**: a port's field list sees what the top level
+    declares (metadata names, `header`/`fields`) and its own names, never another port's,
+    in either source order; such a reference gets the "referenced before" message. All four
+    used to carry one port's names into the next. Measured before the change: no corpus,
+    library, example or registry schema (6 and 335 with `ports`) refers across ports. Declared: every `name`, `var`, `index`, `count_as` (a `byte_group`/`flagged`
     member and a tag component included) and `metadata` include/timestamp names. **A
     nameless element declares no name**: `$element` needs `element: {name: element, ...}`.
     A name declared earlier in a branch not taken is absent at decode (PS-314), not an
@@ -1688,8 +1743,16 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     `index`; the sibling's element carries a lookup or is a literal (PS-374). Load-time, in
     Python `sibling_errors` (from `iterator_errors`), Go `cr121.go`, Java and C# `Wave6a`.
   - **Decode** is unchanged, two arrays, except that different lengths are an error naming
-    both, also in the generated codec. **Encoding** is unchanged: each array encodes on its
-    own, and the spec says nothing about an encoder meeting different lengths.
+    both, also in the generated codec. **Encoding** each array on its own wrote a frame the
+    decoder refused, so CR-2026-133 (PS-550) rejects it: "Repeat 'values' is given 1 values
+    and 'codes', which identifies them, 2 (PS-550)" (`none` where the sibling is not a list).
+    Checked against the data map the repeat is encoded from, before any element is written,
+    in Python `_encode_repeat`, Go `encodeRepeat` (via `Field.Siblings`), Java
+    `Encoder.encodeRepeat`, C# `SchemaEncoder.EncodeRepeat` (`SiblingNames`) and the
+    runtime's `encRepeat` (`encSiblings` mirrors `sibling_references`). An absent repeat
+    still encodes to nothing, so the check runs only when the identified repeat is given.
+    No vector can expect a rejection, so no floor moves; `test_cr_2026_133_*`, Go
+    `cr133_test.go`, Java `CR2026133Test`, C# `CR2026_133Tests` hold the text.
   - **`_meta`:** `{"repeat": name, "values": [...], "open": true}` in that key order, the
     PS-375 listing of the sibling's element with `field` replaced by `repeat`. The sibling
     is found through `element_repeats` of the field list the repeat sits in, passed down
@@ -1718,6 +1781,90 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   `References`). The index is declared by the repeat itself, so it is always in order; a
   sibling declared after the reference is both a PS-539 forward reference and a PS-546
   error. Python lists both; Go, Java and C# report the first they meet.
+- **CR-2026-110 (PS-157 amended, PS-525 to PS-527): `on_repeat` on a tlv.**
+  - **What it does:** with `merge: true`, a name more than one entry reports - same tag or
+    not - is combined by its mode: `collect` (default, an array in payload order), `last`
+    (the last value wins) or `merge` (objects combined member by member; a member reported
+    twice is an error naming both, unless the member declares `on_repeat: last`). A field's
+    own `on_repeat` beats the tlv's. **Two departures from the CR text, at Jason's
+    decision, are implemented:** a tlv's `merge` default reaches its `type: object` fields
+    only (the rest keep `collect`), and a merged member may declare `last`.
+  - **One helper set per language, mirroring the spec prototype:** Python
+    `reported_fields`/`tlv_repeat_modes`/`on_repeat_schema_errors`/`combine_repeated`,
+    Go `go/schema/cr110.go`, Java `OnRepeat`, C# `OnRepeat.cs` plus `CombineRepeated` in
+    the decoder. The generator calls the Python helpers at generation time and folds each
+    entry through `tlvFold`, so the generated codec now collects as the interpreters do -
+    it used to keep the last value for every repeated name.
+  - **PS-526 is checked at load** in all four and by the validator and generator, in the
+    prototype's wording, over every tlv in the document.
+  - **A collected value that is itself a list stays one element.** All four appended a
+    second report *into* a first value that was a list (a repeat), splicing the elements;
+    the decoders now track which names they turned into arrays.
+  - **Encoding (PS-527):** a merged object is written one entry per case declaring members
+    the input supplies, in case declaration order; a `last` value once, under the first
+    case declaring it. CR-2026-125 settled the rest (next entry). The reference used to
+    fail inside `int()` on a collected scalar array and zero-fill an object's members, and
+    the generated codec wrote one wrong entry. `encode-round-trip.py` files `last` losses
+    as `last-value`.
+  - **Found on the way:** Go and Java parsed no cases for an inline `tlv:` block declaring
+    none of `tag_size`/`tag_fields`/`tag_key` (a one-byte tag is the default), so every
+    tag was unknown and the decode succeeded empty; C#'s tlv candidate sort was unstable
+    on ties, and now keeps declaration order as the reference does, which round-trips one
+    more vobo vector (C#'s encode floor is +2, not +1).
+  - **C:** no `on_repeat`; the harness skips such schemas with a named interpreter-gap
+    reason, and a vector expecting a PS-157 array, which `decode_result_t` cannot hold.
+    `schema_binary.py` refuses the key.
+  - **Fixtures:** `tlv-repeat-collect`, `-last`, `-merge`, `-member-last`,
+    `-object-collect`. Decode floors +6 everywhere; re-encode +1 (tlv-repeat-merge's
+    `object_members_combine`).
+- **CR-2026-125 and CR-2026-128 (PS-525, PS-526, PS-527): `on_repeat` encoding and
+  placement.** CR-2026-125's "first case declaring it" could not be honoured - a tlv entry
+  carries every field its case declares, so it zero-filled or dropped - and CR-2026-128
+  replaced it, from this branch's report. In all five encoders:
+  - **Each value goes under the first case whose declared fields it supplies in full**: a
+    scalar, each element of an array PS-157 collected (`_reports_list` tells a field whose
+    own value is a list), a `last` value, a merged object's members. An object element
+    supplies exactly the case's members; a merged case is written once the input supplies
+    all its members and one of them is still unwritten. A shared `last` member rides, with
+    the input's value, in every case written. Nothing is zero-filled or dropped; a value no
+    case takes is "tlv: no case takes the value of '{n}' ... in full (PS-502, PS-527)", and a
+    supplied member no case declares "tlv: the merged object '{n}' is given ['{m}'], which no
+    case declares (PS-527)". `{dr: 5}` gives `0311 05`, `[{adr: 1}, {dr: 5}]` gives
+    `0310 01 0311 05`, a scalar follows the same rule.
+  - **Two choices, both needed to keep the corpus, which CR-2026-129 adopted into PS-527.**
+    A case requiring more fields is tried before declaration order - an object counting
+    its members, so a merged {adr, dr} case outranks a {dr} one declared before it
+    (`_claim_width`, Go `claimWidth`, Java `claimWidth`, C# `Width`, the generator's
+    `width`): em400-mud declares
+    [3, 103] (temperature) before [131, 103] (temperature, temperature_alarm), and strict
+    declaration order hands temperature to the first and strands the alarm. And a case
+    takes no value it cannot write (the old fidelity check, per field): am308's `tvoc` of
+    4369 does not fit one case's `div: 100` u16. Without the two, 92 vectors in 20 schemas
+    (Milesight, vobo, one fixture) went from round-tripping to an error when measured; with
+    them the Python residue is unchanged but for tlv-repeat-object-collect, which now
+    round-trips.
+  - **The algorithm** is one queue per name and a pending set per merged object, swept
+    case by case until nothing moves: `_case_claims` (a flagged group's fields and
+    `optional: true` ones do not block a case), then the entries go out in payload order.
+    Go has no payload order: it uses `TLVOrder` when given, else ascending tag, and tries
+    the cases `TLVOrder` names first, so the tag that wrote a value gets it back.
+  - **PS-526 as amended: merged cases may share a member only where it declares `last`**,
+    else "tlv: cases share the member '{m}' of the merged object '{o}' without
+    `on_repeat: last` (PS-526)" at load, in all four loaders, the validator and the
+    generator (via `tlv_repeat_modes`). Measured 2026-10-11: nothing in the corpus or the
+    registry is rejected.
+  - **`on_repeat` where it has no effect is rejected at load** - anywhere but a tlv, a
+    field a tlv case reports, or `last` on a merged object's member - by Python
+    (`on_repeat_schema_errors`, so the validator and generator too), Go `checkOnRepeat`,
+    Java `OnRepeat.checkPlacement` and C# `CheckOnRepeat`, in the prototype's wording.
+    Declarations are compared by identity; `definitions` is skipped and held to the rule
+    where `$ref` splices it. Measured 2026-10-10: no schema in the corpus (5 use
+    `on_repeat`) or the private registry (none) is rejected.
+  - **Fixtures:** `tlv-repeat-collect-first-case` (`3a 01 3a 02` round-trips),
+    `tlv-repeat-merge-shared-member` (`dr` declares `last`; `0310 01 05` stays one entry)
+    and `tlv-repeat-merge-shared-last` (the shared `last` member in both written cases).
+    CR-2026-128 moved decode +1 and re-encode +2 in all four: shared-last, and
+    tlv-repeat-object-collect, which now round-trips.
 - **CR-2026-115 (PS-535): a read or skip past the end names the field**, in the spec
   prototype's words, identical in Python, Go, Java, C#, the generated codec and C (spec main
   c932961): `Field 'n': Buffer underflow: need 2 bytes at offset 0, but only 1 remaining

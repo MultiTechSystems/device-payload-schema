@@ -246,6 +246,9 @@ fields:
 // the branch merges them back — without that they were silently dropped, which
 // would have made the tlv path look clean by construction.
 func TestWarningsEscapeATLVCase(t *testing.T) {
+	// PS-527 (CR-2026-128) writes a case only once the input supplies every field it
+	// declares, so a case is never zero-filled; a record inside one still can be, and its
+	// warning must still escape the case's own buffer.
 	s, err := ParseSchema(`
 name: tlv-warning
 endian: big
@@ -257,17 +260,22 @@ fields:
       tag_key: [channel_id]
       cases:
         "3":
-          - name: temperature
-            type: u8
-          - name: humidity
-            type: u8
+          - name: samples
+            type: repeat
+            count: 1
+            fields:
+              - name: temperature
+                type: u8
+              - name: humidity
+                type: u8
 `)
 	if err != nil {
 		t.Fatalf("parse failed: %v", err)
 	}
 
-	// humidity is omitted, so the case encodes a zero for it.
-	result, err := s.EncodeToResult(map[string]any{"temperature": 20}, 0)
+	// The record omits humidity, so the repeat encodes a zero for it.
+	result, err := s.EncodeToResult(map[string]any{
+		"samples": []any{map[string]any{"temperature": 20}}}, 0)
 	if err != nil {
 		t.Fatalf("encode failed: %v", err)
 	}

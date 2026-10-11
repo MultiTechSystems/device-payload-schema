@@ -43,6 +43,7 @@ sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 import yaml  # noqa: E402
 
+from schema_interpreter import reported_fields  # noqa: E402
 from validate_schema import (  # noqa: E402
     expected_fields_match,
     is_encode_vector,
@@ -270,6 +271,12 @@ def tlv_source(field, schema_endian, next_index):
     if tlv.get("reserve"):
         # include/schema_interpreter.h has no reserve on its tlv: an interpreter gap.
         return None, None, 0, "the interpreter has no tlv reserve (PS-471)"
+    if "on_repeat" in tlv or any(
+            "on_repeat" in f for body in (tlv.get("cases") or {}).values()
+            if isinstance(body, list) for f in reported_fields(body).values()):
+        # CR-2026-110: decode_result_t holds one value per entry, with no way to combine
+        # a name two entries report - an interpreter gap, like PS-157's array below.
+        return None, None, 0, "the interpreter has no on_repeat (PS-525)"
 
     tag_fields = tlv.get("tag_fields") or []
     if tag_fields:
@@ -564,6 +571,25 @@ static void emit(const char* schema, const char* vector,
 '''
 
 
+def collected_tlv_names(node):
+    """The names a tlv case reports as a scalar: an array under one is PS-157's."""
+    names = set()
+    if isinstance(node, dict):
+        tlv = node.get("tlv")
+        if isinstance(tlv, dict):
+            for body in (tlv.get("cases") or {}).values():
+                if isinstance(body, list):
+                    names |= {n for n, f in reported_fields(body).items()
+                              if f.get("type") not in ("repeat", "bytes")}
+        for key, value in node.items():
+            if key != "test_vectors":
+                names |= collected_tlv_names(value)
+    elif isinstance(node, list):
+        for item in node:
+            names |= collected_tlv_names(item)
+    return names
+
+
 def schema_has_tlv(node):
     """Whether a tlv appears anywhere in the schema - as a `tlv:` key or `type: tlv`."""
     if isinstance(node, dict):
@@ -657,6 +683,20 @@ def run():
             skips[reason] += 1
             skipped_vectors += len(vectors)
             continue
+        # PS-157: a name two tlv entries report is collected into an array, and
+        # decode_result_t holds one value per name - an interpreter gap, per vector,
+        # since the same schema's other vectors report each name once.
+        collected = collected_tlv_names(schema)
+        kept = [v for v in vectors
+                if not any(isinstance((v.get("expected") or {}).get(n), list)
+                           for n in collected)]
+        if len(kept) < len(vectors):
+            skips["a tlv name reported twice is an array (PS-157), which "
+                  "decode_result_t cannot hold"] += 1
+            skipped_vectors += len(vectors) - len(kept)
+            vectors = kept
+            if not vectors:
+                continue
         entries.append((len(entries), (path.name, vectors, source, schema)))
 
     entries = [(i, payload) for i, payload in enumerate(p for _, p in entries)]
