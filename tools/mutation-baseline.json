@@ -3,10 +3,10 @@
   "min_score_new": 0.8,
   "include_library_composed": false,
   "distribution": {
-    "100%": 211,
+    "100%": 212,
     "95-99%": 21,
     "90-94%": 3,
-    "80-89%": 10,
+    "80-89%": 11,
     "70-79%": 1,
     "<70%": 1,
     "unscored": 13
@@ -359,6 +359,16 @@
       "unreached": 0,
       "generated": 14,
       "vectors": 4,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/lookup-reference-binding.yaml": {
+      "score": 0.8681,
+      "killed": 79,
+      "survived": 12,
+      "unreached": 26,
+      "generated": 170,
+      "vectors": 14,
       "provenance": "independent",
       "failing_original": 0
     },
@@ -968,6 +978,16 @@
       "survived": 1,
       "unreached": 0,
       "generated": 18,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/tag-component-reference-binding.yaml": {
+      "score": 1.0,
+      "killed": 16,
+      "survived": 0,
+      "unreached": 6,
+      "generated": 36,
       "vectors": 2,
       "provenance": "independent",
       "failing_original": 0
