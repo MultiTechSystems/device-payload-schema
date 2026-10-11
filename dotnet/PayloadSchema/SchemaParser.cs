@@ -621,7 +621,10 @@ public static partial class SchemaParser
                 f.Length = -1;
             else if (System.Text.RegularExpressions.Regex.IsMatch(lengthText, @"^-?\d+$")
                      || lengthText.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            {
                 f.Length = Int(len);
+                f.LengthDeclared = true;
+            }
             else
                 // PS-464: the name of a preceding field, with or without `$`, resolved
                 // when the field is decoded (PS-465). Int() read it as 0 bytes.

@@ -1,0 +1,47 @@
+# A computed field whose source names a field with no value is absent too (PS-314,
+# PS-429): a value that cannot be resolved is omitted, and the fields after it decode as
+# usual. Here a zero divisor omits `per_unit` (PS-278), so `total`, which multiplies it,
+# and `doubled`, which refers to it, have nothing to work with. Python and Java read the
+# missing value as 0 and reported both as 0; Go and C# failed the whole decode.
+#
+# The second vector has a divisor, so the same three fields are shown present.
+name: probe_reference_to_absent
+endian: big
+fields:
+- name: count
+  type: u8
+- name: divisor
+  type: u8
+- name: per_unit
+  type: number
+  compute: {op: div, a: $count, b: $divisor}
+- name: total
+  type: number
+  compute: {op: mul, a: $per_unit, b: 100}
+- name: doubled
+  type: number
+  ref: $per_unit
+  mult: 2
+- name: after
+  type: u8
+test_vectors:
+- name: zero_divisor
+  source: spec-example
+  payload: "0A 00 07"
+  expected:
+    count: 10
+    divisor: 0
+    per_unit: null
+    total: null
+    doubled: null
+    after: 7
+- name: with_a_divisor
+  source: spec-example
+  payload: "0A 04 07"
+  expected:
+    count: 10
+    divisor: 4
+    per_unit: 2.5
+    total: 250
+    doubled: 5
+    after: 7

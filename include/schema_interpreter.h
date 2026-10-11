@@ -909,9 +909,11 @@ static inline int decode_field(
             
         /* A skip past the end is a short read like any other. It stepped *pos past len
          * and reported success, so bytes_consumed exceeded the payload and bytes_unread
-         * went negative. */
+         * went negative. `length: 0` advances by nothing (PS-392): a size of 0 was read
+         * as one byte, so zero-length.yaml's second field ran past the payload. The
+         * absent-length default of one byte is the builder's (field_skip). */
         case FIELD_TYPE_SKIP: {
-            size_t width = field->size ? field->size : 1;
+            size_t width = field->size;
             if (*pos + width > len) return SCHEMA_ERR_BUFFER;
             *pos += width;
             return SCHEMA_OK;
@@ -1542,10 +1544,11 @@ static inline int encode_field(
             break;
         }
         
-        /* The width decode reads (size 0 is one byte), and never past the result buffer:
-         * a skip is up to 255 bytes, so a few of them overran data[SCHEMA_MAX_PAYLOAD]. */
+        /* The width decode reads (size 0 is no bytes, PS-392), and never past the result
+         * buffer: a skip is up to 255 bytes, so a few of them overran
+         * data[SCHEMA_MAX_PAYLOAD]. */
         case FIELD_TYPE_SKIP: {
-            size_t width = field->size ? field->size : 1;
+            size_t width = field->size;
             if (*pos + width > SCHEMA_MAX_PAYLOAD) return SCHEMA_ERR_BUFFER;
             memset(buf + *pos, 0, width);
             *pos += width;

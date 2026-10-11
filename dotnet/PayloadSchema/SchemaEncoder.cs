@@ -182,8 +182,12 @@ public static class SchemaEncoder
                     // A nested object is reported under its own name (PS-139), so its
                     // members are read from that mapping. They were looked up in the
                     // enclosing data, where they are not, and every member encoded as zero.
+                    // A `name_from` object was reported under its templated key, so that
+                    // is the key to read it back from (CR-2026-030).
+                    var objectKey = ResolveEncodeName(field, data);
                     return EncodeFieldList(field.Fields,
-                        data.TryGetValue(field.Name, out var nested) && nested is Dictionary<string, object?> members
+                        objectKey != null && data.TryGetValue(objectKey, out var nested)
+                        && nested is Dictionary<string, object?> members
                             ? members : data);
                 case FieldType.Number:
                     // Derived from other fields: no bytes of its own.

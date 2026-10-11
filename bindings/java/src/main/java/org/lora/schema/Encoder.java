@@ -130,7 +130,10 @@ final class Encoder {
             // A nested object is reported under its own name (PS-139), so its members
             // are read from that mapping. They were looked up in the enclosing data,
             // where they are not, and every member encoded as a zero.
-            Object nested = field.getName() == null ? null : data.get(field.getName());
+            // A `name_from` object was reported under its templated key, so that is the
+            // key to read it back from (CR-2026-030), as for any other field.
+            String key = field.getName() == null ? null : resolveEncodeName(field, data);
+            Object nested = key == null ? null : data.get(key);
             @SuppressWarnings("unchecked")
             Map<String, Object> members = nested instanceof Map<?, ?> m ? (Map<String, Object>) m : data;
             return encodeFieldList(field.getFields(), members);

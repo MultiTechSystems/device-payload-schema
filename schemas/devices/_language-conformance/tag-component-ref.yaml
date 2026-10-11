@@ -1,0 +1,45 @@
+# A composite tag's components are fields decoded earlier in the payload, so a case
+# body may reference one by name (PS-265): here the high nibble of the tag byte is the
+# cause of the report, and the case looks it up. Only a component's `var:` was bound, so
+# `$cause` read 0 in Python and Java - every report fell to the lookup's miss - and was
+# "not found" in Go and C#, failing the decode. Go also bound nothing for a bit-range
+# component's `var:`, which the second case reads.
+name: probe_tag_component_ref
+endian: big
+fields:
+- tlv:
+    tag_fields:
+    - name: kind
+      type: "u8[0:3]"
+    - name: cause
+      type: "u8[4:7]"
+      consume: 1
+      var: c
+    tag_key: [kind, cause]
+    cases:
+      "[1, *]":
+      - name: why
+        type: number
+        ref: $cause
+        lookup: {1: button, 2: timer}
+      - name: level
+        type: u8
+      "[2, *]":
+      - name: scaled
+        type: number
+        ref: $c
+        mult: 10
+test_vectors:
+- name: both_kinds
+  source: spec-example
+  payload: "21 05 32"
+  expected:
+    why: timer
+    level: 5
+    scaled: 30
+- name: cause_without_a_label
+  source: spec-example
+  payload: "01 05"
+  expected:
+    why: null
+    level: 5

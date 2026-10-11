@@ -122,14 +122,14 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Device schemas
 
-300 schemas under `schemas/devices/`.
-Mean quality score 75.6% (PLATINUM 37, GOLD 39, SILVER 176, BRONZE 26, REJECTED 22). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+306 schemas under `schemas/devices/`.
+Mean quality score 75.5% (PLATINUM 37, GOLD 39, SILVER 179, BRONZE 29, REJECTED 22). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
-| _language-conformance | 88 | 169 | SILVER 66, BRONZE 15, REJECTED 7 |
+| _language-conformance | 94 | 177 | SILVER 69, BRONZE 18, REJECTED 7 |
 | milesight | 84 | 1427 | PLATINUM 21, GOLD 33, SILVER 27, REJECTED 3 |
 | decentlab | 58 | 204 | PLATINUM 13, GOLD 6, SILVER 27, BRONZE 8, REJECTED 4 |
 | _library-composed | 49 | 57 | SILVER 48, BRONZE 1 |
@@ -199,9 +199,11 @@ Mean quality score 75.6% (PLATINUM 37, GOLD 39, SILVER 176, BRONZE 26, REJECTED 
 | `_language-conformance/metadata-enrichment` | 2 | 3 | fields | 75% | SILVER |
 | `_language-conformance/metadata-epoch-calendar` | 2 | 1 | fields | 71% | SILVER |
 | `_language-conformance/minifloat` | 7 | 1 | fields | 75% | SILVER |
+| `_language-conformance/name-from-object` | 4 | 1 | fields | 71% | SILVER |
 | `_language-conformance/name-from-rendering` | 16 | 8 | ports | 76% | SILVER |
 | `_language-conformance/name-from-var` | 2 | 2 | fields | 71% | SILVER |
 | `_language-conformance/name-from` | 2 | 1 | fields | 71% | SILVER |
+| `_language-conformance/numeric-looking-text` | 2 | 1 | fields | 71% | SILVER |
 | `_language-conformance/object-member-field-list` | 13 | 2 | fields | 42% | REJECTED |
 | `_language-conformance/object-unnamed-skip` | 4 | 1 | fields | 71% | SILVER |
 | `_language-conformance/optional-trailing` | 3 | 3 | fields | 73% | SILVER |
@@ -209,6 +211,7 @@ Mean quality score 75.6% (PLATINUM 37, GOLD 39, SILVER 176, BRONZE 26, REJECTED 
 | `_language-conformance/range-before-lookup` | 2 | 4 | fields | 71% | SILVER |
 | `_language-conformance/ref-everywhere` | 3 | 1 | fields | 71% | SILVER |
 | `_language-conformance/ref-header` | 1 | 1 | fields | 71% | SILVER |
+| `_language-conformance/reference-to-absent` | 6 | 2 | fields | 71% | SILVER |
 | `_language-conformance/repeat-byte-length-span` | 4 | 1 | fields | 73% | SILVER |
 | `_language-conformance/repeat-byte-length` | 4 | 1 | fields | 73% | SILVER |
 | `_language-conformance/repeat-carry` | 4 | 1 | fields | 69% | BRONZE |
@@ -223,9 +226,11 @@ Mean quality score 75.6% (PLATINUM 37, GOLD 39, SILVER 176, BRONZE 26, REJECTED 
 | `_language-conformance/repeat-reserve` | 3 | 2 | fields | 71% | SILVER |
 | `_language-conformance/repeat-trailer` | 4 | 1 | fields | 69% | BRONZE |
 | `_language-conformance/round-half-to-even` | 5 | 1 | fields | 71% | SILVER |
+| `_language-conformance/round-large-value` | 2 | 1 | fields | 69% | BRONZE |
 | `_language-conformance/round-ties-away` | 4 | 1 | fields | 71% | SILVER |
 | `_language-conformance/sentinel` | 2 | 2 | fields | 69% | BRONZE |
 | `_language-conformance/skip-type` | 3 | 1 | fields | 71% | SILVER |
+| `_language-conformance/tag-component-ref` | 5 | 2 | fields | 69% | BRONZE |
 | `_language-conformance/tlv-case-field-list` | 10 | 7 | fields | 78% | SILVER |
 | `_language-conformance/tlv-case-key-patterns` | 6 | 5 | fields | 76% | SILVER |
 | `_language-conformance/tlv-nameless-case` | 2 | 1 | fields | 71% | SILVER |
@@ -241,6 +246,7 @@ Mean quality score 75.6% (PLATINUM 37, GOLD 39, SILVER 176, BRONZE 26, REJECTED 
 | `_language-conformance/wide-bit-range` | 3 | 2 | fields | 71% | SILVER |
 | `_language-conformance/wide-group` | 2 | 2 | fields | 71% | SILVER |
 | `_language-conformance/word-ordered` | 4 | 1 | fields | 73% | SILVER |
+| `_language-conformance/zero-length` | 3 | 1 | fields | 69% | BRONZE |
 | `_library-composed/alarm_config__set_delta_threshold` | 4 | 2 | fields | 71% | SILVER |
 | `_library-composed/alarm_config__set_temp_alarm` | 5 | 2 | fields | 71% | SILVER |
 | `_library-composed/data_logging__clear_log` | 3 | 2 | fields | 71% | SILVER |

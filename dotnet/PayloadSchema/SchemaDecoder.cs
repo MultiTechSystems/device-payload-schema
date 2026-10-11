@@ -394,6 +394,17 @@ public static class SchemaDecoder
         finally { ctx.MetaDepth--; }
     }
 
+    /// <summary>
+    /// A field whose type reads <c>length</c> bytes and which declares <c>length: 0</c>
+    /// reads nothing (PS-392 for a skip). Length 0 was taken as no length and one byte was
+    /// read, so a zero-length skip in a tlv case swallowed the next entry's tag (milesight
+    /// gs601's 0xEE request) and one in a match case shifted every field after it.
+    /// </summary>
+    static bool DeclaresZeroLength(SchemaField field) =>
+        field.LengthDeclared && field.Length == 0
+        && field.Type is FieldType.Skip or FieldType.Bytes or FieldType.Ascii
+            or FieldType.String or FieldType.Hex or FieldType.Base64;
+
     static object? DecodeFieldBody(SchemaField field, DecodeContext ctx, PayloadSchemaDefinition? schema)
     {
         // A negative Length is the `remaining` sentinel and is passed through to
@@ -401,7 +412,9 @@ public static class SchemaDecoder
         int length = field.LengthRef != null && field.Type is FieldType.Bytes or FieldType.Ascii
                          or FieldType.Hex or FieldType.Base64 or FieldType.Skip
             ? ResolveLengthRef(field, ctx)
-            : field.Length != 0 ? field.Length : Helpers.InferLengthFromType(field.Type);
+            : field.Length != 0 || DeclaresZeroLength(field)
+                ? field.Length
+                : Helpers.InferLengthFromType(field.Type);
         string endian = field.Endian ?? ctx.Endian;
         object? value = null;
         // The integer as read, before any `encoding` is decoded, for PS-427.
@@ -1111,7 +1124,11 @@ public static class SchemaDecoder
             if (!ctx.Variables.TryGetValue(refName, out var refVal))
             {
                 ctx.CheckUnbound(refName);    // PS-368
-                throw new InvalidOperationException($"Ref field not found: {refName}");
+                // PS-314/PS-429: a reference with no value - a field omitted earlier by
+                // a zero divisor, a log of x <= 0, a sentinel or a lookup with no entry -
+                // cannot be resolved, so this field is absent too. It threw, failing the
+                // whole decode.
+                return null;
             }
             var (ok, rv) = Helpers.ToFloat64(refVal);
             source = ok ? rv : 0;
@@ -1134,6 +1151,9 @@ public static class SchemaDecoder
     {
         double a = ResolveOperand(cd.A, ctx);
         double b = ResolveOperand(cd.B, ctx);
+        // PS-314/PS-429: an operand with no value makes the field absent, as a zero
+        // divisor does. NaN arithmetic is not relied on to carry the sentinel through.
+        if (IsComputeOmitted(a) || IsComputeOmitted(b)) return ComputeOmitted;
 
         return cd.Op switch
         {
@@ -1163,8 +1183,15 @@ public static class SchemaDecoder
                 var (ok, f) = Helpers.ToFloat64(val);
                 if (ok) return f;
             }
-            else ctx.CheckUnbound(name);    // PS-368
-            throw new InvalidOperationException($"Operand field not found: {op}");
+            else
+            {
+                ctx.CheckUnbound(name);    // PS-368
+                // PS-314/PS-429: an operand with no value omits the field. dragino
+                // wsc2-lb's `rain` multiplies by a quotient whose divisor can be 0, and
+                // "Operand field not found" failed the whole decode.
+                return ComputeOmitted;
+            }
+            throw new InvalidOperationException($"Operand field {op} is not a number");
         }
         return double.Parse(op, CultureInfo.InvariantCulture);
     }
@@ -1388,7 +1415,13 @@ public static class SchemaDecoder
                         val = (int)Helpers.DecodeUint(data, ctx.Endian);
                     }
                     if (!string.IsNullOrEmpty(tf.Name))
+                    {
                         tagValues[tf.Name] = val;
+                        // A component is a field decoded earlier in the payload, so its
+                        // name is a reference the case body may make (`ref: $rsn`,
+                        // PS-265). Only `var:` was bound: "Ref field not found: rsn".
+                        ctx.Variables[tf.Name] = (long)val;
+                    }
                     // A component's `var:` binds for the case body, as a field's does; a
                     // name_from template such as "temperature_${ch}" reads it.
                     if (!string.IsNullOrEmpty(tf.Var))

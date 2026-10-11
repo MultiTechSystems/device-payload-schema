@@ -1,0 +1,21 @@
+# Rounding a value that already has no digits at the requested place leaves it as it is
+# (PS-390). 7F7FC99E is a 32-bit float near the type's maximum, 3.4e38; to six places it
+# is 45 significant digits, more than Python's decimal arithmetic holds by default, and
+# the reference failed the decode with InvalidOperation where the other four reported
+# the value.
+name: probe_round_large_value
+endian: big
+fields:
+- name: big
+  type: f32
+  transform:
+  - {op: round, decimals: 6}
+- name: small
+  type: u8
+test_vectors:
+- name: near_the_maximum
+  source: spec-example
+  payload: "7F 7F C9 9E 05"
+  expected:
+    big: 3.3999999521443642e+38
+    small: 5
