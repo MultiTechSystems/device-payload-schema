@@ -12,6 +12,7 @@ fields. Both are ratcheted with a floor so the checks cannot pass by finding not
 look at.
 """
 
+import functools
 import re
 import sys
 from pathlib import Path
@@ -71,7 +72,18 @@ def property_for(schema_doc, key):
     return None
 
 
+@functools.lru_cache(maxsize=None)
 def decoded_corpus():
+    """(path, output schema, [decoded data, ...]) per schema, decoded once per process.
+
+    Every test here reads the same decode of the whole corpus, and nothing mutates it, so
+    it is computed once rather than five times (two of them in one test): about 90
+    seconds of a serial run, for identical answers.
+    """
+    return tuple(_decode_corpus())
+
+
+def _decode_corpus():
     """Yield (path, output schema, [decoded data, ...]) per schema.
 
     Aggregated per schema rather than per vector: a schema whose first vector reports

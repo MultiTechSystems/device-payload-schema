@@ -58,20 +58,52 @@ python3 tools/generate_ts013_codec.py <schema.yaml> -o <output-dir> --slim
 python3 tools/convert_decentlab.py <vendor-codec.js>
 python3 tools/convert_milesight.py <vendor-codec.js>
 
+# Full verification: use this before pushing, not the targets one by one
+make verify        # test-languages once, then every corpus floor read from its logs
+
 # Tests
 make test          # C self-tests + pytest
-make pytest        # Python only
+make pytest        # Python only, on every core (pytest-xdist, -n auto)
+make pytest PYTEST_ARGS=          # ...serially; PYTEST_ARGS takes any pytest options
 make fuzz-quick    # 10-second fuzz, cheap enough for every commit
 
-# The Go, Java and C# interpreters, in containers - no local toolchain needed
+# The Go, Java and C# interpreters, in containers - no local toolchain needed.
+# Each keeps its output in build/lang-logs/<lang>.log for check-floors --from-logs.
 make test-go
 make test-java
 make test-dotnet
 make test-languages   # every implementation: Python, C, Go, Java, C#
+make check-floors     # runs Go, Java and C# again to read their counts
+make check-floors-from-logs   # reads them from the logs above instead
 
 # Regenerate the repository index after adding docs, tools or schemas
 python3 tools/generate_docs_index.py
 ```
+
+**Verify with `make verify`, once.** It runs `make test-languages` (pytest on every
+core, the C self-tests, Go, Java and C#) and then `check-floors --from-logs`, which reads
+the Go, Java and C# corpus counts from the logs those suites just wrote instead of
+running each a second time. A log missing, unfinished, or older than any edit to a file
+git sees (tracked or untracked-not-ignored) makes check-floors run that one suite itself,
+and its report says where each implementation's numbers came from. So do not edit while
+it runs, and do not follow it with `make pytest` and `make check-floors` - that repeats
+work it has already done. Measured 2026-10-11 on a 32-core machine with warm container
+caches: the suite took 17.5 minutes serially and under 2 on every core, and a whole pass
+(`make verify`) took 3 minutes where `make pytest`, `make test-languages` and
+`make check-floors` in turn had taken about 36 - pytest twice, Go, Java and C# twice.
+
+Two rules keep the suite safe to parallelise, and a new test must follow both:
+
+- **Never write into the working tree.** Use `tmp_path`. Two `test_floor_checker` tests
+  used to rewrite `tests/test_encode_round_trip.py` and restore it in a `finally`; under
+  xdist one could take the other's rewrite as its original and leave a wrong floor on
+  disk. `check-floors --floor-root DIR` exists so those tests point at a copy.
+- **A corpus-wide computation shared by several tests is computed once.** A module
+  fixture is built once per *worker*, so eight workers rebuilt `test_corpus_invariants`'
+  70-second decode eight times. Mark such a module or class
+  `pytest.mark.xdist_group(...)`; `make pytest` passes `--dist loadgroup`, which keeps a
+  group on one worker. Cache a repeated tool run with `functools.lru_cache` and group its
+  callers, as `test_cr_2026_025_encode_parity_method.py` does.
 
 Note: `make validate` only covers `examples/*.yaml`. Device schemas under
 `schemas/devices/` are not part of that target — validate and score those
@@ -589,7 +621,8 @@ languages in four syntaxes, and it prints each beside the actual *its own implem
 reaches. Use it before claiming a floor is loose or tight. The rule below was broken a
 second time without it - `tlv` reported loose at "900 against an actual of 910", which was
 Python's floor next to Go's actual, both exactly at their own. `check-floors-python` is
-instant; the full run drives four Docker toolchains.
+instant; the full run drives four Docker toolchains, and `--from-logs` (what `make verify`
+uses) reads their counts from the last `make test-go`/`test-java`/`test-dotnet` instead.
 
 **Never compare implementations by their per-shape round-trip counts.** Those counts are
 ratchets for one harness over time. Across implementations they are not comparable: each
