@@ -516,8 +516,7 @@ func (ctx *DecodeContext) Read(n int) ([]byte, error) {
 		n = ctx.Remaining()
 	}
 	if ctx.Offset+n > len(ctx.Data) {
-		return nil, fmt.Errorf("buffer underflow: need %d bytes at offset %d, but only %d remaining",
-			n, ctx.Offset, ctx.Remaining())
+		return nil, underflowNeed(n, ctx.Offset, len(ctx.Data))
 	}
 	result := ctx.Data[ctx.Offset : ctx.Offset+n]
 	ctx.Offset += n
@@ -531,7 +530,7 @@ func (ctx *DecodeContext) Peek(n int, offset int) ([]byte, error) {
 		return nil, fmt.Errorf("invalid peek of %d bytes at offset %d", n, pos)
 	}
 	if pos+n > len(ctx.Data) {
-		return nil, fmt.Errorf("buffer underflow at peek offset %d", pos)
+		return nil, underflowPeek(pos)
 	}
 	return ctx.Data[pos : pos+n], nil
 }
@@ -2073,7 +2072,9 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 		ctx.rangeStash = rangeStash{}
 		value, err := ctx.decodeFieldProduced(field)
 		if err != nil {
-			return nil, err
+			// PS-535: the innermost field that read past the end is named; an enclosing
+			// object or repeat passes its member's error through unchanged.
+			return nil, nameUnderflow(err, field.Name, string(field.Type))
 		}
 
 		internal := strings.HasPrefix(field.Name, "_")
@@ -2159,7 +2160,10 @@ func decodeByteGroup(field Field, ctx *DecodeContext) (map[string]any, error) {
 	if size == 0 {
 		size = 1
 	}
-	
+
+	if size > ctx.Remaining() {
+		return nil, byteGroupUnderflow(field, size, ctx)
+	}
 	data, err := ctx.Read(size)
 	if err != nil {
 		return nil, err
@@ -2436,7 +2440,11 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		value = decodeBits(data[0], field.Bit, 1) != 0
 		// Consume bytes if specified
 		if field.Consume > 0 {
-			ctx.Read(field.Consume)
+			// PS-535: consuming past the end is a short read. The error was discarded,
+			// so the bool decoded and the offset stayed short of the end.
+			if _, err := ctx.Read(field.Consume); err != nil {
+				return nil, err
+			}
 		}
 
 	case TypeBits, TypeBitsLower:
@@ -2472,7 +2480,7 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		value = strings.TrimRight(string(data), "\x00")
+		value = decodeASCII(field.Name, data, ctx) // PS-534, PS-538
 
 	case TypeEnum, TypeEnumLower:
 		// Enum: read base type and map to string
@@ -3014,7 +3022,9 @@ func decodeMatch(field Field, ctx *DecodeContext) (any, error) {
 		}
 		data, err := ctx.Read(length)
 		if err != nil {
-			return nil, err
+			// PS-535: the discriminator is the field that read, named by the match's
+			// `name` where it declares one.
+			return nil, nameUnderflow(err, field.Name, "match")
 		}
 		matchValue = int(decodeUint(data, ctx.Endian))
 
@@ -3714,7 +3724,7 @@ func decodeRepeat(field Field, ctx *DecodeContext) ([]any, error) {
 					return raggedTailError(field, ctx.Remaining(), elementSize, start)
 				}
 				if err := elements.element(); err != nil {
-					if strings.Contains(err.Error(), "buffer underflow") {
+					if isBufferUnderflow(err) {
 						return raggedTailError(field, len(ctx.Data)-start, 0, start)
 					}
 					return err
@@ -5246,12 +5256,21 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 			// A literal came from no bytes, so it writes none (PS-359).
 			break
 		}
-		if strVal, ok := value.(string); ok {
-			if length <= 0 {
-				length = len(strVal)
+		if value != nil {
+			// PS-537: a fixed length bounds and pads the value; `remaining` or a
+			// reference has none, and the value supplies the count.
+			fixed := -1
+			if field.Length > 0 && field.LengthRef == "" {
+				fixed = field.Length
 			}
-			data := make([]byte, length)
-			copy(data, []byte(strVal))
+			strVal, ok := value.(string)
+			if !ok {
+				strVal = fmt.Sprintf("%v", value)
+			}
+			data, err := encodeASCII(field.Name, strVal, fixed, ctx)
+			if err != nil {
+				return err
+			}
 			ctx.Write(data)
 		}
 

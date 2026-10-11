@@ -5,8 +5,67 @@ using System.Buffers.Binary;
 
 namespace PayloadSchema;
 
+/// <summary>
+/// An error whose text already names its field in full, reported verbatim: an enclosing
+/// construct must not prefix it. Mirrors FieldError in tools/schema_interpreter.py.
+/// </summary>
+public sealed class FieldErrorException : InvalidOperationException
+{
+    public FieldErrorException(string message) : base(message) { }
+}
+
 public static class Helpers
 {
+    /// <summary>
+    /// PS-534, PS-538 (CR-2026-114): each byte of an `ascii` value is the ISO 8859-1
+    /// character of the same number, so the value is lossless and re-encodes to the same
+    /// bytes (PS-537); trailing 0x00 padding only is dropped. A byte above 0x7F is reported
+    /// with PS-073's warning. Encoding.ASCII wrote `?` for it. Mirrors decode_ascii in
+    /// tools/schema_interpreter.py.
+    /// </summary>
+    public static string DecodeAscii(string? name, ReadOnlySpan<byte> raw, List<string> warnings)
+    {
+        var chars = new char[raw.Length];
+        bool high = false;
+        for (int i = 0; i < raw.Length; i++)
+        {
+            chars[i] = (char)raw[i];
+            if (raw[i] > 0x7F) high = true;
+        }
+        if (high)
+            warnings.Add($"Field '{name}': a byte above 0x7F in an ascii value (PS-073, PS-538)");
+        return new string(chars).TrimEnd('\0');
+    }
+
+    /// <summary>
+    /// PS-537 (CR-2026-114): a character above U+00FF, or a value longer than a fixed
+    /// <paramref name="length"/>, is rejected naming the field; U+0080..U+00FF is written as
+    /// the byte of the same number with a warning; a short value is padded with 0x00. A null
+    /// length is not fixed (`remaining`, a reference), and the value supplies it. Mirrors
+    /// encode_ascii in tools/schema_interpreter.py. UTF-8 was written and then truncated,
+    /// which could split a character ("ABCé" to 414243c3).
+    /// </summary>
+    public static byte[] EncodeAscii(string? name, string text, int? length, List<string> warnings)
+    {
+        foreach (var ch in text)
+            if (ch > 0xFF)
+                throw new FieldErrorException($"Field '{name}': an ascii value holds a character "
+                    + "above U+00FF, which has no byte (PS-537)");
+        if (length is int fixedLength && text.Length > fixedLength)
+            throw new FieldErrorException($"Field '{name}': an ascii value of {text.Length} bytes "
+                + $"is longer than its length of {fixedLength} (PS-537)");
+        var output = new byte[length ?? text.Length];
+        bool high = false;
+        for (int i = 0; i < text.Length; i++)
+        {
+            output[i] = (byte)text[i];
+            if (text[i] > 0x7F) high = true;
+        }
+        if (high)
+            warnings.Add($"Field '{name}': a character above U+007F in an ascii value (PS-537)");
+        return output;
+    }
+
     public static ulong DecodeUint(ReadOnlySpan<byte> data, string endian)
     {
         ulong val = 0;

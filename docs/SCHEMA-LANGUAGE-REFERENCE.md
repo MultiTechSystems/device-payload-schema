@@ -96,7 +96,7 @@ the range is an error (PS-420).
 
 | Type | Description |
 |------|-------------|
-| `ascii` | ASCII string (requires `length:`) |
+| `ascii` | Text of `length:` bytes; trailing 0x00 padding dropped, a byte above 0x7F reported as its ISO 8859-1 character with a warning (PS-534, PS-538). Encoding pads with 0x00 and rejects a value too long or above U+00FF (PS-537) |
 | `hex` | Lowercase hex string (requires `length:`) |
 | `bytes` | Raw bytes, reported as declared by `format:` (requires `length:`, PS-456) |
 | `base64` | Base64 encoded output (requires `length:`) |

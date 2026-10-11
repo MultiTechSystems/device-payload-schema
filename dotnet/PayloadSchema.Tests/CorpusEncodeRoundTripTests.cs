@@ -52,7 +52,7 @@ public class CorpusEncodeRoundTripTests
     // which the raw-YAML classifier had filed under that shape. Its out_of_range vector
     // omits a field and cannot (bytes differ), and leftover-bytes' second vector
     // re-encodes to its first byte only (PS-474): both by design.
-    const int EncodeFloorTotal = 1783;   // +8: name-from-rendering (CR-2026-112); +2: boolean-literal (CR-2026-107); +13: the nine TS013-defect fixtures (tlv-tag-bit-range does not round-trip); +8: CR-2026-104 lookup label fixtures (plain fixed); +3: byte-group-bool; +3: tlv-case-field-list; +2: tlv-case-key-patterns; +2: CR-2026-096 meta fixtures (meta-port-default, plain fixed); +6 before: trimmed vendor vectors
+    const int EncodeFloorTotal = 1787;   // +4: ascii-latin1 (CR-2026-114); +8: name-from-rendering (CR-2026-112); +2: boolean-literal (CR-2026-107); +13: the nine TS013-defect fixtures (tlv-tag-bit-range does not round-trip); +8: CR-2026-104 lookup label fixtures (plain fixed); +3: byte-group-bool; +3: tlv-case-field-list; +2: tlv-case-key-patterns; +2: CR-2026-096 meta fixtures (meta-port-default, plain fixed); +6 before: trimmed vendor vectors
 
     /// <summary>
     /// Per-shape floors, so a regression in a layout that works cannot hide behind the mass
@@ -63,7 +63,7 @@ public class CorpusEncodeRoundTripTests
         // 1283 -> 1281 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped only because their internal byte halves were all zero, which the encoder wrote for an internal field with no value. It now reports such a field instead.
         ["tlv"] = 1299,   // +3: tlv-case-field-list; +2: tlv-case-key-patterns; +6: trimmed vendor vectors (am30x, ws50x, em310-tilt) now round-trip
         ["flagged"] = 193,
-        ["plain fixed"] = 127,   // +8: name-from-rendering (CR-2026-112); +8: CR-2026-104 lookup label fixtures; +9: TS013 fixtures; +2: CR-2026-096 meta-port-default.yaml
+        ["plain fixed"] = 131,   // +4: ascii-latin1 (CR-2026-114); +8: name-from-rendering (CR-2026-112); +8: CR-2026-104 lookup label fixtures; +9: TS013 fixtures; +2: CR-2026-096 meta-port-default.yaml
         ["match"] = 125,
         ["byte_group"] = 25,   // +3: byte-group-bool; +2: wide-group
         // 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now

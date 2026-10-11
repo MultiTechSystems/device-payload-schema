@@ -322,6 +322,21 @@ public static class SchemaDecoder
     static Dictionary<string, object?> DecodeByteGroup(SchemaField field, DecodeContext ctx)
     {
         int size = field.Size > 0 ? field.Size : 1;
+        if (ctx.Remaining < size)
+        {
+            // PS-535: a member reads the group's bytes from its start, so the first
+            // member whose own base does not fit is the field that read past the end, as
+            // the spec prototype names it. Where every base fits and the group's `size`
+            // does not, the group itself made the read.
+            foreach (var member in field.ByteGroup)
+            {
+                int baseBytes = member.Type == FieldType.Bits && member.BitBaseBytes > 0
+                    ? member.BitBaseBytes : 1;
+                if (baseBytes > ctx.Remaining)
+                    throw BufferUnderflowException.PeekAt(ctx.Offset).Name(member.Name, member.RawType);
+            }
+            throw BufferUnderflowException.Need(size, ctx.Offset, ctx.Data.Length).Name(null, "byte_group");
+        }
         var data = ctx.Read(size);
         var result = new Dictionary<string, object?>();
 
@@ -387,11 +402,20 @@ public static class SchemaDecoder
         // members and a repeat's elements are another level of output, described by the
         // declaration's nested entries (PS-371, PS-481), not by what they wrote.
         ctx.Produced(field);
-        if (field.Type is not (FieldType.Object or FieldType.Repeat))
-            return DecodeFieldBody(field, ctx, schema);
-        ctx.MetaDepth++;
-        try { return DecodeFieldBody(field, ctx, schema); }
-        finally { ctx.MetaDepth--; }
+        try
+        {
+            if (field.Type is not (FieldType.Object or FieldType.Repeat))
+                return DecodeFieldBody(field, ctx, schema);
+            ctx.MetaDepth++;
+            try { return DecodeFieldBody(field, ctx, schema); }
+            finally { ctx.MetaDepth--; }
+        }
+        catch (BufferUnderflowException e) when (!e.Named)
+        {
+            // PS-535: the innermost field that read past the end is named; an enclosing
+            // object or repeat passes its member's error through unchanged.
+            throw e.Name(field.Name, field.RawType);
+        }
     }
 
     static object? DecodeFieldBody(SchemaField field, DecodeContext ctx, PayloadSchemaDefinition? schema)
@@ -535,7 +559,7 @@ public static class SchemaDecoder
             case FieldType.Ascii:
             {
                 var data = ctx.Read(length);
-                value = Encoding.ASCII.GetString(data).TrimEnd('\0');
+                value = Helpers.DecodeAscii(field.Name, data, ctx.Warnings);
                 break;
             }
 
@@ -1215,7 +1239,11 @@ public static class SchemaDecoder
         else
         {
             int length = field.Length > 0 ? field.Length : 1;
-            var data = ctx.Read(length);
+            ReadOnlySpan<byte> data;
+            // PS-535: the discriminator is the field that read; it is named by the
+            // match's `name`, where it declares one.
+            try { data = ctx.Read(length); }
+            catch (BufferUnderflowException e) when (!e.Named) { throw e.Name(field.Name, "match"); }
             matchValue = (int)Helpers.DecodeUint(data, ctx.Endian);
 
             // A discriminator read from the payload is reported where `name` asks for it

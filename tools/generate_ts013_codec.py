@@ -300,12 +300,6 @@ function encBase64(text) {
   return out;
 }
 
-function encUtf8(text) {
-  var s = unescape(encodeURIComponent(String(text))), out = [];
-  for (var i = 0; i < s.length; i++) out.push(s.charCodeAt(i));
-  return out;
-}
-
 function encEnumLabel(entry) {
   return entry !== null && typeof entry === "object" && "name" in entry ? entry.name : entry;
 }
@@ -376,9 +370,22 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
     return;
   }
   if (encIsLiteral(f)) return;                       // PS-359: a literal writes nothing
-  if (type === "string" || type === "ascii") {
-    var u = encUtf8(value);
-    encPad(out, u, encLength(f, u.length));
+  if (type === "string" || type === "ascii") {        // encode_ascii (PS-537)
+    var text = String(value), u = [], high = false;
+    var fixed = typeof f.length === "number" && f.length >= 0 ? f.length : null;
+    for (var c = 0; c < text.length; c++) {
+      var code = text.charCodeAt(c);
+      if (code > 0xFF) {
+        encFail("Field '" + f.name + "': an ascii value holds a character above U+00FF, which has no byte (PS-537)");
+      }
+      if (code > 0x7F) high = true;
+      u.push(code);                                  // PS-538: the byte of the same number
+    }
+    if (fixed !== null && u.length > fixed) {
+      encFail("Field '" + f.name + "': an ascii value of " + u.length + " bytes is longer than its length of " + fixed + " (PS-537)");
+    }
+    if (high) ctx.wa.push("Field '" + f.name + "': a character above U+007F in an ascii value (PS-537)");
+    encPad(out, u, fixed !== null ? fixed : u.length);
     return;
   }
   if (type === "hex") {
@@ -932,9 +939,10 @@ function encList(out, fields, data, ctx, top) {
 }
 
 function encodeRoot(fields, data, endian) {
-  var ctx = { endian: endian, w: [] }, out = [];
+  // wa: PS-537's warnings, reported after the others as the reference reports them.
+  var ctx = { endian: endian, w: [], wa: [] }, out = [];
   encList(out, fields, data || {}, ctx, true);
-  return { bytes: out, warnings: ctx.w };
+  return { bytes: out, warnings: ctx.w.concat(ctx.wa) };
 }
 '''
 
@@ -1007,7 +1015,7 @@ _CODEC_LOCALS = {
     'pos', 'd', 'vars', 'w', 'aqr', 'aqp', 'endian', 'buf', 'bgVal', 'bgStart', 'q',
     'qn', 'r', 'port', 'bytes', 'cmdName', 'cmdId', 'input', 'e', 'i', 'k',
     '_si', '_tlvTag', '_tlvStart', '_tlvSpan', '_tlvLen', '_mv', '_mr', '_k', '_a', '_p',
-    '_i', '_flags',
+    '_i', '_flags', 'wn',
 }
 _JS_RESERVED = {
     'arguments', 'await', 'break', 'case', 'catch', 'class', 'const', 'continue',
@@ -1683,11 +1691,24 @@ var SAFE_INTEGER = 9007199254740991;
 
 /* A read past the end of the payload is an error, as it is in every interpreter. The
  * readers below used to substitute 0 for a missing byte, so a truncated payload decoded
- * to plausible values with no error at all. */
+ * to plausible values with no error at all.
+ *
+ * PS-535 (CR-2026-115): the error identifies the field. Each field's code sets `_fld` to
+ * its label before it reads - `'name'`, or `an unnamed skip` - so the innermost field
+ * reading is the one named, and the text is the reference's exactly. */
+var _fld = null;
+function underflow(detail) {
+  return new Error(_fld === null ? detail : "Field " + _fld + ": " + detail + " (PS-535)");
+}
 function need(buf, pos, size) {
   if (pos + size > buf.length) {
-    throw new Error("Buffer too short: need " + size + " bytes at pos " + pos);
+    throw underflow("Buffer underflow: need " + size + " bytes at offset " + pos +
+                    ", but only " + Math.max(0, buf.length - pos) + " remaining");
   }
+}
+/* A bit range or a bool reads its byte(s) without consuming them. */
+function needPeek(buf, pos, size) {
+  if (pos + size > buf.length) throw underflow("Buffer underflow at peek offset " + pos);
 }
 
 function orderedBytes(buf, pos, size, endian) {
@@ -2140,7 +2161,8 @@ function writeS(buf, pos, size, value, endian) {
 
     def _gen_decode_fn(self, fname: str, fields: List[Dict]) -> str:
         lines = [f'function {fname}(buf, endian) {{']
-        lines.append(f'  var pos = 0, d = {{}}, vars = {{}}, w = [];')
+        lines.append(f'  var pos = 0, d = {{}}, vars = {{}}, w = [], wn = [];')
+        lines.append('  _fld = null;')
         # Readings omitted as "no reading" (PS-427, PS-428), for `_quality` if produced.
         lines.append('  var aqr = {}, aqp = {};')
         # rv: a looked-up field's value before its lookup, which valid_range compares
@@ -2184,7 +2206,7 @@ function writeS(buf, pos, size, value, endian) {
         lines.append('  if (!_leftDone && pos < buf.length) w.push((buf.length - pos) + '
                      '" byte(s) after the last field left undecoded, from offset " + pos + '
                      '" (PS-472)");')
-        lines.append('  return { data: d, pos: pos, warnings: w };')
+        lines.append('  return { data: d, pos: pos, warnings: w.concat(wn) };')
         lines.append('}')
         return '\n'.join(lines)
 
@@ -2215,6 +2237,12 @@ function writeS(buf, pos, size, value, endian) {
         problems = encoding_errors(field) if isinstance(field, dict) and 'type' in field else []
         if problems:
             raise ValueError(problems[0])
+        if isinstance(field, dict) and field.get('type'):
+            # PS-535: the field about to read, for a short read's error. A member of an
+            # object or a repeat element sets its own, so the innermost field is named.
+            from schema_interpreter import underflow_label
+            label = underflow_label(field.get('name'), field.get('type'))
+            lines.append(f'{i}  _fld = {json.dumps(label)};')
 
         # byte_group
         if 'byte_group' in field:
@@ -2231,6 +2259,20 @@ function writeS(buf, pos, size, value, endian) {
             group_endian = f'"{bg["endian"]}"' if isinstance(bg, dict) and bg.get('endian') else 'endian'
             lines.append(f'{i}  // byte_group')
             lines.append(f'{i}  var bgStart = pos;')
+            # PS-535: a member reads the group's bytes from its start, so the first member
+            # whose base does not fit is the field named, in the peek form; where every
+            # base fits and the group's size does not, the group itself is.
+            from schema_interpreter import underflow_label
+            members = bg_fields if isinstance(bg_fields, list) else []
+            lines.append(f'{i}  if (buf.length - pos < {int(bg_size)}) {{')
+            for bf in members:
+                bm = re.match(r'^[us](\d+)\[', str(bf.get('type', '')))
+                bbytes = int(bm.group(1)) // 8 if bm else 1
+                blabel = json.dumps(underflow_label(bf.get('name'), bf.get('type')))
+                lines.append(f'{i}    if (buf.length - pos < {bbytes}) {{ _fld = {blabel}; '
+                             f'needPeek(buf, pos, {bbytes}); }}')
+            lines.append(f'{i}    _fld = {json.dumps(underflow_label(None, "byte_group"))};')
+            lines.append(f'{i}  }}')
             wide_group = int(bg_size) >= 7
             if wide_group:
                 # Past 2^53 readU gives a decimal string; take each range from the bytes.
@@ -2653,6 +2695,7 @@ function writeS(buf, pos, size, value, endian) {
             # integer and corrupts a u32 base with its top bit set. An `sN` base is
             # sign-extended from the range's width (PS-352, PS-353).
             signed = base_type.startswith('s')
+            lines.append(f'{i}  needPeek(buf, pos, {base_size});')         # PS-535
             if base_size >= 7:
                 # readU gives a seven- or eight-byte base as a decimal string past 2^53,
                 # and the division below then read every range of it as 0.
@@ -2665,6 +2708,7 @@ function writeS(buf, pos, size, value, endian) {
                 if signed:
                     lines.append(f'{i}  if ({js_name} >= {2 ** (bit_width - 1)}) {js_name} -= {2 ** bit_width};')
             if consume:
+                lines.append(f'{i}  need(buf, pos, {int(consume)});')            # PS-535
                 lines.append(f'{i}  pos += {int(consume)};')
 
             val_expr = self._apply_modifiers_expr(js_name, field)
@@ -2706,9 +2750,10 @@ function writeS(buf, pos, size, value, endian) {
         if ftype == 'bool':
             bit = int(field.get('bit', 0))
             consume = field.get('consume', 0)
-            lines.append(f'{i}  if (pos >= buf.length) throw new Error("Buffer too short for bool");')
+            lines.append(f'{i}  needPeek(buf, pos, 1);')
             lines.append(f'{i}  var {js_name}_out = ((buf[pos] >> {bit}) & 1) === 1;')
             if consume:
+                lines.append(f'{i}  need(buf, pos, {int(consume)});')            # PS-535
                 lines.append(f'{i}  pos += {int(consume)};')
             if field.get('var'):
                 lines.append(f'{i}  vars.{to_js_name(field["var"])} = {js_name}_out;')
@@ -2725,7 +2770,7 @@ function writeS(buf, pos, size, value, endian) {
             # A skip past the end is a short read, as in every interpreter; the codec
             # advanced past the payload and reported success.
             lines.append(f'{i}  var _skipN = {length_to_js(field)};')
-            lines.append(f'{i}  if (pos + _skipN > buf.length) throw new Error("Buffer too short for skip");')
+            lines.append(f'{i}  need(buf, pos, _skipN);')
             lines.append(f'{i}  pos += _skipN;')
             return lines
 
@@ -2733,7 +2778,7 @@ function writeS(buf, pos, size, value, endian) {
         # integer path, which then had no size for it.
         if ftype == 'base64':
             lines.append(f'{i}  var {js_name}_n = {length_to_js(field)};')
-            lines.append(f'{i}  if (pos + {js_name}_n > buf.length) throw new Error("Buffer too short for base64");')
+            lines.append(f'{i}  need(buf, pos, {js_name}_n);')
             lines.append(f'{i}  var {js_name} = toBase64(buf, pos, {js_name}_n);')
             lines.append(f'{i}  pos += {js_name}_n;')
             if not name.startswith('_'):
@@ -2752,12 +2797,18 @@ function writeS(buf, pos, size, value, endian) {
             lines.append(f'{i}  var {js_name}_n = {length_to_js(field)};')
             # A declared length the payload cannot supply is an error, as in every
             # interpreter; the loops below stopped at the end and reported what was left.
-            lines.append(f'{i}  if (pos + {js_name}_n > buf.length) throw new Error("Buffer too short for {ftype}");')
+            lines.append(f'{i}  need(buf, pos, {js_name}_n);')
             if ftype == 'ascii':
                 lines.append(f'{i}  for (var _si = 0; _si < {js_name}_n && pos < buf.length; _si++)'
                              f' {{ {js_name} += String.fromCharCode(buf[pos++]); }}')
                 # Trailing NUL padding is not part of the text, as in the reference
                 # (`rstrip` of NUL); the codec used to report "HC" followed by two NULs.
+                # PS-538: each byte is its ISO 8859-1 character, with PS-073's warning
+                # for one above 0x7F. Collected apart and reported after the decode's
+                # own warnings, where the reference reports a nested one.
+                from schema_interpreter import ASCII_HIGH_BYTE_WARNING
+                warning = json.dumps(ASCII_HIGH_BYTE_WARNING.format(field.get('name')))
+                lines.append(f'{i}  if (/[\\u0080-\\u00ff]/.test({js_name})) wn.push({warning});')
                 lines.append(f'{i}  {js_name} = {js_name}.replace(/\\u0000+$/, "");')
             elif ftype == 'bytes' and field.get('format', 'hex') in ('base64', 'array'):
                 # PS-079: the declared format. Ignored before, so every bytes field was
@@ -2834,7 +2885,7 @@ function writeS(buf, pos, size, value, endian) {
         # Nibble-decimal (PS-329, PS-330): upper nibble whole, lower nibble tenths, the
         # upper nibble a 4-bit two's-complement value for sdec.
         if ftype in ('udec', 'sdec'):
-            lines.append(f'{i}  if (pos >= buf.length) throw new Error("Buffer too short for {ftype}");')
+            lines.append(f'{i}  need(buf, pos, 1);')
             if ftype == 'sdec':
                 lines.append(f'{i}  var {js_name}_w = buf[pos] >> 4; if ({js_name}_w >= 8) {js_name}_w -= 16;')
             else:
@@ -3073,6 +3124,7 @@ function writeS(buf, pos, size, value, endian) {
         length_size = int(tlv.get('length_size', 0))
 
         lines.append(f'{i}  // TLV loop')
+        lines.append(f'{i}  _fld = null;')
         # PS-477: a tag is never partly read - fewer bytes than the tag at the start of an
         # entry is an error identifying the tlv. The loop used to require tag and length
         # to fit and stop silently otherwise. PS-486 extends it to the rest of the entry:
@@ -3318,6 +3370,9 @@ function writeS(buf, pos, size, value, endian) {
             # Read it here, and consume it: the bytes belong to this construct.
             span = int(width) if width else 1
             lines.append(f'{i}  // match on an inline {span}-byte discriminator')
+            from schema_interpreter import underflow_label
+            mlabel = underflow_label(match.get('name'), 'match')
+            lines.append(f'{i}  _fld = {json.dumps(mlabel)};')       # PS-535
             lines.append(f'{i}  var _mv = readU(buf, pos, {span}, endian);')
             lines.append(f'{i}  pos += {span};')
             discriminator = '_mv'

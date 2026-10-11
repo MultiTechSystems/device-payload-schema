@@ -1560,6 +1560,23 @@ public class Schema {
      *                   list and not to a byte_group member, as in the reference.
      */
     private Object decodeField(Field field, DecodeContext ctx, boolean fieldRules) {
+        try {
+            return decodeFieldBody(field, ctx, fieldRules);
+        } catch (SchemaException.BufferUnderflow e) {
+            // PS-535: the innermost field that read past the end is named; an enclosing
+            // object, repeat or construct passes its member's error through unchanged.
+            throw e.named(field.getName(), kindOf(field));
+        }
+    }
+
+    /** What a field is, as its schema wrote it, for a PS-535 error with no name to give. */
+    private static String kindOf(Field field) {
+        Object raw = field.getRaw() != null ? field.getRaw().get("type") : null;
+        if (raw != null) return String.valueOf(raw);
+        return field.getType() != null ? field.getType().name().toLowerCase() : "field";
+    }
+
+    private Object decodeFieldBody(Field field, DecodeContext ctx, boolean fieldRules) {
         int length = field.getEffectiveLength();
         if (field.getLengthRef() != null) {
             switch (field.getType()) {
@@ -1679,7 +1696,17 @@ public class Schema {
             
             case ASCII -> {
                 byte[] data = ctx.read(length);
-                String str = new String(data, StandardCharsets.US_ASCII);
+                // PS-538: each byte is the ISO 8859-1 character of the same number, so the
+                // value is lossless and re-encodes to the same bytes (PS-537). US_ASCII
+                // decoded a byte above 0x7F as U+FFFD. PS-073's warning reports it.
+                String str = new String(data, StandardCharsets.ISO_8859_1);
+                for (byte b : data) {
+                    if ((b & 0xFF) > 0x7F) {
+                        ctx.addWarning("Field '" + field.getName()
+                                + "': a byte above 0x7F in an ascii value (PS-073, PS-538)");
+                        break;
+                    }
+                }
                 // Trailing NUL padding only, as the reference strips it: this removed
                 // every NUL and then trimmed spaces, so "HC " read as "HC" and "A\0B"
                 // as "AB" where Python, Go and C# keep both.
@@ -1944,7 +1971,14 @@ public class Schema {
             matchValue = toInt(val, 0);
         } else {
             int length = field.getLength() > 0 ? field.getLength() : 1;
-            byte[] data = ctx.read(length);
+            byte[] data;
+            try {
+                data = ctx.read(length);
+            } catch (SchemaException.BufferUnderflow e) {
+                // PS-535: the discriminator is the field that read; it is named by the
+                // match's `name`, where it declares one.
+                throw e.named(field.getName(), "match");
+            }
             matchValue = (int) ctx.decodeUnsigned(data, ctx.getEndian());
 
             // A discriminator read from the payload is reported where `name` asks for it
@@ -2509,8 +2543,9 @@ public class Schema {
                     }
                     try {
                         decodeElement(field, ctx, iterations, carryState, result);
-                    } catch (SchemaException.DecodeException e) {
-                        if (e.getMessage() == null || !e.getMessage().contains("Buffer underflow")) throw e;
+                    } catch (SchemaException.BufferUnderflow e) {
+                        // PS-343: a short element of an until-end repeat is its ragged
+                        // tail, which names the repeat (as PS-535 permits).
                         throw raggedTailError(field, regionEnd - start, 0, start);
                     }
                 }
@@ -2690,6 +2725,25 @@ public class Schema {
         // the group's start, big-endian, which agrees only for a big-endian group whose
         // members are as wide as it is.
         String endian = group.getGroupEndian() != null ? group.getGroupEndian() : this.endian;
+        if (group.getByteGroupSize() > ctx.remaining()) {
+            // PS-535: a member reads the group's bytes from its start, so the first member
+            // whose base does not fit is the field that read past the end, as the spec
+            // prototype names it. Where every base fits and the group's size does not, the
+            // group itself made the read.
+            for (Field member : group.getByteGroup()) {
+                int base = member.getType() == FieldType.BITS
+                        ? Math.max(1, member.getBitBaseBytes()) : 1;
+                if (base > ctx.remaining()) {
+                    throw new SchemaException.BufferUnderflow(String.format(
+                            "Buffer underflow at peek offset %d", start))
+                            .named(member.getName(), kindOf(member));
+                }
+            }
+            throw new SchemaException.BufferUnderflow(String.format(
+                    "Buffer underflow: need %d bytes at offset %d, but only %d remaining",
+                    group.getByteGroupSize(), start, Math.max(0, ctx.remaining())))
+                    .named(null, "byte_group");
+        }
         long groupValue = ctx.decodeUnsigned(ctx.peek(group.getByteGroupSize(), 0), endian);
 
         for (Field member : group.getByteGroup()) {

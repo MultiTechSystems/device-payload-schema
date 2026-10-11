@@ -118,6 +118,27 @@ UNREACHABLE_KEYS = {
 
 BIT_RANGE = re.compile(r"^u(\d+)\[(\d+):(\d+)\]$")
 
+#: CR-2026-114 (la-payload-schema main c932961). The interpreter holds `ascii` text as a
+#: C string, so it stops at the first 0x00 - "AB\0C" is "AB", where PS-534 keeps the NUL
+#: and drops only trailing ones - and copies a byte above 0x7F through as itself rather
+#: than as the ISO 8859-1 character PS-538 requires. Both are interpreter gaps, recorded
+#: in AGENTS.md like the boolean literal; a schema whose vectors expect either is not
+#: attempted, rather than counted as a C failure the harness knows in advance.
+TEXT_GAP = ("ascii text with an interior 0x00 or a byte above 0x7F: the interpreter holds "
+            "text as a C string (PS-534, PS-538, a known C gap)")
+
+
+def expects_text_c_cannot_hold(schema, vectors):
+    """True where a vector expects an ascii value C cannot report (PS-534, PS-538)."""
+    names = {f.get("name") for f in schema.get("fields") or []
+             if isinstance(f, dict) and f.get("type") == "ascii"}
+    for vector in vectors:
+        for key, value in (vector.get("expected") or {}).items():
+            if key in names and isinstance(value, str) and (
+                    "\x00" in value.rstrip("\x00") or any(ord(ch) > 0x7F for ch in value)):
+                return True
+    return False
+
 
 def c_string(text):
     return '"' + str(text).replace("\\", "\\\\").replace('"', '\\"') + '"'
@@ -625,6 +646,12 @@ def run():
         if not vectors:
             continue
         vector_total += len(vectors)
+        if expects_text_c_cannot_hold(schema, vectors):
+            # Asked of the interpreter, not of this harness: it would build the schema and
+            # report something else.
+            skips[TEXT_GAP] += 1
+            skipped_vectors += len(vectors)
+            continue
         source, reason = schema_source(len(entries), schema)
         if source is None:
             skips[reason] += 1

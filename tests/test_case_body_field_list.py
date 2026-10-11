@@ -89,7 +89,11 @@ def test_an_error_inside_a_group_member_fails_the_decode():
     )
     result = SchemaInterpreter(yaml.safe_load(src)).decode(bytes([1, 2]))
     assert not result.success
-    assert result.errors and result.errors[0].startswith("Error decoding g:")
+    # PS-535: the member that read past the end is named, not the group.
+    assert result.errors == [
+        "Field 'b': Buffer underflow: need 2 bytes at offset 1, but only 1 remaining "
+        "(PS-535)"
+    ]
 
 
 def test_a_group_member_range_is_flagged_and_warned():
@@ -159,7 +163,10 @@ def test_a_skip_past_the_end_is_an_error():
     # It decoded with success; Go, Java and C# report the short read.
     result = SchemaInterpreter(yaml.safe_load(SKIP_PAST_END)).decode(bytes([1, 2]))
     assert not result.success
-    assert result.errors == ["Error decoding pad: Buffer too short for skip"]
+    assert result.errors == [
+        "Field 'pad': Buffer underflow: need 4 bytes at offset 1, but only 1 remaining "
+        "(PS-535)"
+    ]
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
@@ -171,7 +178,10 @@ def test_the_generated_codec_reports_a_skip_past_the_end():
     out = subprocess.run(
         ["node"], input=script, capture_output=True, text=True, check=True
     )
-    assert any("Buffer too short for skip" in e for e in json.loads(out.stdout))
+    assert json.loads(out.stdout) == [
+        "Field 'pad': Buffer underflow: need 4 bytes at offset 1, but only 1 remaining "
+        "(PS-535)"
+    ]
 
 
 def test_a_presence_group_field_range_is_checked_once():

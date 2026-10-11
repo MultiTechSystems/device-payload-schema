@@ -62,7 +62,8 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # +3: tlv-case-field-list.
 # +2: boolean-literal (CR-2026-107).
 # +8: name-from-rendering (CR-2026-112), all plain fixed.
-FLOOR_TOTAL = 1783
+# +4: ascii-latin1 (CR-2026-114), all plain fixed: a byte above 0x7F re-encodes to itself.
+FLOOR_TOTAL = 1787
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -72,7 +73,7 @@ FLOOR_BY_SHAPE = {
     # for an internal field with no value. It now reports such a field instead.
     "tlv": 1299,
     "flagged": 193,
-    "plain fixed": 127,
+    "plain fixed": 131,
     "match": 125,
     "byte_group": 25,
     # 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now

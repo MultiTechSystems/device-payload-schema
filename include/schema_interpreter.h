@@ -1062,6 +1062,115 @@ static inline int decode_field(
 }
 
 /* ============================================
+ * PS-535: a short read names its field
+ * ============================================ */
+
+/* The spelling of a type in an unnamed field's PS-535 message ("an unnamed skip"). A
+ * bit range's own spelling (`u8[3:4]`) is not kept by the binary schema, so it reads
+ * "an unnamed bit range". */
+static inline const char* schema_type_label(field_type_t type) {
+    switch (type) {
+        case FIELD_TYPE_U8: return "u8";
+        case FIELD_TYPE_U16: return "u16";
+        case FIELD_TYPE_U24: return "u24";
+        case FIELD_TYPE_U32: return "u32";
+        case FIELD_TYPE_U32LE16: return "u32le16";
+        case FIELD_TYPE_S32LE16: return "s32le16";
+        case FIELD_TYPE_U64: return "u64";
+        case FIELD_TYPE_S8: return "s8";
+        case FIELD_TYPE_S16: return "s16";
+        case FIELD_TYPE_S24: return "s24";
+        case FIELD_TYPE_S32: return "s32";
+        case FIELD_TYPE_S64: return "s64";
+        case FIELD_TYPE_F16: return "f16";
+        case FIELD_TYPE_F32: return "f32";
+        case FIELD_TYPE_F64: return "f64";
+        case FIELD_TYPE_BOOL: return "bool";
+        case FIELD_TYPE_BITS: return "bit range";
+        case FIELD_TYPE_SKIP: return "skip";
+        case FIELD_TYPE_ASCII: return "ascii";
+        case FIELD_TYPE_HEX: return "hex";
+        case FIELD_TYPE_BASE64: return "base64";
+        case FIELD_TYPE_BYTES: return "bytes";
+        case FIELD_TYPE_ENUM: return "enum";
+        case FIELD_TYPE_UDEC: return "udec";
+        case FIELD_TYPE_SDEC: return "sdec";
+        default: return "field";
+    }
+}
+
+/* The bytes a field's read needs, as decode_field checks them; 0 for a bool or a bit
+ * range, which peek at their byte without consuming it. */
+static inline size_t schema_read_need(const field_def_t* field) {
+    switch (field->type) {
+        case FIELD_TYPE_U8: case FIELD_TYPE_S8:
+        case FIELD_TYPE_UDEC: case FIELD_TYPE_SDEC: return 1;
+        case FIELD_TYPE_U16: case FIELD_TYPE_S16: case FIELD_TYPE_F16: return 2;
+        case FIELD_TYPE_U24: case FIELD_TYPE_S24: return 3;
+        case FIELD_TYPE_U32: case FIELD_TYPE_S32: case FIELD_TYPE_F32:
+        case FIELD_TYPE_U32LE16: case FIELD_TYPE_S32LE16: return 4;
+        case FIELD_TYPE_U64: case FIELD_TYPE_S64: case FIELD_TYPE_F64: return 8;
+        case FIELD_TYPE_SKIP: return field->size ? field->size : 1;
+        default: return field->size;
+    }
+}
+
+/* CR-2026-115 (la-payload-schema main c932961): a read or skip past the end of the
+ * payload is an error identifying the field, in the text the other five implementations
+ * report, so a cross-language diff compares equal strings:
+ *
+ *   Field 'name': Buffer underflow: need N bytes at offset O, but only R remaining (PS-535)
+ *   Field 'name': Buffer underflow at peek offset O (PS-535)          (a bool, a bit range)
+ *   Field an unnamed skip: Buffer underflow: ...                      (no name)
+ *
+ * decode_field returns SCHEMA_ERR_BUFFER before it moves `pos`, so `pos` is the field's
+ * offset. The worst case is 141 characters and its NUL - a quoted 31-character name and
+ * three ten-digit numbers - inside error_msg's 152, checked with -Wformat-truncation=2. */
+static inline void schema_underflow_message(
+    decode_result_t* result,
+    const field_def_t* field,
+    size_t pos,
+    size_t len
+) {
+    char label[SCHEMA_MAX_NAME_LEN + 2];       /* a quoted name, or "an unnamed <type>" */
+    /* field_skip() gives a skip the placeholder name `_skip`; the schema named nothing. */
+    const bool placeholder = field->type == FIELD_TYPE_SKIP &&
+                             strcmp(field->name, "_skip") == 0;
+    if (field->name[0] && !placeholder) {
+        snprintf(label, sizeof(label), "'%s'", field->name);
+    } else {
+        snprintf(label, sizeof(label), "an unnamed %s", schema_type_label(field->type));
+    }
+    if (field->type == FIELD_TYPE_BOOL || field->type == FIELD_TYPE_BITS) {
+        snprintf(result->error_msg, sizeof(result->error_msg),
+                 "Field %s: Buffer underflow at peek offset %u (PS-535)",
+                 label, (unsigned)pos);
+        return;
+    }
+    snprintf(result->error_msg, sizeof(result->error_msg),
+             "Field %s: Buffer underflow: need %u bytes at offset %u, but only %u "
+             "remaining (PS-535)",
+             label, (unsigned)schema_read_need(field), (unsigned)pos,
+             (unsigned)(pos < len ? len - pos : 0));
+}
+
+/* The error of a field that failed to decode: its code, and for a short read its
+ * message (PS-535). */
+static inline int schema_field_failed(
+    decode_result_t* result,
+    int rc,
+    const field_def_t* field,
+    size_t pos,
+    size_t len
+) {
+    result->error_code = rc;
+    if (rc == SCHEMA_ERR_BUFFER && result->error_msg[0] == '\0') {
+        schema_underflow_message(result, field, pos, len);
+    }
+    return rc;
+}
+
+/* ============================================
  * Main Decode Function
  * ============================================ */
 
@@ -1155,8 +1264,8 @@ static inline int schema_decode_direction(
                         &vars, schema->endian
                     );
                     if (rc != SCHEMA_OK) {
-                        result->error_code = rc;
-                        return rc;
+                        return schema_field_failed(result, rc, &schema->fields[field_idx],
+                                                   pos, len);
                     }
                     if (result->fields[result->field_count].valid) {
                         result->field_count++;
@@ -1276,8 +1385,8 @@ static inline int schema_decode_direction(
                         &vars, schema->endian
                     );
                     if (rc != SCHEMA_OK) {
-                        result->error_code = rc;
-                        return rc;
+                        return schema_field_failed(result, rc, &schema->fields[field_idx],
+                                                   pos, len);
                     }
                     if (result->fields[result->field_count].valid) {
                         result->field_count++;
@@ -1328,8 +1437,8 @@ static inline int schema_decode_direction(
                             &vars, schema->endian
                         );
                         if (rc != SCHEMA_OK) {
-                            result->error_code = rc;
-                            return rc;
+                            return schema_field_failed(result, rc,
+                                                       &schema->fields[field_idx], pos, len);
                         }
                         if (result->fields[result->field_count].valid) {
                             result->field_count++;
@@ -1349,8 +1458,7 @@ static inline int schema_decode_direction(
         );
         
         if (rc != SCHEMA_OK) {
-            result->error_code = rc;
-            return rc;
+            return schema_field_failed(result, rc, field, pos, len);
         }
         
         if (result->fields[result->field_count].valid &&
