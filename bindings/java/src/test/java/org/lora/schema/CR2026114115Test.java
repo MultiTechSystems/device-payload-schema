@@ -64,6 +64,11 @@ public class CR2026114115Test {
             Arguments.of(schema("- name: r\n  type: repeat\n  count: 2\n  fields:\n"
                     + "  - {name: v, type: u16}\n"),
                 "000102", "Field 'v': " + String.format(need, 2, 2, 1)),
+            // CR-2026-111: an element is decoded as a one-field record named `element`.
+            Arguments.of(schema("- {name: r, type: repeat, count: 2, element: {name: v, type: u16}}\n"),
+                "000102", "Field 'v': " + String.format(need, 2, 2, 1)),
+            Arguments.of(schema("- {name: r, type: repeat, count: 2, element: {type: u16}}\n"),
+                "000102", "Field 'element': " + String.format(need, 2, 2, 1)),
             Arguments.of(schema("- {name: k, type: u8, var: k}\n- match:\n    field: $k\n"
                     + "    cases:\n      1:\n      - {name: m, type: u16}\n"),
                 "0101", "Field 'm': " + String.format(need, 2, 1, 1)),

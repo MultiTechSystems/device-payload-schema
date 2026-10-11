@@ -62,6 +62,13 @@ SHORT_READS = [
     ('counted element member', [{'name': 'r', 'type': 'repeat', 'count': 2,
                                  'fields': [{'name': 'v', 'type': 'u16'}]}], '000102',
      underflow("'v'", 2, 2, 1)),
+    ('named element', [{'name': 'r', 'type': 'repeat', 'count': 2,
+                        'element': {'name': 'v', 'type': 'u16'}}], '000102',
+     underflow("'v'", 2, 2, 1)),
+    # CR-2026-111: a nameless element is decoded as a record named `element`.
+    ('unnamed element', [{'name': 'r', 'type': 'repeat', 'count': 2,
+                          'element': {'type': 'u16'}}], '000102',
+     underflow("'element'", 2, 2, 1)),
     ('case body member', [{'name': 'k', 'type': 'u8', 'var': 'k'},
                           {'match': {'field': '$k',
                                      'cases': {1: [{'name': 'm', 'type': 'u16'}]}}}],

@@ -52,6 +52,10 @@ public class CR2026_114_115Tests
             Need("'x'", 2, 0, 1) },
         new object[] { "- {name: r, type: repeat, count: 2, fields: [{name: v, type: u16}]}\n",
             "000102", Need("'v'", 2, 2, 1) },
+        new object[] { "- {name: r, type: repeat, count: 2, element: {name: v, type: u16}}\n",
+            "000102", Need("'v'", 2, 2, 1) },
+        new object[] { "- {name: r, type: repeat, count: 2, element: {type: u16}}\n",
+            "000102", Need("'element'", 2, 2, 1) },
         new object[] { "- tlv: {tag_size: 1, cases: {1: [{name: t, type: u16}]}}\n", "0101",
             Need("'t'", 2, 1, 1) },
         // A reserve is the end of the payload for the reads inside it (PS-350, PS-471).
