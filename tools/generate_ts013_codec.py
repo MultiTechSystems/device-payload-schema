@@ -2947,20 +2947,13 @@ function writeS(buf, pos, size, value, endian) {
             group_endian = f'"{bg["endian"]}"' if isinstance(bg, dict) and bg.get('endian') else 'endian'
             lines.append(f'{i}  // byte_group')
             lines.append(f'{i}  var bgStart = pos;')
-            # PS-535: a member reads the group's bytes from its start, so the first member
-            # whose base does not fit is the field named, in the peek form; where every
-            # base fits and the group's size does not, the group itself is.
-            from schema_interpreter import underflow_label
+            # PS-535: the group is read as one value (CR-2026-131), so the failing read is
+            # the group's, in the peek form, and it is identified by its members.
+            from schema_interpreter import byte_group_label
             members = bg_fields if isinstance(bg_fields, list) else []
-            lines.append(f'{i}  if (buf.length - pos < {int(bg_size)}) {{')
-            for bf in members:
-                bm = re.match(r'^[us](\d+)\[', str(bf.get('type', '')))
-                bbytes = int(bm.group(1)) // 8 if bm else 1
-                blabel = json.dumps(underflow_label(bf.get('name'), bf.get('type')))
-                lines.append(f'{i}    if (buf.length - pos < {bbytes}) {{ _fld = {blabel}; '
-                             f'needPeek(buf, pos, {bbytes}); }}')
-            lines.append(f'{i}    _fld = {json.dumps(underflow_label(None, "byte_group"))};')
-            lines.append(f'{i}  }}')
+            glabel = json.dumps(byte_group_label(members))
+            lines.append(f'{i}  if (buf.length - pos < {int(bg_size)}) {{ _fld = {glabel}; '
+                         f'needPeek(buf, pos, {int(bg_size)}); }}')
             wide_group = int(bg_size) >= 7
             if wide_group:
                 # Past 2^53 readU gives a decimal string; take each range from the bytes.

@@ -69,9 +69,13 @@ func TestCR2026115AShortReadNamesItsField(t *testing.T) {
 		{"bool consume", "- {name: bo, type: bool, consume: 2}", "01",
 			"Field 'bo': Buffer underflow: need 2 bytes at offset 0, but only 1 remaining (PS-535)"},
 		{"shared byte member", "- byte_group: {size: 2, fields: [{name: a, type: 'u16[0:3]'}, {name: c, type: 'u16[4:7]'}]}", "01",
-			"Field 'a': Buffer underflow at peek offset 0 (PS-535)"},
-		{"shared byte size", "- byte_group: {size: 2, fields: [{name: a, type: 'u8[0:3]'}, {name: c, type: 'u8[4:7]'}]}", "01",
-			"Field an unnamed byte_group: Buffer underflow: need 2 bytes at offset 0, but only 1 remaining (PS-535)"},
+			"Field byte_group of 'a', 'c': Buffer underflow at peek offset 0 (PS-535)"},
+		// CR-2026-131: the group is one read, named by every member in order, internal
+		// ones included, whichever member's base would have fitted.
+		{"shared byte size", "- byte_group: {size: 2, fields: [{name: a, type: 'u8[0:3]'}, {name: _r, type: 'u8[4:7]'}]}", "01",
+			"Field byte_group of 'a', '_r': Buffer underflow at peek offset 0 (PS-535)"},
+		{"unnamed byte_group", "- byte_group: {size: 2, fields: [{type: 'u8[0:3]'}]}", "01",
+			"Field an unnamed byte_group: Buffer underflow at peek offset 0 (PS-535)"},
 		// An inline discriminator is named by the construct's `name`, where it has one.
 		{"named discriminator", "- match: {length: 2, name: kind, cases: {1: [{name: m, type: u8}]}}", "00",
 			"Field 'kind': Buffer underflow: need 2 bytes at offset 0, but only 1 remaining (PS-535)"},
