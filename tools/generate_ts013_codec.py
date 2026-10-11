@@ -436,7 +436,76 @@ function encRawBits(f) {                              // raw_bits_field
   return g;
 }
 
-function encDeclaringVar(name) { return ENC_VARS[name] || null; }   // _field_declaring_var
+// The field list being encoded: a reference is looked for there before the rest of the
+// schema (ENC_VARS, ENC_NAMED), since each port may declare its own `code`.
+var ENC_SCOPE = null;
+
+function encFind(node, test) {                        // the walk in _field_declaring_var
+  if (Array.isArray(node)) {
+    for (var i = 0; i < node.length; i++) { var f = encFind(node[i], test); if (f) return f; }
+    return null;
+  }
+  if (node && typeof node === "object") {
+    if (test(node)) return node;
+    for (var k in node) {
+      if (!Object.prototype.hasOwnProperty.call(node, k)) continue;
+      var g = encFind(node[k], test);
+      if (g) return g;
+    }
+  }
+  return null;
+}
+
+function encDeclaringVar(name) {                      // _field_declaring_var
+  var f = encFind(ENC_SCOPE, function (n) { return n["var"] === name && n.name; });
+  return f ? { name: f.name, lookup: f.lookup, type: f.type, values: f.values }
+           : (ENC_VARS[name] || null);
+}
+
+function encNamed(name) {                             // _field_named
+  var f = encFind(ENC_SCOPE, function (n) {
+    return n.name === name && ((n.lookup !== undefined && n.lookup !== null) || n.type === "enum");
+  });
+  return f ? { name: f.name, lookup: f.lookup, type: f.type, values: f.values }
+           : (ENC_NAMED[name] || null);
+}
+
+function encReverseEnum(value, f) {                   // reverse_enum
+  var values = f.values || {}, k;
+  if (Array.isArray(values)) {
+    var labels = values.map(encEnumLabel);
+    if (labels.indexOf(value) >= 0) return labels.indexOf(value);
+  } else {
+    for (k in values) {
+      if (Object.prototype.hasOwnProperty.call(values, k) && encEnumLabel(values[k]) === value) {
+        var n = Number(k);
+        return isFinite(n) ? n : value;
+      }
+    }
+  }
+  if (typeof value === "string" && value.indexOf("unknown(") === 0 && value.slice(-1) === ")") {
+    var u = parseInt(value.slice(8, -1), 10);
+    if (isFinite(u)) return u;
+  }
+  return value;
+}
+
+function encReference(ref, data) {                    // _encode_reference
+  // PS-523: a looked-up field bound the number under a text or boolean label, and a
+  // numeric label as itself; the data carries the label, so the first are reversed.
+  var value, src;
+  if (Object.prototype.hasOwnProperty.call(data, ref)) { value = data[ref]; src = encNamed(ref); }
+  else {
+    src = encDeclaringVar(ref);
+    if (!src || !Object.prototype.hasOwnProperty.call(data, src.name)) return null;
+    value = data[src.name];
+  }
+  if (src && src.lookup !== null && src.lookup !== undefined &&
+      (typeof value === "string" || typeof value === "boolean")) return encReverseLookup(value, src.lookup);
+  // CR-2026-132: an enum bound its code.
+  if (src && src.type === "enum" && typeof value === "string") return encReverseEnum(value, src);
+  return value;
+}
 
 function encResolveName(f, name, data) {              // _resolve_encode_name
   if (!f.name_from) return name;
@@ -701,14 +770,7 @@ function encMatch(out, f, data, ctx) {                // _encode_match
   var dflt = m["default"] === undefined ? "error" : m["default"];
   var disc = null;
   if (m.name && Object.prototype.hasOwnProperty.call(data, m.name)) disc = data[m.name];
-  else if (m.field) {
-    var ref = String(m.field).replace(/^\$+/, "");
-    if (Object.prototype.hasOwnProperty.call(data, ref)) disc = data[ref];
-    else {
-      var src = encDeclaringVar(ref);
-      if (src && Object.prototype.hasOwnProperty.call(data, src.name)) disc = encReverseLookup(data[src.name], src.lookup);
-    }
-  }
+  else if (m.field) disc = encReference(String(m.field).replace(/^\$+/, ""), data);
   var key = null, body = null;
   if (disc !== null && disc !== undefined) {
     for (var k in cases) {
@@ -1116,6 +1178,7 @@ function encList(out, fields, data, ctx, top) {
 function encodeRoot(fields, data, endian) {
   // wa: PS-537's warnings, reported after the others as the reference reports them.
   var ctx = { endian: endian, w: [], wa: [] }, out = [];
+  ENC_SCOPE = fields;
   encList(out, fields, data || {}, ctx, true);
   return { bytes: out, warnings: ctx.w.concat(ctx.wa) };
 }
@@ -1190,7 +1253,7 @@ _CODEC_LOCALS = {
     'pos', 'd', 'vars', 'w', 'aqr', 'aqp', 'endian', 'buf', 'bgVal', 'bgStart', 'q',
     'qn', 'r', 'port', 'bytes', 'cmdName', 'cmdId', 'input', 'e', 'i', 'k',
     '_si', '_tlvTag', '_tlvStart', '_tlvSpan', '_tlvLen', '_mv', '_mr', '_k', '_a', '_p',
-    '_i', '_flags', 'wn',
+    '_i', '_flags', 'lv', 'lbl',
 }
 _JS_RESERVED = {
     'arguments', 'await', 'break', 'case', 'catch', 'class', 'const', 'continue',
@@ -1214,7 +1277,7 @@ def _codec_globals() -> set:
         names = set(re.findall(r'^function ([A-Za-z_$][\w$]*)', text, re.M))
         names |= set(re.findall(r'^var ([A-Za-z_$][\w$]*)', text, re.M))
         names |= {'ENC_TYPES', 'ENC_WORD_ORDERED', 'ENC_ENDIAN_OPAQUE', 'ENC_COMPUTED',
-                  'ENC_VARS', 'OUTPUT_KEYS', 'COMMANDS', 'decodeUplink', 'decodeDownlink',
+                  'ENC_VARS', 'ENC_NAMED', 'OUTPUT_KEYS', 'COMMANDS', 'decodeUplink', 'decodeDownlink',
                   'encodeDownlink', 'decodePayload', 'encodePayload', 'decodeCommand',
                   'encodeCommand'}
         _CODEC_GLOBALS = names
@@ -1706,7 +1769,9 @@ def name_from_to_js(field: Dict[str, Any], js_name: str) -> Tuple[List[str], str
         if literal:
             parts.append(json.dumps(literal))
         reference = to_js_name(match.group(1))
-        parts.append(f'vars.{reference}')
+        # A template writes the value reported, a looked-up field's label (PS-532), not
+        # the number a reference binds (PS-523).
+        parts.append(f'("{reference}" in lbl ? lbl.{reference} : vars.{reference})')
         refs.append(reference)
         last = match.end()
     tail = str(template)[last:]
@@ -1724,12 +1789,16 @@ def name_from_to_js(field: Dict[str, Any], js_name: str) -> Tuple[List[str], str
                    f"'{reference}', which has not been decoded")
         guards.append(f'if (vars.{reference} === undefined) '
                       f'throw new Error({json.dumps(message)});')
+        omitted = (f"name_from for '{field.get('name')}' references {reference}, which "
+                   "reported no value (PS-266, PS-532)")
+        guards.append(f'if ("{reference}" in lbl && lbl.{reference} === undefined) '
+                      f'throw new Error({json.dumps(omitted)});')
         # PS-532: concatenation writes a number, string or boolean as the key wants it,
         # and an object or array has no text to write.
         shape = (f"template {str(template)!r} references {reference!r}, which is not a "
                  "number, string or boolean and cannot be written into a key (PS-532)")
         guards.append(f'if (vars.{reference} !== null && typeof vars.{reference} === '
-                      f'"object") throw new Error({json.dumps(shape)});')
+                      f'"object" && !("{reference}" in lbl)) throw new Error({json.dumps(shape)});')
     return guards, 'd[' + ' + '.join(parts) + ']'
 
 
@@ -1737,7 +1806,8 @@ def ref_to_js(ref: str) -> str:
     """Convert a `$field` reference to a JS expression.
 
     Resolves against `vars`, which records every field - internal or not - after its
-    modifiers, matching the interpreters' variable table. `d` holds only the reported
+    modifiers, and a looked-up field as PS-523 binds it, matching the interpreters'
+    variable table. `d` holds only the reported
     fields, so a reference to an internal name (one beginning with an underscore)
     resolved to undefined: rakwireless/qingping computes both humidity and temperature
     from internal bitfields and reported neither.
@@ -1860,6 +1930,13 @@ function seqLookup(table, index) {
     return table[index];
   }
   throw new Error("lookup index " + index + " out of bounds for " + table.length + " entries");
+}
+
+// --- What a reference to a looked-up field binds (PS-523) ---
+// A numeric label is bound as itself, so a table of sizes feeds arithmetic; a text or
+// boolean label, or no entry at all, binds the number before the lookup.
+function refValue(label, number) {
+  return typeof label === "number" ? label : number;
 }
 
 // --- Lookup default template ---
@@ -2383,7 +2460,28 @@ function writeS(buf, pos, size, value, endian) {
             if isinstance(node, dict):
                 var = node.get('var')
                 if isinstance(var, str) and node.get('name') and var not in found:
-                    found[var] = {'name': node['name'], 'lookup': node.get('lookup')}
+                    found[var] = {'name': node['name'], 'lookup': node.get('lookup'),
+                                  'type': node.get('type'), 'values': node.get('values')}
+                for value in node.values():
+                    visit(value)
+            elif isinstance(node, list):
+                for item in node:
+                    visit(item)
+
+        visit(self.schema)
+        return found
+
+    def _enc_named(self) -> Dict[str, Dict[str, Any]]:
+        """field name -> the first field of that name carrying a lookup (_field_named)."""
+        found: Dict[str, Dict[str, Any]] = {}
+
+        def visit(node):
+            if isinstance(node, dict):
+                name = node.get('name')
+                if isinstance(name, str) and name not in found and (
+                        node.get('lookup') is not None or node.get('type') == 'enum'):
+                    found[name] = {'name': name, 'lookup': node.get('lookup'),
+                                   'type': node.get('type'), 'values': node.get('values')}
                 for value in node.values():
                     visit(value)
             elif isinstance(node, list):
@@ -2512,6 +2610,10 @@ function writeS(buf, pos, size, value, endian) {
         # a PS-302 warning already reported the bytes left over (PS-472).
         # rcs: the records the current repeat element yields (PS-541); null outside one.
         lines.append('  var rv = {}, rvs = {}, _leftDone = false, rcs = null;')
+        # lv: a looked-up field's number before its lookup, which a reference binds under
+        # a text or boolean label (PS-523); lbl: the value it reported, by the names it
+        # binds, which a key template writes (PS-532) - undefined where it had no entry.
+        lines.append('  var lv = {}, lbl = {};')
         lines.append(f'  endian = endian || "{self.endian}";')
         self.indent = 1
         for field in self._expand_refs(fields):
@@ -2671,7 +2773,7 @@ function writeS(buf, pos, size, value, endian) {
                 # `vars` records the post-modifier value - see _apply_modifiers_expr.
                 bval = self._apply_modifiers_expr(bjs, bf)
                 lines.append(f'{i}  var {bjs}_out = {bval};')
-                lines.append(f'{i}  vars.{bjs} = {bjs}_out;')
+                lines.extend(f'{i}  {s}' for s in self._bind_js(bf, bjs, f'{bjs}_out', False))
                 if not bname.startswith('_'):
                     guards, target = name_from_to_js(bf, bjs)
                     for guard in guards:
@@ -2825,7 +2927,8 @@ function writeS(buf, pos, size, value, endian) {
             # the enclosing one deleted any enclosing field sharing a member's name.
             lines.append(f'{i}    var {arr}_outer = d; d = {{}};')
             # PS-368: an element's names do not outlive it; `vars` is restored after it.
-            lines.append(f'{i}    var {arr}_vars = Object.assign({{}}, vars);')
+            lines.append(f'{i}    var {arr}_vars = Object.assign({{}}, vars), '
+                         f'{arr}_lbl = Object.assign({{}}, lbl);')
             # PS-541: an element reaching `records` collects them in `rcs`, and reports
             # them in its place. Emitted only where the element can reach one.
             yields_records = records_reachable(members)
@@ -2869,7 +2972,7 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append(f'{i}    {arr}_carry.{to_js_name(name)} = vars.{to_js_name(name)};')
             keep = condition_to_js(field['present_if']) if field.get('present_if') else 'true'
             lines.append(f'{i}    var {arr}_keep = {keep};')
-            lines.append(f'{i}    vars = {arr}_vars; {arr}_i++;')
+            lines.append(f'{i}    vars = {arr}_vars; lbl = {arr}_lbl; {arr}_i++;')
             if yields_records:
                 # PS-541: each record, after the element's other reported fields.
                 r = f'{arr}_r'
@@ -3135,14 +3238,19 @@ function writeS(buf, pos, size, value, endian) {
             vals = field.get('values', {})
             # The description form reports its `name` (PS-394); the mapping was emitted
             # whole and reported as the value.
+            if isinstance(vals, list):
+                vals = dict(enumerate(vals))
             val_json = json.dumps({str(k): enum_label(v) for k, v in vals.items()})
-            default = field.get('default', None)
-            default_js = json.dumps(default) if default else f'{js_name}_raw'
+            # PS-068 (CR-2026-132): with no `default` an unmatched code is omitted, as a
+            # lookup miss is (PS-269); `undefined` is dropped from the output, and the
+            # reference still binds the code below. This reported the code itself.
+            default_js = json.dumps(field['default']) if 'default' in field else 'undefined'
             lines.append(f'{i}  var {js_name}_map = {val_json};')
             lines.append(f'{i}  var {js_name}_out = {js_name}_map[{js_name}_raw] !== undefined ? {js_name}_map[{js_name}_raw] : {default_js};')
-            # The interpreters store the mapped label in their variable table, having
-            # applied the mapping before recording the variable, so record it here too.
-            lines.append(f'{i}  vars.{js_name} = {js_name}_out;')
+            # PS-523 (CR-2026-132): an enum is a lookup by another spelling, so a reference
+            # binds its code and a template reads its name.
+            lines.extend(f'{i}  {s}' for s in self._bind_js(
+                field, js_name, f'{js_name}_out', number=f'{js_name}_raw'))
             guards, target = name_from_to_js(field, js_name)
             for guard in guards:
                 lines.append(f'{i}  {guard}')
@@ -3264,7 +3372,7 @@ function writeS(buf, pos, size, value, endian) {
             lines.append(f'{i}  pos += {sz};')
             val_expr = self._apply_modifiers_expr(js_name, field)
             lines.append(f'{i}  var {js_name}_out = {val_expr};')
-            lines.append(f'{i}  vars.{js_name} = {js_name}_out;')
+            lines.extend(f'{i}  {s}' for s in self._bind_js(field, js_name, f'{js_name}_out', False))
             if not name.startswith('_'):
                 guards, target = name_from_to_js(field, js_name)
                 for guard in guards:
@@ -3281,7 +3389,7 @@ function writeS(buf, pos, size, value, endian) {
             lines.append(f'{i}  pos += {size};')
             val_expr = self._apply_modifiers_expr(js_name, field)
             lines.append(f'{i}  var {js_name}_out = {js_name} === undefined ? undefined : {val_expr};')
-            lines.append(f'{i}  vars.{js_name} = {js_name}_out;')
+            lines.extend(f'{i}  {s}' for s in self._bind_js(field, js_name, f'{js_name}_out', False))
             if not name.startswith('_'):
                 guards, target = name_from_to_js(field, js_name)
                 for guard in guards:
@@ -3301,7 +3409,7 @@ function writeS(buf, pos, size, value, endian) {
             lines.append(f'{i}  pos += 1;')
             val_expr = self._apply_modifiers_expr(js_name, field)
             lines.append(f'{i}  var {js_name}_out = {val_expr};')
-            lines.append(f'{i}  vars.{js_name} = {js_name}_out;')
+            lines.extend(f'{i}  {s}' for s in self._bind_js(field, js_name, f'{js_name}_out', False))
             if not name.startswith('_'):
                 guards, target = name_from_to_js(field, js_name)
                 for guard in guards:
@@ -3348,7 +3456,8 @@ function writeS(buf, pos, size, value, endian) {
         bounds = field.get('valid_range')
         if field.get('out_of_range') != 'omit' or not isinstance(bounds, (list, tuple)) \
                 or len(bounds) != 2:
-            return [f'{i}  d.{name} = {value_expr};', f'{i}  vars.{name} = {value_expr};']
+            return [f'{i}  d.{name} = {value_expr};'] + \
+                [f'{i}  {s}' for s in self._bind_js(field, name, f'd.{name}', False)]
         tmp = f'_c_{to_js_name(name)}'
         key = json.dumps(name)
         # PS-475: compared before the lookup; a guard's `else` is not compared at all.
@@ -3356,7 +3465,28 @@ function writeS(buf, pos, size, value, endian) {
         return [f'{i}  var {tmp} = {value_expr};',
                 f'{i}  if (!rvs[{key}] && typeof {v} === "number" && ({v} < {bounds[0]} || {v} > {bounds[1]})) '
                 f'{{ aqr[{json.dumps(name)}] = "out_of_range"; }}',
-                f'{i}  else {{ d.{name} = {tmp}; vars.{name} = {tmp}; }}']
+                f'{i}  else {{ d.{name} = {tmp}; '
+                + ' '.join(self._bind_js(field, name, tmp, False)) + ' }']
+
+    @staticmethod
+    def _bind_js(field: Dict, js_name: str, value: str, with_var: bool = True,
+                 number: Optional[str] = None) -> List[str]:
+        """Statements binding a field's names in `vars`, as PS-523 says.
+
+        A looked-up field binds its label where that is a number and otherwise the number
+        before the lookup (`lv`), a lookup miss included; `lbl` keeps the reported value,
+        which a `name_from` template writes (PS-532). Every name used to hold the label,
+        so `$code` in a `compute` read "report_rsp" and a case keyed 129 never matched.
+        """
+        names = [js_name]
+        if with_var and field.get('var'):
+            names.insert(0, to_js_name(field['var']))
+        if number is None and 'lookup' not in field:
+            return [f'vars.{n} = {value};' for n in names]
+        if number is None:
+            number = f'lv[{json.dumps(field.get("name", ""))}]'
+        return [f'vars.{n} = refValue({value}, {number}); lbl.{n} = {value};'
+                for n in names]
 
     def _emit_tail(self, lines: List[str], i: str, field: Dict, js_name: str, name: str,
                    bits_var: str = '') -> None:
@@ -3367,10 +3497,7 @@ function writeS(buf, pos, size, value, endian) {
         field is absent - not bound, not reported - and `_quality` records why where it
         is produced (`aqr` for a field declaring a range, `aqp` otherwise).
         """
-        body = []
-        if field.get('var'):
-            body.append(f'vars.{to_js_name(field["var"])} = {js_name}_out;')
-        body.append(f'vars.{js_name} = {js_name}_out;')
+        body = self._bind_js(field, js_name, f'{js_name}_out')
         if not name.startswith('_'):
             guards, target = name_from_to_js(field, js_name)
             body.extend(guards)
@@ -3421,6 +3548,11 @@ function writeS(buf, pos, size, value, endian) {
 
         if 'lookup' in field:
             lookup = field['lookup']
+            # PS-523: the number before the lookup, for a reference to bind under a
+            # text or boolean label. `lv` is read through below, so it is evaluated once.
+            number_key = json.dumps(field.get('name', ''))
+            pre_lookup = expr
+            expr = f'lv[{number_key}]'
             if isinstance(lookup, dict):
                 # `default` is a fallback, not a key. It used to be serialized into the
                 # table, so a miss found nothing and fell through to the raw integer -
@@ -3454,6 +3586,7 @@ function writeS(buf, pos, size, value, endian) {
                 # the index expression is evaluated once instead of up to three times.
                 lk = json.dumps(lookup)
                 expr = f'seqLookup({lk}, {expr})'
+            expr = f'(lv[{number_key}] = {pre_lookup}, {expr})'
         if stash:
             bounds = field.get('valid_range')
             if field.get('out_of_range') == 'omit' and isinstance(bounds, (list, tuple)) \
@@ -3582,9 +3715,11 @@ function writeS(buf, pos, size, value, endian) {
             # (rakwireless standardized payload). Its name is bound too: a component is
             # a field decoded earlier in the payload, so `ref: $rsn` in a case reads it
             # (PS-265), where the codec read an undefined value.
-            lines.append(f'{i}    vars.{tfname} = {tfname};')
-            if tf.get('var'):
-                lines.append(f'{i}    vars.{to_js_name(str(tf["var"]))} = {tfname};')
+            # PS-523 (CR-2026-132): both bind as any field's do - through its modifiers,
+            # and a lookup's number under a text label, the label kept for templates. The
+            # tag is still matched on the value read.
+            lines.append(f'{i}    var {tfname}_out = {self._apply_modifiers_expr(tfname, tf)};')
+            lines.extend(f'{i}    {s}' for s in self._bind_js(tf, tfname, f'{tfname}_out'))
         if not tag_fields:
             lines.append(f'{i}    var _tlvTag = readU(buf, pos, {tag_size}, endian);')
             lines.append(f'{i}    pos += {tag_size};')
@@ -3792,6 +3927,12 @@ function writeS(buf, pos, size, value, endian) {
             reference = match['field']
             discriminator = f'vars.{to_js_name(reference.lstrip("$"))}'
             lines.append(f'{i}  // match on {discriminator}')
+            # A name nothing bound - a sentinel or an omitted range left it unbound
+            # (PS-523) - is an error, as in every interpreter; the codec took `default`.
+            message = (f"Match field {reference} has no value: no earlier field or var: "
+                       "binds it")
+            lines.append(f'{i}  if ({discriminator} === undefined) '
+                         f'throw new Error({json.dumps(message)});')
         else:
             # Read it here, and consume it: the bytes belong to this construct.
             span = int(width) if width else 1
@@ -3882,9 +4023,10 @@ function writeS(buf, pos, size, value, endian) {
                 return f'{discriminator} === {int(text, 0)}'
             except ValueError:
                 # A string key matches a string discriminator by equality, as the
-                # interpreters compare it - typically a lookup label (`Cmd` reads 0x81
-                # and reports "ConfigReportRsp"). These keys yielded no branch, so every
-                # such case body was silently missing from the codec's output.
+                # interpreters compare it - an `ascii` field's text. Not a lookup label:
+                # a reference to a looked-up field binds a number (PS-523), so a label
+                # key matches nothing there (PS-524). These keys yielded no branch, so
+                # every such case body was silently missing from the codec's output.
                 return f'{discriminator} === {json.dumps(case_key)}'
         return None
 
@@ -3892,7 +4034,8 @@ function writeS(buf, pos, size, value, endian) {
     # Encoder generation
     # ---------------------------------------------------------------
     def _gen_encode_fields(self) -> str:
-        parts = [f'var ENC_VARS = {json.dumps(self._enc_vars(), default=str)};']
+        parts = [f'var ENC_VARS = {json.dumps(self._enc_vars(), default=str)};',
+                 f'var ENC_NAMED = {json.dumps(self._enc_named(), default=str)};']
         if self.has_ports:
             for port_key, port_def in self.schema['ports'].items():
                 fname = f'encodePort{port_key}'

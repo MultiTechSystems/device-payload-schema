@@ -83,10 +83,13 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # +6: repeat-element-null-sentinel, -internal-name, repeat-identity-sibling (2) and
 # repeat-count-computed (CR-2026-121, CR-2026-123), plus the null fixture's
 # reserved-value vector, whose null now writes the sentinel (PS-544); all repeat.
+# +6: lookup-reference-binding (CR-2026-109, CR-2026-132), match; the miss, default
+# and unnamed-enum vectors carry no value to write back.
+# +4: lookup-reference-binding vectors added for the mutation gate, match.
 # (merged with master's +6 tlv-repeat/mutation-gate vectors)
 # +4: ascii-latin1 (CR-2026-114), all plain fixed: a byte above 0x7F re-encodes to itself.
 # +3: byte-group-width (CR-2026-131), byte_group.
-FLOOR_TOTAL = 1827
+FLOOR_TOTAL = 1837
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -97,7 +100,7 @@ FLOOR_BY_SHAPE = {
     "tlv": 1305,   # +2: CR-2026-128; +3: CR-2026-125 fixtures; +1: tlv-repeat-merge (CR-2026-110)
     "flagged": 193,
     "plain fixed": 147,
-    "match": 129,  # +4: match-u32-inline-discriminator
+    "match": 139,  # +1: CR-2026-132 enum port; +5: lookup-reference-binding (CR-2026-109); +4: match-u32-inline-discriminator
     "byte_group": 28,  # +3: byte-group-width (CR-2026-131)
     # 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now
     # carry only the definitions they reach, so one no longer has a `repeat` in an

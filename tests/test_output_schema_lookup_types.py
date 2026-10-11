@@ -15,8 +15,8 @@ closed, so the value set is declared as an `enum`:
   (PS-105).
 
 `type: enum` depends on whether a `default` is declared: with one, an unmapped value is
-reported as that default (PS-068) and the set is closed; without one it is reported as the
-string `"unknown(<n>)"`, so the set is open and no enum can be declared.
+reported as that default (PS-068) and the set is closed; without one the field is omitted
+(PS-068 as CR-2026-132 amends it, as PS-269 omits a lookup miss), so the set is closed too.
 
 Every claim here was measured against the interpreter rather than read off the code.
 """
@@ -164,11 +164,11 @@ class TestSequenceLookup:
 
 
 class TestEnumType:
-    def test_string_values_stay_a_string_with_no_enum(self):
-        # An unmapped value is reported as "unknown(<n>)", so the set is open.
+    def test_string_values_are_enumerated_with_no_default(self):
+        # An unmapped value is omitted (CR-2026-132), so the set is closed.
         assert declared(
             "  - name: v\n    type: enum\n    base: u8\n    values: {0: alpha}\n"
-        ) == {"type": "string"}
+        ) == {"type": "string", "enum": ["alpha"]}
 
     def test_a_default_closes_the_set_so_it_is_enumerated(self):
         # PS-068: an unmapped value is reported as `default`, not "unknown(<n>)".
@@ -183,14 +183,14 @@ class TestEnumType:
         assert reported(body, "09")["v"] == "other"
         assert "other" in declared(body)["enum"]
 
-    def test_numeric_values_still_admit_the_unknown_string(self):
+    def test_numeric_values_no_longer_admit_a_string(self):
         assert declared(
             "  - name: v\n    type: enum\n    base: u8\n    values: {0: 100}\n"
-        ) == {"type": ["integer", "string"]}
+        ) == {"type": "integer", "enum": [100]}
 
-    def test_the_unknown_form_is_what_is_actually_reported(self):
+    def test_an_unmapped_value_is_omitted(self):
         body = "  - name: v\n    type: enum\n    base: u8\n    values: {0: alpha}\n"
-        assert reported(body, "09")["v"] == "unknown(9)"
+        assert "v" not in reported(body, "09")
 
     def test_no_values_stays_permissive(self):
         assert declared("  - name: v\n    type: enum\n    base: u8\n")["type"] == [

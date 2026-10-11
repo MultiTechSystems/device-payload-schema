@@ -1270,6 +1270,29 @@ def encoding_errors(field_def):
     return errors
 
 
+def reverse_enum(value, field_def):
+    """The code an enum reported `value` for, or `value` where none is found
+    (CR-2026-132: a reference to an enum binds its code)."""
+    values = field_def.get('values') or {}
+    if isinstance(values, dict):
+        for key, entry in values.items():
+            if enum_label(entry) == value:
+                try:
+                    return int(key, 0) if isinstance(key, str) else int(key)
+                except ValueError:
+                    return value
+    elif isinstance(values, list):
+        labels = [enum_label(entry) for entry in values]
+        if value in labels:
+            return labels.index(value)
+    if isinstance(value, str) and value.startswith('unknown(') and value.endswith(')'):
+        try:
+            return int(value[8:-1])
+        except ValueError:
+            return value
+    return value
+
+
 def enum_label(entry):
     """What an enum value reports: its `name` where it is the description form (PS-394).
 
@@ -3638,6 +3661,10 @@ class SchemaInterpreter:
             # declaration is synthetic and has no name.
             raise name_underflow(BufferUnderflow(getattr(exc, 'detail', str(exc))),
                                  field_def.get('name'), 'enum') from exc
+        # PS-523 (CR-2026-132): an enum is a lookup by another spelling, so a reference
+        # binds its code and a template reads its name.
+        if hasattr(self, '_lookup_numbers'):
+            self._lookup_numbers[id(field_def)] = raw_value
         
         # Map to string value
         # Values can be dict {0: 'idle', 1: 'running'} or list ['idle', 'running']
@@ -3653,14 +3680,17 @@ class SchemaInterpreter:
                 # default the schema asked for.
                 if 'default' in field_def:
                     return field_def['default'], new_pos
-                return f"unknown({raw_value})", new_pos
+                # PS-068 (CR-2026-132): with no `default` the field is omitted, as a
+                # lookup miss is (PS-269), so it keeps one type; a reference still binds
+                # the code (PS-523). This reported "unknown(N)", and the others the code.
+                return OMITTED, new_pos
         elif isinstance(values, list):
             if 0 <= raw_value < len(values):
                 return enum_label(values[raw_value]), new_pos
             elif 'default' in field_def:
                 return field_def['default'], new_pos
             else:
-                return f"unknown({raw_value})", new_pos
+                return OMITTED, new_pos      # PS-068, as above
         
         # No mapping - return raw value
         return raw_value, new_pos
@@ -3709,6 +3739,7 @@ class SchemaInterpreter:
             """Decode one element from `region`; append it unless present_if drops it."""
             nonlocal iterations
             outer = dict(self._variables)
+            outer_labels = dict(self._labels)
             saved_current = self._current_data
             saved_names = getattr(self, '_element_names', None)
             self._element_names = {f.get('name') for f in nested_fields if isinstance(f, dict)}
@@ -3737,6 +3768,7 @@ class SchemaInterpreter:
             finally:
                 # PS-368: an element's names do not outlive it.
                 self._variables = outer
+                self._labels = outer_labels
                 self._current_data = saved_current
                 self._element_names = saved_names
                 self._pending_records = saved_records
@@ -4066,6 +4098,38 @@ class SchemaInterpreter:
         
         return result, pos
     
+    def _bind(self, field_def: Dict[str, Any], names: List[Optional[str]], value: Any) -> None:
+        """Bind a decoded field's value under each of `names`, as PS-523 says.
+
+        A field with a lookup, or an enum (CR-2026-132), binds the label where it is a number - a
+        table of sizes or exponents feeds arithmetic - and otherwise the number before
+        the lookup: under a text or boolean label, and where the mapping had no entry
+        and the field is omitted (PS-269). A `match` therefore selects on the number
+        under a command's name (PS-524). The value reported is kept in `_labels`, which
+        is what a `name_from` template writes (PS-532); OMITTED there marks a miss.
+
+        Every variable table used to hold the label, so `$cmd` in a `compute` failed to
+        convert 'report_rsp', a case keyed 129 never matched it, and a miss left the
+        name unbound altogether.
+        """
+        names = [n for n in names if n]
+        if field_def.get('lookup') is not None or field_def.get('type') == 'enum':
+            number = self._lookup_numbers.pop(id(field_def), OMITTED)
+            numeric = (value is not OMITTED and isinstance(value, (int, float))
+                       and not isinstance(value, bool))
+            bound = value if numeric else number
+            if bound is OMITTED:
+                return
+            for n in names:
+                self._variables[n] = bound
+                self._labels[n] = value
+            return
+        if value is OMITTED:
+            return
+        for n in names:
+            self._variables[n] = value
+            self._labels.pop(n, None)
+
     def _bind_internal(self, field_def: Dict[str, Any], name: str, value: Any) -> None:
         """Bind an internal (`_`-prefixed) field's value without reporting it.
 
@@ -4079,13 +4143,7 @@ class SchemaInterpreter:
             value = self._evaluate_formula(field_def['formula'], value)
         else:
             value = self._apply_modifiers(value, field_def)
-        if value is OMITTED:
-            return
-        if not hasattr(self, '_variables'):
-            self._variables = {}
-        self._variables[name] = value
-        if field_def.get('var'):
-            self._variables[field_def['var']] = value
+        self._bind(field_def, [name, field_def.get('var')], value)
 
     def _decode_match_option_b(self, match_def: Dict[str, Any], buf: bytes,
                                 pos: int) -> Tuple[Dict[str, Any], int]:
@@ -4647,8 +4705,14 @@ class SchemaInterpreter:
         def substitute(match):
             reference = match.group(1)
             if reference in self._variables:
-                return render_template_value(
-                    self._variables[reference], reference, template)
+                # A template writes the value reported - a looked-up field's label -
+                # not the number a reference binds (PS-532, PS-523).
+                value = self._labels.get(reference, self._variables[reference])
+                if value is OMITTED:
+                    raise ValueError(
+                        "name_from for %r references %s, which reported no value "
+                        "(PS-266, PS-532)" % (name, reference))
+                return render_template_value(value, reference, template)
             missing.append(reference)
             return ''
 
@@ -4811,7 +4875,7 @@ class SchemaInterpreter:
                 if not name.startswith('_'):
                     result.data[name] = value
                 # Add to variables so field can be referenced by compute/formula
-                self._variables[name] = value
+                self._bind(gf, [name], value)
             except Exception as e:
                 result.errors.append(error_text(f"Error in byte_group field {name}: ", e))
     
@@ -4883,13 +4947,14 @@ class SchemaInterpreter:
                     # is a reference the case body may make (`ref: $rsn`, PS-265), as a
                     # field's is. It was bound only under `var:`, so `$rsn` read the 0 an
                     # unbound name reads here and Go and C# failed the decode.
-                    if tf.get('name'):
-                        self._variables[tf['name']] = tf_value
                     # A component's `var:` binds for the case body (a `name_from`
                     # template, a `match`), as a field's does; it bound nothing, so
                     # `name_from: "temperature_${ch}"` failed in every case.
-                    if tf.get('var'):
-                        self._variables[tf['var']] = tf_value
+                    # PS-523 (CR-2026-132): both bind as any field's do - through its
+                    # modifiers, and a lookup's number under a text label, with the
+                    # label kept for templates. The tag is still matched on the value read.
+                    self._bind(tf, [tf.get('name'), tf.get('var')],
+                               self._apply_modifiers(tf_value, tf))
                 
                 # Build composite key for matching
                 if isinstance(tag_key, list):
@@ -5115,6 +5180,10 @@ class SchemaInterpreter:
             # an index the table lacks is no error when the field is dropped anyway.
             if self._range_omits(field_def, value):
                 return value
+        # PS-523: a reference binds the number before the lookup where the lookup
+        # reports a label, so it is kept for `_bind` to find.
+        if field_def.get('lookup') is not None:
+            self._lookup_numbers[id(field_def)] = value
         # Apply lookup table
         value = apply_lookup(value, field_def.get('lookup'))
         
@@ -5176,6 +5245,10 @@ class SchemaInterpreter:
         self._current_data = result.data
         # Variable storage for Option B match references
         self._variables = {}
+        # PS-523, PS-532: the value a looked-up field reports, by the names it binds,
+        # for templates; and the number before each lookup, by field definition.
+        self._labels = {}
+        self._lookup_numbers = {}
         # PS-541: the records the current repeat element yields; None outside one.
         self._pending_records = None
         # Readings omitted under PS-427/PS-428, for `_quality` if it is produced.
@@ -5461,7 +5534,9 @@ class SchemaInterpreter:
                     value = self._decode_computed_field(field_def)
                     if value is OMITTED:
                         # Zero divisor (PS-278): the field is absent, and decoding of
-                        # the rest of the payload continues.
+                        # the rest of the payload continues. A lookup with no entry
+                        # omits it too, and leaves the name bound to the number (PS-523).
+                        self._bind(field_def, [name], value)
                         continue
                     if field_type == 'integer' and value is not None:
                         # PS-283: an error, not a silent truncation. The schema is
@@ -5490,7 +5565,7 @@ class SchemaInterpreter:
                         # in its output.
                         if not name.startswith('_'):
                             result.data[name] = value
-                        self._variables[name] = value
+                        self._bind(field_def, [name], value)
                         # Check valid_range for computed fields
                         if field_def.get('valid_range'):
                             quality = self._check_valid_range(value, field_def, result)
@@ -5548,7 +5623,9 @@ class SchemaInterpreter:
                     if value is OMITTED:
                         # A lookup with no entry for this value: the device did not
                         # report anything the schema can name, so the field is left
-                        # out rather than reported as a raw integer (PS-269).
+                        # out rather than reported as a raw integer (PS-269). A
+                        # reference to it still binds the number (PS-523).
+                        self._bind(field_def, [field_def.get('var'), name], value)
                         continue
                     output_name = self._resolve_field_name(field_def, name)
                     if output_name != name:
@@ -5558,13 +5635,11 @@ class SchemaInterpreter:
                     if field_def.get('valid_range'):
                         quality = self._check_valid_range(value, field_def, result)
                         result.quality[output_name] = quality
-                    # Store variable if var: specified (Option B)
-                    if field_def.get('var'):
-                        self._variables[field_def['var']] = value
-                    # Always store by field name (for flagged/formula lookups). The
-                    # schema-level name is used here, not the resolved output name,
-                    # so $references keep working when name_from is in play.
-                    self._variables[name] = value
+                    # Store the value under its `var:` (Option B) and always under the
+                    # field name (for flagged/formula lookups). The schema-level name is
+                    # used here, not the resolved output name, so $references keep
+                    # working when name_from is in play. PS-523 decides what is bound.
+                    self._bind(field_def, [field_def.get('var'), name], value)
             except RaggedTailError as e:
                 result.errors.append(str(e))                    # PS-343, bare
                 break
@@ -5757,6 +5832,9 @@ class SchemaInterpreter:
         output = bytearray()
         
         fields = self._resolve_fields(fPort)
+        # The fields this message is encoded from: a reference is looked for among them
+        # before the rest of the schema, since each port may declare its own `code`.
+        self._encode_scope = fields
         
         # Pre-scan for flagged constructs to compute flags values
         flags_patches = {}
@@ -6185,7 +6263,8 @@ class SchemaInterpreter:
         return int(packed).to_bytes(max(1, size), byteorder)
 
     def _field_declaring_var(self, var_name: str) -> Optional[Dict[str, Any]]:
-        """The field that declared ``var: <var_name>``, searched anywhere in the schema.
+        """The field that declared ``var: <var_name>``: in the fields being encoded, else
+        anywhere in the schema.
 
         A match's discriminator is named by its variable, and the variable's name is
         often not the field's: rbs30x has ``name: event_type`` with ``var: evt`` and
@@ -6206,7 +6285,52 @@ class SchemaInterpreter:
                     if found is not None:
                         return found
             return None
-        return visit(self.schema)
+        found = visit(getattr(self, '_encode_scope', None))
+        return found if found is not None else visit(self.schema)
+
+    def _field_named(self, name: str) -> Optional[Dict[str, Any]]:
+        """A field named `name` that carries a lookup or is an enum: in the fields being
+        encoded, else anywhere in the schema."""
+        def visit(node):
+            if isinstance(node, dict):
+                if node.get('name') == name and (node.get('lookup') is not None
+                                                 or node.get('type') == 'enum'):
+                    return node
+                for value in node.values():
+                    found = visit(value)
+                    if found is not None:
+                        return found
+            elif isinstance(node, list):
+                for item in node:
+                    found = visit(item)
+                    if found is not None:
+                        return found
+            return None
+        found = visit(getattr(self, '_encode_scope', None))
+        return found if found is not None else visit(self.schema)
+
+    def _encode_reference(self, reference: str, data: Dict[str, Any]) -> Any:
+        """The value `$reference` was bound to when `data` was decoded, or None.
+
+        PS-523: a looked-up field binds the number under a text or boolean label, and a
+        numeric label as itself. The output carries the label, so a text or boolean one
+        is reversed through the field's lookup; a numeric one is used as it is. The
+        variable's name is often not the field's (PS-267), so a `var` is followed to
+        the field that declared it.
+        """
+        if reference in data:
+            value, source = data[reference], self._field_named(reference)
+        else:
+            source = self._field_declaring_var(reference)
+            if not source or source.get('name') not in data:
+                return None
+            value = data[source['name']]
+        lookup = source.get('lookup') if source else None
+        if lookup is not None and isinstance(value, (str, bool)):
+            return reverse_lookup(value, lookup)
+        if source and source.get('type') == 'enum' and isinstance(value, str):
+            return reverse_enum(value, source)      # its code (CR-2026-132)
+        return value
 
     def _case_fields_present(self, cases: Dict[Any, Any], data: Dict[str, Any]):
         """The case whose fields the data carries most of, or ``(None, None)``.
@@ -6250,14 +6374,7 @@ class SchemaInterpreter:
         if match_name and match_name in data:
             discriminator = data[match_name]
         elif field_ref:
-            var_name = str(field_ref).lstrip('$')
-            if var_name in data:
-                discriminator = data[var_name]
-            else:
-                source = self._field_declaring_var(var_name)
-                if source and source.get('name') in data:
-                    discriminator = reverse_lookup(
-                        data[source['name']], source.get('lookup'))
+            discriminator = self._encode_reference(str(field_ref).lstrip('$'), data)
 
         matched_key, matched_fields = None, None
         if discriminator is not None:
@@ -7008,6 +7125,7 @@ class SchemaInterpreter:
         cmd_def = self.downlink_commands[command_name]
         command_id = cmd_def.get('command_id', 0)
         fields = cmd_def.get('fields', [])
+        self._encode_scope = fields
         
         output = bytearray()
         

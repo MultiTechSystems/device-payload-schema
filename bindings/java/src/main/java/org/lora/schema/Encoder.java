@@ -608,7 +608,9 @@ final class Encoder {
             String varName = match.getOn().startsWith("$")
                     ? match.getOn().substring(1) : match.getOn();
             if (data.containsKey(varName)) {
-                discriminator = data.get(varName);
+                // The output holds what the field reported; the match compared what a
+                // reference to it binds (PS-523), the number under a text label.
+                discriminator = boundFromReported(fieldNamed(varName), data.get(varName));
             } else {
                 // The variable's name is often not the field's: rbs30x has
                 // `name: event_type` with `var: evt`, and matches on `$evt`. Decoded
@@ -617,7 +619,7 @@ final class Encoder {
                 Field source = fieldDeclaringVar(varName);
                 if (source != null && source.getName() != null
                         && data.containsKey(source.getName())) {
-                    discriminator = reverseLookup(data.get(source.getName()), source.getLookup());
+                    discriminator = boundFromReported(source, data.get(source.getName()));
                 }
             }
         }
@@ -1151,11 +1153,76 @@ final class Encoder {
      * The field that declared {@code var: <name>}, searched anywhere in the schema.
      */
     private Field fieldDeclaringVar(String varName) {
-        Field found = searchForVar(schema.getFields(), varName);
+        Field found = searchForVar(fields, varName);
+        if (found != null) return found;
+        found = searchForVar(schema.getFields(), varName);
         if (found != null) return found;
         if (schema.getPorts() != null) {
             for (Schema.PortDef port : schema.getPorts().values()) {
                 found = searchForVar(port.getFields(), varName);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * What a reference to {@code source} bound when it reported {@code reported} (PS-523):
+     * a numeric label as itself, and the number under a text or boolean label, recovered
+     * through the lookup or its {@code ${value}} default.
+     */
+    private static Object boundFromReported(Field source, Object reported) {
+        if (source != null && source.getType() == FieldType.ENUM && reported instanceof String name) {
+            // CR-2026-132: a reference to an enum bound its code.
+            if (source.getValues() != null) {
+                for (Map.Entry<Integer, String> e : source.getValues().entrySet()) {
+                    if (name.equals(e.getValue())) return (long) e.getKey();
+                }
+            }
+            if (name.startsWith("unknown(") && name.endsWith(")")) {
+                try {
+                    return Long.parseLong(name.substring(8, name.length() - 1));
+                } catch (NumberFormatException ignored) {
+                    return reported;
+                }
+            }
+            return reported;
+        }
+        if (source == null || source.getLookup() == null || source.getLookup().isEmpty()
+                || reported instanceof Number) {
+            return reported;
+        }
+        Object reversed = reverseLookup(reported, source.getLookup());
+        String template = Wave5.template(source);
+        if (reversed instanceof String text && template != null) {
+            Double recovered = Wave5.matchTemplate(template, text);
+            if (recovered != null) return recovered;
+        }
+        return reversed;
+    }
+
+    /** The field a name refers to, wherever in the schema it is declared. */
+    private Field fieldNamed(String name) {
+        // The fields being encoded first: in a ports schema each port may declare the name.
+        Field found = searchForName(fields, name);
+        if (found != null) return found;
+        found = searchForName(schema.getFields(), name);
+        if (found != null) return found;
+        if (schema.getPorts() != null) {
+            for (Schema.PortDef port : schema.getPorts().values()) {
+                found = searchForName(port.getFields(), name);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private static Field searchForName(List<Field> list, String name) {
+        if (list == null) return null;
+        for (Field f : list) {
+            if (name.equals(f.getName())) return f;
+            for (List<Field> nested : nestedFieldLists(f)) {
+                Field found = searchForName(nested, name);
                 if (found != null) return found;
             }
         }

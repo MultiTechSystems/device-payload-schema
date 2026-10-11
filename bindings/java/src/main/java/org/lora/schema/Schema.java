@@ -892,6 +892,21 @@ public class Schema {
             if (fm.get("default") != null) {
                 f.setEnumDefault(String.valueOf(fm.get("default")));
             }
+        } else if (fm.get("values") instanceof List<?> valuesList) {
+            // The sequence form names codes from zero; it was not parsed, so every code
+            // of such an enum read as unmapped.
+            Map<Integer, String> values = new HashMap<>();
+            for (int i = 0; i < valuesList.size(); i++) {
+                Object label = valuesList.get(i);
+                if (label instanceof Map<?, ?> described) {
+                    label = described.get("name");
+                }
+                values.put(i, String.valueOf(label));
+            }
+            f.setValues(values);
+            if (fm.get("default") != null) {
+                f.setEnumDefault(String.valueOf(fm.get("default")));
+            }
         }
 
         // Computed fields (type: number). None of this was parsed, so every schema
@@ -1520,7 +1535,9 @@ public class Schema {
                     for (Map.Entry<?, ?> entry : matchMap.entrySet()) {
                         String key = String.valueOf(entry.getKey());
                         result.put(key, entry.getValue());
-                        ctx.setVariable(key, entry.getValue());
+                        // A looked-up field in the case bound itself (PS-523); rebinding
+                        // its reported label here would undo that.
+                        if (!ctx.hasLabel(key)) ctx.setVariable(key, entry.getValue());
                     }
                 }
                 continue;
@@ -1552,7 +1569,9 @@ public class Schema {
                 Map<String, Object> flaggedResult = decodeFlagged(field.getFlagged(), ctx);
                 result.putAll(flaggedResult);
                 for (Map.Entry<String, Object> entry : flaggedResult.entrySet()) {
-                    ctx.setVariable(entry.getKey(), entry.getValue());
+                    if (!ctx.hasLabel(entry.getKey())) {                // PS-523
+                        ctx.setVariable(entry.getKey(), entry.getValue());
+                    }
                 }
                 continue;
             }
@@ -1583,7 +1602,11 @@ public class Schema {
             }
 
             if (value == OMITTED) {
-                // A mapping lookup with no entry and no default (PS-269).
+                // A mapping lookup with no entry and no default (PS-269): not reported,
+                // and a reference to it still binds the number (PS-523).
+                if (field.getName() != null && !field.getName().isEmpty()) {
+                    ctx.bindMissed(field.getName(), field);
+                }
                 continue;
             }
 
@@ -1603,7 +1626,7 @@ public class Schema {
                 }
                 // Variables are keyed by the schema-level name so $references keep
                 // working when name_from is in play (PS-267).
-                ctx.setVariable(field.getName(), value);
+                ctx.bind(field.getName(), field, value);       // PS-523
                 ctx.checkValidRange(value, field);     // PS-131
             }
         }
@@ -1903,6 +1926,8 @@ public class Schema {
                 };
                 byte[] data = ctx.read(baseLength);
                 int raw = (int) ctx.decodeUnsigned(data, fieldEndian);
+                // PS-523 (CR-2026-132): a reference to an enum binds its code.
+                ctx.recordEnumCode(field, (long) raw);
                 Map<Integer, String> values = field.getValues();
                 if (values != null && values.containsKey(raw)) {
                     value = values.get(raw);
@@ -1910,6 +1935,8 @@ public class Schema {
                     // An unmapped value reports the declared default (PS-068).
                     value = field.getEnumDefault();
                 } else {
+                    // No name and no default: omitted in applyGroupMember (PS-068, as
+                    // amended by CR-2026-132), still bound to the code.
                     value = (long) raw;
                 }
             }
@@ -1956,6 +1983,7 @@ public class Schema {
      */
     private Object applyGroupMember(Object value, Field field, DecodeContext ctx, boolean fieldRules,
             boolean asDeclared) {
+        ctx.clearLookup(field);
         // Apply formula if present (takes precedence). A computed field has already
         // had its own arithmetic applied by decodeComputed, in the order the
         // interpreter uses: polynomial, then modifiers, then transform. Running the
@@ -2002,6 +2030,8 @@ public class Schema {
             // the key 2. An integral double such as 7.0 is the key 7. A computed value
             // reaches the lookup after its arithmetic (PS-443), so it is often a double.
             double numVal = ((Number) value).doubleValue();
+            // PS-523: the number a reference binds where the label is not a number.
+            Object number = value;
             int intVal = (int) numVal;
             boolean integral = numVal == Math.rint(numVal) && !Double.isInfinite(numVal);
             String template = Wave5.template(field);
@@ -2023,7 +2053,34 @@ public class Schema {
                     "lookup index %d out of bounds for %d entries",
                     intVal, field.getLookup().size()));
             } else {
+                // PS-269 omits the field; PS-523 leaves a reference bound to the number.
+                ctx.recordLookup(field, number, DecodeContext.NO_LABEL);
+                if (field.getVar() != null && !field.getVar().isEmpty()) {
+                    ctx.bind(field.getVar(), field, number);
+                }
                 return OMITTED;
+            }
+            ctx.recordLookup(field, number, value);
+        }
+
+        // PS-523 (CR-2026-132): an enum is a lookup by another spelling - its code is the
+        // number a reference binds, its name the label a template writes.
+        if (field.getType() == FieldType.ENUM) {
+            Object code = ctx.takeEnumCode(field);
+            if (code != null) {
+                Map<Integer, String> names = field.getValues();
+                boolean named = names != null && names.containsKey(((Number) code).intValue());
+                if (!named && field.getEnumDefault() == null) {
+                    // PS-068 (CR-2026-132): a code with no name and no default is omitted,
+                    // as a lookup miss is (PS-269) - never the raw integer - and a
+                    // reference still binds the code (PS-523).
+                    ctx.recordLookup(field, code, DecodeContext.NO_LABEL);
+                    if (field.getVar() != null && !field.getVar().isEmpty()) {
+                        ctx.bind(field.getVar(), field, code);
+                    }
+                    return OMITTED;
+                }
+                ctx.recordLookup(field, code, value);
             }
         }
         
@@ -2035,7 +2092,7 @@ public class Schema {
 
         // Store variable
         if (field.getVar() != null && !field.getVar().isEmpty()) {
-            ctx.setVariable(field.getVar(), value);
+            ctx.bind(field.getVar(), field, value);        // PS-523
         }
         
         return value;
@@ -2289,17 +2346,21 @@ public class Schema {
                         byte[] data = ctx.read(tagFieldWidth(tf));
                         val = (int) ctx.decodeUnsigned(data, ctx.getEndian());
                     }
+                    // A component is a field decoded earlier in the payload, so its name
+                    // is a reference the case body may make (`ref: $rsn`, PS-265), and its
+                    // `var:` binds for the case body, as a field's does; a name_from
+                    // template such as "temperature_${ch}" reads it. PS-523 (CR-2026-132):
+                    // both bind as any field's do - through its modifiers, and a lookup's
+                    // number under a text label, the label kept for templates.
+                    // applyGroupMember binds the `var`. The tag is matched on `val`.
+                    Object bound = applyGroupMember((long) val, tf, ctx);
                     if (tf.getName() != null) {
                         tagValues.put(tf.getName(), val);
-                        // A component is a field decoded earlier in the payload, so its
-                        // name is a reference the case body may make (`ref: $rsn`,
-                        // PS-265). Only `var:` was bound, so `$rsn` read 0.
-                        ctx.setVariable(tf.getName(), (long) val);
-                    }
-                    // A component's `var:` binds for the case body, as a field's does; a
-                    // name_from template such as "temperature_${ch}" reads it.
-                    if (tf.getVar() != null) {
-                        ctx.setVariable(tf.getVar(), (long) val);
+                        if (bound == OMITTED) {
+                            ctx.bindMissed(tf.getName(), tf);
+                        } else {
+                            ctx.bind(tf.getName(), tf, bound);
+                        }
                     }
                 }
                 
@@ -2497,7 +2558,13 @@ public class Schema {
         List<String> missing = new ArrayList<>();
         while (matcher.find()) {
             String reference = matcher.group(1);
-            Object value = ctx.getVariable(reference);
+            // A template writes the value reported, the label where there is a lookup
+            // (PS-532), not what a reference binds (PS-523).
+            Object value = ctx.reported(reference);
+            if (value == DecodeContext.NO_LABEL) {
+                throw new SchemaException("name_from for '" + field.getName() + "' references "
+                        + reference + ", which reported no value (PS-266, PS-532)");
+            }
             String replacement;
             if (value == null) {
                 missing.add(reference);
@@ -2733,6 +2800,7 @@ public class Schema {
     private void decodeElement(Field repeat, DecodeContext ctx, int[] iterations,
                                Map<String, Object> carryState, List<Object> result) {
         Map<String, Object> outer = ctx.snapshotVariables();
+        Map<String, Object> outerLabels = ctx.snapshotLabels();
         Set<String> savedNames = ctx.getElementNames();
         List<Field> members = repeat.getFields() == null ? List.of() : repeat.getFields();
         Set<String> names = new HashSet<>();
@@ -2762,6 +2830,7 @@ public class Schema {
         } finally {
             // PS-368: an element's names do not outlive it.
             ctx.restoreVariables(outer);
+            ctx.restoreLabels(outerLabels);
             ctx.setElementNames(savedNames);
             ctx.setPendingRecords(savedRecords);
         }
@@ -2948,8 +3017,12 @@ public class Schema {
                     value = applyGroupMember(extractRange(groupValue, member.getType().isSigned(),
                             0, member.getType().defaultLength() * 8), member, ctx);
                 }
-                if (value == OMITTED || value == null) continue;
-                ctx.setVariable(name, value);
+                if (value == OMITTED) {
+                    ctx.bindMissed(name, member);                   // PS-523
+                    continue;
+                }
+                if (value == null) continue;
+                ctx.bind(name, member, value);                      // PS-523
                 if (!name.startsWith("_")) {
                     String outputName = resolveFieldName(member, ctx);
                     if (!outputName.equals(name)) ctx.produced(member, outputName);   // PS-492

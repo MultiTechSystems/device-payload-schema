@@ -57,6 +57,58 @@ public class DecodeContext
     public string Endian { get; }
     public Dictionary<string, object?> Variables { get; } = new();
     /// <summary>
+    /// PS-532: the value a looked-up field reported, by the name it binds, for `name_from`
+    /// templates - which read the label while a `$` reference reads PS-523's binding.
+    /// <see cref="SchemaDecoder.Omitted"/> where the lookup had no entry. A name bound by
+    /// any other field has no entry here, and a template reads its variable.
+    /// </summary>
+    internal Dictionary<string, object?> Reported { get; } = new();
+    /// <summary>
+    /// PS-523: what a looked-up field binds, by field definition, set where its lookup ran:
+    /// the label where it is a number, else the number before the lookup.
+    /// </summary>
+    internal Dictionary<SchemaField, object?> LookupBinding { get; } = new(ReferenceEqualityComparer.Instance);
+    /// <summary>
+    /// CR-2026-132: the code an enum read, by field definition, which its reference binds.
+    /// </summary>
+    internal Dictionary<SchemaField, object?> EnumCodes { get; } = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>
+    /// Binds <paramref name="name"/> for <paramref name="field"/> as PS-523 says, keeping
+    /// the reported value for templates (PS-532). A field with no lookup binds what it
+    /// reported. Mirrors Scope.bind in the spec prototype.
+    /// </summary>
+    internal void Bind(SchemaField field, string name, object? reported)
+    {
+        if ((field.Lookup != null || field.Type == FieldType.Enum)
+            && LookupBinding.TryGetValue(field, out var binding))
+        {
+            Variables[name] = binding;
+            Reported[name] = reported;
+        }
+        else
+        {
+            Variables[name] = reported;
+            Reported.Remove(name);
+        }
+    }
+
+    /// <summary>
+    /// Re-binds a name from a construct's merged output. A name its own field already bound
+    /// under PS-523 is left alone: the output holds the label, not the binding.
+    /// </summary>
+    internal void BindOutput(string name, object? value)
+    {
+        if (Reported.TryGetValue(name, out var reported) && Equals(reported, value))
+            return;
+        Variables[name] = value;
+        Reported.Remove(name);
+    }
+
+    /// <summary>Whether a lookup label is a number, which PS-523 binds as itself.</summary>
+    internal static bool IsNumericLabel(object? label) =>
+        label is not bool && label is not string && Helpers.ToFloat64(label).ok;
+    /// <summary>
     /// The records the current repeat element yields through `records` (PS-541); null
     /// outside an element.
     /// </summary>
