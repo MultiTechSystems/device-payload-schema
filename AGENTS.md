@@ -188,17 +188,17 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2601 payload vectors in `schemas/devices/` (measured 2026-10-10 with
-`tools/check-floors.py`, after the CR-2026-112 name-from-rendering fixture) are the shared
+The 2610 payload vectors in `schemas/devices/` (measured 2026-10-10 with
+`tools/check-floors.py`, after the CR-2026-109 lookup-reference-binding fixture) are the shared
 cross-language test set. Every implementation has a runner that reads the same YAML and
 the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1783 |
-| Go | `go/schema/corpus_conformance_test.go` | 2603 | 1800 (plain API 1777) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2603 | 1783 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2603 | 1783 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1788 |
+| Go | `go/schema/corpus_conformance_test.go` | 2610 | 1805 (plain API 1782) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2610 | 1788 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2610 | 1788 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 546 of 546 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -680,8 +680,9 @@ rather than a loss: the value is reported under a templated key (`channel_3_read
 every encoder looked it up under the declared name (`reading`), found nothing, and wrote a
 zero. An unresolvable template is an error now, and the "missing field" warning names the
 resolved key rather than one the schema never reports. Note there are two resolvers per
-implementation, deliberately — decode resolves against its variables, encode against the
-data it was handed. CR-2026-031 added `name-from-var.yaml`, whose `var: idx` sits on a field
+implementation, deliberately — decode resolves against the values its fields *reported*
+(since CR-2026-109 a table kept beside the variables, which hold PS-523's binding), encode
+against the data it was handed. CR-2026-031 added `name-from-var.yaml`, whose `var: idx` sits on a field
 called `channel_id`, so the PS-267 fallback through the declaring field is exercised rather
 than merely written; the corpus's other `name_from` names a field and a variable that agree,
 which a resolver ignoring `var:` would have passed.
@@ -755,10 +756,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1783 |
-| Go | `go/schema/corpus_encode_test.go` | 1800 (plain 1777) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1783 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1783 |
+| Python | `tests/test_encode_round_trip.py` | 1788 |
+| Go | `go/schema/corpus_encode_test.go` | 1805 (plain 1782) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1788 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1788 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1490,7 +1491,47 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   No corpus schema's template referenced a lookup, boolean or fraction, so no device
   vector changed. `senml.name` templates are not rendered by either SenML producer (Python,
   C#): a record's `n` is the template as written, so PS-532's senml half is open. Fixture:
-  `name-from-rendering.yaml`.
+  `name-from-rendering.yaml`. When this landed every variable table held the label, so the
+  template read it from there; CR-2026-109 changed what a reference binds, and the
+  resolvers now read a separate table of reported values (next entry).
+- **CR-2026-109 (PS-523, PS-524): a reference to a looked-up field binds a number.** A `$`
+  reference and a `var` bind the number before the lookup where the lookup reports a text
+  or boolean label, or has no entry (the field is omitted, PS-269, but the name stays bound);
+  where it reports a number they bind that number, so `lookup: [0, 125, 250, 500]` feeds
+  `125` to a `compute`. A sentinel or `out_of_range: omit` leaves the name unbound. A `match`
+  compares its case keys with that binding, so a text key there matches nothing, and
+  `validate_schema.case_key_type_warnings` warns about one (PS-524's SHOULD). A `name_from`
+  template is not a reference: it writes the reported value (PS-532), and a template over a
+  lookup miss is an error, `name_from for 'x' references code, which reported no value
+  (PS-266, PS-532)`. `type: enum` is outside PS-523 and still binds its label.
+  - **Measured before, the CR's own table was wrong:** it said Go, Java and C# already bound
+    the number. On 81 probes (6 lookup kinds x compute/match/var/template, at the top level,
+    in a tlv case and in a match body) **all five bound the label**: a text label failed
+    every `compute` (Python `could not convert string`, Go and C# `operand field not found`,
+    Java read 0), no numeric case key matched, and a miss left the name unbound
+    (`Variable not found`). Python's boolean probes passed only because `True == 1`.
+  - **Where each language keeps the two values.** Python: `_bind` and the `_labels` /
+    `_lookup_numbers` tables in `schema_interpreter.py`, the number recorded in
+    `_apply_modifiers`. Go: `go/schema/cr109.go` (`bindReference`, `rebindReported`,
+    `templateValue`). Java: `DecodeContext.bind` / `reported` / `bindMissed`. C#:
+    `DecodeContext.Bind` / `Reported` / `BindOutput`. TS013: `_bind_js`, the `lv` and `lbl`
+    objects and `refValue()`. Each scopes the reported table with a repeat element, as PS-368
+    scopes the variables. **The copy loops that re-bind a construct's merged output** (Go,
+    Java and C#, after a byte_group, flagged group, match or `$ref`) would overwrite the
+    number with the label; each skips a name its own field already bound.
+  - **Encoding.** Every encoder took a `match: {field: $x}` discriminator straight from the
+    data, which is the label, and reversed it through the lookup only when reached via a
+    `var` - turning a numeric label back into its index. All now reverse a text or boolean
+    label and use a numeric one as it is (`_encode_reference`, `encReference`,
+    `encodeDiscriminator`, `boundFromReported`, `ReferenceBinding`), and look for the field
+    in the port being encoded before the rest of the schema, since two ports may declare one
+    name with different tables. Go's encoder had no `$var` discriminator at all before.
+  - Fixture `lookup-reference-binding.yaml`, one port per case. No device schema and no
+    vector of the private registry changed decode or encode output, and no schema in either
+    keys a case by a label. A string case key is matched as nothing rather than refused at
+    load, as the spec prototype does; PS-524 asks only for "matches nothing".
+  - The generated codec took `default` for a `match` on an unbound name; it now throws, as
+    every interpreter does.
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.

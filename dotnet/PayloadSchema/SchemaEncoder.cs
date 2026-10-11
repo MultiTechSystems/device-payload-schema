@@ -640,7 +640,10 @@ public static class SchemaEncoder
                 var varName = match.On.TrimStart('$');
                 if (data.TryGetValue(varName, out var byVar))
                 {
-                    discriminator = byVar;
+                    // The output holds what the field reported. Where that is a text or
+                    // boolean label, the reference bound the number under it (PS-523), and
+                    // the cases are keyed by that number (PS-524).
+                    discriminator = ReferenceBinding(byVar, FieldNamed(varName));
                 }
                 else
                 {
@@ -652,7 +655,7 @@ public static class SchemaEncoder
                     var source = FieldDeclaringVar(varName);
                     if (source != null && !string.IsNullOrEmpty(source.Name)
                         && data.TryGetValue(source.Name, out var byField))
-                        discriminator = ReverseLookup(byField, source.Lookup);
+                        discriminator = ReferenceBinding(byField, source);
                 }
             }
 
@@ -1003,34 +1006,59 @@ public static class SchemaEncoder
             return WriteUint(single.Value, tagSize, _endian);
         }
 
-        /// <summary>The field that declared `var: name`, searched anywhere in the schema.</summary>
-        SchemaField? FieldDeclaringVar(string varName)
+        /// <summary>
+        /// The value a `$` reference bound for a field that reported <paramref name="reported"/>
+        /// (PS-523): a numeric label as itself, else the number its lookup maps from - the key
+        /// of a label, or the value a `${value}` default wrote. A label only a plain `default`
+        /// carries has no number to recover and is returned as it is, matching no case.
+        /// </summary>
+        static object? ReferenceBinding(object? reported, SchemaField? source)
         {
-            var found = SearchForVar(_schema.Fields, varName);
+            if (source?.Lookup is not { Count: > 0 } || DecodeContext.IsNumericLabel(reported))
+                return reported;
+            var reversed = ReverseLookup(reported, source.Lookup);
+            if (reversed is string text && Wave5.Template(source) is { } template
+                && Wave5.MatchTemplate(template, text) is { } recovered)
+                return recovered;
+            return reversed;
+        }
+
+        /// <summary>The field declaring <paramref name="name"/>, searched anywhere in the schema.</summary>
+        SchemaField? FieldNamed(string name) =>
+            SearchSchema(f => f.Name == name);
+
+        /// <summary>The field that declared `var: name`, searched anywhere in the schema.</summary>
+        SchemaField? FieldDeclaringVar(string varName) =>
+            SearchSchema(f => f.Var == varName && !string.IsNullOrEmpty(f.Name));
+
+        SchemaField? SearchSchema(Func<SchemaField, bool> wanted)
+        {
+            // The fields being encoded first: a ports schema may declare one name per port.
+            var found = Search(_fields, wanted) ?? Search(_schema.Fields, wanted);
             if (found != null) return found;
             if (_schema.Ports != null)
                 foreach (var port in _schema.Ports.Values)
                 {
-                    found = SearchForVar(port.Fields, varName);
+                    found = Search(port.Fields, wanted);
                     if (found != null) return found;
                 }
             if (_schema.Definitions != null)
                 foreach (var def in _schema.Definitions.Values)
                 {
-                    found = SearchForVar(def.Fields, varName);
+                    found = Search(def.Fields, wanted);
                     if (found != null) return found;
                 }
             return null;
         }
 
-        static SchemaField? SearchForVar(List<SchemaField> fields, string varName)
+        static SchemaField? Search(List<SchemaField> fields, Func<SchemaField, bool> wanted)
         {
             foreach (var f in fields)
             {
-                if (f.Var == varName && !string.IsNullOrEmpty(f.Name)) return f;
+                if (wanted(f)) return f;
                 foreach (var nested in NestedFieldLists(f))
                 {
-                    var found = SearchForVar(nested, varName);
+                    var found = Search(nested, wanted);
                     if (found != null) return found;
                 }
             }

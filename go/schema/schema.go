@@ -369,6 +369,11 @@ type DecodeContext struct {
 	// whose members are not top-level keys. See meta.go.
 	metaProducers map[string]map[string]any
 	metaDepth     int
+	// lookupNumber is the number the field just decoded held before its lookup, and
+	// labels what each looked-up name reported beside the number bound for it, for
+	// name_from templates (PS-523, PS-532). See cr109.go.
+	lookupNumber lookupNumber
+	labels       map[string]labelEntry
 }
 
 // EncodeContext maintains state during encoding.
@@ -1991,7 +1996,7 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 			}
 			for k, v := range refResult {
 				result[k] = v
-				ctx.Variables[k] = v
+				ctx.rebindReported(k, v)
 			}
 			continue
 		}
@@ -2004,7 +2009,7 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 			}
 			for k, v := range bgResult {
 				result[k] = v
-				ctx.Variables[k] = v
+				ctx.rebindReported(k, v)
 			}
 			continue
 		}
@@ -2041,7 +2046,7 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 			}
 			for k, v := range flaggedResult {
 				result[k] = v
-				ctx.Variables[k] = v
+				ctx.rebindReported(k, v)
 			}
 			continue
 		}
@@ -2055,7 +2060,7 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 			if matchMap, ok := matchResult.(map[string]any); ok {
 				for k, v := range matchMap {
 					result[k] = v
-					ctx.Variables[k] = v
+					ctx.rebindReported(k, v)
 				}
 			}
 			continue
@@ -2071,6 +2076,7 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 		}
 
 		ctx.rangeStash = rangeStash{}
+		ctx.lookupNumber = lookupNumber{}
 		value, err := ctx.decodeFieldProduced(field)
 		if err != nil {
 			return nil, err
@@ -2101,7 +2107,9 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 
 		if value == omitted {
 			// A lookup with no entry and no default: the device reported nothing
-			// this schema can name, so the field is left out (PS-269).
+			// this schema can name, so the field is left out (PS-269). A reference to
+			// it is still bound to the number (PS-523).
+			ctx.bindReference(field.Name, field, omitted)
 			continue
 		}
 
@@ -2121,8 +2129,8 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 				result[outputName] = value
 			}
 			// Keyed by the schema-level name so $references keep working when
-			// name_from is in play (PS-267).
-			ctx.Variables[field.Name] = value
+			// name_from is in play (PS-267). A looked-up field binds as PS-523 says.
+			ctx.bindReference(field.Name, field, value)
 			// Check valid_range and update quality
 			if len(field.ValidRange) >= 2 {
 				ctx.checkValidRange(value, field)
@@ -2207,11 +2215,15 @@ func decodeByteGroup(field Field, ctx *DecodeContext) (map[string]any, error) {
 			return nil, err
 		}
 		if value == omitted || subfield.Name == "" {
+			// A lookup miss is not reported but its reference is bound (PS-523).
+			ctx.bindReference(subfield.Name, subfield, value)
 			continue
 		}
+		// Bound here, as PS-523 says, for later references; the caller's copy of the
+		// reported value leaves this binding alone.
+		ctx.bindReference(subfield.Name, subfield, value)
 		if strings.HasPrefix(subfield.Name, "_") {
 			// Internal: bound for later references, not reported.
-			ctx.Variables[subfield.Name] = value
 			continue
 		}
 		result[subfield.Name] = value
@@ -2669,6 +2681,7 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 // to skip them, and the compute path's copy forgot the bare modifiers - and before that,
 // the skip forgot compute and dl-blg's voltage_ratio had its stages applied twice.
 func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, error) {
+	ctx.lookupNumber = lookupNumber{}
 	if value == omitted {
 		return omitted, nil
 	}
@@ -2743,6 +2756,12 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 		}
 	}
 
+	// PS-523: a reference to a looked-up field binds this number unless the lookup
+	// reports a number; see bindReference.
+	if hasLookup(field) {
+		ctx.lookupNumber = lookupNumber{owner: field.Name, number: value, set: true}
+	}
+
 	// Apply lookup. A mapping is matched on its keys, which need not start at
 	// zero or be contiguous (PS-268); an unmatched value omits the field rather
 	// than reporting the raw integer under a name that promises a label, unless a
@@ -2766,6 +2785,10 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 			} else if field.LookupDefault != nil {
 				value = *field.LookupDefault
 			} else {
+				// PS-269 omits the field; its `var` is still bound to the number (PS-523).
+				if field.Var != "" {
+					ctx.bindReference(field.Var, field, omitted)
+				}
 				return omitted, nil
 			}
 		}
@@ -2831,7 +2854,7 @@ func finishComputedValue(value any, field Field, ctx *DecodeContext) (any, error
 		}
 	}
 	if field.Var != "" {
-		ctx.Variables[field.Var] = value
+		ctx.bindReference(field.Var, field, value)
 	}
 	return value, nil
 }
@@ -3476,7 +3499,15 @@ func resolveFieldName(field Field, ctx *DecodeContext) (string, error) {
 	var shapeErr error
 	resolved := nameFromPattern.ReplaceAllStringFunc(field.NameFrom, func(match string) string {
 		reference := match[2 : len(match)-1]
-		value, ok := ctx.Variables[reference]
+		// The reported value, the label where the field has a lookup (PS-532), not the
+		// number a reference binds (PS-523).
+		value, ok, err := ctx.templateValue(field, reference)
+		if err != nil {
+			if shapeErr == nil {
+				shapeErr = err
+			}
+			return ""
+		}
 		if !ok {
 			missing = append(missing, reference)
 			return ""
@@ -4331,7 +4362,7 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 // encodeMatch writes a match construct's bytes. An inline match (length: N) read those
 // bytes itself, so encoding writes them back; a match on field: $var read nothing,
 // because the variable came from a field earlier in the list that is encoded on its own.
-func encodeMatch(field Field, data map[string]any, ctx *EncodeContext) error {
+func encodeMatch(field Field, siblings []Field, data map[string]any, ctx *EncodeContext) error {
 	var discriminator any
 	if field.Name != "" {
 		if v, ok := data[field.Name]; ok {
@@ -4341,7 +4372,13 @@ func encodeMatch(field Field, data map[string]any, ctx *EncodeContext) error {
 	if discriminator == nil && field.On != "" {
 		varName := strings.TrimPrefix(field.On, "$")
 		if v, ok := data[varName]; ok {
-			discriminator = v
+			// The data carries the label; the case is keyed by what the reference
+			// binds (PS-523, PS-524).
+			discriminator = encodeDiscriminator(varName, v, siblings)
+		} else if v, ok := dataThroughVar(varName, siblings, data); ok {
+			// `field: $c` names a `var`, which the data does not carry: the field
+			// declaring it does, under its own name (PS-267), as resolveEncodeName reads it.
+			discriminator = encodeDiscriminator(varName, v, siblings)
 		} else if v, ok := ctx.Variables[varName]; ok {
 			discriminator = v
 		}
@@ -4718,7 +4755,7 @@ func encodeFields(fields []Field, data map[string]any, ctx *EncodeContext) error
 		}
 
 		if field.MatchInline != nil {
-			if err := encodeMatch(*field.MatchInline, data, ctx); err != nil {
+			if err := encodeMatch(*field.MatchInline, fields, data, ctx); err != nil {
 				return err
 			}
 			continue

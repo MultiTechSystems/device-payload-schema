@@ -201,7 +201,7 @@ public static class SchemaDecoder
                 var refResult = ResolveRef(field.Ref2, ctx, schema);
                 MergeTo(result, refResult);
                 foreach (var kv in refResult)
-                    ctx.Variables[kv.Key] = kv.Value;
+                    ctx.BindOutput(kv.Key, kv.Value);
                 continue;
             }
 
@@ -211,7 +211,7 @@ public static class SchemaDecoder
                 var bgResult = DecodeByteGroup(field, ctx);
                 MergeTo(result, bgResult);
                 foreach (var kv in bgResult)
-                    ctx.Variables[kv.Key] = kv.Value;
+                    ctx.BindOutput(kv.Key, kv.Value);
                 continue;
             }
 
@@ -235,7 +235,7 @@ public static class SchemaDecoder
                 var flaggedResult = DecodeFlagged(field.Flagged, ctx);
                 MergeTo(result, flaggedResult);
                 foreach (var kv in flaggedResult)
-                    ctx.Variables[kv.Key] = kv.Value;
+                    ctx.BindOutput(kv.Key, kv.Value);
                 continue;
             }
 
@@ -247,7 +247,7 @@ public static class SchemaDecoder
                 {
                     MergeTo(result, matchMap);
                     foreach (var kv in matchMap)
-                        ctx.Variables[kv.Key] = kv.Value;
+                        ctx.BindOutput(kv.Key, kv.Value);
                 }
                 continue;
             }
@@ -260,7 +260,7 @@ public static class SchemaDecoder
                 {
                     MergeTo(result, matchMap);
                     foreach (var kv in matchMap)
-                        ctx.Variables[kv.Key] = kv.Value;
+                        ctx.BindOutput(kv.Key, kv.Value);
                 }
                 continue;
             }
@@ -279,7 +279,11 @@ public static class SchemaDecoder
             if (ReferenceEquals(value, Omitted))
             {
                 // A mapping lookup with no entry and no default: the device
-                // reported nothing this schema can name (PS-269).
+                // reported nothing this schema can name (PS-269). The reference stays
+                // bound to the number (PS-523).
+                if (field.Lookup != null && !string.IsNullOrEmpty(field.Name)
+                    && ctx.LookupBinding.ContainsKey(field))
+                    ctx.Bind(field, field.Name, Omitted);
                 continue;
             }
 
@@ -297,8 +301,9 @@ public static class SchemaDecoder
                     result[outputName] = value;
                 }
                 // Keyed by the schema-level name in Variables so $references keep
-                // working when name_from is in play (PS-267).
-                ctx.Variables[field.Name] = value;
+                // working when name_from is in play (PS-267). A looked-up field binds
+                // PS-523's value and keeps its label for templates (PS-532).
+                ctx.Bind(field, field.Name, value);
                 if (field.ValidRange is { Length: >= 2 })
                     ctx.CheckValidRange(value, field);
             }
@@ -345,14 +350,20 @@ public static class SchemaDecoder
                 raw = (double)rawVal;
 
             var value = ApplyPostRead(raw, subfield, ctx);
-            if (ReferenceEquals(value, Omitted) || string.IsNullOrEmpty(subfield.Name))
+            if (string.IsNullOrEmpty(subfield.Name))
                 continue;
-            if (subfield.Name.StartsWith("_"))
+            if (ReferenceEquals(value, Omitted))
             {
-                // Internal: bound for later references, not reported.
-                ctx.Variables[subfield.Name] = value;
+                // PS-269 omits it; PS-523 leaves its reference bound to the number.
+                if (subfield.Lookup != null && ctx.LookupBinding.ContainsKey(subfield))
+                    ctx.Bind(subfield, subfield.Name, Omitted);
                 continue;
             }
+            // Bound here, as PS-523 says, before the group's output is merged: an internal
+            // member is bound and not reported.
+            ctx.Bind(subfield, subfield.Name, value);
+            if (subfield.Name.StartsWith("_"))
+                continue;
             result[subfield.Name] = value;
         }
 
@@ -733,6 +744,7 @@ public static class SchemaDecoder
         bool asDeclared = false;
         ctx.GuardElse.Remove(field);
         ctx.PreLookup.Remove(field);
+        ctx.LookupBinding.Remove(field);
         if (value is DeclaredElse declared)
         {
             value = declared.Value;
@@ -820,6 +832,9 @@ public static class SchemaDecoder
                         $"lookup index {numVal.ToString(CultureInfo.InvariantCulture)} is not an index "
                         + $"of a {field.Lookup.Count}-entry sequence (PS-105)");
                 var template = Wave5.Template(field);
+                // PS-523: the number before the lookup, which a reference binds under a
+                // text or boolean label and where the mapping has no entry.
+                var number = value;
                 if (integral && field.Lookup.TryGetValue(intVal, out var lookupStr))
                     value = lookupStr;
                 else if (template != null)
@@ -834,13 +849,20 @@ public static class SchemaDecoder
                     throw new InvalidOperationException(
                         $"lookup index {intVal} out of bounds for {field.Lookup.Count} entries");
                 else
+                {
+                    // PS-269 omits the field; PS-523 leaves its reference bound to the number.
+                    ctx.LookupBinding[field] = number;
+                    if (field.Var != null)
+                        ctx.Bind(field, field.Var, Omitted);
                     return Omitted;
+                }
+                ctx.LookupBinding[field] = DecodeContext.IsNumericLabel(value) ? value : number;
             }
         }
 
-        // Store variable
+        // Store variable: PS-523's binding, keeping the label for templates (PS-532).
         if (field.Var != null)
-            ctx.Variables[field.Var] = value;
+            ctx.Bind(field, field.Var, value);
 
         return value;
     }
@@ -1587,6 +1609,16 @@ public static class SchemaDecoder
                 missing.Add(reference);
                 return string.Empty;
             }
+            // A template writes the value reported, the label where there is a lookup
+            // (PS-532), not the number a reference binds (PS-523).
+            if (ctx.Reported.TryGetValue(reference, out var reported))
+            {
+                if (ReferenceEquals(reported, Omitted))
+                    throw new InvalidOperationException(
+                        $"name_from for '{field.Name}' references {reference}, which reported "
+                        + "no value (PS-266, PS-532)");
+                value = reported;
+            }
             return Wave5.RenderTemplateValue(value)
                 ?? throw new InvalidOperationException(
                     Wave5.TemplateShapeError(field.NameFrom!, reference));
@@ -1667,6 +1699,7 @@ public static class SchemaDecoder
         void Element()
         {
             var outer = new Dictionary<string, object?>(ctx.Variables);
+            var outerReported = new Dictionary<string, object?>(ctx.Reported);
             var savedNames = ctx.ElementNames;
             ctx.ElementNames = elementNames;
             if (!string.IsNullOrEmpty(field.Index))
@@ -1689,6 +1722,9 @@ public static class SchemaDecoder
                 ctx.Variables.Clear();
                 foreach (var kv in outer)
                     ctx.Variables[kv.Key] = kv.Value;
+                ctx.Reported.Clear();
+                foreach (var kv in outerReported)
+                    ctx.Reported[kv.Key] = kv.Value;
                 ctx.ElementNames = savedNames;
             }
             iterations++;

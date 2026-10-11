@@ -1,0 +1,160 @@
+# PS-523, PS-524 (CR-2026-109): what a `$` reference and a `var` bind for a field whose
+# value goes through a table of labels.
+#
+# - A text or boolean label: the reference binds the number under it, so arithmetic reads
+#   129, and a case keyed 129 is the one selected.
+# - A numeric label: the reference binds the label, so a table of sizes feeds arithmetic
+#   (`[0, 125, 250, 500]` gives 125, not the index 1).
+# - No entry and no default: the field is not reported (PS-269), and the reference is
+#   still bound to the number.
+# - A default label: it is reported, and the reference binds the number.
+#
+# A key template is not a reference: it writes the value reported, the label (PS-532).
+# Each port is one rule. On every port `code` is read and labelled, `doubled` reads it by
+# name, `held` reads it through its `var`, a case is selected on it, and the selected case
+# reports a reading whose key is built from it.
+name: probe_lookup_reference_binding
+endian: big
+ports:
+  1:
+    fields:
+      - {name: code, type: u8, var: c, lookup: {1: report, 129: report_rsp}}
+      - {name: doubled, type: number, compute: {op: mul, a: $code, b: 2}}
+      - {name: held, type: number, ref: $c}
+      - match:
+          field: $code
+          cases:
+            129: [{name: reading, type: u8, name_from: "reading_${code}"}]
+          default: [{name: other, type: u8}]
+  2:
+    fields:
+      - {name: code, type: u8, var: c, lookup: {0: false, 1: true}}
+      - {name: doubled, type: number, compute: {op: mul, a: $code, b: 2}}
+      - {name: held, type: number, ref: $c}
+      - match:
+          field: $c
+          cases:
+            1: [{name: reading, type: u8, name_from: "reading_${code}"}]
+          default: [{name: other, type: u8}]
+  3:
+    fields:
+      - {name: code, type: u8, var: c, lookup: [0, 125, 250, 500]}
+      - {name: doubled, type: number, compute: {op: mul, a: $code, b: 2}}
+      - {name: held, type: number, ref: $c}
+      - match:
+          field: $code
+          cases:
+            125: [{name: reading, type: u8, name_from: "reading_${code}"}]
+          default: [{name: other, type: u8}]
+  4:
+    fields:
+      - {name: code, type: u8, var: c, lookup: {1: 10, 2: 20}}
+      - {name: doubled, type: number, compute: {op: mul, a: $code, b: 2}}
+      - {name: held, type: number, ref: $c}
+      - match:
+          field: $c
+          cases:
+            20: [{name: reading, type: u8, name_from: "reading_${code}"}]
+          default: [{name: other, type: u8}]
+  5:
+    fields:
+      - {name: code, type: u8, var: c, lookup: {1: report, 129: report_rsp}}
+      - {name: doubled, type: number, compute: {op: mul, a: $code, b: 2}}
+      - {name: held, type: number, ref: $c}
+      - match:
+          field: $code
+          cases:
+            129: [{name: reading, type: u8, name_from: "reading_${code}"}]
+            5: [{name: unlisted, type: u8}]
+          default: [{name: other, type: u8}]
+  6:
+    fields:
+      - {name: code, type: u8, var: c, lookup: {1: report, default: spare}}
+      - {name: doubled, type: number, compute: {op: mul, a: $code, b: 2}}
+      - {name: held, type: number, ref: $c}
+      - match:
+          field: $code
+          cases:
+            5: [{name: reading, type: u8, name_from: "reading_${code}"}]
+          default: [{name: other, type: u8}]
+  7:
+    fields:
+      - {name: code, type: u8, var: c, lookup: {1: report, default: "code_${value}"}}
+      - {name: doubled, type: number, compute: {op: mul, a: $code, b: 2}}
+      - {name: held, type: number, ref: $c}
+      - match:
+          field: $c
+          cases:
+            5: [{name: reading, type: u8, name_from: "reading_${code}"}]
+          default: [{name: other, type: u8}]
+test_vectors:
+  - name: a_text_label_binds_its_number
+    payload: "81 07"
+    fPort: 1
+    source: spec-example
+    expected:
+      code: report_rsp
+      doubled: 258
+      held: 129
+      reading_report_rsp: 7
+      other: null
+  - name: a_boolean_label_binds_its_number
+    payload: "01 07"
+    fPort: 2
+    source: spec-example
+    expected:
+      code: true
+      doubled: 2
+      held: 1
+      reading_true: 7
+      other: null
+  - name: a_numeric_sequence_label_binds_itself
+    payload: "01 07"
+    fPort: 3
+    source: spec-example
+    expected:
+      code: 125
+      doubled: 250
+      held: 125
+      reading_125: 7
+      other: null
+  - name: a_numeric_mapping_label_binds_itself
+    payload: "02 07"
+    fPort: 4
+    source: spec-example
+    expected:
+      code: 20
+      doubled: 40
+      held: 20
+      reading_20: 7
+      other: null
+  - name: a_value_with_no_entry_is_omitted_but_bound
+    payload: "05 07"
+    fPort: 5
+    source: spec-example
+    expected:
+      code: null
+      doubled: 10
+      held: 5
+      unlisted: 7
+      other: null
+  - name: a_default_label_binds_the_number
+    payload: "05 07"
+    fPort: 6
+    source: spec-example
+    expected:
+      code: spare
+      doubled: 10
+      held: 5
+      reading_spare: 7
+      other: null
+  - name: a_templated_default_binds_the_number
+    payload: "05 07"
+    fPort: 7
+    source: spec-example
+    expected:
+      code: code_5
+      doubled: 10
+      held: 5
+      reading_code_5: 7
+      other: null

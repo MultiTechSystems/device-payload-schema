@@ -1425,7 +1425,9 @@ public class Schema {
                     for (Map.Entry<?, ?> entry : matchMap.entrySet()) {
                         String key = String.valueOf(entry.getKey());
                         result.put(key, entry.getValue());
-                        ctx.setVariable(key, entry.getValue());
+                        // A looked-up field in the case bound itself (PS-523); rebinding
+                        // its reported label here would undo that.
+                        if (!ctx.hasLabel(key)) ctx.setVariable(key, entry.getValue());
                     }
                 }
                 continue;
@@ -1444,7 +1446,9 @@ public class Schema {
                 Map<String, Object> flaggedResult = decodeFlagged(field.getFlagged(), ctx);
                 result.putAll(flaggedResult);
                 for (Map.Entry<String, Object> entry : flaggedResult.entrySet()) {
-                    ctx.setVariable(entry.getKey(), entry.getValue());
+                    if (!ctx.hasLabel(entry.getKey())) {                // PS-523
+                        ctx.setVariable(entry.getKey(), entry.getValue());
+                    }
                 }
                 continue;
             }
@@ -1475,7 +1479,11 @@ public class Schema {
             }
 
             if (value == OMITTED) {
-                // A mapping lookup with no entry and no default (PS-269).
+                // A mapping lookup with no entry and no default (PS-269): not reported,
+                // and a reference to it still binds the number (PS-523).
+                if (field.getName() != null && !field.getName().isEmpty()) {
+                    ctx.bindMissed(field.getName(), field);
+                }
                 continue;
             }
 
@@ -1495,7 +1503,7 @@ public class Schema {
                 }
                 // Variables are keyed by the schema-level name so $references keep
                 // working when name_from is in play (PS-267).
-                ctx.setVariable(field.getName(), value);
+                ctx.bind(field.getName(), field, value);       // PS-523
                 ctx.checkValidRange(value, field);     // PS-131
             }
         }
@@ -1821,6 +1829,7 @@ public class Schema {
      */
     private Object applyGroupMember(Object value, Field field, DecodeContext ctx, boolean fieldRules,
             boolean asDeclared) {
+        ctx.clearLookup(field);
         // Apply formula if present (takes precedence). A computed field has already
         // had its own arithmetic applied by decodeComputed, in the order the
         // interpreter uses: polynomial, then modifiers, then transform. Running the
@@ -1867,6 +1876,8 @@ public class Schema {
             // the key 2. An integral double such as 7.0 is the key 7. A computed value
             // reaches the lookup after its arithmetic (PS-443), so it is often a double.
             double numVal = ((Number) value).doubleValue();
+            // PS-523: the number a reference binds where the label is not a number.
+            Object number = value;
             int intVal = (int) numVal;
             boolean integral = numVal == Math.rint(numVal) && !Double.isInfinite(numVal);
             String template = Wave5.template(field);
@@ -1888,8 +1899,14 @@ public class Schema {
                     "lookup index %d out of bounds for %d entries",
                     intVal, field.getLookup().size()));
             } else {
+                // PS-269 omits the field; PS-523 leaves a reference bound to the number.
+                ctx.recordLookup(field, number, DecodeContext.NO_LABEL);
+                if (field.getVar() != null && !field.getVar().isEmpty()) {
+                    ctx.bind(field.getVar(), field, number);
+                }
                 return OMITTED;
             }
+            ctx.recordLookup(field, number, value);
         }
         
         // PS-428: outside the range is no reading, not a flagged one, so the field is
@@ -1900,7 +1917,7 @@ public class Schema {
 
         // Store variable
         if (field.getVar() != null && !field.getVar().isEmpty()) {
-            ctx.setVariable(field.getVar(), value);
+            ctx.bind(field.getVar(), field, value);        // PS-523
         }
         
         return value;
@@ -2331,7 +2348,13 @@ public class Schema {
         List<String> missing = new ArrayList<>();
         while (matcher.find()) {
             String reference = matcher.group(1);
-            Object value = ctx.getVariable(reference);
+            // A template writes the value reported, the label where there is a lookup
+            // (PS-532), not what a reference binds (PS-523).
+            Object value = ctx.reported(reference);
+            if (value == DecodeContext.NO_LABEL) {
+                throw new SchemaException("name_from for '" + field.getName() + "' references "
+                        + reference + ", which reported no value (PS-266, PS-532)");
+            }
             String replacement;
             if (value == null) {
                 missing.add(reference);
@@ -2550,6 +2573,7 @@ public class Schema {
     private void decodeElement(Field repeat, DecodeContext ctx, int[] iterations,
                                Map<String, Object> carryState, List<Map<String, Object>> result) {
         Map<String, Object> outer = ctx.snapshotVariables();
+        Map<String, Object> outerLabels = ctx.snapshotLabels();
         Set<String> savedNames = ctx.getElementNames();
         List<Field> members = repeat.getFields() == null ? List.of() : repeat.getFields();
         Set<String> names = new HashSet<>();
@@ -2572,6 +2596,7 @@ public class Schema {
         } finally {
             // PS-368: an element's names do not outlive it.
             ctx.restoreVariables(outer);
+            ctx.restoreLabels(outerLabels);
             ctx.setElementNames(savedNames);
         }
         iterations[0]++;
@@ -2708,8 +2733,12 @@ public class Schema {
                 } else {
                     value = decodeField(member, ctx, false);
                 }
-                if (value == OMITTED || value == null) continue;
-                ctx.setVariable(name, value);
+                if (value == OMITTED) {
+                    ctx.bindMissed(name, member);                   // PS-523
+                    continue;
+                }
+                if (value == null) continue;
+                ctx.bind(name, member, value);                      // PS-523
                 if (!name.startsWith("_")) {
                     String outputName = resolveFieldName(member, ctx);
                     if (!outputName.equals(name)) ctx.produced(member, outputName);   // PS-492
