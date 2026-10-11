@@ -204,13 +204,10 @@ score-check: $(VENV)/bin/activate
 	$(PYTHON) tools/score_schema.py schemas/devices --all --baseline score-baseline.json --quiet
 	$(PYTHON) tools/score_schema.py examples/canonical-modifier-order.yaml --min-tier SILVER --quiet
 
-# fuzz.yml: the examples, skipping the three that need preprocessing first.
+# fuzz.yml: every example. None needs preprocessing: each is a schema as written.
 validate-examples: $(VENV)/bin/activate
 	@status=0; \
 	for schema in examples/*.yaml; do \
-		case "$$schema" in \
-			*_with_lib.yaml|*_rename.yaml|examples/lib_sensors_test.yaml) continue;; \
-		esac; \
 		PYTHONPATH=tools $(PYTHON) tools/validate_schema.py "$$schema" > /tmp/ve.txt 2>&1 || { \
 			echo "FAILED: $$schema"; cat /tmp/ve.txt; status=1; }; \
 	done; \

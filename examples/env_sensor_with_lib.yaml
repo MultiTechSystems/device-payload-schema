@@ -1,26 +1,98 @@
-# Example: Environmental Sensor using Library
-# 
-# This schema demonstrates using the sensor library for common definitions.
-# Run through preprocessor before using with interpreter:
+# Example: Environmental Sensor built from library definitions
 #
-#   python tools/schema_preprocessor.py examples/env_sensor_with_lib.yaml -o examples/env_sensor_resolved.yaml
+# Shows how to reuse field groups with `definitions` and `$ref` (PS-345 to PS-349).
+# Each definition below is copied from the schema library:
+#
+#   msg_type_header      schemas/library/common/headers.yaml
+#   temp_humidity        schemas/library/profiles/env-sensor.yaml
+#   battery_mv           schemas/library/sensors/power.yaml
+#   battery_pct_from_mv  schemas/library/sensors/power.yaml
+#
+# The definitions are in this document because a pointer must take the form
+# `#/definitions/<name>` (PS-461). A pointer naming another file, such as
+# `schemas/library/sensors/power.yaml#/definitions/battery_mv`, is OPTIONAL (PS-462).
+# None of the interpreters in this repository supports it, and each one rejects it.
+# To pull definitions in from library files at authoring time, use
+# tools/schema_preprocessor.py; see docs/FAQ.md.
+#
+# examples/env_sensor_with_lib_resolved.yaml is this schema with every reference
+# substituted (expand_refs), which is how every implementation decodes it.
+# tests/test_examples_library_copies.py holds both files to that, and the definitions
+# here to the library's.
 
 name: env_sensor_example
 version: 1
 endian: big
 description: Environmental sensor using library definitions
 
+definitions:
+  msg_type_header:
+    fields:
+      - name: msg_type
+        type: u8
+        description: "Message type identifier"
+        lookup:
+          0: "heartbeat"
+          1: "data"
+          2: "alarm"
+          3: "config"
+          255: "diagnostic"
+
+  temp_humidity:
+    fields:
+      - name: temperature
+        type: s16
+        div: 10
+        unit: "°C"
+        senml: {unit: Cel}
+        valid_range: [-40, 85]
+        resolution: 0.1
+        unece: "CEL"
+        ipso: {object: 3303}
+
+      - name: humidity
+        type: u8
+        mult: 0.5
+        unit: "%RH"
+        valid_range: [0, 100]
+        resolution: 0.5
+        unece: "P1"
+        ipso: {object: 3304}
+
+  battery_mv:
+    fields:
+      - name: battery_mv
+        type: u16
+        unit: "mV"
+        valid_range: [1800, 4200]
+        resolution: 1
+        description: "Battery voltage in millivolts"
+        ipso: {object: 3316}
+
+  battery_pct_from_mv:
+    fields:
+      - name: battery_percent
+        type: number
+        ref: "$battery_mv"
+        transform:
+          - add: -1800
+          - div: 12
+        unit: "%"
+        senml: {unit: "/100"}
+        valid_range: [0, 100]
+        description: "Battery percentage computed from mV (1800-3000mV = 0-100%)"
+
 fields:
-  # Message type header from library
-  - $ref: "schemas/library/common/headers.yaml#/definitions/msg_type_header"
-  
-  # Temperature and humidity from profile
-  - $ref: "schemas/library/profiles/env-sensor.yaml#/definitions/temp_humidity"
-  
-  # Battery from individual sensor definitions
-  - $ref: "schemas/library/sensors/power.yaml#/definitions/battery_mv"
-  - $ref: "schemas/library/sensors/power.yaml#/definitions/battery_pct_from_mv"
-  
+  # Message type header
+  - $ref: "#/definitions/msg_type_header"
+
+  # Temperature and humidity profile
+  - $ref: "#/definitions/temp_humidity"
+
+  # Battery voltage, then the percentage computed from it
+  - $ref: "#/definitions/battery_mv"
+  - $ref: "#/definitions/battery_pct_from_mv"
+
   # Device-specific field (not from library)
   - name: report_interval
     type: u16
