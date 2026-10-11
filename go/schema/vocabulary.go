@@ -184,6 +184,13 @@ func checkTypeVocabulary(raw map[string]any) error {
 			}
 			// PS-528: a repeat's `element` is one field definition, held to the same rules.
 			if element := asStringMap(field["element"]); element != nil {
+				// PS-545 first: a construct or typeless element is named as such, not as
+				// a field that declares no type.
+				if field["type"] == "repeat" {
+					if err := elementRepeatError(field); err != nil {
+						return err
+					}
+				}
 				if err := check([]any{element}, at+".element"); err != nil {
 					return err
 				}

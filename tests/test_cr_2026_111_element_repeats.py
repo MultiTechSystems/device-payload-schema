@@ -3,10 +3,10 @@
 
 A repeat declaring `element`, one field, in place of `fields` reports an array of the
 element's values, with `null` at a position whose value was omitted (PS-528). An encoder
-takes the array back (PS-529); a `null` position is refused, naming it, because the CR
-leaves its encoding open. `index_base` counts the index from an integer (PS-530). `_meta`
-nests the element's entry under `element` and an index listing carries a non-zero base
-(PS-531, PS-375).
+takes the array back (PS-529); a `null` position with no `sentinel` to write is
+refused, naming it (PS-544, CR-2026-121). `index_base` counts the index from an integer
+(PS-530). `_meta` nests the element's entry under `element` and an index listing carries
+a non-zero base (PS-531, PS-375).
 
 The cases mirror the spec prototype's TestCR2026111ElementRepeat, and the messages are
 its wording, which Go, Java, C# and the TS013 generator give identically.
@@ -118,8 +118,8 @@ class TestEncode:
     def test_a_null_position_is_refused_naming_it(self):
         encoded = SchemaInterpreter(schema_of(INCREMENTS)).encode({"increments": [12, None]})
         assert not encoded.success
-        assert ("Repeat 'increments' has null at position 1, which has no encoding "
-                "(PS-529)") in encoded.errors[0]
+        assert ("Repeat 'increments' has null at position 1, and its element "
+                "declares no `sentinel` to write for it (PS-544)") in encoded.errors[0]
 
     def test_index_base_encodes_as_it_decodes(self):
         fields = [{"name": "v", "type": "repeat", "count": 2, "index": "i",
@@ -226,8 +226,9 @@ class TestGeneratedCodec:
         out = run_codec(schema_of(INCREMENTS), bytes.fromhex("00780096005A"))
         assert bytes(out["e"]["bytes"]).hex() == "00780096005a"
         out = run_codec(schema_of(INCREMENTS), b"", {"increments": [12, None]})
-        assert any("Repeat 'increments' has null at position 1, which has no encoding "
-                   "(PS-529)" in e for e in out["e"]["errors"])
+        message = ("Repeat 'increments' has null at position 1, and its element "
+                   "declares no `sentinel` to write for it (PS-544)")
+        assert any(message in e for e in out["e"]["errors"])
 
 
 def test_the_output_schema_is_an_array_of_nullable_values():

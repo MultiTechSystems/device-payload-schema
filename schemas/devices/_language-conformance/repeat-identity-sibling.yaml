@@ -1,0 +1,60 @@
+# One array identified by another, position by position (PS-546, PS-547, CR-2026-123).
+# A device sends a list of register codes and then one reading per code; `identity:
+# $codes[i]` says the reading at position i is the one the code at position i names.
+#
+# The decoded output is unchanged, two arrays. `_meta` carries the identity under its
+# own `repeat` key, listing the labels the code can take with the `${value}` default
+# last and `open` beside them (PS-375, PS-489).
+#
+# Two arrays of different lengths is an error naming both; no vector expects a failure,
+# so each implementation's own tests hold that.
+name: probe_repeat_identity_sibling
+endian: big
+fields:
+- name: n
+  type: u8
+- name: codes
+  type: repeat
+  count: $n
+  element:
+    type: u8
+    lookup:
+      1: "1.8.1"
+      2: "2.8.1"
+      default: "${value}"
+- name: readings
+  type: repeat
+  count: $n
+  index: i
+  identity: $codes[i]
+  element:
+    type: u32
+test_vectors:
+- name: two_registers
+  source: spec-example
+  payload: "02 01 02 0000007B 000001C8"
+  expected:
+    n: 2
+    codes: ["1.8.1", "2.8.1"]
+    readings: [123, 456]
+  expected_meta:
+    schema: probe_repeat_identity_sibling
+    fields:
+      n: {type: u8}
+      codes:
+        type: repeat
+        element: {type: u8}
+      readings:
+        type: repeat
+        identity:
+          repeat: codes
+          values: ["1.8.1", "2.8.1", "${value}"]
+          open: true
+        element: {type: u32}
+- name: unlabelled_code
+  source: spec-example
+  payload: "01 09 00000005"
+  expected:
+    n: 1
+    codes: ["9"]
+    readings: [5]

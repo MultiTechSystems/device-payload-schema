@@ -252,8 +252,8 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
     "ipso": {
         "object": (("py", "score"), "IPSO object id, checked by the scorer"),
         "instance": (
-            ("doc:reference",),
-            "documented in the language reference; no tool reads it",
+            ("py", "go", "java", "cs"),
+            "an IPSO instance, 0 to 65534, checked at load (PS-548); _meta lists it",
         ),
         "resource": (
             ("doc:reference",),

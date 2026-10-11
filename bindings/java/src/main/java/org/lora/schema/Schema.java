@@ -944,9 +944,10 @@ public class Schema {
             // PS-528: a repeat of single values decodes its element as a one-field record
             // under the element's name, or "element", and reports the value. Wave6a has
             // already rejected both, neither, and a non-mapping element.
-            Map<String, Object> member = new LinkedHashMap<>((Map<String, Object>) element);
-            String elementName = member.get("name") instanceof String n && !n.isEmpty() ? n : "element";
-            member.put("name", elementName);
+            // PS-545: an element named with `_` is decoded under "element", with `var`
+            // keeping `$_x` bound, so its value is reported.
+            Map<String, Object> member = Wave6a.elementMember(element);
+            String elementName = (String) member.get("name");
             List<Map<String, Object>> one = new ArrayList<>();
             one.add(member);
             f.setFields(parseFields(one));
@@ -1216,12 +1217,13 @@ public class Schema {
             if (f.getRaw() != null) declaredList.add(f.getRaw());
         }
         Map<String, Map<?, ?>> declared = Meta.declarations(declaredList);
+        Map<String, Map<?, ?>> siblings = Wave6a.elementRepeats(declaredList);     // PS-546
         Map<String, Object> entries = new LinkedHashMap<>();
         for (String key : result.keySet()) {
             if (key.startsWith("_")) continue;              // `_quality`, `_warnings`
             Map<?, ?> source = ctx.getProducers().get(key);
             if (source == null) source = declared.get(key);
-            entries.put(key, source != null ? Meta.fieldMeta(source, null) : new LinkedHashMap<>());
+            entries.put(key, source != null ? Meta.fieldMeta(source, null, siblings) : new LinkedHashMap<>());
         }
         meta.put("fields", entries);
         result.put("_meta", meta);
@@ -2615,6 +2617,22 @@ public class Schema {
         if (result.size() < minIterations) {
             throw new SchemaException.DecodeException(
                 String.format("Repeat produced %d elements, but minimum is %d", result.size(), minIterations));
+        }
+
+        // PS-546: a sibling identifying these values position by position reported as
+        // many values as this repeat, or the pairing names nothing.
+        if (field.getRaw() != null) {
+            Set<String> seen = new LinkedHashSet<>();
+            for (String[] ref : Wave6a.siblingReferences(field.getRaw())) {
+                if (!seen.add(ref[1])) continue;
+                Object reported = ctx.getVariable(ref[1]);
+                if (!(reported instanceof List<?> l) || l.size() != result.size()) {
+                    Object have = reported instanceof List<?> l2 ? (Object) l2.size() : "none";
+                    throw new SchemaException.DecodeException("Repeat '" + field.getName() + "' has "
+                            + result.size() + " values and '" + ref[1] + "', which identifies them, has "
+                            + have + " (PS-546)");
+                }
+            }
         }
 
         // PS-367: the number of elements reported, bound for every later field only.
