@@ -820,27 +820,58 @@ function encTlv(out, f, data, ctx) {                  // _encode_tlv
   var tlv = f.tlv || {}, cases = tlv.cases || {}, lsize = tlv.length_size || 0;
   if (tlv.merge === false) encFail("a tlv with merge: false reports its entries under 'channels', and encoding them is not supported");
   var order = Object.keys(data), cands = [];
-  for (var key in cases) {
-    if (key === "default" || !Array.isArray(cases[key])) continue;
-    var claimed = encClaimable(cases[key]).map(function (c) { return c.name; })
-      .filter(function (n) { return Object.prototype.hasOwnProperty.call(data, n); });
-    if (!claimed.length) continue;
-    var fid = encCaseFidelity(cases[key], data);
+  // PS-527. `rep` is tlv_repeat_modes, resolved at generation time, with the cases'
+  // declaration order: an object's integer-like keys iterate in ascending order, not
+  // the order the schema wrote them.
+  var rep = tlv.__on_repeat || {};
+  var modes = rep.modes || {}, owner = rep.owner || {};
+  var keys = rep.order || Object.keys(cases);
+  keys.forEach(function (key) {
+    if (key === "default" || !Array.isArray(cases[key])) return;
+    var caseData = data, claimed = [], units = [];
+    encClaimable(cases[key]).forEach(function (c) {
+      var n = c.name;
+      if (!Object.prototype.hasOwnProperty.call(data, n)) return;
+      var mode = modes[n] || "collect", v = data[n];
+      // A `last` value is written once, under the first case declaring it.
+      if (mode === "last" && owner[n] !== key) return;
+      // _reports_list: PS-157 collected this name into an array, and PS-502's one
+      // entry per element is not supported yet.
+      if (Array.isArray(v) && c.type !== "repeat" && !(c.type === "bytes" && c.format === "array"))
+        encFail("tlv: '" + n + "' was collected into an array (PS-157), and writing one entry per element (PS-502) is not supported");
+      if (mode === "merge" && v !== null && typeof v === "object" && !Array.isArray(v)) {
+        // One entry per case declaring any of the merged object's members the input
+        // supplies, holding those members - every such case, so what it spends is
+        // its own and never already spent.
+        var sub = {}, any = false;
+        (c.fields || []).forEach(function (m) {
+          if (m && m.name && Object.prototype.hasOwnProperty.call(v, m.name)) { sub[m.name] = v[m.name]; any = true; }
+        });
+        if (!any) return;
+        if (caseData === data) { caseData = {}; for (var k in data) caseData[k] = data[k]; }
+        caseData[n] = sub;
+        claimed.push(n); units.push(n + "\u0000" + key);
+        return;
+      }
+      claimed.push(n); units.push(n);
+    });
+    if (!claimed.length) return;
+    var fid = encCaseFidelity(cases[key], caseData);
     var position = Math.min.apply(null, claimed.map(function (n) { return order.indexOf(n); }));
-    cands.push({ p: position, l: fid[1] ? 0 : 1, m: -fid[0], key: key, body: cases[key], claimed: claimed, seq: cands.length });
-  }
+    cands.push({ p: position, l: fid[1] ? 0 : 1, m: -fid[0], key: key, body: cases[key], units: units, data: caseData, seq: cands.length });
+  });
   cands.sort(function (a, b) { return a.p - b.p || a.l - b.l || a.m - b.m || a.seq - b.seq; });
   var spent = {}, emitted = [];
   cands.forEach(function (c) {
-    if (c.claimed.every(function (n) { return spent[n]; })) return;
-    c.claimed.forEach(function (n) { spent[n] = true; });
+    if (c.units.every(function (n) { return spent[n]; })) return;
+    c.units.forEach(function (n) { spent[n] = true; });
     emitted.push(c);
   });
   emitted.sort(function (a, b) { return a.p - b.p || a.seq - b.seq; });
   emitted.forEach(function (c) {
     encTlvTag(out, c.key, tlv, ctx);
     var value = [];
-    encList(value, c.body, data, ctx);
+    encList(value, c.body, c.data, ctx);
     if (lsize > 0) encWriteInt(out, value.length, lsize, false, ctx.endian);
     for (var i = 0; i < value.length; i++) out.push(value[i]);
   });
@@ -1049,6 +1080,45 @@ def _codec_globals() -> set:
                   'encodeCommand'}
         _CODEC_GLOBALS = names
     return _CODEC_GLOBALS
+
+
+def _tlv_repeat_modes(tlv):
+    """tlv_repeat_modes() for a tlv that declares `on_repeat` on itself or on a case
+    field (PS-525); otherwise every name collects (PS-157), and the codec carries no
+    table for it."""
+    from schema_interpreter import tlv_repeat_modes, reported_fields
+    declared = 'on_repeat' in tlv or any(
+        'on_repeat' in field_def
+        for body in (tlv.get('cases') or {}).values() if isinstance(body, list)
+        for field_def in reported_fields(body).values())
+    return tlv_repeat_modes(tlv) if declared else ({}, {}, [])
+
+
+def _annotate_on_repeat(node):
+    """A copy of an encoder plan with each tlv carrying `__on_repeat`: its names' modes
+    (PS-525), the case each `last` name is written under (PS-527) and the cases'
+    declaration order, which a JSON object with integer-like keys does not keep."""
+    from schema_interpreter import reported_fields
+    if isinstance(node, list):
+        return [_annotate_on_repeat(item) for item in node]
+    if not isinstance(node, dict):
+        return node
+    out = {k: _annotate_on_repeat(v) for k, v in node.items()}
+    tlv = node.get('tlv')
+    if isinstance(tlv, dict) and isinstance(tlv.get('cases'), dict):
+        modes = _tlv_repeat_modes(tlv)[0]
+        owner = {}
+        for key, body in tlv['cases'].items():
+            if isinstance(body, list):
+                for name in reported_fields(body):
+                    if modes.get(name) == 'last':
+                        owner.setdefault(name, str(key))
+        out['tlv'] = dict(out['tlv'], __on_repeat={
+            'modes': {k: v for k, v in modes.items() if v != 'collect'},
+            'owner': owner,
+            'order': [str(key) for key in tlv['cases']],
+        })
+    return out
 
 
 def to_js_name(name: str) -> str:
@@ -1498,6 +1568,9 @@ class TS013Generator:
         from schema_interpreter import annotation_schema_errors
         iterator_problems += annotation_schema_errors(schema)
         iterator_problems += meta_declaration_errors(schema)    # PS-491
+        # PS-525, PS-526: on_repeat's values, merge on objects only, one mode per name.
+        from schema_interpreter import on_repeat_schema_errors
+        iterator_problems += on_repeat_schema_errors(schema)
         # PS-358, PS-519, PS-520: a malformed literal, as the interpreter refuses it.
         from schema_interpreter import literal_errors, typed_field_dicts
         for field_def in typed_field_dicts(schema):
@@ -1612,6 +1685,43 @@ function tlvUnknownRaw(d, tag, buf, from, span, separate) {
   var key = separate ? "channels" : "unknown_tags";
   if (!d[key]) { d[key] = []; }
   d[key].push({ tag: tag, raw: hex });
+}
+
+// --- A name reported again (PS-157, PS-525) ---
+// One tlv entry's output folded into the tlv's. A name already reported is combined as
+// its on_repeat says: collected into an array by default, kept from the last entry
+// under `last`, combined member by member under `merge`. `collected` holds the names
+// already turned into arrays: a value that is itself a list is one element, not
+// appended into. The generated codec kept the last value for every name, so where two
+// entries reported one name the interpreters gave an array and this gave one value.
+function tlvFold(outer, entry, modes, lastMembers, collected) {
+  for (var k in entry) {
+    if (!Object.prototype.hasOwnProperty.call(entry, k)) continue;
+    var v = entry[k];
+    if (v === undefined) continue;
+    var mode = modes[k] || "collect";
+    if (!Object.prototype.hasOwnProperty.call(outer, k) || outer[k] === undefined) {
+      outer[k] = v;
+    } else if (mode === "last") {
+      outer[k] = v;
+    } else if (mode === "merge") {
+      var combined = {}, before = outer[k];
+      for (var a in before) if (Object.prototype.hasOwnProperty.call(before, a)) combined[a] = before[a];
+      for (var m in v) {
+        if (!Object.prototype.hasOwnProperty.call(v, m)) continue;
+        if (Object.prototype.hasOwnProperty.call(combined, m) && !(lastMembers[k] && lastMembers[k][m])) {
+          throw new Error("tlv: the merged object '" + k + "' reports its member '" + m + "' twice (PS-525)");
+        }
+        combined[m] = v[m];
+      }
+      outer[k] = combined;
+    } else if (collected[k]) {
+      outer[k].push(v);
+    } else {
+      outer[k] = [outer[k], v];
+      collected[k] = true;
+    }
+  }
 }
 
 // --- Absent values ---
@@ -3196,6 +3306,17 @@ function writeS(buf, pos, size, value, endian) {
         tag_parts_expr = '[' + ', '.join(tag_parts) + ']'
 
         separate = tlv.get('merge', True) is False
+        # PS-157, PS-525: each entry of a merged tlv decodes into an object of its own,
+        # folded into the output by tlvFold, so a name two entries report is combined
+        # as its on_repeat says. The tables are keyed as the output is staged.
+        repeat_modes, repeat_last, _ = _tlv_repeat_modes(tlv)
+        fold_modes = json.dumps({to_js_name(k): v for k, v in repeat_modes.items()
+                                 if v != 'collect'}, sort_keys=True)
+        fold_last = json.dumps({to_js_name(k): {to_js_name(m): True for m in sorted(ms)}
+                                for k, ms in repeat_last.items() if ms}, sort_keys=True)
+        fold_id = self._tlv_fold_seq = getattr(self, '_tlv_fold_seq', 0) + 1
+        if not separate:
+            lines.insert(1, f'{i}  var _tlvC{fold_id} = {{}};')
         # PS-270: exact keys are tried first, then negated (`!n`), then wildcard (`*`), so
         # a broad key never shadows a specific one; within a rank, schema order. A
         # composite key is compared component by component, as the interpreters do. It
@@ -3221,6 +3342,8 @@ function writeS(buf, pos, size, value, endian) {
                 # by swapping it in as `d` for their length. This was not generated at
                 # all, so `channels` was missing from the codec's output with no error.
                 lines.append(f'{i}      var _tlvOuter = d; d = {{ tag: {tag_parts_expr} }};')
+            else:
+                lines.append(f'{i}      var _tlvO{fold_id} = d; d = {{}};')
             self.indent += 2
             for cf in case_fields:
                 lines.extend(self._gen_decode_field(cf))
@@ -3228,6 +3351,9 @@ function writeS(buf, pos, size, value, endian) {
             if separate:
                 lines.append(f'{i}      if (!_tlvOuter.channels) {{ _tlvOuter.channels = []; }}')
                 lines.append(f'{i}      _tlvOuter.channels.push(d); d = _tlvOuter;')
+            else:
+                lines.append(f'{i}      tlvFold(_tlvO{fold_id}, d, {fold_modes}, {fold_last}, '
+                             f'_tlvC{fold_id}); d = _tlvO{fold_id};')
 
         if not first:
             lines.append(f'{i}    }} else {{')
@@ -3480,6 +3606,7 @@ function writeS(buf, pos, size, value, endian) {
         exactly as the decoder sees it.
         """
         plan = self._expand_refs(list(fields)) if isinstance(fields, list) else fields
+        plan = _annotate_on_repeat(plan)
         return '\n'.join([
             f'var {fname}_FIELDS = {json.dumps(plan, default=str, separators=(",", ":"))};',
             f'function {fname}(d, endian) {{',

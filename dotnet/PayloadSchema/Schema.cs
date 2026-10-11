@@ -258,6 +258,12 @@ public class SchemaField
     public bool? Merge { get; set; }
     public string? UnknownMode { get; set; }
     public Dictionary<string, List<SchemaField>>? TLVCases { get; set; }
+    /// <summary>How each name the tlv reports combines when more than one entry reports
+    /// it (PS-157, PS-525): collect, merge or last. A name not listed collects.</summary>
+    public Dictionary<string, string> TLVRepeatModes { get; set; } = new();
+    /// <summary>The members of each merged object that declare `on_repeat: last`, the
+    /// only members two entries may both report (PS-525).</summary>
+    public Dictionary<string, HashSet<string>> TLVLastMembers { get; set; } = new();
 
     // Bitfield string
     public List<List<object>> Parts { get; set; } = new();

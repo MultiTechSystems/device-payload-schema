@@ -188,18 +188,18 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2618 payload vectors in `schemas/devices/` (measured 2026-10-10 with
+The 2624 payload vectors in `schemas/devices/` (measured 2026-10-10 with
 `tools/check-floors.py`, after the CR-2026-111 element-repeat and registry divergence
-fixtures) are the shared
+fixtures and CR-2026-110's tlv-repeat-* fixtures) are the shared
 cross-language test set. Every implementation has a runner that reads the same YAML and
 the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1794 |
-| Go | `go/schema/corpus_conformance_test.go` | 2618 | 1811 (plain API 1788) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2618 | 1794 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2618 | 1794 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1795 |
+| Go | `go/schema/corpus_conformance_test.go` | 2624 | 1812 (plain API 1789) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2624 | 1796 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2624 | 1795 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 550 of 550 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -756,10 +756,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1794 |
-| Go | `go/schema/corpus_encode_test.go` | 1811 (plain 1788) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1794 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1794 |
+| Python | `tests/test_encode_round_trip.py` | 1795 |
+| Go | `go/schema/corpus_encode_test.go` | 1812 (plain 1789) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1795 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1796 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1559,6 +1559,44 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   - **C:** has no repeat. `schema_binary.py` refuses `element` and `index_base` by name.
   - **Fixtures:** `repeat-element-named`, `-unnamed`, `-null` and `-object`, and
     `repeat-index-base`.
+- **CR-2026-110 (PS-157 amended, PS-525 to PS-527): `on_repeat` on a tlv.**
+  - **What it does:** with `merge: true`, a name more than one entry reports - same tag or
+    not - is combined by its mode: `collect` (default, an array in payload order), `last`
+    (the last value wins) or `merge` (objects combined member by member; a member reported
+    twice is an error naming both, unless the member declares `on_repeat: last`). A field's
+    own `on_repeat` beats the tlv's. **Two departures from the CR text, at Jason's
+    decision, are implemented:** a tlv's `merge` default reaches its `type: object` fields
+    only (the rest keep `collect`), and a merged member may declare `last`.
+  - **One helper set per language, mirroring the spec prototype:** Python
+    `reported_fields`/`tlv_repeat_modes`/`on_repeat_schema_errors`/`combine_repeated`,
+    Go `go/schema/cr110.go`, Java `OnRepeat`, C# `OnRepeat.cs` plus `CombineRepeated` in
+    the decoder. The generator calls the Python helpers at generation time and folds each
+    entry through `tlvFold`, so the generated codec now collects as the interpreters do -
+    it used to keep the last value for every repeated name.
+  - **PS-526 is checked at load** in all four and by the validator and generator, in the
+    prototype's wording, over every tlv in the document.
+  - **A collected value that is itself a list stays one element.** All four appended a
+    second report *into* a first value that was a list (a repeat), splicing the elements;
+    the decoders now track which names they turned into arrays.
+  - **Encoding (PS-527):** a merged object is written one entry per case declaring members
+    the input supplies, in case declaration order; a `last` value once, under the first
+    case declaring it. **An array PS-157 collected is refused by name in all five**
+    ("tlv: '{n}' was collected into an array (PS-157), and writing one entry per element
+    (PS-502) is not supported") - the reference used to fail inside `int()` for a scalar
+    and zero-fill an object's members, and the generated codec wrote one wrong entry.
+    `encode-round-trip.py` files these as `collected-array` (recoverable) and `last`
+    losses as `last-value`.
+  - **Found on the way:** Go and Java parsed no cases for an inline `tlv:` block declaring
+    none of `tag_size`/`tag_fields`/`tag_key` (a one-byte tag is the default), so every
+    tag was unknown and the decode succeeded empty; C#'s tlv candidate sort was unstable
+    on ties, and now keeps declaration order as the reference does, which round-trips one
+    more vobo vector (C#'s encode floor is +2, not +1).
+  - **C:** no `on_repeat`; the harness skips such schemas with a named interpreter-gap
+    reason, and a vector expecting a PS-157 array, which `decode_result_t` cannot hold.
+    `schema_binary.py` refuses the key.
+  - **Fixtures:** `tlv-repeat-collect`, `-last`, `-merge`, `-member-last`,
+    `-object-collect`. Decode floors +6 everywhere; re-encode +1 (tlv-repeat-merge's
+    `object_members_combine`).
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.

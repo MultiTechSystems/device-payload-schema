@@ -66,7 +66,10 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # round-trip: its cases match a range of tags).
 # +5: repeat-element-named, -unnamed, -object, repeat-index-base and the null fixture's
 # vector with no null (CR-2026-111), all repeat. Its two null vectors are refused.
-FLOOR_TOTAL = 1794
+# +1: tlv-repeat-merge's object_members_combine (CR-2026-110), tlv. The other
+# tlv-repeat-* vectors are lossy by design (last) or collected arrays, which the
+# encoders refuse (PS-502 per element is not supported).
+FLOOR_TOTAL = 1795
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -74,7 +77,7 @@ FLOOR_BY_SHAPE = {
     # 1283 -> 1281 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped
     # only because their internal byte halves were all zero, which the encoder wrote
     # for an internal field with no value. It now reports such a field instead.
-    "tlv": 1299,
+    "tlv": 1300,   # +1: tlv-repeat-merge (CR-2026-110)
     "flagged": 193,
     "plain fixed": 133,
     "match": 125,

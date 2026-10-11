@@ -157,6 +157,11 @@ def test_reported_values_satisfy_their_declared_type():
                     else {declared_type}
                 )
                 checked += 1
+                if isinstance(value, list) and "array" not in allowed:
+                    # PS-507: a name a tlv collected into an array (PS-157,
+                    # CR-2026-110) is described by its entry element by element.
+                    if all(json_types(v) & allowed for v in value):
+                        continue
                 if not (json_types(value) & allowed):
                     problems.setdefault(path.name, set()).add(
                         f"{key}: {type(value).__name__} not in {sorted(allowed)}"
@@ -184,7 +189,8 @@ def test_reported_values_are_in_their_declared_enum():
                 if not subschema or "enum" not in subschema:
                     continue
                 checked += 1
-                if value not in subschema["enum"]:
+                values = value if isinstance(value, list) else [value]   # PS-507
+                if any(v not in subschema["enum"] for v in values):
                     problems.setdefault(path.name, set()).add(
                         f"{key}: {value!r} not in {subschema['enum'][:6]}"
                     )

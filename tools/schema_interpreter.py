@@ -770,6 +770,129 @@ def arithmetic_schema_errors(node, _top=True):
     return errors
 
 
+#: CR-2026-110 (PS-525): how a name reported by more than one tlv entry combines.
+ON_REPEAT = ('collect', 'merge', 'last')
+
+#: The constructs whose fields report into the enclosing object, so a tlv case reports
+#: their names as its own (the spec prototype's STRUCTURAL_KEYS).
+_REPORTING_CONSTRUCTS = ('match', 'byte_group', 'flagged', 'tlv')
+
+
+def reported_fields(fields):
+    """Every named field a field list reports, by name, first declaration first, looking
+    through the constructs whose fields merge into the enclosing object. An object's or
+    repeat's members are not descended into: they report under the field's own name.
+    The spec prototype's `declared_fields`."""
+    found = {}  # type: Dict[str, Dict[str, Any]]
+
+    def walk(items):
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            if 'type' in item:
+                if item.get('name'):
+                    found.setdefault(item['name'], item)
+                walk(item.get('trailer'))
+                continue
+            spec = next((item[k] for k in _REPORTING_CONSTRUCTS if k in item), None)
+            if isinstance(spec, list):
+                walk(spec)
+            elif isinstance(spec, dict):
+                walk(spec.get('fields'))
+                for body in (spec.get('cases') or {}).values():
+                    walk(body if isinstance(body, list) else None)
+                for group in spec.get('groups') or []:
+                    walk(group.get('fields') if isinstance(group, dict) else None)
+    walk(fields)
+    return found
+
+
+def tlv_repeat_modes(tlv_def):
+    """How each name a tlv reports combines when more than one entry reports it (PS-157,
+    PS-525, PS-526): (mode by name, the members of each merged object that declare
+    `last`, the schema errors).
+
+    A field's own `on_repeat` takes precedence over the tlv's. A tlv's `merge` reaches
+    its `type: object` fields only; any other field keeps `collect`, since only an
+    object can merge. With no `on_repeat` anywhere every field collects, as PS-157
+    always has.
+    Every declaration of one name must agree. The wording is the spec prototype's.
+    """
+    errors = []  # type: List[str]
+    modes = {}  # type: Dict[str, str]
+    last_members = {}  # type: Dict[str, set]
+    if not isinstance(tlv_def, dict):
+        return modes, last_members, errors
+    default = tlv_def.get('on_repeat', 'collect')
+    if default not in ON_REPEAT:
+        errors.append(f"tlv `on_repeat` is one of {', '.join(ON_REPEAT)}, not "
+                      f"{default!r} (PS-525)")
+        default = 'collect'
+    for body in (tlv_def.get('cases') or {}).values():
+        if not isinstance(body, list):
+            continue
+        for name, field_def in reported_fields(body).items():
+            own = field_def.get('on_repeat')
+            if own is not None and own not in ON_REPEAT:
+                errors.append(f"Field '{name}': `on_repeat` is one of "
+                              f"{', '.join(ON_REPEAT)}, not {own!r} (PS-525)")
+                continue
+            is_object = field_def.get('type') == 'object'
+            if own == 'merge' and not is_object:
+                errors.append(f"Field '{name}': only a `type: object` field may "
+                              f"declare `on_repeat: merge` (PS-526)")
+                continue
+            mode = own or (default if default != 'merge' or is_object else 'collect')
+            if modes.setdefault(name, mode) != mode:
+                errors.append(f"tlv: the fields reporting '{name}' declare different "
+                              f"`on_repeat`, {modes[name]} and {mode} (PS-526)")
+                continue
+            if mode == 'merge':
+                last_members.setdefault(name, set()).update(
+                    member['name'] for member in field_def.get('fields') or []
+                    if isinstance(member, dict) and member.get('on_repeat') == 'last'
+                    and member.get('name'))
+    return modes, last_members, errors
+
+
+def on_repeat_schema_errors(node):
+    """tlv_repeat_modes()'s errors for every tlv in a schema, wherever it sits (PS-526):
+    a schema that breaks the rules is invalid whether or not a payload reaches it."""
+    errors = []  # type: List[str]
+    if isinstance(node, dict):
+        if isinstance(node.get('tlv'), dict):
+            errors.extend(tlv_repeat_modes(node['tlv'])[2])
+        for key, value in node.items():
+            if key != 'test_vectors':
+                errors.extend(on_repeat_schema_errors(value))
+    elif isinstance(node, list):
+        for item in node:
+            errors.extend(on_repeat_schema_errors(item))
+    return errors
+
+
+def _reports_list(field_def):
+    """Whether a field's own value is a list - a repeat, or bytes rendered as an array -
+    so that a list under its name is not PS-157's collection of several entries."""
+    kind = field_def.get('type')
+    return kind == 'repeat' or (kind == 'bytes' and field_def.get('format') == 'array')
+
+
+def combine_repeated(name, earlier, value, mode, last_members):
+    """`last` keeps the later value; `merge` combines two objects member by member,
+    and a member reported twice is an error unless it declares `on_repeat: last`
+    (PS-525)."""
+    if mode == 'last':
+        return value
+    combined = dict(earlier)
+    for member, member_value in value.items():
+        if member in combined and member not in last_members:
+            raise ValueError(f"tlv: the merged object '{name}' reports its member "
+                             f"'{member}' twice (PS-525)")
+        combined[member] = member_value
+    return combined
+
+
 def annotation_errors(field_def):
     """PS-510 (CR-2026-102): a field's `ipso` is a mapping carrying `object`, and its
     `senml` a mapping. `ipso: 3303` loaded and every implementation dropped it, so the
@@ -2055,6 +2178,7 @@ class SchemaInterpreter:
             self._load_errors.extend(lookup_template_errors(field_def))
         self._load_errors.extend(arithmetic_schema_errors(schema))    # PS-445, PS-452
         self._load_errors.extend(annotation_schema_errors(schema))    # PS-510
+        self._load_errors.extend(on_repeat_schema_errors(schema))     # PS-525, PS-526
         self._load_errors.extend(meta_declaration_errors(schema))      # PS-491
         self._load_errors.extend(timestamp_errors(schema.get('metadata')))
         self._load_errors.extend(schema_iterator_errors(schema))
@@ -3920,7 +4044,11 @@ class SchemaInterpreter:
         
         result = {}
         channels = []
-        
+        # PS-525: how a name reported again combines. Its schema errors were reported
+        # at load (on_repeat_schema_errors), so only the modes are needed here.
+        modes, last_members, _ = tlv_repeat_modes(tlv_def)
+        collected = set()       # names already turned into arrays (PS-157)
+
         while pos < len(buf):
             # Where this entry begins, so PS-302 can count the bytes abandoned from the
             # unknown tag itself rather than from after it.
@@ -4091,14 +4219,21 @@ class SchemaInterpreter:
 
             if merge:
                 for k, v in tag_result.items():
-                    if k in result:
-                        # Repeated tag -> collect into array
-                        if isinstance(result[k], list):
-                            result[k].append(v)
-                        else:
-                            result[k] = [result[k], v]
-                    else:
+                    mode = modes.get(k, 'collect')
+                    if k not in result:
                         result[k] = v
+                    elif mode != 'collect':                         # PS-525
+                        result[k] = combine_repeated(k, result[k], v, mode,
+                                                     last_members.get(k, set()))
+                    elif k in collected:                            # PS-157
+                        result[k].append(v)
+                    else:
+                        # A name reported again becomes an array. Whether it already is
+                        # one is not the test: a value that is itself a list (a repeat)
+                        # was appended into, so its second report was spliced among the
+                        # first's elements.
+                        result[k] = [result[k], v]
+                        collected.add(k)
             else:
                 entry = {'tag': list(tag_tuple)}
                 entry.update(tag_result)
@@ -5599,40 +5734,83 @@ class SchemaInterpreter:
         length_size = tlv_def.get('length_size', 0) or 0
         byteorder = 'little' if self.endian == Endian.LITTLE else 'big'
         order = list(data)
+        modes = tlv_repeat_modes(tlv_def)[0]
+        # PS-527: a `last` value is written once, under the first case in declaration
+        # order that declares it, so no other case may claim it.
+        last_owner = {}  # type: Dict[str, Any]
+        for case_key, case_fields in cases.items():
+            if case_key == 'default' or not isinstance(case_fields, list):
+                continue
+            for name in reported_fields(case_fields):
+                if modes.get(name) == 'last':
+                    last_owner.setdefault(name, case_key)
 
         candidates = []
         for case_key, case_fields in cases.items():
             if case_key == 'default' or not isinstance(case_fields, list):
                 continue
-            names = [f['name'] for f in self._claimable_fields(case_fields)]
-            claimed = [n for n in names if n in data]
+            claimed = []
+            units = []          # what claiming this case spends
+            case_data = data
+            for f in self._claimable_fields(case_fields):
+                n = f['name']
+                if n not in data:
+                    continue
+                mode = modes.get(n, 'collect')
+                if mode == 'last' and last_owner.get(n) != case_key:
+                    continue
+                if isinstance(data[n], list) and not _reports_list(f):
+                    # PS-157 collected this name into an array. PS-502 writes one entry
+                    # per element, which this encoder does not do yet: say so, rather
+                    # than fail inside int() or write an object's members as zeros.
+                    raise ValueError(
+                        f"tlv: '{n}' was collected into an array (PS-157), and writing "
+                        f"one entry per element (PS-502) is not supported")
+                if mode == 'merge' and isinstance(data[n], dict):
+                    # PS-527: one entry per case declaring any of the merged object's
+                    # members the input supplies, holding those members - every such
+                    # case, so what it spends is its own and never already spent.
+                    members = [m.get('name') for m in f.get('fields') or []
+                               if isinstance(m, dict) and m.get('name')]
+                    subset = {m: v for m, v in data[n].items() if m in members}
+                    if not subset:
+                        continue
+                    if case_data is data:
+                        case_data = dict(data)
+                    case_data[n] = subset
+                    claimed.append(n)
+                    units.append((n, case_key))
+                    continue
+                claimed.append(n)
+                units.append(n)
             if not claimed:
                 continue
-            matches, lossless = self._case_fidelity(case_fields, data)
+            matches, lossless = self._case_fidelity(case_fields, case_data)
             candidates.append((
                 min(order.index(n) for n in claimed),   # payload order
                 0 if lossless else 1,                   # one that can reproduce the value
                 -matches,                               # then the fuller explanation
-                case_key, case_fields, claimed,
+                case_key, case_fields, units, case_data,
             ))
 
+        # Stable, so cases that tie keep their declaration order (PS-527).
         candidates.sort(key=lambda item: item[:3])
 
         out = bytearray()
         spent: set = set()
         emitted = []
-        for position, _, _, case_key, case_fields, claimed in candidates:
+        for position, _, _, case_key, case_fields, units, case_data in candidates:
             # Every decoded field belongs to one channel. Without this a name defined
             # under two tags emitted both of them, so am308 grew an extra channel.
-            if all(name in spent for name in claimed):
+            if all(unit in spent for unit in units):
                 continue
-            spent.update(claimed)
-            emitted.append((position, case_key, case_fields))
+            spent.update(units)
+            emitted.append((position, case_key, case_fields, case_data))
 
         emitted.sort(key=lambda item: item[0])
-        for _, case_key, case_fields in emitted:
+        for _, case_key, case_fields, case_data in emitted:
             tag = self._encode_tlv_tag(case_key, tlv_def)
-            value = self._encode_field_list(case_fields, data)
+            value = self._encode_field_list(case_fields, case_data)
             out.extend(tag)
             if length_size > 0:
                 out.extend(len(value).to_bytes(length_size, byteorder))

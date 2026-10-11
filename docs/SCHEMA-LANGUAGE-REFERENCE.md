@@ -908,6 +908,31 @@ Parse tag-based variable content. Supports single and multi-byte tags.
 The loop stops where the reserved bytes begin, and the fields after it read them. Fewer
 bytes than `reserve` at the start is an error.
 
+### A name reported more than once (`on_repeat`)
+
+With `merge: true`, a name two entries report - whether they share a tag or not - is
+combined as its `on_repeat` says (PS-157, PS-525): `collect` (the default) gathers the
+values into an array in payload order, `last` keeps the value reported last, and `merge`
+combines `type: object` values member by member.
+
+```yaml
+- tlv:
+    tag_size: 2
+    on_repeat: merge      # default for this tlv's object fields; others keep collect
+    cases:
+      0x0310: [{name: loramac, type: object, fields: [{name: adr, type: u8}]}]
+      0x0311: [{name: loramac, type: object, fields: [{name: dr, type: u8}]}]
+# 0310 01 0311 05  ->  {"loramac": {"adr": 1, "dr": 5}}
+```
+
+A field's own `on_repeat` takes precedence over the tlv's. Only a `type: object` field may
+declare `merge`, and every field reporting one name must resolve to the same mode, or the
+schema is rejected (PS-526). A merged object reporting one member twice is an error,
+unless that member declares `on_repeat: last`. The encoder writes a merged object as one
+entry per case declaring members the input supplies, and a `last` value once, under the
+first case declaring it (PS-527). Encoding an array PS-157 collected is not supported yet,
+and is refused by name.
+
 ### Multi-Byte Tags (Tektelic-style)
 
 ```yaml

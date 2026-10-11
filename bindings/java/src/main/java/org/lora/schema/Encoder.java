@@ -799,7 +799,8 @@ final class Encoder {
     private record Fidelity(int matches, boolean lossless) {}
 
     private record Candidate(int position, int lossPenalty, int matches, String caseKey,
-                             List<Field> caseFields, List<String> claimed) {}
+                             List<Field> caseFields, List<String> claimed,
+                             Map<String, Object> caseData) {}
 
     /**
      * Rebuild a TLV payload from decoded output.
@@ -820,23 +821,71 @@ final class Encoder {
         int lengthSize = Math.max(0, tlv.getLengthSize());
 
         List<String> order = new ArrayList<>(data.keySet());
+        OnRepeat.Modes modes = tlv.getRepeatModes();
+        // PS-527: a `last` value is written once, under the first case in declaration
+        // order that declares it, so no other case may claim it.
+        Map<String, String> lastOwner = new LinkedHashMap<>();
+        for (Map.Entry<String, List<Field>> entry : cases.entrySet()) {
+            if ("default".equals(entry.getKey()) || entry.getValue() == null) continue;
+            for (Field f : claimableFields(entry.getValue())) {
+                String name = payloadName(f);
+                if (name != null && "last".equals(modes.mode(name))) {
+                    lastOwner.putIfAbsent(name, entry.getKey());
+                }
+            }
+        }
 
         List<Candidate> candidates = new ArrayList<>();
         for (Map.Entry<String, List<Field>> entry : cases.entrySet()) {
             if ("default".equals(entry.getKey()) || entry.getValue() == null) continue;
             List<String> claimed = new ArrayList<>();
+            List<String> units = new ArrayList<>();     // what claiming this case spends
+            Map<String, Object> caseData = data;
             for (Field f : claimableFields(entry.getValue())) {
                 String name = payloadName(f);
-                if (name != null && data.containsKey(name)) claimed.add(name);
+                if (name == null || !data.containsKey(name)) continue;
+                String mode = modes.mode(name);
+                if ("last".equals(mode) && !entry.getKey().equals(lastOwner.get(name))) continue;
+                if (data.get(name) instanceof List<?> && !OnRepeat.reportsList(f)) {
+                    // PS-157 collected the name into an array; PS-502's one entry per
+                    // element is not supported, so say so rather than write a wrong frame.
+                    throw new SchemaException.EncodeException("tlv: '" + name + "' was collected into an array"
+                            + " (PS-157), and writing one entry per element (PS-502) is not supported");
+                }
+                if ("merge".equals(mode) && data.get(name) instanceof Map<?, ?> object) {
+                    // PS-527: one entry per case declaring any of the merged object's
+                    // members the input supplies, holding those members - every such
+                    // case, so what it spends is its own and never already spent.
+                    Set<String> members = new LinkedHashSet<>();
+                    if (f.getFields() != null) {
+                        for (Field m : f.getFields()) {
+                            if (m.getName() != null && !m.getName().isEmpty()) members.add(m.getName());
+                        }
+                    }
+                    Map<String, Object> subset = new LinkedHashMap<>();
+                    for (Map.Entry<?, ?> member : object.entrySet()) {
+                        String key = String.valueOf(member.getKey());
+                        if (members.contains(key)) subset.put(key, member.getValue());
+                    }
+                    if (subset.isEmpty()) continue;
+                    if (caseData == data) caseData = new LinkedHashMap<>(data);
+                    caseData.put(name, subset);
+                    claimed.add(name);
+                    units.add(name + "\u0000" + entry.getKey());
+                    continue;
+                }
+                claimed.add(name);
+                units.add(name);
             }
             if (claimed.isEmpty()) continue;
             int position = Integer.MAX_VALUE;
             for (String name : claimed) {
                 position = Math.min(position, order.indexOf(name));
             }
-            Fidelity fidelity = caseFidelity(entry.getValue(), data);
+            Fidelity fidelity = caseFidelity(entry.getValue(), caseData);
+            // Stable sort below, so cases that tie keep their declaration order (PS-527).
             candidates.add(new Candidate(position, fidelity.lossless() ? 0 : 1,
-                    fidelity.matches(), entry.getKey(), entry.getValue(), claimed));
+                    fidelity.matches(), entry.getKey(), entry.getValue(), units, caseData));
         }
 
         // Payload order first, then the case that can reproduce the value, then the fuller
@@ -863,7 +912,7 @@ final class Encoder {
         ByteBuf out = new ByteBuf();
         for (Candidate candidate : emitted) {
             byte[] tag = encodeTLVTag(candidate.caseKey(), tlv);
-            byte[] value = encodeFieldList(candidate.caseFields(), data);
+            byte[] value = encodeFieldList(candidate.caseFields(), candidate.caseData());
             out.write(tag);
             if (lengthSize > 0) {
                 out.write(writeInt(value.length, lengthSize, false));

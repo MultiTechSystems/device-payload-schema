@@ -399,6 +399,9 @@ type EncodeContext struct {
 	// returned bare bytes and so had nowhere to put them, which is why its
 	// encoder was the silent one. Read them with Schema.EncodeToResult.
 	Warnings []string
+	// order is the schema's source key order, from which encodeTLV recovers the cases'
+	// declaration order (PS-527). A Go map has none.
+	order keyOrder
 }
 
 // NewEncodeContext creates a new encode context.
@@ -433,6 +436,7 @@ func (ctx *EncodeContext) branch() *EncodeContext {
 	child := NewEncodeContext(ctx.Endian)
 	child.Variables = ctx.Variables
 	child.Definitions = ctx.Definitions
+	child.order = ctx.order
 	return child
 }
 
@@ -919,6 +923,11 @@ func ParseSchema(data string) (*Schema, error) {
 	if err := checkMetaDeclarations(raw, order); err != nil {
 		return nil, err
 	}
+	// CR-2026-110: on_repeat's values, merge on objects only, one mode per name
+	// (PS-525, PS-526), in case declaration order.
+	if err := checkOnRepeat(raw, order); err != nil {
+		return nil, err
+	}
 
 	schema := &Schema{repeatOnly: repeatOnlyNames(raw), keyOrder: order}
 	schema.rawName = raw["name"]
@@ -1070,6 +1079,29 @@ func enumLabel(v any) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// parseTLVCases reads a tlv block's `cases` mapping, keyed as written.
+func parseTLVCases(fm map[string]any) map[string][]Field {
+	var cases map[string][]Field
+	if casesMap, ok := fm["cases"].(map[string]any); ok {
+		cases = make(map[string][]Field)
+		for key, value := range casesMap {
+			if caseFieldsRaw, ok := value.([]any); ok {
+				cases[key] = parseFieldsRaw(caseFieldsRaw)
+			}
+		}
+	}
+	// YAML may hand back map[any]any for a mapping with non-string keys.
+	if casesMap, ok := fm["cases"].(map[any]any); ok {
+		cases = make(map[string][]Field)
+		for key, value := range casesMap {
+			if caseFieldsRaw, ok := value.([]any); ok {
+				cases[fmt.Sprintf("%v", key)] = parseFieldsRaw(caseFieldsRaw)
+			}
+		}
+	}
+	return cases
 }
 
 func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
@@ -1487,23 +1519,7 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	// tag_key, which is why elsys/ers decoded to nothing.
 	if f.Type == TypeTLV || f.Type == "tlv" || fm["tag_fields"] != nil ||
 		fm["tag_key"] != nil || fm["tag_size"] != nil {
-		if casesMap, ok := fm["cases"].(map[string]any); ok {
-			f.TLVCases = make(map[string][]Field)
-			for key, value := range casesMap {
-				if caseFieldsRaw, ok := value.([]any); ok {
-					f.TLVCases[key] = parseFieldsRaw(caseFieldsRaw)
-				}
-			}
-		}
-		// YAML may hand back map[any]any for a mapping with non-string keys.
-		if casesMap, ok := fm["cases"].(map[any]any); ok {
-			f.TLVCases = make(map[string][]Field)
-			for key, value := range casesMap {
-				if caseFieldsRaw, ok := value.([]any); ok {
-					f.TLVCases[fmt.Sprintf("%v", key)] = parseFieldsRaw(caseFieldsRaw)
-				}
-			}
-		}
+		f.TLVCases = parseTLVCases(fm)
 	}
 
 	// Bitfield string fields
@@ -1675,6 +1691,12 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	if tlvRaw, ok := fm["tlv"].(map[string]any); ok {
 		tlvField := parseFieldMap(tlvRaw, nil)
 		tlvField.Type = "tlv"
+		// An inline block is a tlv whatever it declares, so its cases are parsed even
+		// with no tag_size (default 1, PS-153). parseFieldMap looks for a marker, and
+		// without one left TLVCases empty: the block decoded to nothing, successfully.
+		if tlvField.TLVCases == nil {
+			tlvField.TLVCases = parseTLVCases(tlvRaw)
+		}
 		f.TLVInline = &tlvField
 	}
 
@@ -3170,6 +3192,10 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 
 	result := make(map[string]any)
 	var channels []map[string]any
+	// PS-525: how a name reported again combines. A schema breaking PS-525/PS-526 was
+	// refused at load, so only the modes are needed here.
+	repeat, _ := tlvRepeatModes(field.decl, nil)
+	collected := map[string]bool{} // names already turned into arrays (PS-157)
 
 	// Parse until end of data
 	for ctx.Remaining() > 0 {
@@ -3284,16 +3310,28 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 			}
 
 			if merge {
-				// Merge fields, converting to array if repeated
+				// A name reported again is combined as its on_repeat says (PS-157,
+				// PS-525): collected into an array by default. Whether the earlier value
+				// is already a list is not the test - a value that is itself a list (a
+				// repeat) was appended into, splicing the second report among the first's
+				// elements.
 				for k, v := range caseResult {
-					if existing, ok := result[k]; ok {
-						if arr, isArr := existing.([]any); isArr {
-							result[k] = append(arr, v)
-						} else {
-							result[k] = []any{existing, v}
-						}
-					} else {
+					existing, ok := result[k]
+					mode := repeat.mode(k)
+					switch {
+					case !ok:
 						result[k] = v
+					case mode != "collect":
+						combined, err := combineRepeated(k, existing, v, mode, repeat.lastMembers[k])
+						if err != nil {
+							return nil, err
+						}
+						result[k] = combined
+					case collected[k]:
+						result[k] = append(existing.([]any), v)
+					default:
+						result[k] = []any{existing, v}
+						collected[k] = true
 					}
 				}
 			} else {
@@ -3866,6 +3904,7 @@ func (s *Schema) encodeToContext(
 	ctx := NewEncodeContext(s.Endian)
 	ctx.TLVOrder = order
 	ctx.Definitions = s.Definitions
+	ctx.order = s.keyOrder
 
 	// Encode header fields first
 	if len(s.Header) > 0 {
@@ -4253,14 +4292,51 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 		key     string
 		fields  []Field
 		claimed []string
+		data    map[string]any
 	}
+	// PS-527: a `last` value is written once, under the first case in declaration order
+	// that declares it, and a merged object once per case declaring any member the
+	// input supplies, holding those members.
+	repeat, _ := tlvRepeatModes(field.decl, ctx.order)
 	candidates := []candidate{}
 	for key, caseFields := range field.TLVCases {
 		claimed := []string{}
+		caseData := data
 		for _, f := range claimableFields(caseFields, nil) {
-			if _, ok := data[f.Name]; ok {
-				claimed = append(claimed, f.Name)
+			value, ok := data[f.Name]
+			if !ok {
+				continue
 			}
+			mode := repeat.mode(f.Name)
+			if mode == "last" && repeat.lastOwner[f.Name] != key {
+				continue
+			}
+			if _, isList := value.([]any); isList && !reportsList(f) {
+				// PS-157 collected the name into an array; PS-502's one entry per
+				// element is not supported, so say so rather than write a wrong frame.
+				return fmt.Errorf("tlv: '%s' was collected into an array (PS-157), and writing one entry per element (PS-502) is not supported", f.Name)
+			}
+			if obj, isMap := value.(map[string]any); isMap && mode == "merge" {
+				subset := map[string]any{}
+				for _, member := range f.Fields {
+					if v, supplied := obj[member.Name]; supplied && member.Name != "" {
+						subset[member.Name] = v
+					}
+				}
+				if len(subset) == 0 {
+					continue
+				}
+				copied := make(map[string]any, len(caseData))
+				for k, v := range caseData {
+					copied[k] = v
+				}
+				copied[f.Name] = subset
+				caseData = copied
+				// Its own unit, never already spent, so every such case is emitted.
+				claimed = append(claimed, f.Name+"\x00"+key)
+				continue
+			}
+			claimed = append(claimed, f.Name)
 		}
 		if len(claimed) == 0 {
 			continue
@@ -4271,12 +4347,12 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 			// written, so it is not a candidate.
 			continue
 		}
-		matches, lossless := caseFidelity(caseFields, data)
+		matches, lossless := caseFidelity(caseFields, caseData)
 		lossy := 0
 		if !lossless {
 			lossy = 1
 		}
-		candidates = append(candidates, candidate{tag, lossy, matches, key, caseFields, claimed})
+		candidates = append(candidates, candidate{tag, lossy, matches, key, caseFields, claimed, caseData})
 	}
 
 	// Ordered for the claiming pass below, not for emission - the chosen set is re-sorted
@@ -4318,7 +4394,7 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 				continue
 			}
 			inner := ctx.branch()
-			if err := encodeFields(c.fields, data, inner); err != nil {
+			if err := encodeFields(c.fields, c.data, inner); err != nil {
 				return err
 			}
 			ctx.Write(c.tag)
@@ -4356,7 +4432,7 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 
 	for _, c := range chosen {
 		inner := ctx.branch()
-		if err := encodeFields(c.fields, data, inner); err != nil {
+		if err := encodeFields(c.fields, c.data, inner); err != nil {
 			return err
 		}
 		ctx.Write(c.tag)

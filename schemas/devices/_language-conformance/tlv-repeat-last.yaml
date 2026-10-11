@@ -1,0 +1,26 @@
+# `on_repeat: last` keeps the value reported last and discards the earlier ones
+# (PS-525, CR-2026-110): mclimate pir-mini sets `event` from several tags, and the
+# vendor keeps the last. The payload is the third row of CR-2026-110's table.
+#
+# Does not round-trip, by design: the discarded value and the tag that carried the kept
+# one are not in the output, so an encoder writes the value once, under the first case
+# declaring it (PS-527): `3a 02`.
+name: probe_tlv_repeat_last
+endian: big
+fields:
+- tlv:
+    tag_size: 1
+    on_repeat: last
+    cases:
+      0x3a:
+      - name: event
+        type: u8
+      0x40:
+      - name: event
+        type: u8
+test_vectors:
+- name: later_value_kept
+  source: spec-example
+  payload: "3a 01 40 02"
+  expected:
+    event: 2

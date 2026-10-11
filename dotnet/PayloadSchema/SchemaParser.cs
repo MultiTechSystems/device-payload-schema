@@ -131,6 +131,7 @@ public static partial class SchemaParser
         // The repeat iterator's rules and a tlv's reserve (CR-2026-048 to -055, -081),
         // over the whole document so an enclosing repeat's names are known.
         CheckIterator(root);
+        CheckOnRepeat(root);    // PS-525, PS-526 (CR-2026-110)
         CheckWave6b(root);    // PS-404, PS-433
         schema.RepeatOnlyNames = RepeatOnlyNames(root);
         // PS-491 (CR-2026-096): one reported name's declarations in one field list agree
@@ -754,6 +755,11 @@ public static partial class SchemaParser
                         if (kv.Value is YamlSequenceNode caseFieldsSeq)
                             f.TLVCases[caseKey] = ParseFields(caseFieldsSeq);
                     }
+                    // PS-525: how a name reported again combines. The schema errors are
+                    // CheckOnRepeat's, at load; only the modes are kept here.
+                    var (modes, lastMembers, _) = TlvRepeatModes(fm);
+                    f.TLVRepeatModes = modes;
+                    f.TLVLastMembers = lastMembers;
                 }
             }
             else if (casesNode is YamlSequenceNode casesSeq)
