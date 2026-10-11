@@ -188,17 +188,18 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2636 payload vectors in `schemas/devices/` (measured 2026-10-10 with
-`tools/check-floors.py`, after the CR-2026-118 and `match-u32-*` fixtures) are the shared
+The 2638 payload vectors in `schemas/devices/` (measured 2026-10-11 with
+`tools/check-floors.py`, after the CR-2026-118 fixtures and CR-2026-117's
+guard-absent-operand, and the `match-u32-*` fixtures) are the shared
 cross-language test set. Every implementation has a runner that reads the same YAML and
 the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
 | Python | `tests/test_corpus_conformance.py` | every vector | 1800 |
-| Go | `go/schema/corpus_conformance_test.go` | 2636 | 1817 (plain API 1794) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2636 | 1800 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2636 | 1800 |
+| Go | `go/schema/corpus_conformance_test.go` | 2638 | 1817 (plain API 1794) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2638 | 1800 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2638 | 1800 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 550 of 550 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -1299,8 +1300,8 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   element's names are restored away after it; a reference to one from after the array,
   or to a field of the element not yet decoded, is an error. Every other unbound
   reference from a `ref` or a `compute` operand makes its field absent in all five
-  (PS-314, PS-429; see the registry divergences below); a guard condition on one still
-  differs - Python and Java read 0, Go fails the condition. `index`, `count_as` (after `present_if`, CR-2026-080), `present_if` and
+  (PS-314, PS-429; see the registry divergences below); a guard condition on one fails
+  in all five (PS-540, CR-2026-117 below). `index`, `count_as` (after `present_if`, CR-2026-080), `present_if` and
   `carry` follow; `reserve` on a repeat and on a `tlv` is a buffer cut at the region's
   end with absolute positions, so nothing inside can read the trailer, and a repeat's
   `trailer` decodes first into the enclosing scope. Schema rules are rejected at load by
@@ -1611,6 +1612,33 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     round-trips. Floors: decode 2618 -> 2628 in Go, Java and C#; re-encode +2 everywhere
     (Python, Java, C# 1794 -> 1796; Go 1811 -> 1813, plain 1788 -> 1790); `plain fixed`
     133 -> 135 in all four.
+- **CR-2026-117 (PS-539, PS-540, 2026-10-11).** PS-536's tag component name binding
+  landed with PR #93; this adds the other two.
+  - **PS-539: a `$` reference naming nothing the schema declares is rejected at load**,
+    as "`$batery` (ref) names no field, var, tag component, index or count_as the schema
+    declares (PS-539)", identical in all four. One walk per language over the raw,
+    `$ref`-spliced document, the spec prototype's `check_references`: Python
+    `reference_errors` (interpreter at decode per PS-328, validator, TS013 generator, and
+    `schema_binary.py` for C's blob), Go `references.go`, Java `References`, C#
+    `References.cs`. Declared: every `name`, `var`, `index`, `count_as` at any depth (so a
+    `byte_group`/`flagged` member, a tag component and a `$ref`-spliced field all count),
+    a `metadata` include or timestamp name, and **`element` for an `element` that declares
+    no name** (PS-528) - the prototype omits that last and would reject
+    `repeat-element-unnamed.yaml`'s `$element`. Not checked: `lookup`, `values`, `else`,
+    `value`, a non-match `default`, a `metadata.include` `source`. Where a name is declared
+    is not checked (PS-314), but `validate_schema.py`'s older order check (PS-122/PS-147)
+    still flags a reference to a later field. Measured before landing: **no** device,
+    library or example schema, and none of the 501 private-registry schemas, is rejected.
+    Go, Java and C# report the first violation; Python all.
+  - **PS-540: a guard or `present_if` condition on an absent value fails**, so `else`
+    applies or the field is omitted. Python and Java read 0, so `gte: 0` passed; the
+    generated codec compared `undefined !== 3` as true and `null >= 0` as true, and now
+    tests `!= null` first, `not_in` (CR-2026-118) included. A repeat's `present_if` is evaluated with its element whole, so
+    a name of the element with no value is absent there, not a PS-368 "not yet decoded"
+    error. C has no guard. Fixture: `guard-absent-operand.yaml` (decode floors
+    2628 -> 2630 in Go, Java and C#; re-encode unchanged, PS-387).
+  - Tests that used an undeclared name to mean "absent" now declare it as a trailing
+    `optional` field (Go `TestRefFieldNotFound`, Java `Wave6aTest`, C# `CR2026_071_073Tests`).
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.

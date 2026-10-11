@@ -4042,7 +4042,11 @@ fields:
     compute: {op: add, a: $nonexistent, b: 1}
   - name: after
     type: u8
+  - name: nonexistent
+    type: u8
+    optional: true
 `
+	// The name is declared (PS-539, CR-2026-117); its optional field is not in the payload.
 	schema, err := ParseSchema(schemaYAML)
 	if err != nil {
 		t.Fatalf("ParseSchema() error = %v", err)
