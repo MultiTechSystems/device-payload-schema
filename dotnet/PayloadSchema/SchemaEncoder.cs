@@ -125,6 +125,10 @@ public static class SchemaEncoder
                 return _result;
             }
 
+            // DeriveInputs also makes the masks the groups fix visible to the constructs
+            // before the block, as the decoder's variables are: dnt binds its mask with an
+            // inline match (CR-2026-136).
+
             // Bit ranges sharing a byte are packed together rather than a byte apiece
             // (CR-2026-024), so the whole list is walked at once: a run cannot be found
             // by looking at one field in isolation.
@@ -154,7 +158,7 @@ public static class SchemaEncoder
         /// of the constructs, so a case body may itself hold a construct.
         /// </summary>
         byte[] EncodeOne(SchemaField field, Dictionary<string, object?> data,
-            List<SchemaField> siblings)
+            List<SchemaField> siblings, FrameBuffer? frame = null)
         {
             if (field.Ref2 != null)
             {
@@ -170,11 +174,11 @@ public static class SchemaEncoder
             if (field.Type == FieldType.TLV && field.TLVCases != null)
                 return EncodeTLV(field, data);
             if (field.MatchInline != null)
-                return EncodeMatch(field.MatchInline, data);
+                return EncodeMatch(field.MatchInline, data, frame?.Pending);
             if (field.Flagged != null)
                 return EncodeFlagged(field.Flagged, data);
             if (field.Type == FieldType.Match && string.IsNullOrEmpty(field.Name))
-                return EncodeMatch(field, data);
+                return EncodeMatch(field, data, frame?.Pending);
 
             switch (field.Type)
             {
@@ -247,7 +251,18 @@ public static class SchemaEncoder
 
             if (field.Type == FieldType.BitfieldString)
                 return EncodeBitfieldString(field, value?.ToString() ?? "");
-            return EncodeField(field, ReverseModifiers(value, field));
+            var reversedValue = ReverseModifiers(value, field);
+            if (field.Type == FieldType.Bool && frame != null)
+            {
+                // A bool is its `bit` of the byte it peeks, advancing only where it
+                // declares `consume` (PS-389, PS-066, CR-2026-136). It was written as a
+                // whole byte of 0 or 1.
+                bool set = reversedValue is bool b ? b
+                    : Helpers.ToFloat64(reversedValue) is (true, not 0);
+                frame.PlaceBits(1, false, field.Bit, set ? 1UL : 0UL, field.Consume);
+                return Array.Empty<byte>();
+            }
+            return EncodeField(field, reversedValue);
         }
 
 
@@ -352,7 +367,10 @@ public static class SchemaEncoder
         byte[] EncodeWithBitfieldRuns(List<SchemaField> fields,
                                       Dictionary<string, object?> data, bool topLevel)
         {
-            var output = new List<byte>();
+            // CR-2026-136: laid out as the decoder reads it. A bit range or bool that does
+            // not consume leaves its bytes pending, and the next field's bytes are ORed
+            // into them rather than written after them.
+            var output = new FrameBuffer();
             var run = new List<SchemaField>();
 
             void Flush()
@@ -362,7 +380,7 @@ public static class SchemaEncoder
                 run.Clear();
                 try
                 {
-                    output.AddRange(EncodeBitfieldRun(pending, data));
+                    EncodeBitfieldRun(pending, data, output);
                 }
                 catch (Exception e)
                 {
@@ -402,7 +420,8 @@ public static class SchemaEncoder
                     Flush();
                     try
                     {
-                        output.AddRange(EncodeOne(field, data, fields));
+                        var bytes = EncodeOne(field, data, fields, output);
+                        output.Extend(bytes, CarriedBy(bytes));
                     }
                     catch (Exception e)
                     {
@@ -417,14 +436,38 @@ public static class SchemaEncoder
                 if (field.Consume >= 1) Flush();
             }
             Flush();
-            return output.ToArray();
+            var frameBytes = output.Frame();
+            _frameBytes = frameBytes;
+            _framePending = output.PendingCount;
+            return frameBytes;
         }
 
-        /// <summary>Pack one run of bit ranges into the byte or bytes they share.</summary>
-        byte[] EncodeBitfieldRun(List<SchemaField> run, Dictionary<string, object?> data)
+        // The last field list's bytes and how many at its end are still pending: a
+        // construct whose bytes are exactly those carries the tail to the enclosing list
+        // (CR-2026-136, the reference's Frame). Matched by reference, so bytes built any
+        // other way carry nothing.
+        byte[]? _frameBytes;
+        int _framePending;
+
+        int CarriedBy(byte[] bytes) => ReferenceEquals(bytes, _frameBytes) ? _framePending : 0;
+
+        /// <summary>
+        /// Place one run of bit ranges into the byte or bytes they share. Each range is ORed
+        /// into the frame's pending base, in the run's byte order, and advances only by its
+        /// own <c>consume</c> (CR-2026-136, PS-016), so the bytes a range peeks are shared
+        /// with whatever field comes next, as a decoder reads them. The run used to be
+        /// written whole, and the next field's bytes after it.
+        /// </summary>
+        void EncodeBitfieldRun(List<SchemaField> run, Dictionary<string, object?> data,
+                               FrameBuffer output)
         {
-            ulong packed = 0;
-            int size = 1;
+            // The run's shared base is in its fields' effective byte order (PS-059): a
+            // field's own `endian` where one declares it, else the schema's.
+            var runEndian = run.Select(m => m.Endian).FirstOrDefault(e => !string.IsNullOrEmpty(e)) ?? _endian;
+            bool little = runEndian == "little";
+            // Every range is resolved and checked before any is placed, so a rejected value
+            // leaves nothing of its run pending in the frame.
+            var placements = new List<(int baseSize, int start, ulong bits, int consume)>();
             foreach (var member in run)
             {
                 object? value = string.IsNullOrEmpty(member.Name) ? 0.0
@@ -433,6 +476,7 @@ public static class SchemaEncoder
                     : data.TryGetValue(member.Name, out var v) && v != null ? v
                     // PS-551. A range was written as zero bits, which read back as a value.
                     : throw new InvalidOperationException(MissingFieldMessage(member.Name));
+                var given = value;
                 value = ReverseModifiers(value, member);
                 var (ok, numeric) = Helpers.ToFloat64(value);
                 if (!ok)
@@ -443,18 +487,18 @@ public static class SchemaEncoder
                         // zero, which would be the silent wrong answer this fix removes.
                         numeric = BitfieldLabelValue(value, member);
                 }
-                long raw = (long)Math.Round(numeric, MidpointRounding.ToEven);
                 var bitRange = Helpers.ParseBitRange(member.RawType)!.Value;
                 int bitLen = bitRange.end - bitRange.start + 1;
-                size = Math.Max(size, Math.Max(1,
-                    Math.Max(member.BitBaseBytes, member.Consume)));
+                // PS-552, PS-064, PS-168: rounded ties to even and checked against the
+                // range's width - never masked into a neighbour's bits. The mask below only
+                // keeps a signed value's two's complement within the width (PS-062).
+                long raw = CheckBitRange(member, RoundToInteger(numeric), bitLen, given);
                 ulong mask = bitLen >= 64 ? ulong.MaxValue : (1UL << bitLen) - 1;
-                packed |= ((ulong)raw & mask) << bitRange.start;
+                placements.Add((Math.Max(1, member.BitBaseBytes), bitRange.start,
+                    (ulong)raw & mask, member.Consume));
             }
-            // The run's shared base is in its fields' effective byte order (PS-059): a
-            // field's own `endian` where one declares it, else the schema's.
-            var runEndian = run.Select(m => m.Endian).FirstOrDefault(e => !string.IsNullOrEmpty(e)) ?? _endian;
-            return Helpers.EncodeUint(packed, Math.Max(1, size), runEndian);
+            foreach (var (baseSize, start, bits, consume) in placements)
+                output.PlaceBits(baseSize, little, start, bits, consume);
         }
 
         /// <summary>The number a bit range's enum label stands for.</summary>
@@ -688,32 +732,32 @@ public static class SchemaEncoder
         /// <summary>Encode the groups whose fields the data carries; the absent ones cost no bytes.</summary>
         byte[] EncodeFlagged(FlaggedDef fd, Dictionary<string, object?> data)
         {
-            var output = new List<byte>();
+            // CR-2026-136: the given groups' members are one field list, laid out as a
+            // decoder reads them, so a bool or bit range in a group is its bits of a shared
+            // byte (vobo's digital groups), and a peek at the end carries to the field after
+            // the block. Each group used to be its own list, so a byte two groups shared was
+            // written twice. An internal member goes through PS-434 in EncodeOne; an omitted
+            // member declaring `sentinel` writes its first one (PS-427). A member with no
+            // name is taken only where it is a construct in its group, as the reference
+            // takes it.
+            var members = new List<SchemaField>();
             foreach (var group in fd.Groups)
             {
                 if (!GroupHasData(group, data)) continue;
                 if (group.Fields.Any(gf => string.IsNullOrEmpty(gf.Name)))
                 {
                     // A construct in the group - a nested flagged block, a byte_group - is
-                    // encoded as any field list is. It was passed over as nameless, so a
-                    // nested group's values were dropped without a word.
-                    output.AddRange(EncodeFieldList(group.Fields, data));
+                    // encoded as any field list is, so the whole group joins the list. It
+                    // was passed over as nameless, so a nested group's values were dropped.
+                    members.AddRange(group.Fields);
                     continue;
                 }
-                // Routed through the run packing for consistency with every other field
-                // list, not because anything needs it today: no `flagged` group in the
-                // corpus holds a bit range. One that grows a run will pack correctly.
-                // An internal member that reads bytes goes through PS-434 in EncodeOne - its
-                // value, else the input's, else an error. It was skipped here, writing none
-                // of the bytes the decoder reads, so every later member was misplaced. An
-                // omitted member declaring `sentinel` writes its first one (PS-427).
-                var emit = group.Fields
-                    .Where(gf => !string.IsNullOrEmpty(gf.Name) && gf.Type != FieldType.Number)
-                    .ToList();
-                // A member the input omits is rejected in EncodeOne (PS-551).
-                output.AddRange(EncodeWithBitfieldRuns(emit, data, topLevel: false));
+                members.AddRange(group.Fields.Where(gf => !string.IsNullOrEmpty(gf.Name)));
             }
-            return output.ToArray();
+            // A given group's members are each required (PS-551), as in any field list: a
+            // nested block's mask is derived and a run of bit ranges is packed.
+            if (members.Count == 0) return Array.Empty<byte>();
+            return EncodeWithBitfieldRuns(members, DeriveInputs(members, data), topLevel: false);
         }
 
         /// <summary>
@@ -741,6 +785,7 @@ public static class SchemaEncoder
                     : data.TryGetValue(member.Name, out var v) && v != null ? v
                     // PS-551. A member was written as zero bits, which read back as a value.
                     : throw new InvalidOperationException(MissingFieldMessage(member.Name));
+                var given = value;
                 if (member.Type == FieldType.Bool)
                 {
                     // A bool member is one bit of the group's value (PS-364).
@@ -754,7 +799,8 @@ public static class SchemaEncoder
                     if (value is bool flag) numeric = flag ? 1 : 0;
                     else continue;
                 }
-                long raw = (long)Math.Round(numeric, MidpointRounding.ToEven);
+                double rounded = RoundToInteger(numeric);                          // PS-552
+                long raw = (long)rounded;
 
                 int bitStart = member.BitOffset;
                 int bitLen = member.BitCount > 0 ? member.BitCount : 0;
@@ -763,6 +809,8 @@ public static class SchemaEncoder
                 {
                     bitStart = bitRange.Value.start;
                     bitLen = bitRange.Value.end - bitRange.Value.start + 1;
+                    // PS-168: checked against the range's width, where it was masked silently.
+                    raw = CheckBitRange(member, rounded, bitLen, given);
                 }
                 if (bitLen > 0)
                 {
@@ -772,7 +820,10 @@ public static class SchemaEncoder
                 else
                 {
                     // A whole integer is its full range (PS-070), masked like any other member.
-                    int bits = Cr131.MemberRange(member).high + 1;
+                    var whole = Cr131.MemberRange(member);
+                    int bits = whole.high + 1;
+                    var (low, high) = IntegerBounds(bits, whole.signed);
+                    raw = (long)CheckFits(rounded, low, high, member.Name, given);     // PS-168
                     packed |= bits >= 64 ? (ulong)raw : (ulong)raw & ((1UL << bits) - 1);
                 }
             }
@@ -929,7 +980,8 @@ public static class SchemaEncoder
         /// `field: $var` read nothing, so writing the discriminator here would duplicate the
         /// earlier field that produced it.
         /// </remarks>
-        byte[] EncodeMatch(SchemaField match, Dictionary<string, object?> data)
+        byte[] EncodeMatch(SchemaField match, Dictionary<string, object?> data,
+            IReadOnlyList<byte>? peeked = null)
         {
             object? discriminator = null;
             if (!string.IsNullOrEmpty(match.Name) && data.TryGetValue(match.Name, out var named))
@@ -958,6 +1010,26 @@ public static class SchemaEncoder
                         && data.TryGetValue(source.Name, out var byField))
                         discriminator = ReferenceBinding(byField, source);
                 }
+            }
+
+            if (discriminator == null && !string.IsNullOrEmpty(match.Var)
+                && data.TryGetValue(match.Var, out var byMatchVar) && byMatchVar != null)
+                // An inline discriminator bound to a variable the rest of the input fixes -
+                // dnt's presence mask, which the flagged block after it reads.
+                discriminator = byMatchVar;
+            if (discriminator == null && match.Length > 0 && peeked != null
+                && peeked.Count >= match.Length)
+            {
+                // CR-2026-136: a bit range before the match peeked these bytes and has
+                // filled them, so they are the discriminator the decoder will read
+                // (r718x's command and device bytes, dnt's first command).
+                ulong peekValue = 0;
+                for (int i = 0; i < match.Length; i++)
+                {
+                    int at = _endian == "little" ? match.Length - 1 - i : i;
+                    peekValue = (peekValue << 8) | peeked[at];
+                }
+                discriminator = (double)peekValue;
             }
 
             MatchCase? matched = null;
@@ -1023,8 +1095,13 @@ public static class SchemaEncoder
                     var value = ok ? (long)Math.Round(numeric, MidpointRounding.ToEven) : 0L;
                     fallbackOut.AddRange(Helpers.EncodeUint((ulong)value, match.Length, _endian));
                 }
-                fallbackOut.AddRange(EncodeFieldList(fallbackFields, data));
-                return fallbackOut.ToArray();
+                var fallbackBody = EncodeFieldList(fallbackFields, data);
+                int fallbackPending = CarriedBy(fallbackBody);
+                fallbackOut.AddRange(fallbackBody);
+                var fallbackBytes = fallbackOut.ToArray();
+                _frameBytes = fallbackBytes;
+                _framePending = fallbackPending;
+                return fallbackBytes;
             }
 
             var output = new List<byte>();
@@ -1051,8 +1128,13 @@ public static class SchemaEncoder
                 }
                 output.AddRange(WriteUint(value, match.Length, _endian));
             }
-            output.AddRange(EncodeFieldList(matched!.Fields, data));
-            return output.ToArray();
+            var body = EncodeFieldList(matched!.Fields, data);
+            int bodyPending = CarriedBy(body);
+            output.AddRange(body);
+            var matchBytes = output.ToArray();
+            _frameBytes = matchBytes;
+            _framePending = bodyPending;
+            return matchBytes;
         }
 
         static bool IsDefaultCase(MatchCase c)
@@ -1580,6 +1662,9 @@ public static class SchemaEncoder
         /// </remarks>
         object? ReverseModifiers(object? value, SchemaField field)
         {
+            // The value as given, for a PS-168 rejection to name (PS-552).
+            _givenField = field;
+            _givenValue = value;
             var reversed = ReverseLookup(value, field.Lookup);
 
             if (reversed is bool unmatched && field.Lookup is { Count: > 0 })
@@ -1688,6 +1773,77 @@ public static class SchemaEncoder
             return value;
         }
 
+        // --- PS-552 rounding and the PS-168 fit check ----------------------------------
+
+        SchemaField? _givenField;
+        object? _givenValue;
+
+        /// <summary>The value the input gave for this field, before its arithmetic was
+        /// inverted; <paramref name="fallback"/> where ReverseModifiers did not see it.</summary>
+        object? Given(SchemaField field, object? fallback)
+            => ReferenceEquals(_givenField, field) ? _givenValue : fallback;
+
+        /// <summary>
+        /// PS-552: the nearest integer to the binary64 value, a tie to even. Kept as a double
+        /// so a value past the range of <c>long</c> still reaches the fit check intact.
+        /// </summary>
+        static double RoundToInteger(double value) => Math.Round(value, MidpointRounding.ToEven);
+
+        /// <summary>The range a whole integer of <paramref name="bits"/> bits holds.</summary>
+        static (double low, double high) IntegerBounds(int bits, bool signed)
+            => signed
+                ? (-Math.Pow(2, bits - 1), Math.Pow(2, bits - 1) - 1)
+                : (0, Math.Pow(2, bits) - 1);
+
+        /// <summary>
+        /// PS-168, PS-552: the rounded integer fits the field's type, or the input is rejected
+        /// naming the field and the value given, in the spec prototype's text. It was masked
+        /// to the width, or reported as "N does not fit 1 unsigned bytes" with no field.
+        /// </summary>
+        static double CheckFits(double raw, double low, double high, string? name, object? given,
+            string? bitRange = null)
+        {
+            // A bit range (PS-064, CR-2026-136) names its type after the range, as the spec
+            // prototype does: "... outside 0 to 15 for u8[0:3] (PS-168)".
+            if (raw < low || raw > high)
+                throw new InvalidOperationException(
+                    $"Field '{name}': {JsNumber(given)} encodes as {JsNumber(raw)}, outside "
+                    + $"{JsNumber(low)} to {JsNumber(high)}"
+                    + (bitRange != null ? $" for {bitRange}" : "") + " (PS-168)");
+            return raw;
+        }
+
+        /// <summary>
+        /// A bit range's type is its width (PS-168, PS-552), signed where the type starts with
+        /// <c>s</c>. One place, so the reading of PS-168 for a bit range is easy to adjust.
+        /// </summary>
+        static long CheckBitRange(SchemaField member, double raw, int bitLen, object? given)
+        {
+            bool signed = (member.RawType ?? "").StartsWith("s");
+            var (low, high) = IntegerBounds(bitLen, signed);
+            return (long)CheckFits(raw, low, high, member.Name, given, member.RawType);
+        }
+
+        /// <summary>A number as JavaScript's String(number) writes it: no `.0` on an
+        /// integral value, else the shortest round-tripping digits.</summary>
+        static string JsNumber(object? value)
+        {
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            switch (value)
+            {
+                case null: return "null";
+                case bool b: return b ? "true" : "false";
+                case string text: return text;
+            }
+            var (ok, d) = Helpers.ToFloat64(value);
+            if (!ok) return value.ToString() ?? "";
+            if (d == Math.Floor(d) && Math.Abs(d) < 1e21)
+                return Math.Abs(d) < 9e15
+                    ? ((long)d).ToString(inv)
+                    : ((decimal)d).ToString(inv);
+            return d.ToString("R", inv);
+        }
+
         // --- one field's bytes -------------------------------------------------------
 
         byte[] EncodeField(SchemaField field, object? value)
@@ -1696,10 +1852,23 @@ public static class SchemaEncoder
 
             if (field.Type == FieldType.Bits || Helpers.ParseBitRange(field.RawType) != null)
             {
-                // A bit range outside a byte_group: the reference interpreter writes the
-                // value into one byte rather than reconstructing a byte it does not own.
+                // A lone bit range: the value in place, in its base's bytes, as the
+                // reference writes it. Rounded and checked against the range's width
+                // (PS-552, PS-168); it was truncated and masked to one byte.
                 var (bitsOk, bitsValue) = Helpers.ToFloat64(value);
-                return new[] { (byte)((bitsOk ? (long)bitsValue : 0L) & 0xFF) };
+                if (!bitsOk)
+                {
+                    if (value is bool bit) bitsValue = bit ? 1 : 0;
+                    else throw NotANumber(field, value);
+                }
+                var lone = Helpers.ParseBitRange(field.RawType);
+                if (lone == null) return new[] { (byte)((long)RoundToInteger(bitsValue) & 0xFF) };
+                int loneLen = lone.Value.end - lone.Value.start + 1;
+                long loneRaw = CheckBitRange(field, RoundToInteger(bitsValue), loneLen,
+                    Given(field, value));
+                ulong loneMask = loneLen >= 64 ? ulong.MaxValue : (1UL << loneLen) - 1;
+                return Helpers.EncodeUint(((ulong)loneRaw & loneMask) << lone.Value.start,
+                    Math.Max(1, field.BitBaseBytes), endian);
             }
 
             if (field.Type == FieldType.Bool)
@@ -1728,6 +1897,13 @@ public static class SchemaEncoder
                 {
                     var (ok, numeric) = Helpers.ToFloat64(value);
                     if (!ok) throw NotANumber(field, value);
+                    if (field.Type is FieldType.U32BE16LE or FieldType.S32BE16LE)
+                    {
+                        // PS-552, PS-168: a 32-bit integer, rounded and checked.
+                        var (low, high) = IntegerBounds(32, field.Type == FieldType.S32BE16LE);
+                        numeric = CheckFits(RoundToInteger(numeric), low, high, field.Name,
+                            Given(field, value));
+                    }
                     return Wave4.WriteWordOrdered(field.Type, numeric);
                 }
                 case FieldType.UFlt16 or FieldType.SFlt16 or FieldType.SFlt24:
@@ -1737,9 +1913,13 @@ public static class SchemaEncoder
                     return Helpers.EncodeUint(Wave4.EncodeMinifloat(field.Type, numeric),
                         Wave4.MinifloatSize(field.Type), endian);
                 }
+                // Word-ordered (PS-271, PS-272): least significant unit first, each unit
+                // big-endian; rounded and checked as 32 bits (PS-552, PS-168).
                 case FieldType.U32LE16 or FieldType.S32LE16:
                 {
-                    long raw = RequireNumber(field, value);
+                    var (low, high) = IntegerBounds(32, field.Type == FieldType.S32LE16);
+                    long raw = (long)CheckFits(RequireRounded(field, value), low, high,
+                        field.Name, Given(field, value));                              // PS-168
                     long combined = raw < 0 ? raw + 0x100000000L : raw;
                     combined &= 0xFFFFFFFFL;
                     var wordOrdered = new List<byte>();
@@ -1750,25 +1930,29 @@ public static class SchemaEncoder
                 case FieldType.U8 or FieldType.U16 or FieldType.U24 or FieldType.U32
                         or FieldType.U64:
                 {
-                    long raw = RequireNumber(field, value);
+                    // PS-552: rounded ties to even before any encoding, then checked against
+                    // the type (PS-168).
+                    double rounded = RequireRounded(field, value);
+                    int width = Helpers.InferLengthFromType(field.Type);
+                    var (low, high) = IntegerBounds(width * 8, false);
                     if (field.Encoding != null)
                     {
                         // The inverse of the named code, after the modifiers are reversed (PS-463).
-                        int width = Helpers.InferLengthFromType(field.Type);
-                        return Helpers.EncodeUint(Wave4.EncodeEncoding(raw, field.Encoding, width, field.Name),
-                            width, endian);
+                        ulong coded = Wave4.EncodeEncoding((long)rounded, field.Encoding, width, field.Name);
+                        CheckFits(coded, low, high, field.Name, Given(field, value));
+                        return Helpers.EncodeUint(coded, width, endian);
                     }
-                    return WriteUint(raw, Helpers.InferLengthFromType(field.Type), endian);
+                    CheckFits(rounded, low, high, field.Name, Given(field, value));
+                    return Helpers.EncodeUint(rounded >= 9223372036854775808.0
+                        ? (ulong)rounded : (ulong)(long)rounded, width, endian);
                 }
                 case FieldType.S8 or FieldType.S16 or FieldType.S24 or FieldType.S32
                         or FieldType.S64:
                 {
-                    long raw = RequireNumber(field, value);
                     int size = Helpers.InferLengthFromType(field.Type);
-                    long half = 1L << (size * 8 - 1);
-                    if (size < 8 && (raw < -half || raw >= half))
-                        throw new InvalidOperationException(
-                            $"{raw} does not fit {size} signed bytes");
+                    var (low, high) = IntegerBounds(size * 8, true);
+                    long raw = (long)CheckFits(RequireRounded(field, value), low, high,
+                        field.Name, Given(field, value));                              // PS-168
                     return Helpers.EncodeSint(raw, size, endian);
                 }
                 case FieldType.F16:
@@ -1896,7 +2080,9 @@ public static class SchemaEncoder
 
         // --- primitives --------------------------------------------------------------
 
-        static long RequireNumber(SchemaField field, object? value)
+        /// <summary>The value as a number rounded ties to even (PS-552), kept a double so the
+        /// fit check sees it whole.</summary>
+        static double RequireRounded(SchemaField field, object? value)
         {
             var (ok, numeric) = Helpers.ToFloat64(value);
             if (!ok)
@@ -1904,7 +2090,7 @@ public static class SchemaEncoder
                 if (value is bool flag) return flag ? 1 : 0;
                 throw NotANumber(field, value);
             }
-            return (long)Math.Round(numeric, MidpointRounding.ToEven);
+            return RoundToInteger(numeric);
         }
 
         static InvalidOperationException NotANumber(SchemaField field, object? value)
@@ -2022,5 +2208,87 @@ public static class SchemaEncoder
             }
             return negative ? -magnitude : magnitude;
         }
+    }
+}
+
+/// <summary>
+/// The bytes a field list writes, laid out as a decoder reads them (CR-2026-136). The
+/// reference's FrameBuffer in tools/schema_interpreter.py, ported.
+/// </summary>
+/// <remarks>
+/// A bit range or a bool that does not <c>consume</c> leaves the bytes it filled pending:
+/// a decoder peeks them (PS-059, PS-066), so the next field reads the same bytes, and its
+/// own bits or bytes are ORed into them. Bytes still pending at the end are written too,
+/// since a decoder reads them.
+/// </remarks>
+internal sealed class FrameBuffer
+{
+    readonly List<byte> _buf = new();
+    readonly List<byte> _pending = new();
+
+    public IReadOnlyList<byte> Pending => _pending;
+
+    public int PendingCount => _pending.Count;
+
+    /// <summary>Write a field's bytes, ORed from the start with whatever is pending; the
+    /// pending bytes they cover are then dropped. Where the bytes are a nested field list's
+    /// and its last <paramref name="carried"/> are still pending there - peeked and consumed
+    /// by nothing in it - they stay pending here, ORed with any older pending beyond them,
+    /// so the field after the construct shares them, as a decoder reads it. The reference's
+    /// FrameBuffer.extend and its Frame.pending.</summary>
+    public void Extend(byte[] data, int carried = 0)
+    {
+        carried = Math.Min(Math.Max(carried, 0), data.Length);
+        int shared = Math.Min(_pending.Count, data.Length);
+        var merged = new byte[data.Length];
+        for (int i = 0; i < data.Length; i++)
+            merged[i] = i < shared ? (byte)(data[i] | _pending[i]) : data[i];
+        _pending.RemoveRange(0, shared);
+        if (carried > 0)
+        {
+            int written = merged.Length - carried;
+            for (int i = 0; i < written; i++) _buf.Add(merged[i]);
+            var tail = new List<byte>();
+            for (int i = written; i < merged.Length; i++) tail.Add(merged[i]);
+            for (int i = 0; i < _pending.Count; i++)
+            {
+                if (i < tail.Count) tail[i] |= _pending[i];
+                else tail.Add(_pending[i]);
+            }
+            _pending.Clear();
+            _pending.AddRange(tail);
+            return;
+        }
+        _buf.AddRange(merged);
+    }
+
+    /// <summary>OR <paramref name="bits"/> at <paramref name="start"/> into the pending base,
+    /// then move <paramref name="consume"/> bytes to the output (PS-016).</summary>
+    public void PlaceBits(int baseSize, bool little, int start, ulong bits, int consume)
+    {
+        while (_pending.Count < baseSize) _pending.Add(0);
+        ulong shifted = start >= 64 ? 0 : bits << start;
+        for (int i = 0; i < baseSize && i < 8; i++)
+        {
+            // Byte i of the base, in its byte order: big-endian puts the most significant
+            // byte first.
+            int significance = little ? i : baseSize - 1 - i;
+            if (significance < 8)
+                _pending[i] |= (byte)(shifted >> (8 * significance));
+        }
+        if (consume > 0)
+        {
+            while (_pending.Count < consume) _pending.Add(0);
+            _buf.AddRange(_pending.GetRange(0, consume));
+            _pending.RemoveRange(0, consume);
+        }
+    }
+
+    public byte[] Frame()
+    {
+        var all = new byte[_buf.Count + _pending.Count];
+        _buf.CopyTo(all, 0);
+        _pending.CopyTo(all, _buf.Count);
+        return all;
     }
 }

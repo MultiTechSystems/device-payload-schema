@@ -113,9 +113,9 @@ MUTANTS = [
         INTERPRETER,
         "            result.errors.append(direction_error)\n"
         "            return result\n\n"
-        "        output = bytearray()",
+        "        output = FrameBuffer()",
         "            result.errors.append(direction_error)\n\n"
-        "        output = bytearray()",
+        "        output = FrameBuffer()",
         INTERPRETER_TESTS,
     ),
     (

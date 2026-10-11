@@ -34,6 +34,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <string.h>
+#include <stdlib.h>
 /* schema_load_binary formats a placeholder field name with snprintf. The header used
  * it without declaring it, so it only compiled where the including file happened to
  * have pulled in <stdio.h> already - every existing caller did. */
@@ -1494,9 +1495,10 @@ typedef struct {
     uint8_t data[SCHEMA_MAX_PAYLOAD];
     int len;
     int error_code;
-    /* PS-551: "Missing required field: {name}", the text every other encoder gives, where
-     * an input is missing. Room for the prefix (24) and the longest name. */
-    char error_msg[24 + SCHEMA_MAX_NAME_LEN];
+    /* The text every other encoder gives for the error, where there is one: PS-551's
+     * "Missing required field: {name}" where an input is missing, and PS-168's
+     * "Field '{name}': {value} encodes as {n}, outside {low} to {high} (PS-168)". */
+    char error_msg[160];
 } encode_result_t;
 
 /* Input values for encoding */
@@ -1541,21 +1543,80 @@ static inline const encode_input_t* find_input(const encode_inputs_t* inputs, co
     return NULL;
 }
 
-/* Write integer to buffer */
+/* Write integer to buffer. ORed in, not assigned (CR-2026-136): a bit range or bool
+ * that did not consume has already filled bits of this byte, which a decoder reads as the
+ * same byte. The result buffer starts zeroed, so a fresh byte is unaffected. */
 static inline void write_int(uint8_t* buf, size_t* pos, int64_t val, int size, endian_t endian) {
     uint64_t uval = (uint64_t)val;
     if (endian == ENDIAN_BIG) {
         for (int i = size - 1; i >= 0; i--) {
-            buf[*pos + i] = uval & 0xFF;
+            buf[*pos + i] |= uval & 0xFF;
             uval >>= 8;
         }
     } else {
         for (int i = 0; i < size; i++) {
-            buf[*pos + i] = uval & 0xFF;
+            buf[*pos + i] |= uval & 0xFF;
             uval >>= 8;
         }
     }
     *pos += size;
+}
+
+/* PS-552: the nearest integer to a binary64 value, a tie to even. No libm: the fraction
+ * v - trunc(v) is exact, so the tie is detected without rounding twice. The encoder used
+ * (int64_t)(v + 0.5), which rounds a tie away from zero and, because the addition itself
+ * rounds, took 0.49999999999999994 to 1 and 23.45 * 10 (234.49999999999997) to 235.
+ * Valid for |v| < 2^63; a caller checks the range first. */
+static inline double schema_round_half_even(double v) {
+    double t = (double)(int64_t)v;
+    double frac = v - t;
+    int odd = (int)((int64_t)t & 1);
+    if (frac > 0.5 || (frac == 0.5 && odd)) return t + 1.0;
+    if (frac < -0.5 || (frac == -0.5 && odd)) return t - 1.0;
+    return t;
+}
+
+/* A number as JavaScript's String(number) writes it, for the PS-168 message: integral
+ * values without a fraction, others in the fewest digits that read back exactly. */
+static inline void schema_format_number(char* out, size_t len, double v, bool is_int,
+                                        int64_t iv) {
+    if (is_int) { snprintf(out, len, "%lld", (long long)iv); return; }
+    if (v == (double)(int64_t)v && v > -1e18 && v < 1e18) {
+        snprintf(out, len, "%lld", (long long)(int64_t)v);
+        return;
+    }
+    for (int p = 1; p <= 17; p++) {
+        snprintf(out, len, "%.*g", p, v);
+        if (strtod(out, NULL) == v) return;
+    }
+}
+
+/* PS-168, PS-552: the rounded value fits [lo, hi] - a bit range's being its width - or
+ * the input is rejected naming the field and the value given. It was masked or wrapped
+ * silently: u8 256 wrote 00, u8 -1 wrote ff, s8 -128.6 wrote 7f. Checked as doubles, so
+ * a value past int64 is caught before any cast. */
+static inline int schema_check_fits(double rounded, double lo, double hi,
+                                    const field_def_t* field, const encode_input_t* input,
+                                    char* err, size_t err_len) {
+    if (rounded >= lo && rounded <= hi) return SCHEMA_OK;
+    if (err && err_len) {
+        char given[40];
+        schema_format_number(given, sizeof(given),
+                             input && !input->is_int ? input->value.f64 : 0.0,
+                             input && input->is_int, input ? input->value.i64 : 0);
+        if (field->type == FIELD_TYPE_BITS) {
+            /* PS-064 (CR-2026-136): a bit range names its type, as the prototype does. */
+            snprintf(err, err_len,
+                     "Field '%s': %s encodes as %.0f, outside %.0f to %.0f for u8[%d:%d] (PS-168)",
+                     field->name, given, rounded, lo, hi, field->bit_start,
+                     field->bit_start + field->bit_width - 1);
+        } else {
+            snprintf(err, err_len,
+                     "Field '%s': %s encodes as %.0f, outside %.0f to %.0f (PS-168)",
+                     field->name, given, rounded, lo, hi);
+        }
+    }
+    return SCHEMA_ERR_OVERFLOW;
 }
 
 /* Encode single field */
@@ -1564,7 +1625,9 @@ static inline int encode_field(
     const encode_inputs_t* inputs,
     uint8_t* buf,
     size_t* pos,
-    endian_t schema_endian
+    endian_t schema_endian,
+    char* err,
+    size_t err_len
 ) {
     const encode_input_t* input = find_input(inputs, field->name);
     if (!input && field->type != FIELD_TYPE_SKIP) {
@@ -1588,17 +1651,44 @@ static inline int encode_field(
         raw_val *= field->div;
     }
     
-    int64_t int_val = (int64_t)(raw_val + (raw_val >= 0 ? 0.5 : -0.5));  /* Round */
-    /* With no modifier the integer is written as given, exact past 2^53. */
-    if (input && input->is_int && !field->has_add && !field->has_mult && !field->has_div) {
-        int_val = input->value.i64;
+    /* PS-552: nearest, a tie to even, on the binary64 value; then PS-168. */
+    bool exact_int = input && input->is_int && !field->has_add && !field->has_mult
+                     && !field->has_div;
+    double rounded = exact_int ? (double)input->value.i64
+                               : (raw_val > -9.2e18 && raw_val < 9.2e18
+                                  ? schema_round_half_even(raw_val) : raw_val);
+    double lo = 0.0, hi = -1.0;     /* hi < lo: no integer range to check */
+    switch (field->type) {
+        case FIELD_TYPE_U8:  lo = 0; hi = 255.0; break;
+        case FIELD_TYPE_S8:  lo = -128.0; hi = 127.0; break;
+        case FIELD_TYPE_U16: lo = 0; hi = 65535.0; break;
+        case FIELD_TYPE_S16: lo = -32768.0; hi = 32767.0; break;
+        case FIELD_TYPE_U24: lo = 0; hi = 16777215.0; break;
+        case FIELD_TYPE_S24: lo = -8388608.0; hi = 8388607.0; break;
+        case FIELD_TYPE_U32: lo = 0; hi = 4294967295.0; break;
+        case FIELD_TYPE_S32: lo = -2147483648.0; hi = 2147483647.0; break;
+        case FIELD_TYPE_U64: lo = 0; hi = 18446744073709551615.0; break;
+        case FIELD_TYPE_S64: lo = -9223372036854775808.0; hi = 9223372036854775807.0; break;
+        case FIELD_TYPE_BITS:     /* a bit range's type is its width */
+            lo = 0; hi = (double)((1ULL << field->bit_width) - 1); break;
+        default: break;
     }
+    /* An exact int64 input always fits s64, and fits u64 unless negative; checking it as a
+     * double would round 2^63 - 1 up past the bound. */
+    bool exact_64 = exact_int && (field->type == FIELD_TYPE_S64
+                                  || (field->type == FIELD_TYPE_U64 && input->value.i64 >= 0));
+    if (hi >= lo && !exact_64) {
+        int rc = schema_check_fits(rounded, lo, hi, field, input, err, err_len);
+        if (rc != SCHEMA_OK) return rc;
+    }
+    int64_t int_val = exact_int ? input->value.i64
+                    : (rounded >= 9.2e18 ? (int64_t)(uint64_t)rounded : (int64_t)rounded);
     endian_t endian = (field->endian != ENDIAN_DEFAULT) ? field->endian : schema_endian;
     
     switch (field->type) {
         case FIELD_TYPE_U8:
         case FIELD_TYPE_S8:
-            buf[*pos] = (uint8_t)(int_val & 0xFF);
+            buf[*pos] |= (uint8_t)(int_val & 0xFF);     /* ORed: see write_int */
             (*pos)++;
             break;
             
@@ -1638,8 +1728,10 @@ static inline int encode_field(
         }
         
         case FIELD_TYPE_BOOL:
-            buf[*pos] = int_val ? 1 : 0;
-            (*pos)++;
+            /* Its `bit` of the byte it peeks, advancing only where it consumes (PS-389,
+             * PS-066, CR-2026-136). It was written as a whole byte of 0 or 1. */
+            if (int_val) buf[*pos] |= (uint8_t)(1u << field->bit_start);
+            if (field->consume) (*pos)++;
             break;
             
         case FIELD_TYPE_BITS: {
@@ -1738,6 +1830,7 @@ static inline int schema_encode_direction(
     }
 
     size_t pos = 0;
+    size_t filled = 0;      /* bytes a non-consuming bit range or bool has filled */
     
     for (int i = 0; i < schema->field_count; i++) {
         const field_def_t* field = &schema->fields[i];
@@ -1758,15 +1851,22 @@ static inline int schema_encode_direction(
             result->error_code = SCHEMA_ERR_PARSE;
             return SCHEMA_ERR_PARSE;
         }
-        int rc = encode_field(field, inputs, result->data, &pos, schema->endian);
+        int rc = encode_field(field, inputs, result->data, &pos, schema->endian,
+                              result->error_msg, sizeof(result->error_msg));
         if (rc != SCHEMA_OK) {
             result->error_code = rc;
             memset(result->data, 0, sizeof(result->data));   /* no partial payload */
             return rc;
         }
+        /* A bit range or bool that did not consume filled the byte at pos: the next field
+         * shares it, and if none does it is still written (CR-2026-136). */
+        if ((field->type == FIELD_TYPE_BITS || field->type == FIELD_TYPE_BOOL)
+            && !field->consume && pos + 1 > filled) {
+            filled = pos + 1;
+        }
     }
     
-    result->len = (int)pos;
+    result->len = (int)(pos > filled ? pos : filled);
     return SCHEMA_OK;
 }
 
