@@ -188,18 +188,18 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2640 payload vectors in `schemas/devices/` (measured 2026-10-11 with
+The 2644 payload vectors in `schemas/devices/` (measured 2026-10-11 with
 `tools/check-floors.py`, after the CR-2026-118 and CR-2026-124 fixtures, CR-2026-117's
-guard-absent-operand, and the `match-u32-*` fixtures) are the shared
-cross-language test set. Every implementation has a runner that reads the same YAML and
+guard-absent-operand, and the `match-u32-*` and names-mangling-alike fixtures) are the
+shared cross-language test set. Every implementation has a runner that reads the same YAML and
 the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1802 |
-| Go | `go/schema/corpus_conformance_test.go` | 2640 | 1819 (plain API 1796) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2640 | 1802 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2640 | 1802 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1806 |
+| Go | `go/schema/corpus_conformance_test.go` | 2644 | 1823 (plain API 1800) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2644 | 1806 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2644 | 1806 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 550 of 550 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -772,10 +772,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1802 |
-| Go | `go/schema/corpus_encode_test.go` | 1819 (plain 1796) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1802 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1802 |
+| Python | `tests/test_encode_round_trip.py` | 1806 |
+| Go | `go/schema/corpus_encode_test.go` | 1823 (plain 1800) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1806 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1806 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1091,8 +1091,12 @@ corpus before those schemas existed.** Each is fixed; the list is here so nobody
   strings), and **Go dropped a non-string lookup label silently**. CR-2026-104 since allows
   boolean labels and fixed Go's labels to hold any scalar (see below).
 - **The generator renamed output keys** to JS identifiers — `pm1.0` came out as `pm1_0`. Keys are
-  now restored at the entry points from a table built at generation time; two names mangling to
-  one spelling is a generation error.
+  now restored at the entry points from a table built at generation time. Two names mangling to
+  one spelling (adeunis `ER+P-1_s` and `ER-P-1_s`) used to be a generation error; now
+  `unique_js_names` suffixes all but one of them (`ER_P_1_s`, `ER_P_1_s_2`, skipping any suffix
+  that is another name's spelling), and `to_js_name` reads that mapping during `generate()`, so
+  every staging and reference site agrees. A schema with no collision generates unchanged.
+  `_language-conformance/names-mangling-alike.yaml` holds all five to it.
 - **`generate_output_schema.py` kept the first branch's enum** when two branches report one key
   with the same type — r718x's `Status` is ON/OFF in one message and Success/Failure in another.
   Same-typed branches now union their enums and widen their bounds.
