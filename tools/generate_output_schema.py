@@ -21,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from schema_interpreter import (  # noqa: E402
-    lookup_template, lookup_template_pattern, render_template_value)
+    enum_label, lookup_template, lookup_template_pattern, render_template_value)
 
 
 def scalar_json_type(value: Any) -> str:
@@ -204,24 +204,21 @@ def yaml_type_to_json_schema(field_type: str, field_def: Dict[str, Any]) -> Dict
         values = field_def.get('values', {})
         if values:
             listed = list(values.values()) if isinstance(values, dict) else list(values)
-            fallback = field_def.get('default')
-            if fallback is not None:
-                # PS-068: an unmapped value is reported as `default`, so the set is
-                # closed and can be enumerated.
-                listed = listed + [fallback]
-                types = union_types(listed)
-                schema = {"type": types[0] if len(types) == 1 else types}
-                unique = []
-                for value in listed:
-                    if value not in unique:
-                        unique.append(value)
-                schema['enum'] = unique
-                return schema
-            # With no `default`, an unmapped value is reported as the string
-            # "unknown(<n>)", so the set is open: no `enum`, and `string` belongs in the
-            # type even where every declared value is a number.
-            types = union_types(listed + ['unknown(0)'])
-            return {"type": types[0] if len(types) == 1 else types}
+            # The description form reports its `name` (PS-394).
+            listed = [enum_label(value) for value in listed]
+            # PS-068: an unmapped value is reported as `default`, and with none the field
+            # is omitted (CR-2026-132), as a lookup miss is (PS-269). Either way the set is
+            # closed and can be enumerated. It used to admit "unknown(<n>)" and stay open.
+            if 'default' in field_def:
+                listed = listed + [field_def['default']]
+            types = union_types(listed)
+            schema = {"type": types[0] if len(types) == 1 else types}
+            unique = []
+            for value in listed:
+                if value not in unique:
+                    unique.append(value)
+            schema['enum'] = unique
+            return schema
         return {"type": ["string", "integer"]}
     
     # Default to number (most fields with modifiers become numbers)
@@ -389,6 +386,15 @@ def reference_pattern(field_def: Optional[Dict[str, Any]]) -> str:
         return '(?:' + '|'.join(re.escape(label) for label in sorted(set(labels))) + ')'
     if not isinstance(field_def, dict):
         return '.+'
+    template = lookup_template(field_def.get('lookup'))
+    if template is not None:
+        # A template writes the label reported (PS-532): a listed one, or the `${value}`
+        # default's text - `code_5`, not the number 5 a reference binds (PS-523).
+        listed = [render_template_value(v, '', '') for k, v in field_def['lookup'].items()
+                  if k != 'default' and isinstance(v, (str, int, float))]
+        parts = [re.escape(label) for label in sorted(set(listed))]
+        parts.append(lookup_template_pattern(template)[1:-1])
+        return '(?:' + '|'.join(parts) + ')'
     if 'cases' in field_def:      # a match discriminator substitutes its value
         return r'-?\d+'
     field_type = str(field_def.get('type', ''))
@@ -916,7 +922,12 @@ def generate_output_schema(yaml_schema: Dict[str, Any]) -> Dict[str, Any]:
     ports = yaml_schema.get('ports', {})
     for port_num, port_def in ports.items():
         if isinstance(port_def, dict) and 'fields' in port_def:
-            process_fields(port_def['fields'], properties, required, definitions, context)
+            # A template resolves against the port's own fields first: two ports may each
+            # declare a `code` with a different lookup (lookup-reference-binding.yaml).
+            port_context = dict(context, sources=dict(
+                context['sources'], **variable_sources({'fields': port_def['fields']})))
+            process_fields(port_def['fields'], properties, required, definitions,
+                           port_context)
     
     # PS-182: `_quality` is part of the decoder's contract, so it is described rather
     # than merely tolerated by additionalProperties - a consumer reading this schema

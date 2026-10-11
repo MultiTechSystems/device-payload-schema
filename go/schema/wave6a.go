@@ -606,6 +606,10 @@ func (r *repeatElements) element() error {
 	for k, v := range ctx.Variables {
 		outer[k] = v
 	}
+	outerLabels := make(map[string]labelEntry, len(ctx.labels))
+	for k, v := range ctx.labels {
+		outerLabels[k] = v
+	}
 	savedNames := ctx.elementNames
 	ctx.elementNames = r.names
 	if r.field.Index != "" {
@@ -643,6 +647,7 @@ func (r *repeatElements) element() error {
 	for k, v := range outer {
 		ctx.Variables[k] = v
 	}
+	ctx.labels = outerLabels // the reported values a template reads go with them (PS-523)
 	ctx.elementNames = savedNames
 	if err != nil {
 		return err

@@ -47,6 +47,12 @@ from pathlib import Path
 
 import pytest
 
+
+# Every test here builds the C interpreter into build-linux-debug/ (make selftest,
+# make test-c, the corpus harness). Under xdist two workers relinking and running the
+# same binaries race ("Text file busy"), so they share one worker.
+pytestmark = pytest.mark.xdist_group("c-build")
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HARNESS = REPO_ROOT / "tools" / "c-corpus-harness.py"
 MAKEFILE = REPO_ROOT / "Makefile"

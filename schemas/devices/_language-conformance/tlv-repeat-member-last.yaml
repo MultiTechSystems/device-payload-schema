@@ -1,0 +1,40 @@
+# A member of a merged object may declare `on_repeat: last`, and is then the one
+# member two entries may both report: the later value is kept (PS-525, CR-2026-110).
+# Any other member reported twice is an error naming the object and the member.
+#
+# Does not round-trip: `seq` is 1 in the first entry and 2 in the second, and the
+# discarded 1 is not in the output.
+name: probe_tlv_repeat_member_last
+endian: big
+fields:
+- tlv:
+    tag_size: 1
+    on_repeat: merge
+    cases:
+      0x01:
+      - name: state
+        type: object
+        fields:
+        - name: mode
+          type: u8
+        - name: seq
+          type: u8
+          on_repeat: last
+      0x02:
+      - name: state
+        type: object
+        fields:
+        - name: level
+          type: u8
+        - name: seq
+          type: u8
+          on_repeat: last
+test_vectors:
+- name: later_member_value_kept
+  source: spec-example
+  payload: "01 07 01 02 09 02"
+  expected:
+    state:
+      mode: 7
+      seq: 2
+      level: 9

@@ -21,9 +21,17 @@ them. Ask for one implementation, or all four.
     python3 tools/check-floors.py --python           # just the fast one
     python3 tools/check-floors.py --loose            # exit 1 if any floor sits below actual
     python3 tools/check-floors.py --json PATH        # machine-readable
+    python3 tools/check-floors.py --from-logs        # reuse `make test-languages` logs
 
 Running Go, Java and C# means running their toolchains in Docker, which takes a couple of
 minutes. `--python` needs nothing but this repository.
+
+`--from-logs` reads the output `make test-go`, `make test-java` and `make test-dotnet`
+already keep under build/lang-logs/ (see tools/run-logged.py), so a verification pass runs
+each suite once rather than twice; `make verify` does exactly that. A log is used only if
+it is complete and no file in the source tree changed after its run began. Otherwise that
+one implementation falls back to running its suite, as it would without the flag, and the
+report says where each implementation's actuals came from.
 """
 
 import argparse
@@ -36,6 +44,14 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+
+#: Where `make test-go`, `make test-java` and `make test-dotnet` keep their output.
+LOG_DIR = REPO / "build" / "lang-logs"
+
+#: The floor declarations are read from here. Only tests change it (--floor-root), so they
+#: can declare a floor in a copy rather than rewriting a file in the working tree - which,
+#: with the suite running in parallel, another worker could read or restore mid-change.
+FLOOR_ROOT = REPO
 
 #: Where each floor is declared, and the pattern that reads its value.
 #: (implementation, floor name, file, regex with one numeric group)
@@ -81,13 +97,13 @@ def read_floors(impl):
     for who, name, rel, pattern in FLOOR_SITES:
         if who != impl:
             continue
-        m = re.search(pattern, (REPO / rel).read_text())
+        m = re.search(pattern, (FLOOR_ROOT / rel).read_text())
         if m:
             out[name] = int(m.group(1))
     for who, rel, pattern in SHAPE_SITES:
         if who != impl:
             continue
-        text = (REPO / rel).read_text()
+        text = (FLOOR_ROOT / rel).read_text()
         # Only the shape table's own entries: a shape name plus a number.
         for shape, value in re.findall(pattern, text):
             if shape in SHAPES:
@@ -166,6 +182,81 @@ def dotnet_actuals():
 ACTUALS = {"python": python_actuals, "go": go_actuals,
            "java": java_actuals, "dotnet": dotnet_actuals}
 
+#: The implementations whose actuals a `make test-<lang>` log can supply.
+LOGGED = ("go", "java", "dotnet")
+
+# Written by tools/run-logged.py around the command's own output.
+LOG_HEADER = re.compile(r"^# run-logged started=([0-9.]+)", re.M)
+LOG_TRAILER = re.compile(r"^# run-logged exit=(-?\d+)\s*$", re.M)
+
+
+def newest_source(repo=REPO):
+    """(mtime, path) of the most recently modified file or directory in the source tree.
+
+    The tree is what git sees: tracked files plus untracked ones that are not ignored, so
+    build output, caches and the logs themselves never count. A tracked file deleted from
+    the working tree is represented by its nearest surviving directory, whose mtime is the
+    only record of when it went. Directories are not counted otherwise: the suites
+    themselves create ignored output beside the sources (dotnet's bin/ and obj/, Maven's
+    target/), which touches those directories and would make every log stale at once.
+    If git cannot answer, the tree is treated as newer than any log, which only costs a run.
+    """
+    try:
+        listing = subprocess.run(
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            cwd=str(repo), capture_output=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return float("inf"), "(git ls-files failed)"
+    newest = (0.0, "")
+    for rel in set(listing.decode("utf-8", errors="replace").split("\0")):
+        if not rel:
+            continue
+        probe = rel
+        while True:
+            try:
+                mtime = os.stat(os.path.join(str(repo), probe)).st_mtime
+                break
+            except OSError:
+                probe = os.path.dirname(probe)  # deleted: ask the directory it was in
+                if not probe:
+                    mtime = 0.0
+                    break
+        if mtime > newest[0]:
+            newest = (mtime, probe)
+    return newest
+
+
+def read_log(path, tree):
+    """(actuals, why) from one run-logged log, or (None, why) when it cannot be used.
+
+    `tree` is newest_source()'s answer. A log is refused when it is missing, when its run
+    did not finish, when a source file changed after its run began, or when it holds no
+    corpus counts at all (a container that failed to start, say). In each case the caller
+    runs the suite instead, which is what plain check-floors always does.
+    """
+    path = Path(path)
+    shown = path
+    try:
+        shown = path.resolve().relative_to(REPO)
+    except ValueError:
+        pass
+    if not path.exists():
+        return None, f"there is no log at {shown}"
+    text = path.read_text(errors="replace")
+    head = LOG_HEADER.search(text)
+    if not head:
+        return None, f"{shown} has no run-logged header"
+    tail = LOG_TRAILER.search(text)
+    if not tail:
+        return None, f"{shown} is incomplete (its run did not finish)"
+    newest_mtime, newest_path = tree
+    if newest_mtime > float(head.group(1)):
+        return None, f"{shown} is stale: {newest_path} changed after its run began"
+    actuals = parse_log(text)
+    if not actuals:
+        return None, f"{shown} holds no corpus counts"
+    return actuals, f"{shown} (exit {tail.group(1)})"
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -174,14 +265,36 @@ def main():
     parser.add_argument("--loose", action="store_true",
                         help="exit 1 if any floor sits below its own actual")
     parser.add_argument("--json", metavar="PATH")
+    parser.add_argument("--from-logs", action="store_true",
+                        help="read Go, Java and C# actuals from the logs `make test-go`, "
+                             "`test-java` and `test-dotnet` keep, running a suite only "
+                             "when its log is missing, incomplete or stale")
+    parser.add_argument("--log-dir", metavar="DIR", default=str(LOG_DIR),
+                        help="where --from-logs looks (default: build/lang-logs)")
+    parser.add_argument("--floor-root", metavar="DIR", help=argparse.SUPPRESS)
     args = parser.parse_args()
+
+    global FLOOR_ROOT
+    if args.floor_root:
+        FLOOR_ROOT = Path(args.floor_root)
 
     chosen = [i for i in ACTUALS if getattr(args, i)] or list(ACTUALS)
     report, loose, below = {}, [], []
+    tree = None
 
     for impl in chosen:
         floors = read_floors(impl)
-        actuals = ACTUALS[impl]()
+        actuals = None
+        if args.from_logs and impl in LOGGED:
+            if tree is None:
+                tree = newest_source()
+            actuals, why = read_log(Path(args.log_dir) / f"{impl}.log", tree)
+            if actuals is None:
+                print(f"\n  {impl}: running its suite, because {why}")
+            else:
+                print(f"\n  {impl}: actuals read from {why}")
+        if actuals is None:
+            actuals = ACTUALS[impl]()
         rows = []
         for name in sorted(floors):
             floor = floors[name]

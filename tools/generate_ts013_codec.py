@@ -319,12 +319,6 @@ function encBase64(text) {
   return out;
 }
 
-function encUtf8(text) {
-  var s = unescape(encodeURIComponent(String(text))), out = [];
-  for (var i = 0; i < s.length; i++) out.push(s.charCodeAt(i));
-  return out;
-}
-
 function encEnumLabel(entry) {
   return entry !== null && typeof entry === "object" && "name" in entry ? entry.name : entry;
 }
@@ -408,9 +402,22 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
     return;
   }
   if (encIsLiteral(f)) return;                       // PS-359: a literal writes nothing
-  if (type === "string" || type === "ascii") {
-    var u = encUtf8(value);
-    encPad(out, u, encLength(f, u.length));
+  if (type === "string" || type === "ascii") {        // encode_ascii (PS-537)
+    var text = String(value), u = [], high = false;
+    var fixed = typeof f.length === "number" && f.length >= 0 ? f.length : null;
+    for (var c = 0; c < text.length; c++) {
+      var code = text.charCodeAt(c);
+      if (code > 0xFF) {
+        encFail("Field '" + f.name + "': an ascii value holds a character above U+00FF, which has no byte (PS-537)");
+      }
+      if (code > 0x7F) high = true;
+      u.push(code);                                  // PS-538: the byte of the same number
+    }
+    if (fixed !== null && u.length > fixed) {
+      encFail("Field '" + f.name + "': an ascii value of " + u.length + " bytes is longer than its length of " + fixed + " (PS-537)");
+    }
+    if (high) ctx.wa.push("Field '" + f.name + "': a character above U+007F in an ascii value (PS-537)");
+    encPad(out, u, fixed !== null ? fixed : u.length);
     return;
   }
   if (type === "hex") {
@@ -444,6 +451,10 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
   encFail("Cannot encode type: " + type);
 }
 
+function encMissing(name) {                           // missing_field_message
+  return "Missing required field: " + name;
+}
+
 function encIsLiteral(f) {                            // is_literal
   return (f.type === "string" || f.type === "number" || f.type === "boolean") && "value" in f;
 }
@@ -461,7 +472,76 @@ function encRawBits(f) {                              // raw_bits_field
   return g;
 }
 
-function encDeclaringVar(name) { return ENC_VARS[name] || null; }   // _field_declaring_var
+// The field list being encoded: a reference is looked for there before the rest of the
+// schema (ENC_VARS, ENC_NAMED), since each port may declare its own `code`.
+var ENC_SCOPE = null;
+
+function encFind(node, test) {                        // the walk in _field_declaring_var
+  if (Array.isArray(node)) {
+    for (var i = 0; i < node.length; i++) { var f = encFind(node[i], test); if (f) return f; }
+    return null;
+  }
+  if (node && typeof node === "object") {
+    if (test(node)) return node;
+    for (var k in node) {
+      if (!Object.prototype.hasOwnProperty.call(node, k)) continue;
+      var g = encFind(node[k], test);
+      if (g) return g;
+    }
+  }
+  return null;
+}
+
+function encDeclaringVar(name) {                      // _field_declaring_var
+  var f = encFind(ENC_SCOPE, function (n) { return n["var"] === name && n.name; });
+  return f ? { name: f.name, lookup: f.lookup, type: f.type, values: f.values }
+           : (ENC_VARS[name] || null);
+}
+
+function encNamed(name) {                             // _field_named
+  var f = encFind(ENC_SCOPE, function (n) {
+    return n.name === name && ((n.lookup !== undefined && n.lookup !== null) || n.type === "enum");
+  });
+  return f ? { name: f.name, lookup: f.lookup, type: f.type, values: f.values }
+           : (ENC_NAMED[name] || null);
+}
+
+function encReverseEnum(value, f) {                   // reverse_enum
+  var values = f.values || {}, k;
+  if (Array.isArray(values)) {
+    var labels = values.map(encEnumLabel);
+    if (labels.indexOf(value) >= 0) return labels.indexOf(value);
+  } else {
+    for (k in values) {
+      if (Object.prototype.hasOwnProperty.call(values, k) && encEnumLabel(values[k]) === value) {
+        var n = Number(k);
+        return isFinite(n) ? n : value;
+      }
+    }
+  }
+  if (typeof value === "string" && value.indexOf("unknown(") === 0 && value.slice(-1) === ")") {
+    var u = parseInt(value.slice(8, -1), 10);
+    if (isFinite(u)) return u;
+  }
+  return value;
+}
+
+function encReference(ref, data) {                    // _encode_reference
+  // PS-523: a looked-up field bound the number under a text or boolean label, and a
+  // numeric label as itself; the data carries the label, so the first are reversed.
+  var value, src;
+  if (Object.prototype.hasOwnProperty.call(data, ref)) { value = data[ref]; src = encNamed(ref); }
+  else {
+    src = encDeclaringVar(ref);
+    if (!src || !Object.prototype.hasOwnProperty.call(data, src.name)) return null;
+    value = data[src.name];
+  }
+  if (src && src.lookup !== null && src.lookup !== undefined &&
+      (typeof value === "string" || typeof value === "boolean")) return encReverseLookup(value, src.lookup);
+  // CR-2026-132: an enum bound its code.
+  if (src && src.type === "enum" && typeof value === "string") return encReverseEnum(value, src);
+  return value;
+}
 
 function encResolveName(f, name, data) {              // _resolve_encode_name
   if (!f.name_from) return name;
@@ -542,8 +622,9 @@ function encBitRun(fr, run, data, ctx) {              // _encode_bitfield_run
   for (var i = 0; i < run.length; i++) {
     var f = run[i], name = f.name || "", v;
     if (!name) v = f["default"] === undefined ? 0 : f["default"];
-    else if (name.charAt(0) === "_") v = encInternalValue(f, data);
-    else v = Object.prototype.hasOwnProperty.call(data, name) ? data[name] : (f["default"] === undefined ? 0 : f["default"]);
+    else if ("value" in f || name.charAt(0) === "_") v = encInternalValue(f, data);
+    else if (!encHas(data, name)) encFail(encMissing(name));   // PS-551
+    else v = data[name];
     v = encReverseModifiers(v, f);
     if (typeof v === "string") v = encLabelValue(v, f);
     if (typeof v === "boolean") v = v ? 1 : 0;
@@ -556,19 +637,32 @@ function encBitRun(fr, run, data, ctx) {              // _encode_bitfield_run
   }
 }
 
+function encGroupWidth(f) {                          // byte_group_width
+  var group = f.byte_group, members = Array.isArray(group) ? group : (group.fields || []);
+  var declared = Array.isArray(group) ? f["size"] : group["size"];
+  var width = (declared === undefined || declared === null) ? 1 : parseInt(declared, 10);
+  for (var i = 0; i < members.length; i++) {   // PS-070: the widest member's base
+    var t = String((members[i] && members[i].type) || ""), r = /^[us](\d+)\[/.exec(t);
+    var w = r ? Math.max(1, Math.floor(Number(r[1]) / 8)) : (ENC_TYPES[t] ? ENC_TYPES[t][0] : 1);
+    if (w > width) width = w;
+  }
+  return width;
+}
+
 function encByteGroup(out, f, data, ctx) {            // _encode_byte_group
-  var group = f.byte_group, members, size;
-  if (Array.isArray(group)) { members = group; size = parseInt(f.size === undefined ? 1 : f.size, 10); }
-  else { members = group.fields || []; size = parseInt(group.size === undefined ? 1 : group.size, 10); }
+  var group = f.byte_group, members = Array.isArray(group) ? group : (group.fields || []);
+  var size = encGroupWidth(f);
   var packed = {};
   for (var i = 0; i < members.length; i++) {
     var g = members[i];
     if (!g || typeof g !== "object") continue;
     if ("endian" in g) encFail("byte_group member '" + (g.name || "?") + "' declares endian; the group's byte order is declared on the group (PS-364)");
+    if (ENC_COMPUTED.indexOf(g.type) >= 0 || encIsLiteral(g)) continue;   // no bits of its own
     var name = g.name || "", v;
     if (!name) v = g["default"] === undefined ? 0 : g["default"];
-    else if (name.charAt(0) === "_") v = encInternalValue(g, data);
-    else v = Object.prototype.hasOwnProperty.call(data, name) ? data[name] : (g["default"] === undefined ? 0 : g["default"]);
+    else if ("value" in g || name.charAt(0) === "_") v = encInternalValue(g, data);
+    else if (!encHas(data, name)) encFail(encMissing(name));   // PS-551
+    else v = data[name];
     if (g.type === "bool") {                    // its `bit` of the group (PS-364)
       if (v) packed = encPlace(packed, 1, Number(g.bit || 0), 1);
       continue;
@@ -580,11 +674,11 @@ function encByteGroup(out, f, data, ctx) {            // _encode_byte_group
     if (String(g.type || "").indexOf("[") >= 0) {
       var bt = encBitType(g.type);
       encFits(v, bt[2], String(g.type).charAt(0) === "s", g, encGiven(g, v), g.type);  // PS-168
-      size = Math.max(size, bt[0]);
       packed = encPlace(packed, v, bt[1], bt[2]);
-    } else {
-      if (v < 0) encFail("can't convert negative int to unsigned");
-      packed = encPlace(packed, v, 0, 53);       // a full-width member owns the bytes
+    } else {                                    // a whole integer is its full range (PS-070)
+      var wt = ENC_TYPES[String(g.type)];
+      encFits(v, wt[0] * 8, wt[1], g, encGiven(g, v));                       // PS-168
+      packed = encPlace(packed, v, 0, wt[0] * 8);
     }
   }
   var endian = (!Array.isArray(group) && group.endian) ? group.endian : ctx.endian;
@@ -640,14 +734,24 @@ function encBitfieldString(out, f, value, ctx) {      // _encode_bitfield_string
   encPacked(out, packed, length, ctx.endian);
 }
 
+function encGroupGiven(group, data) {                 // _flagged_group_given
+  var gfs = group.fields || [];
+  if (gfs.some(function (g) { return g && g.name && Object.prototype.hasOwnProperty.call(data, g.name); })) return true;
+  return encClaimable(gfs).some(function (g) { return Object.prototype.hasOwnProperty.call(data, g.name); });
+}
+
 function encFlagged(out, fg, data, ctx) {             // _encode_flagged
   // CR-2026-136: the given groups' members are one field list, laid out as a decoder
   // reads them (a bool or bit range is its bits of a shared byte; an object is encoded).
   var groups = fg.groups || [], members = [];
   for (var i = 0; i < groups.length; i++) {
     var gfs = groups[i].fields || [];
-    var has = gfs.some(function (g) { return g.name && Object.prototype.hasOwnProperty.call(data, g.name); });
-    if (!has) continue;
+    if (!encGroupGiven(groups[i], data)) continue;
+    if (gfs.some(function (g) { return g && typeof g === "object" && !g.name; })) {
+      // A construct in the group (a nested flagged block, a byte_group): all of it.
+      gfs.forEach(function (g) { if (g && typeof g === "object") members.push(g); });
+      continue;
+    }
     gfs.forEach(function (g) { if (g && typeof g === "object" && g.name) members.push(g); });
   }
   return encList(out, members, data, ctx);
@@ -712,14 +816,7 @@ function encMatch(out, f, data, ctx, peeked) {        // _encode_match
   var dflt = m["default"] === undefined ? "error" : m["default"];
   var disc = null;
   if (m.name && Object.prototype.hasOwnProperty.call(data, m.name)) disc = data[m.name];
-  else if (m.field) {
-    var ref = String(m.field).replace(/^\$+/, "");
-    if (Object.prototype.hasOwnProperty.call(data, ref)) disc = data[ref];
-    else {
-      var src = encDeclaringVar(ref);
-      if (src && Object.prototype.hasOwnProperty.call(data, src.name)) disc = encReverseLookup(data[src.name], src.lookup);
-    }
-  }
+  else if (m.field) disc = encReference(String(m.field).replace(/^\$+/, ""), data);
   if ((disc === null || disc === undefined) && m["var"] && encHas(data, m["var"])) disc = data[m["var"]];
   if ((disc === null || disc === undefined) && length !== undefined && length !== null &&
       peeked && peeked.length >= Number(length)) {
@@ -741,28 +838,47 @@ function encMatch(out, f, data, ctx, peeked) {        // _encode_match
     var found = encCaseFieldsPresent(cases, data);
     if (found) { key = found[0]; body = found[1]; }
   }
+  var known = disc !== null && disc !== undefined;
+  var inline = length !== undefined && length !== null;
   if (body === null) {
     if (Array.isArray(dflt)) body = dflt;
     else if (Array.isArray(cases["default"])) body = cases["default"];
-    else if (length !== undefined && length !== null && disc !== null && disc !== undefined) body = [];
-    else return;
+    else if (!known && (dflt === "skip" || (inline && !m.name))) return;   // the non-advancing peek
+    else if (inline && !known) encFail(encMissing(m.name || "match"));   // PS-551
+    else body = [];
   }
-  if (length !== undefined && length !== null) {
+  if (inline) {
     var value = disc;
-    if (value === null || value === undefined) {
-      if (key === null) encFail("match case " + JSON.stringify(key) + " names no single discriminator value");
-      value = encParseInt0(key);
+    if (!known) {
+      if (key === null) encFail(encMissing(m.name || "match"));
+      value = encExactCase(key);
+      if (value === null) encFail("match case " + JSON.stringify(key) + " names no single discriminator value");
     }
     encWriteInt(out, value, parseInt(length, 10), false, ctx.endian);
   }
   return encList(out, body, data, ctx);
 }
 
-function encRepeat(out, f, data, ctx) {               // _encode_repeat
-  var name = f.name || "", records = data[name];
-  if (records === undefined || records === null) return;
-  if (!Array.isArray(records) && typeof records === "object") records = [records];
-  if (!Array.isArray(records)) encFail("repeat field " + JSON.stringify(name) + ": expected a list of records, got " + typeof records);
+function encRecords(f, data) {                        // _repeat_records
+  var r = data[f.name || ""];
+  if (r === undefined || r === null) return null;
+  if (Array.isArray(r)) return r;
+  if (typeof r === "object") return [r];
+  return null;
+}
+
+function encRepeatSize(f, key, data, siblings) {      // _repeat_size
+  var size = f[key];
+  if (typeof size === "string" && size.charAt(0) === "$") {
+    var src = encSizeSource(siblings, size.slice(1));
+    size = data[src ? src.name : size.slice(1)];
+  }
+  if (typeof size !== "number" || !isFinite(size) || Math.floor(size) !== size) return null;
+  return size;
+}
+
+function encRepeatElements(out, f, data, records, count, ctx) {   // _encode_repeat_elements
+  var name = f.name || "";
   // PS-550: a sibling identifying these values position by position is given as many
   // values as this repeat, as a decoder requires (PS-546).
   encSiblings(f).forEach(function (sib) {
@@ -796,12 +912,30 @@ function encRepeat(out, f, data, ctx) {               // _encode_repeat
   if (f.present_if && rf.some(function (r) { return r && ENC_COMPUTED.indexOf(r.type) < 0 && !encIsLiteral(r); })) {
     encFail("repeat field " + JSON.stringify(name) + " declares present_if and its elements read payload bytes, so the elements it dropped cannot be encoded (PS-387)");
   }
+  if (count !== null && records.length !== count) {
+    // PS-551: the count and the list must agree; nothing is padded or cut.
+    encFail("Repeat '" + name + "' is given " + records.length + " values for a count of " + count + " (PS-551)");
+  }
   for (var i = 0; i < records.length; i++) {
     var rec = records[i];
     if (rec === null || typeof rec !== "object" || Array.isArray(rec)) encFail("repeat field " + JSON.stringify(name) + ": expected each record to be a mapping");
     if (f.index) { var copy = {}; for (var k in rec) copy[k] = rec[k]; copy[f.index] = i + (f.index_base || 0); rec = copy; }
     encList(out, rf, rec, ctx);
   }
+}
+
+function encRepeat(out, f, data, ctx, siblings) {     // _encode_repeat
+  var name = f.name || "", raw = data[name];
+  if (raw !== undefined && raw !== null && typeof raw !== "object") encFail("repeat field " + JSON.stringify(name) + ": expected a list of records, got " + typeof raw);
+  var records = encRecords(f, data);
+  if (records === null) encFail(encMissing(name));      // PS-551
+  siblings = siblings || [];
+  var count = encRepeatSize(f, "count", data, siblings);
+  var body = [];
+  encRepeatElements(body, f, data, records, count, ctx);
+  var bl = encRepeatSize(f, "byte_length", data, siblings);
+  if (bl !== null && body.length !== bl) encFail("Repeat '" + name + "' encodes to " + body.length + " bytes for a byte_length of " + bl + " (PS-551)");
+  for (var i = 0; i < body.length; i++) out.push(body[i]);
   if (f.trailer) encList(out, f.trailer, data, ctx);
 }
 
@@ -902,31 +1036,136 @@ function encTlvTag(out, key, tlv, ctx) {              // _encode_tlv_tag
   encWriteInt(out, encParseInt0(key), tlv.tag_size === undefined ? 1 : tlv.tag_size, false, ctx.endian);
 }
 
+function encCaseClaims(fields, optional) {             // _case_claims
+  var out = [];
+  (fields || []).forEach(function (f) {
+    if (!f || typeof f !== "object") return;
+    if ("byte_group" in f && !f.type) {
+      var g = f.byte_group;
+      out = out.concat(encCaseClaims(Array.isArray(g) ? g : (g.fields || []), optional));
+      return;
+    }
+    if ("flagged" in f && !f.type) {
+      (f.flagged.groups || []).forEach(function (grp) { out = out.concat(encCaseClaims(grp.fields || [], true)); });
+      return;
+    }
+    if (!f.name || String(f.name).charAt(0) === "_" || ENC_COMPUTED.indexOf(f.type) >= 0) return;
+    out.push([f, !!optional || f.optional === true]);
+  });
+  return out;
+}
+
 function encTlv(out, f, data, ctx) {                  // _encode_tlv
   var tlv = f.tlv || {}, cases = tlv.cases || {}, lsize = tlv.length_size || 0;
   if (tlv.merge === false) encFail("a tlv with merge: false reports its entries under 'channels', and encoding them is not supported");
-  var order = Object.keys(data), cands = [];
-  for (var key in cases) {
-    if (key === "default" || !Array.isArray(cases[key])) continue;
-    var claimed = encClaimable(cases[key]).map(function (c) { return c.name; })
-      .filter(function (n) { return Object.prototype.hasOwnProperty.call(data, n); });
-    if (!claimed.length) continue;
-    var fid = encCaseFidelity(cases[key], data);
-    var position = Math.min.apply(null, claimed.map(function (n) { return order.indexOf(n); }));
-    cands.push({ p: position, l: fid[1] ? 0 : 1, m: -fid[0], key: key, body: cases[key], claimed: claimed, seq: cands.length });
-  }
-  cands.sort(function (a, b) { return a.p - b.p || a.l - b.l || a.m - b.m || a.seq - b.seq; });
-  var spent = {}, emitted = [];
-  cands.forEach(function (c) {
-    if (c.claimed.every(function (n) { return spent[n]; })) return;
-    c.claimed.forEach(function (n) { spent[n] = true; });
-    emitted.push(c);
+  var order = Object.keys(data), has = Object.prototype.hasOwnProperty;
+  // PS-525 to PS-527 (CR-2026-110, -125, -128). `rep` is tlv_repeat_modes and
+  // tlv_encode_plan, resolved at generation time, with the cases' declaration order: an
+  // object's integer-like keys iterate in ascending order, not the order written.
+  var rep = tlv.__on_repeat || {};
+  var modes = rep.modes || {}, members = rep.members || {};
+  var keys = rep.order || Object.keys(cases);
+  // A supplied member of a merged object that no case declares has nowhere to go.
+  Object.keys(members).forEach(function (n) {
+    var v = data[n];
+    if (v === null || typeof v !== "object" || Array.isArray(v)) return;
+    var stray = Object.keys(v).filter(function (m) { return members[n].indexOf(m) < 0; }).sort();
+    if (stray.length) encFail("tlv: the merged object '" + n + "' is given [" + stray.map(function (m) { return "'" + m + "'"; }).join(", ") + "], which no case declares (PS-527)");
   });
-  emitted.sort(function (a, b) { return a.p - b.p || a.seq - b.seq; });
-  emitted.forEach(function (c) {
-    encTlvTag(out, c.key, tlv, ctx);
+  // Each value goes under the first case whose declared fields it supplies in full;
+  // nothing is zero-filled or dropped. A case requiring more fields is tried first.
+  var entries = [];
+  keys.forEach(function (key) {
+    if (key === "default" || !Array.isArray(cases[key])) return;
+    var req = [], opt = [];
+    encCaseClaims(cases[key]).forEach(function (c) { (c[1] ? opt : req).push(c[0]); });
+    entries.push({ key: key, body: cases[key], req: req, opt: opt, seq: entries.length });
+  });
+  // An object counts its members (CR-2026-129), so a merged {adr, dr} case outranks {dr}.
+  function width(list) {
+    return list.reduce(function (n, c) {
+      return n + (c.type === "object" ? Math.max(1, encCaseClaims(c.fields || []).length) : 1);
+    }, 0);
+  }
+  entries.forEach(function (e) { e.width = width(e.req); });
+  entries.sort(function (a, b) { return b.width - a.width || a.seq - b.seq; });
+  var queues = {}, pending = {};
+  entries.forEach(function (e) {
+    e.req.concat(e.opt).forEach(function (c) {
+      var n = c.name;
+      if (!has.call(data, n) || has.call(queues, n) || modes[n] === "merge") return;
+      var v = data[n];
+      var collected = Array.isArray(v) && c.type !== "repeat" && !(c.type === "bytes" && c.format === "array") && (modes[n] || "collect") === "collect";
+      queues[n] = collected ? v.slice() : [v];
+    });
+  });
+  Object.keys(members).forEach(function (n) {
+    var v = data[n];
+    if (v !== null && typeof v === "object" && !Array.isArray(v)) pending[n] = Object.keys(v);
+  });
+  function membersOf(c) { return (c.fields || []).filter(function (m) { return m && m.name; }).map(function (m) { return m.name; }); }
+  function fits(c, v) {
+    if (c.type === "object" && v !== null && typeof v === "object" && !Array.isArray(v) && modes[c.name] !== "merge") {
+      var claims = encCaseClaims(c.fields || []), every = {}, ok = true;
+      claims.forEach(function (x) { every[x[0].name] = true; if (!x[1] && !has.call(v, x[0].name)) ok = false; });
+      Object.keys(v).forEach(function (k) { if (!every[k]) ok = false; });
+      return ok;
+    }
+    var one = {}; one[c.name] = v;
+    return encCaseFidelity([c], one)[1];
+  }
+  var written = [], progress = true;
+  while (progress) {
+    progress = false;
+    entries.forEach(function (e) {
+      for (;;) {
+        var values = {}, taken = 0, complete = true;
+        for (var i = 0; i < e.req.length; i++) {
+          var c = e.req[i], n = c.name;
+          if (modes[n] === "merge") {
+            var ms = membersOf(c);
+            if (!has.call(pending, n) || ms.some(function (m) { return !has.call(data[n], m); })) { complete = false; break; }
+            var sub = {};
+            ms.forEach(function (m) { sub[m] = data[n][m]; });
+            values[n] = sub;
+            if (ms.some(function (m) { return pending[n].indexOf(m) >= 0; })) taken++;
+          } else {
+            var q = queues[n];
+            if (!q || !q.length || !fits(c, q[0])) { complete = false; break; }
+            values[n] = q[0]; taken++;
+          }
+        }
+        if (!complete) break;
+        e.opt.forEach(function (c) {
+          var q = queues[c.name];
+          if (q && q.length && fits(c, q[0])) { values[c.name] = q[0]; taken++; }
+        });
+        if (!taken) break;
+        var entry = {}, pos = Infinity;
+        for (var k in data) entry[k] = data[k];
+        Object.keys(values).forEach(function (n) {
+          entry[n] = values[n];
+          pos = Math.min(pos, order.indexOf(n));
+          if (modes[n] === "merge") pending[n] = pending[n].filter(function (m) { return !has.call(values[n], m); });
+          else queues[n].shift();
+        });
+        written.push({ key: e.key, body: e.body, data: entry, p: pos, seq: written.length });
+        progress = true;
+      }
+    });
+  }
+  Object.keys(queues).forEach(function (n) {
+    if (queues[n].length) encFail("tlv: no case takes the value of '" + n + "' " + JSON.stringify(queues[n][0]) + " in full (PS-502, PS-527)");
+  });
+  Object.keys(pending).forEach(function (n) {
+    if (pending[n].length) encFail("tlv: no case takes the members [" + pending[n].slice().sort().map(function (m) { return "'" + m + "'"; }).join(", ") + "] of the merged object '" + n + "' in full (PS-527)");
+  });
+  // Payload order, so a payload round-trips; entries of one name keep the order taken.
+  written.sort(function (a, b) { return a.p - b.p || a.seq - b.seq; });
+  written.forEach(function (w) {
+    encTlvTag(out, w.key, tlv, ctx);
     var value = [];
-    encList(value, c.body, data, ctx);
+    encList(value, w.body, w.data, ctx);
     if (lsize > 0) encWriteInt(out, value.length, lsize, false, ctx.endian);
     for (var i = 0; i < value.length; i++) out.push(value[i]);
   });
@@ -985,33 +1224,116 @@ function encPlaceBits(fr, base, endian, start, width, value, consume) {
   }
 }
 
-/* `top` selects the reference's top-level loop (encode) over _encode_field_list: the
- * flagged mask patch, the "Missing field" warning and the name_from error are its alone. */
-function encList(out, fields, data, ctx, top) {
-  var omitted = null, patches = {};
-  if (top) {
-    fields.forEach(function (f) {
-      if (!f || !f.flagged) return;
-      var flags = 0;
-      (f.flagged.groups || []).forEach(function (g) {
-        if ((g.fields || []).some(function (x) { return x.name && Object.prototype.hasOwnProperty.call(data, x.name); })) {
-          flags += Math.pow(2, g.bit || 0);
+/* PS-551: what the input omits but the rest of it fixes (_derive_inputs and helpers). */
+function encSizeSource(fields, ref) {                 // _size_source
+  for (var i = 0; i < (fields || []).length; i++) {
+    var f = fields[i];
+    if (!f || typeof f !== "object") continue;
+    if (f.byte_group !== undefined) {
+      var g = f.byte_group, found = encSizeSource(Array.isArray(g) ? g : (g.fields || []), ref);
+      if (found) return found;
+      continue;
+    }
+    if (f.name && (f.name === ref || f.var === ref)) return f;
+  }
+  return null;
+}
+
+function encDerivable(src) {                          // _derivable
+  if (!src || !src.name) return false;
+  if (ENC_COMPUTED.indexOf(src.type) >= 0 || encIsLiteral(src)) return false;
+  var keys = ["value", "name_from", "lookup", "mult", "div", "add", "transform", "polynomial", "encoding", "compute", "ref", "guard"];
+  return !keys.some(function (k) { return k in src; });
+}
+
+function encIsPeek(fields, src) {                     // _is_peek
+  var items = encRuns(fields);
+  for (var i = 0; i < items.length; i++) {
+    var run = items[i].bits;
+    if (run && run.indexOf(src) >= 0) return (parseInt(run[run.length - 1].consume || 0, 10) || 0) < 1;
+  }
+  return false;
+}
+
+function encDerivedSource(fields, ref) {              // _derived_source
+  if (typeof ref !== "string" || ref.charAt(0) !== "$") return null;
+  var src = encSizeSource(fields, ref.slice(1));
+  return (encDerivable(src) && !encIsPeek(fields, src)) ? src : null;
+}
+
+function encExactCase(key) {                          // _exact_case_value
+  if (typeof key === "number") return Math.floor(key) === key ? key : null;
+  try { return encParseInt0(key); } catch (e) { return null; }
+}
+
+function encSoleCase(cases, data) {                   // _sole_case_given
+  var best = null, bestHits = 0, tied = false;
+  for (var key in cases) {
+    if (key === "default" || !Array.isArray(cases[key])) continue;
+    var hits = encClaimable(cases[key]).filter(function (c) { return Object.prototype.hasOwnProperty.call(data, c.name); }).length;
+    if (hits > bestHits) { best = key; bestHits = hits; tied = false; }
+    else if (hits && hits === bestHits) tied = true;
+  }
+  return (best === null || tied) ? null : encExactCase(best);
+}
+
+function encDerive(fields, data, ctx) {                 // _derive_inputs
+  var d = {};
+  for (var k in data) d[k] = data[k];
+  (fields || []).forEach(function (f) {
+    if (!f || typeof f !== "object") return;
+    var src;
+    if (f.type === "repeat") {
+      var records = encRecords(f, data);
+      if (records === null) return;
+      ["count", "byte_length"].forEach(function (key) {
+        src = encDerivedSource(fields, f[key]);
+        if (!src || encHas(d, src.name)) return;
+        if (key === "count") d[src.name] = records.length;
+        else {
+          var scratch = [];
+          encRepeatElements(scratch, f, data, records, null, ctx);
+          d[src.name] = scratch.length;
         }
       });
-      patches[f.flagged.field || ""] = flags;
-    });
-  }
+    } else if (f.match && typeof f.match === "object" && !f.type) {
+      src = encDerivedSource(fields, f.match.field);
+      if (!src || encHas(d, src.name)) return;
+      var v = encSoleCase(f.match.cases || {}, data);
+      if (v !== null) d[src.name] = v;
+    } else if (f.flagged && typeof f.flagged === "object") {
+      var mask = String(f.flagged.field || "").replace(/^\$+/, "");
+      src = encSizeSource(fields, mask);
+      var name = src ? src.name : mask, bits = 0, declared = 0;
+      (f.flagged.groups || []).forEach(function (g) {
+        declared += Math.pow(2, g.bit || 0);
+        if (encGroupGiven(g, data)) bits += Math.pow(2, g.bit || 0);
+      });
+      var given = d[name];
+      if (given === undefined || given === null) { d[name] = bits; return; }
+      // The groups test what a reference to the mask binds (PS-523, CR-2026-132): an
+      // enum's code, the number under a text label, as _encode_reference gives it.
+      given = encReference(name, d);
+      if (typeof given === "number" && Math.floor(given) === given) {
+        var low = 0;
+        (f.flagged.groups || []).forEach(function (g) {
+          if (Math.floor(given / Math.pow(2, g.bit || 0)) % 2) low += Math.pow(2, g.bit || 0);
+        });
+        if (low !== bits) encFail("Flagged field '" + name + "' is given " + given + ", and the groups given set " + bits + " (PS-551)");
+      }
+    }
+  });
+  return d;
+}
+
+/* `top` selects the reference's top-level loop (encode) over _encode_field_list: the
+ * name_from error is its alone. */
+function encList(out, fields, data, ctx, top) {
+  var omitted = null;
+  data = encDerive(fields, data, ctx);
   // CR-2026-136: a frame laid out as a decoder reads it (FrameBuffer). A bit range or
   // bool that does not consume leaves its bytes pending, and the next field's are ORed in.
   var fr = { out: [], pend: [] };
-  if (top) {
-    // The masks the groups fix are visible to the constructs before the block, as the
-    // decoder's variables are: dnt binds its mask with an inline match.
-    var seen = {};
-    for (var dk in data) seen[dk] = data[dk];
-    for (var pk in patches) if (pk && !encHas(seen, pk)) seen[pk] = patches[pk];
-    data = seen;
-  }
   encRuns(fields).forEach(function (item) {
     if (item.bits) { encBitRun(fr, item.bits, data, ctx); return; }
     var tmp = [];
@@ -1023,42 +1345,39 @@ function encList(out, fields, data, ctx, top) {
   return fr.pend.length;     // the bytes at the end still pending (Frame.pending)
 
   function encOne(item, out) {
-    var f = item.field, name = f.name || (top ? "unknown" : ""), type = f.type === undefined ? "u8" : f.type;
-    if (top && f.optional === true && f.name) {
-      if (!encHas(data, f.name)) { omitted = omitted || f.name; return; }
-      if (omitted) encFail("Error encoding " + f.name + ": optional field supplied while the earlier optional field " + JSON.stringify(omitted) + " is not (PS-405)");
+    var f = item.field, name = f.name || "", type = f.type === undefined ? "u8" : f.type;
+    if (f.optional === true && f.name) {
+      var okey = encResolveName(f, f.name, data);
+      if (!encHas(data, okey === null ? f.name : okey)) { omitted = omitted || f.name; return; }
+      if (omitted) encFail("optional field " + JSON.stringify(f.name) + " is supplied while the earlier optional field " + JSON.stringify(omitted) + " is not (PS-405)");
     }
     if ("match" in f && !f.type) { return encMatch(out, f, data, ctx, fr.pend); }
     if ("tlv" in f && !f.type) { encTlv(out, f, data, ctx); return; }
     if ("byte_group" in f) { encByteGroup(out, f, data, ctx); return; }
-    if (type === "repeat") { encRepeat(out, f, data, ctx); return; }
+    if ("flagged" in f && !f.type) { return encFlagged(out, f.flagged, data, ctx); }
+    if (type === "repeat") { encRepeat(out, f, data, ctx, fields); return; }
     if (type === "object") {
+      if (!name) return encList(out, f.fields || [], data, ctx);
       // Read back from the key a `name_from` object was reported under (CR-2026-030).
       var objKey = encResolveName(f, name, data);
-      var nested = objKey === null ? undefined : data[objKey];
-      var isMap = nested !== null && typeof nested === "object" && !Array.isArray(nested);
-      return encList(out, f.fields || [], isMap ? nested : (top ? {} : data), ctx);
+      if (objKey === null) objKey = name;
+      var nested = data[objKey];
+      if (nested === null || typeof nested !== "object" || Array.isArray(nested)) encFail(encMissing(objKey));   // PS-551
+      return encList(out, f.fields || [], nested, ctx);
     }
-    if (top && "flagged" in f) { return encFlagged(out, f.flagged, data, ctx); }
     if (ENC_COMPUTED.indexOf(type) >= 0) return;
     if (type === "skip") {
       var n = typeof f.length === "string" ? 0 : Math.max(0, parseInt(f.length === undefined ? 1 : f.length, 10));
       for (var i = 0; i < n; i++) out.push(0);
       return;
     }
-    if (type === "bitfield_string") {
-      encBitfieldString(out, f, data[name] === undefined ? "" : data[name], ctx);
-      return;
-    }
     if (encIsLiteral(f)) return;
     if ("value" in f) { encField(out, f, f.value, ctx); return; }
     var value;
     if (!name) {
-      value = f["default"] === undefined ? 0 : f["default"];
+      value = f["default"] === undefined ? 0 : f["default"];   // padding, as a skip is
     } else if (name.charAt(0) === "_") {
       value = encInternalValue(f, data);
-    } else if (top && Object.prototype.hasOwnProperty.call(patches, name)) {
-      value = patches[name];
     } else {
       var key = encResolveName(f, name, data);
       if (key === null) {
@@ -1066,17 +1385,12 @@ function encList(out, fields, data, ctx, top) {
         key = name;
       }
       if (!encHas(data, key)) {
-        if (f.optional === true) { omitted = omitted || name; return; }
         if (f.sentinel) { encField(out, encRawBits(f), f.sentinel[0], ctx); return; }
-        if (top) { ctx.w.push("Missing field: " + key); value = 0; }
-        else value = f["default"] === undefined ? 0 : f["default"];
-      } else {
-        if (f.optional === true && omitted) {
-          encFail("optional field " + JSON.stringify(name) + " is supplied while the earlier optional field " + JSON.stringify(omitted) + " is not (PS-405)");
-        }
-        value = data[key];
+        encFail(encMissing(key));                // PS-551: this wrote a zero
       }
+      value = data[key];
     }
+    if (type === "bitfield_string") { encBitfieldString(out, f, value, ctx); return; }
     if (type === "bool") {                       // its bit of the byte it peeks
       encPlaceBits(fr, 1, "big", Number(f.bit || 0), 1, value ? 1 : 0,
                    parseInt(f.consume || 0, 10) || 0);
@@ -1087,9 +1401,11 @@ function encList(out, fields, data, ctx, top) {
 }
 
 function encodeRoot(fields, data, endian) {
-  var ctx = { endian: endian, w: [] }, out = [];
+  // wa: PS-537's warnings, reported after the others as the reference reports them.
+  var ctx = { endian: endian, w: [], wa: [] }, out = [];
+  ENC_SCOPE = fields;
   encList(out, fields, data || {}, ctx, true);
-  return { bytes: out, warnings: ctx.w };
+  return { bytes: out, warnings: ctx.w.concat(ctx.wa) };
 }
 '''
 
@@ -1162,7 +1478,7 @@ _CODEC_LOCALS = {
     'pos', 'd', 'vars', 'w', 'aqr', 'aqp', 'endian', 'buf', 'bgVal', 'bgStart', 'q',
     'qn', 'r', 'port', 'bytes', 'cmdName', 'cmdId', 'input', 'e', 'i', 'k',
     '_si', '_tlvTag', '_tlvStart', '_tlvSpan', '_tlvLen', '_mv', '_mr', '_k', '_a', '_p',
-    '_i', '_flags',
+    '_i', '_flags', 'lv', 'lbl',
 }
 _JS_RESERVED = {
     'arguments', 'await', 'break', 'case', 'catch', 'class', 'const', 'continue',
@@ -1186,11 +1502,45 @@ def _codec_globals() -> set:
         names = set(re.findall(r'^function ([A-Za-z_$][\w$]*)', text, re.M))
         names |= set(re.findall(r'^var ([A-Za-z_$][\w$]*)', text, re.M))
         names |= {'ENC_TYPES', 'ENC_WORD_ORDERED', 'ENC_ENDIAN_OPAQUE', 'ENC_COMPUTED',
-                  'ENC_VARS', 'OUTPUT_KEYS', 'COMMANDS', 'decodeUplink', 'decodeDownlink',
+                  'ENC_VARS', 'ENC_NAMED', 'OUTPUT_KEYS', 'COMMANDS', 'decodeUplink', 'decodeDownlink',
                   'encodeDownlink', 'decodePayload', 'encodePayload', 'decodeCommand',
                   'encodeCommand'}
         _CODEC_GLOBALS = names
     return _CODEC_GLOBALS
+
+
+def _tlv_repeat_modes(tlv):
+    """tlv_repeat_modes() for a tlv that declares `on_repeat` on itself or on a case
+    field (PS-525); otherwise every name collects (PS-157), and the codec carries no
+    table for it."""
+    from schema_interpreter import tlv_repeat_modes, reported_fields
+    declared = 'on_repeat' in tlv or any(
+        'on_repeat' in field_def
+        for body in (tlv.get('cases') or {}).values() if isinstance(body, list)
+        for field_def in reported_fields(body).values())
+    return tlv_repeat_modes(tlv) if declared else ({}, {}, [])
+
+
+def _annotate_on_repeat(node):
+    """A copy of an encoder plan with each tlv carrying `__on_repeat`: its names' modes
+    (PS-525), each merged object's declared members (PS-527) and the cases' declaration
+    order, which a JSON object with integer-like keys does not keep."""
+    from schema_interpreter import tlv_encode_plan
+    if isinstance(node, list):
+        return [_annotate_on_repeat(item) for item in node]
+    if not isinstance(node, dict):
+        return node
+    out = {k: _annotate_on_repeat(v) for k, v in node.items()}
+    tlv = node.get('tlv')
+    if isinstance(tlv, dict) and isinstance(tlv.get('cases'), dict):
+        modes, last_members, _ = _tlv_repeat_modes(tlv)
+        plan = tlv_encode_plan(tlv, modes, last_members)
+        out['tlv'] = dict(out['tlv'], __on_repeat={
+            'modes': {k: v for k, v in modes.items() if v != 'collect'},
+            'members': {k: sorted(v) for k, v in plan['members'].items()},
+            'order': [str(key) for key in tlv['cases']],
+        })
+    return out
 
 
 #: Per-generation spellings for names whose plain mangling collides with another
@@ -1644,7 +1994,9 @@ def name_from_to_js(field: Dict[str, Any], js_name: str) -> Tuple[List[str], str
         if literal:
             parts.append(json.dumps(literal))
         reference = to_js_name(match.group(1))
-        parts.append(f'vars.{reference}')
+        # A template writes the value reported, a looked-up field's label (PS-532), not
+        # the number a reference binds (PS-523).
+        parts.append(f'("{reference}" in lbl ? lbl.{reference} : vars.{reference})')
         refs.append(reference)
         last = match.end()
     tail = str(template)[last:]
@@ -1662,12 +2014,16 @@ def name_from_to_js(field: Dict[str, Any], js_name: str) -> Tuple[List[str], str
                    f"'{reference}', which has not been decoded")
         guards.append(f'if (vars.{reference} === undefined) '
                       f'throw new Error({json.dumps(message)});')
+        omitted = (f"name_from for '{field.get('name')}' references {reference}, which "
+                   "reported no value (PS-266, PS-532)")
+        guards.append(f'if ("{reference}" in lbl && lbl.{reference} === undefined) '
+                      f'throw new Error({json.dumps(omitted)});')
         # PS-532: concatenation writes a number, string or boolean as the key wants it,
         # and an object or array has no text to write.
         shape = (f"template {str(template)!r} references {reference!r}, which is not a "
                  "number, string or boolean and cannot be written into a key (PS-532)")
         guards.append(f'if (vars.{reference} !== null && typeof vars.{reference} === '
-                      f'"object") throw new Error({json.dumps(shape)});')
+                      f'"object" && !("{reference}" in lbl)) throw new Error({json.dumps(shape)});')
     return guards, 'd[' + ' + '.join(parts) + ']'
 
 
@@ -1675,7 +2031,8 @@ def ref_to_js(ref: str) -> str:
     """Convert a `$field` reference to a JS expression.
 
     Resolves against `vars`, which records every field - internal or not - after its
-    modifiers, matching the interpreters' variable table. `d` holds only the reported
+    modifiers, and a looked-up field as PS-523 binds it, matching the interpreters'
+    variable table. `d` holds only the reported
     fields, so a reference to an internal name (one beginning with an underscore)
     resolved to undefined: rakwireless/qingping computes both humidity and temperature
     from internal bitfields and reported neither.
@@ -1721,6 +2078,9 @@ class TS013Generator:
         from schema_interpreter import reference_errors
         iterator_problems += reference_errors(schema)            # PS-539
         iterator_problems += meta_declaration_errors(schema)    # PS-491
+        # PS-525, PS-526: on_repeat's values, merge on objects only, one mode per name.
+        from schema_interpreter import on_repeat_schema_errors
+        iterator_problems += on_repeat_schema_errors(schema)
         # PS-358, PS-519, PS-520: a malformed literal, as the interpreter refuses it.
         from schema_interpreter import literal_errors, typed_field_dicts
         for field_def in typed_field_dicts(schema):
@@ -1797,6 +2157,13 @@ function seqLookup(table, index) {
   throw new Error("lookup index " + index + " out of bounds for " + table.length + " entries");
 }
 
+// --- What a reference to a looked-up field binds (PS-523) ---
+// A numeric label is bound as itself, so a table of sizes feeds arithmetic; a text or
+// boolean label, or no entry at all, binds the number before the lookup.
+function refValue(label, number) {
+  return typeof label === "number" ? label : number;
+}
+
 // --- Lookup default template ---
 // PS-406: a mapping default carrying ${value} names the value it could not map, written
 // in decimal. String() gives the shortest round-tripping decimal with no fraction where
@@ -1847,6 +2214,43 @@ function tlvUnknownRaw(d, tag, buf, from, span, separate) {
   var key = separate ? "channels" : "unknown_tags";
   if (!d[key]) { d[key] = []; }
   d[key].push({ tag: tag, raw: hex });
+}
+
+// --- A name reported again (PS-157, PS-525) ---
+// One tlv entry's output folded into the tlv's. A name already reported is combined as
+// its on_repeat says: collected into an array by default, kept from the last entry
+// under `last`, combined member by member under `merge`. `collected` holds the names
+// already turned into arrays: a value that is itself a list is one element, not
+// appended into. The generated codec kept the last value for every name, so where two
+// entries reported one name the interpreters gave an array and this gave one value.
+function tlvFold(outer, entry, modes, lastMembers, collected) {
+  for (var k in entry) {
+    if (!Object.prototype.hasOwnProperty.call(entry, k)) continue;
+    var v = entry[k];
+    if (v === undefined) continue;
+    var mode = modes[k] || "collect";
+    if (!Object.prototype.hasOwnProperty.call(outer, k) || outer[k] === undefined) {
+      outer[k] = v;
+    } else if (mode === "last") {
+      outer[k] = v;
+    } else if (mode === "merge") {
+      var combined = {}, before = outer[k];
+      for (var a in before) if (Object.prototype.hasOwnProperty.call(before, a)) combined[a] = before[a];
+      for (var m in v) {
+        if (!Object.prototype.hasOwnProperty.call(v, m)) continue;
+        if (Object.prototype.hasOwnProperty.call(combined, m) && !(lastMembers[k] && lastMembers[k][m])) {
+          throw new Error("tlv: the merged object '" + k + "' reports its member '" + m + "' twice (PS-525)");
+        }
+        combined[m] = v[m];
+      }
+      outer[k] = combined;
+    } else if (collected[k]) {
+      outer[k].push(v);
+    } else {
+      outer[k] = [outer[k], v];
+      collected[k] = true;
+    }
+  }
 }
 
 // --- Absent values ---
@@ -1931,11 +2335,24 @@ var SAFE_INTEGER = 9007199254740991;
 
 /* A read past the end of the payload is an error, as it is in every interpreter. The
  * readers below used to substitute 0 for a missing byte, so a truncated payload decoded
- * to plausible values with no error at all. */
+ * to plausible values with no error at all.
+ *
+ * PS-535 (CR-2026-115): the error identifies the field. Each field's code sets `_fld` to
+ * its label before it reads - `'name'`, or `an unnamed skip` - so the innermost field
+ * reading is the one named, and the text is the reference's exactly. */
+var _fld = null;
+function underflow(detail) {
+  return new Error(_fld === null ? detail : "Field " + _fld + ": " + detail + " (PS-535)");
+}
 function need(buf, pos, size) {
   if (pos + size > buf.length) {
-    throw new Error("Buffer too short: need " + size + " bytes at pos " + pos);
+    throw underflow("Buffer underflow: need " + size + " bytes at offset " + pos +
+                    ", but only " + Math.max(0, buf.length - pos) + " remaining");
   }
+}
+/* A bit range or a bool reads its byte(s) without consuming them. */
+function needPeek(buf, pos, size) {
+  if (pos + size > buf.length) throw underflow("Buffer underflow at peek offset " + pos);
 }
 
 function orderedBytes(buf, pos, size, endian) {
@@ -2268,7 +2685,28 @@ function writeS(buf, pos, size, value, endian) {
             if isinstance(node, dict):
                 var = node.get('var')
                 if isinstance(var, str) and node.get('name') and var not in found:
-                    found[var] = {'name': node['name'], 'lookup': node.get('lookup')}
+                    found[var] = {'name': node['name'], 'lookup': node.get('lookup'),
+                                  'type': node.get('type'), 'values': node.get('values')}
+                for value in node.values():
+                    visit(value)
+            elif isinstance(node, list):
+                for item in node:
+                    visit(item)
+
+        visit(self.schema)
+        return found
+
+    def _enc_named(self) -> Dict[str, Dict[str, Any]]:
+        """field name -> the first field of that name carrying a lookup (_field_named)."""
+        found: Dict[str, Dict[str, Any]] = {}
+
+        def visit(node):
+            if isinstance(node, dict):
+                name = node.get('name')
+                if isinstance(name, str) and name not in found and (
+                        node.get('lookup') is not None or node.get('type') == 'enum'):
+                    found[name] = {'name': name, 'lookup': node.get('lookup'),
+                                   'type': node.get('type'), 'values': node.get('values')}
                 for value in node.values():
                     visit(value)
             elif isinstance(node, list):
@@ -2388,7 +2826,8 @@ function writeS(buf, pos, size, value, endian) {
 
     def _gen_decode_fn(self, fname: str, fields: List[Dict]) -> str:
         lines = [f'function {fname}(buf, endian) {{']
-        lines.append(f'  var pos = 0, d = {{}}, vars = {{}}, w = [];')
+        lines.append(f'  var pos = 0, d = {{}}, vars = {{}}, w = [], wn = [];')
+        lines.append('  _fld = null;')
         # Readings omitted as "no reading" (PS-427, PS-428), for `_quality` if produced.
         lines.append('  var aqr = {}, aqp = {};')
         # rv: a looked-up field's value before its lookup, which valid_range compares
@@ -2396,6 +2835,10 @@ function writeS(buf, pos, size, value, endian) {
         # a PS-302 warning already reported the bytes left over (PS-472).
         # rcs: the records the current repeat element yields (PS-541); null outside one.
         lines.append('  var rv = {}, rvs = {}, _leftDone = false, rcs = null;')
+        # lv: a looked-up field's number before its lookup, which a reference binds under
+        # a text or boolean label (PS-523); lbl: the value it reported, by the names it
+        # binds, which a key template writes (PS-532) - undefined where it had no entry.
+        lines.append('  var lv = {}, lbl = {};')
         lines.append(f'  endian = endian || "{self.endian}";')
         self.indent = 1
         for field in self._expand_refs(fields):
@@ -2433,7 +2876,7 @@ function writeS(buf, pos, size, value, endian) {
         lines.append('  if (!_leftDone && pos < buf.length) w.push((buf.length - pos) + '
                      '" byte(s) after the last field left undecoded, from offset " + pos + '
                      '" (PS-472)");')
-        lines.append('  return { data: d, pos: pos, warnings: w };')
+        lines.append('  return { data: d, pos: pos, warnings: w.concat(wn) };')
         lines.append('}')
         return '\n'.join(lines)
 
@@ -2464,6 +2907,12 @@ function writeS(buf, pos, size, value, endian) {
         problems = encoding_errors(field) if isinstance(field, dict) and 'type' in field else []
         if problems:
             raise ValueError(problems[0])
+        if isinstance(field, dict) and field.get('type'):
+            # PS-535: the field about to read, for a short read's error. A member of an
+            # object or a repeat element sets its own, so the innermost field is named.
+            from schema_interpreter import underflow_label
+            label = underflow_label(field.get('name'), field.get('type'))
+            lines.append(f'{i}  _fld = {json.dumps(label)};')
 
         # PS-541: each field list yields one record of the enclosing repeat element,
         # decoded into a fresh `d` and collected in `rcs`; the element reports them.
@@ -2486,17 +2935,32 @@ function writeS(buf, pos, size, value, endian) {
         if 'byte_group' in field:
             bg = field['byte_group']
             bg_fields = bg if isinstance(bg, list) else bg.get('fields', bg)
-            bg_size = field.get('size', 1) if isinstance(bg, dict) else 1
-            if isinstance(bg, dict):
-                bg_size = bg.get('size', 1)
-            # PS-397: overlapping members are a schema error; generating a codec that
-            # reported both from the same bits was the generator's version of accepting it.
-            from schema_interpreter import byte_group_endian, check_byte_group_overlap
-            check_byte_group_overlap(bg_fields)
+            # PS-070 (CR-2026-131): the widest member's base, widened by any `size`. The
+            # array form's `size` beside the group was ignored here, and a group with
+            # no `size` read one byte.
+            # PS-397 and PS-070: overlapping members, a member of another kind and a size
+            # narrower than a member are schema errors, raised here as in the interpreter.
+            from schema_interpreter import (byte_group_endian, byte_group_member_range,
+                                            byte_group_width)
+            bg_size = byte_group_width(field)
             byte_group_endian(field, None)        # PS-364: a member's endian is refused
             group_endian = f'"{bg["endian"]}"' if isinstance(bg, dict) and bg.get('endian') else 'endian'
             lines.append(f'{i}  // byte_group')
             lines.append(f'{i}  var bgStart = pos;')
+            # PS-535: a member reads the group's bytes from its start, so the first member
+            # whose base does not fit is the field named, in the peek form; where every
+            # base fits and the group's size does not, the group itself is.
+            from schema_interpreter import underflow_label
+            members = bg_fields if isinstance(bg_fields, list) else []
+            lines.append(f'{i}  if (buf.length - pos < {int(bg_size)}) {{')
+            for bf in members:
+                bm = re.match(r'^[us](\d+)\[', str(bf.get('type', '')))
+                bbytes = int(bm.group(1)) // 8 if bm else 1
+                blabel = json.dumps(underflow_label(bf.get('name'), bf.get('type')))
+                lines.append(f'{i}    if (buf.length - pos < {bbytes}) {{ _fld = {blabel}; '
+                             f'needPeek(buf, pos, {bbytes}); }}')
+            lines.append(f'{i}    _fld = {json.dumps(underflow_label(None, "byte_group"))};')
+            lines.append(f'{i}  }}')
             wide_group = int(bg_size) >= 7
             if wide_group:
                 # Past 2^53 readU gives a decimal string; take each range from the bytes.
@@ -2506,7 +2970,6 @@ function writeS(buf, pos, size, value, endian) {
             for bf in (bg_fields if isinstance(bg_fields, list) else []):
                 bname = bf.get('name', '_')
                 btype = bf.get('type', 'u8')
-                bit_m = re.match(r'([us])\d+\[(\d+):(\d+)\]', btype)
                 if btype == 'bool':
                     # PS-364: a bool member reads its `bit` of the group's value. Members
                     # other than bit ranges were skipped here with no error, so a group's
@@ -2520,30 +2983,27 @@ function writeS(buf, pos, size, value, endian) {
                             lines.append(f'{i}  {guard}')
                         lines.append(f'{i}  {target} = {bjs}_out;')
                     continue
-                if not bit_m:
-                    raise ValueError(
-                        f"byte_group member {bname!r}: type {btype!r} is not a bit range or "
-                        f"bool, which is all the generator emits for a group member")
-                if bit_m:
-                    lo, hi = int(bit_m.group(2)), int(bit_m.group(3))
-                    width = hi - lo + 1
-                    bjs = to_js_name(bname)
-                    if wide_group:
-                        lines.append(f'{i}  var {bjs} = bitRange(bgVal, {lo}, {width}, '
-                                     f'{json.dumps(bit_m.group(1) == "s")});')
-                    else:
-                        lines.append(f'{i}  var {bjs} = Math.floor(bgVal / {2 ** lo}) % {2 ** width};')
-                    if bit_m.group(1) == 's' and not wide_group:
-                        lines.append(f'{i}  if ({bjs} >= {2 ** (width - 1)}) {bjs} -= {2 ** width};')
-                    # `vars` records the post-modifier value - see _apply_modifiers_expr.
-                    bval = self._apply_modifiers_expr(bjs, bf)
-                    lines.append(f'{i}  var {bjs}_out = {bval};')
-                    lines.append(f'{i}  vars.{bjs} = {bjs}_out;')
-                    if not bname.startswith('_'):
-                        guards, target = name_from_to_js(bf, bjs)
-                        for guard in guards:
-                            lines.append(f'{i}  {guard}')
-                        lines.append(f'{i}  {target} = {bjs}_out;')
+                # PS-070: a bit range, or a whole integer as its full range (`u16` is
+                # `u16[0:15]`); either reads from the group's start.
+                _, lo, hi, signed = byte_group_member_range(bf)
+                width = hi - lo + 1
+                bjs = to_js_name(bname)
+                if wide_group:
+                    lines.append(f'{i}  var {bjs} = bitRange(bgVal, {lo}, {width}, '
+                                 f'{json.dumps(signed)});')
+                else:
+                    lines.append(f'{i}  var {bjs} = Math.floor(bgVal / {2 ** lo}) % {2 ** width};')
+                if signed and not wide_group:
+                    lines.append(f'{i}  if ({bjs} >= {2 ** (width - 1)}) {bjs} -= {2 ** width};')
+                # `vars` records the post-modifier value - see _apply_modifiers_expr.
+                bval = self._apply_modifiers_expr(bjs, bf)
+                lines.append(f'{i}  var {bjs}_out = {bval};')
+                lines.extend(f'{i}  {s}' for s in self._bind_js(bf, bjs, f'{bjs}_out', False))
+                if not bname.startswith('_'):
+                    guards, target = name_from_to_js(bf, bjs)
+                    for guard in guards:
+                        lines.append(f'{i}  {guard}')
+                    lines.append(f'{i}  {target} = {bjs}_out;')
             lines.append(f'{i}  pos = bgStart + {bg_size};')
             return lines
 
@@ -2692,7 +3152,8 @@ function writeS(buf, pos, size, value, endian) {
             # the enclosing one deleted any enclosing field sharing a member's name.
             lines.append(f'{i}    var {arr}_outer = d; d = {{}};')
             # PS-368: an element's names do not outlive it; `vars` is restored after it.
-            lines.append(f'{i}    var {arr}_vars = Object.assign({{}}, vars);')
+            lines.append(f'{i}    var {arr}_vars = Object.assign({{}}, vars), '
+                         f'{arr}_lbl = Object.assign({{}}, lbl);')
             # PS-541: an element reaching `records` collects them in `rcs`, and reports
             # them in its place. Emitted only where the element can reach one.
             yields_records = records_reachable(members)
@@ -2736,7 +3197,7 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append(f'{i}    {arr}_carry.{to_js_name(name)} = vars.{to_js_name(name)};')
             keep = condition_to_js(field['present_if']) if field.get('present_if') else 'true'
             lines.append(f'{i}    var {arr}_keep = {keep};')
-            lines.append(f'{i}    vars = {arr}_vars; {arr}_i++;')
+            lines.append(f'{i}    vars = {arr}_vars; lbl = {arr}_lbl; {arr}_i++;')
             if yields_records:
                 # PS-541: each record, after the element's other reported fields.
                 r = f'{arr}_r'
@@ -2969,6 +3430,7 @@ function writeS(buf, pos, size, value, endian) {
             # integer and corrupts a u32 base with its top bit set. An `sN` base is
             # sign-extended from the range's width (PS-352, PS-353).
             signed = base_type.startswith('s')
+            lines.append(f'{i}  needPeek(buf, pos, {base_size});')         # PS-535
             if base_size >= 7:
                 # readU gives a seven- or eight-byte base as a decimal string past 2^53,
                 # and the division below then read every range of it as 0.
@@ -2981,6 +3443,7 @@ function writeS(buf, pos, size, value, endian) {
                 if signed:
                     lines.append(f'{i}  if ({js_name} >= {2 ** (bit_width - 1)}) {js_name} -= {2 ** bit_width};')
             if consume:
+                lines.append(f'{i}  need(buf, pos, {int(consume)});')            # PS-535
                 lines.append(f'{i}  pos += {int(consume)};')
 
             val_expr = self._apply_modifiers_expr(js_name, field)
@@ -3000,14 +3463,19 @@ function writeS(buf, pos, size, value, endian) {
             vals = field.get('values', {})
             # The description form reports its `name` (PS-394); the mapping was emitted
             # whole and reported as the value.
+            if isinstance(vals, list):
+                vals = dict(enumerate(vals))
             val_json = json.dumps({str(k): enum_label(v) for k, v in vals.items()})
-            default = field.get('default', None)
-            default_js = json.dumps(default) if default else f'{js_name}_raw'
+            # PS-068 (CR-2026-132): with no `default` an unmatched code is omitted, as a
+            # lookup miss is (PS-269); `undefined` is dropped from the output, and the
+            # reference still binds the code below. This reported the code itself.
+            default_js = json.dumps(field['default']) if 'default' in field else 'undefined'
             lines.append(f'{i}  var {js_name}_map = {val_json};')
             lines.append(f'{i}  var {js_name}_out = {js_name}_map[{js_name}_raw] !== undefined ? {js_name}_map[{js_name}_raw] : {default_js};')
-            # The interpreters store the mapped label in their variable table, having
-            # applied the mapping before recording the variable, so record it here too.
-            lines.append(f'{i}  vars.{js_name} = {js_name}_out;')
+            # PS-523 (CR-2026-132): an enum is a lookup by another spelling, so a reference
+            # binds its code and a template reads its name.
+            lines.extend(f'{i}  {s}' for s in self._bind_js(
+                field, js_name, f'{js_name}_out', number=f'{js_name}_raw'))
             guards, target = name_from_to_js(field, js_name)
             for guard in guards:
                 lines.append(f'{i}  {guard}')
@@ -3022,9 +3490,10 @@ function writeS(buf, pos, size, value, endian) {
         if ftype == 'bool':
             bit = int(field.get('bit', 0))
             consume = field.get('consume', 0)
-            lines.append(f'{i}  if (pos >= buf.length) throw new Error("Buffer too short for bool");')
+            lines.append(f'{i}  needPeek(buf, pos, 1);')
             lines.append(f'{i}  var {js_name}_out = ((buf[pos] >> {bit}) & 1) === 1;')
             if consume:
+                lines.append(f'{i}  need(buf, pos, {int(consume)});')            # PS-535
                 lines.append(f'{i}  pos += {int(consume)};')
             if field.get('var'):
                 lines.append(f'{i}  vars.{to_js_name(field["var"])} = {js_name}_out;')
@@ -3041,7 +3510,7 @@ function writeS(buf, pos, size, value, endian) {
             # A skip past the end is a short read, as in every interpreter; the codec
             # advanced past the payload and reported success.
             lines.append(f'{i}  var _skipN = {length_to_js(field)};')
-            lines.append(f'{i}  if (pos + _skipN > buf.length) throw new Error("Buffer too short for skip");')
+            lines.append(f'{i}  need(buf, pos, _skipN);')
             lines.append(f'{i}  pos += _skipN;')
             return lines
 
@@ -3049,7 +3518,7 @@ function writeS(buf, pos, size, value, endian) {
         # integer path, which then had no size for it.
         if ftype == 'base64':
             lines.append(f'{i}  var {js_name}_n = {length_to_js(field)};')
-            lines.append(f'{i}  if (pos + {js_name}_n > buf.length) throw new Error("Buffer too short for base64");')
+            lines.append(f'{i}  need(buf, pos, {js_name}_n);')
             lines.append(f'{i}  var {js_name} = toBase64(buf, pos, {js_name}_n);')
             lines.append(f'{i}  pos += {js_name}_n;')
             if not name.startswith('_'):
@@ -3068,12 +3537,18 @@ function writeS(buf, pos, size, value, endian) {
             lines.append(f'{i}  var {js_name}_n = {length_to_js(field)};')
             # A declared length the payload cannot supply is an error, as in every
             # interpreter; the loops below stopped at the end and reported what was left.
-            lines.append(f'{i}  if (pos + {js_name}_n > buf.length) throw new Error("Buffer too short for {ftype}");')
+            lines.append(f'{i}  need(buf, pos, {js_name}_n);')
             if ftype == 'ascii':
                 lines.append(f'{i}  for (var _si = 0; _si < {js_name}_n && pos < buf.length; _si++)'
                              f' {{ {js_name} += String.fromCharCode(buf[pos++]); }}')
                 # Trailing NUL padding is not part of the text, as in the reference
                 # (`rstrip` of NUL); the codec used to report "HC" followed by two NULs.
+                # PS-538: each byte is its ISO 8859-1 character, with PS-073's warning
+                # for one above 0x7F. Collected apart and reported after the decode's
+                # own warnings, where the reference reports a nested one.
+                from schema_interpreter import ASCII_HIGH_BYTE_WARNING
+                warning = json.dumps(ASCII_HIGH_BYTE_WARNING.format(field.get('name')))
+                lines.append(f'{i}  if (/[\\u0080-\\u00ff]/.test({js_name})) wn.push({warning});')
                 lines.append(f'{i}  {js_name} = {js_name}.replace(/\\u0000+$/, "");')
             elif ftype == 'bytes' and field.get('format', 'hex') in ('base64', 'array'):
                 # PS-079: the declared format. Ignored before, so every bytes field was
@@ -3122,7 +3597,7 @@ function writeS(buf, pos, size, value, endian) {
             lines.append(f'{i}  pos += {sz};')
             val_expr = self._apply_modifiers_expr(js_name, field)
             lines.append(f'{i}  var {js_name}_out = {val_expr};')
-            lines.append(f'{i}  vars.{js_name} = {js_name}_out;')
+            lines.extend(f'{i}  {s}' for s in self._bind_js(field, js_name, f'{js_name}_out', False))
             if not name.startswith('_'):
                 guards, target = name_from_to_js(field, js_name)
                 for guard in guards:
@@ -3139,7 +3614,7 @@ function writeS(buf, pos, size, value, endian) {
             lines.append(f'{i}  pos += {size};')
             val_expr = self._apply_modifiers_expr(js_name, field)
             lines.append(f'{i}  var {js_name}_out = {js_name} === undefined ? undefined : {val_expr};')
-            lines.append(f'{i}  vars.{js_name} = {js_name}_out;')
+            lines.extend(f'{i}  {s}' for s in self._bind_js(field, js_name, f'{js_name}_out', False))
             if not name.startswith('_'):
                 guards, target = name_from_to_js(field, js_name)
                 for guard in guards:
@@ -3150,7 +3625,7 @@ function writeS(buf, pos, size, value, endian) {
         # Nibble-decimal (PS-329, PS-330): upper nibble whole, lower nibble tenths, the
         # upper nibble a 4-bit two's-complement value for sdec.
         if ftype in ('udec', 'sdec'):
-            lines.append(f'{i}  if (pos >= buf.length) throw new Error("Buffer too short for {ftype}");')
+            lines.append(f'{i}  need(buf, pos, 1);')
             if ftype == 'sdec':
                 lines.append(f'{i}  var {js_name}_w = buf[pos] >> 4; if ({js_name}_w >= 8) {js_name}_w -= 16;')
             else:
@@ -3159,7 +3634,7 @@ function writeS(buf, pos, size, value, endian) {
             lines.append(f'{i}  pos += 1;')
             val_expr = self._apply_modifiers_expr(js_name, field)
             lines.append(f'{i}  var {js_name}_out = {val_expr};')
-            lines.append(f'{i}  vars.{js_name} = {js_name}_out;')
+            lines.extend(f'{i}  {s}' for s in self._bind_js(field, js_name, f'{js_name}_out', False))
             if not name.startswith('_'):
                 guards, target = name_from_to_js(field, js_name)
                 for guard in guards:
@@ -3206,7 +3681,8 @@ function writeS(buf, pos, size, value, endian) {
         bounds = field.get('valid_range')
         if field.get('out_of_range') != 'omit' or not isinstance(bounds, (list, tuple)) \
                 or len(bounds) != 2:
-            return [f'{i}  d.{name} = {value_expr};', f'{i}  vars.{name} = {value_expr};']
+            return [f'{i}  d.{name} = {value_expr};'] + \
+                [f'{i}  {s}' for s in self._bind_js(field, name, f'd.{name}', False)]
         tmp = f'_c_{to_js_name(name)}'
         key = json.dumps(name)
         # PS-475: compared before the lookup; a guard's `else` is not compared at all.
@@ -3214,7 +3690,28 @@ function writeS(buf, pos, size, value, endian) {
         return [f'{i}  var {tmp} = {value_expr};',
                 f'{i}  if (!rvs[{key}] && typeof {v} === "number" && ({v} < {bounds[0]} || {v} > {bounds[1]})) '
                 f'{{ aqr[{json.dumps(name)}] = "out_of_range"; }}',
-                f'{i}  else {{ d.{name} = {tmp}; vars.{name} = {tmp}; }}']
+                f'{i}  else {{ d.{name} = {tmp}; '
+                + ' '.join(self._bind_js(field, name, tmp, False)) + ' }']
+
+    @staticmethod
+    def _bind_js(field: Dict, js_name: str, value: str, with_var: bool = True,
+                 number: Optional[str] = None) -> List[str]:
+        """Statements binding a field's names in `vars`, as PS-523 says.
+
+        A looked-up field binds its label where that is a number and otherwise the number
+        before the lookup (`lv`), a lookup miss included; `lbl` keeps the reported value,
+        which a `name_from` template writes (PS-532). Every name used to hold the label,
+        so `$code` in a `compute` read "report_rsp" and a case keyed 129 never matched.
+        """
+        names = [js_name]
+        if with_var and field.get('var'):
+            names.insert(0, to_js_name(field['var']))
+        if number is None and 'lookup' not in field:
+            return [f'vars.{n} = {value};' for n in names]
+        if number is None:
+            number = f'lv[{json.dumps(field.get("name", ""))}]'
+        return [f'vars.{n} = refValue({value}, {number}); lbl.{n} = {value};'
+                for n in names]
 
     def _emit_tail(self, lines: List[str], i: str, field: Dict, js_name: str, name: str,
                    bits_var: str = '') -> None:
@@ -3225,10 +3722,7 @@ function writeS(buf, pos, size, value, endian) {
         field is absent - not bound, not reported - and `_quality` records why where it
         is produced (`aqr` for a field declaring a range, `aqp` otherwise).
         """
-        body = []
-        if field.get('var'):
-            body.append(f'vars.{to_js_name(field["var"])} = {js_name}_out;')
-        body.append(f'vars.{js_name} = {js_name}_out;')
+        body = self._bind_js(field, js_name, f'{js_name}_out')
         if not name.startswith('_'):
             guards, target = name_from_to_js(field, js_name)
             body.extend(guards)
@@ -3279,6 +3773,11 @@ function writeS(buf, pos, size, value, endian) {
 
         if 'lookup' in field:
             lookup = field['lookup']
+            # PS-523: the number before the lookup, for a reference to bind under a
+            # text or boolean label. `lv` is read through below, so it is evaluated once.
+            number_key = json.dumps(field.get('name', ''))
+            pre_lookup = expr
+            expr = f'lv[{number_key}]'
             if isinstance(lookup, dict):
                 # `default` is a fallback, not a key. It used to be serialized into the
                 # table, so a miss found nothing and fell through to the raw integer -
@@ -3312,6 +3811,7 @@ function writeS(buf, pos, size, value, endian) {
                 # the index expression is evaluated once instead of up to three times.
                 lk = json.dumps(lookup)
                 expr = f'seqLookup({lk}, {expr})'
+            expr = f'(lv[{number_key}] = {pre_lookup}, {expr})'
         if stash:
             bounds = field.get('valid_range')
             if field.get('out_of_range') == 'omit' and isinstance(bounds, (list, tuple)) \
@@ -3389,6 +3889,7 @@ function writeS(buf, pos, size, value, endian) {
         length_size = int(tlv.get('length_size', 0))
 
         lines.append(f'{i}  // TLV loop')
+        lines.append(f'{i}  _fld = null;')
         # PS-477: a tag is never partly read - fewer bytes than the tag at the start of an
         # entry is an error identifying the tlv. The loop used to require tag and length
         # to fit and stop silently otherwise. PS-486 extends it to the rest of the entry:
@@ -3439,9 +3940,11 @@ function writeS(buf, pos, size, value, endian) {
             # (rakwireless standardized payload). Its name is bound too: a component is
             # a field decoded earlier in the payload, so `ref: $rsn` in a case reads it
             # (PS-265), where the codec read an undefined value.
-            lines.append(f'{i}    vars.{tfname} = {tfname};')
-            if tf.get('var'):
-                lines.append(f'{i}    vars.{to_js_name(str(tf["var"]))} = {tfname};')
+            # PS-523 (CR-2026-132): both bind as any field's do - through its modifiers,
+            # and a lookup's number under a text label, the label kept for templates. The
+            # tag is still matched on the value read.
+            lines.append(f'{i}    var {tfname}_out = {self._apply_modifiers_expr(tfname, tf)};')
+            lines.extend(f'{i}    {s}' for s in self._bind_js(tf, tfname, f'{tfname}_out'))
         if not tag_fields:
             lines.append(f'{i}    var _tlvTag = readU(buf, pos, {tag_size}, endian);')
             lines.append(f'{i}    pos += {tag_size};')
@@ -3471,6 +3974,17 @@ function writeS(buf, pos, size, value, endian) {
         tag_parts_expr = '[' + ', '.join(tag_parts) + ']'
 
         separate = tlv.get('merge', True) is False
+        # PS-157, PS-525: each entry of a merged tlv decodes into an object of its own,
+        # folded into the output by tlvFold, so a name two entries report is combined
+        # as its on_repeat says. The tables are keyed as the output is staged.
+        repeat_modes, repeat_last, _ = _tlv_repeat_modes(tlv)
+        fold_modes = json.dumps({to_js_name(k): v for k, v in repeat_modes.items()
+                                 if v != 'collect'}, sort_keys=True)
+        fold_last = json.dumps({to_js_name(k): {to_js_name(m): True for m in sorted(ms)}
+                                for k, ms in repeat_last.items() if ms}, sort_keys=True)
+        fold_id = self._tlv_fold_seq = getattr(self, '_tlv_fold_seq', 0) + 1
+        if not separate:
+            lines.insert(1, f'{i}  var _tlvC{fold_id} = {{}};')
         # PS-270: exact keys are tried first, then negated (`!n`), then wildcard (`*`), so
         # a broad key never shadows a specific one; within a rank, schema order. A
         # composite key is compared component by component, as the interpreters do. It
@@ -3496,6 +4010,8 @@ function writeS(buf, pos, size, value, endian) {
                 # by swapping it in as `d` for their length. This was not generated at
                 # all, so `channels` was missing from the codec's output with no error.
                 lines.append(f'{i}      var _tlvOuter = d; d = {{ tag: {tag_parts_expr} }};')
+            else:
+                lines.append(f'{i}      var _tlvO{fold_id} = d; d = {{}};')
             self.indent += 2
             for cf in case_fields:
                 lines.extend(self._gen_decode_field(cf))
@@ -3503,6 +4019,9 @@ function writeS(buf, pos, size, value, endian) {
             if separate:
                 lines.append(f'{i}      if (!_tlvOuter.channels) {{ _tlvOuter.channels = []; }}')
                 lines.append(f'{i}      _tlvOuter.channels.push(d); d = _tlvOuter;')
+            else:
+                lines.append(f'{i}      tlvFold(_tlvO{fold_id}, d, {fold_modes}, {fold_last}, '
+                             f'_tlvC{fold_id}); d = _tlvO{fold_id};')
 
         if not first:
             lines.append(f'{i}    }} else {{')
@@ -3633,10 +4152,19 @@ function writeS(buf, pos, size, value, endian) {
             reference = match['field']
             discriminator = f'vars.{to_js_name(reference.lstrip("$"))}'
             lines.append(f'{i}  // match on {discriminator}')
+            # A name nothing bound - a sentinel or an omitted range left it unbound
+            # (PS-523) - is an error, as in every interpreter; the codec took `default`.
+            message = (f"Match field {reference} has no value: no earlier field or var: "
+                       "binds it")
+            lines.append(f'{i}  if ({discriminator} === undefined) '
+                         f'throw new Error({json.dumps(message)});')
         else:
             # Read it here, and consume it: the bytes belong to this construct.
             span = int(width) if width else 1
             lines.append(f'{i}  // match on an inline {span}-byte discriminator')
+            from schema_interpreter import underflow_label
+            mlabel = underflow_label(match.get('name'), 'match')
+            lines.append(f'{i}  _fld = {json.dumps(mlabel)};')       # PS-535
             lines.append(f'{i}  var _mv = readU(buf, pos, {span}, endian);')
             lines.append(f'{i}  pos += {span};')
             discriminator = '_mv'
@@ -3720,9 +4248,10 @@ function writeS(buf, pos, size, value, endian) {
                 return f'{discriminator} === {int(text, 0)}'
             except ValueError:
                 # A string key matches a string discriminator by equality, as the
-                # interpreters compare it - typically a lookup label (`Cmd` reads 0x81
-                # and reports "ConfigReportRsp"). These keys yielded no branch, so every
-                # such case body was silently missing from the codec's output.
+                # interpreters compare it - an `ascii` field's text. Not a lookup label:
+                # a reference to a looked-up field binds a number (PS-523), so a label
+                # key matches nothing there (PS-524). These keys yielded no branch, so
+                # every such case body was silently missing from the codec's output.
                 return f'{discriminator} === {json.dumps(case_key)}'
         return None
 
@@ -3730,7 +4259,8 @@ function writeS(buf, pos, size, value, endian) {
     # Encoder generation
     # ---------------------------------------------------------------
     def _gen_encode_fields(self) -> str:
-        parts = [f'var ENC_VARS = {json.dumps(self._enc_vars(), default=str)};']
+        parts = [f'var ENC_VARS = {json.dumps(self._enc_vars(), default=str)};',
+                 f'var ENC_NAMED = {json.dumps(self._enc_named(), default=str)};']
         if self.has_ports:
             for port_key, port_def in self.schema['ports'].items():
                 fname = f'encodePort{port_key}'
@@ -3755,6 +4285,7 @@ function writeS(buf, pos, size, value, endian) {
         exactly as the decoder sees it.
         """
         plan = self._expand_refs(list(fields)) if isinstance(fields, list) else fields
+        plan = _annotate_on_repeat(plan)
         return '\n'.join([
             f'var {fname}_FIELDS = {json.dumps(plan, default=str, separators=(",", ":"))};',
             f'function {fname}(d, endian) {{',
@@ -3810,9 +4341,12 @@ function writeS(buf, pos, size, value, endian) {
                     js_name = to_js_name(fname)
                     
                     # Handle modifiers
-                    src = f'data.{js_name} !== undefined ? data.{js_name} : 0'
+                    # PS-551: a missing value is rejected, naming the field, as the
+                    # reference's encode_command does. It was written as 0.
+                    src = f'data.{js_name}'
                     rev = self._reverse_modifiers_expr(f'({src})', field)
-                    
+                    lines.append(f'    if (data.{js_name} === undefined || data.{js_name} === null) '
+                                 f'throw new Error({json.dumps("Missing required field: " + fname)});')
                     lines.append(f'    {write_fn}(buf, pos, {sz}, {rev}, endian);')
                     lines.append(f'    pos += {sz};')
         

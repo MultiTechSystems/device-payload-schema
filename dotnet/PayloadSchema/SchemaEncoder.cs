@@ -9,8 +9,10 @@ namespace PayloadSchema;
 /// <remarks>
 /// Mirrors the reference interpreter's EncodeResult: a field that cannot be encoded is
 /// recorded against the payload rather than aborting it, so one unrecoverable value does
-/// not cost every other field its bytes. A field the data does not carry is a warning and
-/// encodes as zero; a value that cannot have produced any legal bytes is an error.
+/// not cost every other field its bytes. A required value the data does not carry is an
+/// error naming the field (PS-551, CR-2026-134), as is a value that cannot have produced
+/// any legal bytes. Where there is any error, <see cref="Payload"/> is empty: the bytes
+/// written before it are a frame short of the rest.
 ///
 /// The decoder throws, and still does. Encoding differs because it has inherently lossy
 /// cases - a `lookup` default label stands for every unmapped value, a rounding stage
@@ -109,39 +111,32 @@ public static class SchemaEncoder
             data ??= new Dictionary<string, object?>();
             var output = new List<byte>();
 
-            // A `flagged` block's flags byte is not in the decoded output as a number a
-            // caller would supply: it is implied by which groups are present. Computed
-            // here so the plain field carrying it gets the right value when its turn comes.
-            var flagsPatches = new Dictionary<string, int>();
-            foreach (var field in _fields)
+            // PS-551: a value the input omits but the rest of it fixes - a repeat's count or
+            // byte_length field, a match's discriminator, a flagged mask - is derived before
+            // anything is written, and a supplied one that disagrees is rejected. The flagged
+            // mask was the one derivation already made, and it overwrote a supplied mask.
+            try
             {
-                if (field.Flagged == null) continue;
-                int flags = 0;
-                foreach (var group in field.Flagged.Groups)
-                    if (GroupHasData(group, data))
-                        flags |= 1 << group.Bit;
-                if (!string.IsNullOrEmpty(field.Flagged.Field))
-                    flagsPatches[field.Flagged.Field] = flags;
+                data = DeriveInputs(_fields, data);
+            }
+            catch (Exception e)
+            {
+                _result.Errors.Add(e.Message);
+                return _result;
             }
 
-            // The masks the groups fix are visible to the constructs before the block, as
-            // the decoder's variables are: dnt binds its mask with an inline match
-            // (CR-2026-136).
-            if (flagsPatches.Count > 0)
-            {
-                data = new Dictionary<string, object?>(data);
-                foreach (var (key, mask) in flagsPatches)
-                    if (!data.TryGetValue(key, out var have) || have == null)
-                        data[key] = (double)mask;
-            }
+            // DeriveInputs also makes the masks the groups fix visible to the constructs
+            // before the block, as the decoder's variables are: dnt binds its mask with an
+            // inline match (CR-2026-136).
 
             // Bit ranges sharing a byte are packed together rather than a byte apiece
             // (CR-2026-024), so the whole list is walked at once: a run cannot be found
             // by looking at one field in isolation.
-            output.AddRange(EncodeWithBitfieldRuns(_fields, data, flagsPatches,
-                                                   topLevel: true));
+            output.AddRange(EncodeWithBitfieldRuns(_fields, data, topLevel: true));
 
-            _result.Payload = output.ToArray();
+            // A rejected input produces no payload: the bytes written before the error are
+            // a frame short of the rest, as Go has always returned nothing.
+            _result.Payload = _result.Errors.Count > 0 ? Array.Empty<byte>() : output.ToArray();
             return _result;
         }
 
@@ -163,7 +158,7 @@ public static class SchemaEncoder
         /// of the constructs, so a case body may itself hold a construct.
         /// </summary>
         byte[] EncodeOne(SchemaField field, Dictionary<string, object?> data,
-            Dictionary<string, int> flagsPatches, bool topLevel, FrameBuffer? frame = null)
+            List<SchemaField> siblings, FrameBuffer? frame = null)
         {
             if (field.Ref2 != null)
             {
@@ -188,18 +183,24 @@ public static class SchemaEncoder
             switch (field.Type)
             {
                 case FieldType.Repeat:
-                    return EncodeRepeat(field, data);
+                    return EncodeRepeat(field, data, siblings);
                 case FieldType.Object:
+                {
                     // A nested object is reported under its own name (PS-139), so its
                     // members are read from that mapping. They were looked up in the
                     // enclosing data, where they are not, and every member encoded as zero.
                     // A `name_from` object was reported under its templated key, so that
                     // is the key to read it back from (CR-2026-030).
-                    var objectKey = ResolveEncodeName(field, data);
-                    return EncodeFieldList(field.Fields,
-                        objectKey != null && data.TryGetValue(objectKey, out var nested)
-                        && nested is Dictionary<string, object?> members
-                            ? members : data);
+                    if (string.IsNullOrEmpty(field.Name))
+                        return EncodeFieldList(field.Fields, data);
+                    var objectKey = ResolveEncodeName(field, data) ?? field.Name;
+                    if (!data.TryGetValue(objectKey, out var nested)
+                        || nested is not Dictionary<string, object?> members)
+                        // PS-551: a whole object the input omits. Its members were looked
+                        // up in the enclosing data and written as zeros.
+                        throw new InvalidOperationException(MissingFieldMessage(objectKey));
+                    return EncodeFieldList(field.Fields, members);
+                }
                 case FieldType.Number:
                     // Derived from other fields: no bytes of its own.
                     return Array.Empty<byte>();
@@ -216,22 +217,16 @@ public static class SchemaEncoder
             if (field.Value != null)
                 return EncodeField(field, field.Value);
 
-            if (field.Type == FieldType.BitfieldString)
-            {
-                data.TryGetValue(field.Name, out var text);
-                return EncodeBitfieldString(field, text?.ToString() ?? "");
-            }
-
             object? value;
             if (string.IsNullOrEmpty(field.Name))
-                value = 0.0;    // unnamed padding
+                // Nothing can be supplied for a field with no name; it is padding, as a
+                // skip is.
+                value = 0.0;
             else if (field.Name.StartsWith("_"))
                 // PS-434: an internal field that reads bytes writes its value (handled
                 // above), else the input's, else it is an error naming the field. This
                 // wrote 0, which reads back as a value the device never sent.
                 value = InternalEncodeValue(field, data);
-            else if (flagsPatches.TryGetValue(field.Name, out var flags))
-                value = (double)flags;
             else
             {
                 // `name_from` reports the value under a templated key, so that is the key
@@ -247,16 +242,15 @@ public static class SchemaEncoder
                     // A reading the decode omitted as "no reading" (PS-427) goes back as
                     // the sentinel it was, not as zero.
                     return EncodeSentinel(field);
-                else if (supplied != null || data.ContainsKey(lookupName))
-                    value = supplied;
                 else
-                {
-                    if (topLevel)
-                        _result.Warnings.Add($"Missing field: {lookupName}");
-                    value = 0.0;
-                }
+                    // PS-551: rejected, naming the field. This warned "Missing field" at
+                    // the top level, said nothing anywhere else, and wrote a zero, which
+                    // reads back as a real zero.
+                    throw new InvalidOperationException(MissingFieldMessage(lookupName));
             }
 
+            if (field.Type == FieldType.BitfieldString)
+                return EncodeBitfieldString(field, value?.ToString() ?? "");
             var reversedValue = ReverseModifiers(value, field);
             if (field.Type == FieldType.Bool && frame != null)
             {
@@ -371,8 +365,7 @@ public static class SchemaEncoder
         /// decoding stops reading from the same offset.
         /// </summary>
         byte[] EncodeWithBitfieldRuns(List<SchemaField> fields,
-                                      Dictionary<string, object?> data,
-                                      Dictionary<string, int> patches, bool topLevel)
+                                      Dictionary<string, object?> data, bool topLevel)
         {
             // CR-2026-136: laid out as the decoder reads it. A bit range or bool that does
             // not consume leaves its bytes pending, and the next field's bytes are ORed
@@ -427,13 +420,15 @@ public static class SchemaEncoder
                     Flush();
                     try
                     {
-                        var bytes = EncodeOne(field, data, patches, topLevel, output);
+                        var bytes = EncodeOne(field, data, fields, output);
                         output.Extend(bytes, CarriedBy(bytes));
                     }
                     catch (Exception e)
                     {
                         if (!topLevel) throw;
-                        _result.Errors.Add($"Error encoding {Describe(field)}: {e.Message}");
+                        // A FieldErrorException already names its field in full (PS-537).
+                        _result.Errors.Add(e is FieldErrorException ? e.Message
+                            : $"Error encoding {Describe(field)}: {e.Message}");
                     }
                     continue;
                 }
@@ -476,8 +471,11 @@ public static class SchemaEncoder
             foreach (var member in run)
             {
                 object? value = string.IsNullOrEmpty(member.Name) ? 0.0
-                    : member.Name.StartsWith("_") ? InternalEncodeValue(member, data)      // PS-434
-                    : (data.TryGetValue(member.Name, out var v) ? v : 0.0);
+                    : member.Value != null || member.Name.StartsWith("_")
+                        ? InternalEncodeValue(member, data)                    // PS-360, PS-434
+                    : data.TryGetValue(member.Name, out var v) && v != null ? v
+                    // PS-551. A range was written as zero bits, which read back as a value.
+                    : throw new InvalidOperationException(MissingFieldMessage(member.Name));
                 var given = value;
                 value = ReverseModifiers(value, member);
                 var (ok, numeric) = Helpers.ToFloat64(value);
@@ -521,8 +519,8 @@ public static class SchemaEncoder
         byte[] EncodeFieldList(List<SchemaField> fields, Dictionary<string, object?> data)
         {
             if (fields.Count == 0) return Array.Empty<byte>();
-            return EncodeWithBitfieldRuns(fields, data, new Dictionary<string, int>(),
-                                          topLevel: false);
+            data = DeriveInputs(fields, data);                                  // PS-551
+            return EncodeWithBitfieldRuns(fields, data, topLevel: false);
         }
 
         List<SchemaField> ResolveDefinition(string refPath)
@@ -535,10 +533,201 @@ public static class SchemaEncoder
             return def.Fields;
         }
 
+        // --- PS-551: missing input and what the rest of the input fixes ----------------
+
+        /// <summary>
+        /// What every encoder says for a required value the input omits (PS-551). The spec
+        /// prototype's text, so a cross-language diff compares equal strings.
+        /// </summary>
+        internal static string MissingFieldMessage(string name) => $"Missing required field: {name}";
+
+        /// <summary>
+        /// The field of this list a <c>$ref</c> names, by its name or its <c>var:</c>.
+        /// Searched into a byte_group's members, since a count is often a few bits of a
+        /// shared byte; not into any other construct. Mirrors _size_source.
+        /// </summary>
+        static SchemaField? SizeSource(List<SchemaField> fields, string reference)
+        {
+            foreach (var f in fields)
+            {
+                if (f.ByteGroup.Count > 0)
+                {
+                    var found = SizeSource(f.ByteGroup, reference);
+                    if (found != null) return found;
+                    continue;
+                }
+                if (!string.IsNullOrEmpty(f.Name) && (f.Name == reference || f.Var == reference))
+                    return f;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Whether a field's value can be derived and written as it stands: it reads bytes
+        /// of its own and reports them unchanged. Mirrors _derivable.
+        /// </summary>
+        static bool Derivable(SchemaField? source)
+        {
+            if (source == null || string.IsNullOrEmpty(source.Name)) return false;
+            if (source.Type == FieldType.Number) return false;
+            if (source.Type is FieldType.String or FieldType.Boolean && source.Value != null) return false;
+            return source.Value == null && source.NameFrom == null && source.Lookup == null
+                && source.Mult == null && source.Div == null && source.Add == null
+                && source.Transform.Count == 0 && source.Polynomial == null
+                && source.Encoding == null && source.Compute == null && source.Ref == null
+                && source.Guard == null;
+        }
+
+        /// <summary>
+        /// Whether <paramref name="source"/> is a bit range in a run nothing closes with
+        /// <c>consume</c>. Such a run reads bytes the fields after it read again (r718x, vobo,
+        /// dnt, the match-u32-peek fixture), and the encoder writes those bytes twice, so a
+        /// value derived into it would add bytes rather than fix them. Mirrors _is_peek.
+        /// </summary>
+        static bool IsPeek(List<SchemaField> fields, SchemaField source)
+        {
+            var run = new List<SchemaField>();
+            foreach (var f in fields)
+            {
+                if (!IsBareBitfield(f))
+                {
+                    if (run.Contains(source)) return true;
+                    run.Clear();
+                    continue;
+                }
+                run.Add(f);
+                if (f.Consume >= 1)
+                {
+                    if (run.Contains(source)) return false;
+                    run.Clear();
+                }
+            }
+            return run.Contains(source);
+        }
+
+        /// <summary>The field a <c>$ref</c> names, where a value can be derived into it.</summary>
+        static SchemaField? DerivedSource(List<SchemaField> fields, object? reference)
+        {
+            if (reference is not string text || !text.StartsWith("$")) return null;
+            var source = SizeSource(fields, text[1..]);
+            if (!Derivable(source) || IsPeek(fields, source!)) return null;
+            return source;
+        }
+
+        /// <summary>The one discriminator a match case key stands for, or null.</summary>
+        static long? ExactCaseValue(object? caseValue)
+        {
+            switch (caseValue)
+            {
+                case null or bool: return null;
+                case int i: return i;
+                case long l: return l;
+                case double d when d == Math.Floor(d): return (long)d;
+                case string s: return ParseIntAny(s);
+                default: return null;
+            }
+        }
+
+        /// <summary>
+        /// The discriminator of the one match case whose fields the input gives; null where
+        /// none is given, two tie, or the case stands for more than one value.
+        /// </summary>
+        static long? SoleCaseGiven(List<MatchCase> cases, Dictionary<string, object?> data)
+        {
+            MatchCase? best = null;
+            int bestHits = 0;
+            bool tied = false;
+            foreach (var c in cases)
+            {
+                if (IsDefaultCase(c)) continue;
+                int hits = ClaimableFields(c.Fields).Count(f => data.ContainsKey(f.Name));
+                if (hits > bestHits)
+                {
+                    best = c;
+                    bestHits = hits;
+                    tied = false;
+                }
+                else if (hits > 0 && hits == bestHits)
+                    tied = true;
+            }
+            return best == null || tied ? null : ExactCaseValue(best.CaseValue);
+        }
+
+        /// <summary>
+        /// PS-551: the values this field list's input omits but the rest of it fixes - a
+        /// repeat's <c>count: $n</c> or <c>byte_length: $n</c> field from its list, a match's
+        /// <c>field: $d</c> discriminator from the one case whose fields are given, a flagged
+        /// mask from the groups given. A supplied value is kept and checked where it is used;
+        /// a supplied flagged mask disagreeing with the groups is rejected here. The input
+        /// itself is not modified. Mirrors _derive_inputs.
+        /// </summary>
+        Dictionary<string, object?> DeriveInputs(List<SchemaField> fields, Dictionary<string, object?> data)
+        {
+            var derived = new Dictionary<string, object?>(data);
+            foreach (var f in fields)
+            {
+                if (f.Type == FieldType.Repeat)
+                {
+                    var records = RepeatRecords(f, data);
+                    if (records == null) continue;
+                    foreach (var (reference, isCount) in new[] { (f.Count, true), (f.ByteLength, false) })
+                    {
+                        var source = DerivedSource(fields, reference);
+                        if (source == null || (derived.TryGetValue(source.Name, out var have) && have != null))
+                            continue;
+                        derived[source.Name] = isCount
+                            ? (long)records.Count
+                            : (long)EncodeRepeatElements(f, data, records, null).Length;
+                    }
+                }
+                else if (f.MatchInline is { } match)
+                {
+                    var source = DerivedSource(fields, match.On);
+                    if (source == null || (derived.TryGetValue(source.Name, out var have) && have != null))
+                        continue;
+                    var key = SoleCaseGiven(match.Cases, data);
+                    if (key != null) derived[source.Name] = key.Value;
+                }
+                else if (f.Flagged is { } flagged)
+                {
+                    var mask = flagged.Field.TrimStart('$');
+                    var maskSource = SizeSource(fields, mask);
+                    var name = maskSource?.Name ?? mask;
+                    long bits = 0, declared = 0;
+                    foreach (var group in flagged.Groups)
+                    {
+                        declared |= 1L << group.Bit;
+                        if (GroupHasData(group, data)) bits |= 1L << group.Bit;
+                    }
+                    if (!data.TryGetValue(name, out var given) || given == null)
+                    {
+                        derived[name] = bits;
+                        continue;
+                    }
+                    // The groups test what a reference to the mask binds (PS-523,
+                    // CR-2026-132): an enum's code, the number under a text label.
+                    // Compared as reported, an enum name or a text label passed unchecked.
+                    given = ReferenceBinding(given, maskSource);
+                    if (given is bool || given is string) continue;
+                    var (ok, numeric) = Helpers.ToFloat64(given);
+                    if (!ok || numeric != Math.Floor(numeric)) continue;
+                    if (((long)numeric & declared) != bits)
+                        throw new InvalidOperationException($"Flagged field '{name}' is given "
+                            + $"{(long)numeric}, and the groups given set {bits} (PS-551)");
+                }
+            }
+            return derived;
+        }
+
         // --- constructs --------------------------------------------------------------
 
+        /// <summary>
+        /// Whether the input gives any of a flagged group's values: a member's own name, or
+        /// a name inside a construct the group holds (a nested flagged block, a byte_group).
+        /// </summary>
         static bool GroupHasData(FlaggedGroup group, Dictionary<string, object?> data)
-            => group.Fields.Any(f => !string.IsNullOrEmpty(f.Name) && data.ContainsKey(f.Name));
+            => group.Fields.Any(f => !string.IsNullOrEmpty(f.Name) && data.ContainsKey(f.Name))
+               || ClaimableFields(group.Fields).Any(f => data.ContainsKey(f.Name));
 
         /// <summary>Encode the groups whose fields the data carries; the absent ones cost no bytes.</summary>
         byte[] EncodeFlagged(FlaggedDef fd, Dictionary<string, object?> data)
@@ -549,16 +738,26 @@ public static class SchemaEncoder
             // the block. Each group used to be its own list, so a byte two groups shared was
             // written twice. An internal member goes through PS-434 in EncodeOne; an omitted
             // member declaring `sentinel` writes its first one (PS-427). A member with no
-            // name is skipped, as the reference skips it.
+            // name is taken only where it is a construct in its group, as the reference
+            // takes it.
             var members = new List<SchemaField>();
             foreach (var group in fd.Groups)
             {
                 if (!GroupHasData(group, data)) continue;
+                if (group.Fields.Any(gf => string.IsNullOrEmpty(gf.Name)))
+                {
+                    // A construct in the group - a nested flagged block, a byte_group - is
+                    // encoded as any field list is, so the whole group joins the list. It
+                    // was passed over as nameless, so a nested group's values were dropped.
+                    members.AddRange(group.Fields);
+                    continue;
+                }
                 members.AddRange(group.Fields.Where(gf => !string.IsNullOrEmpty(gf.Name)));
             }
+            // A given group's members are each required (PS-551), as in any field list: a
+            // nested block's mask is derived and a run of bit ranges is packed.
             if (members.Count == 0) return Array.Empty<byte>();
-            return EncodeWithBitfieldRuns(members, data, new Dictionary<string, int>(),
-                                          topLevel: false);
+            return EncodeWithBitfieldRuns(members, DeriveInputs(members, data), topLevel: false);
         }
 
         /// <summary>
@@ -572,13 +771,20 @@ public static class SchemaEncoder
         byte[] EncodeByteGroup(SchemaField group, Dictionary<string, object?> data)
         {
             ulong packed = 0;
-            int size = group.Size > 0 ? group.Size : 1;
+            int size = Cr131.ByteGroupWidth(group);    // PS-070, CR-2026-131: as decoded
 
             foreach (var member in group.ByteGroup)
             {
+                // A computed or literal member has no bits of its own (PS-359).
+                if (member.Type == FieldType.Number
+                    || (member.Type is FieldType.String or FieldType.Boolean && member.Value != null))
+                    continue;
                 object? value = string.IsNullOrEmpty(member.Name) ? 0.0
-                    : member.Name.StartsWith("_") ? InternalEncodeValue(member, data)      // PS-434
-                    : (data.TryGetValue(member.Name, out var v) ? v : 0.0);
+                    : member.Value != null || member.Name.StartsWith("_")
+                        ? InternalEncodeValue(member, data)                    // PS-360, PS-434
+                    : data.TryGetValue(member.Name, out var v) && v != null ? v
+                    // PS-551. A member was written as zero bits, which read back as a value.
+                    : throw new InvalidOperationException(MissingFieldMessage(member.Name));
                 var given = value;
                 if (member.Type == FieldType.Bool)
                 {
@@ -605,9 +811,6 @@ public static class SchemaEncoder
                     bitLen = bitRange.Value.end - bitRange.Value.start + 1;
                     // PS-168: checked against the range's width, where it was masked silently.
                     raw = CheckBitRange(member, rounded, bitLen, given);
-                    // The base width is part of the member's type: u24[4:23] owns three
-                    // bytes of the group, however small the group's own `size` says it is.
-                    size = Math.Max(size, Math.Max(1, member.BitBaseBytes));
                 }
                 if (bitLen > 0)
                 {
@@ -616,8 +819,12 @@ public static class SchemaEncoder
                 }
                 else
                 {
-                    // A full-width member owns the group's bytes outright.
-                    packed |= (ulong)raw;
+                    // A whole integer is its full range (PS-070), masked like any other member.
+                    var whole = Cr131.MemberRange(member);
+                    int bits = whole.high + 1;
+                    var (low, high) = IntegerBounds(bits, whole.signed);
+                    raw = (long)CheckFits(rounded, low, high, member.Name, given);     // PS-168
+                    packed |= bits >= 64 ? (ulong)raw : (ulong)raw & ((1UL << bits) - 1);
                 }
             }
             return Helpers.EncodeUint(packed, Math.Max(1, size), group.GroupEndian ?? _endian);
@@ -640,19 +847,69 @@ public static class SchemaEncoder
                 || (f.MatchInline is { } m && (m.Cases.Any(c => RecordsReachable(c.Fields))
                     || (m.MatchDefault is List<SchemaField> d && RecordsReachable(d)))));
 
-        byte[] EncodeRepeat(SchemaField field, Dictionary<string, object?> data)
+        /// <summary>
+        /// PS-551: an absent list is a missing value, and a list must agree with its count
+        /// and byte_length, literal or referenced. An absent list wrote nothing, leaving the
+        /// frame short of the elements a count or byte_length field still declared.
+        /// </summary>
+        byte[] EncodeRepeat(SchemaField field, Dictionary<string, object?> data,
+            List<SchemaField> siblings)
         {
-            if (string.IsNullOrEmpty(field.Name) || !data.TryGetValue(field.Name, out var records)
-                || records == null)
-                return Array.Empty<byte>();
+            data.TryGetValue(field.Name ?? "", out var raw);
+            if (raw != null && raw is not (Dictionary<string, object?> or System.Collections.IList))
+                throw new InvalidOperationException(
+                    $"repeat field '{field.Name}': expected a list of records, got {raw.GetType().Name}");
+            var list = RepeatRecords(field, data)
+                ?? throw new InvalidOperationException(MissingFieldMessage(field.Name ?? ""));
+            var count = RepeatSize(field.Count, data, siblings);
+            var output = new List<byte>(EncodeRepeatElements(field, data, list, count));
+            var byteLength = RepeatSize(field.ByteLength, data, siblings);
+            if (byteLength != null && output.Count != byteLength)
+                throw new InvalidOperationException($"Repeat '{field.Name}' encodes to {output.Count} "
+                    + $"bytes for a byte_length of {byteLength} (PS-551)");
+            // PS-385: the elements, then the trailer, whose values sit beside the repeat.
+            if (field.Trailer is { Count: > 0 })
+                output.AddRange(EncodeFieldList(field.Trailer, data));
+            return output.ToArray();
+        }
 
-            List<object?> list = records switch
+        /// <summary>A repeat's list as the input gives it, or null where it gives none.</summary>
+        static List<object?>? RepeatRecords(SchemaField field, Dictionary<string, object?> data)
+        {
+            if (string.IsNullOrEmpty(field.Name) || !data.TryGetValue(field.Name, out var records))
+                return null;
+            return records switch
             {
                 Dictionary<string, object?> single => new List<object?> { single },
                 List<object?> many => many,
-                _ => throw new InvalidOperationException(
-                    $"repeat field '{field.Name}': expected a list of records, got {records.GetType().Name}")
+                System.Collections.IList other => other.Cast<object?>().ToList(),
+                _ => null,
             };
+        }
+
+        /// <summary>A repeat's `count` or `byte_length` as the schema or the input states it.</summary>
+        static long? RepeatSize(object? size, Dictionary<string, object?> data, List<SchemaField> siblings)
+        {
+            object? value = size;
+            if (size is string text && text.StartsWith("$"))
+            {
+                var source = SizeSource(siblings, text[1..]);
+                data.TryGetValue(source?.Name ?? text[1..], out value);
+            }
+            if (value is bool || value is string) return null;
+            var (ok, numeric) = Helpers.ToFloat64(value);
+            if (!ok || numeric != Math.Floor(numeric)) return null;
+            return (long)numeric;
+        }
+
+        /// <summary>
+        /// A repeat's elements back to back: no framing, no trailer. `count`, where the schema
+        /// or the input states one, is checked after the refusals that concern the schema
+        /// rather than the input (PS-550, PS-542, PS-387).
+        /// </summary>
+        byte[] EncodeRepeatElements(SchemaField field, Dictionary<string, object?> data,
+            List<object?> list, long? count)
+        {
             // PS-550: a sibling identifying these values position by position is given as
             // many values as this repeat, as a decoder requires (PS-546).
             foreach (var sibling in field.SiblingNames)
@@ -690,6 +947,10 @@ public static class SchemaEncoder
                 throw new InvalidOperationException($"repeat field '{field.Name}' declares present_if "
                     + "and its elements read payload bytes, so the elements it dropped cannot be "
                     + "encoded (PS-387)");
+            if (count != null && list.Count != count)
+                // PS-551: the count and the list must agree; nothing is padded or cut.
+                throw new InvalidOperationException($"Repeat '{field.Name}' is given {list.Count} "
+                    + $"values for a count of {count} (PS-551)");
 
             var output = new List<byte>();
             int position = 0;
@@ -707,9 +968,6 @@ public static class SchemaEncoder
                 output.AddRange(EncodeFieldList(field.Fields, asMap));
                 position++;
             }
-            // PS-385: the elements, then the trailer, whose values sit beside the repeat.
-            if (field.Trailer is { Count: > 0 })
-                output.AddRange(EncodeFieldList(field.Trailer, data));
             return output.ToArray();
         }
 
@@ -735,7 +993,10 @@ public static class SchemaEncoder
                 var varName = match.On.TrimStart('$');
                 if (data.TryGetValue(varName, out var byVar))
                 {
-                    discriminator = byVar;
+                    // The output holds what the field reported. Where that is a text or
+                    // boolean label, the reference bound the number under it (PS-523), and
+                    // the cases are keyed by that number (PS-524).
+                    discriminator = ReferenceBinding(byVar, FieldNamed(varName));
                 }
                 else
                 {
@@ -747,7 +1008,7 @@ public static class SchemaEncoder
                     var source = FieldDeclaringVar(varName);
                     if (source != null && !string.IsNullOrEmpty(source.Name)
                         && data.TryGetValue(source.Name, out var byField))
-                        discriminator = ReverseLookup(byField, source.Lookup);
+                        discriminator = ReferenceBinding(byField, source);
                 }
             }
 
@@ -806,12 +1067,23 @@ public static class SchemaEncoder
             }
             if (matched == null && fallbackFields == null)
             {
-                // 'skip' with a known inline discriminator: its bytes, and no case. They
-                // were left out, so the frame was short of the byte the decoder reads.
-                if (match.Length > 0 && discriminator != null)
-                    fallbackFields = new List<SchemaField>();
-                else
-                    return Array.Empty<byte>();   // nothing in the data belongs to any case
+                var mode = match.MatchDefault as string ?? "error";
+                if (discriminator == null
+                    && (mode == "skip" || (match.Length > 0 && string.IsNullOrEmpty(match.Name))))
+                    // Nothing given and nothing the input could give: an inline match
+                    // with no name reports no discriminator, and a `skip` default none
+                    // for an unmatched value. This is the corpus's non-advancing peek
+                    // (r718x, dnt, and registry schemas), whose byte the bit range before
+                    // it already wrote. Left as it was, as the reference leaves it.
+                    return Array.Empty<byte>();
+                if (match.Length > 0 && discriminator == null)
+                    // PS-551: an inline discriminator the input neither gives nor fixes
+                    // through a case's fields. This returned no bytes at all, dropping the
+                    // discriminator's own (PS-442).
+                    throw new InvalidOperationException(MissingFieldMessage(
+                        string.IsNullOrEmpty(match.Name) ? "match" : match.Name));
+                // 'skip': the discriminator, and nothing for the case.
+                fallbackFields = new List<SchemaField>();
             }
 
             if (fallbackFields != null)
@@ -843,15 +1115,20 @@ public static class SchemaEncoder
                 }
                 else
                 {
-                    var fromKey = ParseIntAny(matched.CaseValue?.ToString() ?? "");
+                    if (IsDefaultCase(matched!))
+                        // PS-551: the default case names no value to write for the
+                        // discriminator the input left out.
+                        throw new InvalidOperationException(MissingFieldMessage(
+                            string.IsNullOrEmpty(match.Name) ? "match" : match.Name));
+                    var fromKey = ExactCaseValue(matched!.CaseValue);
                     if (fromKey == null)
                         throw new InvalidOperationException(
-                            $"match case {matched.CaseValue} names no single discriminator value");
+                            $"match case {matched!.CaseValue} names no single discriminator value");
                     value = fromKey.Value;
                 }
                 output.AddRange(WriteUint(value, match.Length, _endian));
             }
-            var body = EncodeFieldList(matched.Fields, data);
+            var body = EncodeFieldList(matched!.Fields, data);
             int bodyPending = CarriedBy(body);
             output.AddRange(body);
             var matchBytes = output.ToArray();
@@ -940,6 +1217,47 @@ public static class SchemaEncoder
         /// schemas rely on; and a nested match or tlv, where which branch supplies a name
         /// depends on the data, so claiming every branch's names would over-claim.</para>
         /// </remarks>
+        /// <summary>
+        /// The reference's _case_claims: claimable fields, a flagged group's (whose mask says
+        /// which are present) and an `optional: true` field marked optional (PS-527).
+        /// </summary>
+        static List<(SchemaField field, bool optional)> CaseClaims(List<SchemaField>? fields, bool optional)
+        {
+            var sink = new List<(SchemaField, bool)>();
+            if (fields == null) return sink;
+            foreach (var f in fields)
+            {
+                if (f.ByteGroup.Count > 0) { sink.AddRange(CaseClaims(f.ByteGroup, optional)); continue; }
+                if (f.Flagged?.Groups != null)
+                {
+                    foreach (var group in f.Flagged.Groups) sink.AddRange(CaseClaims(group.Fields, true));
+                    continue;
+                }
+                if (PayloadName(f) == null) continue;
+                sink.Add((f, optional || f.Optional));
+            }
+            return sink;
+        }
+
+        /// <summary>
+        /// Whether a case's field takes a value (PS-527): an object element supplies exactly
+        /// the members it declares, and a field takes no value it cannot write.
+        /// </summary>
+        bool Fits(SchemaField f, object? value, Dictionary<string, string> modes)
+        {
+            var name = PayloadName(f)!;
+            if (f.Type == FieldType.Object && value is Dictionary<string, object?> whole
+                && !(modes.TryGetValue(name, out var md) && md == "merge"))
+            {
+                var claims = CaseClaims(f.Fields, false);
+                var every = claims.Select(c => c.field.Name).ToHashSet();
+                return claims.All(c => c.optional || whole.ContainsKey(c.field.Name))
+                    && whole.Keys.All(every.Contains);
+            }
+            return CaseFidelity(new List<SchemaField> { f },
+                new Dictionary<string, object?> { [name] = value }).lossless;
+        }
+
         static List<SchemaField> ClaimableFields(List<SchemaField> caseFields)
         {
             var claimable = new List<SchemaField>();
@@ -1024,53 +1342,158 @@ public static class SchemaEncoder
             int lengthSize = Math.Max(0, tlv.LengthSize);
             var order = _order ?? data.Keys.ToList();
 
-            var candidates = new List<(int position, int lossPenalty, int matches,
-                string caseKey, List<SchemaField> caseFields, List<string> claimed)>();
-
+            // PS-525 to PS-527 (CR-2026-110, -125, -128): each value - a scalar, each element
+            // of an array PS-157 collected, a `last` value, a merged object's members - goes
+            // under the first case whose declared fields it supplies in full; nothing is
+            // zero-filled or dropped, and what no case takes is an error. A case requiring
+            // more fields is tried first, then declaration order, so em400-mud's [131, 103]
+            // (temperature, temperature_alarm) is not stranded by [3, 103] (temperature).
+            var modes = tlv.TLVRepeatModes;
+            string ModeOf(string n) => modes.TryGetValue(n, out var md) ? md : "collect";
+            var entries = new List<(string key, List<SchemaField> fields, List<SchemaField> required,
+                List<SchemaField> optional, int rank)>();
+            var declaredMembers = new Dictionary<string, HashSet<string>>();
             foreach (var (caseKey, caseFields) in tlv.TLVCases)
             {
                 if (caseKey == "default") continue;
-                var claimed = ClaimableFields(caseFields)
-                    .Select(PayloadName)
-                    .Where(n => n != null && data.ContainsKey(n))
-                    .Select(n => n!)
-                    .ToList();
-                if (claimed.Count == 0) continue;
-                int position = claimed.Min(n =>
+                var required = new List<SchemaField>();
+                var optional = new List<SchemaField>();
+                foreach (var (f, isOptional) in CaseClaims(caseFields, false))
                 {
-                    int index = order.ToList().IndexOf(n);
-                    return index < 0 ? int.MaxValue : index;
-                });
-                var (matches, lossless) = CaseFidelity(caseFields, data);
-                candidates.Add((position, lossless ? 0 : 1, matches, caseKey, caseFields, claimed));
+                    (isOptional ? optional : required).Add(f);
+                    var n = PayloadName(f)!;
+                    if (ModeOf(n) != "merge") continue;
+                    foreach (var m in f.Fields)
+                    {
+                        if (string.IsNullOrEmpty(m.Name)) continue;
+                        if (!declaredMembers.TryGetValue(n, out var set)) declaredMembers[n] = set = new();
+                        set.Add(m.Name);
+                    }
+                }
+                entries.Add((caseKey, caseFields, required, optional, entries.Count));
+            }
+            // An object counts its members (CR-2026-129), so a merged {adr, dr} case outranks {dr}.
+            int Width(List<SchemaField> fields) => fields.Sum(f =>
+                f.Type == FieldType.Object ? Math.Max(1, CaseClaims(f.Fields, false).Count) : 1);
+            entries = entries.OrderByDescending(e => Width(e.required)).ThenBy(e => e.rank).ToList();
+
+            // A supplied member of a merged object that no case declares has nowhere to go.
+            foreach (var (n, members) in declaredMembers)
+            {
+                if (!data.TryGetValue(n, out var value) || value is not Dictionary<string, object?> whole) continue;
+                var stray = whole.Keys.Where(k => !members.Contains(k)).Select(k => $"'{k}'")
+                    .OrderBy(k => k, StringComparer.Ordinal).ToList();
+                if (stray.Count > 0)
+                    throw new InvalidOperationException($"tlv: the merged object '{n}' is given "
+                        + $"[{string.Join(", ", stray)}], which no case declares (PS-527)");
             }
 
-            // Payload order first, then the case that can reproduce the value, then the
-            // fuller explanation of it.
-            candidates.Sort((a, b) =>
-            {
-                if (a.position != b.position) return a.position.CompareTo(b.position);
-                if (a.lossPenalty != b.lossPenalty) return a.lossPenalty.CompareTo(b.lossPenalty);
-                return b.matches.CompareTo(a.matches);
-            });
+            var queues = new Dictionary<string, Queue<object?>>();
+            foreach (var e in entries)
+                foreach (var f in e.required.Concat(e.optional))
+                {
+                    var n = PayloadName(f)!;
+                    if (!data.TryGetValue(n, out var v) || queues.ContainsKey(n) || ModeOf(n) == "merge") continue;
+                    bool collected = v is System.Collections.IList && !(f.Type == FieldType.Repeat
+                        || (f.Type == FieldType.Bytes && f.Format == "array")) && ModeOf(n) == "collect";
+                    queues[n] = collected
+                        ? new Queue<object?>(((System.Collections.IList)v!).Cast<object?>())
+                        : new Queue<object?>(new[] { v });
+                }
+            var pending = new Dictionary<string, HashSet<string>>();
+            foreach (var n in declaredMembers.Keys)
+                if (data.TryGetValue(n, out var v) && v is Dictionary<string, object?> whole)
+                    pending[n] = whole.Keys.ToHashSet();
 
-            // Every decoded field belongs to one channel. Without this a name defined under
-            // two tags emits both of them, so am308 grows an extra channel.
-            var spent = new HashSet<string>();
-            var emitted = new List<(int position, string caseKey, List<SchemaField> caseFields)>();
-            foreach (var candidate in candidates)
+            var written = new List<(string key, List<SchemaField> fields, Dictionary<string, object?> data,
+                int position, int seq)>();
+            bool progress = true;
+            while (progress)
             {
-                if (candidate.claimed.All(spent.Contains)) continue;
-                foreach (var name in candidate.claimed) spent.Add(name);
-                emitted.Add((candidate.position, candidate.caseKey, candidate.caseFields));
+                progress = false;
+                foreach (var e in entries)
+                {
+                    while (true)
+                    {
+                        var values = new Dictionary<string, object?>();
+                        int taken = 0;
+                        bool complete = true;
+                        foreach (var f in e.required)
+                        {
+                            var n = PayloadName(f)!;
+                            if (ModeOf(n) == "merge")
+                            {
+                                if (!pending.ContainsKey(n) || data[n] is not Dictionary<string, object?> whole)
+                                {
+                                    complete = false;
+                                    break;
+                                }
+                                var sub = new Dictionary<string, object?>();
+                                bool fresh = false;
+                                foreach (var m in f.Fields)
+                                {
+                                    if (string.IsNullOrEmpty(m.Name)) continue;
+                                    if (!whole.TryGetValue(m.Name, out var mv)) { complete = false; break; }
+                                    sub[m.Name] = mv;
+                                    fresh |= pending[n].Contains(m.Name);
+                                }
+                                if (!complete) break;
+                                values[n] = sub;
+                                if (fresh) taken++;
+                                continue;
+                            }
+                            if (!queues.TryGetValue(n, out var q) || q.Count == 0 || !Fits(f, q.Peek(), modes))
+                            {
+                                complete = false;
+                                break;
+                            }
+                            values[n] = q.Peek();
+                            taken++;
+                        }
+                        if (!complete) break;
+                        foreach (var f in e.optional)
+                        {
+                            var n = PayloadName(f)!;
+                            if (queues.TryGetValue(n, out var q) && q.Count > 0 && Fits(f, q.Peek(), modes))
+                            {
+                                values[n] = q.Peek();
+                                taken++;
+                            }
+                        }
+                        if (taken == 0) break;
+                        var entryData = new Dictionary<string, object?>(data);
+                        int position = int.MaxValue;
+                        foreach (var (n, v) in values)
+                        {
+                            entryData[n] = v;
+                            int index = order.ToList().IndexOf(n);
+                            position = Math.Min(position, index < 0 ? int.MaxValue : index);
+                            if (ModeOf(n) == "merge")
+                                pending[n].ExceptWith(((Dictionary<string, object?>)v!).Keys);
+                            else
+                                queues[n].Dequeue();
+                        }
+                        written.Add((e.key, e.fields, entryData, position, written.Count));
+                        progress = true;
+                    }
+                }
             }
-            emitted.Sort((a, b) => a.position.CompareTo(b.position));
+            foreach (var (n, q) in queues)
+                if (q.Count > 0)
+                    throw new InvalidOperationException($"tlv: no case takes the value of '{n}' "
+                        + $"{q.Peek()} in full (PS-502, PS-527)");
+            foreach (var (n, left) in pending)
+                if (left.Count > 0)
+                    throw new InvalidOperationException("tlv: no case takes the members ["
+                        + string.Join(", ", left.Select(m => $"'{m}'").OrderBy(m => m, StringComparer.Ordinal))
+                        + $"] of the merged object '{n}' in full (PS-527)");
 
+            // Payload order, so a payload round-trips; entries of one name keep the order taken.
             var output = new List<byte>();
-            foreach (var (_, caseKey, caseFields) in emitted)
+            foreach (var w in written.OrderBy(w => w.position).ThenBy(w => w.seq))
             {
-                var tag = EncodeTLVTag(caseKey, tlv);
-                var value = EncodeFieldList(caseFields, data);
+                var tag = EncodeTLVTag(w.key, tlv);
+                var value = EncodeFieldList(w.fields, w.data);
                 output.AddRange(tag);
                 if (lengthSize > 0)
                     output.AddRange(WriteUint(value.Length, lengthSize, _endian));
@@ -1135,34 +1558,75 @@ public static class SchemaEncoder
             return WriteUint(single.Value, tagSize, _endian);
         }
 
-        /// <summary>The field that declared `var: name`, searched anywhere in the schema.</summary>
-        SchemaField? FieldDeclaringVar(string varName)
+        /// <summary>
+        /// The value a `$` reference bound for a field that reported <paramref name="reported"/>
+        /// (PS-523): a numeric label as itself, else the number its lookup maps from - the key
+        /// of a label, or the value a `${value}` default wrote. A label only a plain `default`
+        /// carries has no number to recover and is returned as it is, matching no case.
+        /// </summary>
+        static object? ReferenceBinding(object? reported, SchemaField? source)
         {
-            var found = SearchForVar(_schema.Fields, varName);
+            // CR-2026-132: an enum bound its code; the data carries its name.
+            if (source?.Type == FieldType.Enum && reported is string name)
+                return ReverseEnum(name, source);
+            if (source?.Lookup is not { Count: > 0 } || DecodeContext.IsNumericLabel(reported))
+                return reported;
+            var reversed = ReverseLookup(reported, source.Lookup);
+            if (reversed is string text && Wave5.Template(source) is { } template
+                && Wave5.MatchTemplate(template, text) is { } recovered)
+                return recovered;
+            return reversed;
+        }
+
+        /// <summary>The code an enum reported <paramref name="name"/> for, else the name.</summary>
+        static object? ReverseEnum(string name, SchemaField field)
+        {
+            if (field.Values != null)
+                foreach (var kv in field.Values)
+                    if (kv.Value == name) return (double)kv.Key;
+            if (field.EnumDefault == name) return name;
+            if (name.StartsWith("unknown(") && name.EndsWith(")")
+                && int.TryParse(name[8..^1], out var n))
+                return (double)n;
+            return name;
+        }
+
+        /// <summary>The field declaring <paramref name="name"/>, searched anywhere in the schema.</summary>
+        SchemaField? FieldNamed(string name) =>
+            SearchSchema(f => f.Name == name);
+
+        /// <summary>The field that declared `var: name`, searched anywhere in the schema.</summary>
+        SchemaField? FieldDeclaringVar(string varName) =>
+            SearchSchema(f => f.Var == varName && !string.IsNullOrEmpty(f.Name));
+
+        SchemaField? SearchSchema(Func<SchemaField, bool> wanted)
+        {
+            // The fields being encoded first: a ports schema may declare one name per port.
+            var found = Search(_fields, wanted) ?? Search(_schema.Fields, wanted);
             if (found != null) return found;
             if (_schema.Ports != null)
                 foreach (var port in _schema.Ports.Values)
                 {
-                    found = SearchForVar(port.Fields, varName);
+                    found = Search(port.Fields, wanted);
                     if (found != null) return found;
                 }
             if (_schema.Definitions != null)
                 foreach (var def in _schema.Definitions.Values)
                 {
-                    found = SearchForVar(def.Fields, varName);
+                    found = Search(def.Fields, wanted);
                     if (found != null) return found;
                 }
             return null;
         }
 
-        static SchemaField? SearchForVar(List<SchemaField> fields, string varName)
+        static SchemaField? Search(List<SchemaField> fields, Func<SchemaField, bool> wanted)
         {
             foreach (var f in fields)
             {
-                if (f.Var == varName && !string.IsNullOrEmpty(f.Name)) return f;
+                if (wanted(f)) return f;
                 foreach (var nested in NestedFieldLists(f))
                 {
-                    var found = SearchForVar(nested, varName);
+                    var found = Search(nested, wanted);
                     if (found != null) return found;
                 }
             }
@@ -1540,10 +2004,11 @@ public static class SchemaEncoder
                     // A literal came from no bytes, so it writes none.
                     return Array.Empty<byte>();
                 case FieldType.Ascii or FieldType.String:
-                {
-                    var raw = System.Text.Encoding.UTF8.GetBytes(value?.ToString() ?? "");
-                    return Pad(raw, EncodeLength(field, raw.Length));
-                }
+                    // PS-537. A fixed `length` pads and bounds the value; `remaining` or a
+                    // reference has no fixed count, so the value supplies it.
+                    return Helpers.EncodeAscii(field.Name, value?.ToString() ?? "",
+                        field.Length > 0 && field.LengthRef == null ? field.Length : null,
+                        _result.Warnings);
             }
 
             throw new InvalidOperationException($"Cannot encode type: {field.Type}");

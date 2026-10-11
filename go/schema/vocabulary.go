@@ -285,65 +285,7 @@ var transformOperations = []string{"add", "mult", "div", "sqrt", "abs", "pow", "
 
 // checkFieldRules holds the per-field rules a schema is rejected for at load, as the
 // specification requires of each.
-// byteGroupMemberBits is the set of bits a byte_group member covers, counted from the
-// group's first bit (most significant bit of its first byte), or nil for a member that
-// is not a bit range or a bool. A range's bits are numbered within its own base (PS-058),
-// so they are mapped onto the group's bit string before members of different widths
-// can be compared.
-func byteGroupMemberBits(member map[string]any) map[int]bool {
-	typ, _ := member["type"].(string)
-	width, start, end := 0, 0, 0
-	if m := bitRangePattern.FindStringSubmatch(typ); m != nil {
-		width, _ = strconv.Atoi(m[1][1:])
-		start, _ = strconv.Atoi(m[2])
-		end, _ = strconv.Atoi(m[3])
-	} else if typ == "bool" {
-		width = 8
-		start, _ = toInt(member["bit"])
-		end = start
-	} else {
-		return nil
-	}
-	bits := map[int]bool{}
-	for b := start; b <= end; b++ {
-		bits[width-1-b] = true
-	}
-	return bits
-}
-
-// checkByteGroupOverlap holds PS-397: bit ranges within one byte_group must not overlap.
-// Overlapping members were accepted, each reported from the same bits.
-func checkByteGroupOverlap(group any, at string) error {
-	members, ok := group.([]any)
-	if !ok {
-		members, _ = asStringMap(group)["fields"].([]any)
-	}
-	type seenMember struct {
-		name string
-		bits map[int]bool
-	}
-	var seen []seenMember
-	for _, raw := range members {
-		member := asStringMap(raw)
-		if member == nil {
-			continue
-		}
-		bits := byteGroupMemberBits(member)
-		if bits == nil {
-			continue
-		}
-		name, _ := member["name"].(string)
-		for _, other := range seen {
-			for b := range bits {
-				if other.bits[b] {
-					return fmt.Errorf("%s.byte_group: members '%s' and '%s' overlap (PS-397)", at, other.name, name)
-				}
-			}
-		}
-		seen = append(seen, seenMember{name, bits})
-	}
-	return nil
-}
+// byteGroupMemberBits and checkByteGroupOverlap live in cr131.go (PS-070, PS-397).
 
 // literalForbidden are the keys a literal must not carry (PS-358).
 var literalForbidden = []string{"ref", "polynomial", "compute", "lookup", "transform", "mult", "div", "add"}
@@ -419,7 +361,7 @@ func checkFieldRules(field map[string]any, at string) error {
 		return err
 	}
 	if group, ok := field["byte_group"]; ok {
-		if err := checkByteGroupOverlap(group, at); err != nil {
+		if err := checkByteGroup(field, at); err != nil { // PS-070, PS-397
 			return err
 		}
 		members, isList := group.([]any)

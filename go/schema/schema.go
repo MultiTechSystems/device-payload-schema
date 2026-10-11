@@ -390,6 +390,13 @@ type DecodeContext struct {
 	// whose members are not top-level keys. See meta.go.
 	metaProducers map[string]map[string]any
 	metaDepth     int
+	// lookupNumber is the number the field just decoded held before its lookup, and
+	// labels what each looked-up name reported beside the number bound for it, for
+	// name_from templates (PS-523, PS-532). See cr109.go.
+	lookupNumber lookupNumber
+	labels       map[string]labelEntry
+	// enumCode is the code an enum just read, for applyLookupAndModifiers (CR-2026-132).
+	enumCode lookupNumber
 	// pendingRecords collects what a repeat element's `records` entry yields (PS-541);
 	// nil outside an element.
 	pendingRecords *[]map[string]any
@@ -417,6 +424,9 @@ type EncodeContext struct {
 	// pending holds the bytes a bit range or bool filled without consuming them
 	// (CR-2026-136); the next write is ORed into them. See placeBits.
 	pending []byte
+	// order is the schema's source key order, from which encodeTLV recovers the cases'
+	// declaration order (PS-527). A Go map has none.
+	order keyOrder
 }
 
 // NewEncodeContext creates a new encode context.
@@ -452,6 +462,7 @@ func (ctx *EncodeContext) branch() *EncodeContext {
 	child := NewEncodeContext(ctx.Endian)
 	child.Variables = ctx.Variables
 	child.Definitions = ctx.Definitions
+	child.order = ctx.order
 	return child
 }
 
@@ -561,8 +572,7 @@ func (ctx *DecodeContext) Read(n int) ([]byte, error) {
 		n = ctx.Remaining()
 	}
 	if ctx.Offset+n > len(ctx.Data) {
-		return nil, fmt.Errorf("buffer underflow: need %d bytes at offset %d, but only %d remaining",
-			n, ctx.Offset, ctx.Remaining())
+		return nil, underflowNeed(n, ctx.Offset, len(ctx.Data))
 	}
 	result := ctx.Data[ctx.Offset : ctx.Offset+n]
 	ctx.Offset += n
@@ -576,7 +586,7 @@ func (ctx *DecodeContext) Peek(n int, offset int) ([]byte, error) {
 		return nil, fmt.Errorf("invalid peek of %d bytes at offset %d", n, pos)
 	}
 	if pos+n > len(ctx.Data) {
-		return nil, fmt.Errorf("buffer underflow at peek offset %d", pos)
+		return nil, underflowPeek(pos)
 	}
 	return ctx.Data[pos : pos+n], nil
 }
@@ -948,6 +958,11 @@ func ParseSchema(data string) (*Schema, error) {
 	if err := checkMetaDeclarations(raw, order); err != nil {
 		return nil, err
 	}
+	// CR-2026-110: on_repeat's values, merge on objects only, one mode per name
+	// (PS-525, PS-526), in case declaration order.
+	if err := checkOnRepeat(raw, order); err != nil {
+		return nil, err
+	}
 
 	schema := &Schema{repeatOnly: repeatOnlyNames(raw), keyOrder: order}
 	schema.rawName = raw["name"]
@@ -1099,6 +1114,29 @@ func enumLabel(v any) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// parseTLVCases reads a tlv block's `cases` mapping, keyed as written.
+func parseTLVCases(fm map[string]any) map[string][]Field {
+	var cases map[string][]Field
+	if casesMap, ok := fm["cases"].(map[string]any); ok {
+		cases = make(map[string][]Field)
+		for key, value := range casesMap {
+			if caseFieldsRaw, ok := value.([]any); ok {
+				cases[key] = parseFieldsRaw(caseFieldsRaw)
+			}
+		}
+	}
+	// YAML may hand back map[any]any for a mapping with non-string keys.
+	if casesMap, ok := fm["cases"].(map[any]any); ok {
+		cases = make(map[string][]Field)
+		for key, value := range casesMap {
+			if caseFieldsRaw, ok := value.([]any); ok {
+				cases[fmt.Sprintf("%v", key)] = parseFieldsRaw(caseFieldsRaw)
+			}
+		}
+	}
+	return cases
 }
 
 func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
@@ -1465,6 +1503,16 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 			}
 		}
 	}
+	// The sequence form names codes from 0; it was not read, so every code was reported
+	// as its integer, and one past the end could not be told from one in range (PS-068).
+	if valuesRaw, ok := fm["values"].([]any); ok {
+		f.Values = make(map[int]string)
+		for i, v := range valuesRaw {
+			if str, ok := enumLabel(v); ok {
+				f.Values[i] = str
+			}
+		}
+	}
 
 	// Byte group (inline grouped bitfields) - array format
 	if bgRaw, ok := fm["byte_group"].([]any); ok {
@@ -1516,23 +1564,7 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	// tag_key, which is why elsys/ers decoded to nothing.
 	if f.Type == TypeTLV || f.Type == "tlv" || fm["tag_fields"] != nil ||
 		fm["tag_key"] != nil || fm["tag_size"] != nil {
-		if casesMap, ok := fm["cases"].(map[string]any); ok {
-			f.TLVCases = make(map[string][]Field)
-			for key, value := range casesMap {
-				if caseFieldsRaw, ok := value.([]any); ok {
-					f.TLVCases[key] = parseFieldsRaw(caseFieldsRaw)
-				}
-			}
-		}
-		// YAML may hand back map[any]any for a mapping with non-string keys.
-		if casesMap, ok := fm["cases"].(map[any]any); ok {
-			f.TLVCases = make(map[string][]Field)
-			for key, value := range casesMap {
-				if caseFieldsRaw, ok := value.([]any); ok {
-					f.TLVCases[fmt.Sprintf("%v", key)] = parseFieldsRaw(caseFieldsRaw)
-				}
-			}
-		}
+		f.TLVCases = parseTLVCases(fm)
 	}
 
 	// Bitfield string fields
@@ -1705,6 +1737,12 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	if tlvRaw, ok := fm["tlv"].(map[string]any); ok {
 		tlvField := parseFieldMap(tlvRaw, nil)
 		tlvField.Type = "tlv"
+		// An inline block is a tlv whatever it declares, so its cases are parsed even
+		// with no tag_size (default 1, PS-153). parseFieldMap looks for a marker, and
+		// without one left TLVCases empty: the block decoded to nothing, successfully.
+		if tlvField.TLVCases == nil {
+			tlvField.TLVCases = parseTLVCases(tlvRaw)
+		}
 		f.TLVInline = &tlvField
 	}
 
@@ -2054,7 +2092,7 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 			}
 			for k, v := range refResult {
 				result[k] = v
-				ctx.Variables[k] = v
+				ctx.rebindReported(k, v)
 			}
 			continue
 		}
@@ -2067,7 +2105,7 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 			}
 			for k, v := range bgResult {
 				result[k] = v
-				ctx.Variables[k] = v
+				ctx.rebindReported(k, v)
 			}
 			continue
 		}
@@ -2104,7 +2142,7 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 			}
 			for k, v := range flaggedResult {
 				result[k] = v
-				ctx.Variables[k] = v
+				ctx.rebindReported(k, v)
 			}
 			continue
 		}
@@ -2128,7 +2166,7 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 			if matchMap, ok := matchResult.(map[string]any); ok {
 				for k, v := range matchMap {
 					result[k] = v
-					ctx.Variables[k] = v
+					ctx.rebindReported(k, v)
 				}
 			}
 			continue
@@ -2144,9 +2182,12 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 		}
 
 		ctx.rangeStash = rangeStash{}
+		ctx.lookupNumber = lookupNumber{}
 		value, err := ctx.decodeFieldProduced(field)
 		if err != nil {
-			return nil, err
+			// PS-535: the innermost field that read past the end is named; an enclosing
+			// object or repeat passes its member's error through unchanged.
+			return nil, nameUnderflow(err, field.Name, string(field.Type))
 		}
 
 		internal := strings.HasPrefix(field.Name, "_")
@@ -2174,7 +2215,9 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 
 		if value == omitted {
 			// A lookup with no entry and no default: the device reported nothing
-			// this schema can name, so the field is left out (PS-269).
+			// this schema can name, so the field is left out (PS-269). A reference to
+			// it is still bound to the number (PS-523).
+			ctx.bindReference(field.Name, field, omitted)
 			continue
 		}
 
@@ -2194,8 +2237,8 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 				result[outputName] = value
 			}
 			// Keyed by the schema-level name so $references keep working when
-			// name_from is in play (PS-267).
-			ctx.Variables[field.Name] = value
+			// name_from is in play (PS-267). A looked-up field binds as PS-523 says.
+			ctx.bindReference(field.Name, field, value)
 			// Check valid_range and update quality
 			if len(field.ValidRange) >= 2 {
 				ctx.checkValidRange(value, field)
@@ -2228,11 +2271,11 @@ func resolveRef(ref string, ctx *DecodeContext, schema *Schema) (map[string]any,
 
 // decodeByteGroup decodes a byte group (multiple bitfields from shared bytes).
 func decodeByteGroup(field Field, ctx *DecodeContext) (map[string]any, error) {
-	size := field.Size
-	if size == 0 {
-		size = 1
+	size := byteGroupWidth(field) // PS-070, CR-2026-131
+
+	if size > ctx.Remaining() {
+		return nil, byteGroupUnderflow(field, size, ctx)
 	}
-	
 	data, err := ctx.Read(size)
 	if err != nil {
 		return nil, err
@@ -2260,15 +2303,15 @@ func decodeByteGroup(field Field, ctx *DecodeContext) (map[string]any, error) {
 
 	for _, subfield := range field.ByteGroup {
 		ctx.produced(subfield.decl, subfield.Name) // PS-490
+		// PS-070: every member is a range of the group's value, read from its start - a
+		// whole integer is its full range, a bool one bit. A whole integer took the whole
+		// group's value, so a u8 beside a u16[8:11] read both bytes.
 		var raw any
-		if m := bitRangePattern.FindStringSubmatch(string(subfield.Type)); m != nil {
-			start, _ := strconv.Atoi(m[2])
-			end, _ := strconv.Atoi(m[3])
-			raw = extractRange(rawVal, m[1][0] == 's', start, end-start+1)
-		} else if subfield.Type == TypeBoolLower || subfield.Type == TypeBool {
-			raw = (rawVal>>uint(subfield.Bit))&1 == 1
+		r := fieldMemberRange(subfield)
+		if r.isBool {
+			raw = (rawVal>>uint(r.low))&1 == 1
 		} else {
-			raw = float64(rawVal)
+			raw = extractRange(rawVal, r.signed, r.low, r.high-r.low+1)
 		}
 
 		// A member is an ordinary field that happens to share its bytes, so its
@@ -2280,11 +2323,15 @@ func decodeByteGroup(field Field, ctx *DecodeContext) (map[string]any, error) {
 			return nil, err
 		}
 		if value == omitted || subfield.Name == "" {
+			// A lookup miss is not reported but its reference is bound (PS-523).
+			ctx.bindReference(subfield.Name, subfield, value)
 			continue
 		}
+		// Bound here, as PS-523 says, for later references; the caller's copy of the
+		// reported value leaves this binding alone.
+		ctx.bindReference(subfield.Name, subfield, value)
 		if strings.HasPrefix(subfield.Name, "_") {
 			// Internal: bound for later references, not reported.
-			ctx.Variables[subfield.Name] = value
 			continue
 		}
 		result[subfield.Name] = value
@@ -2509,7 +2556,11 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		value = decodeBits(data[0], field.Bit, 1) != 0
 		// Consume bytes if specified
 		if field.Consume > 0 {
-			ctx.Read(field.Consume)
+			// PS-535: consuming past the end is a short read. The error was discarded,
+			// so the bool decoded and the offset stayed short of the end.
+			if _, err := ctx.Read(field.Consume); err != nil {
+				return nil, err
+			}
 		}
 
 	case TypeBits, TypeBitsLower:
@@ -2545,7 +2596,7 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		value = strings.TrimRight(string(data), "\x00")
+		value = decodeASCII(field.Name, data, ctx) // PS-534, PS-538
 
 	case TypeEnum, TypeEnumLower:
 		// Enum: read base type and map to string
@@ -2563,6 +2614,8 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 			return nil, err
 		}
 		intVal := int(decodeUint(data, endian))
+		// PS-523 (CR-2026-132): a reference to an enum binds its code.
+		ctx.enumCode = lookupNumber{owner: field.Name, number: intVal, set: true}
 		if field.Values != nil {
 			if str, ok := field.Values[intVal]; ok {
 				value = str
@@ -2571,7 +2624,10 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 				// the raw integer here ignored the default the schema asked for.
 				value = *field.EnumDefault
 			} else {
-				value = intVal
+				// PS-068 (CR-2026-132): with no default an unmatched code is omitted,
+				// as a lookup miss is (PS-269), so the field keeps one type; a
+				// reference to it still binds the code (PS-523).
+				value = omitted
 			}
 		} else {
 			value = intVal
@@ -2742,7 +2798,19 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 // to skip them, and the compute path's copy forgot the bare modifiers - and before that,
 // the skip forgot compute and dl-blg's voltage_ratio had its stages applied twice.
 func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, error) {
+	// PS-523 (CR-2026-132): an enum's code, recorded where it was read, is the number its
+	// reference binds; any other field starts with none.
+	if isEnumField(field) && ctx.enumCode.set && ctx.enumCode.owner == field.Name {
+		ctx.lookupNumber = ctx.enumCode
+	} else {
+		ctx.lookupNumber = lookupNumber{}
+	}
+	ctx.enumCode = lookupNumber{}
 	if value == omitted {
+		// An unmatched enum code (PS-068): its `var` is still bound to the code (PS-523).
+		if isEnumField(field) && field.Var != "" {
+			ctx.bindReference(field.Var, field, omitted)
+		}
 		return omitted, nil
 	}
 	// Formula takes precedence over top-level modifiers (per spec section 03)
@@ -2816,6 +2884,12 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 		}
 	}
 
+	// PS-523: a reference to a looked-up field binds this number unless the lookup
+	// reports a number; see bindReference.
+	if hasLookup(field) {
+		ctx.lookupNumber = lookupNumber{owner: field.Name, number: value, set: true}
+	}
+
 	// Apply lookup. A mapping is matched on its keys, which need not start at
 	// zero or be contiguous (PS-268); an unmatched value omits the field rather
 	// than reporting the raw integer under a name that promises a label, unless a
@@ -2839,6 +2913,10 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 			} else if field.LookupDefault != nil {
 				value = *field.LookupDefault
 			} else {
+				// PS-269 omits the field; its `var` is still bound to the number (PS-523).
+				if field.Var != "" {
+					ctx.bindReference(field.Var, field, omitted)
+				}
 				return omitted, nil
 			}
 		}
@@ -2869,13 +2947,38 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 // $rsn`, PS-265), and its `var:` binds as a field's does - a `name_from` template such as
 // "temperature_${ch}" reads it. Only `var:` was bound, and only on the whole-byte path, so
 // `ref: $rsn` beside a bit-range component failed with "ref field not found".
-func bindTagComponent(tf Field, val int64, ctx *DecodeContext) {
+//
+// PS-523 (CR-2026-132): a component binds as any field does. One with a lookup or
+// modifiers goes through them, and binds the number under a text or boolean label, or a
+// numeric label as itself, keeping the label for templates. The tag is still matched on
+// the value read.
+func bindTagComponent(tf Field, val int64, ctx *DecodeContext) error {
+	if !hasLookup(tf) && !hasComponentModifiers(tf) {
+		if tf.Name != "" {
+			ctx.Variables[tf.Name] = val
+			delete(ctx.labels, tf.Name)
+		}
+		if tf.Var != "" {
+			ctx.Variables[tf.Var] = val
+			delete(ctx.labels, tf.Var)
+		}
+		return nil
+	}
+	// applyLookupAndModifiers binds the `var` itself (finishComputedValue, or a miss).
+	value, err := applyLookupAndModifiers(val, tf, ctx)
+	if err != nil {
+		return err
+	}
 	if tf.Name != "" {
-		ctx.Variables[tf.Name] = val
+		ctx.bindReference(tf.Name, tf, value)
 	}
-	if tf.Var != "" {
-		ctx.Variables[tf.Var] = val
-	}
+	return nil
+}
+
+// hasComponentModifiers reports whether a tag component declares arithmetic to apply.
+func hasComponentModifiers(tf Field) bool {
+	return tf.Mult != nil || tf.Div != nil || tf.Add != nil || len(tf.Transform) > 0 ||
+		tf.Formula != ""
 }
 
 // computedSource is a computed field's source (PS-443): the referenced value with its
@@ -2921,7 +3024,7 @@ func finishComputedValue(value any, field Field, ctx *DecodeContext) (any, error
 		}
 	}
 	if field.Var != "" {
-		ctx.Variables[field.Var] = value
+		ctx.bindReference(field.Var, field, value)
 	}
 	return value, nil
 }
@@ -3104,7 +3207,9 @@ func decodeMatch(field Field, ctx *DecodeContext) (any, error) {
 		}
 		data, err := ctx.Read(length)
 		if err != nil {
-			return nil, err
+			// PS-535: the discriminator is the field that read, named by the match's
+			// `name` where it declares one.
+			return nil, nameUnderflow(err, field.Name, "match")
 		}
 		matchValue = int(decodeUint(data, ctx.Endian))
 
@@ -3215,6 +3320,10 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 
 	result := make(map[string]any)
 	var channels []map[string]any
+	// PS-525: how a name reported again combines. A schema breaking PS-525/PS-526 was
+	// refused at load, so only the modes are needed here.
+	repeat, _ := tlvRepeatModes(field.decl, nil)
+	collected := map[string]bool{} // names already turned into arrays (PS-157)
 
 	// Parse until end of data
 	for ctx.Remaining() > 0 {
@@ -3254,7 +3363,9 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 					if tf.Name != "" {
 						tagValues[tf.Name] = int(v.(float64))
 					}
-					bindTagComponent(tf, int64(v.(float64)), ctx)
+					if err := bindTagComponent(tf, int64(v.(float64)), ctx); err != nil {
+						return nil, err
+					}
 					continue
 				}
 				data, err := ctx.Read(tagFieldWidth(tf))
@@ -3265,7 +3376,9 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 				if tf.Name != "" {
 					tagValues[tf.Name] = val
 				}
-				bindTagComponent(tf, int64(val), ctx)
+				if err := bindTagComponent(tf, int64(val), ctx); err != nil {
+					return nil, err
+				}
 			}
 
 			// Build tag key
@@ -3329,16 +3442,28 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 			}
 
 			if merge {
-				// Merge fields, converting to array if repeated
+				// A name reported again is combined as its on_repeat says (PS-157,
+				// PS-525): collected into an array by default. Whether the earlier value
+				// is already a list is not the test - a value that is itself a list (a
+				// repeat) was appended into, splicing the second report among the first's
+				// elements.
 				for k, v := range caseResult {
-					if existing, ok := result[k]; ok {
-						if arr, isArr := existing.([]any); isArr {
-							result[k] = append(arr, v)
-						} else {
-							result[k] = []any{existing, v}
-						}
-					} else {
+					existing, ok := result[k]
+					mode := repeat.mode(k)
+					switch {
+					case !ok:
 						result[k] = v
+					case mode != "collect":
+						combined, err := combineRepeated(k, existing, v, mode, repeat.lastMembers[k])
+						if err != nil {
+							return nil, err
+						}
+						result[k] = combined
+					case collected[k]:
+						result[k] = append(existing.([]any), v)
+					default:
+						result[k] = []any{existing, v}
+						collected[k] = true
 					}
 				}
 			} else {
@@ -3562,7 +3687,15 @@ func resolveFieldName(field Field, ctx *DecodeContext) (string, error) {
 	var shapeErr error
 	resolved := nameFromPattern.ReplaceAllStringFunc(field.NameFrom, func(match string) string {
 		reference := match[2 : len(match)-1]
-		value, ok := ctx.Variables[reference]
+		// The reported value, the label where the field has a lookup (PS-532), not the
+		// number a reference binds (PS-523).
+		value, ok, err := ctx.templateValue(field, reference)
+		if err != nil {
+			if shapeErr == nil {
+				shapeErr = err
+			}
+			return ""
+		}
 		if !ok {
 			missing = append(missing, reference)
 			return ""
@@ -3800,7 +3933,7 @@ func decodeRepeat(field Field, ctx *DecodeContext) ([]any, error) {
 					return raggedTailError(field, ctx.Remaining(), elementSize, start)
 				}
 				if err := elements.element(); err != nil {
-					if strings.Contains(err.Error(), "buffer underflow") {
+					if isBufferUnderflow(err) {
 						return raggedTailError(field, len(ctx.Data)-start, 0, start)
 					}
 					return err
@@ -3881,8 +4014,9 @@ type EncodeResult struct {
 
 // EncodeWithPort encodes data to binary using port-based schema selection.
 //
-// A field missing from data is written as zero and noted as a warning, which
-// EncodeToResult reports and this signature necessarily drops.
+// A required field missing from data is an error naming it (PS-551); a value the
+// rest of the data fixes - a repeat's count, a match's discriminator, a flagged mask -
+// is derived.
 func (s *Schema) EncodeWithPort(data map[string]any, fPort int) ([]byte, error) {
 	ctx, err := s.encodeToContext(data, fPort, nil)
 	if err != nil {
@@ -3925,6 +4059,7 @@ func (s *Schema) encodeToContext(
 	ctx := NewEncodeContext(s.Endian)
 	ctx.TLVOrder = order
 	ctx.Definitions = s.Definitions
+	ctx.order = s.keyOrder
 
 	// Encode header fields first
 	if len(s.Header) > 0 {
@@ -4301,127 +4436,238 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 	if field.Merge != nil && !*field.Merge {
 		return fmt.Errorf("%s", "a tlv with merge: false reports its entries under 'channels', and encoding them is not supported")
 	}
-	// Python recovers channel order from its decoded output, whose keys are in payload
-	// order. A Go map has no order at all, so the channels are emitted in ascending tag
-	// order instead - which is how devices in this corpus lay them out, but is an
-	// assumption rather than recovered information. The floor in corpus_encode_test.go
-	// records how far it gets.
-	type candidate struct {
-		tag     []byte
-		lossy   int
-		matches int
-		key     string
-		fields  []Field
-		claimed []string
+	// PS-525 to PS-527 (CR-2026-110, -125, -128): each value - a scalar, each element of
+	// an array PS-157 collected, a `last` value, a merged object's members - goes under
+	// the first case whose declared fields it supplies in full; nothing is zero-filled
+	// or dropped, and what no case takes is an error. A case requiring more fields is
+	// tried first, then declaration order: em400-mud's [3, 103] (temperature) comes
+	// before [131, 103] (temperature, temperature_alarm), and taking temperature first
+	// would strand the alarm. That is CR-2026-029's specificity, kept under CR-2026-128. With the order DecodeOrdered reported, the cases read are
+	// tried first, in that order, so the tag that wrote a value gets it back.
+	repeat, _ := tlvRepeatModes(field.decl, ctx.order)
+	plan := tlvEncodePlan(field.decl, ctx.order, repeat)
+	if err := plan.strayMember(data); err != nil {
+		return err
 	}
-	candidates := []candidate{}
-	for key, caseFields := range field.TLVCases {
-		claimed := []string{}
-		for _, f := range claimableFields(caseFields, nil) {
-			if _, ok := data[f.Name]; ok {
-				claimed = append(claimed, f.Name)
+	type entry struct {
+		key           string
+		fields        []Field
+		required, opt []Field
+		rank          int
+	}
+	declared := tlvCaseOrder(field, ctx.order)
+	recorded := map[string]int{}
+	for i, key := range ctx.TLVOrder {
+		if _, seen := recorded[key]; !seen {
+			recorded[key] = i
+		}
+	}
+	entries := []entry{}
+	for i, key := range declared {
+		caseFields, ok := field.TLVCases[key]
+		if !ok || key == "default" {
+			continue
+		}
+		e := entry{key: key, fields: caseFields, rank: i}
+		for _, c := range caseClaims(caseFields, false, nil) {
+			if c.optional {
+				e.opt = append(e.opt, c.field)
+			} else {
+				e.required = append(e.required, c.field)
 			}
 		}
-		if len(claimed) == 0 {
-			continue
-		}
-		tag, err := encodeTLVTag(key, field, ctx)
-		if err != nil {
-			// A wildcard or negated key names a range of tags (PS-270); it cannot be
-			// written, so it is not a candidate.
-			continue
-		}
-		matches, lossless := caseFidelity(caseFields, data)
-		lossy := 0
-		if !lossless {
-			lossy = 1
-		}
-		candidates = append(candidates, candidate{tag, lossy, matches, key, caseFields, claimed})
+		entries = append(entries, e)
 	}
-
-	// Ordered for the claiming pass below, not for emission - the chosen set is re-sorted
-	// by tag before anything is written.
-	//
-	// The most specific case claims first. Sorting by tag instead let a case claiming one
-	// name spend it before a case claiming that name *and another* was considered, and the
-	// spend rule below only skips a case whose every name is already taken - so both were
-	// emitted. em400-mud declares `[3, 103] -> (temperature)` and
-	// `[131, 103] -> (temperature, temperature_abnormal)`, and data carrying both names
-	// came back as two channels, `036700008367000000` where the payload was
-	// `8367000000` (CR-2026-029).
-	sort.SliceStable(candidates, func(i, j int) bool {
-		if len(candidates[i].claimed) != len(candidates[j].claimed) {
-			return len(candidates[i].claimed) > len(candidates[j].claimed)
+	sort.SliceStable(entries, func(i, j int) bool {
+		ri, iok := recorded[entries[i].key]
+		rj, jok := recorded[entries[j].key]
+		if iok != jok {
+			return iok
 		}
-		if candidates[i].lossy != candidates[j].lossy {
-			return candidates[i].lossy < candidates[j].lossy
+		if iok && ri != rj {
+			return ri < rj
 		}
-		if candidates[i].matches != candidates[j].matches {
-			return candidates[i].matches > candidates[j].matches
-		}
-		// Tag order last, so the choice is deterministic where nothing else separates two
-		// cases - a Go map's iteration order is not.
-		return bytes.Compare(candidates[i].tag, candidates[j].tag) < 0
+		return claimWidth(entries[i].required) > claimWidth(entries[j].required)
 	})
 
-	// With the order DecodeOrdered reported, the channels go back exactly where they
-	// were - including a tag that appears twice. Without it the sort above stands in.
-	if len(ctx.TLVOrder) > 0 {
-		byKey := map[string]candidate{}
-		for _, c := range candidates {
-			byKey[c.key] = c
-		}
-		emittedAny := false
-		for _, key := range ctx.TLVOrder {
-			c, ok := byKey[key]
-			if !ok {
+	queues := map[string][]any{}
+	for _, e := range entries {
+		for _, f := range append(append([]Field{}, e.required...), e.opt...) {
+			value, ok := data[f.Name]
+			if _, queued := queues[f.Name]; !ok || queued || repeat.mode(f.Name) == "merge" {
 				continue
 			}
-			inner := ctx.branch()
-			if err := encodeFields(c.fields, data, inner); err != nil {
-				return err
+			if list, isList := value.([]any); isList && !reportsList(f) && repeat.mode(f.Name) == "collect" {
+				queues[f.Name] = append([]any{}, list...)
+			} else {
+				queues[f.Name] = []any{value}
 			}
-			inner.flushPending() // a tlv value is measured whole
-			ctx.Write(c.tag)
-			if field.LengthSize > 0 {
-				ctx.Write(encodeUint(uint64(len(inner.Buffer)), field.LengthSize, ctx.Endian))
-			}
-			ctx.Write(inner.Buffer)
-			ctx.mergeWarnings(inner)
-			emittedAny = true
 		}
-		if emittedAny {
-			return nil
+	}
+	pending := map[string]map[string]bool{}
+	for name := range plan.members {
+		if obj, ok := data[name].(map[string]any); ok {
+			pending[name] = map[string]bool{}
+			for m := range obj {
+				pending[name][m] = true
+			}
+		}
+	}
+	fits := func(f Field, value any) bool {
+		if obj, ok := value.(map[string]any); ok && (f.Type == TypeObject || f.Type == "object") &&
+			repeat.mode(f.Name) != "merge" {
+			every := map[string]bool{}
+			for _, c := range caseClaims(f.Fields, false, nil) {
+				every[c.field.Name] = true
+				if _, given := obj[c.field.Name]; !given && !c.optional {
+					return false
+				}
+			}
+			for k := range obj {
+				if !every[k] {
+					return false
+				}
+			}
+			return true
+		}
+		return fieldTakes(f, value)
+	}
+
+	type written struct {
+		key    string
+		fields []Field
+		data   map[string]any
+		tag    []byte
+		pos    int
+	}
+	out := []written{}
+	for progress := true; progress; {
+		progress = false
+		for _, e := range entries {
+			for {
+				values := map[string]any{}
+				taken, complete := 0, true
+				for _, f := range e.required {
+					if repeat.mode(f.Name) == "merge" {
+						obj, _ := data[f.Name].(map[string]any)
+						if pending[f.Name] == nil || obj == nil {
+							complete = false
+							break
+						}
+						sub, fresh := map[string]any{}, false
+						for _, m := range f.Fields {
+							if m.Name == "" {
+								continue
+							}
+							v, ok := obj[m.Name]
+							if !ok {
+								complete = false
+								break
+							}
+							sub[m.Name] = v
+							fresh = fresh || pending[f.Name][m.Name]
+						}
+						if !complete {
+							break
+						}
+						values[f.Name] = sub
+						if fresh {
+							taken++
+						}
+						continue
+					}
+					q := queues[f.Name]
+					if len(q) == 0 || !fits(f, q[0]) {
+						complete = false
+						break
+					}
+					values[f.Name] = q[0]
+					taken++
+				}
+				if !complete {
+					break
+				}
+				for _, f := range e.opt {
+					if q := queues[f.Name]; len(q) > 0 && fits(f, q[0]) {
+						values[f.Name] = q[0]
+						taken++
+					}
+				}
+				if taken == 0 {
+					break
+				}
+				entryData := make(map[string]any, len(data))
+				for k, v := range data {
+					entryData[k] = v
+				}
+				for name, v := range values {
+					entryData[name] = v
+					if repeat.mode(name) == "merge" {
+						for m := range v.(map[string]any) {
+							delete(pending[name], m)
+						}
+					} else {
+						queues[name] = queues[name][1:]
+					}
+				}
+				tag, err := encodeTLVTag(e.key, field, ctx)
+				if err != nil {
+					return err
+				}
+				pos := len(ctx.TLVOrder)
+				if r, ok := recorded[e.key]; ok {
+					pos = r
+				}
+				out = append(out, written{e.key, e.fields, entryData, tag, pos})
+				progress = true
+			}
+		}
+	}
+	queueNames := make([]string, 0, len(queues))
+	for name := range queues {
+		queueNames = append(queueNames, name)
+	}
+	sort.Strings(queueNames)
+	for _, name := range queueNames {
+		if q := queues[name]; len(q) > 0 {
+			return fmt.Errorf("tlv: no case takes the value of '%s' %s in full (PS-502, PS-527)", name, pyRepr(q[0]))
+		}
+	}
+	pendingNames := make([]string, 0, len(pending))
+	for name := range pending {
+		pendingNames = append(pendingNames, name)
+	}
+	sort.Strings(pendingNames)
+	for _, name := range pendingNames {
+		if len(pending[name]) > 0 {
+			left := []string{}
+			for m := range pending[name] {
+				left = append(left, "'"+m+"'")
+			}
+			sort.Strings(left)
+			return fmt.Errorf("tlv: no case takes the members [%s] of the merged object '%s' in full (PS-527)",
+				strings.Join(left, ", "), name)
 		}
 	}
 
-	spent := map[string]bool{}
-	chosen := []candidate{}
-	for _, c := range candidates {
-		allSpent := true
-		for _, name := range c.claimed {
-			if !spent[name] {
-				allSpent = false
-				break
-			}
+	// A Go map has no payload order, so the entries go out in the order DecodeOrdered
+	// reported where there is one, else in ascending tag order - how this corpus's
+	// devices lay them out, an assumption rather than recovered information. Entries of
+	// one tag keep the order they were taken in.
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].pos != out[j].pos {
+			return out[i].pos < out[j].pos
 		}
-		if allSpent {
-			continue
-		}
-		for _, name := range c.claimed {
-			spent[name] = true
-		}
-		chosen = append(chosen, c)
-	}
-	sort.SliceStable(chosen, func(i, j int) bool { return bytes.Compare(chosen[i].tag, chosen[j].tag) < 0 })
-
-	for _, c := range chosen {
+		return bytes.Compare(out[i].tag, out[j].tag) < 0
+	})
+	for _, w := range out {
+		tag := w.tag
 		inner := ctx.branch()
-		if err := encodeFields(c.fields, data, inner); err != nil {
+		if err := encodeFields(w.fields, w.data, inner); err != nil {
 			return err
 		}
 		inner.flushPending() // a tlv value is measured whole
-		ctx.Write(c.tag)
+		ctx.Write(tag)
 		if field.LengthSize > 0 {
 			ctx.Write(encodeUint(uint64(len(inner.Buffer)), field.LengthSize, ctx.Endian))
 		}
@@ -4434,7 +4680,7 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 // encodeMatch writes a match construct's bytes. An inline match (length: N) read those
 // bytes itself, so encoding writes them back; a match on field: $var read nothing,
 // because the variable came from a field earlier in the list that is encoded on its own.
-func encodeMatch(field Field, data map[string]any, ctx *EncodeContext) error {
+func encodeMatch(field Field, siblings []Field, data map[string]any, ctx *EncodeContext) error {
 	var discriminator any
 	if field.Name != "" {
 		if v, ok := data[field.Name]; ok {
@@ -4444,7 +4690,13 @@ func encodeMatch(field Field, data map[string]any, ctx *EncodeContext) error {
 	if discriminator == nil && field.On != "" {
 		varName := strings.TrimPrefix(field.On, "$")
 		if v, ok := data[varName]; ok {
-			discriminator = v
+			// The data carries the label; the case is keyed by what the reference
+			// binds (PS-523, PS-524).
+			discriminator = encodeDiscriminator(varName, v, siblings)
+		} else if v, ok := dataThroughVar(varName, siblings, data); ok {
+			// `field: $c` names a `var`, which the data does not carry: the field
+			// declaring it does, under its own name (PS-267), as resolveEncodeName reads it.
+			discriminator = encodeDiscriminator(varName, v, siblings)
 		} else if v, ok := ctx.Variables[varName]; ok {
 			discriminator = v
 		}
@@ -4516,12 +4768,35 @@ func encodeMatch(field Field, data map[string]any, ctx *EncodeContext) error {
 			}
 		}
 		if best <= 0 {
-			if field.Length == 0 || discriminator == nil {
-				return nil
+			chosen, chosenKey = nil, ""
+			// Nothing in the input belongs to any case: the default, as the reference
+			// takes it here.
+			if discriminator == nil {
+				switch fallback := field.MatchDefault.(type) {
+				case []any:
+					chosen, chosenKey = parseFieldsRaw(fallback), "default"
+				case []Field:
+					chosen, chosenKey = fallback, "default"
+				}
 			}
-			// 'skip' with a known inline discriminator: its bytes, and no case. They
-			// were not written, so every field after the match shifted.
-			chosen = []Field{}
+			switch {
+			case chosen != nil:
+			case discriminator == nil && (field.MatchDefault == "skip" || (field.Length > 0 && field.Name == "")):
+				// Nothing given and nothing the input could give: an inline match with
+				// no name reports no discriminator, and a `skip` default none for an
+				// unmatched value. This is the corpus's non-advancing peek (r718x, dnt,
+				// and registry schemas), whose byte the bit range before it already
+				// wrote. Left as it was.
+				return nil
+			case field.Length > 0 && discriminator == nil:
+				// PS-551: an inline discriminator the input neither gives nor fixes
+				// through a case's fields. This returned no bytes at all, dropping the
+				// discriminator's own (PS-442).
+				return missingFieldError(matchLabel(field))
+			default:
+				// 'skip' with a discriminator: the discriminator, and nothing for the case.
+				chosen = []Field{}
+			}
 		}
 	}
 
@@ -4529,8 +4804,12 @@ func encodeMatch(field Field, data map[string]any, ctx *EncodeContext) error {
 		value := int64(0)
 		if intVal, ok := toInt(discriminator); ok {
 			value = int64(intVal)
+		} else if chosenKey == "" {
+			return missingFieldError(matchLabel(field))
 		} else if v, err := parseIntAny(chosenKey); err == nil {
 			value = v
+		} else {
+			return fmt.Errorf("match case %q names no single discriminator value", chosenKey)
 		}
 		ctx.Write(encodeUint(uint64(value), field.Length, ctx.Endian))
 	}
@@ -4540,24 +4819,27 @@ func encodeMatch(field Field, data map[string]any, ctx *EncodeContext) error {
 // encodeByteGroup packs a group's bit ranges back into their shared byte(s). Encoding had
 // no case for the construct, so it emitted a single zero byte: right length, wrong bits.
 func encodeByteGroup(field Field, data map[string]any, ctx *EncodeContext) error {
-	size := field.Size
-	if size <= 0 {
-		size = 1
-	}
+	size := byteGroupWidth(field) // PS-070, CR-2026-131: the width decoding reads
 	packed := uint64(0)
 	for _, gf := range field.ByteGroup {
+		if isComputedField(gf) || isLiteralField(gf) {
+			continue // no bits of its own (PS-359)
+		}
 		var value any = 0
-		if strings.HasPrefix(gf.Name, "_") {
-			// PS-434: an internal member writes its value, else the input's.
+		if gf.Value != nil || strings.HasPrefix(gf.Name, "_") {
+			// PS-360, PS-434: its value, else the input's, else an error naming it.
 			v, err := internalEncodeValue(gf, data)
 			if err != nil {
 				return err
 			}
 			value = v
 		} else if gf.Name != "" {
-			if v, ok := data[gf.Name]; ok {
-				value = v
+			v, ok := data[gf.Name]
+			if !ok || v == nil {
+				// PS-551. A member was written as zero bits, which read back as a value.
+				return missingFieldError(gf.Name)
 			}
+			value = v
 		}
 		if gf.Type == TypeBoolLower || gf.Type == TypeBool {
 			// A bool member is one bit of the group's value (PS-364).
@@ -4573,22 +4855,24 @@ func encodeByteGroup(field Field, data map[string]any, ctx *EncodeContext) error
 		// PS-552: a tie to even; this rounded half up (math.Round), so 2.5 wrote 3.
 		rounded := roundToInteger(raw)
 		num := uint64(int64(rounded))
-		if m := bitRangePattern.FindStringSubmatch(string(gf.Type)); m != nil {
-			bits, _ := strconv.Atoi(strings.TrimLeft(m[1], "usf"))
-			start, _ := strconv.Atoi(m[2])
-			end, _ := strconv.Atoi(m[3])
-			if base := bits / 8; base > size {
-				size = base
-			}
-			width := uint(end - start + 1)
-			// PS-168: the range's width is its type; a value past it was masked silently.
-			if err := bitRangeFitError(rounded, int(width), gf.Type, gf.Name, value); err != nil {
-				return err
-			}
-			packed |= (num & ((1 << width) - 1)) << uint(start)
+		// A whole integer is its full range (PS-070), masked like any other member.
+		r := fieldMemberRange(gf)
+		width := uint(r.high - r.low + 1)
+		// PS-168: a value past the member's width is rejected; it was masked silently.
+		var fitErr error
+		if bitRangePattern.MatchString(string(gf.Type)) {
+			fitErr = bitRangeFitError(rounded, int(width), gf.Type, gf.Name, value)
 		} else {
-			packed |= num
+			fitErr = integerFitError(rounded, int(width), r.signed, gf.Name, value)
 		}
+		if fitErr != nil {
+			return fitErr
+		}
+		mask := ^uint64(0)
+		if width < 64 {
+			mask = (1 << width) - 1
+		}
+		packed |= (num & mask) << uint(r.low)
 	}
 	endian := field.GroupEndian
 	if endian == "" {
@@ -4614,16 +4898,25 @@ func encodeRef(ref string, data map[string]any, ctx *EncodeContext) error {
 	return encodeFields(def.Fields, data, ctx)
 }
 
-// encodeRepeat writes a repeat's records back to back. The framing costs no bytes here:
-// count: $n and byte_length: $len name a field earlier in the list, encoded on its own.
-func encodeRepeat(field Field, data map[string]any, ctx *EncodeContext) error {
-	raw, ok := data[field.Name]
-	if !ok {
-		return nil
+// encodeRepeat writes a repeat's records back to back, then any trailer. The framing
+// costs no bytes here: count: $n and byte_length: $len name a field earlier in the list,
+// encoded from its own value - derived from this list where the input omits it (PS-551).
+//
+// PS-551: an absent list is a missing value, and a list must agree with its count and
+// byte_length, literal or referenced. An absent list wrote nothing, leaving the frame
+// short of the elements a count or byte_length field still declared (PS-442).
+func encodeRepeat(field Field, data map[string]any, ctx *EncodeContext, siblings []Field) error {
+	raw, present := data[field.Name]
+	if present && raw != nil {
+		switch raw.(type) {
+		case []any, map[string]any:
+		default:
+			return fmt.Errorf("repeat field %q: expected a list of records", field.Name)
+		}
 	}
-	records, ok := raw.([]any)
+	records, ok := repeatRecords(field, data)
 	if !ok {
-		return fmt.Errorf("repeat field %q: expected a list of records", field.Name)
+		return missingFieldError(field.Name)
 	}
 	// PS-550: a sibling identifying these values position by position is given as many
 	// values as this repeat, as a decoder requires (PS-546).
@@ -4638,9 +4931,20 @@ func encodeRepeat(field Field, data map[string]any, ctx *EncodeContext) error {
 				field.Name, len(records), sibling, have)
 		}
 	}
-	if err := encodeRepeatRecords(field, records, ctx); err != nil {
+	count := -1
+	if n, ok := repeatSize(field.Count, data, siblings); ok {
+		count = n
+	}
+	elements := ctx.branch()
+	if err := encodeRepeatRecords(field, records, elements, count); err != nil {
 		return err
 	}
+	if n, ok := repeatSize(field.ByteLength, data, siblings); ok && len(elements.Buffer) != n {
+		return fmt.Errorf("Repeat '%s' encodes to %d bytes for a byte_length of %d (PS-551)",
+			field.Name, len(elements.Buffer), n)
+	}
+	ctx.Write(elements.Buffer)
+	ctx.mergeWarnings(elements)
 	// PS-385: the elements, then the trailer, whose values sit beside the repeat.
 	if len(field.Trailer) > 0 {
 		return encodeFieldsSealed(field.Trailer, data, ctx)
@@ -4648,8 +4952,10 @@ func encodeRepeat(field Field, data map[string]any, ctx *EncodeContext) error {
 	return nil
 }
 
-// encodeRepeatRecords writes a repeat's records back to back.
-func encodeRepeatRecords(field Field, records []any, ctx *EncodeContext) error {
+// encodeRepeatRecords writes a repeat's records back to back. A count of -1 states
+// none; otherwise the list must have that many values (PS-551), checked after the
+// refusals that concern the schema rather than the input.
+func encodeRepeatRecords(field Field, records []any, ctx *EncodeContext, count int) error {
 	if recordsReachable(field.Fields) {
 		// PS-542: the records do not say which element they came from.
 		return fmt.Errorf("Repeat '%s' has elements that yield several records, which cannot be encoded (PS-542)", field.Name)
@@ -4671,6 +4977,11 @@ func encodeRepeatRecords(field Field, records []any, ctx *EncodeContext) error {
 			wrapped[position] = map[string]any{field.ElementName: item}
 		}
 		records = wrapped
+	}
+	if count >= 0 && len(records) != count {
+		// PS-551: the count and the list must agree; nothing is padded or cut.
+		return fmt.Errorf("Repeat '%s' is given %d values for a count of %d (PS-551)",
+			field.Name, len(records), count)
 	}
 	for position, item := range records {
 		record, ok := item.(map[string]any)
@@ -4747,17 +5058,20 @@ func encodeBitfieldRun(run []Field, data map[string]any, ctx *EncodeContext) err
 	}
 	for _, gf := range run {
 		var value any = 0
-		if strings.HasPrefix(gf.Name, "_") {
-			// PS-434: an internal bit range writes its value, else the input's.
+		if gf.Value != nil || strings.HasPrefix(gf.Name, "_") {
+			// PS-360, PS-434: its value, else the input's, else an error naming it.
 			v, err := internalEncodeValue(gf, data)
 			if err != nil {
 				return err
 			}
 			value = v
 		} else if gf.Name != "" {
-			if v, ok := data[gf.Name]; ok {
-				value = v
+			v, ok := data[gf.Name]
+			if !ok || v == nil {
+				// PS-551. A range was written as zero bits, which read back as a value.
+				return missingFieldError(gf.Name)
 			}
+			value = v
 		}
 		raw, ok := rawForField(gf, value)
 		if !ok {
@@ -4836,47 +5150,41 @@ func encodeFieldsSealed(fields []Field, data map[string]any, ctx *EncodeContext)
 }
 
 func encodeFieldList(fields []Field, data map[string]any, ctx *EncodeContext) error {
-	// Pre-scan flagged constructs to compute flag values
-	flagsPatches := map[string]int{}
-	for _, field := range fields {
-		if field.Flagged != nil {
-			flags := 0
-			for _, group := range field.Flagged.Groups {
-				for _, gf := range group.Fields {
-					if gf.Name != "" {
-						if _, ok := data[gf.Name]; ok {
-							flags |= (1 << group.Bit)
-							break
-						}
-					}
-				}
-			}
-			flagsPatches[field.Flagged.Field] = flags
-		}
+	// PS-551: a value the input omits but the rest of it fixes - a repeat's count or
+	// byte_length field, a match's discriminator, a flagged mask - is derived before
+	// anything is written, and a supplied one that disagrees is rejected. The flagged
+	// mask was the one derivation already made, and it overwrote a supplied mask.
+	data, err := deriveInputs(fields, data, ctx)
+	if err != nil {
+		return err
 	}
-	// The masks the groups fix are visible to the constructs before the block, as the
-	// decoder's variables are: dnt binds its mask with an inline match (CR-2026-136).
-	var patched map[string]any
-	for key, flags := range flagsPatches {
-		if key == "" || data[key] != nil {
-			continue
-		}
-		if patched == nil {
-			patched = make(map[string]any, len(data)+len(flagsPatches))
-			for k, v := range data {
-				patched[k] = v
-			}
-		}
-		patched[key] = flags
-	}
-	if patched != nil {
-		data = patched
-	}
+	// deriveInputs also makes the masks the groups fix visible to the constructs before
+	// the block, as the decoder's variables are: dnt binds its mask with an inline match
+	// (CR-2026-136).
 	// The first optional field the input left out (PS-405).
 	omittedOptional := ""
 
 	for i := 0; i < len(fields); i++ {
 		field := fields[i]
+
+		// PS-405, before any construct: an optional object or repeat the input omits
+		// writes nothing, as a plain field does.
+		if field.Optional && field.Name != "" && !isBareBitfieldField(field) {
+			key, nameErr := resolveEncodeName(field, fields, data)
+			if nameErr != nil || key == "" {
+				key = field.Name
+			}
+			if v, ok := data[key]; !ok || v == nil {
+				if omittedOptional == "" {
+					omittedOptional = field.Name
+				}
+				continue
+			}
+			if omittedOptional != "" {
+				return fmt.Errorf("field '%s': optional field supplied while the earlier optional field '%s' is not (PS-405)",
+					field.Name, omittedOptional)
+			}
+		}
 
 		// Bit ranges sharing a byte are packed together rather than a byte apiece
 		// (CR-2026-024). The run ends at the field whose `consume` closes the span,
@@ -4920,7 +5228,7 @@ func encodeFieldList(fields []Field, data map[string]any, ctx *EncodeContext) er
 		}
 
 		if field.MatchInline != nil {
-			if err := encodeMatch(*field.MatchInline, data, ctx); err != nil {
+			if err := encodeMatch(*field.MatchInline, fields, data, ctx); err != nil {
 				return err
 			}
 			continue
@@ -4934,7 +5242,7 @@ func encodeFieldList(fields []Field, data map[string]any, ctx *EncodeContext) er
 		}
 
 		if field.Type == "repeat" {
-			if err := encodeRepeat(field, data, ctx); err != nil {
+			if err := encodeRepeat(field, data, ctx, fields); err != nil {
 				return err
 			}
 			continue
@@ -5004,6 +5312,15 @@ func encodeFieldList(fields []Field, data map[string]any, ctx *EncodeContext) er
 		// field. Writing zero read back as a value the device never sent wherever the
 		// field was not padding. Unnamed padding still writes zeros.
 		if field.Name == "" {
+			if field.Type == TypeObject || field.Type == TypeObjectLower {
+				// A nameless object's members sit in the enclosing data.
+				if err := encodeFields(field.Fields, data, ctx); err != nil {
+					return err
+				}
+				continue
+			}
+			// Nothing can be supplied for a field with no name; it is padding, as a
+			// skip is.
 			if err := encodeField(field, 0, ctx); err != nil {
 				return err
 			}
@@ -5020,41 +5337,15 @@ func encodeFieldList(fields []Field, data map[string]any, ctx *EncodeContext) er
 			continue
 		}
 
-		// Bitfield string encoding
-		if field.Type == TypeBitfieldString {
-			if strVal, ok := data[field.Name].(string); ok {
-				if err := encodeBitfieldString(field, strVal, ctx); err != nil {
-					return err
-				}
-			}
-			continue
+		// `name_from` reports the value under a templated key, so that is the key to
+		// read it back from (CR-2026-030).
+		lookupName, nameErr := resolveEncodeName(field, fields, data)
+		if nameErr != nil {
+			return nameErr
 		}
-
-		// Patch flags value
-		var value any
-		if patchedFlags, ok := flagsPatches[field.Name]; ok {
-			value = float64(patchedFlags)
-		} else {
-			// `name_from` reports the value under a templated key, so that is the key
-			// to read it back from (CR-2026-030).
-			lookupName, nameErr := resolveEncodeName(field, fields, data)
-			if nameErr != nil {
-				return nameErr
-			}
-			var exists bool
-			value, exists = data[lookupName]
-			if field.Optional && (!exists || value == nil) {
-				// PS-405: an optional field is written only where the input has it.
-				if omittedOptional == "" {
-					omittedOptional = field.Name
-				}
-				continue
-			}
-			if field.Optional && omittedOptional != "" {
-				return fmt.Errorf("field '%s': optional field supplied while the earlier optional field '%s' is not (PS-405)",
-					field.Name, omittedOptional)
-			}
-			if (!exists || value == nil) && len(field.Sentinel) > 0 {
+		value, exists := data[lookupName]
+		if !exists || value == nil {
+			if len(field.Sentinel) > 0 {
 				// A reading the decode omitted as "no reading" (PS-427) goes back as
 				// the sentinel it was, not as zero.
 				if err := encodeSentinel(field, ctx); err != nil {
@@ -5062,18 +5353,18 @@ func encodeFieldList(fields []Field, data map[string]any, ctx *EncodeContext) er
 				}
 				continue
 			}
-			if !exists {
-				// A field the input omits is written as zero and reported, which
-				// is what Python, Java and C# all do. Skipping it wrote no bytes
-				// at all, so the payload came out short and every field after it
-				// landed at the wrong offset — a corrupt frame returned as a
-				// success. Zero is not a guess at the value; it is a placeholder
-				// that keeps the layout intact while the warning says the value
-				// was never supplied. encodeFieldList, used for tlv/match/repeat
-				// cases, already did exactly this.
-				ctx.Warnings = append(ctx.Warnings, "Missing field: "+lookupName)
-				value = 0
+			// PS-551: rejected, naming the field. This warned "Missing field" and wrote
+			// a zero, which reads back as a real zero - and for `ascii`, `hex`, a whole
+			// object or a bitfield_string it wrote nothing at all, so every later field
+			// shifted (PS-442).
+			return missingFieldError(lookupName)
+		}
+
+		if field.Type == TypeBitfieldString {
+			if err := encodeBitfieldString(field, fmt.Sprintf("%v", value), ctx); err != nil {
+				return err
 			}
+			continue
 		}
 
 		if err := encodeField(field, value, ctx); err != nil {
@@ -5083,26 +5374,38 @@ func encodeFieldList(fields []Field, data map[string]any, ctx *EncodeContext) er
 	return nil
 }
 
+// matchLabel names an inline match's discriminator in a rejection: the match's name,
+// else "match", as the reference does.
+func matchLabel(field Field) string {
+	if field.Name != "" {
+		return field.Name
+	}
+	return "match"
+}
+
 func encodeFlagged(fd *FlaggedDef, data map[string]any, ctx *EncodeContext) error {
-	// CR-2026-136: the given groups' named members are one field list, laid out as a
-	// decoder reads them, so a bool or bit range in a group is its bits of a shared byte
-	// (vobo's digital groups) and a construct in one is encoded as any is (dnt's object).
-	// Each group used to be written member by member, a run flushed whole at the group's
-	// end. Mirrors _encode_flagged in tools/schema_interpreter.py; unnamed members are
-	// skipped, as there. The list goes through encodeFields, so a run of bit ranges in
-	// it is packed by encodeBitfieldRun like any other (CR-2026-024).
+	// CR-2026-136: the given groups' members are one field list, laid out as a decoder
+	// reads them, so a bool or bit range in a group is its bits of a shared byte (vobo's
+	// digital groups) and a construct in one is encoded as any is (dnt's object). Each
+	// group used to be written member by member, a run flushed whole at the group's end.
+	// Mirrors _encode_flagged in tools/schema_interpreter.py: a nameless member is taken
+	// only where it is a construct in its group (a nested flagged block, a byte_group),
+	// and the list goes through encodeFields, so PS-551 holds for each given group's
+	// members and a run of bit ranges is packed by encodeBitfieldRun (CR-2026-024).
 	var members []Field
 	for _, group := range fd.Groups {
-		given := false
+		if !flaggedGroupGiven(group, data) {
+			continue
+		}
+		hasConstruct := false
 		for _, gf := range group.Fields {
-			if gf.Name != "" {
-				if _, ok := data[gf.Name]; ok {
-					given = true
-					break
-				}
+			if gf.Name == "" {
+				hasConstruct = true
+				break
 			}
 		}
-		if !given {
+		if hasConstruct {
+			members = append(members, group.Fields...)
 			continue
 		}
 		for _, gf := range group.Fields {
@@ -5431,12 +5734,21 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 			// A literal came from no bytes, so it writes none (PS-359).
 			break
 		}
-		if strVal, ok := value.(string); ok {
-			if length <= 0 {
-				length = len(strVal)
+		if value != nil {
+			// PS-537: a fixed length bounds and pads the value; `remaining` or a
+			// reference has none, and the value supplies the count.
+			fixed := -1
+			if field.Length > 0 && field.LengthRef == "" {
+				fixed = field.Length
 			}
-			data := make([]byte, length)
-			copy(data, []byte(strVal))
+			strVal, ok := value.(string)
+			if !ok {
+				strVal = fmt.Sprintf("%v", value)
+			}
+			data, err := encodeASCII(field.Name, strVal, fixed, ctx)
+			if err != nil {
+				return err
+			}
 			ctx.Write(data)
 		}
 
@@ -5526,7 +5838,7 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 
 	case TypeRepeat, TypeRepeatLower:
 		if arrVal, ok := value.([]any); ok {
-			if err := encodeRepeatRecords(field, arrVal, ctx); err != nil {
+			if err := encodeRepeatRecords(field, arrVal, ctx, -1); err != nil {
 				return err
 			}
 		}

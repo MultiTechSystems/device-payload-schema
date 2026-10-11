@@ -108,6 +108,9 @@ public class Schema {
         // Wave 6b (CR-2026-059, -067): optional fields form the tail of their list (PS-404)
         // and no field takes a name reserved for interpreter metadata (PS-433).
         Wave6b.checkSchema(raw);
+        // CR-2026-110/125: PS-525 and PS-526 over every tlv, and an `on_repeat` where it
+        // has no effect, refused wherever it sits.
+        OnRepeat.checkPlacement(raw);
         // CR-2026-117: every `$` reference names something the schema declares (PS-539).
         References.check(raw);
         Schema schema = new Schema();
@@ -190,7 +193,7 @@ public class Schema {
                 throw new SchemaException("Field '" + fm.get("name") + "' declares no type");
             }
             checkBytesFormat(fm);
-            if (fm.containsKey("byte_group")) checkByteGroupOverlap(fm.get("byte_group"));
+            if (fm.containsKey("byte_group")) checkByteGroup(fm);        // PS-070, PS-397
             checkCaseBodies(fm);               // PS-441
             checkLiteral(fm);
             checkAnnotations(fm);              // PS-510
@@ -216,6 +219,27 @@ public class Schema {
             fields.add(parseField(fm));
         }
         return fields;
+    }
+
+    /**
+     * A tlv block's cases, insertion-ordered: encoding ranks the candidate cases for a
+     * channel and needs that ranking to be reproducible, which a HashMap's iteration order
+     * is not, and PS-527 writes a merged object's entries in case declaration order. Its
+     * {@code on_repeat} modes are resolved here, so a schema breaking PS-525/PS-526 is
+     * rejected at load.
+     */
+    @SuppressWarnings("unchecked")
+    private static void parseTlvCases(Field f, Map<String, Object> fm) {
+        if (!(fm.get("cases") instanceof Map<?, ?> casesRaw)) return;
+        Map<String, List<Field>> tlvCases = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : casesRaw.entrySet()) {
+            String key = String.valueOf(entry.getKey());
+            if (entry.getValue() instanceof List) {
+                tlvCases.put(key, parseFields((List<Map<String, Object>>) entry.getValue()));
+            }
+        }
+        f.setTlvCases(tlvCases);
+        f.setRepeatModes(OnRepeat.of(fm));
     }
 
     /**
@@ -336,50 +360,98 @@ public class Schema {
         }
     }
 
+    /** The whole-integer types a byte_group member may name (PS-070): u16 is u16[0:15]. */
+    private static final Map<String, Integer> WHOLE_INTEGER_BYTES = Map.ofEntries(
+            Map.entry("u8", 1), Map.entry("u16", 2), Map.entry("u24", 3), Map.entry("u32", 4),
+            Map.entry("u64", 8), Map.entry("uint8", 1), Map.entry("uint16", 2),
+            Map.entry("uint24", 3), Map.entry("uint32", 4), Map.entry("uint64", 8),
+            Map.entry("s8", 1), Map.entry("s16", 2), Map.entry("s24", 3), Map.entry("s32", 4),
+            Map.entry("s64", 8), Map.entry("i8", 1), Map.entry("i16", 2), Map.entry("i24", 3),
+            Map.entry("i32", 4), Map.entry("i64", 8), Map.entry("int8", 1),
+            Map.entry("int16", 2), Map.entry("int24", 3), Map.entry("int32", 4),
+            Map.entry("int64", 8));
+
     /**
-     * The bits a byte_group member covers, counted from the group's first bit (most
-     * significant bit of its first byte), or null for a member that is neither a bit range
-     * nor a bool. Mapping onto the group lets members of different widths be compared.
+     * A byte_group member's {base bytes, low bit, high bit} (PS-070, CR-2026-131). A member
+     * is a bit range; a whole integer, its full range; or a bool with {@code bit}, one bit
+     * of a u8. Its bits are numbered in the group's assembled value (PS-364), so members of
+     * any width compare directly. They were mapped most-significant-first within each
+     * member's own base, which disagreed with decoding for members of different widths.
      */
-    private static Set<Integer> byteGroupMemberBits(Map<String, Object> member) {
+    static int[] byteGroupMemberRange(Map<String, Object> member) {
         Object type = member.get("type");
-        int width, start, end;
-        Matcher m = BIT_RANGE.matcher(type == null ? "" : type.toString());
+        String typ = type == null ? "" : type.toString();
+        Object name = member.get("name");
+        Matcher m = BIT_RANGE.matcher(typ);
         if (m.matches()) {
-            width = Integer.parseInt(m.group(2));
-            start = Integer.parseInt(m.group(3));
-            end = Integer.parseInt(m.group(4));
-        } else if ("bool".equals(type)) {
-            width = 8;
-            start = toInt(member.get("bit"), 0);
-            end = start;
-        } else {
-            return null;
+            int lo = Integer.parseInt(m.group(3));
+            int hi = Integer.parseInt(m.group(4));
+            return new int[] {Math.max(1, Integer.parseInt(m.group(2)) / 8),
+                    Math.min(lo, hi), Math.max(lo, hi)};
         }
-        Set<Integer> bits = new HashSet<>();
-        for (int b = start; b <= end; b++) bits.add(width - 1 - b);
-        return bits;
+        Integer whole = WHOLE_INTEGER_BYTES.get(typ);
+        if (whole != null) return new int[] {whole, 0, whole * 8 - 1};
+        if ("bool".equals(typ) && member.get("bit") instanceof Number bitNumber) {
+            int bit = bitNumber.intValue();
+            if (bit < 0 || bit > 7) {
+                throw new SchemaException("byte_group member '" + name + "' is a bool at bit " + bit
+                        + "; a bool member is one bit of a u8, 0 to 7 (PS-070)");
+            }
+            return new int[] {1, bit, bit};
+        }
+        throw new SchemaException("byte_group member '" + name
+                + "' is not a bit range, a whole integer or a bool with `bit` (PS-364)");
     }
 
-    /** PS-397: bit ranges within one byte_group must not overlap. They were accepted. */
+    /**
+     * The bytes a byte_group covers (PS-070, CR-2026-131): with no {@code size}, its widest
+     * member's base type, whichever bytes that member's bits fall in - a {@code u16[0:3]}
+     * member makes it two bytes. A {@code size} may widen it; a narrower one is rejected at load
+     * ({@link #checkByteGroup}). Decoding
+     * read a group with no size as one byte, so a {@code u16[8:15]} member decoded from
+     * the wrong byte, while encoding already widened to the base.
+     */
+    static int byteGroupWidth(List<Field> members, int declared) {
+        int width = Math.max(1, declared);
+        for (Field member : members == null ? List.<Field>of() : members) {
+            FieldType type = member.getType();
+            int base = type == FieldType.BITS ? Math.max(1, member.getBitBaseBytes())
+                    : type != null && type.isInteger() ? type.defaultLength() : 1;
+            width = Math.max(width, base);
+        }
+        return width;
+    }
+
+    /**
+     * A byte_group's load-time rules: every member a kind PS-070 admits, no two members on
+     * the same bits (PS-397), and a {@code size} no narrower than the widest member's base
+     * (PS-070, CR-2026-131), which used to be widened silently.
+     */
     @SuppressWarnings("unchecked")
-    private static void checkByteGroupOverlap(Object group) {
+    private static void checkByteGroup(Map<String, Object> fm) {
+        Object group = fm.get("byte_group");
         List<?> members = group instanceof List<?> list ? list
                 : group instanceof Map<?, ?> map && map.get("fields") instanceof List<?> fl ? fl
                 : List.of();
-        List<Map.Entry<Object, Set<Integer>>> seen = new ArrayList<>();
+        Object size = group instanceof Map<?, ?> map ? map.get("size") : fm.get("size");
+        List<Map.Entry<Object, int[]>> seen = new ArrayList<>();
+        int widest = 1;
         for (Object raw : members) {
             if (!(raw instanceof Map)) continue;
             Map<String, Object> member = (Map<String, Object>) raw;
-            Set<Integer> bits = byteGroupMemberBits(member);
-            if (bits == null) continue;
-            for (Map.Entry<Object, Set<Integer>> other : seen) {
-                if (!Collections.disjoint(other.getValue(), bits)) {
+            int[] range = byteGroupMemberRange(member);
+            for (Map.Entry<Object, int[]> other : seen) {
+                if (range[1] <= other.getValue()[2] && other.getValue()[1] <= range[2]) {
                     throw new SchemaException("byte_group members '" + other.getKey() + "' and '"
                             + member.get("name") + "' overlap (PS-397)");
                 }
             }
-            seen.add(Map.entry(String.valueOf(member.get("name")), bits));
+            seen.add(Map.entry(String.valueOf(member.get("name")), range));
+            widest = Math.max(widest, range[0]);
+        }
+        if (size instanceof Number declared && declared.intValue() < widest) {
+            throw new SchemaException("byte_group declares size " + declared.intValue()
+                    + ", narrower than its widest member's " + widest + " bytes (PS-070)");
         }
     }
 
@@ -820,6 +892,21 @@ public class Schema {
             if (fm.get("default") != null) {
                 f.setEnumDefault(String.valueOf(fm.get("default")));
             }
+        } else if (fm.get("values") instanceof List<?> valuesList) {
+            // The sequence form names codes from zero; it was not parsed, so every code
+            // of such an enum read as unmapped.
+            Map<Integer, String> values = new HashMap<>();
+            for (int i = 0; i < valuesList.size(); i++) {
+                Object label = valuesList.get(i);
+                if (label instanceof Map<?, ?> described) {
+                    label = described.get("name");
+                }
+                values.put(i, String.valueOf(label));
+            }
+            f.setValues(values);
+            if (fm.get("default") != null) {
+                f.setEnumDefault(String.valueOf(fm.get("default")));
+            }
         }
 
         // Computed fields (type: number). None of this was parsed, so every schema
@@ -966,17 +1053,7 @@ public class Schema {
         if ((f.getType() == FieldType.TLV || fm.containsKey("tag_fields")
                 || fm.containsKey("tag_key") || fm.containsKey("tag_size"))
                 && casesRaw instanceof Map) {
-            // Insertion-ordered: encoding ranks the candidate cases for a channel and
-            // needs that ranking to be reproducible, which a HashMap's iteration order is
-            // not.
-            Map<String, List<Field>> tlvCases = new LinkedHashMap<>();
-            for (Map.Entry<?, ?> entry : ((Map<?, ?>) casesRaw).entrySet()) {
-                String key = String.valueOf(entry.getKey());
-                if (entry.getValue() instanceof List) {
-                    tlvCases.put(key, parseFields((List<Map<String, Object>>) entry.getValue()));
-                }
-            }
-            f.setTlvCases(tlvCases);
+            parseTlvCases(f, fm);
         }
         
         // Repeat fields
@@ -1039,11 +1116,11 @@ public class Schema {
             if (groupMap.get("fields") instanceof List<?> groupFields) {
                 f.setByteGroup(parseFields((List<Map<String, Object>>) groupFields));
             }
-            f.setByteGroupSize(toInt(groupMap.get("size"), 1));
+            f.setByteGroupSize(byteGroupWidth(f.getByteGroup(), toInt(groupMap.get("size"), 1)));
             if (groupMap.get("endian") instanceof String groupEndian) f.setGroupEndian(groupEndian);
         } else if (byteGroupRaw instanceof List<?> groupFields) {
             f.setByteGroup(parseFields((List<Map<String, Object>>) groupFields));
-            f.setByteGroupSize(toInt(fm.get("size"), 1));
+            f.setByteGroupSize(byteGroupWidth(f.getByteGroup(), toInt(fm.get("size"), 1)));
         }
 
         // Flagged construct
@@ -1133,6 +1210,10 @@ public class Schema {
         if (tlvRaw instanceof Map) {
             Field tlvField = parseField((Map<String, Object>) tlvRaw);
             tlvField.setType(FieldType.TLV);
+            // A block with a one-byte tag need declare none of tag_size, tag_fields and
+            // tag_key, and then nothing above marked it as a tlv, so its cases were never
+            // parsed and every tag was unknown.
+            if (tlvField.getTlvCases() == null) parseTlvCases(tlvField, (Map<String, Object>) tlvRaw);
             f.setTlvInline(tlvField);
         }
         
@@ -1454,7 +1535,9 @@ public class Schema {
                     for (Map.Entry<?, ?> entry : matchMap.entrySet()) {
                         String key = String.valueOf(entry.getKey());
                         result.put(key, entry.getValue());
-                        ctx.setVariable(key, entry.getValue());
+                        // A looked-up field in the case bound itself (PS-523); rebinding
+                        // its reported label here would undo that.
+                        if (!ctx.hasLabel(key)) ctx.setVariable(key, entry.getValue());
                     }
                 }
                 continue;
@@ -1486,7 +1569,9 @@ public class Schema {
                 Map<String, Object> flaggedResult = decodeFlagged(field.getFlagged(), ctx);
                 result.putAll(flaggedResult);
                 for (Map.Entry<String, Object> entry : flaggedResult.entrySet()) {
-                    ctx.setVariable(entry.getKey(), entry.getValue());
+                    if (!ctx.hasLabel(entry.getKey())) {                // PS-523
+                        ctx.setVariable(entry.getKey(), entry.getValue());
+                    }
                 }
                 continue;
             }
@@ -1517,7 +1602,11 @@ public class Schema {
             }
 
             if (value == OMITTED) {
-                // A mapping lookup with no entry and no default (PS-269).
+                // A mapping lookup with no entry and no default (PS-269): not reported,
+                // and a reference to it still binds the number (PS-523).
+                if (field.getName() != null && !field.getName().isEmpty()) {
+                    ctx.bindMissed(field.getName(), field);
+                }
                 continue;
             }
 
@@ -1537,7 +1626,7 @@ public class Schema {
                 }
                 // Variables are keyed by the schema-level name so $references keep
                 // working when name_from is in play (PS-267).
-                ctx.setVariable(field.getName(), value);
+                ctx.bind(field.getName(), field, value);       // PS-523
                 ctx.checkValidRange(value, field);     // PS-131
             }
         }
@@ -1602,6 +1691,23 @@ public class Schema {
      *                   list and not to a byte_group member, as in the reference.
      */
     private Object decodeField(Field field, DecodeContext ctx, boolean fieldRules) {
+        try {
+            return decodeFieldBody(field, ctx, fieldRules);
+        } catch (SchemaException.BufferUnderflow e) {
+            // PS-535: the innermost field that read past the end is named; an enclosing
+            // object, repeat or construct passes its member's error through unchanged.
+            throw e.named(field.getName(), kindOf(field));
+        }
+    }
+
+    /** What a field is, as its schema wrote it, for a PS-535 error with no name to give. */
+    private static String kindOf(Field field) {
+        Object raw = field.getRaw() != null ? field.getRaw().get("type") : null;
+        if (raw != null) return String.valueOf(raw);
+        return field.getType() != null ? field.getType().name().toLowerCase() : "field";
+    }
+
+    private Object decodeFieldBody(Field field, DecodeContext ctx, boolean fieldRules) {
         int length = field.getEffectiveLength();
         if (field.getLengthRef() != null) {
             switch (field.getType()) {
@@ -1721,7 +1827,17 @@ public class Schema {
             
             case ASCII -> {
                 byte[] data = ctx.read(length);
-                String str = new String(data, StandardCharsets.US_ASCII);
+                // PS-538: each byte is the ISO 8859-1 character of the same number, so the
+                // value is lossless and re-encodes to the same bytes (PS-537). US_ASCII
+                // decoded a byte above 0x7F as U+FFFD. PS-073's warning reports it.
+                String str = new String(data, StandardCharsets.ISO_8859_1);
+                for (byte b : data) {
+                    if ((b & 0xFF) > 0x7F) {
+                        ctx.addWarning("Field '" + field.getName()
+                                + "': a byte above 0x7F in an ascii value (PS-073, PS-538)");
+                        break;
+                    }
+                }
                 // Trailing NUL padding only, as the reference strips it: this removed
                 // every NUL and then trimmed spaces, so "HC " read as "HC" and "A\0B"
                 // as "AB" where Python, Go and C# keep both.
@@ -1810,6 +1926,8 @@ public class Schema {
                 };
                 byte[] data = ctx.read(baseLength);
                 int raw = (int) ctx.decodeUnsigned(data, fieldEndian);
+                // PS-523 (CR-2026-132): a reference to an enum binds its code.
+                ctx.recordEnumCode(field, (long) raw);
                 Map<Integer, String> values = field.getValues();
                 if (values != null && values.containsKey(raw)) {
                     value = values.get(raw);
@@ -1817,6 +1935,8 @@ public class Schema {
                     // An unmapped value reports the declared default (PS-068).
                     value = field.getEnumDefault();
                 } else {
+                    // No name and no default: omitted in applyGroupMember (PS-068, as
+                    // amended by CR-2026-132), still bound to the code.
                     value = (long) raw;
                 }
             }
@@ -1863,6 +1983,7 @@ public class Schema {
      */
     private Object applyGroupMember(Object value, Field field, DecodeContext ctx, boolean fieldRules,
             boolean asDeclared) {
+        ctx.clearLookup(field);
         // Apply formula if present (takes precedence). A computed field has already
         // had its own arithmetic applied by decodeComputed, in the order the
         // interpreter uses: polynomial, then modifiers, then transform. Running the
@@ -1909,6 +2030,8 @@ public class Schema {
             // the key 2. An integral double such as 7.0 is the key 7. A computed value
             // reaches the lookup after its arithmetic (PS-443), so it is often a double.
             double numVal = ((Number) value).doubleValue();
+            // PS-523: the number a reference binds where the label is not a number.
+            Object number = value;
             int intVal = (int) numVal;
             boolean integral = numVal == Math.rint(numVal) && !Double.isInfinite(numVal);
             String template = Wave5.template(field);
@@ -1930,7 +2053,34 @@ public class Schema {
                     "lookup index %d out of bounds for %d entries",
                     intVal, field.getLookup().size()));
             } else {
+                // PS-269 omits the field; PS-523 leaves a reference bound to the number.
+                ctx.recordLookup(field, number, DecodeContext.NO_LABEL);
+                if (field.getVar() != null && !field.getVar().isEmpty()) {
+                    ctx.bind(field.getVar(), field, number);
+                }
                 return OMITTED;
+            }
+            ctx.recordLookup(field, number, value);
+        }
+
+        // PS-523 (CR-2026-132): an enum is a lookup by another spelling - its code is the
+        // number a reference binds, its name the label a template writes.
+        if (field.getType() == FieldType.ENUM) {
+            Object code = ctx.takeEnumCode(field);
+            if (code != null) {
+                Map<Integer, String> names = field.getValues();
+                boolean named = names != null && names.containsKey(((Number) code).intValue());
+                if (!named && field.getEnumDefault() == null) {
+                    // PS-068 (CR-2026-132): a code with no name and no default is omitted,
+                    // as a lookup miss is (PS-269) - never the raw integer - and a
+                    // reference still binds the code (PS-523).
+                    ctx.recordLookup(field, code, DecodeContext.NO_LABEL);
+                    if (field.getVar() != null && !field.getVar().isEmpty()) {
+                        ctx.bind(field.getVar(), field, code);
+                    }
+                    return OMITTED;
+                }
+                ctx.recordLookup(field, code, value);
             }
         }
         
@@ -1942,7 +2092,7 @@ public class Schema {
 
         // Store variable
         if (field.getVar() != null && !field.getVar().isEmpty()) {
-            ctx.setVariable(field.getVar(), value);
+            ctx.bind(field.getVar(), field, value);        // PS-523
         }
         
         return value;
@@ -1995,7 +2145,14 @@ public class Schema {
             discriminator = val;
         } else {
             int length = field.getLength() > 0 ? field.getLength() : 1;
-            byte[] data = ctx.read(length);
+            byte[] data;
+            try {
+                data = ctx.read(length);
+            } catch (SchemaException.BufferUnderflow e) {
+                // PS-535: the discriminator is the field that read; it is named by the
+                // match's `name`, where it declares one.
+                throw e.named(field.getName(), "match");
+            }
             matchValue = ctx.decodeUnsigned(data, ctx.getEndian());
             discriminator = matchValue;
 
@@ -2145,6 +2302,7 @@ public class Schema {
         
         Map<String, Object> result = new LinkedHashMap<>();
         List<Map<String, Object>> channels = new ArrayList<>();
+        Set<String> collected = new HashSet<>();       // names turned into arrays (PS-157)
         
         // A composite tag's width is its tag_fields' summed widths.
         int tagWidth = tagSize;
@@ -2188,17 +2346,21 @@ public class Schema {
                         byte[] data = ctx.read(tagFieldWidth(tf));
                         val = (int) ctx.decodeUnsigned(data, ctx.getEndian());
                     }
+                    // A component is a field decoded earlier in the payload, so its name
+                    // is a reference the case body may make (`ref: $rsn`, PS-265), and its
+                    // `var:` binds for the case body, as a field's does; a name_from
+                    // template such as "temperature_${ch}" reads it. PS-523 (CR-2026-132):
+                    // both bind as any field's do - through its modifiers, and a lookup's
+                    // number under a text label, the label kept for templates.
+                    // applyGroupMember binds the `var`. The tag is matched on `val`.
+                    Object bound = applyGroupMember((long) val, tf, ctx);
                     if (tf.getName() != null) {
                         tagValues.put(tf.getName(), val);
-                        // A component is a field decoded earlier in the payload, so its
-                        // name is a reference the case body may make (`ref: $rsn`,
-                        // PS-265). Only `var:` was bound, so `$rsn` read 0.
-                        ctx.setVariable(tf.getName(), (long) val);
-                    }
-                    // A component's `var:` binds for the case body, as a field's does; a
-                    // name_from template such as "temperature_${ch}" reads it.
-                    if (tf.getVar() != null) {
-                        ctx.setVariable(tf.getVar(), (long) val);
+                        if (bound == OMITTED) {
+                            ctx.bindMissed(tf.getName(), tf);
+                        } else {
+                            ctx.bind(tf.getName(), tf, bound);
+                        }
                     }
                 }
                 
@@ -2247,21 +2409,27 @@ public class Schema {
                 Map<String, Object> caseResult = decodeFields(caseFields, ctx);
                 
                 if (merge) {
+                    OnRepeat.Modes modes = field.getRepeatModes();
                     for (Map.Entry<String, Object> entry : caseResult.entrySet()) {
                         String k = entry.getKey();
                         Object v = entry.getValue();
-                        if (result.containsKey(k)) {
-                            Object existing = result.get(k);
-                            if (existing instanceof List) {
-                                ((List<Object>) existing).add(v);
-                            } else {
-                                List<Object> arr = new ArrayList<>();
-                                arr.add(existing);
-                                arr.add(v);
-                                result.put(k, arr);
-                            }
-                        } else {
+                        String mode = modes.mode(k);
+                        if (!result.containsKey(k)) {
                             result.put(k, v);
+                        } else if (!"collect".equals(mode)) {               // PS-525
+                            result.put(k, OnRepeat.combine(k, result.get(k), v, mode, modes.last(k)));
+                        } else if (collected.contains(k)) {                 // PS-157
+                            ((List<Object>) result.get(k)).add(v);
+                        } else {
+                            // A name reported again becomes an array. Whether it already is
+                            // one is not the test: a value that is itself a list (a repeat)
+                            // was appended into, splicing its second report among the
+                            // first's elements.
+                            List<Object> arr = new ArrayList<>();
+                            arr.add(result.get(k));
+                            arr.add(v);
+                            result.put(k, arr);
+                            collected.add(k);
                         }
                     }
                 } else {
@@ -2390,7 +2558,13 @@ public class Schema {
         List<String> missing = new ArrayList<>();
         while (matcher.find()) {
             String reference = matcher.group(1);
-            Object value = ctx.getVariable(reference);
+            // A template writes the value reported, the label where there is a lookup
+            // (PS-532), not what a reference binds (PS-523).
+            Object value = ctx.reported(reference);
+            if (value == DecodeContext.NO_LABEL) {
+                throw new SchemaException("name_from for '" + field.getName() + "' references "
+                        + reference + ", which reported no value (PS-266, PS-532)");
+            }
             String replacement;
             if (value == null) {
                 missing.add(reference);
@@ -2568,8 +2742,9 @@ public class Schema {
                     }
                     try {
                         decodeElement(field, ctx, iterations, carryState, result);
-                    } catch (SchemaException.DecodeException e) {
-                        if (e.getMessage() == null || !e.getMessage().contains("Buffer underflow")) throw e;
+                    } catch (SchemaException.BufferUnderflow e) {
+                        // PS-343: a short element of an until-end repeat is its ragged
+                        // tail, which names the repeat (as PS-535 permits).
                         throw raggedTailError(field, regionEnd - start, 0, start);
                     }
                 }
@@ -2625,6 +2800,7 @@ public class Schema {
     private void decodeElement(Field repeat, DecodeContext ctx, int[] iterations,
                                Map<String, Object> carryState, List<Object> result) {
         Map<String, Object> outer = ctx.snapshotVariables();
+        Map<String, Object> outerLabels = ctx.snapshotLabels();
         Set<String> savedNames = ctx.getElementNames();
         List<Field> members = repeat.getFields() == null ? List.of() : repeat.getFields();
         Set<String> names = new HashSet<>();
@@ -2654,6 +2830,7 @@ public class Schema {
         } finally {
             // PS-368: an element's names do not outlive it.
             ctx.restoreVariables(outer);
+            ctx.restoreLabels(outerLabels);
             ctx.setElementNames(savedNames);
             ctx.setPendingRecords(savedRecords);
         }
@@ -2799,6 +2976,26 @@ public class Schema {
         // the group's start, big-endian, which agrees only for a big-endian group whose
         // members are as wide as it is.
         String endian = group.getGroupEndian() != null ? group.getGroupEndian() : this.endian;
+        if (group.getByteGroupSize() > ctx.remaining()) {
+            // PS-535: a member reads the group's bytes from its start, so the first member
+            // whose base does not fit is the field that read past the end, as the spec
+            // prototype names it. Where every base fits and the group's size does not, the
+            // group itself made the read.
+            for (Field member : group.getByteGroup()) {
+                // A member's base is CR-2026-131's: a bit range's base, a whole
+                // integer's width, one byte for a bool.
+                int base = byteGroupWidth(List.of(member), 1);
+                if (base > ctx.remaining()) {
+                    throw new SchemaException.BufferUnderflow(String.format(
+                            "Buffer underflow at peek offset %d", start))
+                            .named(member.getName(), kindOf(member));
+                }
+            }
+            throw new SchemaException.BufferUnderflow(String.format(
+                    "Buffer underflow: need %d bytes at offset %d, but only %d remaining",
+                    group.getByteGroupSize(), start, Math.max(0, ctx.remaining())))
+                    .named(null, "byte_group");
+        }
         long groupValue = ctx.decodeUnsigned(ctx.peek(group.getByteGroupSize(), 0), endian);
 
         for (Field member : group.getByteGroup()) {
@@ -2815,10 +3012,17 @@ public class Schema {
                     int bit = Math.max(0, member.getBoolBit());
                     value = ((groupValue >>> bit) & 1) == 1;
                 } else {
-                    value = decodeField(member, ctx, false);
+                    // PS-070: a whole integer is its full range of the group's value, read
+                    // from the group's start. It was read as a field of its own.
+                    value = applyGroupMember(extractRange(groupValue, member.getType().isSigned(),
+                            0, member.getType().defaultLength() * 8), member, ctx);
                 }
-                if (value == OMITTED || value == null) continue;
-                ctx.setVariable(name, value);
+                if (value == OMITTED) {
+                    ctx.bindMissed(name, member);                   // PS-523
+                    continue;
+                }
+                if (value == null) continue;
+                ctx.bind(name, member, value);                      // PS-523
                 if (!name.startsWith("_")) {
                     String outputName = resolveFieldName(member, ctx);
                     if (!outputName.equals(name)) ctx.produced(member, outputName);   // PS-492

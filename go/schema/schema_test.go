@@ -2089,10 +2089,9 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	// Should return raw value or unknown marker
-	status := decoded["mode"]
-	if status == nil {
-		t.Errorf("mode should not be nil for unknown enum value")
+	// PS-068 (CR-2026-132): with no default, an unmatched code is omitted.
+	if status, ok := decoded["mode"]; ok {
+		t.Errorf("mode = %v, want it omitted for an unmatched code", status)
 	}
 }
 
@@ -6276,9 +6275,9 @@ fields:
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	// Should return raw value when not found
-	if mustNum(decoded["mode"]) != float64(99) {
-		t.Errorf("mode = %v, want 99", decoded["mode"])
+	// PS-068 (CR-2026-132): omitted, not the raw value, so the field keeps one type.
+	if mode, ok := decoded["mode"]; ok {
+		t.Errorf("mode = %v, want it omitted", mode)
 	}
 }
 

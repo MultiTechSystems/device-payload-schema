@@ -47,6 +47,9 @@ The `inherent` reasons, each of which is a decision recorded elsewhere:
   undescribed-bits  A `version_string` or `bitfield_string` whose `parts` do not cover
                     every bit of the field it reads: the uncovered bits are not in the
                     output. ws50x's `v11.1` leaves the low nibble undescribed.
+  last-value        A tlv name or merged member declaring `on_repeat: last` keeps the value
+                    reported last and discards the others (PS-525); the discarded values
+                    and the tag that carried the kept one are not in the output.
   ambiguous-case    Several TLV or match cases carry the same field names, so the tag that
                     produced them is not recoverable from the names alone.
   pattern-tag       A tlv case keyed `[1, !0]` or `[9, *]` stands for many tags (PS-270),
@@ -62,6 +65,12 @@ The `inherent` reasons, each of which is a decision recorded elsewhere:
                     report - a zero divisor (PS-100), the log of a non-positive number
                     (PS-117), a failed guard with no `else` (PS-400), an unmapped lookup
                     (PS-269). The bytes that produced the absence are not in the output.
+
+                    PS-551 (CR-2026-134) made every encoder reject a required value its
+                    input omits, "Missing required field: {name}", where it used to write a
+                    zero. The input here is the decode's own output, so such a rejection
+                    means the decode reported no value for that field: it is filed here
+                    when no other reason already explains the vector.
   null-element      A repeat declaring `element` reports an omitted value as `null` in its
                     position (PS-528). An encoder writes the element's first `sentinel` for
                     it, and refuses the array, naming the position, where the element
@@ -108,6 +117,7 @@ INHERENT = (
     "skip-field",
     "lossy-value",
     "undescribed-bits",
+    "last-value",
     "ambiguous-case",
     "null-element",
 )
@@ -176,6 +186,8 @@ def schema_traits(schema):
         tlv = node.get("tlv")
         if isinstance(tlv, dict) and tlv.get("merge", True) is False:
             traits.add("separate-tlv")
+        if node.get("on_repeat") == "last":
+            traits.add("last-value")
         if isinstance(tlv, dict) and any(
                 "!" in str(key) or "*" in str(key) for key in (tlv.get("cases") or {})):
             traits.add("pattern-tag")
@@ -298,7 +310,11 @@ def run():
             kind = ("error" if result.errors
                     else "length" if len(got) != len(want) else "bytes")
             counts[kind] += 1
-            reason = classify(decoded, traits, schema, port) or "unexplained"
+            reason = classify(decoded, traits, schema, port)
+            if reason is None and any(
+                    "Missing required field: " in e for e in result.errors):
+                reason = "absent-value"                                  # PS-551
+            reason = reason or "unexplained"
             counts[reason] += 1
             detail = (result.errors[0][:120] if result.errors
                       else f"want {want.hex()} got {got.hex()}")

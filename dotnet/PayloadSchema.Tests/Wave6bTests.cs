@@ -268,13 +268,24 @@ public class Wave6bTests
     }
 
     [Fact]
-    public void AnInternalDiscriminatorIsNotInferredFromTheCase()
+    public void AnInternalDiscriminatorIsDerivedFromTheCase()
     {
-        // The encoder no longer guesses `_kind` from the case the data fits: it is an
-        // error where neither the schema nor the input gives it (PS-434).
+        // CR-2026-134 (PS-551) settled what PS-434 left open: the one case whose fields the
+        // input gives fixes `_kind`, so the encoder derives it rather than refusing.
         var schema = Fields("{\"name\": \"_kind\", \"type\": \"u8\"}",
             "{\"match\": {\"field\": \"$_kind\", \"cases\": {\"1\": [{\"name\": \"t\", \"type\": \"u8\"}]}}}");
-        Assert.Contains(Encode(schema, new() { ["t"] = 7 }).Errors, e => e.Contains("PS-434"));
+        var result = Encode(schema, new() { ["t"] = 7 });
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        Assert.Equal(new byte[] { 1, 7 }, result.Payload);
+    }
+
+    [Fact]
+    public void AnInternalDiscriminatorNoCaseFixesIsStillAnError()
+    {
+        // With no case's fields given nothing fixes `_kind`, and PS-434's error stands.
+        var schema = Fields("{\"name\": \"_kind\", \"type\": \"u8\"}",
+            "{\"match\": {\"field\": \"$_kind\", \"cases\": {\"1\": [{\"name\": \"t\", \"type\": \"u8\"}]}}}");
+        Assert.Contains(Encode(schema, new()).Errors, e => e.Contains("PS-434"));
     }
 
     // PS-464, PS-465 ----------------------------------------------------------------------

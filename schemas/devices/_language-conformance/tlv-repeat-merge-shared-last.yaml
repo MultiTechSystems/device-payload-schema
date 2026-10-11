@@ -1,0 +1,38 @@
+# A shared `last` member rides, with the input's value, in every case written for the
+# merged object that declares it (PS-527 as CR-2026-128 replaces it). Both cases are
+# needed here, for `a` and for `b`, so `m` is written twice and decodes back as the last.
+# This is the spec prototype's own round trip.
+name: probe_tlv_repeat_merge_shared_last
+endian: big
+fields:
+- tlv:
+    tag_size: 1
+    on_repeat: merge
+    cases:
+      0x01:
+      - name: o
+        type: object
+        fields:
+        - name: a
+          type: u8
+        - name: m
+          type: u8
+          on_repeat: last
+      0x02:
+      - name: o
+        type: object
+        fields:
+        - name: b
+          type: u8
+        - name: m
+          type: u8
+          on_repeat: last
+test_vectors:
+- name: shared_last_in_every_written_case
+  source: spec-example
+  payload: "01 01 09 02 02 09"
+  expected:
+    o:
+      a: 1
+      m: 9
+      b: 2

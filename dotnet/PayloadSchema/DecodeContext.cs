@@ -3,12 +3,111 @@
 
 namespace PayloadSchema;
 
+/// <summary>
+/// A read or skip past the end of the payload, less any `reserve` in force (PS-535,
+/// CR-2026-115). Thrown unnamed by <see cref="DecodeContext.Read"/> and
+/// <see cref="DecodeContext.Peek"/>; the innermost field that made the read restates it as
+/// <c>Field '&lt;name&gt;': ... (PS-535)</c> (<see cref="Name"/>), and every enclosing field
+/// passes it through unchanged. The text is the spec prototype's and the reference's
+/// (BufferUnderflow in tools/schema_interpreter.py), so a cross-language diff compares
+/// equal strings.
+/// </summary>
+public sealed class BufferUnderflowException : InvalidOperationException
+{
+    /// <summary>True once the message identifies the field.</summary>
+    public bool Named { get; }
+    /// <summary>The unnamed text, before a field was named.</summary>
+    public string Detail { get; }
+
+    BufferUnderflowException(string message, string detail, bool named) : base(message)
+    {
+        Detail = detail;
+        Named = named;
+    }
+
+    internal static BufferUnderflowException Need(int n, int offset, int end)
+    {
+        var text = $"Buffer underflow: need {n} bytes at offset {offset}, "
+            + $"but only {Math.Max(0, end - offset)} remaining";
+        return new BufferUnderflowException(text, text, false);
+    }
+
+    /// <summary>A bit range or a bool reads its byte(s) without consuming them.</summary>
+    internal static BufferUnderflowException PeekAt(int pos)
+    {
+        var text = $"Buffer underflow at peek offset {pos}";
+        return new BufferUnderflowException(text, text, false);
+    }
+
+    /// <summary>How a PS-535 error identifies a field: its name, else what it is.</summary>
+    internal static string Label(string? name, string? kind) =>
+        !string.IsNullOrEmpty(name) ? $"'{name}'"
+            : $"an unnamed {(string.IsNullOrEmpty(kind) ? "field" : kind)}";
+
+    /// <summary>PS-535: the error of the field that made the read; a named one is kept.</summary>
+    internal BufferUnderflowException Name(string? name, string? kind) =>
+        Named ? this
+            : new BufferUnderflowException($"Field {Label(name, kind)}: {Detail} (PS-535)", Detail, true);
+}
+
 public class DecodeContext
 {
     public byte[] Data { get; internal set; }
     public int Offset { get; set; }
     public string Endian { get; }
     public Dictionary<string, object?> Variables { get; } = new();
+    /// <summary>
+    /// PS-532: the value a looked-up field reported, by the name it binds, for `name_from`
+    /// templates - which read the label while a `$` reference reads PS-523's binding.
+    /// <see cref="SchemaDecoder.Omitted"/> where the lookup had no entry. A name bound by
+    /// any other field has no entry here, and a template reads its variable.
+    /// </summary>
+    internal Dictionary<string, object?> Reported { get; } = new();
+    /// <summary>
+    /// PS-523: what a looked-up field binds, by field definition, set where its lookup ran:
+    /// the label where it is a number, else the number before the lookup.
+    /// </summary>
+    internal Dictionary<SchemaField, object?> LookupBinding { get; } = new(ReferenceEqualityComparer.Instance);
+    /// <summary>
+    /// CR-2026-132: the code an enum read, by field definition, which its reference binds.
+    /// </summary>
+    internal Dictionary<SchemaField, object?> EnumCodes { get; } = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>
+    /// Binds <paramref name="name"/> for <paramref name="field"/> as PS-523 says, keeping
+    /// the reported value for templates (PS-532). A field with no lookup binds what it
+    /// reported. Mirrors Scope.bind in the spec prototype.
+    /// </summary>
+    internal void Bind(SchemaField field, string name, object? reported)
+    {
+        if ((field.Lookup != null || field.Type == FieldType.Enum)
+            && LookupBinding.TryGetValue(field, out var binding))
+        {
+            Variables[name] = binding;
+            Reported[name] = reported;
+        }
+        else
+        {
+            Variables[name] = reported;
+            Reported.Remove(name);
+        }
+    }
+
+    /// <summary>
+    /// Re-binds a name from a construct's merged output. A name its own field already bound
+    /// under PS-523 is left alone: the output holds the label, not the binding.
+    /// </summary>
+    internal void BindOutput(string name, object? value)
+    {
+        if (Reported.TryGetValue(name, out var reported) && Equals(reported, value))
+            return;
+        Variables[name] = value;
+        Reported.Remove(name);
+    }
+
+    /// <summary>Whether a lookup label is a number, which PS-523 binds as itself.</summary>
+    internal static bool IsNumericLabel(object? label) =>
+        label is not bool && label is not string && Helpers.ToFloat64(label).ok;
     /// <summary>
     /// The records the current repeat element yields through `records` (PS-541); null
     /// outside an element.
@@ -123,8 +222,7 @@ public class DecodeContext
         if (n < 0)
             n = Remaining;
         if (Offset + n > Data.Length)
-            throw new InvalidOperationException(
-                $"Buffer underflow: need {n} bytes at offset {Offset}, but only {Remaining} remaining");
+            throw BufferUnderflowException.Need(n, Offset, Data.Length);
         var result = Data.AsSpan(Offset, n);
         Offset += n;
         return result;
@@ -134,7 +232,7 @@ public class DecodeContext
     {
         int pos = Offset + relativeOffset;
         if (pos + n > Data.Length)
-            throw new InvalidOperationException($"Buffer underflow at peek offset {pos}");
+            throw BufferUnderflowException.PeekAt(pos);
         return Data.AsSpan(pos, n);
     }
 

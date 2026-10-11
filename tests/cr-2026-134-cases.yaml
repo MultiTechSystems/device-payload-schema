@@ -1,0 +1,783 @@
+# CR-2026-134 (PS-551): an encoder rejects missing input and derives what the input fixes.
+#
+# One case list, read by the reference (tests/test_cr_2026_134_missing_input.py), the
+# generated codec's runtime encoder (same file), Go (go/schema/cr134_test.go), Java
+# (CR2026134Test.java) and C# (CR2026_134Tests.cs), so all five are held to the same
+# bytes and the same text. A rejection cannot be a corpus vector, which is why this is
+# here rather than in schemas/devices.
+#
+# Each case gives `schema` (YAML text, so each language loads it with its own parser),
+# `input` (JSON text, so no YAML typing differs between them), and either `payload`
+# (the hex every encoder writes) or `error` (text one of the encoder's errors contains).
+# A case with `error` also requires that no payload is returned.
+#
+# The messages are the spec prototype's:
+#   Missing required field: {name}
+#   Repeat '{name}' is given {n} values for a count of {count} (PS-551)
+# and two this repository adds where the prototype states the rule and gives no text:
+#   Repeat '{name}' encodes to {n} bytes for a byte_length of {length} (PS-551)
+#   Flagged field '{mask}' is given {value}, and the groups given set {bits} (PS-551)
+
+cases:
+
+# --- A missing required value is rejected, naming the field --------------------------
+
+- name: top_level_scalar
+  schema: |
+    name: t
+    fields:
+      - {name: a, type: u8}
+      - {name: b, type: u8}
+  input: '{"b": 1}'
+  error: "Missing required field: a"
+
+- name: nested_scalar
+  schema: |
+    name: t
+    fields:
+      - name: o
+        type: object
+        fields:
+          - {name: x, type: u8}
+          - {name: y, type: u8}
+  input: '{"o": {"y": 1}}'
+  error: "Missing required field: x"
+
+- name: ascii
+  schema: |
+    name: t
+    fields:
+      - {name: s, type: ascii, length: 3}
+      - {name: b, type: u8}
+  input: '{"b": 1}'
+  error: "Missing required field: s"
+
+- name: hex
+  schema: |
+    name: t
+    fields:
+      - {name: h, type: hex, length: 2}
+      - {name: b, type: u8}
+  input: '{"b": 1}'
+  error: "Missing required field: h"
+
+- name: bytes
+  schema: |
+    name: t
+    fields:
+      - {name: d, type: bytes, length: 2}
+      - {name: b, type: u8}
+  input: '{"b": 1}'
+  error: "Missing required field: d"
+
+- name: bitfield_string
+  schema: |
+    name: t
+    fields:
+      - name: v
+        type: bitfield_string
+        length: 1
+        parts: [[4, 4], [0, 4]]
+      - {name: b, type: u8}
+  input: '{"b": 1}'
+  error: "Missing required field: v"
+
+- name: whole_object
+  schema: |
+    name: t
+    fields:
+      - name: o
+        type: object
+        fields:
+          - {name: x, type: u8}
+      - {name: b, type: u8}
+  input: '{"b": 1}'
+  error: "Missing required field: o"
+
+- name: flagged_member
+  schema: |
+    name: t
+    fields:
+      - {name: flags, type: u8}
+      - flagged:
+          field: flags
+          groups:
+            - bit: 0
+              fields:
+                - {name: t, type: u8}
+                - {name: h, type: u8}
+  input: '{"flags": 1, "t": 1}'
+  error: "Missing required field: h"
+
+- name: byte_group_member
+  schema: |
+    name: t
+    fields:
+      - byte_group:
+          size: 1
+          fields:
+            - {name: hi, type: "u8[4:7]"}
+            - {name: lo, type: "u8[0:3]"}
+  input: '{"hi": 1}'
+  error: "Missing required field: lo"
+
+- name: bit_range_member
+  schema: |
+    name: t
+    fields:
+      - {name: hi, type: "u8[4:7]"}
+      - {name: lo, type: "u8[0:3]", consume: 1}
+  input: '{"hi": 1}'
+  error: "Missing required field: lo"
+
+- name: tlv_case_member
+  schema: |
+    name: t
+    fields:
+      - tlv:
+          tag_size: 1
+          cases:
+            1:
+              - {name: a, type: u8}
+              - {name: c, type: u8}
+  input: '{"a": 1}'
+  # A tlv case is written only when the input gives every field it declares (PS-527,
+  # CR-2026-128), so the rejection is PS-527's, naming the value no case takes in full.
+  error: "tlv: no case takes the value of 'a' 1 in full (PS-502, PS-527)"
+
+# --- A framed repeat whose list is absent writes nothing no longer (PS-442) ----------
+
+- name: repeat_literal_count_absent
+  schema: |
+    name: t
+    fields:
+      - name: v
+        type: repeat
+        count: 2
+        element: {type: u8}
+      - {name: b, type: u8}
+  input: '{"b": 1}'
+  error: "Missing required field: v"
+
+- name: repeat_ref_count_absent
+  schema: |
+    name: t
+    fields:
+      - {name: n, type: u8}
+      - name: v
+        type: repeat
+        count: $n
+        element: {type: u8}
+  input: '{"n": 2}'
+  error: "Missing required field: v"
+
+- name: repeat_ref_byte_length_absent
+  schema: |
+    name: t
+    fields:
+      - {name: bl, type: u8}
+      - name: v
+        type: repeat
+        byte_length: $bl
+        fields:
+          - {name: x, type: u8}
+  input: '{"bl": 2}'
+  error: "Missing required field: v"
+
+- name: repeat_until_end_absent
+  schema: |
+    name: t
+    fields:
+      - {name: a, type: u8}
+      - name: v
+        type: repeat
+        until: end
+        element: {type: u8}
+  input: '{"a": 1}'
+  error: "Missing required field: v"
+
+- name: repeat_in_tlv_case_absent
+  schema: |
+    name: t
+    fields:
+      - tlv:
+          tag_size: 1
+          cases:
+            1:
+              - {name: a, type: u8}
+              - name: v
+                type: repeat
+                count: 2
+                element: {type: u8}
+  input: '{"a": 1}'
+  # Rejected by PS-527 before the repeat is reached, as tlv_case_member is.
+  error: "tlv: no case takes the value of 'a' 1 in full (PS-502, PS-527)"
+
+- name: repeat_trailer_list_absent
+  schema: |
+    name: t
+    fields:
+      - name: v
+        type: repeat
+        until: end
+        reserve: 1
+        trailer:
+          - {name: crc, type: u8}
+        element: {type: u8}
+  input: '{"crc": 9}'
+  error: "Missing required field: v"
+
+- name: repeat_trailer_empty_list
+  schema: |
+    name: t
+    fields:
+      - name: v
+        type: repeat
+        until: end
+        reserve: 1
+        trailer:
+          - {name: crc, type: u8}
+        element: {type: u8}
+  input: '{"v": [], "crc": 9}'
+  payload: "09"
+
+- name: repeat_trailer_list
+  schema: |
+    name: t
+    fields:
+      - name: v
+        type: repeat
+        until: end
+        reserve: 1
+        trailer:
+          - {name: crc, type: u8}
+        element: {type: u8}
+  input: '{"v": [1, 2], "crc": 9}'
+  payload: "010209"
+
+- name: repeat_trailer_value_absent
+  schema: |
+    name: t
+    fields:
+      - name: v
+        type: repeat
+        until: end
+        reserve: 1
+        trailer:
+          - {name: crc, type: u8}
+        element: {type: u8}
+  input: '{"v": [1, 2]}'
+  error: "Missing required field: crc"
+
+# --- A list must agree with its count ------------------------------------------------
+
+- name: short_literal_count
+  schema: |
+    name: t
+    fields:
+      - name: v
+        type: repeat
+        count: 3
+        element: {type: u8}
+  input: '{"v": [1]}'
+  error: "Repeat 'v' is given 1 values for a count of 3 (PS-551)"
+
+- name: long_literal_count
+  schema: |
+    name: t
+    fields:
+      - name: v
+        type: repeat
+        count: 3
+        element: {type: u8}
+  input: '{"v": [1, 2, 3, 4]}'
+  error: "Repeat 'v' is given 4 values for a count of 3 (PS-551)"
+
+- name: short_record_list
+  schema: |
+    name: t
+    fields:
+      - name: v
+        type: repeat
+        count: 2
+        fields:
+          - {name: x, type: u8}
+  input: '{"v": [{"x": 1}]}'
+  error: "Repeat 'v' is given 1 values for a count of 2 (PS-551)"
+
+# --- Derived: the rest of the input fixes the value ----------------------------------
+
+- name: derived_count
+  schema: |
+    name: t
+    fields:
+      - {name: n, type: u8}
+      - name: v
+        type: repeat
+        count: $n
+        element: {type: u8}
+  input: '{"v": [5, 6]}'
+  payload: "020506"
+
+- name: derived_count_through_var
+  schema: |
+    name: t
+    fields:
+      - {name: num, type: u8, var: n}
+      - name: v
+        type: repeat
+        count: $n
+        element: {type: u8}
+  input: '{"v": [5, 6, 7]}'
+  payload: "03050607"
+
+- name: derived_internal_count
+  schema: |
+    name: t
+    fields:
+      - {name: _n, type: u8}
+      - name: v
+        type: repeat
+        count: $_n
+        element: {type: u8}
+  input: '{"v": [7]}'
+  payload: "0107"
+
+- name: derived_empty_count
+  schema: |
+    name: t
+    fields:
+      - {name: n, type: u8}
+      - name: v
+        type: repeat
+        count: $n
+        element: {type: u8}
+  input: '{"v": []}'
+  payload: "00"
+
+- name: derived_byte_length
+  schema: |
+    name: t
+    fields:
+      - {name: bl, type: u8}
+      - name: v
+        type: repeat
+        byte_length: $bl
+        element: {type: u16}
+  input: '{"v": [1, 2]}'
+  payload: "0400010002"
+
+- name: derived_count_in_byte_group
+  schema: |
+    name: t
+    fields:
+      - byte_group:
+          size: 1
+          fields:
+            - {name: kind, type: "u8[4:7]"}
+            - {name: n, type: "u8[0:3]"}
+      - name: v
+        type: repeat
+        count: $n
+        element: {type: u8}
+  input: '{"kind": 1, "v": [8, 9]}'
+  payload: "120809"
+
+- name: agreeing_count
+  schema: |
+    name: t
+    fields:
+      - {name: n, type: u8}
+      - name: v
+        type: repeat
+        count: $n
+        element: {type: u8}
+  input: '{"n": 2, "v": [5, 6]}'
+  payload: "020506"
+
+- name: disagreeing_count
+  schema: |
+    name: t
+    fields:
+      - {name: n, type: u8}
+      - name: v
+        type: repeat
+        count: $n
+        element: {type: u8}
+  input: '{"n": 3, "v": [5, 6]}'
+  error: "Repeat 'v' is given 2 values for a count of 3 (PS-551)"
+
+- name: disagreeing_byte_length
+  schema: |
+    name: t
+    fields:
+      - {name: bl, type: u8}
+      - name: v
+        type: repeat
+        byte_length: $bl
+        element: {type: u16}
+  input: '{"bl": 3, "v": [1, 2]}'
+  error: "Repeat 'v' encodes to 4 bytes for a byte_length of 3 (PS-551)"
+
+- name: derived_match_discriminator
+  schema: |
+    name: t
+    fields:
+      - {name: kind, type: u8}
+      - match:
+          field: $kind
+          cases:
+            1:
+              - {name: temperature, type: s16}
+            2:
+              - {name: humidity, type: u8}
+  input: '{"humidity": 50}'
+  payload: "0232"
+
+- name: derived_internal_match_discriminator
+  schema: |
+    name: t
+    fields:
+      - {name: _kind, type: u8}
+      - match:
+          field: $_kind
+          cases:
+            1:
+              - {name: temperature, type: s16}
+            2:
+              - {name: humidity, type: u8}
+  input: '{"temperature": 231}'
+  payload: "0100e7"
+
+- name: ambiguous_match_discriminator
+  schema: |
+    name: t
+    fields:
+      - {name: kind, type: u8}
+      - match:
+          field: $kind
+          cases:
+            1:
+              - {name: x, type: u8}
+            2:
+              - {name: x, type: u16}
+  input: '{"x": 5}'
+  error: "Missing required field: kind"
+
+- name: ranged_match_discriminator
+  schema: |
+    name: t
+    fields:
+      - {name: kind, type: u8}
+      - match:
+          field: $kind
+          cases:
+            "1..3":
+              - {name: x, type: u8}
+  input: '{"x": 5}'
+  error: "Missing required field: kind"
+
+- name: disagreeing_match_discriminator
+  schema: |
+    name: t
+    fields:
+      - {name: kind, type: u8}
+      - match:
+          field: $kind
+          cases:
+            1:
+              - {name: temperature, type: s16}
+            2:
+              - {name: humidity, type: u8}
+  input: '{"kind": 1, "humidity": 50}'
+  error: "Missing required field: temperature"
+
+- name: named_inline_discriminator_absent
+  schema: |
+    name: t
+    fields:
+      - match:
+          length: 1
+          name: kind
+          cases:
+            1:
+              - {name: x, type: u8}
+  input: '{}'
+  error: "Missing required field: kind"
+
+- name: named_inline_discriminator_derived
+  schema: |
+    name: t
+    fields:
+      - match:
+          length: 1
+          name: kind
+          cases:
+            1:
+              - {name: x, type: u8}
+            2:
+              - {name: y, type: u8}
+  input: '{"y": 4}'
+  payload: "0204"
+
+- name: derived_flagged_mask
+  schema: |
+    name: t
+    fields:
+      - {name: flags, type: u8}
+      - flagged:
+          field: flags
+          groups:
+            - bit: 0
+              fields:
+                - {name: t, type: u8}
+            - bit: 1
+              fields:
+                - {name: h, type: u8}
+  input: '{"h": 5}'
+  payload: "0205"
+
+- name: disagreeing_flagged_mask
+  schema: |
+    name: t
+    fields:
+      - {name: flags, type: u8}
+      - flagged:
+          field: flags
+          groups:
+            - bit: 0
+              fields:
+                - {name: t, type: u8}
+            - bit: 1
+              fields:
+                - {name: h, type: u8}
+  input: '{"flags": 1, "h": 5}'
+  error: "Flagged field 'flags' is given 1, and the groups given set 2 (PS-551)"
+
+- name: flagged_mask_keeps_undeclared_bits
+  schema: |
+    name: t
+    fields:
+      - {name: flags, type: u8}
+      - flagged:
+          field: flags
+          groups:
+            - bit: 0
+              fields:
+                - {name: t, type: u8}
+  input: '{"flags": 129, "t": 5}'
+  payload: "8105"
+
+- name: flagged_in_match_case
+  schema: |
+    name: t
+    fields:
+      - {name: kind, type: u8}
+      - match:
+          field: $kind
+          cases:
+            1:
+              - {name: m, type: u8}
+              - flagged:
+                  field: m
+                  groups:
+                    - bit: 0
+                      fields:
+                        - {name: t, type: u8}
+  input: '{"kind": 1, "t": 9}'
+  payload: "010109"
+
+# --- Derived and supplied values meet CR-2026-109/132's reference binding -----------
+#
+# A reference to an enum binds its code, and one to a looked-up field the number under a
+# text label or a numeric label as itself (PS-523). What is derived is that bound value,
+# and a supplied value is checked against the rest of the input as a reference binds it,
+# not as reported - else an enum name or a text label passed the check unseen.
+
+- name: derived_enum_match_discriminator
+  schema: |
+    name: t
+    fields:
+      - name: kind
+        type: enum
+        base: u8
+        values: {1: alpha, 2: beta}
+      - match:
+          field: $kind
+          cases:
+            1:
+              - {name: a, type: u8}
+            2:
+              - {name: b, type: u16}
+  input: '{"b": 5}'
+  payload: "020005"
+
+- name: enum_match_discriminator_by_name
+  schema: |
+    name: t
+    fields:
+      - name: kind
+        type: enum
+        base: u8
+        values: {1: alpha, 2: beta}
+      - match:
+          field: $kind
+          cases:
+            1:
+              - {name: a, type: u8}
+            2:
+              - {name: b, type: u16}
+  input: '{"kind": "beta", "b": 5}'
+  payload: "020005"
+
+- name: numeric_label_match_discriminator
+  schema: |
+    name: t
+    fields:
+      - name: kind
+        type: u8
+        lookup: {1: 10, 2: 20}
+      - match:
+          field: $kind
+          cases:
+            10:
+              - {name: a, type: u8}
+            20:
+              - {name: b, type: u16}
+  input: '{"kind": 20, "b": 5}'
+  payload: "020005"
+
+- name: derived_enum_flagged_mask
+  schema: |
+    name: t
+    fields:
+      - name: mask
+        type: enum
+        base: u8
+        values: {1: one, 2: two, 3: both}
+      - flagged:
+          field: mask
+          groups:
+            - bit: 0
+              fields:
+                - {name: a, type: u8}
+            - bit: 1
+              fields:
+                - {name: b, type: u8}
+  input: '{"a": 1, "b": 2}'
+  payload: "030102"
+
+- name: enum_flagged_mask_by_name
+  schema: |
+    name: t
+    fields:
+      - name: mask
+        type: enum
+        base: u8
+        values: {1: one, 2: two, 3: both}
+      - flagged:
+          field: mask
+          groups:
+            - bit: 0
+              fields:
+                - {name: a, type: u8}
+            - bit: 1
+              fields:
+                - {name: b, type: u8}
+  input: '{"mask": "both", "a": 1, "b": 2}'
+  payload: "030102"
+
+- name: disagreeing_enum_flagged_mask
+  schema: |
+    name: t
+    fields:
+      - name: mask
+        type: enum
+        base: u8
+        values: {1: one, 2: two, 3: both}
+      - flagged:
+          field: mask
+          groups:
+            - bit: 0
+              fields:
+                - {name: a, type: u8}
+            - bit: 1
+              fields:
+                - {name: b, type: u8}
+  input: '{"mask": "one", "a": 1, "b": 2}'
+  error: "Flagged field 'mask' is given 1, and the groups given set 3 (PS-551)"
+
+- name: disagreeing_text_label_flagged_mask
+  schema: |
+    name: t
+    fields:
+      - name: mask
+        type: u8
+        lookup: {1: one, 2: two, 3: both}
+      - flagged:
+          field: mask
+          groups:
+            - bit: 0
+              fields:
+                - {name: a, type: u8}
+            - bit: 1
+              fields:
+                - {name: b, type: u8}
+  input: '{"mask": "one", "a": 1, "b": 2}'
+  error: "Flagged field 'mask' is given 1, and the groups given set 3 (PS-551)"
+
+# --- Defined absence is still allowed ------------------------------------------------
+
+- name: optional_literal_internal_skip
+  schema: |
+    name: t
+    fields:
+      - {name: a, type: u8}
+      - {name: _r, type: u8, value: 0}
+      - {name: pad, type: skip, length: 1}
+      - {name: label, type: string, value: x}
+      - {name: o, type: u8, optional: true}
+  input: '{"a": 1}'
+  payload: "010000"
+
+- name: internal_member_with_value
+  schema: |
+    name: t
+    fields:
+      - byte_group:
+          size: 1
+          fields:
+            - {name: _rsv, type: "u8[4:7]", value: 0}
+            - {name: lo, type: "u8[0:3]"}
+  input: '{"lo": 3}'
+  payload: "03"
+
+- name: absent_flagged_group
+  schema: |
+    name: t
+    fields:
+      - {name: flags, type: u8}
+      - flagged:
+          field: flags
+          groups:
+            - bit: 0
+              fields:
+                - {name: t, type: u8}
+            - bit: 1
+              fields:
+                - {name: h, type: u8}
+  input: '{"t": 4}'
+  payload: "0104"
+
+- name: optional_object_absent
+  schema: |
+    name: t
+    fields:
+      - {name: a, type: u8}
+      - name: o
+        type: object
+        optional: true
+        fields:
+          - {name: x, type: u8}
+  input: '{"a": 1}'
+  payload: "01"

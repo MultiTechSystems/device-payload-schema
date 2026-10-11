@@ -309,6 +309,14 @@
             "type": "string",
             "description": "`type: repeat`: its `index`, a `$` reference to a field of its elements, or `$name[i]` naming an earlier sibling repeat declaring `element` at the same position (PS-546), identifying the metric each element carries (PS-372). An annotation; decoding ignores it (PS-376)."
           },
+          "on_repeat": {
+            "enum": [
+              "collect",
+              "merge",
+              "last"
+            ],
+            "description": "In a `tlv` case: how this field combines when more than one entry reports its name (PS-525), overriding the tlv's `on_repeat`. Only a `type: object` field may declare `merge` (PS-526). A member of a merged object may declare `last`, so a later entry may report it again and its value is kept; any other member reported twice is an error."
+          },
           "optional": {
             "const": true,
             "description": "Decoded where its bytes remain, absent where none do, an error where some do but too few (PS-402, PS-403). Every later field in the list must be optional too (PS-404). Encoded only where the input supplies it (PS-405)."
@@ -383,6 +391,15 @@
             "minimum": 0,
             "description": "Bytes at the end of the payload the loop must not consume; the fields after the tlv decode from them (PS-471). An error where fewer remain at the start of the tlv."
           },
+        "on_repeat": {
+          "enum": [
+            "collect",
+            "merge",
+            "last"
+          ],
+          "default": "collect",
+          "description": "The default for the cases' fields when more than one entry reports a name, whether the entries share a tag or not (PS-157, PS-525). `collect` gathers the values into an array; `last` keeps the last; `merge` combines objects member by member and reaches only the `type: object` fields, the others keeping `collect`. A field's own `on_repeat` takes precedence. Every field reporting one name must resolve to the same mode (PS-526)."
+        },
         "cases": {
           "type": "object",
           "description": "Tag to the fields it introduces. A key is an integer (`1`, or `0x20` which YAML reads as 32); a range `\"2..5\"` or a list `[1, 2, 3]` for a single tag; a composite `\"[1, 117]\"` for a tag read through tag_fields, where a part may be `*` for any value or `!0` for any value but that one (PS-270); or `default`.",

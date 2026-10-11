@@ -554,10 +554,49 @@ static void test_a_skip_past_the_end_is_an_error(void) {
     schema_add_field(&s, &pad);
 
     TCHECK(schema_decode(&s, payload, sizeof(payload), &r) == SCHEMA_ERR_BUFFER);
+    /* PS-535: field_skip() names nothing, so the skip is "an unnamed skip". */
+    TCHECK(strcmp(r.error_msg, "Field an unnamed skip: Buffer underflow: need 4 bytes at "
+                               "offset 1, but only 2 remaining (PS-535)") == 0);
 
     uint8_t enough[] = {0x01, 0x00, 0x00, 0x00, 0x00};
     TCHECK(schema_decode(&s, enough, sizeof(enough), &r) == SCHEMA_OK);
     TCHECK(r.bytes_consumed == 5 && r.bytes_unread == 0);
+}
+
+/* PS-535 (CR-2026-115): a short read names the field that made it, in the text every
+ * other implementation reports. It was SCHEMA_ERR_BUFFER with an empty message. */
+static void test_a_short_read_names_the_field(void) {
+    schema_t s;
+    decode_result_t r;
+    uint8_t payload[] = {0x01, 0x02};
+
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t lead = field_u8("lead");
+    field_def_t wide = field_u32("reading", ENDIAN_BIG);
+    schema_add_field(&s, &lead);
+    schema_add_field(&s, &wide);
+    TCHECK(schema_decode(&s, payload, sizeof(payload), &r) == SCHEMA_ERR_BUFFER);
+    TCHECK(strcmp(r.error_msg, "Field 'reading': Buffer underflow: need 4 bytes at "
+                               "offset 1, but only 1 remaining (PS-535)") == 0);
+
+    /* A bool peeks at its byte: the peek form, as the reference writes it. */
+    memset(&s, 0, sizeof(s));
+    field_def_t flag = field_bool("alarm", 3, false);
+    schema_add_field(&s, &lead);
+    schema_add_field(&s, &flag);
+    TCHECK(schema_decode(&s, payload, 1, &r) == SCHEMA_ERR_BUFFER);
+    TCHECK(strcmp(r.error_msg, "Field 'alarm': Buffer underflow at peek offset 1 "
+                               "(PS-535)") == 0);
+
+    /* A tlv case body's field is the one named, not the tlv. */
+    build_tlv(&s, field_tlv(1, 0), 1);
+    field_def_t wider = field_u16("v", ENDIAN_BIG);
+    schema_place_field(&s, 10, &wider);
+    uint8_t cut[] = {0x01, 0x05};
+    TCHECK(schema_decode(&s, cut, sizeof(cut), &r) == SCHEMA_ERR_BUFFER);
+    TCHECK(strcmp(r.error_msg, "Field 'v': Buffer underflow: need 2 bytes at offset 1, "
+                               "but only 1 remaining (PS-535)") == 0);
 }
 
 /* On encode a skip writes its zeros - it was dropped with the `_` internals, so the field
@@ -733,6 +772,31 @@ static void test_bit_ranges_are_laid_out_as_decoded(void) {
     }
 }
 
+static void test_a_missing_input_is_named(void) {
+    /* PS-551 (CR-2026-134): rejected, naming the field, with no payload. The code alone
+     * was returned before, so a caller could not tell which input it had left out. */
+    schema_t s;
+    encode_result_t out;
+    encode_inputs_t inputs;
+
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t a = field_u8("a");
+    field_def_t b = field_u8("b");
+    schema_add_field(&s, &a);
+    schema_add_field(&s, &b);
+    encode_inputs_init(&inputs);
+    encode_inputs_add_int(&inputs, "a", 1);
+    TCHECK(schema_encode(&s, &inputs, &out) == SCHEMA_ERR_PARSE);
+    TCHECK(out.len == 0);
+    TCHECK(strcmp(out.error_msg, "Missing required field: b") == 0);
+
+    encode_inputs_add_int(&inputs, "b", 2);
+    TCHECK(schema_encode(&s, &inputs, &out) == SCHEMA_OK);
+    TCHECK(out.len == 2 && out.data[0] == 1 && out.data[1] == 2);
+    TCHECK(out.error_msg[0] == 0);
+}
+
 /*
  * Main test entry point
  */
@@ -764,11 +828,13 @@ void selftest_schema(void) {
     test_a_cut_value_is_an_error();
     test_leftover_bytes_are_reported();
     test_a_skip_past_the_end_is_an_error();
+    test_a_short_read_names_the_field();
     test_a_skip_is_written_on_encode();
     test_an_unknown_tag_is_left_over_from_the_tag();
     test_an_encoder_rounds_ties_to_even();
     test_a_value_that_does_not_fit_is_named();
     test_bit_ranges_are_laid_out_as_decoded();
+    test_a_missing_input_is_named();
 
     LOG(LOG_INFO, MOD, "Schema interpreter self-tests complete");
 }

@@ -101,7 +101,9 @@ class TestReference:
         ), out.errors
 
     def test_a_repeat_without_a_sibling_reference_is_not_checked(self):
-        plain = values()
+        # count 1, so the list agrees with its own count (PS-551, CR-2026-134) and only
+        # the sibling's length differs.
+        plain = values(count=1)
         del plain["identity"]
         out = SchemaInterpreter(schema_of([CODES, plain])).encode(
             {"codes": ["1.8.1", "2.8.1"], "values": [1]}

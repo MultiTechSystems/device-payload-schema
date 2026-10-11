@@ -29,6 +29,7 @@ The real gap is the reverse and is left to its own CR: of Go's 28, fourteen are
 and cannot re-encode.
 """
 
+import functools
 import subprocess
 import sys
 from pathlib import Path
@@ -42,13 +43,20 @@ PY_HARNESS = REPO_ROOT / "tests" / "test_encode_round_trip.py"
 GO_HARNESS = REPO_ROOT / "go" / "schema" / "corpus_encode_test.go"
 
 
+@functools.lru_cache(maxsize=None)
 def tool(*args):
+    """The tool's output, run once per distinct argument list in a process.
+
+    Each run re-encodes the whole corpus (about 50 seconds) and its output depends only on
+    the tree, so the four list-mode tests share two runs rather than making five.
+    """
     done = subprocess.run([sys.executable, str(TOOL), *args],
                           cwd=REPO_ROOT, capture_output=True, text=True)
     assert done.returncode == 0, done.stderr[:400]
     return done.stdout
 
 
+@pytest.mark.xdist_group("cr025-encode-round-trip-tool")
 class TestTheListModeExists:
     """The means of comparing by identity rather than by bucket size."""
 

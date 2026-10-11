@@ -80,13 +80,15 @@ class TestTheFixtureRoundTripsOnTheReference:
         # `idx` absent, so `channel_${idx}_reading` cannot be rebuilt.
         result = SchemaInterpreter(loaded).encode({"channel_3_reading": 42})
         assert result.errors, "an unresolvable template must not encode as zero"
-        assert "name_from" in result.errors[0], result.errors
+        # PS-551 (CR-2026-134) also rejects the missing `idx` itself, first.
+        assert any("name_from" in e for e in result.errors), result.errors
 
     def test_a_missing_value_names_the_resolved_key(self):
-        """The warning has to name the key a caller would actually supply."""
+        """The rejection has to name the key a caller would actually supply. It was a
+        warning until CR-2026-134 (PS-551) made a missing value an error."""
         loaded = schema()
         result = SchemaInterpreter(loaded).encode({"idx": 7})
-        assert any("channel_7_reading" in w for w in result.warnings), result.warnings
+        assert "Missing required field: channel_7_reading" in result.errors, result.errors
 
 
 class TestEveryEncoderResolvesTheTemplate:
@@ -123,22 +125,23 @@ class TestEveryEncoderResolvesTheTemplate:
             assert "func resolveFieldName(" in text
 
 
+@pytest.mark.xdist_group("cr030-encode-round-trip-tool")
 class TestTheResidueHasNothingRecoverableLeft:
     """The point of the CR: the classified residue is now all genuine loss."""
 
-    def test_the_tool_still_explains_everything(self):
+    @pytest.fixture(scope="class")
+    def done(self):
+        """One run of the tool for both tests: it re-encodes the whole corpus each time."""
         import subprocess
-        done = subprocess.run(
+        return subprocess.run(
             [sys.executable, str(REPO_ROOT / "tools" / "encode-round-trip.py")],
             cwd=REPO_ROOT, capture_output=True, text=True)
+
+    def test_the_tool_still_explains_everything(self, done):
         assert done.returncode == 0, done.stderr[:400]
         assert re.search(r"0\s+unexplained", done.stdout), done.stdout[-600:]
 
-    def test_no_templated_name_is_left_in_the_residue(self):
-        import subprocess
-        done = subprocess.run(
-            [sys.executable, str(REPO_ROOT / "tools" / "encode-round-trip.py")],
-            cwd=REPO_ROOT, capture_output=True, text=True)
+    def test_no_templated_name_is_left_in_the_residue(self, done):
         assert "templated-name" not in done.stdout, (
             "a name_from vector is still failing to re-encode"
         )

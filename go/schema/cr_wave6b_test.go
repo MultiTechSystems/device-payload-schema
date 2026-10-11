@@ -278,12 +278,20 @@ func TestWave6bFlaggedInternalMember(t *testing.T) {
 	}
 }
 
-// PS-434: the discriminator of a match is not inferred from the case the data fits.
-func TestWave6bInternalDiscriminatorIsNotInferred(t *testing.T) {
+// PS-551 (CR-2026-134): the discriminator of a match is derived from the one case whose
+// fields the input gives. PS-434 alone left it an error; PS-551 says the rest of the
+// input fixes it. Where two cases explain the input equally well nothing is fixed, and
+// the internal field is still an error under PS-434.
+func TestWave6bInternalDiscriminatorIsDerived(t *testing.T) {
 	s := wave6bSchema(t, "  - {name: _kind, type: u8}\n"+
 		"  - match: {field: $_kind, cases: {1: [{name: temperature, type: s16}]}}\n")
-	_, err := s.Encode(map[string]any{"temperature": 231})
-	expectErrorCiting(t, "internal discriminator", err, "PS-434")
+	if out, err := s.Encode(map[string]any{"temperature": 231}); err != nil || !bytes.Equal(out, []byte{1, 0, 0xE7}) {
+		t.Errorf("% x %v, want 01 00e7", out, err)
+	}
+	tied := wave6bSchema(t, "  - {name: _kind, type: u8}\n"+
+		"  - match: {field: $_kind, cases: {1: [{name: x, type: u8}], 2: [{name: x, type: u16}]}}\n")
+	_, err := tied.Encode(map[string]any{"x": 5})
+	expectErrorCiting(t, "ambiguous internal discriminator", err, "PS-434")
 }
 
 // PS-464, PS-465.

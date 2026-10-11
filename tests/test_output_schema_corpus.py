@@ -12,6 +12,7 @@ fields. Both are ratcheted with a floor so the checks cannot pass by finding not
 look at.
 """
 
+import functools
 import re
 import sys
 from pathlib import Path
@@ -71,7 +72,18 @@ def property_for(schema_doc, key):
     return None
 
 
+@functools.lru_cache(maxsize=None)
 def decoded_corpus():
+    """(path, output schema, [decoded data, ...]) per schema, decoded once per process.
+
+    Every test here reads the same decode of the whole corpus, and nothing mutates it, so
+    it is computed once rather than five times (two of them in one test): about 90
+    seconds of a serial run, for identical answers.
+    """
+    return tuple(_decode_corpus())
+
+
+def _decode_corpus():
     """Yield (path, output schema, [decoded data, ...]) per schema.
 
     Aggregated per schema rather than per vector: a schema whose first vector reports
@@ -157,6 +169,11 @@ def test_reported_values_satisfy_their_declared_type():
                     else {declared_type}
                 )
                 checked += 1
+                if isinstance(value, list) and "array" not in allowed:
+                    # PS-507: a name a tlv collected into an array (PS-157,
+                    # CR-2026-110) is described by its entry element by element.
+                    if all(json_types(v) & allowed for v in value):
+                        continue
                 if not (json_types(value) & allowed):
                     problems.setdefault(path.name, set()).add(
                         f"{key}: {type(value).__name__} not in {sorted(allowed)}"
@@ -184,7 +201,8 @@ def test_reported_values_are_in_their_declared_enum():
                 if not subschema or "enum" not in subschema:
                     continue
                 checked += 1
-                if value not in subschema["enum"]:
+                values = value if isinstance(value, list) else [value]   # PS-507
+                if any(v not in subschema["enum"] for v in values):
                     problems.setdefault(path.name, set()).add(
                         f"{key}: {value!r} not in {subschema['enum'][:6]}"
                     )
