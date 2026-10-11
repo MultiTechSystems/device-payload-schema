@@ -1404,6 +1404,7 @@ public static class SchemaDecoder
 
         var result = new Dictionary<string, object?>();
         var channels = new List<Dictionary<string, object?>>();
+        var collected = new HashSet<string>();      // names already turned into arrays (PS-157)
 
         while (ctx.Remaining > 0)
         {
@@ -1518,16 +1519,28 @@ public static class SchemaDecoder
                 {
                     foreach (var kv in caseResult)
                     {
-                        if (result.ContainsKey(kv.Key))
+                        var mode = field.TLVRepeatModes.TryGetValue(kv.Key, out var m) ? m : "collect";
+                        if (!result.ContainsKey(kv.Key))
                         {
-                            if (result[kv.Key] is List<object?> arr)
-                                arr.Add(kv.Value);
-                            else
-                                result[kv.Key] = new List<object?> { result[kv.Key], kv.Value };
+                            result[kv.Key] = kv.Value;
+                        }
+                        else if (mode != "collect")                              // PS-525
+                        {
+                            result[kv.Key] = CombineRepeated(kv.Key, result[kv.Key], kv.Value, mode,
+                                field.TLVLastMembers.TryGetValue(kv.Key, out var lm) ? lm : null);
+                        }
+                        else if (collected.Contains(kv.Key))                       // PS-157
+                        {
+                            ((List<object?>)result[kv.Key]!).Add(kv.Value);
                         }
                         else
                         {
-                            result[kv.Key] = kv.Value;
+                            // A name reported again becomes an array. Whether it already is
+                            // one is not the test: a value that is itself a list (a repeat)
+                            // was appended into, so its second report was spliced among the
+                            // first's elements.
+                            result[kv.Key] = new List<object?> { result[kv.Key], kv.Value };
+                            collected.Add(kv.Key);
                         }
                     }
                 }
@@ -1605,6 +1618,27 @@ public static class SchemaDecoder
             result["channels"] = channels;
 
         return result;
+    }
+
+    /// <summary>
+    /// `last` keeps the later value; `merge` combines two objects member by member, and a
+    /// member reported twice is an error unless it declares `on_repeat: last` (PS-525).
+    /// </summary>
+    static object? CombineRepeated(string name, object? earlier, object? value, string mode,
+        HashSet<string>? lastMembers)
+    {
+        if (mode == "last" || earlier is not Dictionary<string, object?> before
+            || value is not Dictionary<string, object?> after)
+            return value;
+        var combined = new Dictionary<string, object?>(before);
+        foreach (var kv in after)
+        {
+            if (combined.ContainsKey(kv.Key) && (lastMembers == null || !lastMembers.Contains(kv.Key)))
+                throw new InvalidOperationException(
+                    $"tlv: the merged object '{name}' reports its member '{kv.Key}' twice (PS-525)");
+            combined[kv.Key] = kv.Value;
+        }
+        return combined;
     }
 
     static string? FindTLVCaseKey(Dictionary<string, List<SchemaField>>? cases, List<int> tag)

@@ -1,0 +1,22 @@
+# A collected array is written under the first case in declaration order that declares
+# the name, one entry per element (PS-502, PS-527 as CR-2026-125 amends it). Both
+# entries here carry the first case's tag, so the payload round-trips; where a later
+# tag carried one, as in tlv-repeat-collect.yaml, it comes back under the first.
+name: probe_tlv_repeat_collect_first_case
+endian: big
+fields:
+- tlv:
+    tag_size: 1
+    cases:
+      0x3a:
+      - name: event
+        type: u8
+      0x40:
+      - name: event
+        type: u8
+test_vectors:
+- name: collected_under_first_case
+  source: spec-example
+  payload: "3a 01 3a 02"
+  expected:
+    event: [1, 2]

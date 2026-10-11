@@ -414,6 +414,9 @@ type EncodeContext struct {
 	// returned bare bytes and so had nowhere to put them, which is why its
 	// encoder was the silent one. Read them with Schema.EncodeToResult.
 	Warnings []string
+	// order is the schema's source key order, from which encodeTLV recovers the cases'
+	// declaration order (PS-527). A Go map has none.
+	order keyOrder
 }
 
 // NewEncodeContext creates a new encode context.
@@ -448,6 +451,7 @@ func (ctx *EncodeContext) branch() *EncodeContext {
 	child := NewEncodeContext(ctx.Endian)
 	child.Variables = ctx.Variables
 	child.Definitions = ctx.Definitions
+	child.order = ctx.order
 	return child
 }
 
@@ -944,6 +948,11 @@ func ParseSchema(data string) (*Schema, error) {
 	if err := checkMetaDeclarations(raw, order); err != nil {
 		return nil, err
 	}
+	// CR-2026-110: on_repeat's values, merge on objects only, one mode per name
+	// (PS-525, PS-526), in case declaration order.
+	if err := checkOnRepeat(raw, order); err != nil {
+		return nil, err
+	}
 
 	schema := &Schema{repeatOnly: repeatOnlyNames(raw), keyOrder: order}
 	schema.rawName = raw["name"]
@@ -1095,6 +1104,29 @@ func enumLabel(v any) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// parseTLVCases reads a tlv block's `cases` mapping, keyed as written.
+func parseTLVCases(fm map[string]any) map[string][]Field {
+	var cases map[string][]Field
+	if casesMap, ok := fm["cases"].(map[string]any); ok {
+		cases = make(map[string][]Field)
+		for key, value := range casesMap {
+			if caseFieldsRaw, ok := value.([]any); ok {
+				cases[key] = parseFieldsRaw(caseFieldsRaw)
+			}
+		}
+	}
+	// YAML may hand back map[any]any for a mapping with non-string keys.
+	if casesMap, ok := fm["cases"].(map[any]any); ok {
+		cases = make(map[string][]Field)
+		for key, value := range casesMap {
+			if caseFieldsRaw, ok := value.([]any); ok {
+				cases[fmt.Sprintf("%v", key)] = parseFieldsRaw(caseFieldsRaw)
+			}
+		}
+	}
+	return cases
 }
 
 func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
@@ -1512,23 +1544,7 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	// tag_key, which is why elsys/ers decoded to nothing.
 	if f.Type == TypeTLV || f.Type == "tlv" || fm["tag_fields"] != nil ||
 		fm["tag_key"] != nil || fm["tag_size"] != nil {
-		if casesMap, ok := fm["cases"].(map[string]any); ok {
-			f.TLVCases = make(map[string][]Field)
-			for key, value := range casesMap {
-				if caseFieldsRaw, ok := value.([]any); ok {
-					f.TLVCases[key] = parseFieldsRaw(caseFieldsRaw)
-				}
-			}
-		}
-		// YAML may hand back map[any]any for a mapping with non-string keys.
-		if casesMap, ok := fm["cases"].(map[any]any); ok {
-			f.TLVCases = make(map[string][]Field)
-			for key, value := range casesMap {
-				if caseFieldsRaw, ok := value.([]any); ok {
-					f.TLVCases[fmt.Sprintf("%v", key)] = parseFieldsRaw(caseFieldsRaw)
-				}
-			}
-		}
+		f.TLVCases = parseTLVCases(fm)
 	}
 
 	// Bitfield string fields
@@ -1701,6 +1717,12 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	if tlvRaw, ok := fm["tlv"].(map[string]any); ok {
 		tlvField := parseFieldMap(tlvRaw, nil)
 		tlvField.Type = "tlv"
+		// An inline block is a tlv whatever it declares, so its cases are parsed even
+		// with no tag_size (default 1, PS-153). parseFieldMap looks for a marker, and
+		// without one left TLVCases empty: the block decoded to nothing, successfully.
+		if tlvField.TLVCases == nil {
+			tlvField.TLVCases = parseTLVCases(tlvRaw)
+		}
 		f.TLVInline = &tlvField
 	}
 
@@ -3211,6 +3233,10 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 
 	result := make(map[string]any)
 	var channels []map[string]any
+	// PS-525: how a name reported again combines. A schema breaking PS-525/PS-526 was
+	// refused at load, so only the modes are needed here.
+	repeat, _ := tlvRepeatModes(field.decl, nil)
+	collected := map[string]bool{} // names already turned into arrays (PS-157)
 
 	// Parse until end of data
 	for ctx.Remaining() > 0 {
@@ -3325,16 +3351,28 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 			}
 
 			if merge {
-				// Merge fields, converting to array if repeated
+				// A name reported again is combined as its on_repeat says (PS-157,
+				// PS-525): collected into an array by default. Whether the earlier value
+				// is already a list is not the test - a value that is itself a list (a
+				// repeat) was appended into, splicing the second report among the first's
+				// elements.
 				for k, v := range caseResult {
-					if existing, ok := result[k]; ok {
-						if arr, isArr := existing.([]any); isArr {
-							result[k] = append(arr, v)
-						} else {
-							result[k] = []any{existing, v}
-						}
-					} else {
+					existing, ok := result[k]
+					mode := repeat.mode(k)
+					switch {
+					case !ok:
 						result[k] = v
+					case mode != "collect":
+						combined, err := combineRepeated(k, existing, v, mode, repeat.lastMembers[k])
+						if err != nil {
+							return nil, err
+						}
+						result[k] = combined
+					case collected[k]:
+						result[k] = append(existing.([]any), v)
+					default:
+						result[k] = []any{existing, v}
+						collected[k] = true
 					}
 				}
 			} else {
@@ -3921,6 +3959,7 @@ func (s *Schema) encodeToContext(
 	ctx := NewEncodeContext(s.Endian)
 	ctx.TLVOrder = order
 	ctx.Definitions = s.Definitions
+	ctx.order = s.keyOrder
 
 	// Encode header fields first
 	if len(s.Header) > 0 {
@@ -4296,125 +4335,237 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 	if field.Merge != nil && !*field.Merge {
 		return fmt.Errorf("%s", "a tlv with merge: false reports its entries under 'channels', and encoding them is not supported")
 	}
-	// Python recovers channel order from its decoded output, whose keys are in payload
-	// order. A Go map has no order at all, so the channels are emitted in ascending tag
-	// order instead - which is how devices in this corpus lay them out, but is an
-	// assumption rather than recovered information. The floor in corpus_encode_test.go
-	// records how far it gets.
-	type candidate struct {
-		tag     []byte
-		lossy   int
-		matches int
-		key     string
-		fields  []Field
-		claimed []string
+	// PS-525 to PS-527 (CR-2026-110, -125, -128): each value - a scalar, each element of
+	// an array PS-157 collected, a `last` value, a merged object's members - goes under
+	// the first case whose declared fields it supplies in full; nothing is zero-filled
+	// or dropped, and what no case takes is an error. A case requiring more fields is
+	// tried first, then declaration order: em400-mud's [3, 103] (temperature) comes
+	// before [131, 103] (temperature, temperature_alarm), and taking temperature first
+	// would strand the alarm. That is CR-2026-029's specificity, kept under CR-2026-128. With the order DecodeOrdered reported, the cases read are
+	// tried first, in that order, so the tag that wrote a value gets it back.
+	repeat, _ := tlvRepeatModes(field.decl, ctx.order)
+	plan := tlvEncodePlan(field.decl, ctx.order, repeat)
+	if err := plan.strayMember(data); err != nil {
+		return err
 	}
-	candidates := []candidate{}
-	for key, caseFields := range field.TLVCases {
-		claimed := []string{}
-		for _, f := range claimableFields(caseFields, nil) {
-			if _, ok := data[f.Name]; ok {
-				claimed = append(claimed, f.Name)
+	type entry struct {
+		key           string
+		fields        []Field
+		required, opt []Field
+		rank          int
+	}
+	declared := tlvCaseOrder(field, ctx.order)
+	recorded := map[string]int{}
+	for i, key := range ctx.TLVOrder {
+		if _, seen := recorded[key]; !seen {
+			recorded[key] = i
+		}
+	}
+	entries := []entry{}
+	for i, key := range declared {
+		caseFields, ok := field.TLVCases[key]
+		if !ok || key == "default" {
+			continue
+		}
+		e := entry{key: key, fields: caseFields, rank: i}
+		for _, c := range caseClaims(caseFields, false, nil) {
+			if c.optional {
+				e.opt = append(e.opt, c.field)
+			} else {
+				e.required = append(e.required, c.field)
 			}
 		}
-		if len(claimed) == 0 {
-			continue
-		}
-		tag, err := encodeTLVTag(key, field, ctx)
-		if err != nil {
-			// A wildcard or negated key names a range of tags (PS-270); it cannot be
-			// written, so it is not a candidate.
-			continue
-		}
-		matches, lossless := caseFidelity(caseFields, data)
-		lossy := 0
-		if !lossless {
-			lossy = 1
-		}
-		candidates = append(candidates, candidate{tag, lossy, matches, key, caseFields, claimed})
+		entries = append(entries, e)
 	}
-
-	// Ordered for the claiming pass below, not for emission - the chosen set is re-sorted
-	// by tag before anything is written.
-	//
-	// The most specific case claims first. Sorting by tag instead let a case claiming one
-	// name spend it before a case claiming that name *and another* was considered, and the
-	// spend rule below only skips a case whose every name is already taken - so both were
-	// emitted. em400-mud declares `[3, 103] -> (temperature)` and
-	// `[131, 103] -> (temperature, temperature_abnormal)`, and data carrying both names
-	// came back as two channels, `036700008367000000` where the payload was
-	// `8367000000` (CR-2026-029).
-	sort.SliceStable(candidates, func(i, j int) bool {
-		if len(candidates[i].claimed) != len(candidates[j].claimed) {
-			return len(candidates[i].claimed) > len(candidates[j].claimed)
+	sort.SliceStable(entries, func(i, j int) bool {
+		ri, iok := recorded[entries[i].key]
+		rj, jok := recorded[entries[j].key]
+		if iok != jok {
+			return iok
 		}
-		if candidates[i].lossy != candidates[j].lossy {
-			return candidates[i].lossy < candidates[j].lossy
+		if iok && ri != rj {
+			return ri < rj
 		}
-		if candidates[i].matches != candidates[j].matches {
-			return candidates[i].matches > candidates[j].matches
-		}
-		// Tag order last, so the choice is deterministic where nothing else separates two
-		// cases - a Go map's iteration order is not.
-		return bytes.Compare(candidates[i].tag, candidates[j].tag) < 0
+		return claimWidth(entries[i].required) > claimWidth(entries[j].required)
 	})
 
-	// With the order DecodeOrdered reported, the channels go back exactly where they
-	// were - including a tag that appears twice. Without it the sort above stands in.
-	if len(ctx.TLVOrder) > 0 {
-		byKey := map[string]candidate{}
-		for _, c := range candidates {
-			byKey[c.key] = c
-		}
-		emittedAny := false
-		for _, key := range ctx.TLVOrder {
-			c, ok := byKey[key]
-			if !ok {
+	queues := map[string][]any{}
+	for _, e := range entries {
+		for _, f := range append(append([]Field{}, e.required...), e.opt...) {
+			value, ok := data[f.Name]
+			if _, queued := queues[f.Name]; !ok || queued || repeat.mode(f.Name) == "merge" {
 				continue
 			}
-			inner := ctx.branch()
-			if err := encodeFields(c.fields, data, inner); err != nil {
-				return err
+			if list, isList := value.([]any); isList && !reportsList(f) && repeat.mode(f.Name) == "collect" {
+				queues[f.Name] = append([]any{}, list...)
+			} else {
+				queues[f.Name] = []any{value}
 			}
-			ctx.Write(c.tag)
-			if field.LengthSize > 0 {
-				ctx.Write(encodeUint(uint64(len(inner.Buffer)), field.LengthSize, ctx.Endian))
-			}
-			ctx.Write(inner.Buffer)
-			ctx.mergeWarnings(inner)
-			emittedAny = true
 		}
-		if emittedAny {
-			return nil
+	}
+	pending := map[string]map[string]bool{}
+	for name := range plan.members {
+		if obj, ok := data[name].(map[string]any); ok {
+			pending[name] = map[string]bool{}
+			for m := range obj {
+				pending[name][m] = true
+			}
+		}
+	}
+	fits := func(f Field, value any) bool {
+		if obj, ok := value.(map[string]any); ok && (f.Type == TypeObject || f.Type == "object") &&
+			repeat.mode(f.Name) != "merge" {
+			every := map[string]bool{}
+			for _, c := range caseClaims(f.Fields, false, nil) {
+				every[c.field.Name] = true
+				if _, given := obj[c.field.Name]; !given && !c.optional {
+					return false
+				}
+			}
+			for k := range obj {
+				if !every[k] {
+					return false
+				}
+			}
+			return true
+		}
+		return fieldTakes(f, value)
+	}
+
+	type written struct {
+		key    string
+		fields []Field
+		data   map[string]any
+		tag    []byte
+		pos    int
+	}
+	out := []written{}
+	for progress := true; progress; {
+		progress = false
+		for _, e := range entries {
+			for {
+				values := map[string]any{}
+				taken, complete := 0, true
+				for _, f := range e.required {
+					if repeat.mode(f.Name) == "merge" {
+						obj, _ := data[f.Name].(map[string]any)
+						if pending[f.Name] == nil || obj == nil {
+							complete = false
+							break
+						}
+						sub, fresh := map[string]any{}, false
+						for _, m := range f.Fields {
+							if m.Name == "" {
+								continue
+							}
+							v, ok := obj[m.Name]
+							if !ok {
+								complete = false
+								break
+							}
+							sub[m.Name] = v
+							fresh = fresh || pending[f.Name][m.Name]
+						}
+						if !complete {
+							break
+						}
+						values[f.Name] = sub
+						if fresh {
+							taken++
+						}
+						continue
+					}
+					q := queues[f.Name]
+					if len(q) == 0 || !fits(f, q[0]) {
+						complete = false
+						break
+					}
+					values[f.Name] = q[0]
+					taken++
+				}
+				if !complete {
+					break
+				}
+				for _, f := range e.opt {
+					if q := queues[f.Name]; len(q) > 0 && fits(f, q[0]) {
+						values[f.Name] = q[0]
+						taken++
+					}
+				}
+				if taken == 0 {
+					break
+				}
+				entryData := make(map[string]any, len(data))
+				for k, v := range data {
+					entryData[k] = v
+				}
+				for name, v := range values {
+					entryData[name] = v
+					if repeat.mode(name) == "merge" {
+						for m := range v.(map[string]any) {
+							delete(pending[name], m)
+						}
+					} else {
+						queues[name] = queues[name][1:]
+					}
+				}
+				tag, err := encodeTLVTag(e.key, field, ctx)
+				if err != nil {
+					return err
+				}
+				pos := len(ctx.TLVOrder)
+				if r, ok := recorded[e.key]; ok {
+					pos = r
+				}
+				out = append(out, written{e.key, e.fields, entryData, tag, pos})
+				progress = true
+			}
+		}
+	}
+	queueNames := make([]string, 0, len(queues))
+	for name := range queues {
+		queueNames = append(queueNames, name)
+	}
+	sort.Strings(queueNames)
+	for _, name := range queueNames {
+		if q := queues[name]; len(q) > 0 {
+			return fmt.Errorf("tlv: no case takes the value of '%s' %s in full (PS-502, PS-527)", name, pyRepr(q[0]))
+		}
+	}
+	pendingNames := make([]string, 0, len(pending))
+	for name := range pending {
+		pendingNames = append(pendingNames, name)
+	}
+	sort.Strings(pendingNames)
+	for _, name := range pendingNames {
+		if len(pending[name]) > 0 {
+			left := []string{}
+			for m := range pending[name] {
+				left = append(left, "'"+m+"'")
+			}
+			sort.Strings(left)
+			return fmt.Errorf("tlv: no case takes the members [%s] of the merged object '%s' in full (PS-527)",
+				strings.Join(left, ", "), name)
 		}
 	}
 
-	spent := map[string]bool{}
-	chosen := []candidate{}
-	for _, c := range candidates {
-		allSpent := true
-		for _, name := range c.claimed {
-			if !spent[name] {
-				allSpent = false
-				break
-			}
+	// A Go map has no payload order, so the entries go out in the order DecodeOrdered
+	// reported where there is one, else in ascending tag order - how this corpus's
+	// devices lay them out, an assumption rather than recovered information. Entries of
+	// one tag keep the order they were taken in.
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].pos != out[j].pos {
+			return out[i].pos < out[j].pos
 		}
-		if allSpent {
-			continue
-		}
-		for _, name := range c.claimed {
-			spent[name] = true
-		}
-		chosen = append(chosen, c)
-	}
-	sort.SliceStable(chosen, func(i, j int) bool { return bytes.Compare(chosen[i].tag, chosen[j].tag) < 0 })
-
-	for _, c := range chosen {
+		return bytes.Compare(out[i].tag, out[j].tag) < 0
+	})
+	for _, w := range out {
+		tag := w.tag
 		inner := ctx.branch()
-		if err := encodeFields(c.fields, data, inner); err != nil {
+		if err := encodeFields(w.fields, w.data, inner); err != nil {
 			return err
 		}
-		ctx.Write(c.tag)
+		ctx.Write(tag)
 		if field.LengthSize > 0 {
 			ctx.Write(encodeUint(uint64(len(inner.Buffer)), field.LengthSize, ctx.Endian))
 		}

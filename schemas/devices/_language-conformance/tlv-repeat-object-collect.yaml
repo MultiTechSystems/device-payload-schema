@@ -1,0 +1,37 @@
+# A field's own `on_repeat` takes precedence over the loop's (PS-525, CR-2026-110):
+# under a loop declaring `merge`, an object that declares `collect` is collected into
+# an array as PS-157 has always done. Every field reporting the name declares it, as
+# PS-526 requires.
+#
+# Round-trips: each element goes under the first case whose members it supplies exactly
+# (PS-527 as CR-2026-128 replaces it), so `{adr: 1}` is written under 0x0310 and
+# `{dr: 5}` under 0x0311.
+name: probe_tlv_repeat_object_collect
+endian: big
+fields:
+- tlv:
+    tag_size: 2
+    on_repeat: merge
+    cases:
+      0x0310:
+      - name: loramac
+        type: object
+        on_repeat: collect
+        fields:
+        - name: adr
+          type: u8
+      0x0311:
+      - name: loramac
+        type: object
+        on_repeat: collect
+        fields:
+        - name: dr
+          type: u8
+test_vectors:
+- name: object_declares_collect
+  source: spec-example
+  payload: "0310 01 0311 05"
+  expected:
+    loramac:
+    - adr: 1
+    - dr: 5
