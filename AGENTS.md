@@ -2046,6 +2046,23 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   has no byte_group decode path, so this is a C gap like the construct itself. **No corpus,
   library, example or registry schema is rejected or changes decode** (registry yabby-edge
   was rewritten as one 8-byte group, 69e1023). Fixture: `byte-group-width.yaml`.
+- **CR-2026-142 (PS-555): the binary schema form carries its names.** `schema_load_binary`
+  used to name each field from its IPSO object (`ipso_to_name`: 3303 was "temperature",
+  anything unlisted `field_xxxx`), so a schema reported different keys from its blob than
+  from its YAML. Format version 3 (`tools/schema_binary.py`, the header's "Binary Schema
+  Loading" block): byte 2 is the *format* version and anything else is refused (1 held
+  the schema's own `version`; 2 is `binary_schema_v2.py`'s unrelated layout under the same
+  magic); count bit 7 announces a name table of one length byte plus UTF-8 per record,
+  0 only for a skip; `skip` moved to type code 0x7, so it has a record at all. Without the
+  table (`--no-names`, `encode_schema(names=False)`) the C loader sets `schema_t.nameless`,
+  every name stays empty, values are reached with `result_get_index()` by schema index,
+  and `result_to_json()` refuses. `SCHEMA_MAX_NAME_LEN` (32, so 31 bytes) is a load error
+  naming the field, never a truncation; the encoder refuses the same, and a count over
+  127. `schema_load_binary_msg()` gives the reason for any refusal. `make test-c`'s
+  harness runs either form with `--from-blob names|nameless` and requires the reference's
+  keys exactly. `schema_interpreter.hpp` and `binary_schema_loader.py` lost their own IPSO
+  name tables the same way; `binary_schema.py` and `binary_schema_v2.py` feed no C reader
+  and were left as they were.
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.
