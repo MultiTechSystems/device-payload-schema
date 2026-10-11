@@ -31,7 +31,9 @@ jobs:
               run: pip install -r requirements.txt
 
             - name: Run tests
-              run: python -m pytest tests/ -q
+              # Parallel, grouped so a module's corpus fixture is built once, not per worker
+              # (tests marked xdist_group; see `make pytest`).
+              run: python -m pytest tests/ -q -n auto --dist loadgroup
 
     # One job per implementation. Modifier order and other shared decode
     # behaviour must agree across all of them (PS-101); Go, Java and C# each
