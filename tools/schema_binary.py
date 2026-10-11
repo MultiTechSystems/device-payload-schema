@@ -389,6 +389,10 @@ def schema_errors(schema: Dict) -> List[str]:
     """Every field_errors() finding in a schema, plus what the C loader would cut."""
     errors = []
     endian = schema.get('endian', 'big')
+    # PS-539 (CR-2026-117): a reference naming nothing declared is a schema error on
+    # every path, the binary blob the C interpreter loads included.
+    from schema_interpreter import expand_refs, reference_errors
+    errors.extend(reference_errors(expand_refs(schema)[0]))     # after splicing (CR-2026-127)
     if schema.get('ports'):
         errors.append("`ports` - the C interpreter has no port selection; refused "
                       "rather than dropped (PS-446)")

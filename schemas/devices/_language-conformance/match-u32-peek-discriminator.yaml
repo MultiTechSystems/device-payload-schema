@@ -1,0 +1,61 @@
+# A `match` on a 32-bit discriminator whose top bit is set, taken from a non-advancing
+# bit-range peek of the four bytes the cases go on to read.
+#
+# The shape is a common way to model a "not available" sentinel: peek the word, and if
+# it is 0x80000000 report a status and step over it, else read it as a value. Python, Go
+# and the generated codec compare the discriminator and the case key as integers. Java
+# and C# narrowed both to a 32-bit int first, and the two narrowings disagreed with the
+# value they were given:
+#
+# - Java holds a case key as text, since splicing references stringifies every mapping
+#   key, and parsed it with Integer.parseInt, which rejects 2147483648. So no
+#   discriminator matched the key and every sentinel decoded as a value of 2147483648.
+# - C#'s (int) of an out-of-range double is int.MinValue on x64, and the parser gives a
+#   key beyond int's range as a double. So the key 2147483648, a discriminator of
+#   0xFFFFFFFF and one of 0x80000001 all became int.MinValue, and two ordinary values
+#   decoded as the sentinel.
+#
+# Each vector asserts one key, so a runner stopping at its first mismatch cannot hide a
+# second. 0x7FFFFFFF is the control: it fits an int and every implementation agreed on it.
+#
+# The internal peek carries no value to write back (PS-434), so the vectors are decode
+# assertions only.
+name: probe_match_u32_peek_discriminator
+endian: big
+fields:
+  - name: _word
+    type: "u32[0:31]"
+  - match:
+      field: $_word
+      cases:
+        2147483648:
+          - {name: reading_status, type: string, value: not_available}
+          - {name: _sentinel, type: skip, length: 4}
+      default:
+        - name: reading
+          type: u32
+test_vectors:
+  - name: sentinel_selects_its_case
+    description: "0x80000000 equals the case key 2147483648"
+    payload: "80000000"
+    source: generated
+    expected:
+      reading_status: not_available
+  - name: all_ones_is_a_value
+    description: "0xFFFFFFFF matches no case and is read as the value it is"
+    payload: "FFFFFFFF"
+    source: generated
+    expected:
+      reading: 4294967295
+  - name: sentinel_plus_one_is_a_value
+    description: "0x80000001 is one above the key, not equal to it"
+    payload: "80000001"
+    source: generated
+    expected:
+      reading: 2147483649
+  - name: int_max_is_a_value
+    description: "0x7FFFFFFF fits a signed 32-bit int; the control"
+    payload: "7FFFFFFF"
+    source: generated
+    expected:
+      reading: 2147483647

@@ -600,10 +600,9 @@ func (r *repeatElements) element() error {
 			}
 		}
 		if r.field.PresentIf != nil {
-			conds := []GuardCondition{*r.field.PresentIf}
-			if err = guardScopeError(conds, ctx); err == nil {
-				keep = guardConditionsHold(&GuardDef{When: conds}, ctx)
-			}
+			// The element is whole here, so a name of it with no value is absent, not
+			// "not yet decoded", and the condition fails (PS-540). No PS-368 check.
+			keep = guardConditionsHold(&GuardDef{When: []GuardCondition{*r.field.PresentIf}}, ctx)
 		}
 	}
 
