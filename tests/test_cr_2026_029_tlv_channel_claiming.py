@@ -139,9 +139,12 @@ class TestTheClaimingPassPrefersSpecificity:
         start = text.index(self.ANCHOR)
         return text[start:start + 2000]
 
-    def test_it_sorts_by_required_count(self):
+    def test_it_sorts_by_required_width(self):
+        """Wider first; an object counts its members (CR-2026-129)."""
         window = self.window()
-        assert "len(entries[i].required) > len(entries[j].required)" in window, window[:400]
+        assert "claimWidth(entries[i].required) > claimWidth(entries[j].required)" in window, (
+            window[:400]
+        )
 
     def test_tag_order_does_not_lead_the_case_order(self):
         window = self.window()

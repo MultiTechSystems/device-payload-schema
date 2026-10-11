@@ -878,7 +878,14 @@ function encTlv(out, f, data, ctx) {                  // _encode_tlv
     encCaseClaims(cases[key]).forEach(function (c) { (c[1] ? opt : req).push(c[0]); });
     entries.push({ key: key, body: cases[key], req: req, opt: opt, seq: entries.length });
   });
-  entries.sort(function (a, b) { return b.req.length - a.req.length || a.seq - b.seq; });
+  // An object counts its members (CR-2026-129), so a merged {adr, dr} case outranks {dr}.
+  function width(list) {
+    return list.reduce(function (n, c) {
+      return n + (c.type === "object" ? Math.max(1, encCaseClaims(c.fields || []).length) : 1);
+    }, 0);
+  }
+  entries.forEach(function (e) { e.width = width(e.req); });
+  entries.sort(function (a, b) { return b.width - a.width || a.seq - b.seq; });
   var queues = {}, pending = {};
   entries.forEach(function (e) {
     e.req.concat(e.opt).forEach(function (c) {

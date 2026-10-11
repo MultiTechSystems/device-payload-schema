@@ -182,4 +182,14 @@ public class CR2026_110Tests
         var o = Assert.IsType<Dictionary<string, object?>>(out_["o"]);
         Assert.Equal(7.0, Convert.ToDouble(o["m"]));
     }
+
+    /// <summary>CR-2026-129: an object case is as wide as its members.</summary>
+    [Fact]
+    public void AnObjectCaseIsAsWideAsItsMembers()
+    {
+        const string wider = "name: t\nendian: big\nfields:\n- tlv:\n    tag_size: 2\n    on_repeat: merge\n    cases:\n"
+            + "      0x0310: [{name: loramac, type: object, fields: [{name: dr, type: u8, on_repeat: last}]}]\n"
+            + "      0x0311: [{name: loramac, type: object, fields: [{name: adr, type: u8}, {name: dr, type: u8, on_repeat: last}]}]\n";
+        EncodesTo(wider, D(("loramac", D(("adr", 1L), ("dr", 5L)))), "03110105");
+    }
 }

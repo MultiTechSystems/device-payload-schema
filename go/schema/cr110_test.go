@@ -315,3 +315,22 @@ func TestCR125LastOnMergedMemberIsAccepted(t *testing.T) {
 		t.Fatalf("decode = %#v", got)
 	}
 }
+
+// CR-2026-129: an object case is as wide as its members, so a merged {adr, dr} case
+// declared after a {dr} case still takes {adr, dr} whole.
+func TestCR129ObjectCaseWidthCountsMembers(t *testing.T) {
+	s := cr110Parse(t, `
+name: t
+fields:
+  - tlv:
+      tag_size: 2
+      on_repeat: merge
+      cases:
+        0x0310: [{name: loramac, type: object, fields: [{name: dr, type: u8, on_repeat: last}]}]
+        0x0311: [{name: loramac, type: object, fields: [{name: adr, type: u8}, {name: dr, type: u8, on_repeat: last}]}]
+`)
+	data := map[string]any{"loramac": map[string]any{"adr": 1, "dr": 5}}
+	if got := hex.EncodeToString(mustEncode(t, s, data, nil)); got != "03110105" {
+		t.Fatalf("encode = %s, want 03110105", got)
+	}
+}

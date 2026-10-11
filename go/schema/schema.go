@@ -4363,7 +4363,7 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 		if iok && ri != rj {
 			return ri < rj
 		}
-		return len(entries[i].required) > len(entries[j].required)
+		return claimWidth(entries[i].required) > claimWidth(entries[j].required)
 	})
 
 	queues := map[string][]any{}

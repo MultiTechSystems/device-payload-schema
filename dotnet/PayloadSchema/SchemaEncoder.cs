@@ -992,7 +992,10 @@ public static class SchemaEncoder
                 }
                 entries.Add((caseKey, caseFields, required, optional, entries.Count));
             }
-            entries = entries.OrderByDescending(e => e.required.Count).ThenBy(e => e.rank).ToList();
+            // An object counts its members (CR-2026-129), so a merged {adr, dr} case outranks {dr}.
+            int Width(List<SchemaField> fields) => fields.Sum(f =>
+                f.Type == FieldType.Object ? Math.Max(1, CaseClaims(f.Fields, false).Count) : 1);
+            entries = entries.OrderByDescending(e => Width(e.required)).ThenBy(e => e.rank).ToList();
 
             // A supplied member of a merged object that no case declares has nowhere to go.
             foreach (var (n, members) in declaredMembers)

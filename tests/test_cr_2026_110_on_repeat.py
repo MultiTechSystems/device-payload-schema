@@ -463,3 +463,40 @@ def test_on_repeat_in_a_definition_is_held_to_the_rule_where_spliced():
     assert SchemaInterpreter(doc).decode(bytes.fromhex("01050107")).data == {"e": 7}
     doc["fields"] = [{"$ref": "#/definitions/d"}]
     assert any(PLACEMENT in e for e in SchemaInterpreter(doc).decode(b"\x01").errors)
+
+
+# CR-2026-129: among the cases a value fills, the one declaring the most fields wins, and
+# an object counts its members. A merged {adr, dr} case declared after a {dr} case still
+# takes {adr, dr} whole; counting the object as one field would let {dr} take dr first
+# and then write 0x0311 for adr too.
+WIDER_LATER = {
+    "tag_size": 2,
+    "on_repeat": "merge",
+    "cases": {
+        0x0310: [
+            {
+                "name": "loramac",
+                "type": "object",
+                "fields": [{"name": "dr", "type": "u8", "on_repeat": "last"}],
+            }
+        ],
+        0x0311: [
+            {
+                "name": "loramac",
+                "type": "object",
+                "fields": [
+                    {"name": "adr", "type": "u8"},
+                    {"name": "dr", "type": "u8", "on_repeat": "last"},
+                ],
+            }
+        ],
+    },
+}
+
+
+def test_an_object_case_is_as_wide_as_its_members():
+    data = {"loramac": {"adr": 1, "dr": 5}}
+    result = encode(WIDER_LATER, data)
+    assert result.errors == []
+    assert bytes(result.payload).hex() == "03110105"
+    assert bytes(generated_encode(WIDER_LATER, data)["bytes"]).hex() == "03110105"

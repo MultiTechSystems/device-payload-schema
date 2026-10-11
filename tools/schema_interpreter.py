@@ -5920,6 +5920,14 @@ class SchemaInterpreter:
             out.append(f)
         return out
 
+    def _claim_width(self, field_def):
+        """How many fields a case's claim counts for when ranking cases (PS-527 as
+        CR-2026-129 states it): an object counts its members, so a merged {adr, dr} case
+        outranks a {dr} one, and anything else counts one."""
+        if field_def.get('type') == 'object':
+            return max(1, len(self._case_claims(field_def.get('fields') or [])))
+        return 1
+
     def _case_claims(self, case_fields, optional=False):
         """_claimable_fields with each field marked optional or not (PS-527): a case is
         filled only once the input supplies every required field. A flagged group's
@@ -6032,7 +6040,7 @@ class SchemaInterpreter:
         # em400-mud's [3, 103] (temperature) is declared before [131, 103]
         # (temperature, temperature_alarm), and taking temperature first strands the
         # alarm, which no case would then take in full (CR-2026-029).
-        entries.sort(key=lambda entry: -len(entry[2]))
+        entries.sort(key=lambda entry: -sum(self._claim_width(f) for f in entry[2]))
 
         queues = {}  # type: Dict[str, list]
         for _, _, required, optional in entries:

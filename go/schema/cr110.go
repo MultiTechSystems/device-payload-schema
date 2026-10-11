@@ -498,3 +498,20 @@ func fieldTakes(f Field, value any) bool {
 	}
 	return true
 }
+
+// claimWidth is how many fields a case's claims count for when ranking cases (PS-527 as
+// CR-2026-129 states it): an object counts its members, so a merged {adr, dr} case
+// outranks a {dr} one, and anything else counts one.
+func claimWidth(fields []Field) int {
+	n := 0
+	for _, f := range fields {
+		if f.Type == TypeObject || f.Type == "object" {
+			if members := len(caseClaims(f.Fields, false, nil)); members > 1 {
+				n += members
+				continue
+			}
+		}
+		n++
+	}
+	return n
+}

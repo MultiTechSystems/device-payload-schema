@@ -204,4 +204,13 @@ public class CR2026110Test {
                 + "      1: [{name: o, type: object, fields: [{name: m, type: u8, on_repeat: last}]}]\n");
         assertEquals(Map.of("o", Map.of("m", 7L)), normalise(s.decode(hex("01050107"))));
     }
+
+    /** CR-2026-129: an object case is as wide as its members. */
+    @Test
+    public void anObjectCaseIsAsWideAsItsMembers() {
+        String wider = "name: t\nfields:\n- tlv:\n    tag_size: 2\n    on_repeat: merge\n    cases:\n"
+                + "      0x0310: [{name: loramac, type: object, fields: [{name: dr, type: u8, on_repeat: last}]}]\n"
+                + "      0x0311: [{name: loramac, type: object, fields: [{name: adr, type: u8}, {name: dr, type: u8, on_repeat: last}]}]\n";
+        encodesTo(wider, map("loramac", map("adr", 1, "dr", 5)), "03110105");
+    }
 }

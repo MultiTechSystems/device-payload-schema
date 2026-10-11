@@ -1645,8 +1645,11 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     supplied member no case declares "tlv: the merged object '{n}' is given ['{m}'], which no
     case declares (PS-527)". `{dr: 5}` gives `0311 05`, `[{adr: 1}, {dr: 5}]` gives
     `0310 01 0311 05`, a scalar follows the same rule.
-  - **Two choices the CR leaves to the implementation, both needed to keep the corpus.** A
-    case requiring more fields is tried before declaration order: em400-mud declares
+  - **Two choices, both needed to keep the corpus, which CR-2026-129 adopted into PS-527.**
+    A case requiring more fields is tried before declaration order - an object counting
+    its members, so a merged {adr, dr} case outranks a {dr} one declared before it
+    (`_claim_width`, Go `claimWidth`, Java `claimWidth`, C# `Width`, the generator's
+    `width`): em400-mud declares
     [3, 103] (temperature) before [131, 103] (temperature, temperature_alarm), and strict
     declaration order hands temperature to the first and strands the alarm. And a case
     takes no value it cannot write (the old fidelity check, per field): am308's `tvoc` of

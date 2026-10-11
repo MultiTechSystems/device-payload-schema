@@ -828,6 +828,25 @@ final class Encoder {
         }
     }
 
+    /**
+     * How many fields a case's claims count for when ranking cases (PS-527 as CR-2026-129
+     * states it): an object counts its members, so a merged {adr, dr} case outranks a
+     * {dr} one, and anything else counts one.
+     */
+    private static int claimWidth(List<Field> fields) {
+        int n = 0;
+        for (Field f : fields) {
+            if (f.getType() == FieldType.OBJECT) {
+                List<Claim> members = new ArrayList<>();
+                collectClaims(f.getFields(), false, members);
+                n += Math.max(1, members.size());
+            } else {
+                n++;
+            }
+        }
+        return n;
+    }
+
     private record TlvEntry(String key, List<Field> fields, List<Field> required,
                             List<Field> optional, int rank) {}
 
@@ -877,7 +896,7 @@ final class Encoder {
             }
             entries.add(new TlvEntry(e.getKey(), e.getValue(), required, optional, entries.size()));
         }
-        entries.sort((x, y) -> Integer.compare(y.required().size(), x.required().size()));
+        entries.sort((x, y) -> Integer.compare(claimWidth(y.required()), claimWidth(x.required())));
 
         // A supplied member of a merged object that no case declares has nowhere to go.
         for (Map.Entry<String, Set<String>> e : declaredMembers.entrySet()) {
