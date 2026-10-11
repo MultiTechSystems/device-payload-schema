@@ -216,11 +216,11 @@ jobs:
       
       - name: Install dependencies
         run: |
-          pip install pytest pytest-cov pyyaml hypothesis
+          pip install pytest pytest-cov pytest-xdist pyyaml hypothesis
       
       - name: Run tests with coverage
         run: |
-          PYTHONPATH=tools pytest tests/ -v \
+          PYTHONPATH=tools pytest tests/ -v -n auto --dist loadgroup \
             --cov=tools \
             --cov-report=term-missing \
             --cov-report=xml:coverage.xml
