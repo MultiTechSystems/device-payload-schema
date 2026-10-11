@@ -198,52 +198,67 @@ public static partial class SchemaParser
     }
 
     /// <summary>
-    /// The bits a byte_group member covers, counted from the group's first bit (most
-    /// significant bit of its first byte), or null for a member that is neither a bit range
-    /// nor a bool. Mapping onto the group lets members of different widths be compared.
+    /// A byte_group member's base bytes and bits (PS-070, CR-2026-131). A member is a bit
+    /// range; a whole integer, its full range (<c>u16</c> is <c>u16[0:15]</c>); or a bool
+    /// with <c>bit</c>, one bit of a u8. Its bits are numbered in the group's assembled value
+    /// (PS-364), so members of any width compare directly. They were mapped
+    /// most-significant-first within each member's own base, and a signed range was not
+    /// checked at all.
     /// </summary>
-    static HashSet<int>? ByteGroupMemberBits(YamlMappingNode member)
+    static (int baseBytes, int low, int high) ByteGroupMemberRange(YamlMappingNode member)
     {
         var type = member.TryGetValue("type", out var t) ? Scalar(t) : "";
-        int width, start, end;
-        var m = System.Text.RegularExpressions.Regex.Match(type, @"^u(\d+)\[(\d+):(\d+)\]$");
+        var name = member.TryGetValue("name", out var n) ? Scalar(n) : "?";
+        var m = System.Text.RegularExpressions.Regex.Match(type, @"^[us](\d+)\[(\d+):(\d+)\]$");
         if (m.Success)
         {
-            width = int.Parse(m.Groups[1].Value);
-            start = int.Parse(m.Groups[2].Value);
-            end = int.Parse(m.Groups[3].Value);
+            int lo = int.Parse(m.Groups[2].Value), hi = int.Parse(m.Groups[3].Value);
+            return (Math.Max(1, int.Parse(m.Groups[1].Value) / 8), Math.Min(lo, hi), Math.Max(lo, hi));
         }
-        else if (type == "bool")
+        if (Cr131.WholeIntegerBytes.TryGetValue(type, out var whole))
+            return (whole, 0, whole * 8 - 1);
+        if (type == "bool" && member.TryGetValue("bit", out var b))
         {
-            width = 8;
-            start = member.TryGetValue("bit", out var b) ? (int)Double(b) : 0;
-            end = start;
+            int bit = (int)Double(b);
+            if (bit < 0 || bit > 7)
+                throw new InvalidOperationException(
+                    $"byte_group member '{name}' is a bool at bit {bit}; a bool member is one bit of a u8, 0 to 7 (PS-070)");
+            return (1, bit, bit);
         }
-        else return null;
-        var bits = new HashSet<int>();
-        for (int i = start; i <= end; i++) bits.Add(width - 1 - i);
-        return bits;
+        throw new InvalidOperationException(
+            $"byte_group member '{name}' is not a bit range, a whole integer or a bool with `bit` (PS-364)");
     }
 
-    /// <summary>PS-397: bit ranges within one byte_group must not overlap. They were accepted.</summary>
-    static void CheckByteGroupOverlap(YamlNode group)
+    /// <summary>
+    /// A byte_group's load-time rules: every member a kind PS-070 admits, no two members on
+    /// the same bits (PS-397), and a <c>size</c> no narrower than the widest member's base
+    /// (PS-070, CR-2026-131), which used to be widened silently.
+    /// </summary>
+    static void CheckByteGroup(YamlMappingNode field, YamlNode group)
     {
+        var groupMap = group as YamlMappingNode;
         var members = group as YamlSequenceNode
-            ?? ((group as YamlMappingNode)?.TryGetValue("fields", out var f) == true ? f as YamlSequenceNode : null);
-        if (members == null) return;
-        var seen = new List<(string name, HashSet<int> bits)>();
-        foreach (var raw in members.Children)
+            ?? (groupMap?.TryGetValue("fields", out var f) == true ? f as YamlSequenceNode : null);
+        YamlNode? size = null;
+        if (groupMap != null) groupMap.TryGetValue("size", out size);
+        else field.TryGetValue("size", out size);
+        var seen = new List<(string name, int low, int high)>();
+        int widest = 1;
+        foreach (var raw in members?.Children ?? (IEnumerable<YamlNode>)Array.Empty<YamlNode>())
         {
             if (raw is not YamlMappingNode member) continue;
-            var bits = ByteGroupMemberBits(member);
-            if (bits == null) continue;
+            var range = ByteGroupMemberRange(member);
             var name = member.TryGetValue("name", out var n) ? Scalar(n) : "?";
             foreach (var other in seen)
-                if (other.bits.Overlaps(bits))
+                if (range.low <= other.high && other.low <= range.high)
                     throw new InvalidOperationException(
                         $"byte_group members '{other.name}' and '{name}' overlap (PS-397)");
-            seen.Add((name, bits));
+            seen.Add((name, range.low, range.high));
+            widest = Math.Max(widest, range.baseBytes);
         }
+        if (size != null && Int(size) < widest)
+            throw new InvalidOperationException(
+                $"byte_group declares size {Int(size)}, narrower than its widest member's {widest} bytes (PS-070)");
     }
 
     /// <summary>
@@ -519,7 +534,7 @@ public static partial class SchemaParser
             CheckWave4(fieldMap);
             CheckLookupTemplate(fieldMap);    // PS-407
             if (fieldMap.TryGetValue("byte_group", out var group))
-                CheckByteGroupOverlap(group);
+                CheckByteGroup(fieldMap, group);   // PS-070, PS-397
             // PS-399, PS-416: exactly one discriminator source. With both `field` and
             // `length`, `field` won and the `length` byte was left unread, misaligning
             // every later field. PS-414: `remaining` is only ever true.

@@ -560,8 +560,9 @@ public static class SchemaEncoder
                 }
                 else
                 {
-                    // A full-width member owns the group's bytes outright.
-                    packed |= (ulong)raw;
+                    // A whole integer is its full range (PS-070), masked like any other member.
+                    int bits = Cr131.MemberRange(member).high + 1;
+                    packed |= bits >= 64 ? (ulong)raw : (ulong)raw & ((1UL << bits) - 1);
                 }
             }
             return Helpers.EncodeUint(packed, Math.Max(1, size), group.GroupEndian ?? _endian);

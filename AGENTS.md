@@ -1667,17 +1667,24 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     1792) and `plain fixed` 135 -> 137 in all four.
 - **CR-2026-131: a byte_group covers its widest member's base** (PS-070). With no `size`, a
   group is as wide as its widest member's base type, whichever bytes the bits fall in -
-  `u16[0:3]` makes it two bytes - and `size` widens it, never narrows it. All five read a
-  sizeless group as one byte while the four encoders already widened a bit range's base,
-  so decode and encode disagreed. One helper per language decides the width for both
-  directions: `byte_group_width` (Python, also used by the TS013 decoder and
-  `payload_size_calc.py`), `byteGroupWidth` (Go `cr131.go`, Java `Schema`), C#
-  `Cr131.ByteGroupWidth`, and `encGroupWidth` in the generated codec's runtime. A full-width
-  integer member counts its own width, a bool one byte. C has no byte_group decode path, so
-  this is a C gap like the construct itself. The validator warns where a declared `size`
-  is narrower than a member's base. **No corpus, library or example schema changed decode**:
-  every group in them declares a `size` at least as wide as its members. Fixture:
-  `byte-group-width.yaml`.
+  `u16[0:3]` makes it two bytes. `size` widens it, and a `size` narrower than a member is
+  **rejected at load**: `byte_group declares size 5, narrower than its widest member's 8
+  bytes (PS-070)`, the spec prototype's text. A member is a bit range, a whole integer
+  (`u16` is `u16[0:15]` of the group's value) or a `bool` with `bit` 0 to 7 (one bit of a
+  `u8`); anything else is rejected, and every member reads from the group's start without
+  moving it. All five read a sizeless group as one byte while the four encoders already
+  widened a bit range's base, so decode and encode disagreed; Go and C# also gave a whole
+  integer member the entire group's value, and Python and Java read it as a field of its
+  own. Where the rules live: `byte_group_member_range`/`byte_group_width`/`byte_group_errors`
+  (Python; the validator and the TS013 generator call them), `go/schema/cr131.go`
+  (`checkByteGroup` from `checkFieldRules`), Java `Schema.checkByteGroup`, C#
+  `SchemaParser.CheckByteGroup` and `Cr131`, and `encGroupWidth` in the generated codec's
+  runtime. **Overlap is now counted in the group's assembled value** (PS-364) in all four;
+  it was counted most-significant-first within each member's own base, which disagreed with
+  every decoder for members of different widths, and C# skipped signed ranges entirely. C
+  has no byte_group decode path, so this is a C gap like the construct itself. **No corpus,
+  library, example or registry schema is rejected or changes decode** (registry yabby-edge
+  was rewritten as one 8-byte group, 69e1023). Fixture: `byte-group-width.yaml`.
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.

@@ -493,25 +493,52 @@ def repeat_limit_message(field_def, limit, mode, offset, end):
 _BIT_RANGE = re.compile(r'^[us](\d+)\[(\d+):(\d+)\]$')
 
 
-def byte_group_member_bits(member):
-    """The bits a byte_group member covers, counted from the group's first bit, or None.
+#: The whole-integer types a byte_group member may name (PS-070): `u16` is `u16[0:15]`.
+#: The word-ordered types are not among them; their bytes are not one value.
+WHOLE_INTEGER_TYPES: Dict[str, Tuple[int, bool]] = {
+    name: info for name, info in INTEGER_TYPE_INFO.items() if name not in WORD_ORDERED_TYPES
+}
 
-    A range's bits are numbered within its own base (PS-058: 0 is the least significant),
-    so they are mapped onto the group's bit string - most significant bit of the first
-    byte first - before members of different widths can be compared.
+
+def byte_group_member_range(member):
+    """(base bytes, low bit, high bit, signed) of a byte_group member (PS-070, CR-2026-131).
+
+    A member is a bit range; a whole integer, which is its full range (`u16` is
+    `u16[0:15]`); or a `bool` with `bit`, one bit of a `u8`. Its bits are numbered in the
+    group's assembled value (PS-364), and it reads from the group's start: no member
+    moves the position, the group consumes its width once. Anything else is rejected.
     """
-    if not isinstance(member, dict):
-        return None
-    ftype = str(member.get('type', ''))
+    name = member.get('name') if isinstance(member, dict) else None
+    ftype = str(member.get('type', '')) if isinstance(member, dict) else ''
     match = _BIT_RANGE.match(ftype)
     if match:
-        width, start, end = (int(g) for g in match.groups())
-    elif ftype == 'bool':
-        width, start = 8, int(member.get('bit', 0))
-        end = start
-    else:
-        return None
-    return {width - 1 - bit for bit in range(start, end + 1)}
+        low, high = sorted((int(match.group(2)), int(match.group(3))))
+        return max(1, int(match.group(1)) // 8), low, high, ftype.startswith('s')
+    if ftype in WHOLE_INTEGER_TYPES:
+        size, signed = WHOLE_INTEGER_TYPES[ftype]
+        return size, 0, size * 8 - 1, signed
+    bit = member.get('bit') if isinstance(member, dict) else None
+    if ftype == 'bool' and isinstance(bit, int) and not isinstance(bit, bool):
+        if not 0 <= bit <= 7:
+            raise ValueError(
+                f"byte_group member {name!r} is a bool at bit {bit}; a bool member is one "
+                f"bit of a u8, 0 to 7 (PS-070)")
+        return 1, bit, bit, False
+    raise ValueError(
+        f"byte_group member {name!r} is not a bit range, a whole integer or a bool with "
+        f"`bit` (PS-364)")
+
+
+def byte_group_member_bits(member):
+    """The bits of the group's assembled value a member covers (PS-364).
+
+    Every member's bits refer to that one value, so they compare directly. They used to
+    be mapped most-significant-first within each member's own base, which disagreed with
+    the decoders for members of different widths: `u8[4:7]` beside `u16[4:7]` read the
+    same bits and passed the check.
+    """
+    _, low, high, _ = byte_group_member_range(member)
+    return set(range(low, high + 1))
 
 
 def byte_group_endian(field_def, context_endian):
@@ -536,36 +563,21 @@ def check_byte_group_overlap(members):
     """PS-397: bit ranges within one byte_group must not overlap.
 
     Overlapping members were accepted by all five implementations, each reporting both
-    from the same bits; encoding then OR-ed two values into them.
+    from the same bits; encoding then OR-ed two values into them. Since CR-2026-131 a
+    whole-integer or bool member takes part too, and a member of any other kind is
+    rejected here.
     """
     seen = []
     for member in members or []:
-        bits = byte_group_member_bits(member)
-        if not bits:
+        if not isinstance(member, dict):
             continue
+        bits = byte_group_member_bits(member)
         for name, other in seen:
             if bits & other:
                 raise ValueError(
                     f"byte_group members '{name}' and '{member.get('name', '?')}' "
                     f"overlap (PS-397)")
         seen.append((member.get('name', '?'), bits))
-
-
-def byte_group_member_width(member):
-    """The bytes a byte_group member's base type spans: `u16[0:3]` and `u16` are 2.
-
-    A bool member is one byte; anything unrecognised counts as one, so it never widens
-    the group by itself.
-    """
-    if not isinstance(member, dict):
-        return 1
-    ftype = str(member.get('type', ''))
-    match = _BIT_RANGE.match(ftype)
-    if match:
-        return max(1, int(match.group(1)) // 8)
-    if ftype in INTEGER_TYPE_INFO:
-        return INTEGER_TYPE_INFO[ftype][0]
-    return 1
 
 
 def byte_group_declared_size(field_def):
@@ -577,19 +589,49 @@ def byte_group_declared_size(field_def):
 
 
 def byte_group_width(field_def):
-    """The bytes a byte_group covers (PS-070, CR-2026-131).
+    """The bytes a byte_group covers (PS-070, CR-2026-131), checking its members.
 
     A group that declares no `size` covers its widest member's base type, whichever
     bytes the member's bits fall in: a `u16[0:3]` member makes it two bytes. `size` may
-    widen it, never narrow it. Every implementation read a sizeless group as one byte,
-    so a `u16[8:15]` member decoded from the wrong byte with nothing reported - while
-    the encoders already widened to the base, so the two directions disagreed.
+    widen it; a `size` narrower than a member's base is a schema error naming the group.
+    Every implementation read a sizeless group as one byte, so a `u16[8:15]` member
+    decoded from the wrong byte with nothing reported - while the encoders already
+    widened to the base, so the two directions disagreed.
     """
     group = field_def.get('byte_group')
     members = group.get('fields', []) if isinstance(group, dict) else group
-    widest = max((byte_group_member_width(m) for m in members or []), default=1)
+    members = [m for m in members or [] if isinstance(m, dict)]
+    check_byte_group_overlap(members)
+    widest = max((byte_group_member_range(m)[0] for m in members), default=1)
     declared = byte_group_declared_size(field_def)
+    if declared is not None and declared < widest:
+        raise ValueError(
+            f"byte_group declares size {declared}, narrower than its widest member's "
+            f"{widest} bytes (PS-070)")
     return max(widest, declared or 1)
+
+
+def byte_group_errors(node, path=""):
+    """Every byte_group in a schema held to PS-070 and PS-397, wherever it sits - top
+    level, a port, a definition, a tlv case, a match branch - as `{path}: {message}`.
+    A group whose `size` is not an integer is left to the structural check."""
+    errors = []
+    if isinstance(node, dict):
+        group = node.get('byte_group')
+        if isinstance(group, (dict, list)):
+            size = group.get('size') if isinstance(group, dict) else node.get('size')
+            if size is None or (isinstance(size, int) and not isinstance(size, bool)):
+                try:
+                    byte_group_width(node)
+                except ValueError as exc:
+                    errors.append(f"{path or 'byte_group'}: {exc}")
+        for key, value in node.items():
+            if key != 'test_vectors':
+                errors.extend(byte_group_errors(value, f"{path}.{key}" if path else str(key)))
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            errors.extend(byte_group_errors(value, f"{path}[{index}]"))
+    return errors
 
 
 def parse_list_case_key(text):
@@ -4203,12 +4245,11 @@ class SchemaInterpreter:
         else:
             # Format 1: list of fields directly
             group_fields = byte_group
-        # PS-070 (CR-2026-131): the widest member's base, widened by any `size`.
-        group_size = byte_group_width(field_def)
-        
         if not group_fields:
             return pos
-        check_byte_group_overlap(group_fields)
+        # PS-070 (CR-2026-131): the widest member's base, widened by any `size`; a size
+        # narrower than a member, an overlap or a member of another kind is rejected.
+        group_size = byte_group_width(field_def)
         group_endian = byte_group_endian(field_def, self.endian)
         saved_endian, self.endian = self.endian, group_endian
         
@@ -4232,24 +4273,18 @@ class SchemaInterpreter:
                                      'little' if self.endian == Endian.LITTLE else 'big')
         for gf in group_fields:
             name = gf.get('name', 'unknown')
-            
-            # Force consume: 0 for all but track internally
-            gf_copy = dict(gf)
-            gf_copy['consume'] = 0
-            
             try:
-                match = _BIT_RANGE.match(str(gf.get('type', '')))
+                # PS-070: every member is a range of the group's value, read from its
+                # start - a whole integer is its full range, a bool one bit - so no member
+                # moves the position. A whole integer used to be read as its own field.
+                _, start, end, signed = byte_group_member_range(gf)
                 self._produced(gf)
-                if match:
-                    start, end = int(match.group(2)), int(match.group(3))
-                    width = end - start + 1
-                    value = (group_value >> start) & ((1 << width) - 1)
-                    if str(gf['type']).startswith('s') and value >= 1 << (width - 1):
-                        value -= 1 << width
-                elif gf.get('type') == 'bool':
-                    value = bool((group_value >> int(gf.get('bit', 0))) & 1)
-                else:
-                    value, _ = self._decode_field(gf_copy, buf, pos)
+                width = end - start + 1
+                value = (group_value >> start) & ((1 << width) - 1)
+                if gf.get('type') == 'bool':
+                    value = bool(value)
+                elif signed and value >= 1 << (width - 1):
+                    value -= 1 << width
                 value = self._apply_modifiers(value, gf)
                 if not name.startswith('_'):
                     result.data[name] = value
@@ -5470,9 +5505,8 @@ class SchemaInterpreter:
             group_fields = byte_group.get('fields', []) or []
         else:
             group_fields = byte_group or []
-        # PS-070 (CR-2026-131): the same width the decoder reads.
+        # PS-070 (CR-2026-131): the same width and member checks the decoder applies.
         size = byte_group_width(field_def)
-        check_byte_group_overlap(group_fields)
 
         packed = 0
         for gf in group_fields:
@@ -5496,12 +5530,10 @@ class SchemaInterpreter:
             if not isinstance(value, (int, float)):
                 continue
             value = int(round(value))
-            if '[' in gtype:
-                _, start, width = self._parse_bitfield_type(gtype)
-                packed |= (value & ((1 << width) - 1)) << start
-            else:
-                # A full-width member: it owns the group's bytes outright.
-                packed |= value
+            # A whole-integer member is its full range (PS-070): masked like any other, so
+            # a negative s8 writes its own byte, not a sign extended across the group.
+            _, start, end, _ = byte_group_member_range(gf)
+            packed |= (value & ((1 << (end - start + 1)) - 1)) << start
         group_endian = byte_group_endian(field_def, self.endian)
         byteorder = 'little' if group_endian == Endian.LITTLE else 'big'
         return int(packed).to_bytes(max(1, size), byteorder)

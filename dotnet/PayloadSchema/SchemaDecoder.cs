@@ -347,15 +347,15 @@ public static class SchemaDecoder
         foreach (var subfield in field.ByteGroup)
         {
             ctx.Produced(subfield);                                            // PS-490
+            // PS-070: every member is a range of the group's value, read from its start - a
+            // whole integer is its full range, a bool one bit. A whole integer took the
+            // whole group's value, so a u8 beside a u16[8:11] read both bytes.
             object raw;
-            var bitRange = Helpers.ParseBitRange(subfield.RawType);
-            if (bitRange != null)
-                raw = ExtractRange(rawVal, subfield.SignedBits, bitRange.Value.start,
-                    bitRange.Value.end - bitRange.Value.start + 1);
-            else if (subfield.Type == FieldType.Bool)
+            var range = Cr131.MemberRange(subfield);
+            if (subfield.Type == FieldType.Bool)
                 raw = ((rawVal >> subfield.Bit) & 1) == 1;
             else
-                raw = (double)rawVal;
+                raw = ExtractRange(rawVal, range.signed, range.low, range.high - range.low + 1);
 
             var value = ApplyPostRead(raw, subfield, ctx);
             if (ReferenceEquals(value, Omitted) || string.IsNullOrEmpty(subfield.Name))

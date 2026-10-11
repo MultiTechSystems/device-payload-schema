@@ -2248,15 +2248,15 @@ func decodeByteGroup(field Field, ctx *DecodeContext) (map[string]any, error) {
 
 	for _, subfield := range field.ByteGroup {
 		ctx.produced(subfield.decl, subfield.Name) // PS-490
+		// PS-070: every member is a range of the group's value, read from its start - a
+		// whole integer is its full range, a bool one bit. A whole integer took the whole
+		// group's value, so a u8 beside a u16[8:11] read both bytes.
 		var raw any
-		if m := bitRangePattern.FindStringSubmatch(string(subfield.Type)); m != nil {
-			start, _ := strconv.Atoi(m[2])
-			end, _ := strconv.Atoi(m[3])
-			raw = extractRange(rawVal, m[1][0] == 's', start, end-start+1)
-		} else if subfield.Type == TypeBoolLower || subfield.Type == TypeBool {
-			raw = (rawVal>>uint(subfield.Bit))&1 == 1
+		r := fieldMemberRange(subfield)
+		if r.isBool {
+			raw = (rawVal>>uint(r.low))&1 == 1
 		} else {
-			raw = float64(rawVal)
+			raw = extractRange(rawVal, r.signed, r.low, r.high-r.low+1)
 		}
 
 		// A member is an ordinary field that happens to share its bytes, so its
@@ -4522,14 +4522,14 @@ func encodeByteGroup(field Field, data map[string]any, ctx *EncodeContext) error
 			continue
 		}
 		num := uint64(int64(math.Round(raw)))
-		if m := bitRangePattern.FindStringSubmatch(string(gf.Type)); m != nil {
-			start, _ := strconv.Atoi(m[2])
-			end, _ := strconv.Atoi(m[3])
-			width := uint(end - start + 1)
-			packed |= (num & ((1 << width) - 1)) << uint(start)
-		} else {
-			packed |= num
+		// A whole integer is its full range (PS-070), masked like any other member.
+		r := fieldMemberRange(gf)
+		width := uint(r.high - r.low + 1)
+		mask := ^uint64(0)
+		if width < 64 {
+			mask = (1 << width) - 1
 		}
+		packed |= (num & mask) << uint(r.low)
 	}
 	endian := field.GroupEndian
 	if endian == "" {

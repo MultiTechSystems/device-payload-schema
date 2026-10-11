@@ -4,39 +4,53 @@
 namespace PayloadSchema;
 
 /// <summary>
-/// CR-2026-131: the bytes a byte_group covers (PS-070).
+/// CR-2026-131: the bytes a byte_group covers and the members it admits (PS-070). The
+/// load-time rules are <c>SchemaParser.CheckByteGroup</c>.
 /// </summary>
 public static class Cr131
 {
-    static readonly HashSet<FieldType> IntegerTypes = new()
+    /// <summary>The whole-integer types a member may name: <c>u16</c> is <c>u16[0:15]</c>.</summary>
+    public static readonly Dictionary<string, int> WholeIntegerBytes = new()
     {
-        FieldType.U8, FieldType.U16, FieldType.U24, FieldType.U32, FieldType.U64,
-        FieldType.S8, FieldType.S16, FieldType.S24, FieldType.S32, FieldType.S64,
-        FieldType.U32LE16, FieldType.S32LE16, FieldType.U32BE16LE, FieldType.S32BE16LE,
+        ["u8"] = 1, ["u16"] = 2, ["u24"] = 3, ["u32"] = 4, ["u64"] = 8,
+        ["uint8"] = 1, ["uint16"] = 2, ["uint24"] = 3, ["uint32"] = 4, ["uint64"] = 8,
+        ["s8"] = 1, ["s16"] = 2, ["s24"] = 3, ["s32"] = 4, ["s64"] = 8,
+        ["i8"] = 1, ["i16"] = 2, ["i24"] = 3, ["i32"] = 4, ["i64"] = 8,
+        ["int8"] = 1, ["int16"] = 2, ["int24"] = 3, ["int32"] = 4, ["int64"] = 8,
     };
 
     /// <summary>
-    /// The bytes a member's base type spans: <c>u16[0:3]</c> and <c>u16</c> are 2. A bool
-    /// member is one byte, and so is anything unrecognised.
+    /// A parsed member's base bytes and bits of the group's assembled value. A bit range is
+    /// itself, a whole integer its full range, a bool its <c>bit</c> of a u8. Every member
+    /// reads from the group's start; none moves the position.
     /// </summary>
-    public static int MemberWidth(SchemaField member)
+    public static (int baseBytes, int low, int high, bool signed) MemberRange(SchemaField member)
     {
-        if (Helpers.ParseBitRange(member.RawType) != null)
-            return Math.Max(1, member.BitBaseBytes);
-        return IntegerTypes.Contains(member.Type) ? Helpers.InferLengthFromType(member.Type) : 1;
+        var bitRange = Helpers.ParseBitRange(member.RawType);
+        if (bitRange != null)
+            return (Math.Max(1, member.BitBaseBytes), bitRange.Value.start, bitRange.Value.end,
+                member.SignedBits);
+        if (member.Type == FieldType.Bool)
+            return (1, member.Bit, member.Bit, false);
+        if (WholeIntegerBytes.TryGetValue(member.RawType, out var whole))
+        {
+            var raw = member.RawType;
+            return (whole, 0, whole * 8 - 1, raw.StartsWith("s") || raw.StartsWith("i"));
+        }
+        return (1, 0, 7, false);   // rejected at load; a field built in code reads one byte
     }
 
     /// <summary>
     /// With no <c>size</c>, a group covers its widest member's base type, whichever bytes
-    /// that member's bits fall in; <c>size</c> may widen it, never narrow it. Decoding read
-    /// a group with no size as one byte, so a <c>u16[8:15]</c> member decoded from the wrong
-    /// byte, while encoding already widened to the base.
+    /// that member's bits fall in; <c>size</c> may widen it, and a narrower one is rejected
+    /// at load. Decoding read a group with no size as one byte, so a <c>u16[8:15]</c>
+    /// member decoded from the wrong byte, while encoding already widened to the base.
     /// </summary>
     public static int ByteGroupWidth(SchemaField group)
     {
         int width = Math.Max(1, group.Size);
         foreach (var member in group.ByteGroup)
-            width = Math.Max(width, MemberWidth(member));
+            width = Math.Max(width, MemberRange(member).baseBytes);
         return width;
     }
 }

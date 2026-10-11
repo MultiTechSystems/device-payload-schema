@@ -25,9 +25,8 @@ from dataclasses import dataclass, field
 
 # Add tools to path
 sys.path.insert(0, str(Path(__file__).parent))
-from schema_interpreter import (SchemaInterpreter, DecodeResult, check_byte_group_overlap,
-                                byte_group_endian, byte_group_declared_size,
-                                byte_group_width,
+from schema_interpreter import (SchemaInterpreter, DecodeResult, byte_group_errors,
+                                byte_group_endian,
                                 encoding_errors, expand_refs, fport_declaration_errors,
                                 annotation_schema_errors, reference_errors,
                                 arithmetic_schema_errors, case_body_errors,
@@ -822,8 +821,9 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
             if span is not None and (not isinstance(span, int)
                                      or isinstance(span, bool) or span < 1):
                 errors.append(f"{bgpath}: 'size' must be an integer of at least 1")
+            # PS-070 and PS-397 (member kinds, overlap, a size no narrower than the widest
+            # member) are byte_group_errors', over every group wherever it sits.
             try:
-                check_byte_group_overlap(bg_fields)
                 byte_group_endian(fld, None)       # PS-364: no member endian
             except ValueError as exc:
                 errors.append(f"{bgpath}: {exc}")
@@ -1386,6 +1386,7 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
             group = entry.get('fields') if isinstance(entry, dict) else entry
             errors.extend(optional_errors(group, f"ports[{port}].fields"))
         errors.extend(internal_name_errors(schema))
+        errors.extend(byte_group_errors(schema))                 # PS-070, PS-397
         for field_def in typed_field_dicts(schema):
             # PS-427: a list of integers. PS-428: omit or flag.
             sentinel = field_def.get('sentinel')
@@ -1695,28 +1696,6 @@ def run_test_vector(interpreter: SchemaInterpreter, tv: Dict[str, Any]) -> TestR
     return result
 
 
-def byte_group_fields(node: Any, path: str = "") -> List[Tuple[str, Dict[str, Any]]]:
-    """Every mapping carrying a well-formed `byte_group`, wherever it sits, with its path.
-
-    A walk over the whole document rather than the field lists, so a group inside a tlv
-    case, a match branch or a definition is found as well as one at top level. A group
-    whose `size` is not an integer is left to the structural check, which reports it.
-    """
-    found: List[Tuple[str, Dict[str, Any]]] = []
-    if isinstance(node, dict):
-        group = node.get('byte_group')
-        if isinstance(group, (dict, list)):
-            size = group.get('size') if isinstance(group, dict) else node.get('size')
-            if size is None or (isinstance(size, int) and not isinstance(size, bool)):
-                found.append((path or "byte_group", node))
-        for key, value in node.items():
-            found.extend(byte_group_fields(value, f"{path}.{key}" if path else str(key)))
-    elif isinstance(node, list):
-        for index, value in enumerate(node):
-            found.extend(byte_group_fields(value, f"{path}[{index}]"))
-    return found
-
-
 def check_best_practices(schema: Dict[str, Any], result: ValidationResult) -> None:
     """Check for best practices and add warnings/info to result."""
 
@@ -1726,16 +1705,6 @@ def check_best_practices(schema: Dict[str, Any], result: ValidationResult) -> No
             result.add_warning("type string declares no value, so a decoder reports an "
                                "error; a string read from the payload is type ascii (PS-361)",
                                str(field_def.get('name', '?')))
-
-    # PS-070 (CR-2026-131): `size` widens a byte_group and never narrows it, so a size
-    # below a member's base type is overridden by that member.
-    for path, group_field in byte_group_fields(schema):
-        declared = byte_group_declared_size(group_field)
-        width = byte_group_width(group_field)
-        if declared is not None and declared < width:
-            result.add_warning(
-                f"byte_group declares size {declared}, narrower than its widest member's "
-                f"base type; the group covers {width} bytes (PS-070)", path)
 
     # PS-338: `fport` is accepted and never written.
     if 'fport' in schema and 'fPort' not in schema:

@@ -1,7 +1,8 @@
 # How many bytes a group of bit ranges covers (PS-070, CR-2026-131). With no `size`,
 # the group covers its widest member's base type, whichever bytes that member's bits
 # fall in: a `u16[...]` member makes it two bytes, a `u32[...]` member four. A `size`
-# may widen the group past that, never narrow it.
+# may widen the group past that; a narrower `size` is rejected. A member is a bit range,
+# a whole integer (its full range) or a bool with `bit`.
 #
 # Every implementation used to read a group with no `size` as one byte, so `upper`
 # below read 0, `nibble` read the high byte's low bits, and every later field came
@@ -41,10 +42,21 @@ fields:
       type: "u16[8:15]"
 - name: after_three
   type: u8
+# A whole integer is its full range, read from the group's start without moving it:
+# `s8` is `s8[0:7]`, beside a range of the other byte.
+- byte_group:
+    endian: little
+    fields:
+    - name: signed_low
+      type: s8
+    - name: mid
+      type: "u16[8:11]"
+- name: after_pair
+  type: u8
 test_vectors:
 - name: distinct
   source: spec-example
-  payload: "AB 05 11 78 00 00 9A 22 34 12 00 33"
+  payload: "AB 05 11 78 00 00 9A 22 34 12 00 33 FE 03 44"
   expected:
     upper: 171
     nibble: 5
@@ -55,9 +67,12 @@ test_vectors:
     lo: 52
     hi: 18
     after_three: 51
+    signed_low: -2
+    mid: 3
+    after_pair: 68
 - name: all_set
   source: spec-example
-  payload: "FF 0F 01 FF 00 00 FF 02 FF FF 00 03"
+  payload: "FF 0F 01 FF 00 00 FF 02 FF FF 00 03 FF 0F 04"
   expected:
     upper: 255
     nibble: 15
@@ -68,9 +83,12 @@ test_vectors:
     lo: 255
     hi: 255
     after_three: 3
+    signed_low: -1
+    mid: 15
+    after_pair: 4
 - name: zero
   source: spec-example
-  payload: "00 00 00 00 00 00 00 00 00 00 00 00"
+  payload: "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
   expected:
     upper: 0
     nibble: 0
@@ -81,3 +99,6 @@ test_vectors:
     lo: 0
     hi: 0
     after_three: 0
+    signed_low: 0
+    mid: 0
+    after_pair: 0

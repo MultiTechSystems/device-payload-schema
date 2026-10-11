@@ -468,8 +468,9 @@ final class Encoder {
                 long mask = member.getBits() >= 64 ? -1L : (1L << member.getBits()) - 1;
                 packed |= (raw & mask) << member.getBitOffset();
             } else {
-                // A full-width member owns the group's bytes outright.
-                packed |= raw;
+                // A whole integer is its full range (PS-070), masked like any other member.
+                int bits = member.getType().defaultLength() * 8;
+                packed |= bits >= 64 ? raw : raw & ((1L << bits) - 1);
             }
         }
         String groupEndian = group.getGroupEndian();
