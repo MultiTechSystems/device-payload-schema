@@ -127,3 +127,230 @@ def test_vectors_failing_on_the_original_fail_the_gate():
     assert any("unmutated" in r for r in out["regressions"])
     new = mg.compare({}, {"x/new.yaml": dict(e(1.0, 5, 0), failing_original=1)})
     assert new["regressions"]
+
+
+# ------------------------------------------------- --only-changed and --shard selection
+
+
+def test_full_sweep_reasons_name_the_tooling_and_the_interpreter():
+    sources = ["tools/schema_interpreter.py", "tools/schema_vocabulary.py"]
+    for path in mg.FULL_SWEEP_FILES + ("tools/schema_vocabulary.py",):
+        assert mg.full_sweep_reasons([path, "docs/FAQ.md"], sources) == [path]
+    assert (
+        mg.full_sweep_reasons(
+            ["schemas/devices/milesight/am102.yaml", "AGENTS.md", "tools/other.py"],
+            sources,
+        )
+        == []
+    )
+
+
+def test_the_harness_loads_the_interpreter_so_its_change_forces_a_full_sweep():
+    mg.load_harness()
+    sources = mg.harness_sources()
+    assert "tools/schema_interpreter.py" in sources
+    assert "tools/schema-mutation.py" in sources
+    assert mg.full_sweep_reasons(["tools/validate_schema.py"], sources)
+
+
+def test_schema_keys_keep_corpus_yaml_only_and_deleted_files():
+    corpus = REPO_ROOT / "schemas" / "devices"
+    keys = mg.schema_keys(
+        [
+            "schemas/devices/milesight/am102.yaml",
+            "schemas/devices/acme/gone.yaml",  # deleted: still judged
+            "schemas/library/common/headers.yaml",
+            "schemas/devices/milesight/README.md",
+            "tools/schema_interpreter.py",
+        ],
+        corpus,
+    )
+    assert keys == ["acme/gone.yaml", "milesight/am102.yaml"]
+
+
+def test_shards_partition_the_corpus_deterministically_and_balance_cost():
+    keys = ["s%02d.yaml" % i for i in range(40)]
+    weights = {k: float(i + 1) for i, k in enumerate(keys[:30])}  # 10 unweighted
+    shards = [mg.shard_of(keys, weights, i, 4) for i in range(1, 5)]
+    assert set().union(*shards) == set(keys)
+    assert sum(len(s) for s in shards) == len(keys)
+    assert shards == [
+        mg.shard_of(list(reversed(keys)), weights, i, 4) for i in range(1, 5)
+    ]
+    median = sorted(weights.values())[15]
+    loads = [sum(weights.get(k, median) for k in s) for s in shards]
+    assert max(loads) - min(loads) <= max(weights.values())
+    assert mg.shard_of(keys, weights, 1, 1) == set(keys)
+
+
+def _two_schema_tree(tmp_path):
+    root = tmp_path / "devices"
+    (root / "milesight").mkdir(parents=True)
+    shutil.copy(SOURCE, root / "milesight" / "am102.yaml")
+    shutil.copy(SOURCE, root / "milesight" / "twin.yaml")
+    baseline = tmp_path / "baseline.json"
+    args = ["--schemas-dir", str(root), "--baseline", str(baseline), "--workers", "1"]
+    assert mg.main(args + ["--update"]) == 0
+    return root, baseline, args
+
+
+def test_only_changed_scores_just_the_changed_schema(tmp_path, monkeypatch, capsys):
+    root, baseline, args = _two_schema_tree(tmp_path)
+    data = json.loads(baseline.read_text())
+    # Inflate the UNCHANGED schema's entry: judging it would fail the run.
+    data["schemas"]["milesight/twin.yaml"]["score"] = 1.01
+    baseline.write_text(json.dumps(data))
+    changed = [str(root / "milesight" / "am102.yaml"), "docs/FAQ.md"]
+    monkeypatch.setattr(mg, "changed_paths", lambda ref: changed)
+    capsys.readouterr()
+    assert mg.main(args + ["--changed-since", "BASE", "--only-changed"]) == 0
+    out = capsys.readouterr().out
+    assert "1 schemas scored" in out and "milesight/am102.yaml" in out
+    # The full sweep judges the twin and fails on it.
+    assert mg.main(args) == 1
+
+
+def test_only_changed_judges_a_changed_schema_against_the_baseline(
+    tmp_path, monkeypatch
+):
+    root, baseline, args = _two_schema_tree(tmp_path)
+    data = json.loads(baseline.read_text())
+    data["schemas"]["milesight/am102.yaml"]["score"] = 1.01
+    baseline.write_text(json.dumps(data))
+    changed = [str(root / "milesight" / "am102.yaml")]
+    monkeypatch.setattr(mg, "changed_paths", lambda ref: changed)
+    assert mg.main(args + ["--changed-since", "BASE", "--only-changed"]) == 1
+
+
+def test_only_changed_fails_a_deleted_baselined_schema(tmp_path, monkeypatch):
+    root, baseline, args = _two_schema_tree(tmp_path)
+    (root / "milesight" / "twin.yaml").unlink()
+    changed = [str(root / "milesight" / "twin.yaml")]
+    monkeypatch.setattr(mg, "changed_paths", lambda ref: changed)
+    assert mg.main(args + ["--changed-since", "BASE", "--only-changed"]) == 1
+
+
+def test_only_changed_holds_a_new_schema_to_the_floor(tmp_path, monkeypatch, capsys):
+    root, baseline, args = _two_schema_tree(tmp_path)
+    shutil.copy(SOURCE, root / "milesight" / "new.yaml")
+    changed = [str(root / "milesight" / "new.yaml")]
+    monkeypatch.setattr(mg, "changed_paths", lambda ref: changed)
+    capsys.readouterr()
+    floor = ["--min-score", "1.01"]
+    assert mg.main(args + ["--changed-since", "BASE", "--only-changed"] + floor) == 1
+    assert "new schema scores" in capsys.readouterr().out
+
+
+def test_only_changed_runs_the_full_sweep_when_the_interpreter_changes(
+    tmp_path, monkeypatch, capsys
+):
+    root, baseline, args = _two_schema_tree(tmp_path)
+    changed = ["tools/schema_interpreter.py"]
+    monkeypatch.setattr(mg, "changed_paths", lambda ref: changed)
+    capsys.readouterr()
+    assert mg.main(args + ["--changed-since", "BASE", "--only-changed"]) == 0
+    out = capsys.readouterr().out
+    assert "full sweep" in out and "2 schemas scored" in out
+
+
+def _run_shards(args, tmp_path, count, skip=()):
+    out = tmp_path / "parts"
+    for i in range(1, count + 1):
+        if i in skip:
+            continue
+        shard = ["--shard", "%d/%d" % (i, count)]
+        assert mg.main(args + shard + ["--parts-out", str(out / ("%d.json" % i))]) == 0
+    return out
+
+
+def test_shards_split_a_schema_and_judge_like_one_run(tmp_path, monkeypatch, capsys):
+    root, baseline, args = _two_schema_tree(tmp_path)
+    monkeypatch.setattr(mg, "MIN_PART_WEIGHT", 0.0)  # split even these small ones
+    out = _run_shards(args, tmp_path, 3)
+    units = set()
+    for name in ("1.json", "2.json", "3.json"):
+        units.update(json.loads((out / name).read_text())["units"])
+    assert any("#" in u for u in units), units  # parts really crossed shards
+    harness = mg.load_harness()
+    assert mg.load_shards(out, harness) == mg.run_harness(root, workers=1)
+    capsys.readouterr()
+    assert mg.main(args + ["--parts-in", str(out)]) == 0
+    assert "2 schemas scored" in capsys.readouterr().out
+    data = json.loads(baseline.read_text())
+    data["schemas"]["milesight/twin.yaml"]["score"] = 1.01
+    baseline.write_text(json.dumps(data))
+    assert mg.main(args + ["--parts-in", str(out)]) == 1
+
+
+def test_a_missing_shard_fails_the_judgement(tmp_path, monkeypatch, capsys):
+    _root, _baseline, args = _two_schema_tree(tmp_path)
+    monkeypatch.setattr(mg, "MIN_PART_WEIGHT", 0.0)
+    out = _run_shards(args, tmp_path, 3, skip=(2,))
+    capsys.readouterr()
+    assert mg.main(args + ["--parts-in", str(out)]) == 1
+    assert "FAIL" in capsys.readouterr().out
+
+
+def test_update_refuses_a_partial_run(tmp_path):
+    _root, _baseline, args = _two_schema_tree(tmp_path)
+    for extra in (
+        ["--changed-since", "BASE", "--only-changed"],
+        ["--shard", "1/2", "--parts-out", str(tmp_path / "p.json")],
+        ["--parts-in", str(tmp_path)],
+    ):
+        try:
+            mg.main(args + ["--update"] + extra)
+        except SystemExit as exc:
+            assert exc.code == 2
+        else:
+            raise AssertionError("--update ran a partial sweep")
+
+
+# ------------------------------------------------- splitting one schema's mutants
+
+
+def test_merged_parts_equal_the_unsplit_report():
+    import yaml
+
+    harness = mg.load_harness()
+    schema = yaml.safe_load(SOURCE.read_text(encoding="utf-8"))
+    whole = harness.mutate_schema(schema, "am102")
+    for count in (1, 2, 5):
+        parts = [
+            harness.mutate_schema(schema, "am102", part=(i, count))
+            for i in reversed(range(count))  # merge_parts orders them itself
+        ]
+        assert harness.merge_parts(parts) == whole
+    try:
+        harness.merge_parts([harness.mutate_schema(schema, "am102", part=(0, 2))])
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a missing part was merged")
+
+
+def test_part_bounds_cover_the_list_exactly():
+    harness = mg.load_harness()
+    for total in (0, 1, 7, 100):
+        for count in (1, 3, 8):
+            spans = [harness.part_bounds(total, i, count) for i in range(count)]
+            assert spans[0][0] == 0 and spans[-1][1] == total
+            assert all(a[1] == b[0] for a, b in zip(spans, spans[1:]))
+
+
+def test_only_a_dominant_schema_is_split():
+    weights = {"big.yaml": 10000000.0, "small.yaml": 30000.0, "tiny.yaml": 10.0}
+    parts = mg.plan_parts(weights, list(weights) + ["new.yaml"], workers=4)
+    assert parts["big.yaml"] == 16
+    assert parts["small.yaml"] == parts["tiny.yaml"] == parts["new.yaml"] == 1
+    assert mg.plan_parts(weights, weights, workers=1)["big.yaml"] == 1
+    # Alone, a light schema is still not split: each part repeats its setup.
+    assert mg.plan_parts(weights, ["small.yaml"], workers=4) == {"small.yaml": 1}
+
+
+def test_a_split_run_judges_like_an_unsplit_one(tmp_path):
+    root, _baseline, _args = _two_schema_tree(tmp_path)
+    whole = mg.run_harness(root, workers=1)
+    heavy = {"milesight/am102.yaml": 1e9, "milesight/twin.yaml": 1.0}
+    split = mg.run_harness(root, workers=2, weights=heavy)
+    assert split == whole

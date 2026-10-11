@@ -885,7 +885,8 @@ def run_vector(interp: SchemaInterpreter, vector: Dict[str, Any]) -> Outcome:
     if passed:
         # PS-043/PS-044, with a null expectation asserting absence (CR-2026-075).
         passed, _detail = expected_fields_match(
-            vector.get("expected") or {}, result.data, CONFORMANCE_TOLERANCE)
+            vector.get("expected") or {}, result.data, CONFORMANCE_TOLERANCE
+        )
     if passed:
         ok, _detail = warnings_match(vector.get("expected_warnings"), result.warnings)
         passed = ok
@@ -1039,13 +1040,28 @@ def _score(killed, survived):
     return round(killed / float(total), 4) if total else None
 
 
+def part_bounds(total: int, index: int, count: int) -> Tuple[int, int]:
+    """[start, stop) of contiguous part `index` (0-based) of `count` over `total` items."""
+    if count < 1 or not 0 <= index < count:
+        raise ValueError("part %d of %d is out of range" % (index, count))
+    return total * index // count, total * (index + 1) // count
+
+
 def mutate_schema(
     schema: Dict[str, Any],
     name: str = "<inline>",
     operators: Optional[Iterable[str]] = None,
     timeout: float = 5.0,
+    part: Optional[Tuple[int, int]] = None,
 ) -> Dict[str, Any]:
-    """Run every mutant of one schema and summarise it."""
+    """Run every mutant of one schema and summarise it.
+
+    With `part=(index, count)`, classify only that contiguous slice of the mutant list
+    and return a partial report for merge_parts(), which turns the `count` partial
+    reports of one schema into exactly the report a single run produces. Each mutant is
+    classified independently of every other, so a large schema's mutants can be spread
+    over processes.
+    """
     warnings.simplefilter("ignore")
     vectors = decode_vectors(schema)
     report = {
@@ -1065,7 +1081,11 @@ def mutate_schema(
     by_operator = {}  # type: Dict[str, Dict[str, int]]
     survivors = []
     unreached = []
-    for mutant in mutants:
+    selected = mutants
+    if part is not None:
+        start, stop = part_bounds(len(mutants), part[0], part[1])
+        selected = mutants[start:stop]
+    for mutant in selected:
         record = classify(mutant, schema, vectors, baseline, reached, timeout)
         status = record["status"]
         bucket = by_operator.setdefault(mutant.operator, {})
@@ -1074,6 +1094,73 @@ def mutate_schema(
             survivors.append(record)
         elif status == UNREACHED:
             unreached.append(record)
+    if part is not None:
+        report.update(
+            {
+                "part": list(part),
+                "generated": len(mutants),
+                "equivalent_by_operator": dict(equivalent),
+                "by_operator": by_operator,
+                "survivors": survivors,
+                "unreached_sites": unreached,
+            }
+        )
+        return report
+    return _summarise(
+        report, len(mutants), by_operator, equivalent, survivors, unreached
+    )
+
+
+def merge_parts(parts: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """One schema's report from the partial reports of mutate_schema(part=...).
+
+    Identical to an unsplit run: the parts are taken in order, their per-operator counts
+    added and their survivor and unreached lists concatenated. A part that failed makes
+    the whole schema's report that error.
+    """
+    for one in parts:
+        if "error" in one:
+            return {"schema": one.get("schema"), "error": one["error"]}
+    parts = sorted(parts, key=lambda one: one["part"][0])
+    count = parts[0]["part"][1]
+    if [one["part"] for one in parts] != [[i, count] for i in range(count)]:
+        raise ValueError(
+            "%s: parts %s do not cover 0..%d"
+            % (parts[0].get("schema"), [one["part"] for one in parts], count - 1)
+        )
+    first = parts[0]
+    report = {
+        key: first[key]
+        for key in ("schema", "vectors", "provenance", "vectors_failing_original")
+    }
+    by_operator = {}  # type: Dict[str, Dict[str, int]]
+    survivors = []  # type: List[Dict[str, Any]]
+    unreached = []  # type: List[Dict[str, Any]]
+    for one in parts:
+        for op, counts in one["by_operator"].items():
+            bucket = by_operator.setdefault(op, {})
+            for status, n in counts.items():
+                bucket[status] = bucket.get(status, 0) + n
+        survivors.extend(one["survivors"])
+        unreached.extend(one["unreached_sites"])
+    return _summarise(
+        report,
+        first["generated"],
+        by_operator,
+        first["equivalent_by_operator"],
+        survivors,
+        unreached,
+    )
+
+
+def _summarise(
+    report: Dict[str, Any],
+    generated: int,
+    by_operator: Dict[str, Dict[str, int]],
+    equivalent: Dict[str, int],
+    survivors: List[Dict[str, Any]],
+    unreached: List[Dict[str, Any]],
+) -> Dict[str, Any]:
     for op, count in equivalent.items():
         by_operator.setdefault(op, {})["equivalent"] = count
 
@@ -1088,7 +1175,7 @@ def mutate_schema(
     survived = total(SURVIVED, False)
     report.update(
         {
-            "generated": len(mutants),
+            "generated": generated,
             "killed": killed,
             "survived": survived,
             "possibly_equivalent": total(POSSIBLY_EQUIVALENT, False),
@@ -1113,14 +1200,16 @@ def mutate_schema(
 
 
 def mutate_file(args) -> Dict[str, Any]:
-    path, operators, timeout = args
+    """Job entry point: (path, operators, timeout[, (part_index, part_count)])."""
+    path, operators, timeout = args[:3]
+    part = args[3] if len(args) > 3 else None
     try:
         rel = str(Path(path).resolve().relative_to(REPO_ROOT))
     except ValueError:
         rel = str(path)
     try:
         schema = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
-        return mutate_schema(schema, rel, operators, timeout)
+        return mutate_schema(schema, rel, operators, timeout, part)
     except Exception as exc:  # pragma: no cover - report, do not abort the run
         return {"schema": rel, "error": "%s: %s" % (type(exc).__name__, exc)}
 

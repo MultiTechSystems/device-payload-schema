@@ -7,7 +7,11 @@
 #                   tools/crossval-baseline.json. Override their locations with
 #                   TTN_DEVICES_REPO=... DECENTLAB_DECODERS=... (environment or make).
 #   gate-mutation   needs nothing beyond the venv. GATE_MUTATION_ARGS passes extra
-#                   options, e.g. GATE_MUTATION_ARGS="--changed-since origin/master".
+#                   options, e.g. GATE_MUTATION_ARGS="--changed-since origin/master"
+#                   (list the changed schemas' survivors), adding "--only-changed" to
+#                   score only those schemas, as a pull request's CI does. CI also
+#                   splits the work with --shard/--parts-out and judges it with
+#                   --parts-in; see tools/mutation-gate.py.
 
 GATE_PYTHON ?= $(if $(PYTHON),$(PYTHON),.venv/bin/python)
 GATE_CROSSVAL_ARGS ?=
