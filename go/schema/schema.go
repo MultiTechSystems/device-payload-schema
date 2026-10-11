@@ -5089,7 +5089,8 @@ func encodeFlagged(fd *FlaggedDef, data map[string]any, ctx *EncodeContext) erro
 	// (vobo's digital groups) and a construct in one is encoded as any is (dnt's object).
 	// Each group used to be written member by member, a run flushed whole at the group's
 	// end. Mirrors _encode_flagged in tools/schema_interpreter.py; unnamed members are
-	// skipped, as there.
+	// skipped, as there. The list goes through encodeFields, so a run of bit ranges in
+	// it is packed by encodeBitfieldRun like any other (CR-2026-024).
 	var members []Field
 	for _, group := range fd.Groups {
 		given := false
