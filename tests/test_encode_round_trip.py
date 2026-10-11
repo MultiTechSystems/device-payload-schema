@@ -68,7 +68,7 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # vector with no null (CR-2026-111), all repeat. Its two null vectors are refused.
 # +2: guard-set (CR-2026-118), plain fixed. The other three CR-2026-118 fixtures are
 # refused (PS-542, PS-387).
-FLOOR_TOTAL = 1794  # +4: match-u32-inline-discriminator
+FLOOR_TOTAL = 1800  # +4: match-u32-inline-discriminator
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
