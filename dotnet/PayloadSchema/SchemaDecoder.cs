@@ -344,17 +344,11 @@ public static class SchemaDecoder
         int size = Cr131.ByteGroupWidth(field);                    // PS-070, CR-2026-131
         if (ctx.Remaining < size)
         {
-            // PS-535: a member reads the group's bytes from its start, so the first
-            // member whose own base does not fit is the field that read past the end, as
-            // the spec prototype names it. Where every base fits and the group's `size`
-            // does not, the group itself made the read. A member's base is CR-2026-131's:
-            // a bit range's base, a whole integer's width, one byte for a bool.
-            foreach (var member in field.ByteGroup)
-            {
-                if (Cr131.MemberRange(member).baseBytes > ctx.Remaining)
-                    throw BufferUnderflowException.PeekAt(ctx.Offset).Name(member.Name, member.RawType);
-            }
-            throw BufferUnderflowException.Need(size, ctx.Offset, ctx.Data.Length).Name(null, "byte_group");
+            // PS-535: the group is read as one value (CR-2026-131), so the failing read is
+            // the group's, in the peek form, and every member is lost; it is identified by
+            // its members, as the spec prototype does.
+            throw BufferUnderflowException.PeekAt(ctx.Offset)
+                .NameAs(BufferUnderflowException.ByteGroupLabel(field.ByteGroup.Select(m => m.Name)));
         }
         var data = ctx.Read(size);
         var result = new Dictionary<string, object?>();

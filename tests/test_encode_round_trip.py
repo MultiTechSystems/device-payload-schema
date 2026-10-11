@@ -96,8 +96,21 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # +1: the merge of the two. lookup-reference-binding's an_unnamed_enum_code_is_omitted_
 # but_bound (match) reports no discriminator, so neither side re-encoded it alone; with
 # PS-551 the code is derived from the case whose fields are given.
+# +1: CR-2026-135's encoder-rounding fixture, its decode vector (plain fixed). Its two
+# encode vectors are no round trip, and arithmetic-worked-examples' omits a field.
+# +264: CR-2026-136 lays bit ranges and bools out as a decoder reads them. A range that
+# does not consume shares its byte with the next field - also across a construct's end,
+# and inside a flagged group - instead of writing it twice, so the peeks in vobo (150),
+# dnt-lw-wsci (75) and milesight ct10x/ct30x/gs301/ws515 (39) round-trip; all tlv.
+# -26 deliberately, merging CR-2026-136 with CR-2026-134: 2132 combined (2079 + 1841 -
+# 1814) less 26 tlv vectors of milesight ct10x (12), ct30x (6), gs301 (6) and ws515 (2)
+# that CR-2026-136 round-tripped by leaving a status peek's bits zero. The peek is a
+# `u16[0:15]` whose lookup misses on an ordinary reading, so the decode omits it
+# (PS-269), and PS-551 makes it a required value the input does not give: the encode is
+# rejected naming the status. Not derivable either - a peek's bytes are written by the
+# field after it (_is_peek).
 # +4: mask-reference-binding (flagged): a `$mask` reference resolves to its binding.
-FLOOR_TOTAL = 1845
+FLOOR_TOTAL = 2084
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -105,9 +118,9 @@ FLOOR_BY_SHAPE = {
     # 1283 -> 1281 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped
     # only because their internal byte halves were all zero, which the encoder wrote
     # for an internal field with no value. It now reports such a field instead.
-    "tlv": 1305,   # +2: CR-2026-128; +3: CR-2026-125 fixtures; +1: tlv-repeat-merge (CR-2026-110)
+    "tlv": 1543,  # -26: CR-2026-136 with CR-2026-134 (see FLOOR_TOTAL); +264: CR-2026-136 (see FLOOR_TOTAL); +2: CR-2026-128; +3: CR-2026-125 fixtures; +1: tlv-repeat-merge (CR-2026-110)
     "flagged": 198,  # +1: CR-2026-134; +4: mask-reference-binding (see FLOOR_TOTAL)
-    "plain fixed": 147,
+    "plain fixed": 148,  # +1: CR-2026-135 (see FLOOR_TOTAL); +4: ascii-latin1 (CR-2026-114)
     # +1: CR-2026-132 enum port; +5: lookup-reference-binding (CR-2026-109);
     # +4: match-u32-inline-discriminator; +2: CR-2026-134; +1: both together (see
     # FLOOR_TOTAL)
