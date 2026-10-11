@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 from score_schema import (  # noqa: E402
     CONFORMANCE_TOLERANCE,
     MIN_VECTORS_HIGH_TIER,
+    NO_DETECTABLE_SEMANTIC_CREDIT,
     analyze_branch_coverage,
     calculate_score,
     check_annotation_correctness,
@@ -259,6 +260,21 @@ class TestIl204Classification:
         )
         assert results["annotation_errors"] == []
         assert results["senml_mapped"] == 1
+
+    def test_fields_inside_a_field_level_match_are_scanned(self):
+        """laq4 reports temperature and humidity from inside a `match:` block."""
+        results = semantic_results(
+            {"name": "mode", "type": "u8"},
+            {"match": {"field": "$mode", "cases": {
+                1: [{"name": "temperature", "type": "s16", "unit": "°C",
+                     "ipso": {"object": 3303}, "senml": {"unit": "Cel"}}],
+                2: {"fields": [{"name": "humidity", "type": "u8"}]},
+            }, "default": [{"name": "pressure", "type": "u16"}]}},
+        )
+        assert results["detectable_sensors"] == 3
+        assert results["ipso_mapped"] == 1
+        assert sorted(m.split(":")[0] for m in results["ipso_missing"]) == [
+            "humidity", "pressure"]
 
     def test_words_split_on_underscore_and_camel_case_ignoring_case(self):
         assert il204_words("Soil_TemperatureAlarm") == ["soil", "temperature", "alarm"]
@@ -505,6 +521,24 @@ class TestTiers:
         score, tier = calculate_score(self._perfect_results())
         assert tier == "PLATINUM"
         assert score >= 95
+
+    def test_no_detectable_field_earns_half_the_semantic_points(self):
+        """A schema IL-204 places nothing in gets 10 of 20, not 0 or 20 (PR #123)."""
+        none_detected = {
+            "total_fields": 3, "detectable_sensors": 0, "ipso_mapped": 0,
+            "senml_mapped": 0, "semantic_mapped": 0, "annotation_errors": [],
+        }
+        full, _ = calculate_score(self._perfect_results())
+        half, tier = calculate_score(
+            self._perfect_results(semantic_annotations=none_detected)
+        )
+        assert NO_DETECTABLE_SEMANTIC_CREDIT == 0.5
+        assert full - half == pytest.approx(10)
+        assert tier == "GOLD"
+        # A schema with no fields at all still has nothing to annotate.
+        empty, _ = calculate_score(self._perfect_results(
+            semantic_annotations=dict(none_detected, total_fields=0)))
+        assert empty == full
 
     def test_no_vectors_is_rejected_not_bronze(self):
         """The specification reserves Bronze for 60-69%; below that is Rejected."""

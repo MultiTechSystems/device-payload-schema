@@ -2593,12 +2593,12 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   `latitude` each demanded an object, is gone. A unit never selects an object (IL-203).
   A generic object (3300, 3320, 3325, 3332) is never a mismatch (IL-199). A
   name-silent field's annotation is neither expected nor flagged. See
-  `docs/IPSO-REFERENCE.md`. **A schema with no field IL-204 places gets no semantic
-  points**, because `calculate_score` awards none at zero detectable fields. That
-  cost 12 Platinum schemas their tier when the rule landed (laq4, uc50x, ws301, the
-  single-probe Decentlab models). laq4 is among them because the scan does not
-  descend into a field-level `match:`, so its temperature and humidity are never
-  seen.
+  `docs/IPSO-REFERENCE.md`. **A schema with no field IL-204 places gets half the
+  semantic points** (`NO_DETECTABLE_SEMANTIC_CREDIT`, 10 of 20), by decision on
+  PR #123. Giving none dropped 12 Platinum schemas whose only fields were battery,
+  voltage or position to Silver. Giving all 20 lifted 257 registry schemas to
+  Platinum without checking anything. The scan now descends into a field-level
+  `match:` too. Before that, laq4's temperature and humidity were never seen.
 - **The TS013 generator's shared-byte bug is fixed**: bare bit ranges, `consume` and
   `bool` with `bit:` decode correctly in generated JavaScript, and
   `tools/vector-verdicts.py` holds both paths to every corpus vector. What remains is

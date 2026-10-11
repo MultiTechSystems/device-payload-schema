@@ -56,6 +56,11 @@ from validate_schema import (validate_schema, ValidationResult, values_match,
 #: about whether a vector passes.
 CONFORMANCE_TOLERANCE = 0.001
 
+#: Share of the semantic points (IPSO + SenML + semantic) a schema earns when it
+#: has fields but none that IL-204 places from its name: half, by decision on
+#: PR #123. See calculate_score.
+NO_DETECTABLE_SEMANTIC_CREDIT = 0.5
+
 #: Tier thresholds from the specification, Section 10 (Conformance).
 TIER_THRESHOLDS = (
     (95, 'PLATINUM'),
@@ -1076,6 +1081,23 @@ def check_semantic_annotations(schema: Dict[str, Any]) -> Tuple[Dict[str, Any], 
                         scan_fields(case_def, prefix)
                 continue
 
+            # Handle a field-level `match:` block (CR-2026-018's spelling). Its
+            # case bodies report their fields at the level of the match itself,
+            # so they keep the enclosing prefix. Without this, every field in a
+            # message-type switch was invisible here: laq4's temperature and
+            # humidity were never seen.
+            if isinstance(field.get('match'), dict):
+                match_def = field['match']
+                bodies = list((match_def.get('cases') or {}).values())
+                if isinstance(match_def.get('default'), (list, dict)):
+                    bodies.append(match_def['default'])
+                for case_def in bodies:
+                    if isinstance(case_def, dict) and 'fields' in case_def:
+                        scan_fields(case_def['fields'], prefix)
+                    elif isinstance(case_def, list):
+                        scan_fields(case_def, prefix)
+                continue
+
             # Handle nested structures
             if field_type in ('object', 'match'):
                 if 'fields' in field:
@@ -1464,17 +1486,15 @@ def calculate_score(
         semantic_ratio = min(1.0, semantic_mapped / detectable)
         score += int(weights['semantic_coverage'] * semantic_ratio)
     elif total_fields > 0:
-        # Has fields but no standard sensors - partial credit based on any annotations
-        ipso_mapped = semantic.get('ipso_mapped', 0)
-        senml_mapped = semantic.get('senml_mapped', 0)
-        semantic_mapped = semantic.get('semantic_mapped', 0)
-        
-        if ipso_mapped > 0:
-            score += weights['ipso_coverage']
-        if senml_mapped > 0:
-            score += weights['senml_coverage']
-        if semantic_mapped > 0:
-            score += weights['semantic_coverage']
+        # No field IL-204 places from its name, so there is nothing the semantic
+        # checks can verify. Half credit, by Jason Reiss's decision when the
+        # IL-204 rule landed (PR #123): no points left a battery-only schema
+        # 20 short of Platinum for having no TTN quantity, and full points
+        # lifted 257 registry schemas to Platinum without checking anything.
+        score += int(
+            (weights['ipso_coverage'] + weights['senml_coverage']
+             + weights['semantic_coverage']) * NO_DETECTABLE_SEMANTIC_CREDIT
+        )
     else:
         # No fields at all - award full semantic points (edge case)
         score += weights['ipso_coverage'] + weights['senml_coverage'] + weights['semantic_coverage']

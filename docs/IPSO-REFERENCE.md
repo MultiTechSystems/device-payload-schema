@@ -116,6 +116,9 @@ the annotation names another quantity, as with `water_temperature` annotated
 3304. A field may opt out with `sensor: none`, or state its quantity with
 `sensor: temperature` where the name does not.
 
+A schema with fields but none that IL-204 places has nothing these checks can
+verify. It earns half of the 20 semantic points.
+
 ## Complex Codec Examples (from TTN lorawan-devices)
 
 These codecs demonstrate edge cases and features to consider:
