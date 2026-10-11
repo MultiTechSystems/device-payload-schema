@@ -300,7 +300,7 @@ def test_every_corpus_schema_and_example_has_only_known_keys():
     import yaml
 
     paths = sorted((REPO_ROOT / "schemas" / "devices").rglob("*.yaml"))
-    paths += sorted((REPO_ROOT / "examples").glob("*_resolved.yaml"))
+    paths += sorted((REPO_ROOT / "examples").glob("*.yaml"))
     bad = []
     for path in paths:
         schema = yaml.safe_load(path.read_text(encoding="utf-8"))

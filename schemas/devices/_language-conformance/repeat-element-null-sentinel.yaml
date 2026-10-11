@@ -1,0 +1,23 @@
+# A null in an array of single values is written back as the element's first reserved
+# raw value (PS-544, CR-2026-121). The element reserves two raw values; either decodes
+# to null in its position (PS-427, PS-528), and the first one listed is what an encoder
+# writes, so this vector round-trips.
+#
+# An element with no reserved value has nothing to write for null, and an encoder
+# reports an error naming the array and the position instead. No vector expects a
+# failure, so that half is held by each implementation's own tests.
+name: probe_repeat_element_null_sentinel
+endian: big
+fields:
+- name: probes
+  type: repeat
+  count: 3
+  element:
+    type: u16
+    sentinel: [0xFFFF, 0xFFFE]
+test_vectors:
+- name: middle_reserved
+  source: spec-example
+  payload: "0001 FFFF 0003"
+  expected:
+    probes: [1, null, 3]

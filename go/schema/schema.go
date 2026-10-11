@@ -224,6 +224,9 @@ type Field struct {
 	// repeat reports each element's value rather than a record holding it.
 	IndexBase   int    `json:"-" yaml:"-"`
 	ElementName string `json:"-" yaml:"-"`
+	// Siblings are the repeats a `$name[i]` reference in this repeat names (PS-546): each
+	// must report as many values as this one.
+	Siblings []string `json:"-" yaml:"-"`
 	// Carry is a computed element field's value before the first element: a number or a
 	// `$name` (PS-378). nil when the field carries nothing.
 	Carry any `json:"-" yaml:"-"`
@@ -3838,6 +3841,20 @@ func decodeRepeat(field Field, ctx *DecodeContext) ([]any, error) {
 			len(result), minIterations)
 	}
 
+	// PS-546: a sibling identifying these values position by position reported as many
+	// values as this repeat, or the pairing names nothing.
+	for _, name := range field.Siblings {
+		reported, isList := ctx.Variables[name].([]any)
+		if !isList || len(reported) != len(result) {
+			have := "none"
+			if isList {
+				have = fmt.Sprint(len(reported))
+			}
+			return nil, fmt.Errorf("Repeat '%s' has %d values and '%s', which identifies them, has %s (PS-546)",
+				field.Name, len(result), name, have)
+		}
+	}
+
 	// PS-367: the number of elements reported, bound for every later field only.
 	if field.CountAs != "" {
 		ctx.Variables[field.CountAs] = len(result)
@@ -4608,12 +4625,12 @@ func encodeRepeatRecords(field Field, records []any, ctx *EncodeContext) error {
 	}
 	if field.ElementName != "" {
 		// PS-529: each value is encoded as the element, wrapped as it was decoded.
-		// CR-2026-111 leaves open what a null position encodes as; the spec prototype
-		// refuses it rather than guess, and so does every encoder here.
+		// PS-544: a null is written as the element's first sentinel, which the field
+		// list writes as raw bits for a nil value; with no sentinel it is an error.
 		wrapped := make([]any, len(records))
 		for position, item := range records {
-			if item == nil {
-				return fmt.Errorf("Repeat '%s' has null at position %d, which has no encoding (PS-529)",
+			if item == nil && (len(field.Fields) == 0 || len(field.Fields[0].Sentinel) == 0) {
+				return fmt.Errorf("Repeat '%s' has null at position %d, and its element declares no `sentinel` to write for it (PS-544)",
 					field.Name, position)
 			}
 			wrapped[position] = map[string]any{field.ElementName: item}

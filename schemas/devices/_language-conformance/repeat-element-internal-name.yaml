@@ -1,0 +1,22 @@
+# The name of an array's single element is never reported (PS-528), so a leading
+# underscore on it hides nothing: the values are decoded and reported like any other
+# (PS-545, CR-2026-121). Before the CR the internal name dropped each value, and every
+# position read null.
+#
+# The name still binds, so a condition on the element can read `$_raw`; each
+# implementation's own tests cover that, since dropping an element cannot be re-encoded.
+name: probe_repeat_element_internal_name
+endian: big
+fields:
+- name: values
+  type: repeat
+  count: 2
+  element:
+    name: _raw
+    type: u8
+test_vectors:
+- name: both_reported
+  source: spec-example
+  payload: "01 02"
+  expected:
+    values: [1, 2]
