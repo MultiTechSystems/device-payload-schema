@@ -33,6 +33,11 @@ from pathlib import Path
 import pytest
 import yaml
 
+# Every test here builds the C interpreter into build-linux-debug/ (make selftest,
+# make test-c, the corpus harness). Under xdist two workers relinking and running the
+# same binaries race ("Text file busy"), so they share one worker.
+pytestmark = pytest.mark.xdist_group("c-build")
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HEADER = REPO_ROOT / "include" / "schema_interpreter.h"
 SELFTEST = REPO_ROOT / "src" / "selftest_schema.c"
