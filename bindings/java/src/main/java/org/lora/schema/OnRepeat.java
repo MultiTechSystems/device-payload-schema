@@ -48,6 +48,7 @@ final class OnRepeat {
         String dflt = (String) rawDefault;
         Map<String, String> modes = new LinkedHashMap<>();
         Map<String, Set<String>> lastMembers = new LinkedHashMap<>();
+        Map<List<String>, List<Map<?, ?>>> shared = new LinkedHashMap<>();
         if (tlv.get("cases") instanceof Map<?, ?> cases) {
             for (Object body : cases.values()) {
                 if (!(body instanceof List<?> list)) continue;
@@ -76,13 +77,24 @@ final class OnRepeat {
                         Set<String> last = lastMembers.computeIfAbsent(name, k -> new LinkedHashSet<>());
                         if (field.get("fields") instanceof List<?> members) {
                             for (Object m : members) {
-                                if (m instanceof Map<?, ?> member && "last".equals(member.get("on_repeat"))
-                                        && member.get("name") instanceof String mn && !mn.isEmpty()) {
-                                    last.add(mn);
-                                }
+                                if (!(m instanceof Map<?, ?> member)
+                                        || !(member.get("name") instanceof String mn) || mn.isEmpty()) continue;
+                                shared.computeIfAbsent(List.of(name, mn), k -> new java.util.ArrayList<>()).add(member);
+                                if ("last".equals(member.get("on_repeat"))) last.add(mn);
                             }
                         }
                     }
+                }
+            }
+        }
+        // CR-2026-128: merged cases share a member only where it declares `last` (PS-526).
+        for (Map.Entry<List<String>, List<Map<?, ?>>> e : shared.entrySet()) {
+            if (e.getValue().size() < 2) continue;
+            for (Map<?, ?> declaration : e.getValue()) {
+                if (!"last".equals(declaration.get("on_repeat"))) {
+                    throw new SchemaException("tlv: cases share the member '" + e.getKey().get(1)
+                            + "' of the merged object '" + e.getKey().get(0)
+                            + "' without `on_repeat: last` (PS-526)");
                 }
             }
         }

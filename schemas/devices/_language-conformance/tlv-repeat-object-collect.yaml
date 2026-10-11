@@ -3,9 +3,9 @@
 # an array as PS-157 has always done. Every field reporting the name declares it, as
 # PS-526 requires.
 #
-# Does not round-trip: the array's elements are written one entry per element under the
-# first case declaring the name (PS-502, PS-527 as CR-2026-125 amends it), so `dr`,
-# which that case's object does not declare, is not written.
+# Round-trips: each element goes under the first case whose members it supplies exactly
+# (PS-527 as CR-2026-128 replaces it), so `{adr: 1}` is written under 0x0310 and
+# `{dr: 5}` under 0x0311.
 name: probe_tlv_repeat_object_collect
 endian: big
 fields:

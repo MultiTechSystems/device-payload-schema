@@ -833,16 +833,34 @@ function encTlvTag(out, key, tlv, ctx) {              // _encode_tlv_tag
   encWriteInt(out, encParseInt0(key), tlv.tag_size === undefined ? 1 : tlv.tag_size, false, ctx.endian);
 }
 
+function encCaseClaims(fields, optional) {             // _case_claims
+  var out = [];
+  (fields || []).forEach(function (f) {
+    if (!f || typeof f !== "object") return;
+    if ("byte_group" in f && !f.type) {
+      var g = f.byte_group;
+      out = out.concat(encCaseClaims(Array.isArray(g) ? g : (g.fields || []), optional));
+      return;
+    }
+    if ("flagged" in f && !f.type) {
+      (f.flagged.groups || []).forEach(function (grp) { out = out.concat(encCaseClaims(grp.fields || [], true)); });
+      return;
+    }
+    if (!f.name || String(f.name).charAt(0) === "_" || ENC_COMPUTED.indexOf(f.type) >= 0) return;
+    out.push([f, !!optional || f.optional === true]);
+  });
+  return out;
+}
+
 function encTlv(out, f, data, ctx) {                  // _encode_tlv
   var tlv = f.tlv || {}, cases = tlv.cases || {}, lsize = tlv.length_size || 0;
   if (tlv.merge === false) encFail("a tlv with merge: false reports its entries under 'channels', and encoding them is not supported");
-  var order = Object.keys(data), cands = [];
-  // PS-527 (CR-2026-110, CR-2026-125). `rep` is tlv_repeat_modes and tlv_encode_plan,
-  // resolved at generation time, with the cases' declaration order: an object's
-  // integer-like keys iterate in ascending order, not the order the schema wrote them.
-  var rep = tlv.__on_repeat || {}, has = Object.prototype.hasOwnProperty;
-  var modes = rep.modes || {}, first = rep.first || {}, members = rep.members || {};
-  var mowner = rep.owner || {}, declaring = rep.declaring || {}, lastm = rep.last || {};
+  var order = Object.keys(data), has = Object.prototype.hasOwnProperty;
+  // PS-525 to PS-527 (CR-2026-110, -125, -128). `rep` is tlv_repeat_modes and
+  // tlv_encode_plan, resolved at generation time, with the cases' declaration order: an
+  // object's integer-like keys iterate in ascending order, not the order written.
+  var rep = tlv.__on_repeat || {};
+  var modes = rep.modes || {}, members = rep.members || {};
   var keys = rep.order || Object.keys(cases);
   // A supplied member of a merged object that no case declares has nowhere to go.
   Object.keys(members).forEach(function (n) {
@@ -851,71 +869,95 @@ function encTlv(out, f, data, ctx) {                  // _encode_tlv
     var stray = Object.keys(v).filter(function (m) { return members[n].indexOf(m) < 0; }).sort();
     if (stray.length) encFail("tlv: the merged object '" + n + "' is given [" + stray.map(function (m) { return "'" + m + "'"; }).join(", ") + "], which no case declares (PS-527)");
   });
+  // Each value goes under the first case whose declared fields it supplies in full;
+  // nothing is zero-filled or dropped. A case requiring more fields is tried first.
+  var entries = [];
   keys.forEach(function (key) {
     if (key === "default" || !Array.isArray(cases[key])) return;
-    var caseData = data, claimed = [], units = [], arrays = [];
-    encClaimable(cases[key]).forEach(function (c) {
+    var req = [], opt = [];
+    encCaseClaims(cases[key]).forEach(function (c) { (c[1] ? opt : req).push(c[0]); });
+    entries.push({ key: key, body: cases[key], req: req, opt: opt, seq: entries.length });
+  });
+  entries.sort(function (a, b) { return b.req.length - a.req.length || a.seq - b.seq; });
+  var queues = {}, pending = {};
+  entries.forEach(function (e) {
+    e.req.concat(e.opt).forEach(function (c) {
       var n = c.name;
-      if (!has.call(data, n)) return;
-      var mode = modes[n] || "collect", v = data[n];
-      // _reports_list: an array PS-157 collected, unless the field's own value is a list.
-      var collected = Array.isArray(v) && c.type !== "repeat" && !(c.type === "bytes" && c.format === "array");
-      // A `last` value and a collected array are written under the first case declaring the name.
-      if ((mode === "last" || collected) && first[n] !== key) return;
-      if (mode === "merge" && v !== null && typeof v === "object" && !Array.isArray(v)) {
-        // One entry per case declaring any of the merged object's members the input
-        // supplies, each member under the first case declaring it, or under every one
-        // for a member declaring `last` - so what a case spends is its own.
-        var sub = {}, any = false;
-        Object.keys(v).forEach(function (m) {
-          var mine = (mowner[n] || {})[m] === key ||
-            ((lastm[n] || []).indexOf(m) >= 0 && ((declaring[n] || {})[m] || []).indexOf(key) >= 0);
-          if (mine) { sub[m] = v[m]; any = true; }
-        });
-        if (!any) return;
-        if (caseData === data) { caseData = {}; for (var k in data) caseData[k] = data[k]; }
-        caseData[n] = sub;
-        claimed.push(n); units.push(n + "\u0000" + key);
-        return;
-      }
-      if (collected) arrays.push(n);
-      claimed.push(n); units.push(n);
+      if (!has.call(data, n) || has.call(queues, n) || modes[n] === "merge") return;
+      var v = data[n];
+      var collected = Array.isArray(v) && c.type !== "repeat" && !(c.type === "bytes" && c.format === "array") && (modes[n] || "collect") === "collect";
+      queues[n] = collected ? v.slice() : [v];
     });
-    if (!claimed.length) return;
-    var entries = [caseData];
-    if (arrays.length) {
-      // PS-502: one entry per element; every name the case writes must be an array of one length.
-      var len = data[arrays[0]].length;
-      if (arrays.length !== claimed.length || arrays.some(function (n) { return data[n].length !== len; }))
-        encFail("tlv case " + key + ": [" + claimed.map(function (n) { return "'" + n + "'"; }).join(", ") + "] cannot be written one entry per element: the collected arrays differ in length or sit beside a single value (PS-502)");
-      entries = [];
-      for (var i = 0; i < len; i++) {
-        var one = {};
-        for (var k2 in caseData) one[k2] = caseData[k2];
-        arrays.forEach(function (n) { one[n] = data[n][i]; });
-        entries.push(one);
-      }
+  });
+  Object.keys(members).forEach(function (n) {
+    var v = data[n];
+    if (v !== null && typeof v === "object" && !Array.isArray(v)) pending[n] = Object.keys(v);
+  });
+  function membersOf(c) { return (c.fields || []).filter(function (m) { return m && m.name; }).map(function (m) { return m.name; }); }
+  function fits(c, v) {
+    if (c.type === "object" && v !== null && typeof v === "object" && !Array.isArray(v) && modes[c.name] !== "merge") {
+      var claims = encCaseClaims(c.fields || []), every = {}, ok = true;
+      claims.forEach(function (x) { every[x[0].name] = true; if (!x[1] && !has.call(v, x[0].name)) ok = false; });
+      Object.keys(v).forEach(function (k) { if (!every[k]) ok = false; });
+      return ok;
     }
-    var fid = encCaseFidelity(cases[key], entries[0]);
-    var position = Math.min.apply(null, claimed.map(function (n) { return order.indexOf(n); }));
-    cands.push({ p: position, l: fid[1] ? 0 : 1, m: -fid[0], key: key, body: cases[key], units: units, entries: entries, seq: cands.length });
-  });
-  cands.sort(function (a, b) { return a.p - b.p || a.l - b.l || a.m - b.m || a.seq - b.seq; });
-  var spent = {}, emitted = [];
-  cands.forEach(function (c) {
-    if (c.units.every(function (n) { return spent[n]; })) return;
-    c.units.forEach(function (n) { spent[n] = true; });
-    emitted.push(c);
-  });
-  emitted.sort(function (a, b) { return a.p - b.p || a.seq - b.seq; });
-  emitted.forEach(function (c) {
-    c.entries.forEach(function (entry) {
-      encTlvTag(out, c.key, tlv, ctx);
-      var value = [];
-      encList(value, c.body, entry, ctx);
-      if (lsize > 0) encWriteInt(out, value.length, lsize, false, ctx.endian);
-      for (var i = 0; i < value.length; i++) out.push(value[i]);
+    var one = {}; one[c.name] = v;
+    return encCaseFidelity([c], one)[1];
+  }
+  var written = [], progress = true;
+  while (progress) {
+    progress = false;
+    entries.forEach(function (e) {
+      for (;;) {
+        var values = {}, taken = 0, complete = true;
+        for (var i = 0; i < e.req.length; i++) {
+          var c = e.req[i], n = c.name;
+          if (modes[n] === "merge") {
+            var ms = membersOf(c);
+            if (!has.call(pending, n) || ms.some(function (m) { return !has.call(data[n], m); })) { complete = false; break; }
+            var sub = {};
+            ms.forEach(function (m) { sub[m] = data[n][m]; });
+            values[n] = sub;
+            if (ms.some(function (m) { return pending[n].indexOf(m) >= 0; })) taken++;
+          } else {
+            var q = queues[n];
+            if (!q || !q.length || !fits(c, q[0])) { complete = false; break; }
+            values[n] = q[0]; taken++;
+          }
+        }
+        if (!complete) break;
+        e.opt.forEach(function (c) {
+          var q = queues[c.name];
+          if (q && q.length && fits(c, q[0])) { values[c.name] = q[0]; taken++; }
+        });
+        if (!taken) break;
+        var entry = {}, pos = Infinity;
+        for (var k in data) entry[k] = data[k];
+        Object.keys(values).forEach(function (n) {
+          entry[n] = values[n];
+          pos = Math.min(pos, order.indexOf(n));
+          if (modes[n] === "merge") pending[n] = pending[n].filter(function (m) { return !has.call(values[n], m); });
+          else queues[n].shift();
+        });
+        written.push({ key: e.key, body: e.body, data: entry, p: pos, seq: written.length });
+        progress = true;
+      }
     });
+  }
+  Object.keys(queues).forEach(function (n) {
+    if (queues[n].length) encFail("tlv: no case takes the value of '" + n + "' " + JSON.stringify(queues[n][0]) + " in full (PS-502, PS-527)");
+  });
+  Object.keys(pending).forEach(function (n) {
+    if (pending[n].length) encFail("tlv: no case takes the members [" + pending[n].slice().sort().map(function (m) { return "'" + m + "'"; }).join(", ") + "] of the merged object '" + n + "' in full (PS-527)");
+  });
+  // Payload order, so a payload round-trips; entries of one name keep the order taken.
+  written.sort(function (a, b) { return a.p - b.p || a.seq - b.seq; });
+  written.forEach(function (w) {
+    encTlvTag(out, w.key, tlv, ctx);
+    var value = [];
+    encList(value, w.body, w.data, ctx);
+    if (lsize > 0) encWriteInt(out, value.length, lsize, false, ctx.endian);
+    for (var i = 0; i < value.length; i++) out.push(value[i]);
   });
 }
 
@@ -1138,8 +1180,8 @@ def _tlv_repeat_modes(tlv):
 
 def _annotate_on_repeat(node):
     """A copy of an encoder plan with each tlv carrying `__on_repeat`: its names' modes
-    (PS-525), tlv_encode_plan's tables (PS-527) and the cases' declaration order, which
-    a JSON object with integer-like keys does not keep."""
+    (PS-525), each merged object's declared members (PS-527) and the cases' declaration
+    order, which a JSON object with integer-like keys does not keep."""
     from schema_interpreter import tlv_encode_plan
     if isinstance(node, list):
         return [_annotate_on_repeat(item) for item in node]
@@ -1152,13 +1194,7 @@ def _annotate_on_repeat(node):
         plan = tlv_encode_plan(tlv, modes, last_members)
         out['tlv'] = dict(out['tlv'], __on_repeat={
             'modes': {k: v for k, v in modes.items() if v != 'collect'},
-            'first': {k: str(v) for k, v in plan['first'].items()},
             'members': {k: sorted(v) for k, v in plan['members'].items()},
-            'owner': {k: {m: str(c) for m, c in v.items()}
-                      for k, v in plan['owner'].items()},
-            'declaring': {k: {m: [str(c) for c in cs] for m, cs in v.items()}
-                          for k, v in plan['declaring'].items()},
-            'last': {k: sorted(v) for k, v in last_members.items() if v},
             'order': [str(key) for key in tlv['cases']],
         })
     return out

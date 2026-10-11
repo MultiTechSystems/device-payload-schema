@@ -109,42 +109,59 @@ public class CR2026_110Tests
     [Fact]
     public void MergeOnATlvSparesAScalar() => SchemaParser.Parse(Loramac);
 
-    // CR-2026-125 (PS-527, PS-525): the spec prototype's TestCR2026125OnRepeatEncoding.
+    // CR-2026-125 and CR-2026-128 (PS-525 to PS-527): the spec prototype's
+    // TestCR2026125OnRepeatEncoding and TestCR2026128FirstCaseThatFits.
 
     const string LoramacShared = "name: t\nendian: big\nfields:\n- tlv:\n    tag_size: 2\n    on_repeat: merge\n"
         + "    cases:\n"
-        + "      0x0310: [{name: loramac, type: object, fields: [{name: adr, type: u8}, {name: dr, type: u8}]}]\n"
-        + "      0x0311: [{name: loramac, type: object, fields: [{name: dr, type: u8}]}]\n";
+        + "      0x0310: [{name: loramac, type: object, fields: [{name: adr, type: u8}, {name: dr, type: u8, on_repeat: last}]}]\n"
+        + "      0x0311: [{name: loramac, type: object, fields: [{name: dr, type: u8, on_repeat: last}]}]\n";
+    const string Collected = "name: t\nendian: big\nfields:\n- tlv:\n    tag_size: 2\n    cases:\n"
+        + "      0x0310: [{name: mac, type: object, fields: [{name: adr, type: u8}]}]\n"
+        + "      0x0311: [{name: mac, type: object, fields: [{name: dr, type: u8}]}]\n";
+    const string SharedLast = "name: t\nendian: big\nfields:\n- tlv:\n    tag_size: 1\n    on_repeat: merge\n    cases:\n"
+        + "      1: [{name: o, type: object, fields: [{name: a, type: u8}, {name: m, type: u8, on_repeat: last}]}]\n"
+        + "      2: [{name: o, type: object, fields: [{name: b, type: u8}, {name: m, type: u8, on_repeat: last}]}]\n";
 
-    [Fact]
-    public void ACollectedNameIsWrittenUnderTheFirstCase()
+    static Dictionary<string, object?> D(params (string k, object? v)[] kv)
+        => kv.ToDictionary(p => p.k, p => p.v);
+
+    static void EncodesTo(string yaml, Dictionary<string, object?> data, string want)
     {
-        var result = SchemaEncoder.Encode(SchemaParser.Parse(Event("")),
-            new Dictionary<string, object?> { ["event"] = new List<object?> { 1L, 2L } });
+        var result = SchemaEncoder.Encode(SchemaParser.Parse(yaml), data);
         Assert.Empty(result.Errors);
-        Assert.Equal(Convert.FromHexString("3a013a02"), result.Payload);
+        Assert.Equal(Convert.FromHexString(want), result.Payload);
     }
 
     [Fact]
-    public void AMemberNoCaseDeclaresIsAnError()
+    public void EachValueGoesUnderTheFirstCaseItFills()
     {
-        var result = SchemaEncoder.Encode(SchemaParser.Parse(LoramacShared), new Dictionary<string, object?>
-        {
-            ["loramac"] = new Dictionary<string, object?> { ["adr"] = 1L, ["dr"] = 5L, ["fw"] = 3L },
-        });
+        EncodesTo(Event(""), D(("event", new List<object?> { 1L, 2L })), "3a013a02");
+        EncodesTo(Event(""), D(("event", 3L)), "3a03");
+        EncodesTo(Collected, D(("mac", new List<object?> { D(("adr", 1L)), D(("dr", 5L)) })), "031001031105");
+        EncodesTo(LoramacShared, D(("loramac", D(("dr", 5L)))), "031105");
+        EncodesTo(LoramacShared, D(("loramac", D(("adr", 1L), ("dr", 5L)))), "03100105");
+        EncodesTo(SharedLast, D(("o", D(("a", 1L), ("b", 2L), ("m", 9L)))), "010109020209");
+    }
+
+    [Fact]
+    public void AValueNoCaseTakesInFullIsAnError()
+    {
+        var result = SchemaEncoder.Encode(SchemaParser.Parse(LoramacShared),
+            D(("loramac", D(("adr", 1L), ("dr", 5L), ("fw", 3L)))));
         Assert.Contains(result.Errors, e => e.Contains(
             "tlv: the merged object 'loramac' is given ['fw'], which no case declares (PS-527)"));
+        result = SchemaEncoder.Encode(SchemaParser.Parse(Collected),
+            D(("mac", new List<object?> { D(("adr", 1L), ("dr", 5L)) })));
+        Assert.Contains(result.Errors, e => e.Contains("tlv: no case takes the value of 'mac'"));
     }
 
     [Fact]
-    public void AMemberTwoCasesDeclareIsWrittenOnce()
+    public void ASharedMemberWithoutLastIsRejectedAtLoad()
     {
-        var result = SchemaEncoder.Encode(SchemaParser.Parse(LoramacShared), new Dictionary<string, object?>
-        {
-            ["loramac"] = new Dictionary<string, object?> { ["adr"] = 1L, ["dr"] = 5L },
-        });
-        Assert.Empty(result.Errors);
-        Assert.Equal(Convert.FromHexString("03100105"), result.Payload);
+        var e = Assert.ThrowsAny<Exception>(() => SchemaParser.Parse(LoramacShared.Replace(", on_repeat: last", "")));
+        Assert.Equal("tlv: cases share the member 'dr' of the merged object 'loramac' without `on_repeat: last` (PS-526)",
+            e.Message);
     }
 
     [Theory]

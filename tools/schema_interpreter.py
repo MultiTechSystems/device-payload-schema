@@ -821,6 +821,7 @@ def tlv_repeat_modes(tlv_def):
     errors = []  # type: List[str]
     modes = {}  # type: Dict[str, str]
     last_members = {}  # type: Dict[str, set]
+    shared = {}  # type: Dict[tuple, list]
     if not isinstance(tlv_def, dict):
         return modes, last_members, errors
     default = tlv_def.get('on_repeat', 'collect')
@@ -852,6 +853,15 @@ def tlv_repeat_modes(tlv_def):
                     member['name'] for member in field_def.get('fields') or []
                     if isinstance(member, dict) and member.get('on_repeat') == 'last'
                     and member.get('name'))
+                for member in field_def.get('fields') or []:
+                    if isinstance(member, dict) and member.get('name'):
+                        shared.setdefault((name, member['name']), []).append(member)
+    for (name, member), declarations in shared.items():
+        # CR-2026-128: merged cases share a member only where it declares `last`.
+        if len(declarations) > 1 and any(d.get('on_repeat') != 'last'
+                                         for d in declarations):
+            errors.append(f"tlv: cases share the member '{member}' of the merged object "
+                          f"'{name}' without `on_repeat: last` (PS-526)")
     return modes, last_members, errors
 
 
@@ -921,30 +931,21 @@ def _reports_list(field_def):
 
 
 def tlv_encode_plan(tlv_def, modes, last_members):
-    """What PS-527 (CR-2026-125) needs to know of a tlv's cases, in declaration order:
-    `first`, the first case declaring each name - a `last` value and an array PS-157
-    collected are written under it; for each merged object, `members`, every member
-    some case declares, `owner`, the first case declaring each member, which writes it
-    once, and `declaring`, every case declaring each member, all of which write a member
-    that declares `last`."""
-    first = {}  # type: Dict[str, Any]
+    """What PS-527 needs of a tlv's cases: `members`, for each merged object, every
+    member some case declares - a supplied member outside it is an error. Shared
+    members are `last` ones, as PS-526 requires, so each written case carries them.
+    `last_members` is accepted for the callers' symmetry with tlv_repeat_modes."""
     members = {}  # type: Dict[str, set]
-    owner = {}  # type: Dict[str, Dict[str, Any]]
-    declaring = {}  # type: Dict[str, Dict[str, list]]
     for case_key, body in (tlv_def.get('cases') or {}).items():
         if case_key == 'default' or not isinstance(body, list):
             continue
         for name, field_def in reported_fields(body).items():
-            first.setdefault(name, case_key)
             if modes.get(name) != 'merge':
                 continue
             for member in field_def.get('fields') or []:
                 if isinstance(member, dict) and member.get('name'):
-                    m = member['name']
-                    members.setdefault(name, set()).add(m)
-                    owner.setdefault(name, {}).setdefault(m, case_key)
-                    declaring.setdefault(name, {}).setdefault(m, []).append(case_key)
-    return {'first': first, 'members': members, 'owner': owner, 'declaring': declaring}
+                    members.setdefault(name, set()).add(member['name'])
+    return {'members': members}
 
 
 def combine_repeated(name, earlier, value, mode, last_members):
@@ -5919,6 +5920,32 @@ class SchemaInterpreter:
             out.append(f)
         return out
 
+    def _case_claims(self, case_fields, optional=False):
+        """_claimable_fields with each field marked optional or not (PS-527): a case is
+        filled only once the input supplies every required field. A flagged group's
+        fields are optional, since its mask says which are present, as is a field
+        declaring `optional: true` (PS-405)."""
+        out = []
+        for f in case_fields:
+            if not isinstance(f, dict):
+                continue
+            if 'byte_group' in f and not f.get('type'):
+                group = f['byte_group']
+                group_fields = (
+                    group.get('fields') or [] if isinstance(group, dict) else group
+                )
+                out.extend(self._case_claims(group_fields or [], optional))
+                continue
+            if 'flagged' in f and not f.get('type'):
+                for group in (f['flagged'].get('groups') or []):
+                    out.extend(self._case_claims(group.get('fields') or [], True))
+                continue
+            name = f.get('name')
+            if not name or str(name).startswith('_') or f.get('type') in COMPUTED_TYPES:
+                continue
+            out.append((f, optional or f.get('optional') is True))
+        return out
+
     def _case_fidelity(self, case_fields: List[Dict[str, Any]], data: Dict[str, Any]):
         """How well a candidate case explains the data: (matches, lossless).
 
@@ -5979,8 +6006,8 @@ class SchemaInterpreter:
         order = list(data)
         modes, last_members, _ = tlv_repeat_modes(tlv_def)
         plan = tlv_encode_plan(tlv_def, modes, last_members)
-        # PS-527 (CR-2026-125): a supplied member of a merged object that no case
-        # declares has nowhere to be written.
+        # PS-527: a supplied member of a merged object that no case declares has
+        # nowhere to be written.
         for n, members in plan['members'].items():
             if isinstance(data.get(n), dict):
                 stray = sorted(set(data[n]) - members)
@@ -5988,92 +6015,115 @@ class SchemaInterpreter:
                     raise ValueError(f"tlv: the merged object '{n}' is given {stray}, "
                                      f"which no case declares (PS-527)")
 
-        candidates = []
+        # PS-527 as CR-2026-128 replaces it: each value - a scalar, each element of an
+        # array PS-157 collected, a `last` value, a merged object's members - goes under
+        # the first case in declaration order whose declared fields it supplies in full.
+        # Nothing is zero-filled and nothing dropped; what no case takes is an error.
+        entries = []  # (case key, fields, required, optional)
         for case_key, case_fields in cases.items():
             if case_key == 'default' or not isinstance(case_fields, list):
                 continue
-            claimed = []
-            units = []          # what claiming this case spends
-            case_data = data
-            arrays = []         # names PS-157 collected, one entry per element
-            for f in self._claimable_fields(case_fields):
+            required, optional = [], []
+            for f, is_optional in self._case_claims(case_fields):
+                (optional if is_optional else required).append(f)
+            entries.append((case_key, case_fields, required, optional))
+        # A case requiring more fields is tried first, then declaration order. Among
+        # cases sharing a name, only the fuller one can take the others it declares:
+        # em400-mud's [3, 103] (temperature) is declared before [131, 103]
+        # (temperature, temperature_alarm), and taking temperature first strands the
+        # alarm, which no case would then take in full (CR-2026-029).
+        entries.sort(key=lambda entry: -len(entry[2]))
+
+        queues = {}  # type: Dict[str, list]
+        for _, _, required, optional in entries:
+            for f in required + optional:
                 n = f['name']
-                if n not in data:
-                    continue
-                mode = modes.get(n, 'collect')
-                collected = isinstance(data[n], list) and not _reports_list(f)
-                if (mode == 'last' or collected) and plan['first'].get(n) != case_key:
-                    # PS-527: a `last` value, and an array PS-157 collected, are written
-                    # under the first case in declaration order that declares the name.
-                    continue
-                if mode == 'merge' and isinstance(data[n], dict):
-                    # PS-527: one entry per case declaring any of the merged object's
-                    # members the input supplies, holding those members. A member
-                    # several cases declare is written once, under the first, unless it
-                    # declares `last`, which every declaring case writes. So what each
-                    # case spends is its own and never already spent.
-                    owner = plan['owner'].get(n, {})
-                    subset = {m: v for m, v in data[n].items()
-                              if owner.get(m) == case_key
-                              or (m in last_members.get(n, set())
-                                  and case_key in plan['declaring'][n].get(m, ()))}
-                    if not subset:
-                        continue
-                    if case_data is data:
-                        case_data = dict(data)
-                    case_data[n] = subset
-                    claimed.append(n)
-                    units.append((n, case_key))
-                    continue
-                if collected:
-                    arrays.append(n)
-                claimed.append(n)
-                units.append(n)
-            if not claimed:
-                continue
-            entries = [case_data]
-            if arrays:
-                # PS-502: one entry per element. Every name the case writes must then be
-                # an array of one length, or the elements cannot be paired into entries.
-                lengths = {len(data[n]) for n in arrays}
-                if len(arrays) != len(claimed) or len(lengths) != 1:
-                    raise ValueError(
-                        f"tlv case {case_key!r}: {claimed} cannot be written one entry "
-                        f"per element: the collected arrays differ in length or sit "
-                        f"beside a single value (PS-502)")
-                entries = [dict(case_data, **{n: data[n][i] for n in arrays})
-                           for i in range(lengths.pop())]
-            matches, lossless = self._case_fidelity(case_fields, entries[0])
-            candidates.append((
-                min(order.index(n) for n in claimed),   # payload order
-                0 if lossless else 1,                   # one that can reproduce the value
-                -matches,                               # then the fuller explanation
-                case_key, case_fields, units, entries,
-            ))
+                if n in data and n not in queues and modes.get(n) != 'merge':
+                    value = data[n]
+                    collected = isinstance(value, list) and not _reports_list(f) \
+                        and modes.get(n, 'collect') == 'collect'
+                    queues[n] = list(value) if collected else [value]
+        pending = {n: set(data[n]) for n in plan['members']
+                   if isinstance(data.get(n), dict)}
 
-        # Stable, so cases that tie keep their declaration order (PS-527).
-        candidates.sort(key=lambda item: item[:3])
+        def members_of(f):
+            return {m['name'] for m in f.get('fields') or []
+                    if isinstance(m, dict) and m.get('name')}
 
+        def fits(f, value):
+            # An object element supplies exactly the members its case declares, and a
+            # case takes no value it cannot write: am308's `tvoc` of 4369 needs 436900
+            # through one case's `div: 100`, which its u16 cannot hold.
+            if f.get('type') == 'object' and isinstance(value, dict) \
+                    and modes.get(f['name']) != 'merge':
+                claims = self._case_claims(f.get('fields') or [])
+                every = {m['name'] for m, _ in claims}
+                needed = {m['name'] for m, is_optional in claims if not is_optional}
+                return needed <= set(value) <= every
+            return self._case_fidelity([f], {f['name']: value})[1]
+
+        written = []  # (case key, fields, data for the entry)
+        progress = True
+        while progress:
+            progress = False
+            for case_key, case_fields, required, optional in entries:
+                while True:
+                    values, taken, complete = {}, [], True
+                    for f in required:
+                        n = f['name']
+                        if modes.get(n) == 'merge':
+                            members = members_of(f)
+                            if n not in pending or not members <= set(data[n]):
+                                complete = False
+                                break
+                            values[n] = {m: data[n][m] for m in members}
+                            if members & pending[n]:
+                                taken.append(n)
+                        else:
+                            queue = queues.get(n)
+                            if not queue or not fits(f, queue[0]):
+                                complete = False
+                                break
+                            values[n] = queue[0]
+                            taken.append(n)
+                    if not complete:
+                        break
+                    for f in optional:
+                        queue = queues.get(f['name'])
+                        if queue and fits(f, queue[0]):
+                            values[f['name']] = queue[0]
+                            taken.append(f['name'])
+                    if not taken:
+                        break
+                    for n in values:
+                        if modes.get(n) == 'merge':
+                            pending[n] -= set(values[n])
+                        else:
+                            queues[n].pop(0)
+                    written.append((case_key, case_fields, dict(data, **values),
+                                    min(order.index(n) for n in values)))
+                    progress = True
+        for n, queue in queues.items():
+            if queue:
+                raise ValueError(f"tlv: no case takes the value of '{n}' {queue[0]!r} in "
+                                 f"full (PS-502, PS-527)")
+        for n, members in pending.items():
+            if members:
+                raise ValueError(f"tlv: no case takes the members {sorted(members)} of "
+                                 f"the merged object '{n}' in full (PS-527)")
+
+        # The entries go out in payload order - the order of the names in decoded
+        # output - so a payload round-trips; entries of one name keep the order the
+        # cases took them in.
+        written.sort(key=lambda item: item[3])
         out = bytearray()
-        spent: set = set()
-        emitted = []
-        for position, _, _, case_key, case_fields, units, entries in candidates:
-            # Every decoded field belongs to one channel. Without this a name defined
-            # under two tags emitted both of them, so am308 grew an extra channel.
-            if all(unit in spent for unit in units):
-                continue
-            spent.update(units)
-            emitted.append((position, case_key, case_fields, entries))
-
-        emitted.sort(key=lambda item: item[0])
-        for _, case_key, case_fields, entries in emitted:
+        for case_key, case_fields, case_data, _ in written:
             tag = self._encode_tlv_tag(case_key, tlv_def)
-            for case_data in entries:
-                value = self._encode_field_list(case_fields, case_data)
-                out.extend(tag)
-                if length_size > 0:
-                    out.extend(len(value).to_bytes(length_size, byteorder))
-                out.extend(value)
+            value = self._encode_field_list(case_fields, case_data)
+            out.extend(tag)
+            if length_size > 0:
+                out.extend(len(value).to_bytes(length_size, byteorder))
+            out.extend(value)
         return bytes(out)
 
     def _reverse_modifiers(self, value: Any, field_def: Dict[str, Any]) -> Any:

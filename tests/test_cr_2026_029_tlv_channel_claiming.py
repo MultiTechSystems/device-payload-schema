@@ -129,29 +129,35 @@ class TestTheOverlapIsRealInTheCorpus:
 
 
 class TestTheClaimingPassPrefersSpecificity:
-    def test_it_sorts_by_claimed_count_first(self):
-        text = GO.read_text()
-        start = text.index("Ordered for the claiming pass below")
-        window = text[start:start + 1400]
-        assert "len(candidates[i].claimed) != len(candidates[j].claimed)" in window, window[:400]
+    """CR-2026-128 replaced the claiming pass with first-fit placement, and kept this
+    CR's specificity: a case requiring more fields is tried first."""
 
-    def test_tag_order_is_the_last_tiebreak_not_the_first(self):
+    ANCHOR = "That is CR-2026-029's specificity, kept under CR-2026-128."
+
+    def window(self):
         text = GO.read_text()
-        start = text.index("Ordered for the claiming pass below")
-        window = text[start:start + 1400]
-        claimed = window.index("claimed)")
-        tag = window.index("bytes.Compare")
-        assert claimed < tag, "tag order must not lead the claiming sort again"
+        start = text.index(self.ANCHOR)
+        return text[start:start + 2000]
+
+    def test_it_sorts_by_required_count(self):
+        window = self.window()
+        assert "len(entries[i].required) > len(entries[j].required)" in window, window[:400]
+
+    def test_tag_order_does_not_lead_the_case_order(self):
+        window = self.window()
+        sort_start = window.index("sort.SliceStable(entries")
+        sort_body = window[sort_start:window.index("})", sort_start)]
+        assert "bytes.Compare" not in sort_body, "tag order must not lead the case order again"
 
     def test_emission_is_still_by_ascending_tag(self):
-        """The fix reorders the claiming pass only; the written order is unchanged."""
+        """Without a recorded order, entries are written in ascending tag order."""
         text = GO.read_text()
-        assert "sort.SliceStable(chosen, func(i, j int) bool { return bytes.Compare(" in text
+        assert "return bytes.Compare(out[i].tag, out[j].tag) < 0" in text
 
     def test_it_says_which_cr_and_gives_the_example(self):
         text = GO.read_text()
-        start = text.index("Ordered for the claiming pass below")
-        window = text[start:start + 1400]
+        start = text.index("func encodeTLV(")
+        window = text[start:text.index(self.ANCHOR) + len(self.ANCHOR)]
         assert "CR-2026-029" in window
         assert "em400-mud" in window
 

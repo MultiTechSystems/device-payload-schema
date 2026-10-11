@@ -803,16 +803,46 @@ final class Encoder {
 
     private record Fidelity(int matches, boolean lossless) {}
 
-    private record Candidate(int position, int lossPenalty, int matches, String caseKey,
-                             List<Field> caseFields, List<String> claimed,
-                             List<Map<String, Object>> entries) {}
+    /** A claimable field of a tlv case, and whether the case may be written without it. */
+    private record Claim(Field field, boolean optional) {}
+
+    /**
+     * The reference's {@code _case_claims}: claimable fields, a flagged group's (whose
+     * mask says which are present) and an {@code optional: true} field marked optional.
+     */
+    private static void collectClaims(List<Field> fields, boolean optional, List<Claim> out) {
+        if (fields == null) return;
+        for (Field f : fields) {
+            if (f.getByteGroup() != null && !f.getByteGroup().isEmpty()) {
+                collectClaims(f.getByteGroup(), optional, out);
+                continue;
+            }
+            if (f.getFlagged() != null && f.getFlagged().getGroups() != null) {
+                for (Field.FlaggedGroup group : f.getFlagged().getGroups()) {
+                    collectClaims(group.getFields(), true, out);
+                }
+                continue;
+            }
+            if (payloadName(f) == null) continue;
+            out.add(new Claim(f, optional || f.isOptional()));
+        }
+    }
+
+    private record TlvEntry(String key, List<Field> fields, List<Field> required,
+                            List<Field> optional, int rank) {}
+
+    private record Written(String key, List<Field> fields, Map<String, Object> data,
+                           int position, int seq) {}
 
     /**
      * Rebuild a TLV payload from decoded output.
      *
-     * <p>A case whose fields are all absent is not emitted. A case that cannot be encoded -
-     * a wildcard tag (PS-270), or a field the data does not carry - throws, so the caller
-     * records it against the payload rather than writing a wrong tag.
+     * <p>PS-525 to PS-527 (CR-2026-110, -125, -128): each value - a scalar, each element of
+     * an array PS-157 collected, a {@code last} value, a merged object's members - goes
+     * under the first case whose declared fields it supplies in full; nothing is
+     * zero-filled or dropped, and what no case takes is an error. A case requiring more
+     * fields is tried first, then declaration order, so em400-mud's [131, 103]
+     * (temperature, temperature_alarm) is not stranded by [3, 103] (temperature).
      */
     private byte[] encodeTLV(Field tlv, Map<String, Object> data) {
         // `merge: false` reports its entries as a list under `channels`, which the claiming
@@ -824,35 +854,31 @@ final class Encoder {
         Map<String, List<Field>> cases = tlv.getTlvCases();
         if (cases == null || cases.isEmpty()) return EMPTY;
         int lengthSize = Math.max(0, tlv.getLengthSize());
-
         List<String> order = new ArrayList<>(data.keySet());
         OnRepeat.Modes modes = tlv.getRepeatModes();
-        // PS-527 (CR-2026-125), the reference's tlv_encode_plan, in declaration order: the
-        // first case declaring each name, which writes a `last` value and an array PS-157
-        // collected; for each merged object every member some case declares, the first
-        // case declaring each member, which writes it once, and every case declaring it,
-        // all of which write a member declaring `last`.
-        Map<String, String> first = new LinkedHashMap<>();
+
+        List<TlvEntry> entries = new ArrayList<>();
         Map<String, Set<String>> declaredMembers = new LinkedHashMap<>();
-        Map<String, Map<String, String>> memberOwner = new LinkedHashMap<>();
-        Map<String, Map<String, Set<String>>> declaring = new LinkedHashMap<>();
-        for (Map.Entry<String, List<Field>> entry : cases.entrySet()) {
-            if ("default".equals(entry.getKey()) || entry.getValue() == null) continue;
-            for (Field f : claimableFields(entry.getValue())) {
-                String name = payloadName(f);
-                if (name == null) continue;
-                first.putIfAbsent(name, entry.getKey());
-                if (!"merge".equals(modes.mode(name)) || f.getFields() == null) continue;
-                for (Field m : f.getFields()) {
-                    if (m.getName() == null || m.getName().isEmpty()) continue;
-                    declaredMembers.computeIfAbsent(name, k -> new LinkedHashSet<>()).add(m.getName());
-                    memberOwner.computeIfAbsent(name, k -> new LinkedHashMap<>())
-                            .putIfAbsent(m.getName(), entry.getKey());
-                    declaring.computeIfAbsent(name, k -> new LinkedHashMap<>())
-                            .computeIfAbsent(m.getName(), k -> new LinkedHashSet<>()).add(entry.getKey());
+        for (Map.Entry<String, List<Field>> e : cases.entrySet()) {
+            if ("default".equals(e.getKey()) || e.getValue() == null) continue;
+            List<Claim> claims = new ArrayList<>();
+            collectClaims(e.getValue(), false, claims);
+            List<Field> required = new ArrayList<>(), optional = new ArrayList<>();
+            for (Claim c : claims) {
+                (c.optional() ? optional : required).add(c.field());
+                String name = payloadName(c.field());
+                if ("merge".equals(modes.mode(name)) && c.field().getFields() != null) {
+                    for (Field m : c.field().getFields()) {
+                        if (m.getName() != null && !m.getName().isEmpty()) {
+                            declaredMembers.computeIfAbsent(name, k -> new LinkedHashSet<>()).add(m.getName());
+                        }
+                    }
                 }
             }
+            entries.add(new TlvEntry(e.getKey(), e.getValue(), required, optional, entries.size()));
         }
+        entries.sort((x, y) -> Integer.compare(y.required().size(), x.required().size()));
+
         // A supplied member of a merged object that no case declares has nowhere to go.
         for (Map.Entry<String, Set<String>> e : declaredMembers.entrySet()) {
             if (!(data.get(e.getKey()) instanceof Map<?, ?> object)) continue;
@@ -867,113 +893,151 @@ final class Encoder {
             }
         }
 
-        List<Candidate> candidates = new ArrayList<>();
-        for (Map.Entry<String, List<Field>> entry : cases.entrySet()) {
-            if ("default".equals(entry.getKey()) || entry.getValue() == null) continue;
-            String caseKey = entry.getKey();
-            List<String> claimed = new ArrayList<>();
-            List<String> units = new ArrayList<>();     // what claiming this case spends
-            List<String> arrays = new ArrayList<>();    // PS-157 arrays, one entry per element
-            Map<String, Object> caseData = data;
-            for (Field f : claimableFields(entry.getValue())) {
-                String name = payloadName(f);
-                if (name == null || !data.containsKey(name)) continue;
-                String mode = modes.mode(name);
-                boolean collected = data.get(name) instanceof List<?> && !OnRepeat.reportsList(f);
-                if (("last".equals(mode) || collected) && !caseKey.equals(first.get(name))) continue;
-                if ("merge".equals(mode) && data.get(name) instanceof Map<?, ?> object) {
-                    // PS-527: one entry per case declaring any of the merged object's
-                    // members the input supplies, each member under the first case
-                    // declaring it, or under every one for a member declaring `last` - so
-                    // what a case spends is its own and never already spent.
-                    Map<String, String> owner = memberOwner.getOrDefault(name, Map.of());
-                    Map<String, Set<String>> by = declaring.getOrDefault(name, Map.of());
-                    Map<String, Object> subset = new LinkedHashMap<>();
-                    for (Map.Entry<?, ?> member : object.entrySet()) {
-                        String key = String.valueOf(member.getKey());
-                        boolean writes = caseKey.equals(owner.get(key))
-                                || (modes.last(name).contains(key)
-                                    && by.getOrDefault(key, Set.of()).contains(caseKey));
-                        if (writes) subset.put(key, member.getValue());
+        Map<String, java.util.ArrayDeque<Object>> queues = new LinkedHashMap<>();
+        for (TlvEntry e : entries) {
+            List<Field> all = new ArrayList<>(e.required());
+            all.addAll(e.optional());
+            for (Field f : all) {
+                String n = payloadName(f);
+                if (!data.containsKey(n) || queues.containsKey(n) || "merge".equals(modes.mode(n))) continue;
+                Object v = data.get(n);
+                java.util.ArrayDeque<Object> q = new java.util.ArrayDeque<>();
+                if (v instanceof List<?> list && !OnRepeat.reportsList(f) && "collect".equals(modes.mode(n))) {
+                    q.addAll(list);
+                } else {
+                    q.add(v);
+                }
+                queues.put(n, q);
+            }
+        }
+        Map<String, Set<String>> pending = new LinkedHashMap<>();
+        for (String n : declaredMembers.keySet()) {
+            if (data.get(n) instanceof Map<?, ?> object) {
+                Set<String> keys = new LinkedHashSet<>();
+                for (Object k : object.keySet()) keys.add(String.valueOf(k));
+                pending.put(n, keys);
+            }
+        }
+
+        List<Written> written = new ArrayList<>();
+        boolean progress = true;
+        while (progress) {
+            progress = false;
+            for (TlvEntry e : entries) {
+                while (true) {
+                    Map<String, Object> values = new LinkedHashMap<>();
+                    int taken = 0;
+                    boolean complete = true;
+                    for (Field f : e.required()) {
+                        String n = payloadName(f);
+                        if ("merge".equals(modes.mode(n))) {
+                            if (!pending.containsKey(n) || !(data.get(n) instanceof Map<?, ?> object)) {
+                                complete = false;
+                                break;
+                            }
+                            Map<String, Object> sub = new LinkedHashMap<>();
+                            boolean fresh = false;
+                            for (Field m : f.getFields() == null ? List.<Field>of() : f.getFields()) {
+                                if (m.getName() == null || m.getName().isEmpty()) continue;
+                                if (!object.containsKey(m.getName())) {
+                                    complete = false;
+                                    break;
+                                }
+                                sub.put(m.getName(), object.get(m.getName()));
+                                fresh |= pending.get(n).contains(m.getName());
+                            }
+                            if (!complete) break;
+                            values.put(n, sub);
+                            if (fresh) taken++;
+                            continue;
+                        }
+                        java.util.ArrayDeque<Object> q = queues.get(n);
+                        if (q == null || q.isEmpty() || !fits(f, q.peekFirst(), modes)) {
+                            complete = false;
+                            break;
+                        }
+                        values.put(n, q.peekFirst());
+                        taken++;
                     }
-                    if (subset.isEmpty()) continue;
-                    if (caseData == data) caseData = new LinkedHashMap<>(data);
-                    caseData.put(name, subset);
-                    claimed.add(name);
-                    units.add(name + "\u0000" + caseKey);
-                    continue;
+                    if (!complete) break;
+                    for (Field f : e.optional()) {
+                        java.util.ArrayDeque<Object> q = queues.get(payloadName(f));
+                        if (q != null && !q.isEmpty() && fits(f, q.peekFirst(), modes)) {
+                            values.put(payloadName(f), q.peekFirst());
+                            taken++;
+                        }
+                    }
+                    if (taken == 0) break;
+                    Map<String, Object> entryData = new LinkedHashMap<>(data);
+                    int position = Integer.MAX_VALUE;
+                    for (Map.Entry<String, Object> v : values.entrySet()) {
+                        String n = v.getKey();
+                        entryData.put(n, v.getValue());
+                        position = Math.min(position, order.indexOf(n));
+                        if ("merge".equals(modes.mode(n))) {
+                            pending.get(n).removeAll(((Map<?, ?>) v.getValue()).keySet());
+                        } else {
+                            queues.get(n).pollFirst();
+                        }
+                    }
+                    written.add(new Written(e.key(), e.fields(), entryData, position, written.size()));
+                    progress = true;
                 }
-                if (collected) arrays.add(name);
-                claimed.add(name);
-                units.add(name);
             }
-            if (claimed.isEmpty()) continue;
-            List<Map<String, Object>> entries = List.of(caseData);
-            if (!arrays.isEmpty()) {
-                // PS-502: one entry per element. Every name the case writes must then be an
-                // array of one length, or the elements cannot be paired into entries.
-                Set<Integer> lengths = new LinkedHashSet<>();
-                for (String name : arrays) lengths.add(((List<?>) data.get(name)).size());
-                if (arrays.size() != claimed.size() || lengths.size() != 1) {
-                    List<String> quoted = new ArrayList<>();
-                    for (String name : claimed) quoted.add("'" + name + "'");
-                    throw new SchemaException.EncodeException("tlv case " + caseKey + ": ["
-                            + String.join(", ", quoted) + "] cannot be written one entry per element:"
-                            + " the collected arrays differ in length or sit beside a single value (PS-502)");
-                }
-                int length = lengths.iterator().next();
-                List<Map<String, Object>> split = new ArrayList<>();
-                for (int i = 0; i < length; i++) {
-                    Map<String, Object> one = new LinkedHashMap<>(caseData);
-                    for (String name : arrays) one.put(name, ((List<?>) data.get(name)).get(i));
-                    split.add(one);
-                }
-                entries = split;
+        }
+        for (Map.Entry<String, java.util.ArrayDeque<Object>> q : queues.entrySet()) {
+            if (!q.getValue().isEmpty()) {
+                throw new SchemaException.EncodeException("tlv: no case takes the value of '" + q.getKey()
+                        + "' " + q.getValue().peekFirst() + " in full (PS-502, PS-527)");
             }
-            int position = Integer.MAX_VALUE;
-            for (String name : claimed) {
-                position = Math.min(position, order.indexOf(name));
+        }
+        for (Map.Entry<String, Set<String>> p : pending.entrySet()) {
+            if (!p.getValue().isEmpty()) {
+                List<String> left = new ArrayList<>();
+                for (String m : p.getValue()) left.add("'" + m + "'");
+                java.util.Collections.sort(left);
+                throw new SchemaException.EncodeException("tlv: no case takes the members ["
+                        + String.join(", ", left) + "] of the merged object '" + p.getKey() + "' in full (PS-527)");
             }
-            Fidelity fidelity = caseFidelity(entry.getValue(), entries.get(0));
-            // Stable sort below, so cases that tie keep their declaration order (PS-527).
-            candidates.add(new Candidate(position, fidelity.lossless() ? 0 : 1,
-                    fidelity.matches(), caseKey, entry.getValue(), units, entries));
         }
 
-        // Payload order first, then the case that can reproduce the value, then the fuller
-        // explanation of it.
-        candidates.sort((a, b) -> {
-            if (a.position() != b.position()) return Integer.compare(a.position(), b.position());
-            if (a.lossPenalty() != b.lossPenalty()) {
-                return Integer.compare(a.lossPenalty(), b.lossPenalty());
-            }
-            return Integer.compare(b.matches(), a.matches());
-        });
-
-        // Every decoded field belongs to one channel. Without this a name defined under
-        // two tags emits both of them, so am308 grows an extra channel.
-        Set<String> spent = new LinkedHashSet<>();
-        List<Candidate> emitted = new ArrayList<>();
-        for (Candidate candidate : candidates) {
-            if (spent.containsAll(candidate.claimed())) continue;
-            spent.addAll(candidate.claimed());
-            emitted.add(candidate);
-        }
-        emitted.sort((a, b) -> Integer.compare(a.position(), b.position()));
-
+        // Payload order, so a payload round-trips; entries of one name keep the order taken.
+        written.sort((x, y) -> x.position() != y.position()
+                ? Integer.compare(x.position(), y.position()) : Integer.compare(x.seq(), y.seq()));
         ByteBuf out = new ByteBuf();
-        for (Candidate candidate : emitted) {
-            byte[] tag = encodeTLVTag(candidate.caseKey(), tlv);
-            for (Map<String, Object> caseData : candidate.entries()) {
-                byte[] value = encodeFieldList(candidate.caseFields(), caseData);
-                out.write(tag);
-                if (lengthSize > 0) {
-                    out.write(writeInt(value.length, lengthSize, false));
-                }
-                out.write(value);
+        for (Written w : written) {
+            out.write(encodeTLVTag(w.key(), tlv));
+            byte[] value = encodeFieldList(w.fields(), w.data());
+            if (lengthSize > 0) {
+                out.write(writeInt(value.length, lengthSize, false));
             }
+            out.write(value);
         }
         return out.toArray();
+    }
+
+    /**
+     * Whether a case's field takes a value (PS-527): an object element supplies exactly
+     * the members it declares, and a field takes no value it cannot write.
+     */
+    private boolean fits(Field f, Object value, OnRepeat.Modes modes) {
+        if (f.getType() == FieldType.OBJECT && value instanceof Map<?, ?> object
+                && !"merge".equals(modes.mode(payloadName(f)))) {
+            List<Claim> claims = new ArrayList<>();
+            collectClaims(f.getFields(), false, claims);
+            Set<String> every = new LinkedHashSet<>();
+            for (Claim c : claims) {
+                every.add(c.field().getName());
+                if (!c.optional() && !object.containsKey(c.field().getName())) return false;
+            }
+            for (Object k : object.keySet()) {
+                if (!every.contains(String.valueOf(k))) return false;
+            }
+            return true;
+        }
+        Map<String, Object> one = new LinkedHashMap<>();
+        one.put(payloadName(f), value);
+        return caseFidelity(List.of(f), one).lossless();
     }
 
     /**

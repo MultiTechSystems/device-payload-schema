@@ -195,7 +195,8 @@ func normalizeNumbers(v any) any {
 	return v
 }
 
-// CR-2026-125 (PS-527, PS-525), the spec prototype's TestCR2026125OnRepeatEncoding.
+// CR-2026-125 and CR-2026-128 (PS-525 to PS-527): the spec prototype's
+// TestCR2026125OnRepeatEncoding and TestCR2026128FirstCaseThatFits.
 
 const cr125Loramac = `
 name: t
@@ -204,35 +205,88 @@ fields:
       tag_size: 2
       on_repeat: merge
       cases:
-        0x0310: [{name: loramac, type: object, fields: [{name: adr, type: u8}, {name: dr, type: u8}]}]
-        0x0311: [{name: loramac, type: object, fields: [{name: dr, type: u8}]}]
+        0x0310: [{name: loramac, type: object, fields: [{name: adr, type: u8}, {name: dr, type: u8, on_repeat: last}]}]
+        0x0311: [{name: loramac, type: object, fields: [{name: dr, type: u8, on_repeat: last}]}]
 `
 
-// An array PS-157 collected is written under the first case declaring the name, one
-// entry per element, on both encode paths.
-func TestCR125CollectedNameWrittenUnderFirstCase(t *testing.T) {
-	s := cr110Parse(t, strings.Replace(cr110Event, "on_repeat: last", "on_repeat: collect", 1))
-	data := map[string]any{"event": []any{1, 2}}
-	for _, order := range [][]string{nil, {"58", "64"}} {
-		if got := hex.EncodeToString(mustEncode(t, s, data, order)); got != "3a013a02" {
-			t.Errorf("order %v: encode = %s, want 3a013a02", order, got)
+const cr128Collected = `
+name: t
+fields:
+  - tlv:
+      tag_size: 2
+      cases:
+        0x0310: [{name: mac, type: object, fields: [{name: adr, type: u8}]}]
+        0x0311: [{name: mac, type: object, fields: [{name: dr, type: u8}]}]
+`
+
+const cr128SharedLast = `
+name: t
+fields:
+  - tlv:
+      on_repeat: merge
+      cases:
+        1: [{name: o, type: object, fields: [{name: a, type: u8}, {name: m, type: u8, on_repeat: last}]}]
+        2: [{name: o, type: object, fields: [{name: b, type: u8}, {name: m, type: u8, on_repeat: last}]}]
+`
+
+// Each value goes under the first case whose declared fields it supplies in full, on
+// both encode paths.
+func TestCR128FirstCaseItFills(t *testing.T) {
+	event := strings.Replace(cr110Event, "on_repeat: last", "on_repeat: collect", 1)
+	cases := []struct {
+		doc  string
+		data map[string]any
+		want string
+	}{
+		{event, map[string]any{"event": []any{1, 2}}, "3a013a02"},
+		{event, map[string]any{"event": 3}, "3a03"},
+		{cr128Collected, map[string]any{"mac": []any{map[string]any{"adr": 1}, map[string]any{"dr": 5}}}, "031001031105"},
+		{cr125Loramac, map[string]any{"loramac": map[string]any{"dr": 5}}, "031105"},
+		{cr125Loramac, map[string]any{"loramac": map[string]any{"adr": 1, "dr": 5}}, "03100105"},
+		{cr128SharedLast, map[string]any{"o": map[string]any{"a": 1, "b": 2, "m": 9}}, "010109020209"},
+	}
+	for _, c := range cases {
+		if got := hex.EncodeToString(mustEncode(t, cr110Parse(t, c.doc), c.data, nil)); got != c.want {
+			t.Errorf("encode %v = %s, want %s", c.data, got, c.want)
 		}
 	}
 }
 
-func TestCR125StrayMemberIsAnError(t *testing.T) {
-	_, err := cr110Parse(t, cr125Loramac).Encode(map[string]any{
-		"loramac": map[string]any{"adr": 1, "dr": 5, "fw": 3}})
-	want := "tlv: the merged object 'loramac' is given ['fw'], which no case declares (PS-527)"
-	if err == nil || err.Error() != want {
-		t.Fatalf("encode error = %v, want %q", err, want)
+func TestCR128ValueNoCaseTakesIsAnError(t *testing.T) {
+	cases := []struct {
+		doc  string
+		data map[string]any
+		want string
+	}{
+		{cr125Loramac, map[string]any{"loramac": map[string]any{"adr": 1, "dr": 5, "fw": 3}},
+			"tlv: the merged object 'loramac' is given ['fw'], which no case declares (PS-527)"},
+		{cr128Collected, map[string]any{"mac": []any{map[string]any{"adr": 1, "dr": 5}}},
+			"tlv: no case takes the value of 'mac'"},
+	}
+	for _, c := range cases {
+		_, err := cr110Parse(t, c.doc).Encode(c.data)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("encode %v: error = %v, want %q", c.data, err, c.want)
+		}
 	}
 }
 
-func TestCR125MemberTwoCasesDeclareWrittenOnce(t *testing.T) {
-	data := map[string]any{"loramac": map[string]any{"adr": 1, "dr": 5}}
-	if got := hex.EncodeToString(mustEncode(t, cr110Parse(t, cr125Loramac), data, nil)); got != "03100105" {
-		t.Fatalf("encode = %s, want 03100105", got)
+func TestCR128SharedMemberWithoutLastIsRejected(t *testing.T) {
+	_, err := ParseSchema(strings.ReplaceAll(cr125Loramac, ", on_repeat: last", ""))
+	want := "tlv: cases share the member 'dr' of the merged object 'loramac' without `on_repeat: last` (PS-526)"
+	if err == nil || err.Error() != want {
+		t.Fatalf("got %v, want %q", err, want)
+	}
+}
+
+func TestCR128SharedLastRoundTrips(t *testing.T) {
+	s := cr110Parse(t, cr128SharedLast)
+	out, err := s.Decode(cr110Hex(t, "010109020209"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := hex.EncodeToString(mustEncode(t, s, out, nil)); got != "010109020209" {
+		t.Fatalf("round trip = %s", got)
 	}
 }
 

@@ -188,17 +188,17 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2636 payload vectors in `schemas/devices/` (measured 2026-10-10 with
-`tools/check-floors.py`, after the CR-2026-118 fixtures and CR-2026-110's and CR-2026-125's tlv-repeat-* fixtures) are the shared
+The 2637 payload vectors in `schemas/devices/` (measured 2026-10-10 with
+`tools/check-floors.py`, after the CR-2026-118 fixtures and CR-2026-110's, CR-2026-125's and CR-2026-128's tlv-repeat-* fixtures) are the shared
 cross-language test set. Every implementation has a runner that reads the same YAML and
 the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1800 |
-| Go | `go/schema/corpus_conformance_test.go` | 2636 | 1817 (plain API 1794) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2636 | 1801 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2636 | 1800 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1802 |
+| Go | `go/schema/corpus_conformance_test.go` | 2637 | 1819 (plain API 1796) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2637 | 1803 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2637 | 1802 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 550 of 550 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -755,10 +755,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1800 |
-| Go | `go/schema/corpus_encode_test.go` | 1817 (plain 1794) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1800 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1801 |
+| Python | `tests/test_encode_round_trip.py` | 1802 |
+| Go | `go/schema/corpus_encode_test.go` | 1819 (plain 1796) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1802 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1803 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1631,24 +1631,39 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   - **Fixtures:** `tlv-repeat-collect`, `-last`, `-merge`, `-member-last`,
     `-object-collect`. Decode floors +6 everywhere; re-encode +1 (tlv-repeat-merge's
     `object_members_combine`).
-- **CR-2026-125 (PS-525, PS-527 amended): `on_repeat` encoding and placement.** Jason's
-  rulings on the five points PR #97 raised, in all five encoders and every loader:
-  - **One table per tlv, `tlv_encode_plan`** (Python; Go `tlvEncodePlan`, and inline in
-    Java's `encodeTLV`, C#'s `EncodeTLV` and the generator's `__on_repeat` annotation),
-    in case declaration order: the first case declaring each name, and for each merged
-    object every member some case declares, its first declaring case and all of them.
-  - **An array PS-157 collected is written under the first case declaring the name, one
-    entry per element** (PS-502), like a `last` value. Every name that case writes must
-    be such an array, of one length, or the encode fails naming the case. The refusal
-    CR-2026-110 added and the `collected-array` residue class are gone. A field whose own
-    value is a list (a repeat, bytes as an array) is not a collection (`_reports_list`).
-  - **A supplied member of a merged object that no case declares is an error**:
-    "tlv: the merged object '{n}' is given ['{m}', ...], which no case declares (PS-527)".
-  - **A merged member several cases declare is written once, under the first**, unless
-    it declares `last`: every declaring case still writes that one, since writing it once
-    would zero-fill it elsewhere and the decoder's last-wins would then report 0. The
-    spec prototype writes even a `last` member once; this follows the coordinator's
-    reading of the ruling ("without `last`"), and is reported to the spec session.
+- **CR-2026-125 and CR-2026-128 (PS-525, PS-526, PS-527): `on_repeat` encoding and
+  placement.** CR-2026-125's "first case declaring it" could not be honoured - a tlv entry
+  carries every field its case declares, so it zero-filled or dropped - and CR-2026-128
+  replaced it, from this branch's report. In all five encoders:
+  - **Each value goes under the first case whose declared fields it supplies in full**: a
+    scalar, each element of an array PS-157 collected (`_reports_list` tells a field whose
+    own value is a list), a `last` value, a merged object's members. An object element
+    supplies exactly the case's members; a merged case is written once the input supplies
+    all its members and one of them is still unwritten. A shared `last` member rides, with
+    the input's value, in every case written. Nothing is zero-filled or dropped; a value no
+    case takes is "tlv: no case takes the value of '{n}' ... in full (PS-502, PS-527)", and a
+    supplied member no case declares "tlv: the merged object '{n}' is given ['{m}'], which no
+    case declares (PS-527)". `{dr: 5}` gives `0311 05`, `[{adr: 1}, {dr: 5}]` gives
+    `0310 01 0311 05`, a scalar follows the same rule.
+  - **Two choices the CR leaves to the implementation, both needed to keep the corpus.** A
+    case requiring more fields is tried before declaration order: em400-mud declares
+    [3, 103] (temperature) before [131, 103] (temperature, temperature_alarm), and strict
+    declaration order hands temperature to the first and strands the alarm. And a case
+    takes no value it cannot write (the old fidelity check, per field): am308's `tvoc` of
+    4369 does not fit one case's `div: 100` u16. Without the two, 92 vectors in 20 schemas
+    (Milesight, vobo, one fixture) went from round-tripping to an error when measured; with
+    them the Python residue is unchanged but for tlv-repeat-object-collect, which now
+    round-trips.
+  - **The algorithm** is one queue per name and a pending set per merged object, swept
+    case by case until nothing moves: `_case_claims` (a flagged group's fields and
+    `optional: true` ones do not block a case), then the entries go out in payload order.
+    Go has no payload order: it uses `TLVOrder` when given, else ascending tag, and tries
+    the cases `TLVOrder` names first, so the tag that wrote a value gets it back.
+  - **PS-526 as amended: merged cases may share a member only where it declares `last`**,
+    else "tlv: cases share the member '{m}' of the merged object '{o}' without
+    `on_repeat: last` (PS-526)" at load, in all four loaders, the validator and the
+    generator (via `tlv_repeat_modes`). Measured 2026-10-11: nothing in the corpus or the
+    registry is rejected.
   - **`on_repeat` where it has no effect is rejected at load** - anywhere but a tlv, a
     field a tlv case reports, or `last` on a merged object's member - by Python
     (`on_repeat_schema_errors`, so the validator and generator too), Go `checkOnRepeat`,
@@ -1656,12 +1671,11 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     Declarations are compared by identity; `definitions` is skipped and held to the rule
     where `$ref` splices it. Measured 2026-10-10: no schema in the corpus (5 use
     `on_repeat`) or the private registry (none) is rejected.
-  - **Go's ordered encode** writes all of a case's entries where its tag first occurs in
-    `TLVOrder`, and skips the tag's later occurrences, which are the same elements.
-  - **Fixtures:** `tlv-repeat-collect-first-case` (`3a 01 3a 02` round-trips) and
-    `tlv-repeat-merge-shared-member` (`0310 01 05` stays one entry). Decode +2 in all
-    four; re-encode +3 in all four (those two and tlv-repeat-merge's
-    `number_keeps_collecting`).
+  - **Fixtures:** `tlv-repeat-collect-first-case` (`3a 01 3a 02` round-trips),
+    `tlv-repeat-merge-shared-member` (`dr` declares `last`; `0310 01 05` stays one entry)
+    and `tlv-repeat-merge-shared-last` (the shared `last` member in both written cases).
+    CR-2026-128 moved decode +1 and re-encode +2 in all four: shared-last, and
+    tlv-repeat-object-collect, which now round-trips.
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.

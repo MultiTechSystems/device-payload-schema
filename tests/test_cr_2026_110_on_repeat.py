@@ -217,8 +217,11 @@ def test_rejected_inside_a_nested_construct():
     assert any("PS-526" in e for e in errors)
 
 
-# CR-2026-125 (PS-525, PS-527): the spec prototype's TestCR2026125OnRepeatEncoding,
-# with the generated codec held to the reference on each encode.
+# CR-2026-125 and CR-2026-128 (PS-525 to PS-527): each value goes under the first case
+# whose declared fields it supplies in full, nothing zero-filled or dropped; merged cases
+# share a member only where it declares `last`. The spec prototype's
+# TestCR2026125OnRepeatEncoding and TestCR2026128FirstCaseThatFits, with the generated
+# codec held to the reference on each encode.
 
 LORAMAC_SHARED = {
     "tag_size": 2,
@@ -228,14 +231,53 @@ LORAMAC_SHARED = {
             {
                 "name": "loramac",
                 "type": "object",
-                "fields": [{"name": "adr", "type": "u8"}, {"name": "dr", "type": "u8"}],
+                "fields": [
+                    {"name": "adr", "type": "u8"},
+                    {"name": "dr", "type": "u8", "on_repeat": "last"},
+                ],
             }
         ],
         0x0311: [
             {
                 "name": "loramac",
                 "type": "object",
-                "fields": [{"name": "dr", "type": "u8"}],
+                "fields": [{"name": "dr", "type": "u8", "on_repeat": "last"}],
+            }
+        ],
+    },
+}
+COLLECTED_OBJECTS = {
+    "tag_size": 2,
+    "cases": {
+        0x0310: [
+            {"name": "mac", "type": "object", "fields": [{"name": "adr", "type": "u8"}]}
+        ],
+        0x0311: [
+            {"name": "mac", "type": "object", "fields": [{"name": "dr", "type": "u8"}]}
+        ],
+    },
+}
+SHARED_LAST = {
+    "on_repeat": "merge",
+    "cases": {
+        1: [
+            {
+                "name": "o",
+                "type": "object",
+                "fields": [
+                    {"name": "a", "type": "u8"},
+                    {"name": "m", "type": "u8", "on_repeat": "last"},
+                ],
+            }
+        ],
+        2: [
+            {
+                "name": "o",
+                "type": "object",
+                "fields": [
+                    {"name": "b", "type": "u8"},
+                    {"name": "m", "type": "u8", "on_repeat": "last"},
+                ],
             }
         ],
     },
@@ -256,52 +298,91 @@ def generated_encode(tlv, data):
 @pytest.mark.parametrize(
     "tlv,data,want",
     [
-        # A collected name is written under the first case declaring it, per element.
+        # A collected scalar: each element under the first case it fills.
         (EVENT, {"event": [1, 2]}, "3a013a02"),
-        # ...an object's array too: its elements under the first case, whose object
-        # declares `adr` only, so the second element's `dr` has no member to go in.
-        (
-            {k: v for k, v in LORAMAC.items() if k != "on_repeat"},
-            {"loramac": [{"adr": 1}, {"adr": 2}]},
-            "031001031002",
-        ),
-        # A member two cases declare is written once, under the first.
+        # A scalar follows the same rule.
+        (EVENT, {"event": 3}, "3a03"),
+        # Each collected object finds the case whose members it supplies exactly.
+        (COLLECTED_OBJECTS, {"mac": [{"adr": 1}, {"dr": 5}]}, "031001031105"),
+        # {dr: 5} fills 0x0311, not 0x0310, which would need adr zero-filled.
+        (LORAMAC_SHARED, {"loramac": {"dr": 5}}, "031105"),
+        # {adr, dr} fills 0x0310; 0x0311 then has nothing new to write.
         (LORAMAC_SHARED, {"loramac": {"adr": 1, "dr": 5}}, "03100105"),
-        # ...even where only that member is supplied: the first case writes it, and its
-        # other member, not supplied, is zero-filled, though 0x0311 declares `dr` alone.
-        # The ruling's consequence, reported to the spec session.
-        (LORAMAC_SHARED, {"loramac": {"dr": 5}}, "03100005"),
+        # A shared `last` member rides in every case written for the object.
+        (SHARED_LAST, {"o": {"a": 1, "b": 2, "m": 9}}, "010109020209"),
     ],
 )
-def test_written_under_the_first_declaring_case(tlv, data, want):
+def test_each_value_goes_under_the_first_case_it_fills(tlv, data, want):
     result = encode(tlv, data)
-    got = generated_encode(tlv, data)
     assert result.errors == []
     assert bytes(result.payload).hex() == want
-    assert bytes(got["bytes"]).hex() == want
+    assert bytes(generated_encode(tlv, data)["bytes"]).hex() == want
 
 
-def test_a_member_no_case_declares_is_an_error():
-    data = {"loramac": {"adr": 1, "dr": 5, "fw": 3}}
-    message = (
-        "tlv: the merged object 'loramac' is given ['fw'], which no case declares "
-        "(PS-527)"
-    )
-    assert any(message in e for e in encode(LORAMAC_SHARED, data).errors)
-    assert any(message in e for e in generated_encode(LORAMAC_SHARED, data)["errors"])
+def test_a_shared_last_member_round_trips():
+    out = decode(SHARED_LAST, "010109020209")
+    assert out.data == {"o": {"a": 1, "m": 9, "b": 2}}
+    assert bytes(encode(SHARED_LAST, out.data).payload).hex() == "010109020209"
 
 
-def test_collected_arrays_of_different_lengths_are_an_error():
+@pytest.mark.parametrize(
+    "tlv,data,message",
+    [
+        (
+            LORAMAC_SHARED,
+            {"loramac": {"adr": 1, "dr": 5, "fw": 3}},
+            "tlv: the merged object 'loramac' is given ['fw'], which no case declares "
+            "(PS-527)",
+        ),
+        (
+            COLLECTED_OBJECTS,
+            {"mac": [{"adr": 1, "dr": 5}]},
+            "tlv: no case takes the value of 'mac' {'adr': 1, 'dr': 5} in full",
+        ),
+        (
+            {"cases": {1: [{"name": "a", "type": "u8"}, {"name": "b", "type": "u8"}]}},
+            {"a": [1, 2], "b": [3]},
+            "tlv: no case takes the value of 'a' 2 in full",
+        ),
+    ],
+)
+def test_a_value_no_case_takes_in_full_is_an_error(tlv, data, message):
+    assert any(message in e for e in encode(tlv, data).errors), encode(tlv, data).errors
+    generated = generated_encode(tlv, data)
+    assert generated.get("errors"), generated
+
+
+def test_collected_arrays_pair_element_by_element():
     tlv = {"cases": {1: [{"name": "a", "type": "u8"}, {"name": "b", "type": "u8"}]}}
-    message = "cannot be written one entry per element"
-    assert any(message in e for e in encode(tlv, {"a": [1, 2], "b": [3]}).errors)
-    assert any(
-        message in e for e in generated_encode(tlv, {"a": [1, 2], "b": [3]})["errors"]
-    )
-    # Equal lengths pair element by element.
-    assert (
-        bytes(encode(tlv, {"a": [1, 2], "b": [3, 4]}).payload).hex() == "010103010204"
-    )
+    result = encode(tlv, {"a": [1, 2], "b": [3, 4]})
+    assert bytes(result.payload).hex() == "010103010204"
+
+
+SHARED_WITHOUT_LAST = {
+    "tag_size": 2,
+    "on_repeat": "merge",
+    "cases": {
+        1: [{"name": "o", "type": "object", "fields": [{"name": "m", "type": "u8"}]}],
+        2: [
+            {
+                "name": "o",
+                "type": "object",
+                "fields": [{"name": "m", "type": "u8"}, {"name": "n", "type": "u8"}],
+            }
+        ],
+    },
+}
+SHARED_MESSAGE = (
+    "tlv: cases share the member 'm' of the merged object 'o' without "
+    "`on_repeat: last` (PS-526)"
+)
+
+
+def test_a_shared_member_without_last_is_rejected_at_load():
+    assert SHARED_MESSAGE in decode(SHARED_WITHOUT_LAST, "000105").errors
+    assert SHARED_MESSAGE in validate_schema_structure(schema(SHARED_WITHOUT_LAST))
+    with pytest.raises(ValueError, match="PS-526"):
+        TS013Generator(schema(SHARED_WITHOUT_LAST))
 
 
 PLACEMENT = "has no effect there: it belongs on a tlv, a field of a tlv case, or a"

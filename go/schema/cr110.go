@@ -13,6 +13,7 @@ package schema
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 )
@@ -120,6 +121,8 @@ func tlvRepeatModes(tlv map[string]any, order keyOrder) (tlvRepeatInfo, error) {
 	if tlv == nil {
 		return info, nil
 	}
+	shared := map[string][]map[string]any{}
+	var sharedOrder []string
 	var firstErr error
 	fail := func(format string, args ...any) {
 		if firstErr == nil {
@@ -182,15 +185,40 @@ func tlvRepeatModes(tlv map[string]any, order keyOrder) (tlvRepeatInfo, error) {
 			members, _ := found[name]["fields"].([]any)
 			for _, m := range members {
 				mm := asStringMap(m)
-				if mm == nil || mm["on_repeat"] != "last" {
+				if mm == nil {
 					continue
 				}
-				if member, _ := mm["name"].(string); member != "" {
-					if info.lastMembers[name] == nil {
-						info.lastMembers[name] = map[string]bool{}
-					}
-					info.lastMembers[name][member] = true
+				member, _ := mm["name"].(string)
+				if member == "" {
+					continue
 				}
+				key := name + "\x00" + member
+				if _, seen := shared[key]; !seen {
+					sharedOrder = append(sharedOrder, key)
+				}
+				shared[key] = append(shared[key], mm)
+				if mm["on_repeat"] != "last" {
+					continue
+				}
+				if info.lastMembers[name] == nil {
+					info.lastMembers[name] = map[string]bool{}
+				}
+				info.lastMembers[name][member] = true
+			}
+		}
+	}
+	// CR-2026-128: merged cases share a member only where it declares `last` (PS-526).
+	for _, key := range sharedOrder {
+		decls := shared[key]
+		if len(decls) < 2 {
+			continue
+		}
+		for _, d := range decls {
+			if d["on_repeat"] != "last" {
+				parts := strings.SplitN(key, "\x00", 2)
+				fail("tlv: cases share the member '%s' of the merged object '%s' without `on_repeat: last` (PS-526)",
+					parts[1], parts[0])
+				break
 			}
 		}
 	}
@@ -327,28 +355,14 @@ func identity(m map[string]any) uintptr {
 	return id
 }
 
-// tlvEncodePlan is tlv_encode_plan: what PS-527 (CR-2026-125) needs of a tlv's cases,
-// in declaration order. first is the first case declaring each name - a `last` value
-// and an array PS-157 collected are written under it. For each merged object, members
-// is every member some case declares, owner the first case declaring each member,
-// which writes it once, and declaring every case declaring each member, all of which
-// write a member that declares `last`.
+// tlvEncodePlan is tlv_encode_plan: for each merged object, every member some case
+// declares; a supplied member outside it is an error (PS-527).
 type encodePlan struct {
-	first     map[string]string
-	members   map[string]map[string]bool
-	owner     map[string]map[string]string
-	declaring map[string]map[string]map[string]bool
-	last      map[string]map[string]bool
+	members map[string]map[string]bool
 }
 
 func tlvEncodePlan(tlv map[string]any, order keyOrder, info tlvRepeatInfo) encodePlan {
-	plan := encodePlan{
-		first:     map[string]string{},
-		members:   map[string]map[string]bool{},
-		owner:     map[string]map[string]string{},
-		declaring: map[string]map[string]map[string]bool{},
-		last:      info.lastMembers,
-	}
+	plan := encodePlan{members: map[string]map[string]bool{}}
 	view := asStringMap(tlv["cases"])
 	if view == nil {
 		return plan
@@ -360,45 +374,22 @@ func tlvEncodePlan(tlv map[string]any, order keyOrder, info tlvRepeatInfo) encod
 		}
 		names, found := reportedFields(body, order)
 		for _, name := range names {
-			if _, seen := plan.first[name]; !seen {
-				plan.first[name] = key
-			}
 			if info.mode(name) != "merge" {
 				continue
 			}
 			members, _ := found[name]["fields"].([]any)
 			for _, member := range members {
 				mm := asStringMap(member)
-				m, _ := mm["name"].(string)
-				if mm == nil || m == "" {
-					continue
+				if m, _ := mm["name"].(string); mm != nil && m != "" {
+					if plan.members[name] == nil {
+						plan.members[name] = map[string]bool{}
+					}
+					plan.members[name][m] = true
 				}
-				if plan.members[name] == nil {
-					plan.members[name] = map[string]bool{}
-					plan.owner[name] = map[string]string{}
-					plan.declaring[name] = map[string]map[string]bool{}
-				}
-				plan.members[name][m] = true
-				if _, owned := plan.owner[name][m]; !owned {
-					plan.owner[name][m] = key
-				}
-				if plan.declaring[name][m] == nil {
-					plan.declaring[name][m] = map[string]bool{}
-				}
-				plan.declaring[name][m][key] = true
 			}
 		}
 	}
 	return plan
-}
-
-// writes is whether the case under key writes a merged object's member: the first case
-// declaring it, or - for a member declaring `last` - every case declaring it (PS-527).
-func (p encodePlan) writes(name, member, key string) bool {
-	if p.owner[name][member] == key {
-		return true
-	}
-	return p.last[name][member] && p.declaring[name][member][key]
 }
 
 // strayMember is PS-527's refusal of a supplied member of a merged object that no case
@@ -429,36 +420,81 @@ func (p encodePlan) strayMember(data map[string]any) error {
 	return nil
 }
 
-// splitCollected is PS-502's one entry per element: every name the case writes must be
-// an array PS-157 collected, all of one length, or the elements cannot be paired.
-func splitCollected(key string, claimed, arrays []string, data map[string]any) ([]map[string]any, error) {
-	length := -1
-	same := len(arrays) == len(claimed)
-	for _, name := range arrays {
-		n := len(data[name].([]any))
-		if length >= 0 && n != length {
-			same = false
+// caseClaim is a claimable field of a tlv case, and whether the case may be written
+// without it: a flagged group's fields, whose mask says which are present, and a field
+// declaring `optional: true` (PS-405). The reference's _case_claims.
+type caseClaim struct {
+	field    Field
+	optional bool
+}
+
+func caseClaims(fields []Field, optional bool, out []caseClaim) []caseClaim {
+	for _, f := range fields {
+		if len(f.ByteGroup) > 0 {
+			out = caseClaims(f.ByteGroup, optional, out)
+			continue
 		}
-		length = n
+		if f.Flagged != nil {
+			for _, g := range f.Flagged.Groups {
+				out = caseClaims(g.Fields, true, out)
+			}
+			continue
+		}
+		if f.Name == "" || strings.HasPrefix(f.Name, "_") ||
+			f.Type == TypeNumber || f.Type == "number" {
+			continue
+		}
+		out = append(out, caseClaim{f, optional || f.Optional})
 	}
-	if !same {
-		quoted := make([]string, len(claimed))
-		for i, name := range claimed {
-			quoted[i] = "'" + name + "'"
+	return out
+}
+
+// tlvCaseOrder is a tlv's case keys in declaration order, recovered from the YAML node
+// tree; a key the tree does not give (a JSON-authored schema) follows, sorted.
+func tlvCaseOrder(field Field, order keyOrder) []string {
+	var keys []string
+	seen := map[string]bool{}
+	for _, key := range order.keys(field.decl["cases"]) {
+		if _, ok := field.TLVCases[key]; ok && !seen[key] {
+			keys = append(keys, key)
+			seen[key] = true
 		}
-		return nil, fmt.Errorf("tlv case %s: [%s] cannot be written one entry per element: the collected arrays differ in length or sit beside a single value (PS-502)",
-			key, strings.Join(quoted, ", "))
 	}
-	entries := make([]map[string]any, length)
-	for i := range entries {
-		entry := make(map[string]any, len(data))
-		for k, v := range data {
-			entry[k] = v
+	var rest []string
+	for key := range field.TLVCases {
+		if !seen[key] {
+			rest = append(rest, key)
 		}
-		for _, name := range arrays {
-			entry[name] = data[name].([]any)[i]
-		}
-		entries[i] = entry
 	}
-	return entries, nil
+	sort.Strings(rest)
+	return append(keys, rest...)
+}
+
+// fieldTakes is whether a case's field can write a value, the reference's _case_fidelity
+// for one field: a label its lookup lacks, a number its arithmetic cannot undo, or one
+// outside its type's range is not taken. A value that is not a number after the lookup -
+// a string, a boolean, a list - is taken, as the reference takes it.
+func fieldTakes(f Field, value any) bool {
+	reversed, err := reverseLookupLabel(f, value)
+	if err != nil {
+		return false
+	}
+	if _, isBool := reversed.(bool); isBool {
+		return true
+	}
+	num, ok := toFloat64(reversed)
+	if !ok {
+		return true
+	}
+	raw, err := reverseArithmetic(num, f)
+	if err != nil || math.Abs(raw-math.Round(raw)) > 1e-9 {
+		return false
+	}
+	if lo, hi, known := integerRange(f.Type); known {
+		r := int64(math.Round(raw))
+		if r < lo || r > hi {
+			return false
+		}
+	}
+	return true
 }

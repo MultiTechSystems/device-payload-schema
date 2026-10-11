@@ -134,44 +134,58 @@ public class CR2026110Test {
         return v;
     }
 
-    // CR-2026-125 (PS-527, PS-525): the spec prototype's TestCR2026125OnRepeatEncoding.
+    // CR-2026-125 and CR-2026-128 (PS-525 to PS-527): the spec prototype's
+    // TestCR2026125OnRepeatEncoding and TestCR2026128FirstCaseThatFits.
 
     private static final String LORAMAC_SHARED = "name: t\nfields:\n- tlv:\n"
             + "    tag_size: 2\n    on_repeat: merge\n    cases:\n"
-            + "      0x0310: [{name: loramac, type: object, fields: [{name: adr, type: u8}, {name: dr, type: u8}]}]\n"
-            + "      0x0311: [{name: loramac, type: object, fields: [{name: dr, type: u8}]}]\n";
+            + "      0x0310: [{name: loramac, type: object, fields: [{name: adr, type: u8}, {name: dr, type: u8, on_repeat: last}]}]\n"
+            + "      0x0311: [{name: loramac, type: object, fields: [{name: dr, type: u8, on_repeat: last}]}]\n";
+    private static final String COLLECTED = "name: t\nfields:\n- tlv:\n    tag_size: 2\n    cases:\n"
+            + "      0x0310: [{name: mac, type: object, fields: [{name: adr, type: u8}]}]\n"
+            + "      0x0311: [{name: mac, type: object, fields: [{name: dr, type: u8}]}]\n";
+    private static final String SHARED_LAST = "name: t\nfields:\n- tlv:\n    on_repeat: merge\n    cases:\n"
+            + "      1: [{name: o, type: object, fields: [{name: a, type: u8}, {name: m, type: u8, on_repeat: last}]}]\n"
+            + "      2: [{name: o, type: object, fields: [{name: b, type: u8}, {name: m, type: u8, on_repeat: last}]}]\n";
 
-    @Test
-    public void aCollectedNameIsWrittenUnderTheFirstCase() {
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("event", List.of(1, 2));
-        EncodeResult result = Schema.fromYaml(event("")).encode(data);
+    private static Map<String, Object> map(Object... kv) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        for (int i = 0; i < kv.length; i += 2) m.put((String) kv[i], kv[i + 1]);
+        return m;
+    }
+
+    private static void encodesTo(String yaml, Map<String, Object> data, String want) {
+        EncodeResult result = Schema.fromYaml(yaml).encode(data);
         assertTrue(result.getErrors().isEmpty(), result.getErrors().toString());
-        assertArrayEquals(hex("3a013a02"), result.getPayload());
+        assertArrayEquals(hex(want), result.getPayload());
     }
 
     @Test
-    public void aMemberNoCaseDeclaresIsAnError() {
-        Map<String, Object> loramac = new LinkedHashMap<>();
-        loramac.put("adr", 1);
-        loramac.put("dr", 5);
-        loramac.put("fw", 3);
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("loramac", loramac);
-        List<String> errors = Schema.fromYaml(LORAMAC_SHARED).encode(data).getErrors();
+    public void eachValueGoesUnderTheFirstCaseItFills() {
+        encodesTo(event(""), map("event", List.of(1, 2)), "3a013a02");
+        encodesTo(event(""), map("event", 3), "3a03");
+        encodesTo(COLLECTED, map("mac", List.of(map("adr", 1), map("dr", 5))), "031001031105");
+        encodesTo(LORAMAC_SHARED, map("loramac", map("dr", 5)), "031105");
+        encodesTo(LORAMAC_SHARED, map("loramac", map("adr", 1, "dr", 5)), "03100105");
+        encodesTo(SHARED_LAST, map("o", map("a", 1, "b", 2, "m", 9)), "010109020209");
+    }
+
+    @Test
+    public void aValueNoCaseTakesInFullIsAnError() {
+        List<String> errors = Schema.fromYaml(LORAMAC_SHARED)
+                .encode(map("loramac", map("adr", 1, "dr", 5, "fw", 3))).getErrors();
         assertTrue(errors.stream().anyMatch(e -> e.contains(
                 "tlv: the merged object 'loramac' is given ['fw'], which no case declares (PS-527)")),
+                errors.toString());
+        errors = Schema.fromYaml(COLLECTED).encode(map("mac", List.of(map("adr", 1, "dr", 5)))).getErrors();
+        assertTrue(errors.stream().anyMatch(e -> e.contains("tlv: no case takes the value of 'mac'")),
                 errors.toString());
     }
 
     @Test
-    public void aMemberTwoCasesDeclareIsWrittenOnce() {
-        Map<String, Object> loramac = new LinkedHashMap<>();
-        loramac.put("adr", 1);
-        loramac.put("dr", 5);
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("loramac", loramac);
-        assertArrayEquals(hex("03100105"), Schema.fromYaml(LORAMAC_SHARED).encode(data).getPayload());
+    public void aSharedMemberWithoutLastIsRejectedAtLoad() {
+        rejected(LORAMAC_SHARED.replace(", on_repeat: last", ""),
+                "tlv: cases share the member 'dr' of the merged object 'loramac' without `on_repeat: last` (PS-526)");
     }
 
     @Test

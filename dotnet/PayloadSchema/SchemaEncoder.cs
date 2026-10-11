@@ -837,6 +837,47 @@ public static class SchemaEncoder
         /// schemas rely on; and a nested match or tlv, where which branch supplies a name
         /// depends on the data, so claiming every branch's names would over-claim.</para>
         /// </remarks>
+        /// <summary>
+        /// The reference's _case_claims: claimable fields, a flagged group's (whose mask says
+        /// which are present) and an `optional: true` field marked optional (PS-527).
+        /// </summary>
+        static List<(SchemaField field, bool optional)> CaseClaims(List<SchemaField>? fields, bool optional)
+        {
+            var sink = new List<(SchemaField, bool)>();
+            if (fields == null) return sink;
+            foreach (var f in fields)
+            {
+                if (f.ByteGroup.Count > 0) { sink.AddRange(CaseClaims(f.ByteGroup, optional)); continue; }
+                if (f.Flagged?.Groups != null)
+                {
+                    foreach (var group in f.Flagged.Groups) sink.AddRange(CaseClaims(group.Fields, true));
+                    continue;
+                }
+                if (PayloadName(f) == null) continue;
+                sink.Add((f, optional || f.Optional));
+            }
+            return sink;
+        }
+
+        /// <summary>
+        /// Whether a case's field takes a value (PS-527): an object element supplies exactly
+        /// the members it declares, and a field takes no value it cannot write.
+        /// </summary>
+        bool Fits(SchemaField f, object? value, Dictionary<string, string> modes)
+        {
+            var name = PayloadName(f)!;
+            if (f.Type == FieldType.Object && value is Dictionary<string, object?> whole
+                && !(modes.TryGetValue(name, out var md) && md == "merge"))
+            {
+                var claims = CaseClaims(f.Fields, false);
+                var every = claims.Select(c => c.field.Name).ToHashSet();
+                return claims.All(c => c.optional || whole.ContainsKey(c.field.Name))
+                    && whole.Keys.All(every.Contains);
+            }
+            return CaseFidelity(new List<SchemaField> { f },
+                new Dictionary<string, object?> { [name] = value }).lossless;
+        }
+
         static List<SchemaField> ClaimableFields(List<SchemaField> caseFields)
         {
             var claimable = new List<SchemaField>();
@@ -921,37 +962,38 @@ public static class SchemaEncoder
             int lengthSize = Math.Max(0, tlv.LengthSize);
             var order = _order ?? data.Keys.ToList();
 
-            // PS-527 (CR-2026-125), the reference's tlv_encode_plan, in declaration order:
-            // the first case declaring each name, which writes a `last` value and an array
-            // PS-157 collected; for each merged object every member some case declares, the
-            // first case declaring each member, which writes it once, and every case
-            // declaring it, all of which write a member declaring `last`.
+            // PS-525 to PS-527 (CR-2026-110, -125, -128): each value - a scalar, each element
+            // of an array PS-157 collected, a `last` value, a merged object's members - goes
+            // under the first case whose declared fields it supplies in full; nothing is
+            // zero-filled or dropped, and what no case takes is an error. A case requiring
+            // more fields is tried first, then declaration order, so em400-mud's [131, 103]
+            // (temperature, temperature_alarm) is not stranded by [3, 103] (temperature).
             var modes = tlv.TLVRepeatModes;
-            var first = new Dictionary<string, string>();
+            string ModeOf(string n) => modes.TryGetValue(n, out var md) ? md : "collect";
+            var entries = new List<(string key, List<SchemaField> fields, List<SchemaField> required,
+                List<SchemaField> optional, int rank)>();
             var declaredMembers = new Dictionary<string, HashSet<string>>();
-            var memberOwner = new Dictionary<string, Dictionary<string, string>>();
-            var declaring = new Dictionary<string, Dictionary<string, HashSet<string>>>();
             foreach (var (caseKey, caseFields) in tlv.TLVCases)
             {
                 if (caseKey == "default") continue;
-                foreach (var f in ClaimableFields(caseFields))
+                var required = new List<SchemaField>();
+                var optional = new List<SchemaField>();
+                foreach (var (f, isOptional) in CaseClaims(caseFields, false))
                 {
-                    if (PayloadName(f) is not { } n) continue;
-                    first.TryAdd(n, caseKey);
-                    if (!modes.TryGetValue(n, out var md) || md != "merge") continue;
+                    (isOptional ? optional : required).Add(f);
+                    var n = PayloadName(f)!;
+                    if (ModeOf(n) != "merge") continue;
                     foreach (var m in f.Fields)
                     {
                         if (string.IsNullOrEmpty(m.Name)) continue;
                         if (!declaredMembers.TryGetValue(n, out var set)) declaredMembers[n] = set = new();
                         set.Add(m.Name);
-                        if (!memberOwner.TryGetValue(n, out var owners)) memberOwner[n] = owners = new();
-                        owners.TryAdd(m.Name, caseKey);
-                        if (!declaring.TryGetValue(n, out var by)) declaring[n] = by = new();
-                        if (!by.TryGetValue(m.Name, out var keys)) by[m.Name] = keys = new();
-                        keys.Add(caseKey);
                     }
                 }
+                entries.Add((caseKey, caseFields, required, optional, entries.Count));
             }
+            entries = entries.OrderByDescending(e => e.required.Count).ThenBy(e => e.rank).ToList();
+
             // A supplied member of a merged object that no case declares has nowhere to go.
             foreach (var (n, members) in declaredMembers)
             {
@@ -963,124 +1005,116 @@ public static class SchemaEncoder
                         + $"[{string.Join(", ", stray)}], which no case declares (PS-527)");
             }
 
-            var candidates = new List<(int position, int lossPenalty, int matches, int index,
-                string caseKey, List<SchemaField> caseFields, List<string> units,
-                List<Dictionary<string, object?>> entries)>();
-
-            int caseIndex = -1;
-            foreach (var (caseKey, caseFields) in tlv.TLVCases)
-            {
-                caseIndex++;
-                if (caseKey == "default") continue;
-                var claimed = new List<string>();
-                var units = new List<string>();     // what claiming this case spends
-                var arrays = new List<string>();    // PS-157 arrays, one entry per element
-                var caseData = data;
-                foreach (var f in ClaimableFields(caseFields))
+            var queues = new Dictionary<string, Queue<object?>>();
+            foreach (var e in entries)
+                foreach (var f in e.required.Concat(e.optional))
                 {
-                    var n = PayloadName(f);
-                    if (n == null || !data.TryGetValue(n, out var supplied)) continue;
-                    var mode = modes.TryGetValue(n, out var md) ? md : "collect";
-                    bool collected = supplied is System.Collections.IList && !(f.Type == FieldType.Repeat
-                        || (f.Type == FieldType.Bytes && f.Format == "array"));
-                    if ((mode == "last" || collected) && (!first.TryGetValue(n, out var owner) || owner != caseKey))
-                        continue;
-                    if (mode == "merge" && supplied is Dictionary<string, object?> whole)
+                    var n = PayloadName(f)!;
+                    if (!data.TryGetValue(n, out var v) || queues.ContainsKey(n) || ModeOf(n) == "merge") continue;
+                    bool collected = v is System.Collections.IList && !(f.Type == FieldType.Repeat
+                        || (f.Type == FieldType.Bytes && f.Format == "array")) && ModeOf(n) == "collect";
+                    queues[n] = collected
+                        ? new Queue<object?>(((System.Collections.IList)v!).Cast<object?>())
+                        : new Queue<object?>(new[] { v });
+                }
+            var pending = new Dictionary<string, HashSet<string>>();
+            foreach (var n in declaredMembers.Keys)
+                if (data.TryGetValue(n, out var v) && v is Dictionary<string, object?> whole)
+                    pending[n] = whole.Keys.ToHashSet();
+
+            var written = new List<(string key, List<SchemaField> fields, Dictionary<string, object?> data,
+                int position, int seq)>();
+            bool progress = true;
+            while (progress)
+            {
+                progress = false;
+                foreach (var e in entries)
+                {
+                    while (true)
                     {
-                        // PS-527: one entry per case declaring any of the merged object's
-                        // members the input supplies, each member under the first case
-                        // declaring it, or under every one for a member declaring `last` -
-                        // so what a case spends is its own and never already spent.
-                        var owners = memberOwner.TryGetValue(n, out var o) ? o : new();
-                        var by = declaring.TryGetValue(n, out var b) ? b : new();
-                        var last = tlv.TLVLastMembers.TryGetValue(n, out var lm) ? lm : new HashSet<string>();
-                        var subset = new Dictionary<string, object?>();
-                        foreach (var kv in whole)
+                        var values = new Dictionary<string, object?>();
+                        int taken = 0;
+                        bool complete = true;
+                        foreach (var f in e.required)
                         {
-                            bool writes = (owners.TryGetValue(kv.Key, out var ok) && ok == caseKey)
-                                || (last.Contains(kv.Key) && by.TryGetValue(kv.Key, out var ks) && ks.Contains(caseKey));
-                            if (writes) subset[kv.Key] = kv.Value;
+                            var n = PayloadName(f)!;
+                            if (ModeOf(n) == "merge")
+                            {
+                                if (!pending.ContainsKey(n) || data[n] is not Dictionary<string, object?> whole)
+                                {
+                                    complete = false;
+                                    break;
+                                }
+                                var sub = new Dictionary<string, object?>();
+                                bool fresh = false;
+                                foreach (var m in f.Fields)
+                                {
+                                    if (string.IsNullOrEmpty(m.Name)) continue;
+                                    if (!whole.TryGetValue(m.Name, out var mv)) { complete = false; break; }
+                                    sub[m.Name] = mv;
+                                    fresh |= pending[n].Contains(m.Name);
+                                }
+                                if (!complete) break;
+                                values[n] = sub;
+                                if (fresh) taken++;
+                                continue;
+                            }
+                            if (!queues.TryGetValue(n, out var q) || q.Count == 0 || !Fits(f, q.Peek(), modes))
+                            {
+                                complete = false;
+                                break;
+                            }
+                            values[n] = q.Peek();
+                            taken++;
                         }
-                        if (subset.Count == 0) continue;
-                        if (ReferenceEquals(caseData, data))
-                            caseData = new Dictionary<string, object?>(data);
-                        caseData[n] = subset;
-                        claimed.Add(n);
-                        units.Add("\u0000" + n + "\u0000" + caseKey);
-                        continue;
-                    }
-                    if (collected) arrays.Add(n);
-                    claimed.Add(n);
-                    units.Add(n);
-                }
-                if (claimed.Count == 0) continue;
-                var entries = new List<Dictionary<string, object?>> { caseData };
-                if (arrays.Count > 0)
-                {
-                    // PS-502: one entry per element. Every name the case writes must then be
-                    // an array of one length, or the elements cannot be paired into entries.
-                    var lengths = arrays.Select(n => ((System.Collections.IList)data[n]!).Count).Distinct().ToList();
-                    if (arrays.Count != claimed.Count || lengths.Count != 1)
-                        throw new InvalidOperationException($"tlv case {caseKey}: ["
-                            + string.Join(", ", claimed.Select(n => $"'{n}'"))
-                            + "] cannot be written one entry per element: the collected arrays differ"
-                            + " in length or sit beside a single value (PS-502)");
-                    entries = new List<Dictionary<string, object?>>();
-                    for (int i = 0; i < lengths[0]; i++)
-                    {
-                        var one = new Dictionary<string, object?>(caseData);
-                        foreach (var n in arrays) one[n] = ((System.Collections.IList)data[n]!)[i];
-                        entries.Add(one);
+                        if (!complete) break;
+                        foreach (var f in e.optional)
+                        {
+                            var n = PayloadName(f)!;
+                            if (queues.TryGetValue(n, out var q) && q.Count > 0 && Fits(f, q.Peek(), modes))
+                            {
+                                values[n] = q.Peek();
+                                taken++;
+                            }
+                        }
+                        if (taken == 0) break;
+                        var entryData = new Dictionary<string, object?>(data);
+                        int position = int.MaxValue;
+                        foreach (var (n, v) in values)
+                        {
+                            entryData[n] = v;
+                            int index = order.ToList().IndexOf(n);
+                            position = Math.Min(position, index < 0 ? int.MaxValue : index);
+                            if (ModeOf(n) == "merge")
+                                pending[n].ExceptWith(((Dictionary<string, object?>)v!).Keys);
+                            else
+                                queues[n].Dequeue();
+                        }
+                        written.Add((e.key, e.fields, entryData, position, written.Count));
+                        progress = true;
                     }
                 }
-                int position = claimed.Min(n =>
-                {
-                    int index = order.ToList().IndexOf(n);
-                    return index < 0 ? int.MaxValue : index;
-                });
-                var (matches, lossless) = CaseFidelity(caseFields, entries[0]);
-                candidates.Add((position, lossless ? 0 : 1, matches, caseIndex, caseKey, caseFields,
-                    units, entries));
             }
+            foreach (var (n, q) in queues)
+                if (q.Count > 0)
+                    throw new InvalidOperationException($"tlv: no case takes the value of '{n}' "
+                        + $"{q.Peek()} in full (PS-502, PS-527)");
+            foreach (var (n, left) in pending)
+                if (left.Count > 0)
+                    throw new InvalidOperationException("tlv: no case takes the members ["
+                        + string.Join(", ", left.Select(m => $"'{m}'").OrderBy(m => m, StringComparer.Ordinal))
+                        + $"] of the merged object '{n}' in full (PS-527)");
 
-            // Payload order first, then the case that can reproduce the value, then the
-            // fuller explanation of it, then declaration order (PS-527). List.Sort is not
-            // stable, so the last tie is stated, as the reference's stable sort keeps it.
-            candidates.Sort((a, b) =>
-            {
-                if (a.position != b.position) return a.position.CompareTo(b.position);
-                if (a.lossPenalty != b.lossPenalty) return a.lossPenalty.CompareTo(b.lossPenalty);
-                if (a.matches != b.matches) return b.matches.CompareTo(a.matches);
-                return a.index.CompareTo(b.index);
-            });
-
-            // Every decoded field belongs to one channel. Without this a name defined under
-            // two tags emits both of them, so am308 grows an extra channel.
-            var spent = new HashSet<string>();
-            var emitted = new List<(int position, int rank, string caseKey, List<SchemaField> caseFields,
-                List<Dictionary<string, object?>> entries)>();
-            foreach (var candidate in candidates)
-            {
-                if (candidate.units.All(spent.Contains)) continue;
-                foreach (var unit in candidate.units) spent.Add(unit);
-                emitted.Add((candidate.position, emitted.Count, candidate.caseKey,
-                    candidate.caseFields, candidate.entries));
-            }
-            emitted.Sort((a, b) => a.position != b.position
-                ? a.position.CompareTo(b.position) : a.rank.CompareTo(b.rank));
-
+            // Payload order, so a payload round-trips; entries of one name keep the order taken.
             var output = new List<byte>();
-            foreach (var (_, _, caseKey, caseFields, entries) in emitted)
+            foreach (var w in written.OrderBy(w => w.position).ThenBy(w => w.seq))
             {
-                var tag = EncodeTLVTag(caseKey, tlv);
-                foreach (var caseData in entries)
-                {
-                    var value = EncodeFieldList(caseFields, caseData);
-                    output.AddRange(tag);
-                    if (lengthSize > 0)
-                        output.AddRange(WriteUint(value.Length, lengthSize, _endian));
-                    output.AddRange(value);
-                }
+                var tag = EncodeTLVTag(w.key, tlv);
+                var value = EncodeFieldList(w.fields, w.data);
+                output.AddRange(tag);
+                if (lengthSize > 0)
+                    output.AddRange(WriteUint(value.Length, lengthSize, _endian));
+                output.AddRange(value);
             }
             return output.ToArray();
         }

@@ -78,6 +78,8 @@ public static partial class SchemaParser
         var errors = new List<string>();
         var modes = new Dictionary<string, string>();
         var last = new Dictionary<string, HashSet<string>>();
+        var shared = new Dictionary<(string obj, string member), List<YamlMappingNode>>();
+        var sharedOrder = new List<(string obj, string member)>();
         var fallback = "collect";
         if (Get(tlv, "on_repeat") is { } d)
         {
@@ -128,11 +130,28 @@ public static partial class SchemaParser
                         last[name] = members = new HashSet<string>();
                     if (Get(decl, "fields") is YamlSequenceNode memberSeq)
                         foreach (var m in memberSeq.Children)
-                            if (m is YamlMappingNode mm && YamlString(Get(mm, "on_repeat")) == "last"
-                                && Get(mm, "name") is YamlScalarNode mn && !string.IsNullOrEmpty(mn.Value))
-                                members.Add(mn.Value!);
+                        {
+                            if (m is not YamlMappingNode mm || Get(mm, "name") is not YamlScalarNode mn
+                                || string.IsNullOrEmpty(mn.Value)) continue;
+                            var key = (name, mn.Value!);
+                            if (!shared.TryGetValue(key, out var decls))
+                            {
+                                shared[key] = decls = new List<YamlMappingNode>();
+                                sharedOrder.Add(key);
+                            }
+                            decls.Add(mm);
+                            if (YamlString(Get(mm, "on_repeat")) == "last") members.Add(mn.Value!);
+                        }
                 }
             }
+        }
+        // CR-2026-128: merged cases share a member only where it declares `last` (PS-526).
+        foreach (var key in sharedOrder)
+        {
+            var decls = shared[key];
+            if (decls.Count > 1 && decls.Any(d => YamlString(Get(d, "on_repeat")) != "last"))
+                errors.Add($"tlv: cases share the member '{key.member}' of the merged object "
+                    + $"'{key.obj}' without `on_repeat: last` (PS-526)");
         }
         return (modes, last, errors);
     }

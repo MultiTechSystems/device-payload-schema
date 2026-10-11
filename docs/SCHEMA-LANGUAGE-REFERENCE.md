@@ -968,10 +968,13 @@ schema is rejected (PS-526). A merged object reporting one member twice is an er
 unless that member declares `on_repeat: last`. `on_repeat` anywhere else - outside a tlv,
 or on a member of an object that is not merged - is rejected (PS-525).
 
-The encoder writes a merged object as one entry per case declaring members the input
-supplies; a member several cases declare goes under the first of them, and a supplied
-member no case declares is an error. A `last` value, and an array PS-157 collected, are
-written under the first case declaring the name, the array one entry per element (PS-527).
+Merged cases may share a member only where it declares `on_repeat: last` (PS-526).
+
+The encoder writes each value - a scalar, each element of an array PS-157 collected, a
+`last` value, a merged object's members - under the first case whose declared fields it
+supplies in full, and never zero-fills or drops one (PS-527). A shared `last` member is
+written in every case written for its object. A value no case takes in full, or a member
+no case declares, is an error naming it.
 
 ### Multi-Byte Tags (Tektelic-style)
 
