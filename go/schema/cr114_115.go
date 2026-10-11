@@ -81,29 +81,32 @@ func isBufferUnderflow(err error) bool {
 	return errors.As(err, &under)
 }
 
-// memberBaseBytes is the bytes a byte_group member's own base reads: `u16[0:3]` two.
-func memberBaseBytes(member Field) int {
-	if m := bitRangePattern.FindStringSubmatch(string(member.Type)); m != nil {
-		var bits int
-		fmt.Sscanf(m[1][1:], "%d", &bits)
-		if bits/8 > 0 {
-			return bits / 8
+// byteGroupLabel is how PS-535 identifies a byte_group: by its members, as the spec
+// prototype does - `byte_group of 'f', 'w'`, every named member in declaration order,
+// internal `_` members included - else `an unnamed byte_group` (CR-2026-131).
+func byteGroupLabel(members []Field) string {
+	names := make([]string, 0, len(members))
+	for _, member := range members {
+		if member.Name != "" {
+			names = append(names, "'"+member.Name+"'")
 		}
 	}
-	return 1
+	if len(names) == 0 {
+		return "an unnamed byte_group"
+	}
+	return "byte_group of " + strings.Join(names, ", ")
 }
 
-// byteGroupUnderflow names a byte_group's short read as the spec prototype does: each
-// member reads the group's bytes from its start, so the first member whose base does not
-// fit made the read. Where every base fits and the group's size does not, the group did.
-func byteGroupUnderflow(field Field, size int, ctx *DecodeContext) error {
-	remaining := ctx.Remaining()
-	for _, member := range field.ByteGroup {
-		if memberBaseBytes(member) > remaining {
-			return nameUnderflow(underflowPeek(ctx.Offset), member.Name, string(member.Type))
-		}
+// byteGroupUnderflow names a byte_group's short read. The group is read as one value
+// (CR-2026-131), so the failing read is the group's, in the peek form, and every member
+// is lost; it is identified by its members (PS-535).
+func byteGroupUnderflow(field Field, ctx *DecodeContext) error {
+	under := underflowPeek(ctx.Offset)
+	return &BufferUnderflowError{
+		Detail: under.Detail,
+		Named:  true,
+		msg:    fmt.Sprintf("Field %s: %s (PS-535)", byteGroupLabel(field.ByteGroup), under.Detail),
 	}
-	return nameUnderflow(underflowNeed(size, ctx.Offset, len(ctx.Data)), "", "byte_group")
 }
 
 // asciiHighByteWarning is PS-073's warning for a byte above 0x7F (PS-538).

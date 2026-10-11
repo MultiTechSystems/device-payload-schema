@@ -133,7 +133,18 @@ SHORT_READS = [
         [{"byte_group": {"size": 2, "fields": [{"name": "a", "type": "u16[0:3]"},
                                                {"name": "c", "type": "u16[4:7]"}]}}],
         "01",
-        peek("'a'", 0),
+        peek("byte_group of 'a', 'c'", 0),
+    ),
+    (
+        [{"byte_group": {"size": 2, "fields": [{"name": "a", "type": "u8[0:3]"},
+                                               {"name": "_r", "type": "u8[4:7]"}]}}],
+        "01",
+        peek("byte_group of 'a', '_r'", 0),
+    ),
+    (
+        [{"byte_group": {"size": 2, "fields": [{"type": "u8[0:3]"}]}}],
+        "01",
+        peek("an unnamed byte_group", 0),
     ),
     (
         [{"name": "n", "type": "u8"}, {"name": "s", "type": "ascii", "length": "$n"}],
