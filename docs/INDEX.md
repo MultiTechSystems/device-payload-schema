@@ -38,7 +38,7 @@ Generated inventory of this repository: what lives where, what each document cov
 | [`FUTURE-FEATURES.md`](FUTURE-FEATURES.md) | Status of semantic enhancements for the Payload Schema language. | 230 |
 | [`GETTING-STARTED.md`](GETTING-STARTED.md) | Create one schema, generate codecs for all platforms. | 401 |
 | [`INTEGRATION-LAYER.md`](INTEGRATION-LAYER.md) | How decoded payloads are transformed into WoT Thing Descriptions, SenML, IPSO, and other output... | 562 |
-| [`IPSO-REFERENCE.md`](IPSO-REFERENCE.md) | Complete reference for IPSO Smart Objects (OMA LwM2M) used in LoRaWAN payload schemas. | 126 |
+| [`IPSO-REFERENCE.md`](IPSO-REFERENCE.md) | Complete reference for IPSO Smart Objects (OMA LwM2M) used in LoRaWAN payload schemas. | 135 |
 | [`LANGUAGE-ANALYSIS.md`](LANGUAGE-ANALYSIS.md) | This document explains the design decisions behind the Payload Schema language. | 390 |
 | [`OUTPUT-FORMATS.md`](OUTPUT-FORMATS.md) | The Payload Schema decoder can output data in multiple formats for different platforms and... | 602 |
 | [`SCHEMA-DEVELOPMENT-GUIDE.md`](SCHEMA-DEVELOPMENT-GUIDE.md) | Best practices for creating complete, validated payload schemas. | 215 |
@@ -59,7 +59,7 @@ Generated inventory of this repository: what lives where, what each document cov
 - **FUTURE-FEATURES.md** — Implemented Features; Planned Features; Out of Scope: Device Profile Metadata; Implementation Notes; Status Summary; Related Standards
 - **GETTING-STARTED.md** — What You Get; 5-Minute Example; Using the Sensor Library; Common Patterns; Adding Semantic Annotations; Test Vector Best Practices; Directory Structure; Next Steps; Getting Help
 - **INTEGRATION-LAYER.md** — The Problem; Two-Layer Architecture; Decoder Output: The Integration Boundary; Integration Profile; Protocol Converters; Format Details; Context Layering; Where the Integration Layer Runs; Relationship to TS013; What Belongs Where; Version History
-- **IPSO-REFERENCE.md** — Common Sensor Objects (3300-3350); Usage in Schema; Adding New IPSO Objects; Keyword Detection; Complex Codec Examples (from TTN lorawan-devices); Version History
+- **IPSO-REFERENCE.md** — Common Sensor Objects (3300-3350); Usage in Schema; Adding New IPSO Objects; Which Fields the Scorer Expects to Be Annotated; Complex Codec Examples (from TTN lorawan-devices); Version History
 - **LANGUAGE-ANALYSIS.md** — Design Goals; Type System Design; Conditional Parsing Design; Arithmetic Pipeline Design; Binary Format Design; Feature Exclusions; Compatibility Considerations; Future Considerations; Summary
 - **OUTPUT-FORMATS.md** — Example; 1. Raw Format (Default); 1a. Interpreter Output: decoded JSON and `_meta`; 2. IPSO Smart Objects Format; 3. SenML Format (RFC 8428); 4. TTN Normalized Format; Format Comparison; Schema Definition; API Usage; Output JSON Schema; Format-Specific JSON Schemas
 - **SCHEMA-DEVELOPMENT-GUIDE.md** — Overview; Process: Converting an Existing Codec; Message Types; Edge Cases; Common Pitfalls; Tools; Checklist: Before Declaring "Complete"; Example: MClimate Vicki
@@ -124,29 +124,29 @@ Generated inventory of this repository: what lives where, what each document cov
 ## Device schemas
 
 338 schemas under `schemas/devices/`.
-Mean quality score 75.7% (PLATINUM 37, GOLD 40, SILVER 219, BRONZE 27, REJECTED 15). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+Mean quality score 75.2% (PLATINUM 43, GOLD 16, SILVER 236, BRONZE 28, REJECTED 15). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
 | _language-conformance | 126 | 254 | SILVER 109, BRONZE 17 |
-| milesight | 84 | 1427 | PLATINUM 21, GOLD 33, SILVER 27, REJECTED 3 |
-| decentlab | 58 | 204 | PLATINUM 13, GOLD 6, SILVER 27, BRONZE 8, REJECTED 4 |
+| milesight | 84 | 1427 | PLATINUM 30, GOLD 14, SILVER 35, BRONZE 2, REJECTED 3 |
+| decentlab | 58 | 204 | PLATINUM 10, GOLD 2, SILVER 35, BRONZE 7, REJECTED 4 |
 | _library-composed | 49 | 57 | SILVER 48, BRONZE 1 |
 | makerfabs | 6 | 0 | REJECTED 6 |
 | mclimate | 3 | 14 | PLATINUM 1, BRONZE 1, REJECTED 1 |
 | dnt | 2 | 144 | SILVER 2 |
 | arwin | 1 | 22 | PLATINUM 1 |
 | digital-matter | 1 | 7 | SILVER 1 |
-| dragino | 1 | 6 | PLATINUM 1 |
+| dragino | 1 | 6 | SILVER 1 |
 | elsys | 1 | 3 | SILVER 1 |
 | hbi | 1 | 19 | SILVER 1 |
 | netvox | 1 | 34 | SILVER 1 |
 | radio-bridge | 1 | 71 | SILVER 1 |
 | radionode | 1 | 0 | REJECTED 1 |
 | rakwireless | 1 | 1 | SILVER 1 |
-| volley-boast | 1 | 436 | GOLD 1 |
+| volley-boast | 1 | 436 | PLATINUM 1 |
 
 ### By device
 
@@ -205,7 +205,7 @@ Mean quality score 75.7% (PLATINUM 37, GOLD 40, SILVER 219, BRONZE 27, REJECTED 
 | `_language-conformance/match-u32-peek-discriminator` | 4 | 4 | fields | 73% | SILVER |
 | `_language-conformance/match-var` | 2 | 1 | fields | 69% | BRONZE |
 | `_language-conformance/meta-device-context` | 6 | 3 | fields | 81% | SILVER |
-| `_language-conformance/meta-nested` | 9 | 2 | fields | 75% | SILVER |
+| `_language-conformance/meta-nested` | 9 | 2 | fields | 82% | SILVER |
 | `_language-conformance/meta-port-default` | 2 | 2 | ports | 65% | BRONZE |
 | `_language-conformance/meta-producer` | 3 | 2 | fields | 73% | SILVER |
 | `_language-conformance/meta-tlv-channels` | 2 | 1 | fields | 69% | BRONZE |
@@ -290,7 +290,7 @@ Mean quality score 75.7% (PLATINUM 37, GOLD 40, SILVER 219, BRONZE 27, REJECTED 
 | `_library-composed/device_management__reboot_immediate` | 3 | 2 | fields | 73% | SILVER |
 | `_library-composed/gps_tracker__clear_all_geofences` | 3 | 1 | fields | 73% | SILVER |
 | `_library-composed/gps_tracker__request_position` | 3 | 1 | fields | 71% | SILVER |
-| `_library-composed/gps_tracker__set_geofence` | 6 | 1 | fields | 82% | SILVER |
+| `_library-composed/gps_tracker__set_geofence` | 6 | 1 | fields | 75% | SILVER |
 | `_library-composed/lorawan_frames__fctrl_uplink_adr_ack` | 5 | 1 | fields | 73% | SILVER |
 | `_library-composed/lorawan_frames__join_request` | 3 | 1 | fields | 71% | SILVER |
 | `_library-composed/lorawan_frames__mhdr_confirmed_down` | 3 | 1 | fields | 73% | SILVER |
@@ -331,167 +331,167 @@ Mean quality score 75.7% (PLATINUM 37, GOLD 40, SILVER 219, BRONZE 27, REJECTED 
 | `_library-composed/utility_meter__set_tariff` | 3 | 1 | fields | 73% | SILVER |
 | `arwin/lrs10701` | 37 | 22 | ports | 100% | PLATINUM |
 | `decentlab/dl-5tm` | 10 | 10 | fields | 100% | PLATINUM |
-| `decentlab/dl-alb` | 11 | 6 | fields | 100% | PLATINUM |
+| `decentlab/dl-alb` | 11 | 6 | fields | 80% | SILVER |
 | `decentlab/dl-atm22` | 15 | 6 | fields | 100% | PLATINUM |
-| `decentlab/dl-atm41` | 27 | 7 | fields | 92% | GOLD |
-| `decentlab/dl-atm41g2` | 20 | 3 | fields | 78% | SILVER |
-| `decentlab/dl-blg` | 9 | 3 | fields | 73% | SILVER |
-| `decentlab/dl-ctd10` | 10 | 6 | fields | 89% | GOLD |
-| `decentlab/dl-cws` | 10 | 2 | fields | 74% | SILVER |
-| `decentlab/dl-cws2` | 12 | 2 | fields | 75% | SILVER |
+| `decentlab/dl-atm41` | 27 | 7 | fields | 86% | GOLD |
+| `decentlab/dl-atm41g2` | 20 | 3 | fields | 77% | SILVER |
+| `decentlab/dl-blg` | 9 | 3 | fields | 78% | SILVER |
+| `decentlab/dl-ctd10` | 10 | 6 | fields | 100% | PLATINUM |
+| `decentlab/dl-cws` | 10 | 2 | fields | 76% | SILVER |
+| `decentlab/dl-cws2` | 12 | 2 | fields | 76% | SILVER |
 | `decentlab/dl-dlr2-002` | 7 | 1 | fields | 65% | BRONZE |
-| `decentlab/dl-dlr2-003` | 6 | 5 | fields | 100% | PLATINUM |
+| `decentlab/dl-dlr2-003` | 6 | 5 | fields | 80% | SILVER |
 | `decentlab/dl-dlr2-004-10` | 5 | 0 | fields | 14% | REJECTED |
 | `decentlab/dl-dlr2-005` | 5 | 2 | fields | 71% | SILVER |
 | `decentlab/dl-dlr2-006` | 5 | 2 | fields | 71% | SILVER |
-| `decentlab/dl-dlr2-008-2000` | 12 | 2 | fields | 72% | SILVER |
-| `decentlab/dl-dlr2-009-2000` | 9 | 2 | fields | 72% | SILVER |
+| `decentlab/dl-dlr2-008-2000` | 12 | 2 | fields | 76% | SILVER |
+| `decentlab/dl-dlr2-009-2000` | 9 | 2 | fields | 76% | SILVER |
 | `decentlab/dl-dlr2-010` | 10 | 1 | fields | 63% | BRONZE |
-| `decentlab/dl-dlr2-011` | 7 | 7 | fields | 100% | PLATINUM |
+| `decentlab/dl-dlr2-011` | 7 | 7 | fields | 80% | SILVER |
 | `decentlab/dl-dlr2-012` | 5 | 1 | fields | 63% | BRONZE |
 | `decentlab/dl-ds18` | 7 | 6 | fields | 100% | PLATINUM |
 | `decentlab/dl-dws-232263168-0000302459-1370` | 10 | 0 | fields | 14% | REJECTED |
-| `decentlab/dl-gmm` | 15 | 6 | fields | 92% | GOLD |
-| `decentlab/dl-iam` | 24 | 12 | fields | 81% | SILVER |
-| `decentlab/dl-ifd` | 6 | 6 | fields | 100% | PLATINUM |
-| `decentlab/dl-ilt` | 7 | 6 | fields | 100% | PLATINUM |
-| `decentlab/dl-isd` | 6 | 6 | fields | 100% | PLATINUM |
-| `decentlab/dl-isf` | 19 | 2 | fields | 74% | SILVER |
-| `decentlab/dl-itst` | 6 | 2 | fields | 73% | SILVER |
+| `decentlab/dl-gmm` | 15 | 6 | fields | 89% | GOLD |
+| `decentlab/dl-iam` | 24 | 12 | fields | 84% | SILVER |
+| `decentlab/dl-ifd` | 6 | 6 | fields | 80% | SILVER |
+| `decentlab/dl-ilt` | 7 | 6 | fields | 80% | SILVER |
+| `decentlab/dl-isd` | 6 | 6 | fields | 80% | SILVER |
+| `decentlab/dl-isf` | 19 | 2 | fields | 80% | SILVER |
+| `decentlab/dl-itst` | 6 | 2 | fields | 69% | BRONZE |
 | `decentlab/dl-kl66-1538372-464859` | 13 | 0 | fields | 14% | REJECTED |
 | `decentlab/dl-lid` | 16 | 6 | fields | 80% | SILVER |
-| `decentlab/dl-lp8p` | 16 | 2 | fields | 68% | BRONZE |
+| `decentlab/dl-lp8p` | 16 | 2 | fields | 71% | SILVER |
 | `decentlab/dl-lpw` | 5 | 2 | fields | 71% | SILVER |
 | `decentlab/dl-lws` | 5 | 2 | fields | 71% | SILVER |
-| `decentlab/dl-mbx` | 7 | 6 | fields | 89% | GOLD |
+| `decentlab/dl-mbx` | 7 | 6 | fields | 80% | SILVER |
 | `decentlab/dl-mes5` | 11 | 6 | fields | 100% | PLATINUM |
 | `decentlab/dl-ntu` | 11 | 6 | fields | 100% | PLATINUM |
-| `decentlab/dl-optod` | 12 | 6 | fields | 96% | PLATINUM |
+| `decentlab/dl-optod` | 12 | 6 | fields | 100% | PLATINUM |
 | `decentlab/dl-par` | 5 | 0 | fields | 14% | REJECTED |
-| `decentlab/dl-pheht` | 11 | 6 | fields | 89% | GOLD |
-| `decentlab/dl-pm` | 17 | 2 | fields | 69% | BRONZE |
-| `decentlab/dl-pr21-1-10` | 6 | 2 | fields | 71% | SILVER |
-| `decentlab/dl-pr26-0-1` | 6 | 2 | fields | 73% | SILVER |
-| `decentlab/dl-pr36-8192` | 6 | 2 | fields | 71% | SILVER |
-| `decentlab/dl-pr36ctd-8192-1024` | 8 | 2 | fields | 71% | SILVER |
+| `decentlab/dl-pheht` | 11 | 6 | fields | 100% | PLATINUM |
+| `decentlab/dl-pm` | 17 | 2 | fields | 70% | SILVER |
+| `decentlab/dl-pr21-1-10` | 6 | 2 | fields | 72% | SILVER |
+| `decentlab/dl-pr26-0-1` | 6 | 2 | fields | 74% | SILVER |
+| `decentlab/dl-pr36-8192` | 6 | 2 | fields | 72% | SILVER |
+| `decentlab/dl-pr36ctd-8192-1024` | 8 | 2 | fields | 72% | SILVER |
 | `decentlab/dl-pyr` | 5 | 2 | fields | 69% | BRONZE |
-| `decentlab/dl-rad` | 10 | 6 | fields | 92% | GOLD |
-| `decentlab/dl-rhc` | 7 | 2 | fields | 75% | SILVER |
-| `decentlab/dl-sdd` | 40 | 2 | fields | 73% | SILVER |
-| `decentlab/dl-sht35` | 6 | 2 | fields | 73% | SILVER |
+| `decentlab/dl-rad` | 10 | 6 | fields | 100% | PLATINUM |
+| `decentlab/dl-rhc` | 7 | 2 | fields | 78% | SILVER |
+| `decentlab/dl-sdd` | 40 | 2 | fields | 76% | SILVER |
+| `decentlab/dl-sht35` | 6 | 2 | fields | 76% | SILVER |
 | `decentlab/dl-smtp` | 20 | 2 | fields | 74% | SILVER |
 | `decentlab/dl-tbrg-01` | 7 | 1 | fields | 65% | BRONZE |
 | `decentlab/dl-tp` | 37 | 6 | fields | 100% | PLATINUM |
-| `decentlab/dl-trs11` | 10 | 1 | fields | 72% | SILVER |
-| `decentlab/dl-trs12` | 11 | 2 | fields | 73% | SILVER |
-| `decentlab/dl-trs21` | 6 | 2 | fields | 74% | SILVER |
-| `decentlab/dl-wrm` | 8 | 2 | fields | 74% | SILVER |
+| `decentlab/dl-trs11` | 10 | 1 | fields | 76% | SILVER |
+| `decentlab/dl-trs12` | 11 | 2 | fields | 78% | SILVER |
+| `decentlab/dl-trs21` | 6 | 2 | fields | 78% | SILVER |
+| `decentlab/dl-wrm` | 8 | 2 | fields | 76% | SILVER |
 | `decentlab/dl-zn1` | 5 | 1 | fields | 63% | BRONZE |
 | `decentlab/dl-zn2` | 8 | 7 | fields | 80% | SILVER |
-| `digital-matter/oyster` | 24 | 7 | ports | 100% | SILVER |
-| `dnt/dnt-lw-wsci-2-1-1` | 130 | 74 | fields | 91% | SILVER |
-| `dnt/dnt-lw-wsci` | 120 | 70 | fields | 91% | SILVER |
-| `dragino/laq4` | 14 | 6 | fields | 100% | PLATINUM |
-| `elsys/ers` | 32 | 3 | fields | 75% | SILVER |
+| `digital-matter/oyster` | 24 | 7 | ports | 80% | SILVER |
+| `dnt/dnt-lw-wsci-2-1-1` | 130 | 74 | fields | 78% | SILVER |
+| `dnt/dnt-lw-wsci` | 120 | 70 | fields | 78% | SILVER |
+| `dragino/laq4` | 14 | 6 | fields | 80% | SILVER |
+| `elsys/ers` | 32 | 3 | fields | 78% | SILVER |
 | `hbi/mla20` | 108 | 19 | fields | 80% | SILVER |
 | `makerfabs/4-channel-adc` | 8 | 0 | fields | 16% | REJECTED |
-| `makerfabs/ath20` | 4 | 0 | fields | 16% | REJECTED |
+| `makerfabs/ath20` | 4 | 0 | fields | 18% | REJECTED |
 | `makerfabs/gps-tracker` | 16 | 0 | fields | 16% | REJECTED |
-| `makerfabs/leaf-moisture-sn-3001` | 6 | 0 | fields | 16% | REJECTED |
+| `makerfabs/leaf-moisture-sn-3001` | 6 | 0 | fields | 18% | REJECTED |
 | `makerfabs/pipe-pressure` | 3 | 0 | fields | 16% | REJECTED |
-| `makerfabs/soil-monitor` | 8 | 0 | fields | 15% | REJECTED |
-| `mclimate/flood-sensor` | 5 | 1 | fields | 61% | BRONZE |
+| `makerfabs/soil-monitor` | 8 | 0 | fields | 18% | REJECTED |
+| `mclimate/flood-sensor` | 5 | 1 | fields | 65% | BRONZE |
 | `mclimate/t-valve` | 11 | 0 | fields | 16% | REJECTED |
-| `mclimate/vicki` | 31 | 13 | fields | 98% | PLATINUM |
-| `milesight/am102` | 20 | 21 | fields | 97% | PLATINUM |
-| `milesight/am102l` | 20 | 19 | fields | 97% | PLATINUM |
-| `milesight/am103` | 16 | 19 | fields | 94% | GOLD |
-| `milesight/am103l` | 16 | 19 | fields | 94% | GOLD |
+| `mclimate/vicki` | 31 | 13 | fields | 100% | PLATINUM |
+| `milesight/am102` | 20 | 21 | fields | 96% | PLATINUM |
+| `milesight/am102l` | 20 | 19 | fields | 96% | PLATINUM |
+| `milesight/am103` | 16 | 19 | fields | 92% | GOLD |
+| `milesight/am103l` | 16 | 19 | fields | 92% | GOLD |
 | `milesight/am104` | 12 | 15 | fields | 100% | PLATINUM |
-| `milesight/am107` | 16 | 15 | fields | 94% | GOLD |
-| `milesight/am307` | 19 | 19 | fields | 91% | GOLD |
-| `milesight/am307l` | 19 | 19 | fields | 91% | GOLD |
-| `milesight/am308` | 20 | 17 | fields | 91% | GOLD |
-| `milesight/am308l` | 20 | 17 | fields | 91% | GOLD |
-| `milesight/am319` | 26 | 17 | fields | 91% | GOLD |
-| `milesight/am319l` | 26 | 17 | fields | 91% | GOLD |
-| `milesight/at101-fh` | 35 | 21 | fields | 91% | GOLD |
+| `milesight/am107` | 16 | 15 | fields | 92% | GOLD |
+| `milesight/am307` | 19 | 19 | fields | 92% | GOLD |
+| `milesight/am307l` | 19 | 19 | fields | 92% | GOLD |
+| `milesight/am308` | 20 | 17 | fields | 92% | GOLD |
+| `milesight/am308l` | 20 | 17 | fields | 92% | GOLD |
+| `milesight/am319` | 26 | 17 | fields | 92% | GOLD |
+| `milesight/am319l` | 26 | 17 | fields | 92% | GOLD |
+| `milesight/at101-fh` | 35 | 21 | fields | 100% | PLATINUM |
 | `milesight/at101` | 19 | 23 | fields | 100% | PLATINUM |
-| `milesight/ct101` | 27 | 32 | fields | 83% | SILVER |
-| `milesight/ct103` | 27 | 32 | fields | 83% | SILVER |
-| `milesight/ct105` | 27 | 32 | fields | 83% | SILVER |
-| `milesight/ct303` | 52 | 28 | fields | 83% | SILVER |
-| `milesight/ct305` | 52 | 28 | fields | 83% | SILVER |
-| `milesight/ct310` | 52 | 28 | fields | 83% | SILVER |
+| `milesight/ct101` | 27 | 32 | fields | 100% | PLATINUM |
+| `milesight/ct103` | 27 | 32 | fields | 100% | PLATINUM |
+| `milesight/ct105` | 27 | 32 | fields | 100% | PLATINUM |
+| `milesight/ct303` | 52 | 28 | fields | 100% | PLATINUM |
+| `milesight/ct305` | 52 | 28 | fields | 100% | PLATINUM |
+| `milesight/ct310` | 52 | 28 | fields | 100% | PLATINUM |
 | `milesight/em300-di` | 10 | 16 | fields | 100% | PLATINUM |
 | `milesight/em300-mcs` | 17 | 20 | fields | 100% | PLATINUM |
-| `milesight/em300-mld` | 5 | 6 | fields | 100% | PLATINUM |
+| `milesight/em300-mld` | 5 | 6 | fields | 80% | SILVER |
 | `milesight/em300-sld` | 9 | 12 | fields | 100% | PLATINUM |
 | `milesight/em300-th` | 8 | 10 | fields | 100% | PLATINUM |
 | `milesight/em300-zld` | 9 | 12 | fields | 100% | PLATINUM |
-| `milesight/em310-tilt` | 18 | 24 | fields | 100% | PLATINUM |
-| `milesight/em310-udl` | 14 | 20 | fields | 89% | GOLD |
+| `milesight/em310-tilt` | 18 | 24 | fields | 80% | SILVER |
+| `milesight/em310-udl` | 14 | 20 | fields | 80% | SILVER |
 | `milesight/em320-th` | 8 | 10 | fields | 100% | PLATINUM |
-| `milesight/em320-tilt` | 10 | 1 | fields | 89% | SILVER |
-| `milesight/em400-mud` | 13 | 16 | fields | 73% | SILVER |
-| `milesight/em400-tld` | 13 | 16 | fields | 73% | SILVER |
-| `milesight/em400-udl` | 13 | 16 | fields | 73% | SILVER |
-| `milesight/em410-rdl` | 17 | 20 | fields | 92% | GOLD |
-| `milesight/em500-co2` | 11 | 1 | fields | 83% | SILVER |
-| `milesight/em500-lgt` | 5 | 7 | fields | 89% | GOLD |
-| `milesight/em500-pp` | 5 | 8 | fields | 89% | GOLD |
+| `milesight/em320-tilt` | 10 | 1 | fields | 69% | BRONZE |
+| `milesight/em400-mud` | 13 | 16 | fields | 77% | SILVER |
+| `milesight/em400-tld` | 13 | 16 | fields | 77% | SILVER |
+| `milesight/em400-udl` | 13 | 16 | fields | 77% | SILVER |
+| `milesight/em410-rdl` | 17 | 20 | fields | 100% | PLATINUM |
+| `milesight/em500-co2` | 11 | 1 | fields | 81% | SILVER |
+| `milesight/em500-lgt` | 5 | 7 | fields | 80% | SILVER |
+| `milesight/em500-pp` | 5 | 8 | fields | 80% | SILVER |
 | `milesight/em500-pt100` | 6 | 7 | fields | 100% | PLATINUM |
 | `milesight/em500-smt` | 8 | 9 | fields | 100% | PLATINUM |
-| `milesight/em500-smtc` | 11 | 16 | fields | 94% | GOLD |
-| `milesight/em500-swl` | 5 | 7 | fields | 89% | GOLD |
-| `milesight/em500-udl` | 5 | 1 | fields | 78% | SILVER |
+| `milesight/em500-smtc` | 11 | 16 | fields | 100% | PLATINUM |
+| `milesight/em500-swl` | 5 | 7 | fields | 80% | SILVER |
+| `milesight/em500-udl` | 5 | 1 | fields | 69% | BRONZE |
 | `milesight/gs101` | 7 | 6 | fields | 78% | SILVER |
 | `milesight/gs301` | 23 | 31 | fields | 100% | PLATINUM |
-| `milesight/ts101` | 14 | 15 | fields | 94% | GOLD |
+| `milesight/ts101` | 14 | 15 | fields | 100% | PLATINUM |
 | `milesight/ts201` | 16 | 23 | fields | 100% | PLATINUM |
-| `milesight/ts201v2` | 24 | 20 | fields | 93% | GOLD |
+| `milesight/ts201v2` | 24 | 20 | fields | 92% | GOLD |
 | `milesight/ts30x` | 26 | 20 | fields | 80% | SILVER |
 | `milesight/uc100` | 7 | 11 | fields | 78% | SILVER |
 | `milesight/uc1114` | 6 | 0 | fields | 16% | REJECTED |
 | `milesight/uc1152` | 4 | 0 | fields | 16% | REJECTED |
 | `milesight/uc300` | 19 | 27 | fields | 80% | SILVER |
-| `milesight/uc50x` | 12 | 22 | fields | 100% | PLATINUM |
-| `milesight/uc51x` | 24 | 24 | fields | 83% | SILVER |
+| `milesight/uc50x` | 12 | 22 | fields | 80% | SILVER |
+| `milesight/uc51x` | 24 | 24 | fields | 80% | SILVER |
 | `milesight/vs121` | 5 | 0 | fields | 16% | REJECTED |
 | `milesight/vs135` | 15 | 15 | fields | 80% | SILVER |
 | `milesight/vs321` | 25 | 24 | fields | 98% | SILVER |
-| `milesight/vs330` | 7 | 9 | fields | 86% | GOLD |
-| `milesight/vs340` | 5 | 5 | fields | 89% | GOLD |
-| `milesight/vs341` | 5 | 5 | fields | 89% | GOLD |
+| `milesight/vs330` | 7 | 9 | fields | 80% | SILVER |
+| `milesight/vs340` | 5 | 5 | fields | 80% | SILVER |
+| `milesight/vs341` | 5 | 5 | fields | 80% | SILVER |
 | `milesight/vs350` | 28 | 38 | fields | 100% | PLATINUM |
 | `milesight/vs351` | 29 | 36 | fields | 100% | PLATINUM |
 | `milesight/vs360` | 23 | 24 | fields | 80% | SILVER |
-| `milesight/vs370` | 14 | 27 | fields | 89% | GOLD |
+| `milesight/vs370` | 14 | 27 | fields | 80% | SILVER |
 | `milesight/vs373` | 33 | 44 | fields | 80% | SILVER |
-| `milesight/ws101` | 5 | 1 | fields | 82% | SILVER |
-| `milesight/ws136` | 4 | 1 | fields | 91% | SILVER |
-| `milesight/ws156` | 4 | 1 | fields | 91% | SILVER |
-| `milesight/ws201` | 6 | 10 | fields | 89% | GOLD |
-| `milesight/ws202` | 6 | 7 | fields | 86% | GOLD |
-| `milesight/ws203` | 12 | 14 | fields | 94% | GOLD |
-| `milesight/ws301` | 6 | 7 | fields | 100% | PLATINUM |
-| `milesight/ws302` | 10 | 9 | fields | 86% | GOLD |
-| `milesight/ws303` | 5 | 5 | fields | 100% | PLATINUM |
+| `milesight/ws101` | 5 | 1 | fields | 73% | SILVER |
+| `milesight/ws136` | 4 | 1 | fields | 71% | SILVER |
+| `milesight/ws156` | 4 | 1 | fields | 71% | SILVER |
+| `milesight/ws201` | 6 | 10 | fields | 80% | SILVER |
+| `milesight/ws202` | 6 | 7 | fields | 80% | SILVER |
+| `milesight/ws203` | 12 | 14 | fields | 100% | PLATINUM |
+| `milesight/ws301` | 6 | 7 | fields | 80% | SILVER |
+| `milesight/ws302` | 10 | 9 | fields | 80% | SILVER |
+| `milesight/ws303` | 5 | 5 | fields | 80% | SILVER |
 | `milesight/ws50x` | 17 | 25 | fields | 78% | SILVER |
-| `milesight/ws515` | 26 | 23 | fields | 86% | GOLD |
+| `milesight/ws515` | 26 | 23 | fields | 94% | GOLD |
 | `milesight/ws52x` | 16 | 21 | fields | 80% | SILVER |
 | `milesight/ws558` | 7 | 17 | fields | 80% | SILVER |
-| `milesight/wt101` | 30 | 24 | fields | 89% | GOLD |
-| `milesight/wt201v1` | 47 | 47 | fields | 94% | GOLD |
-| `milesight/wt201v2` | 48 | 49 | fields | 91% | GOLD |
+| `milesight/wt101` | 30 | 24 | fields | 100% | PLATINUM |
+| `milesight/wt201v1` | 47 | 47 | fields | 100% | PLATINUM |
+| `milesight/wt201v2` | 48 | 49 | fields | 100% | PLATINUM |
 | `milesight/wts305` | 13 | 16 | fields | 92% | GOLD |
 | `milesight/wts505` | 13 | 16 | fields | 92% | GOLD |
 | `milesight/wts506` | 13 | 15 | fields | 92% | GOLD |
 | `netvox/r718x` | 33 | 34 | ports | 80% | SILVER |
 | `radio-bridge/rbs30x` | 52 | 71 | fields | 80% | SILVER |
 | `radionode/rn320bth` | 13 | 0 | fields | 14% | REJECTED |
-| `rakwireless/qingping` | 11 | 1 | fields | 83% | SILVER |
-| `volley-boast/vobo` | 5066 | 436 | ports, tlv, match | 93% | GOLD |
+| `rakwireless/qingping` | 11 | 1 | fields | 89% | SILVER |
+| `volley-boast/vobo` | 5066 | 436 | ports, tlv, match | 100% | PLATINUM |
 
 ## Other schema files
 
