@@ -1074,8 +1074,12 @@ corpus before those schemas existed.** Each is fixed; the list is here so nobody
   strings), and **Go dropped a non-string lookup label silently**. CR-2026-104 since allows
   boolean labels and fixed Go's labels to hold any scalar (see below).
 - **The generator renamed output keys** to JS identifiers — `pm1.0` came out as `pm1_0`. Keys are
-  now restored at the entry points from a table built at generation time; two names mangling to
-  one spelling is a generation error.
+  now restored at the entry points from a table built at generation time. Two names mangling to
+  one spelling (adeunis `ER+P-1_s` and `ER-P-1_s`) used to be a generation error; now
+  `unique_js_names` suffixes all but one of them (`ER_P_1_s`, `ER_P_1_s_2`, skipping any suffix
+  that is another name's spelling), and `to_js_name` reads that mapping during `generate()`, so
+  every staging and reference site agrees. A schema with no collision generates unchanged.
+  `_language-conformance/names-mangling-alike.yaml` holds all five to it.
 - **`generate_output_schema.py` kept the first branch's enum** when two branches report one key
   with the same type — r718x's `Status` is ON/OFF in one message and Success/Failure in another.
   Same-typed branches now union their enums and widen their bounds.
