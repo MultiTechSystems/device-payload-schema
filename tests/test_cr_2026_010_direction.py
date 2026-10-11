@@ -317,6 +317,16 @@ ports:
             "fPort 1 is declared direction:uplink; message direction is downlink"
         ]
 
+    def test_nothing_is_encoded(self):
+        # The direction is refused before any field is looked at. Since CR-2026-134 a
+        # rejected input carries no payload whatever the reason, so the payload check
+        # below no longer tells an encoder that stops from one that carries on; a field
+        # the input omits does - it would add PS-551's "Missing required field".
+        result = interpreter(self.ENCODABLE).encode({}, fPort=1, direction="downlink")
+        assert result.errors == [
+            "fPort 1 is declared direction:uplink; message direction is downlink"
+        ]
+
     def test_no_payload_is_produced(self):
         # Emitting the bytes anyway would put a malformed frame on the air.
         result = interpreter(self.ENCODABLE).encode(

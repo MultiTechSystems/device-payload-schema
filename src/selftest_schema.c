@@ -644,6 +644,31 @@ static void test_an_unknown_tag_is_left_over_from_the_tag(void) {
     TCHECK(r.bytes_unread == 2);
 }
 
+static void test_a_missing_input_is_named(void) {
+    /* PS-551 (CR-2026-134): rejected, naming the field, with no payload. The code alone
+     * was returned before, so a caller could not tell which input it had left out. */
+    schema_t s;
+    encode_result_t out;
+    encode_inputs_t inputs;
+
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t a = field_u8("a");
+    field_def_t b = field_u8("b");
+    schema_add_field(&s, &a);
+    schema_add_field(&s, &b);
+    encode_inputs_init(&inputs);
+    encode_inputs_add_int(&inputs, "a", 1);
+    TCHECK(schema_encode(&s, &inputs, &out) == SCHEMA_ERR_PARSE);
+    TCHECK(out.len == 0);
+    TCHECK(strcmp(out.error_msg, "Missing required field: b") == 0);
+
+    encode_inputs_add_int(&inputs, "b", 2);
+    TCHECK(schema_encode(&s, &inputs, &out) == SCHEMA_OK);
+    TCHECK(out.len == 2 && out.data[0] == 1 && out.data[1] == 2);
+    TCHECK(out.error_msg[0] == 0);
+}
+
 /*
  * Main test entry point
  */
@@ -678,6 +703,7 @@ void selftest_schema(void) {
     test_a_short_read_names_the_field();
     test_a_skip_is_written_on_encode();
     test_an_unknown_tag_is_left_over_from_the_tag();
+    test_a_missing_input_is_named();
 
     LOG(LOG_INFO, MOD, "Schema interpreter self-tests complete");
 }

@@ -419,6 +419,10 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
   encFail("Cannot encode type: " + type);
 }
 
+function encMissing(name) {                           // missing_field_message
+  return "Missing required field: " + name;
+}
+
 function encIsLiteral(f) {                            // is_literal
   return (f.type === "string" || f.type === "number" || f.type === "boolean") && "value" in f;
 }
@@ -583,8 +587,9 @@ function encBitRun(out, run, data, ctx) {             // _encode_bitfield_run
   for (var i = 0; i < run.length; i++) {
     var f = run[i], name = f.name || "", v;
     if (!name) v = f["default"] === undefined ? 0 : f["default"];
-    else if (name.charAt(0) === "_") v = encInternalValue(f, data);
-    else v = Object.prototype.hasOwnProperty.call(data, name) ? data[name] : (f["default"] === undefined ? 0 : f["default"]);
+    else if ("value" in f || name.charAt(0) === "_") v = encInternalValue(f, data);
+    else if (!encHas(data, name)) encFail(encMissing(name));   // PS-551
+    else v = data[name];
     v = encReverseModifiers(v, f);
     if (typeof v === "string") v = encLabelValue(v, f);
     if (typeof v === "boolean") v = v ? 1 : 0;
@@ -619,10 +624,12 @@ function encByteGroup(out, f, data, ctx) {            // _encode_byte_group
     var g = members[i];
     if (!g || typeof g !== "object") continue;
     if ("endian" in g) encFail("byte_group member '" + (g.name || "?") + "' declares endian; the group's byte order is declared on the group (PS-364)");
+    if (ENC_COMPUTED.indexOf(g.type) >= 0 || encIsLiteral(g)) continue;   // no bits of its own
     var name = g.name || "", v;
     if (!name) v = g["default"] === undefined ? 0 : g["default"];
-    else if (name.charAt(0) === "_") v = encInternalValue(g, data);
-    else v = Object.prototype.hasOwnProperty.call(data, name) ? data[name] : (g["default"] === undefined ? 0 : g["default"]);
+    else if ("value" in g || name.charAt(0) === "_") v = encInternalValue(g, data);
+    else if (!encHas(data, name)) encFail(encMissing(name));   // PS-551
+    else v = data[name];
     if (g.type === "bool") {                    // its `bit` of the group (PS-364)
       if (v) packed = encPlace(packed, 1, Number(g.bit || 0), 1);
       continue;
@@ -691,21 +698,33 @@ function encBitfieldString(out, f, value, ctx) {      // _encode_bitfield_string
   encPacked(out, packed, length, ctx.endian);
 }
 
+function encGroupGiven(group, data) {                 // _flagged_group_given
+  var gfs = group.fields || [];
+  if (gfs.some(function (g) { return g && g.name && Object.prototype.hasOwnProperty.call(data, g.name); })) return true;
+  return encClaimable(gfs).some(function (g) { return Object.prototype.hasOwnProperty.call(data, g.name); });
+}
+
 function encFlagged(out, fg, data, ctx) {             // _encode_flagged
   var groups = fg.groups || [];
   for (var i = 0; i < groups.length; i++) {
     var gfs = groups[i].fields || [];
-    var has = gfs.some(function (g) { return g.name && Object.prototype.hasOwnProperty.call(data, g.name); });
-    if (!has) continue;
+    if (!encGroupGiven(groups[i], data)) continue;
+    if (gfs.some(function (g) { return g && typeof g === "object" && !g.name; })) {
+      encList(out, gfs, data, ctx);              // a construct in the group
+      continue;
+    }
     for (var j = 0; j < gfs.length; j++) {
       var g = gfs[j], name = g.name || "", v;
       if (!name) continue;
       if (ENC_COMPUTED.indexOf(g.type || "u8") >= 0) continue;
+      if (encIsLiteral(g)) continue;
+      if ("value" in g && name.charAt(0) !== "_") { encField(out, g, g.value, ctx); continue; }
       if (name.charAt(0) === "_") v = encInternalValue(g, data);
-      else if (!Object.prototype.hasOwnProperty.call(data, name) && g.sentinel) {
+      else if (!encHas(data, name) && g.sentinel) {
         encField(out, encRawBits(g), g.sentinel[0], ctx);
         continue;
-      } else v = Object.prototype.hasOwnProperty.call(data, name) ? data[name] : 0;
+      } else if (!encHas(data, name)) encFail(encMissing(name));   // PS-551
+      else v = data[name];
       encField(out, g, encReverseModifiers(v, g), ctx);
     }
   }
@@ -782,27 +801,47 @@ function encMatch(out, f, data, ctx) {                // _encode_match
     var found = encCaseFieldsPresent(cases, data);
     if (found) { key = found[0]; body = found[1]; }
   }
+  var known = disc !== null && disc !== undefined;
+  var inline = length !== undefined && length !== null;
   if (body === null) {
     if (Array.isArray(dflt)) body = dflt;
     else if (Array.isArray(cases["default"])) body = cases["default"];
-    else return;
+    else if (!known && (dflt === "skip" || (inline && !m.name))) return;   // the non-advancing peek
+    else if (inline && !known) encFail(encMissing(m.name || "match"));   // PS-551
+    else body = [];
   }
-  if (length !== undefined && length !== null) {
+  if (inline) {
     var value = disc;
-    if (value === null || value === undefined) {
-      if (key === null) encFail("match case " + JSON.stringify(key) + " names no single discriminator value");
-      value = encParseInt0(key);
+    if (!known) {
+      if (key === null) encFail(encMissing(m.name || "match"));
+      value = encExactCase(key);
+      if (value === null) encFail("match case " + JSON.stringify(key) + " names no single discriminator value");
     }
     encWriteInt(out, value, parseInt(length, 10), false, ctx.endian);
   }
   encList(out, body, data, ctx);
 }
 
-function encRepeat(out, f, data, ctx) {               // _encode_repeat
-  var name = f.name || "", records = data[name];
-  if (records === undefined || records === null) return;
-  if (!Array.isArray(records) && typeof records === "object") records = [records];
-  if (!Array.isArray(records)) encFail("repeat field " + JSON.stringify(name) + ": expected a list of records, got " + typeof records);
+function encRecords(f, data) {                        // _repeat_records
+  var r = data[f.name || ""];
+  if (r === undefined || r === null) return null;
+  if (Array.isArray(r)) return r;
+  if (typeof r === "object") return [r];
+  return null;
+}
+
+function encRepeatSize(f, key, data, siblings) {      // _repeat_size
+  var size = f[key];
+  if (typeof size === "string" && size.charAt(0) === "$") {
+    var src = encSizeSource(siblings, size.slice(1));
+    size = data[src ? src.name : size.slice(1)];
+  }
+  if (typeof size !== "number" || !isFinite(size) || Math.floor(size) !== size) return null;
+  return size;
+}
+
+function encRepeatElements(out, f, data, records, count, ctx) {   // _encode_repeat_elements
+  var name = f.name || "";
   // PS-550: a sibling identifying these values position by position is given as many
   // values as this repeat, as a decoder requires (PS-546).
   encSiblings(f).forEach(function (sib) {
@@ -836,12 +875,30 @@ function encRepeat(out, f, data, ctx) {               // _encode_repeat
   if (f.present_if && rf.some(function (r) { return r && ENC_COMPUTED.indexOf(r.type) < 0 && !encIsLiteral(r); })) {
     encFail("repeat field " + JSON.stringify(name) + " declares present_if and its elements read payload bytes, so the elements it dropped cannot be encoded (PS-387)");
   }
+  if (count !== null && records.length !== count) {
+    // PS-551: the count and the list must agree; nothing is padded or cut.
+    encFail("Repeat '" + name + "' is given " + records.length + " values for a count of " + count + " (PS-551)");
+  }
   for (var i = 0; i < records.length; i++) {
     var rec = records[i];
     if (rec === null || typeof rec !== "object" || Array.isArray(rec)) encFail("repeat field " + JSON.stringify(name) + ": expected each record to be a mapping");
     if (f.index) { var copy = {}; for (var k in rec) copy[k] = rec[k]; copy[f.index] = i + (f.index_base || 0); rec = copy; }
     encList(out, rf, rec, ctx);
   }
+}
+
+function encRepeat(out, f, data, ctx, siblings) {     // _encode_repeat
+  var name = f.name || "", raw = data[name];
+  if (raw !== undefined && raw !== null && typeof raw !== "object") encFail("repeat field " + JSON.stringify(name) + ": expected a list of records, got " + typeof raw);
+  var records = encRecords(f, data);
+  if (records === null) encFail(encMissing(name));      // PS-551
+  siblings = siblings || [];
+  var count = encRepeatSize(f, "count", data, siblings);
+  var body = [];
+  encRepeatElements(body, f, data, records, count, ctx);
+  var bl = encRepeatSize(f, "byte_length", data, siblings);
+  if (bl !== null && body.length !== bl) encFail("Repeat '" + name + "' encodes to " + body.length + " bytes for a byte_length of " + bl + " (PS-551)");
+  for (var i = 0; i < body.length; i++) out.push(body[i]);
   if (f.trailer) encList(out, f.trailer, data, ctx);
 }
 
@@ -1098,61 +1155,149 @@ function encHas(data, name) {
   return Object.prototype.hasOwnProperty.call(data, name) && data[name] !== null && data[name] !== undefined;
 }
 
-/* `top` selects the reference's top-level loop (encode) over _encode_field_list: the
- * flagged mask patch, the "Missing field" warning and the name_from error are its alone. */
-function encList(out, fields, data, ctx, top) {
-  var omitted = null, patches = {};
-  if (top) {
-    fields.forEach(function (f) {
-      if (!f || !f.flagged) return;
-      var flags = 0;
-      (f.flagged.groups || []).forEach(function (g) {
-        if ((g.fields || []).some(function (x) { return x.name && Object.prototype.hasOwnProperty.call(data, x.name); })) {
-          flags += Math.pow(2, g.bit || 0);
+/* PS-551: what the input omits but the rest of it fixes (_derive_inputs and helpers). */
+function encSizeSource(fields, ref) {                 // _size_source
+  for (var i = 0; i < (fields || []).length; i++) {
+    var f = fields[i];
+    if (!f || typeof f !== "object") continue;
+    if (f.byte_group !== undefined) {
+      var g = f.byte_group, found = encSizeSource(Array.isArray(g) ? g : (g.fields || []), ref);
+      if (found) return found;
+      continue;
+    }
+    if (f.name && (f.name === ref || f.var === ref)) return f;
+  }
+  return null;
+}
+
+function encDerivable(src) {                          // _derivable
+  if (!src || !src.name) return false;
+  if (ENC_COMPUTED.indexOf(src.type) >= 0 || encIsLiteral(src)) return false;
+  var keys = ["value", "name_from", "lookup", "mult", "div", "add", "transform", "polynomial", "encoding", "compute", "ref", "guard"];
+  return !keys.some(function (k) { return k in src; });
+}
+
+function encIsPeek(fields, src) {                     // _is_peek
+  var items = encRuns(fields);
+  for (var i = 0; i < items.length; i++) {
+    var run = items[i].bits;
+    if (run && run.indexOf(src) >= 0) return (parseInt(run[run.length - 1].consume || 0, 10) || 0) < 1;
+  }
+  return false;
+}
+
+function encDerivedSource(fields, ref) {              // _derived_source
+  if (typeof ref !== "string" || ref.charAt(0) !== "$") return null;
+  var src = encSizeSource(fields, ref.slice(1));
+  return (encDerivable(src) && !encIsPeek(fields, src)) ? src : null;
+}
+
+function encExactCase(key) {                          // _exact_case_value
+  if (typeof key === "number") return Math.floor(key) === key ? key : null;
+  try { return encParseInt0(key); } catch (e) { return null; }
+}
+
+function encSoleCase(cases, data) {                   // _sole_case_given
+  var best = null, bestHits = 0, tied = false;
+  for (var key in cases) {
+    if (key === "default" || !Array.isArray(cases[key])) continue;
+    var hits = encClaimable(cases[key]).filter(function (c) { return Object.prototype.hasOwnProperty.call(data, c.name); }).length;
+    if (hits > bestHits) { best = key; bestHits = hits; tied = false; }
+    else if (hits && hits === bestHits) tied = true;
+  }
+  return (best === null || tied) ? null : encExactCase(best);
+}
+
+function encDerive(fields, data, ctx) {                 // _derive_inputs
+  var d = {};
+  for (var k in data) d[k] = data[k];
+  (fields || []).forEach(function (f) {
+    if (!f || typeof f !== "object") return;
+    var src;
+    if (f.type === "repeat") {
+      var records = encRecords(f, data);
+      if (records === null) return;
+      ["count", "byte_length"].forEach(function (key) {
+        src = encDerivedSource(fields, f[key]);
+        if (!src || encHas(d, src.name)) return;
+        if (key === "count") d[src.name] = records.length;
+        else {
+          var scratch = [];
+          encRepeatElements(scratch, f, data, records, null, ctx);
+          d[src.name] = scratch.length;
         }
       });
-      patches[f.flagged.field || ""] = flags;
-    });
-  }
+    } else if (f.match && typeof f.match === "object" && !f.type) {
+      src = encDerivedSource(fields, f.match.field);
+      if (!src || encHas(d, src.name)) return;
+      var v = encSoleCase(f.match.cases || {}, data);
+      if (v !== null) d[src.name] = v;
+    } else if (f.flagged && typeof f.flagged === "object") {
+      var mask = String(f.flagged.field || "").replace(/^\$+/, "");
+      src = encSizeSource(fields, mask);
+      var name = src ? src.name : mask, bits = 0, declared = 0;
+      (f.flagged.groups || []).forEach(function (g) {
+        declared += Math.pow(2, g.bit || 0);
+        if (encGroupGiven(g, data)) bits += Math.pow(2, g.bit || 0);
+      });
+      var given = d[name];
+      if (given === undefined || given === null) { d[name] = bits; return; }
+      // The groups test what a reference to the mask binds (PS-523, CR-2026-132): an
+      // enum's code, the number under a text label, as _encode_reference gives it.
+      given = encReference(name, d);
+      if (typeof given === "number" && Math.floor(given) === given) {
+        var low = 0;
+        (f.flagged.groups || []).forEach(function (g) {
+          if (Math.floor(given / Math.pow(2, g.bit || 0)) % 2) low += Math.pow(2, g.bit || 0);
+        });
+        if (low !== bits) encFail("Flagged field '" + name + "' is given " + given + ", and the groups given set " + bits + " (PS-551)");
+      }
+    }
+  });
+  return d;
+}
+
+/* `top` selects the reference's top-level loop (encode) over _encode_field_list: the
+ * name_from error is its alone. */
+function encList(out, fields, data, ctx, top) {
+  var omitted = null;
+  data = encDerive(fields, data, ctx);
   encRuns(fields).forEach(function (item) {
     if (item.bits) { encBitRun(out, item.bits, data, ctx); return; }
-    var f = item.field, name = f.name || (top ? "unknown" : ""), type = f.type === undefined ? "u8" : f.type;
-    if (top && f.optional === true && f.name) {
-      if (!encHas(data, f.name)) { omitted = omitted || f.name; return; }
-      if (omitted) encFail("Error encoding " + f.name + ": optional field supplied while the earlier optional field " + JSON.stringify(omitted) + " is not (PS-405)");
+    var f = item.field, name = f.name || "", type = f.type === undefined ? "u8" : f.type;
+    if (f.optional === true && f.name) {
+      var okey = encResolveName(f, f.name, data);
+      if (!encHas(data, okey === null ? f.name : okey)) { omitted = omitted || f.name; return; }
+      if (omitted) encFail("optional field " + JSON.stringify(f.name) + " is supplied while the earlier optional field " + JSON.stringify(omitted) + " is not (PS-405)");
     }
     if ("match" in f && !f.type) { encMatch(out, f, data, ctx); return; }
     if ("tlv" in f && !f.type) { encTlv(out, f, data, ctx); return; }
     if ("byte_group" in f) { encByteGroup(out, f, data, ctx); return; }
-    if (type === "repeat") { encRepeat(out, f, data, ctx); return; }
+    if ("flagged" in f && !f.type) { encFlagged(out, f.flagged, data, ctx); return; }
+    if (type === "repeat") { encRepeat(out, f, data, ctx, fields); return; }
     if (type === "object") {
+      if (!name) { encList(out, f.fields || [], data, ctx); return; }
       // Read back from the key a `name_from` object was reported under (CR-2026-030).
       var objKey = encResolveName(f, name, data);
-      var nested = objKey === null ? undefined : data[objKey];
-      var isMap = nested !== null && typeof nested === "object" && !Array.isArray(nested);
-      encList(out, f.fields || [], isMap ? nested : (top ? {} : data), ctx);
+      if (objKey === null) objKey = name;
+      var nested = data[objKey];
+      if (nested === null || typeof nested !== "object" || Array.isArray(nested)) encFail(encMissing(objKey));   // PS-551
+      encList(out, f.fields || [], nested, ctx);
       return;
     }
-    if (top && "flagged" in f) { encFlagged(out, f.flagged, data, ctx); return; }
     if (ENC_COMPUTED.indexOf(type) >= 0) return;
     if (type === "skip") {
       var n = typeof f.length === "string" ? 0 : Math.max(0, parseInt(f.length === undefined ? 1 : f.length, 10));
       for (var i = 0; i < n; i++) out.push(0);
       return;
     }
-    if (type === "bitfield_string") {
-      encBitfieldString(out, f, data[name] === undefined ? "" : data[name], ctx);
-      return;
-    }
     if (encIsLiteral(f)) return;
     if ("value" in f) { encField(out, f, f.value, ctx); return; }
     var value;
     if (!name) {
-      value = f["default"] === undefined ? 0 : f["default"];
+      value = f["default"] === undefined ? 0 : f["default"];   // padding, as a skip is
     } else if (name.charAt(0) === "_") {
       value = encInternalValue(f, data);
-    } else if (top && Object.prototype.hasOwnProperty.call(patches, name)) {
-      value = patches[name];
     } else {
       var key = encResolveName(f, name, data);
       if (key === null) {
@@ -1160,17 +1305,12 @@ function encList(out, fields, data, ctx, top) {
         key = name;
       }
       if (!encHas(data, key)) {
-        if (f.optional === true) { omitted = omitted || name; return; }
         if (f.sentinel) { encField(out, encRawBits(f), f.sentinel[0], ctx); return; }
-        if (top) { ctx.w.push("Missing field: " + key); value = 0; }
-        else value = f["default"] === undefined ? 0 : f["default"];
-      } else {
-        if (f.optional === true && omitted) {
-          encFail("optional field " + JSON.stringify(name) + " is supplied while the earlier optional field " + JSON.stringify(omitted) + " is not (PS-405)");
-        }
-        value = data[key];
+        encFail(encMissing(key));                // PS-551: this wrote a zero
       }
+      value = data[key];
     }
+    if (type === "bitfield_string") { encBitfieldString(out, f, value, ctx); return; }
     encField(out, f, encReverseModifiers(value, f), ctx);
   });
 }
@@ -4116,9 +4256,12 @@ function writeS(buf, pos, size, value, endian) {
                     js_name = to_js_name(fname)
                     
                     # Handle modifiers
-                    src = f'data.{js_name} !== undefined ? data.{js_name} : 0'
+                    # PS-551: a missing value is rejected, naming the field, as the
+                    # reference's encode_command does. It was written as 0.
+                    src = f'data.{js_name}'
                     rev = self._reverse_modifiers_expr(f'({src})', field)
-                    
+                    lines.append(f'    if (data.{js_name} === undefined || data.{js_name} === null) '
+                                 f'throw new Error({json.dumps("Missing required field: " + fname)});')
                     lines.append(f'    {write_fn}(buf, pos, {sz}, {rev}, endian);')
                     lines.append(f'    pos += {sz};')
         

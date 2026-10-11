@@ -424,6 +424,12 @@ def internal_name_errors(schema):
     return errors
 
 
+def missing_field_message(name):
+    """PS-551: what every encoder says for a required value the input omits. The spec
+    prototype's text, so a cross-language diff compares equal strings."""
+    return f"Missing required field: {name}"
+
+
 def raw_bits_field(field_def):
     """The field without its `encoding`: a sentinel is written as the bits it is (PS-427)."""
     return {k: v for k, v in field_def.items() if k != 'encoding'}
@@ -5836,20 +5842,15 @@ class SchemaInterpreter:
         # before the rest of the schema, since each port may declare its own `code`.
         self._encode_scope = fields
         
-        # Pre-scan for flagged constructs to compute flags values
-        flags_patches = {}
-        for field_def in fields:
-            if 'flagged' in field_def:
-                flagged_def = field_def['flagged']
-                field_name = flagged_def.get('field', '')
-                groups = flagged_def.get('groups', [])
-                flags = 0
-                for group in groups:
-                    bit = group.get('bit', 0)
-                    group_fields = group.get('fields', [])
-                    if any(gf.get('name') and gf['name'] in data for gf in group_fields):
-                        flags |= (1 << bit)
-                flags_patches[field_name] = flags
+        # PS-551: a value the input omits but the rest of it fixes - a repeat's count or
+        # byte_length field, a match's discriminator, a flagged mask - is derived before
+        # anything is written, and a supplied one that disagrees is rejected. The flagged
+        # mask was the one derivation already made, and it overwrote a supplied mask.
+        try:
+            data = self._derive_inputs(fields, data)
+        except Exception as e:
+            result.errors.append(str(e))
+            return result
 
         omitted_optional = None     # the first optional field the input left out (PS-405)
 
@@ -5912,7 +5913,7 @@ class SchemaInterpreter:
             
             if field_def.get('type') == 'repeat':
                 try:
-                    output.extend(self._encode_repeat(field_def, data))
+                    output.extend(self._encode_repeat(field_def, data, fields))
                 except Exception as e:
                     result.errors.append(
                         f"Error encoding repeat {field_def.get('name')!r}: {e}")
@@ -5930,10 +5931,15 @@ class SchemaInterpreter:
                         f"Error encoding object {field_def.get('name')!r}: {e}")
                     continue
                 nested = data.get(key) if key is not None else None
+                if not isinstance(nested, dict):
+                    # PS-551: a whole object the input omits. Its members were written as
+                    # zeros, each warned about (or, in Go, nothing written at all).
+                    result.errors.append(missing_field_message(
+                        key if key is not None else field_def.get('name')))
+                    continue
                 try:
                     output.extend(self._encode_field_list(
-                        field_def.get('fields') or [],
-                        nested if isinstance(nested, dict) else {}))
+                        field_def.get('fields') or [], nested))
                 except Exception as e:
                     result.errors.append(
                         f"Error encoding object {field_def.get('name')!r}: {e}")
@@ -5956,13 +5962,6 @@ class SchemaInterpreter:
             # `ref`, `compute`, `polynomial` or `guard` fell through to "Cannot encode
             # type: number" - every schema with a computed field failed to encode.
             if field_type in COMPUTED_TYPES:
-                continue
-            
-            # Bitfield string encoding
-            if field_type == 'bitfield_string':
-                value = data.get(name, '')
-                encoded = self._encode_bitfield_string(field_def, str(value))
-                output.extend(encoded)
                 continue
             
             # Skip type: emit zero bytes, no input needed
@@ -5988,14 +5987,16 @@ class SchemaInterpreter:
 
             # PS-434: an internal field that reads bytes writes its value, else the
             # input's, else it is an error naming the field.
-            if name.startswith('_'):
+            if not field_def.get('name'):
+                # Nothing can be supplied for a field with no name; it is padding, as a
+                # skip is.
+                value = field_def.get('default', 0)
+            elif name.startswith('_'):
                 try:
                     value = self._internal_encode_value(field_def, data)
                 except ValueError as e:
                     result.errors.append(error_text(f"Error encoding {name}: ", e))
                     continue
-            elif name in flags_patches:
-                value = flags_patches[name]
             else:
                 # `name_from` reports the value under a templated key, so that is the key
                 # to read it back from (CR-2026-030).
@@ -6031,10 +6032,17 @@ class SchemaInterpreter:
                         result.errors.append(error_text(f"Error encoding {name}: ", e))
                     continue
                 if value is None:
-                    result.warnings.append(f"Missing field: {lookup_name}")
-                    value = 0
+                    # PS-551: rejected, naming the field. This warned "Missing field" and
+                    # wrote a zero, which reads back as a real zero.
+                    result.errors.append(missing_field_message(lookup_name))
+                    continue
             
             try:
+                if field_type == 'bitfield_string':
+                    # Inside the try: a segment that is not a number raised out of
+                    # encode() itself.
+                    output.extend(self._encode_bitfield_string(field_def, str(value)))
+                    continue
                 # Reverse modifiers
                 value = self._reverse_modifiers(value, field_def)
                 
@@ -6043,10 +6051,188 @@ class SchemaInterpreter:
             except Exception as e:
                 result.errors.append(error_text(f"Error encoding {name}: ", e))
         
-        result.payload = bytes(output)
+        # A rejected input produces no payload: the bytes written before the error are a
+        # frame short of the rest, as Go has always returned nothing.
+        result.payload = b'' if result.errors else bytes(output)
         result.warnings.extend(self._encode_warnings)
         return result
     
+    @staticmethod
+    def _size_source(fields: List[Dict[str, Any]], ref: str) -> Optional[Dict[str, Any]]:
+        """The field of this list a `$ref` names, by its name or its `var:`.
+
+        Searched into a byte_group's members, since a count is often a few bits of a
+        shared byte. Not into any other construct: a name bound inside a match branch or
+        a repeat element is not one this list's values can fix.
+        """
+        for f in fields:
+            if not isinstance(f, dict):
+                continue
+            group = f.get('byte_group')
+            if group is not None:
+                members = group.get('fields') if isinstance(group, dict) else group
+                found = SchemaInterpreter._size_source(members or [], ref)
+                if found is not None:
+                    return found
+                continue
+            if f.get('name') and (f.get('name') == ref or f.get('var') == ref):
+                return f
+        return None
+
+    @staticmethod
+    def _derivable(source: Optional[Dict[str, Any]]) -> bool:
+        """Whether a field's value can be derived and written as it stands (PS-551).
+
+        It reads bytes of its own and reports them unchanged: no `value` (PS-360 writes
+        that), no computed type, no `name_from`, and no arithmetic or lookup between the
+        bytes and the value a reference binds.
+        """
+        if not isinstance(source, dict) or not source.get('name'):
+            return False
+        if source.get('type') in COMPUTED_TYPES or is_literal(source):
+            return False
+        return not any(key in source for key in (
+            'value', 'name_from', 'lookup', 'mult', 'div', 'add', 'transform',
+            'polynomial', 'encoding', 'compute', 'ref', 'guard'))
+
+    def _is_peek(self, fields: List[Dict[str, Any]], source: Dict[str, Any]) -> bool:
+        """Whether `source` is a bit range in a run nothing closes with `consume`.
+
+        Such a run reads bytes the fields after it read again (r718x, vobo, dnt, the
+        match-u32-peek fixture), and the encoder writes those bytes twice - once for
+        the run and once for what follows - so a value derived into it would add
+        bytes rather than fix them. Not derived; it stays an error naming the field.
+        """
+        for kind, item in self._bitfield_runs(fields):
+            if kind == 'bits' and any(f is source for f in item):
+                return int(item[-1].get('consume', 0) or 0) < 1
+        return False
+
+    def _derived_source(self, fields: List[Dict[str, Any]],
+                        ref: Any) -> Optional[Dict[str, Any]]:
+        """The field a `$ref` names, where a value can be derived into it (PS-551)."""
+        if not (isinstance(ref, str) and ref.startswith('$')):
+            return None
+        source = self._size_source(fields, ref[1:])
+        if not self._derivable(source) or self._is_peek(fields, source):
+            return None
+        return source
+
+    def _repeat_records(self, field_def: Dict[str, Any], data: Dict[str, Any]):
+        """A repeat's list as the input gives it, or None where it gives none."""
+        records = data.get(field_def.get('name', ''))
+        if isinstance(records, dict):
+            return [records]
+        if isinstance(records, (list, tuple)):
+            return list(records)
+        return None
+
+    def _exact_case_value(self, case_key: Any) -> Optional[int]:
+        """The one discriminator a match case key stands for, or None (a list, a range,
+        `default`, a pattern)."""
+        if isinstance(case_key, bool):
+            return None
+        if isinstance(case_key, int):
+            return case_key
+        if isinstance(case_key, str):
+            try:
+                return int(case_key.strip(), 0)
+            except ValueError:
+                return None
+        return None
+
+    def _derive_inputs(self, fields: List[Dict[str, Any]],
+                       data: Dict[str, Any]) -> Dict[str, Any]:
+        """PS-551: the values this field list's input omits but the rest of it fixes.
+
+        - a repeat's `count: $n` or `byte_length: $n` field, from the list given;
+        - a match's `field: $d` discriminator, from the one case whose fields are given;
+        - a flagged construct's mask field, from the groups given.
+
+        A supplied value is kept: the construct checks that it agrees with what the rest
+        of the input says, and rejects the input where it does not. The input itself is
+        not modified.
+        """
+        derived = dict(data)
+        for f in fields:
+            if not isinstance(f, dict):
+                continue
+            if f.get('type') == 'repeat':
+                records = self._repeat_records(f, data)
+                if records is None:
+                    continue
+                for key in ('count', 'byte_length'):
+                    source = self._derived_source(fields, f.get(key))
+                    if source is None or derived.get(source['name']) is not None:
+                        continue
+                    if key == 'count':
+                        derived[source['name']] = len(records)
+                    else:
+                        derived[source['name']] = len(
+                            self._encode_repeat_elements(f, data, records))
+            elif isinstance(f.get('match'), dict) and not f.get('type'):
+                source = self._derived_source(fields, f['match'].get('field'))
+                if source is None or derived.get(source['name']) is not None:
+                    continue
+                key = self._sole_case_given(f['match'].get('cases') or {}, data)
+                if key is not None:
+                    derived[source['name']] = key
+            elif isinstance(f.get('flagged'), dict):
+                mask = str(f['flagged'].get('field', '')).lstrip('$')
+                source = self._size_source(fields, mask)
+                name = source['name'] if source is not None else mask
+                bits = 0
+                for group in f['flagged'].get('groups') or []:
+                    if self._flagged_group_given(group, data):
+                        bits |= 1 << int(group.get('bit', 0))
+                given = data.get(name)
+                if given is None:
+                    derived[name] = bits
+                    continue
+                declared = 0
+                for group in f['flagged'].get('groups') or []:
+                    declared |= 1 << int(group.get('bit', 0))
+                # The groups test what a reference to the mask binds (PS-523, CR-2026-132):
+                # an enum's code, the number under a text label. Compared as reported, an
+                # enum name or a text label passed unchecked and wrote a mask disagreeing
+                # with the groups after it.
+                given = self._encode_reference(name, data)
+                if isinstance(given, int) and not isinstance(given, bool) \
+                        and (given & declared) != bits:
+                    raise ValueError(
+                        f"Flagged field '{name}' is given {given}, and the groups given "
+                        f"set {bits} (PS-551)")
+        return derived
+
+    def _sole_case_given(self, cases: Dict[Any, Any], data: Dict[str, Any]) -> Optional[int]:
+        """The discriminator of the one match case whose fields the input gives.
+
+        None where no case's fields are given, where two cases explain the input equally
+        well, or where the case stands for more than one value.
+        """
+        best, best_hits, tied = None, 0, False
+        for case_key, case_fields in cases.items():
+            if case_key == 'default' or not isinstance(case_fields, list):
+                continue
+            hits = sum(1 for f in self._claimable_fields(case_fields)
+                       if f.get('name') in data)
+            if hits > best_hits:
+                best, best_hits, tied = case_key, hits, False
+            elif hits and hits == best_hits:
+                tied = True
+        if best is None or tied:
+            return None
+        return self._exact_case_value(best)
+
+    def _flagged_group_given(self, group: Dict[str, Any], data: Dict[str, Any]) -> bool:
+        """Whether the input gives any of a flagged group's own values."""
+        fields = group.get('fields') or []
+        if any(isinstance(gf, dict) and gf.get('name') and gf['name'] in data
+               for gf in fields):
+            return True
+        return any(f.get('name') in data
+                   for f in self._claimable_fields(fields))
+
     def _encode_flagged(self, flagged_def: Dict[str, Any], data: Dict[str, Any]) -> bytes:
         """Encode flagged groups: only encode groups where data is present."""
         groups = flagged_def.get('groups', [])
@@ -6055,13 +6241,23 @@ class SchemaInterpreter:
         for group in groups:
             bit = group.get('bit', 0)
             group_fields = group.get('fields', [])
-            has_data = any(gf.get('name') and gf['name'] in data for gf in group_fields)
-            if not has_data:
+            if not self._flagged_group_given(group, data):
+                continue
+            if any(isinstance(gf, dict) and not gf.get('name') for gf in group_fields):
+                # A construct in the group - a nested flagged block, a byte_group - is
+                # encoded as any field list is. It was passed over as nameless, so a
+                # nested group's values were dropped without a word.
+                output.extend(self._encode_field_list(group_fields, data))
                 continue
             for gf in group_fields:
                 gf_name = gf.get('name', '')
                 gf_type = gf.get('type', 'u8')
                 if not gf_name:
+                    continue
+                if is_literal(gf):
+                    continue                    # PS-359: a literal writes no bytes
+                if 'value' in gf and not gf_name.startswith('_'):
+                    output.extend(self._encode_field(gf, gf['value']))      # PS-360
                     continue
                 if gf_type in COMPUTED_TYPES:
                     # A derived value: computed from other fields, so it has no bytes of
@@ -6073,11 +6269,15 @@ class SchemaInterpreter:
                     # PS-434. An internal member was skipped outright, writing none of
                     # the bytes the decoder reads, so every later member was misplaced.
                     value = self._internal_encode_value(gf, data)
-                elif gf_name not in data and gf.get('sentinel'):
+                elif data.get(gf_name) is None and gf.get('sentinel'):
                     output.extend(self._encode_field(raw_bits_field(gf), gf['sentinel'][0]))   # PS-427
                     continue
+                elif data.get(gf_name) is None:
+                    # PS-551: the group is given, so each of its values is required. A
+                    # member was written as zero, which reads back as a real zero.
+                    raise ValueError(missing_field_message(gf_name))
                 else:
-                    value = data.get(gf_name, 0)
+                    value = data[gf_name]
                 value = self._reverse_modifiers(value, gf)
                 output.extend(self._encode_field(gf, value))
         
@@ -6133,12 +6333,17 @@ class SchemaInterpreter:
                 continue
             name = gf.get('name', '')
             gtype = str(gf.get('type', ''))
+            if gtype in COMPUTED_TYPES or is_literal(gf):
+                continue                # no bits of its own (PS-359)
             if not name:
                 value = gf.get('default', 0)
-            elif str(name).startswith('_'):
-                value = self._internal_encode_value(gf, data)          # PS-434
+            elif 'value' in gf or str(name).startswith('_'):
+                value = self._internal_encode_value(gf, data)          # PS-360, PS-434
+            elif data.get(name) is None:
+                # PS-551. A member was written as zero bits, which read back as a value.
+                raise ValueError(missing_field_message(name))
             else:
-                value = data.get(name, gf.get('default', 0))
+                value = data[name]
             if gtype == 'bool':
                 # PS-364: a bool member is its `bit` of the group's value. It was taken as a
                 # full-width member, so True set bit 0 whatever `bit` it declared.
@@ -6236,10 +6441,13 @@ class SchemaInterpreter:
             ftype = str(field_def.get('type', ''))
             if not name:
                 value = field_def.get('default', 0)
-            elif str(name).startswith('_'):
-                value = self._internal_encode_value(field_def, data)   # PS-434
+            elif 'value' in field_def or str(name).startswith('_'):
+                value = self._internal_encode_value(field_def, data)   # PS-360, PS-434
+            elif data.get(name) is None:
+                # PS-551. A range was written as zero bits, which read back as a value.
+                raise ValueError(missing_field_message(name))
             else:
-                value = data.get(name, field_def.get('default', 0))
+                value = data[name]
             value = self._reverse_modifiers(value, field_def)
             if isinstance(value, str):
                 # A bit range carrying `enum:` or `values:` reports a label, so the number
@@ -6393,18 +6601,33 @@ class SchemaInterpreter:
                 matched_fields = default
             elif isinstance(cases.get('default'), list):
                 matched_fields = cases['default']
-            else:
-                # 'skip', or nothing in the data belongs to any case.
+            elif discriminator is None and (
+                    default == 'skip' or (length is not None and not match_name)):
+                # Nothing given and nothing the input could give: an inline match with no
+                # name reports no discriminator, and a `skip` default none for an
+                # unmatched value. This is the corpus's non-advancing peek (r718x, dnt,
+                # and registry schemas), whose byte the bit range before it already
+                # wrote. Left as it was; see AGENTS.md.
                 return b''
+            elif length is not None and discriminator is None:
+                # PS-551: an inline discriminator the input neither gives nor fixes
+                # through a case's fields. This returned no bytes at all, dropping the
+                # discriminator's own (PS-442).
+                raise ValueError(missing_field_message(match_name or 'match'))
+            else:
+                # 'skip': the discriminator, and nothing for the case.
+                matched_fields = []
 
         out = bytearray()
         if length is not None:
             value = discriminator
             if value is None:
-                if not isinstance(matched_key, (int, str)):
+                if matched_key is None:
+                    raise ValueError(missing_field_message(match_name or 'match'))
+                value = self._exact_case_value(matched_key)
+                if value is None:
                     raise ValueError(
                         f"match case {matched_key!r} names no single discriminator value")
-                value = int(str(matched_key), 0)
             out.extend(int(value).to_bytes(int(length), byteorder))
         out.extend(self._encode_field_list(matched_fields, data))
         return bytes(out)
@@ -6450,7 +6673,8 @@ class SchemaInterpreter:
         return int(value).to_bytes(tag_size, byteorder)
 
     def _encode_field_list(self, fields: List[Dict[str, Any]], data: Dict[str, Any]) -> bytes:
-        """Encode a list of plain fields - a TLV case's value bytes."""
+        """Encode a list of fields - a TLV case, match branch, repeat element or object."""
+        data = self._derive_inputs(fields, data)                           # PS-551
         out = bytearray()
         omitted_optional = None     # the first optional field the input left out (PS-405)
         for kind, item in self._bitfield_runs(fields):
@@ -6462,6 +6686,17 @@ class SchemaInterpreter:
             f = item
             if not isinstance(f, dict):
                 continue
+            name = f.get('name', '')
+            # PS-405, before any construct: an optional object or repeat the input omits
+            # writes nothing, as a plain field does.
+            if f.get('optional') is True and name:
+                key = self._resolve_encode_name(f, name, data) or name
+                if data.get(key) is None:
+                    omitted_optional = omitted_optional or name
+                    continue
+                if omitted_optional:
+                    raise ValueError(f"optional field {name!r} is supplied while the earlier "
+                                     f"optional field {omitted_optional!r} is not (PS-405)")
             # A case body may hold another construct rather than a plain field.
             if 'match' in f and not f.get('type'):
                 out.extend(self._encode_match(f, data))
@@ -6472,18 +6707,29 @@ class SchemaInterpreter:
             if 'byte_group' in f:
                 out.extend(self._encode_byte_group(f, data))
                 continue
-            name = f.get('name', '')
+            if 'flagged' in f and not f.get('type'):
+                # It was refused here as "declares no type", though the top level encoded
+                # the same construct, so a flagged block in a match, tlv or repeat could
+                # not be encoded at all.
+                out.extend(self._encode_flagged(f['flagged'], data))
+                continue
             ftype = f.get('type', 'u8')
             if ftype == 'repeat':
-                out.extend(self._encode_repeat(f, data))
+                out.extend(self._encode_repeat(f, data, fields))
                 continue
             if ftype == 'object':
                 # A nested object is reported under its own name (PS-139), so its members
                 # are read from that mapping. They were looked up in the enclosing data,
                 # where they are not, and every member encoded as a zero.
-                nested = data.get(name)
-                out.extend(self._encode_field_list(
-                    f.get('fields') or [], nested if isinstance(nested, dict) else data))
+                if not name:
+                    out.extend(self._encode_field_list(f.get('fields') or [], data))
+                    continue
+                key = self._resolve_encode_name(f, name, data) or name
+                nested = data.get(key)
+                if not isinstance(nested, dict):
+                    # PS-551: its members were written as zeros.
+                    raise ValueError(missing_field_message(key))
+                out.extend(self._encode_field_list(f.get('fields') or [], nested))
                 continue
             if ftype in COMPUTED_TYPES:
                 # Derived: computed from other fields, no bytes of its own.
@@ -6493,9 +6739,6 @@ class SchemaInterpreter:
                 length = 0 if isinstance(length, str) else max(0, int(length))
                 out.extend(bytes(length))
                 continue
-            if ftype == 'bitfield_string':
-                out.extend(self._encode_bitfield_string(f, str(data.get(name, ''))))
-                continue
             if is_literal(f):
                 continue            # PS-359: a literal writes no bytes
             if 'value' in f:
@@ -6503,53 +6746,38 @@ class SchemaInterpreter:
                 out.extend(self._encode_field(f, f['value']))
                 continue
             if not name:
+                # Nothing can be supplied for a field with no name; it is padding, as a
+                # skip is.
                 value = f.get('default', 0)
             elif name.startswith('_'):
-                if f.get('type') in COMPUTED_TYPES:
-                    continue                    # a computed field writes no bytes
                 value = self._internal_encode_value(f, data)           # PS-434
             else:
                 # As in the top-level loop: a templated key is where the value lives.
                 lookup_name = self._resolve_encode_name(f, name, data) or name
                 if data.get(lookup_name) is None:
-                    if f.get('optional') is True:
-                        omitted_optional = omitted_optional or name    # PS-405
-                        continue
                     if f.get('sentinel'):
                         # A reading the decode omitted as "no reading" (PS-427) goes back
                         # as the sentinel it was, not as zero.
                         out.extend(self._encode_field(raw_bits_field(f), f['sentinel'][0]))
                         continue
-                elif f.get('optional') is True and omitted_optional:
-                    raise ValueError(f"optional field {name!r} is supplied while the earlier "
-                                     f"optional field {omitted_optional!r} is not (PS-405)")
-                value = data.get(lookup_name, f.get('default', 0))
+                    # PS-551. This wrote a zero, silently.
+                    raise ValueError(missing_field_message(lookup_name))
+                value = data[lookup_name]
+            if ftype == 'bitfield_string':
+                out.extend(self._encode_bitfield_string(f, str(value)))
+                continue
             value = self._reverse_modifiers(value, f)
             out.extend(self._encode_field(f, value))
         return bytes(out)
 
-    def _encode_repeat(self, field_def: Dict[str, Any], data: Dict[str, Any]) -> bytes:
-        """Encode a ``repeat``: its records back to back, and nothing else.
+    def _encode_repeat_elements(self, field_def: Dict[str, Any], data: Dict[str, Any],
+                                records: List[Any], count: Optional[int] = None) -> bytes:
+        """A repeat's elements back to back: no framing, no trailer.
 
-        The framing costs no bytes of its own here. ``count: $n`` and
-        ``byte_length: $len`` name a field earlier in the list, which the main loop
-        encodes from its own value, and ``until: end`` needs no header at all - so the
-        construct contributes exactly its records. Each record is a dict, and its fields
-        are looked up inside it rather than in the payload-level output.
-
-        Encoding reached "Cannot encode type: repeat" before this, so a schema with a
-        repeat lost every record: repeat-count.yaml re-encoded 020a14 as 02.
+        `count`, where the schema or the input states one, is checked after the refusals
+        that concern the schema rather than the input (PS-550, PS-542, PS-387).
         """
         name = field_def.get('name', '')
-        records = data.get(name)
-        if records is None:
-            return b''
-        if isinstance(records, dict):
-            records = [records]
-        if not isinstance(records, (list, tuple)):
-            raise ValueError(
-                f"repeat field {name!r}: expected a list of records, got "
-                f"{type(records).__name__}")
         # PS-550: a sibling identifying these values position by position is given as
         # many values as this repeat, as a decoder requires (PS-546).
         for sibling in dict.fromkeys(n for _, n, _ in sibling_references(field_def)):
@@ -6583,6 +6811,10 @@ class SchemaInterpreter:
             raise ValueError(
                 f"repeat field {name!r} declares present_if and its elements read payload "
                 f"bytes, so the elements it dropped cannot be encoded (PS-387)")
+        if count is not None and len(records) != count:
+            # PS-551: the count and the list must agree; nothing is padded or cut.
+            raise ValueError(f"Repeat '{name}' is given {len(records)} values for a count "
+                             f"of {count} (PS-551)")
         index = field_def.get('index')
         out = bytearray()
         for position, record in enumerate(records):
@@ -6595,10 +6827,55 @@ class SchemaInterpreter:
                 # while each was decoded, so a name_from template resolves the same way.
                 record = dict(record, **{index: position + index_base(field_def)})
             out.extend(self._encode_field_list(record_fields, record))
+        return bytes(out)
+
+    def _encode_repeat(self, field_def: Dict[str, Any], data: Dict[str, Any],
+                       siblings: Optional[List[Dict[str, Any]]] = None) -> bytes:
+        """Encode a ``repeat``: its records back to back, then any trailer.
+
+        The framing costs no bytes of its own here. ``count: $n`` and
+        ``byte_length: $len`` name a field earlier in the list, which the field list
+        encodes from its own value - derived from this list where the input omits it
+        (PS-551) - and ``until: end`` needs no header at all. Each record is a dict, and
+        its fields are looked up inside it rather than in the payload-level output.
+
+        PS-551: an absent list is a missing value, and a list must agree with its count
+        and byte_length, literal or referenced. An absent list wrote nothing, leaving the
+        frame short of the elements a count or byte_length field still declared.
+        """
+        name = field_def.get('name', '')
+        raw = data.get(name)
+        if raw is not None and not isinstance(raw, (list, tuple, dict)):
+            raise ValueError(
+                f"repeat field {name!r}: expected a list of records, got "
+                f"{type(raw).__name__}")
+        records = self._repeat_records(field_def, data)
+        if records is None:
+            raise ValueError(missing_field_message(name))
+        siblings = siblings or []
+        count = self._repeat_size(field_def, 'count', data, siblings)
+        out = bytearray(self._encode_repeat_elements(field_def, data, records, count))
+        byte_length = self._repeat_size(field_def, 'byte_length', data, siblings)
+        if byte_length is not None and len(out) != byte_length:
+            raise ValueError(f"Repeat '{name}' encodes to {len(out)} bytes for a "
+                             f"byte_length of {byte_length} (PS-551)")
         # PS-385: the elements, then the trailer, whose values sit beside the repeat.
         if field_def.get('trailer'):
             out.extend(self._encode_field_list(field_def['trailer'], data))
         return bytes(out)
+
+    def _repeat_size(self, field_def: Dict[str, Any], key: str, data: Dict[str, Any],
+                     siblings: List[Dict[str, Any]]) -> Optional[int]:
+        """A repeat's `count` or `byte_length` as the schema or the input states it."""
+        size = field_def.get(key)
+        if isinstance(size, str) and size.startswith('$'):
+            source = self._size_source(siblings, size[1:])
+            size = data.get(source['name'] if source is not None else size[1:])
+        if isinstance(size, bool) or not isinstance(size, (int, float)):
+            return None
+        if isinstance(size, float) and not size.is_integer():
+            return None
+        return int(size)
 
     def _claimable_fields(
         self, case_fields: List[Dict[str, Any]]
@@ -7141,10 +7418,11 @@ class SchemaInterpreter:
             if name.startswith('_'):
                 continue
             
-            value = data.get(name, 0)
+            value = data.get(name)
             if value is None:
-                result.warnings.append(f"Missing command field: {name}")
-                value = 0
+                # PS-551: written as zero, silently where the key was absent.
+                result.errors.append(missing_field_message(name))
+                continue
             
             try:
                 value = self._reverse_modifiers(value, field_def)
@@ -7153,7 +7431,7 @@ class SchemaInterpreter:
             except Exception as e:
                 result.errors.append(error_text(f"Error encoding command field {name}: ", e))
         
-        result.payload = bytes(output)
+        result.payload = b'' if result.errors else bytes(output)
         result.warnings.extend(self._encode_warnings)
         return result
     
