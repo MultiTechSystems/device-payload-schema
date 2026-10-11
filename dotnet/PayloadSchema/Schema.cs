@@ -90,6 +90,9 @@ public class GuardCondition
     public double? Lte { get; set; }
     public double? Eq { get; set; }
     public double? Ne { get; set; }
+    /// <summary>`in` / `not_in`: the value equals one of these, or none (PS-543).</summary>
+    public double[]? In { get; set; }
+    public double[]? NotIn { get; set; }
 }
 
 public class GuardDef
@@ -129,6 +132,12 @@ public class SchemaField
     public bool IntegerResult { get; set; }
     public string RawType { get; set; } = "";
     public int Length { get; set; }
+    /// <summary>
+    /// Whether <c>length</c> was written as a number, so that <c>length: 0</c> - a field
+    /// of no bytes (PS-392) - is told apart from no length at all, which takes the type's
+    /// width.
+    /// </summary>
+    public bool LengthDeclared { get; set; }
     /// <summary>
     /// `length` naming a preceding field, with or without `$`, whose decoded value is the
     /// count (PS-464, PS-465). Stored without the `$`; Length is then 0.
@@ -197,6 +206,19 @@ public class SchemaField
     public string? Index { get; set; }
     /// <summary>Bound to the number of elements reported, after the repeat (PS-367).</summary>
     public string? CountAs { get; set; }
+    /// <summary>
+    /// For a repeat declaring `element` (PS-528): the name its one field is decoded under,
+    /// its own or "element". <see cref="Fields"/> then holds that one field, and the repeat
+    /// reports each element's value rather than a record. Null for a `fields` repeat.
+    /// </summary>
+    public string? ElementName { get; set; }
+    /// <summary>The number <see cref="Index"/> counts from (PS-530), 0 by default.</summary>
+    public int IndexBase { get; set; }
+    /// <summary>
+    /// A `records` entry (PS-541): field lists, each yielding one record that the enclosing
+    /// repeat reports in place of its element. Null where the entry is not one.
+    /// </summary>
+    public List<List<SchemaField>>? Records { get; set; }
     /// <summary>An element is reported only where this holds (PS-386).</summary>
     public GuardCondition? PresentIf { get; set; }
     /// <summary>

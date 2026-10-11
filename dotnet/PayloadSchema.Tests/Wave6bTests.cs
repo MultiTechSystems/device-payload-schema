@@ -170,7 +170,11 @@ public class Wave6bTests
         var schema = Fields("{\"name\": \"t\", \"type\": \"u8\", \"sentinel\": [255], \"var\": \"tv\"}",
             "{\"name\": \"u\", \"type\": \"number\", \"ref\": \"$t\", \"mult\": 2}");
         Assert.Equal(10.0, Convert.ToDouble(Decode(schema, "05")["u"]));
-        Assert.Throws<InvalidOperationException>(() => Decode(schema, "FF"));
+        // PS-429: a reference to the omitted field is a reference to an absent one, so
+        // `u` is absent too (PS-314) rather than the whole decode failing.
+        var absent = Decode(schema, "FF");
+        Assert.False(absent.ContainsKey("t"));
+        Assert.False(absent.ContainsKey("u"));
     }
 
     [Fact]

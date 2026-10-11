@@ -21,7 +21,7 @@ import re
 import sys
 import yaml
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 
 #: What a port entry declaring no `direction` means (PS-287). `both` keeps the annotation
@@ -764,16 +764,44 @@ function encRepeat(out, f, data, ctx) {               // _encode_repeat
   if (!Array.isArray(records) && typeof records === "object") records = [records];
   if (!Array.isArray(records)) encFail("repeat field " + JSON.stringify(name) + ": expected a list of records, got " + typeof records);
   var rf = f.fields || [];
+  if (f.element && typeof f.element === "object" && !f.fields) {
+    // PS-529: each value is encoded as the element, wrapped as it was decoded. A null
+    // position has no encoding (CR-2026-111 leaves it open), so it is refused.
+    var en = f.element.name || "element", el = {};
+    for (var ek in f.element) el[ek] = f.element[ek];
+    el.name = en; rf = [el];
+    records = records.map(function (v, p) {
+      if (v === null || v === undefined) encFail("Repeat '" + name + "' has null at position " + p + ", which has no encoding (PS-529)");
+      var w = {}; w[en] = v; return w;
+    });
+  }
+  if (encReachesRecords(rf)) {
+    // PS-542: the records do not say which element they came from.
+    encFail("Repeat '" + name + "' has elements that yield several records, which cannot be encoded (PS-542)");
+  }
   if (f.present_if && rf.some(function (r) { return r && ENC_COMPUTED.indexOf(r.type) < 0 && !encIsLiteral(r); })) {
     encFail("repeat field " + JSON.stringify(name) + " declares present_if and its elements read payload bytes, so the elements it dropped cannot be encoded (PS-387)");
   }
   for (var i = 0; i < records.length; i++) {
     var rec = records[i];
     if (rec === null || typeof rec !== "object" || Array.isArray(rec)) encFail("repeat field " + JSON.stringify(name) + ": expected each record to be a mapping");
-    if (f.index) { var copy = {}; for (var k in rec) copy[k] = rec[k]; copy[f.index] = i; rec = copy; }
+    if (f.index) { var copy = {}; for (var k in rec) copy[k] = rec[k]; copy[f.index] = i + (f.index_base || 0); rec = copy; }
     encList(out, rf, rec, ctx);
   }
   if (f.trailer) encList(out, f.trailer, data, ctx);
+}
+
+function encReachesRecords(fields) {                  // records_reachable
+  return (fields || []).some(function (f) {
+    if (!f || typeof f !== "object") return false;
+    if ("records" in f && !f.type) return true;
+    var m = f.match;
+    if (!m || typeof m !== "object" || f.type) return false;
+    var bodies = [];
+    for (var k in (m.cases || {})) bodies.push(m.cases[k]);
+    bodies.push(m["default"]);
+    return bodies.some(function (b) { return Array.isArray(b) && encReachesRecords(b); });
+  });
 }
 
 function encClaimable(fields) {                       // _claimable_fields
@@ -922,7 +950,9 @@ function encList(out, fields, data, ctx, top) {
     if ("byte_group" in f) { encByteGroup(out, f, data, ctx); return; }
     if (type === "repeat") { encRepeat(out, f, data, ctx); return; }
     if (type === "object") {
-      var nested = data[name];
+      // Read back from the key a `name_from` object was reported under (CR-2026-030).
+      var objKey = encResolveName(f, name, data);
+      var nested = objKey === null ? undefined : data[objKey];
       var isMap = nested !== null && typeof nested === "object" && !Array.isArray(nested);
       encList(out, f.fields || [], isMap ? nested : (top ? {} : data), ctx);
       return;
@@ -1077,7 +1107,63 @@ def _codec_globals() -> set:
     return _CODEC_GLOBALS
 
 
+#: Per-generation spellings for names whose plain mangling collides with another
+#: name's. `TS013Generator.generate` fills it for the schema it is generating and
+#: restores it afterwards; `to_js_name` consults it first, so every site that stages,
+#: reads or references a field - `$name`, `ref:`, compute operands, a match's field,
+#: name_from templates, guards, lengths - agrees on one spelling without each call
+#: site having to know about collisions.
+_JS_NAME_OVERRIDES: Dict[str, str] = {}
+
+
 def to_js_name(name: str) -> str:
+    override = _JS_NAME_OVERRIDES.get(name)
+    if override is not None:
+        return override
+    return _mangle_js_name(name)
+
+
+def unique_js_names(names: Iterable[str]) -> Dict[str, str]:
+    """Give every name a JS spelling no other name in the set shares.
+
+    A name keeps its plain mangling unless another name mangles to the same spelling
+    (vendor keys `ER+P-1_s` and `ER-P-1_s` both mangle to `ER_P_1_s`), so a schema with
+    no collision generates exactly the codec it always did. Within a colliding group a
+    name that is already its own spelling keeps it - it is the only one a reader would
+    expect there - and the rest follow in sorted order, the first keeping the plain
+    spelling and each later one taking `_2`, `_3`, ... A suffix is skipped where it is
+    some other name's plain spelling or already taken, so `a+b`, `a-b` and `a_b_2`
+    give `a_b`, `a_b_3` and `a_b_2`. The output keys are restored from this mapping at
+    the codec's entry points, so the suffix never reaches a caller.
+    """
+    unique = sorted(set(names))
+    plain = {name: _mangle_js_name(name) for name in unique}
+    reserved = set(plain.values())
+    groups: Dict[str, List[str]] = {}
+    for name in unique:
+        groups.setdefault(plain[name], []).append(name)
+    taken: Set[str] = set()
+    result: Dict[str, str] = {}
+    for spelling in sorted(groups):
+        members = sorted(groups[spelling], key=lambda n: (n != spelling, n))
+        result[members[0]] = spelling
+        taken.add(spelling)
+        suffix = 2
+        for name in members[1:]:
+            while True:
+                candidate = '%s_%d' % (spelling, suffix)
+                suffix += 1
+                if candidate in reserved or candidate in taken:
+                    continue
+                if _mangle_js_name(candidate) != candidate:   # a reserved identifier
+                    continue
+                break
+            result[name] = candidate
+            taken.add(candidate)
+    return result
+
+
+def _mangle_js_name(name: str) -> str:
     mangled = re.sub(r'[^a-zA-Z0-9_]', '_', name)
     # An identifier cannot start with a digit: Watteco's `4_20_mA` emitted
     # `var 4_20_mA`, a syntax error that stopped the whole codec loading. The key is
@@ -1255,6 +1341,11 @@ def compute_to_js(compute: Dict[str, Any]) -> str:
     return '0'
 
 
+def operand_ok_js(field_js: str) -> str:
+    """A condition's operand can be compared: present (PS-540) and not a boolean (PS-549)."""
+    return f"({field_js} != null && typeof {field_js} !== 'boolean')"
+
+
 def condition_to_js(cond: Dict[str, Any]) -> str:
     """One guard condition, {field: $x, <op>: value}, as a JS boolean (PS-386)."""
     field_ref = cond.get('field', '')
@@ -1262,8 +1353,21 @@ def condition_to_js(cond: Dict[str, Any]) -> str:
     for op, js in (('gt', '>'), ('gte', '>='), ('lt', '<'), ('lte', '<='),
                    ('eq', '==='), ('ne', '!==')):
         if op in cond:
-            return f'({field_js} {js} {cond[op]})'
+            # PS-540: an absent operand fails the condition. JS would compare
+            # `undefined !== 3` as true and `null >= 0` as true. PS-549: so does a
+            # boolean, which JS would compare as 1 or 0.
+            return f'({operand_ok_js(field_js)} && {field_js} {js} {cond[op]})'
+    if 'in' in cond or 'not_in' in cond:
+        # PS-540: an absent operand fails `not_in` too.
+        return f'({operand_ok_js(field_js)} && {set_condition_to_js(field_js, cond)})'
     return 'true'
+
+
+def set_condition_to_js(field_js: str, cond: Dict[str, Any]) -> str:
+    """`in` / `not_in` (PS-543): the value equals one of a list of numbers, or none."""
+    op = 'in' if 'in' in cond else 'not_in'
+    values = json.dumps([v for v in cond[op]])
+    return f'{values}.indexOf({field_js}) {">=" if op == "in" else "<"} 0'
 
 
 def guard_to_js(guard: Dict[str, Any], value_expr: str, else_hook: str = '') -> str:
@@ -1282,7 +1386,10 @@ def guard_to_js(guard: Dict[str, Any], value_expr: str, else_hook: str = '') -> 
             field_js = f'vars.{to_js_name(field_ref[1:])}'  # see ref_to_js
         else:
             continue
-        
+        # PS-540: an absent operand fails the condition; JS would pass `undefined !== 3`
+        # and `null >= 0`.
+        if any(op in cond for op in ('gt', 'gte', 'lt', 'lte', 'eq', 'ne', 'in', 'not_in')):
+            conditions.append(operand_ok_js(field_js))                # PS-540, PS-549
         if 'gt' in cond:
             conditions.append(f'{field_js} > {cond["gt"]}')
         elif 'gte' in cond:
@@ -1295,6 +1402,8 @@ def guard_to_js(guard: Dict[str, Any], value_expr: str, else_hook: str = '') -> 
             conditions.append(f'{field_js} === {cond["eq"]}')
         elif 'ne' in cond:
             conditions.append(f'{field_js} !== {cond["ne"]}')
+        elif 'in' in cond or 'not_in' in cond:                          # PS-543
+            conditions.append(set_condition_to_js(field_js, cond))
     
     if not conditions:
         return value_expr
@@ -1530,6 +1639,8 @@ class TS013Generator:
         # PS-510: ipso and senml are mappings, and ipso carries `object`.
         from schema_interpreter import annotation_schema_errors
         iterator_problems += annotation_schema_errors(schema)
+        from schema_interpreter import reference_errors
+        iterator_problems += reference_errors(schema)            # PS-539
         iterator_problems += meta_declaration_errors(schema)    # PS-491
         # PS-358, PS-519, PS-520: a malformed literal, as the interpreter refuses it.
         from schema_interpreter import literal_errors, typed_field_dicts
@@ -1554,6 +1665,18 @@ class TS013Generator:
         return '  ' * self.indent
 
     def generate(self) -> str:
+        global _JS_NAME_OVERRIDES
+        saved = _JS_NAME_OVERRIDES
+        _JS_NAME_OVERRIDES = {
+            name: js for name, js in unique_js_names(self._field_names()).items()
+            if js != _mangle_js_name(name)
+        }
+        try:
+            return self._generate()
+        finally:
+            _JS_NAME_OVERRIDES = saved
+
+    def _generate(self) -> str:
         lines = []
         lines.append(f'// TS013 Payload Codec — {self.name}')
         lines.append(f'// Schema version: {self.version}')
@@ -2218,7 +2341,8 @@ function writeS(buf, pos, size, value, endian) {
         # rv: a looked-up field's value before its lookup, which valid_range compares
         # (PS-475); rvs: fields whose guard reported `else`, which it does not. _leftDone:
         # a PS-302 warning already reported the bytes left over (PS-472).
-        lines.append('  var rv = {}, rvs = {}, _leftDone = false;')
+        # rcs: the records the current repeat element yields (PS-541); null outside one.
+        lines.append('  var rv = {}, rvs = {}, _leftDone = false, rcs = null;')
         # lv: a looked-up field's number before its lookup, which a reference binds under
         # a text or boolean label (PS-523); lbl: the value it reported, by the names it
         # binds, which a key template writes (PS-532) - undefined where it had no entry.
@@ -2291,6 +2415,23 @@ function writeS(buf, pos, size, value, endian) {
         problems = encoding_errors(field) if isinstance(field, dict) and 'type' in field else []
         if problems:
             raise ValueError(problems[0])
+
+        # PS-541: each field list yields one record of the enclosing repeat element,
+        # decoded into a fresh `d` and collected in `rcs`; the element reports them.
+        if 'records' in field and not field.get('type'):
+            lines.append(f'{i}  if (rcs === null) throw new Error("`records` belongs '
+                         f'in a repeat\'s element, or a match case within it '
+                         f'(PS-541)");')
+            for body in field['records']:
+                outer = f'_ro{self._next_uid()}'
+                lines.append(f'{i}  var {outer} = d; d = {{}};')
+                for member in body:
+                    if isinstance(member, dict):
+                        lines.extend(self._gen_decode_field(member))
+                lines.append(f"{i}  for (var _k in d) {{ if (_k.charAt(0) === '_') "
+                             f"delete d[_k]; }}")
+                lines.append(f'{i}  rcs.push(d); d = {outer};')
+            return lines
 
         # byte_group
         if 'byte_group' in field:
@@ -2403,7 +2544,12 @@ function writeS(buf, pos, size, value, endian) {
         # Members decode into the flat `d`, then each iteration lifts them into a record
         # and deletes them, the same approach the nested `object` support uses - so their
         # modifiers, lookups and bitfields keep working through the existing generators.
-        if field.get('type') == 'repeat' and field.get('fields'):
+        from schema_interpreter import index_base, records_reachable, repeat_members
+        # PS-528: `element` decodes as a one-field record under its name (or `element`),
+        # and the repeat reports the record's value - null where it was omitted.
+        element_members, element_name = (repeat_members(field) if field.get('type') == 'repeat'
+                                         else ([], None))
+        if field.get('type') == 'repeat' and element_members:
             key = to_js_name(field.get('name', '_items'))
             # The list's own variable is numbered, not named after the field: a member
             # sharing the repeat's name (an `altitude` list of records each holding an
@@ -2412,7 +2558,7 @@ function writeS(buf, pos, size, value, endian) {
             arr = f'_rep{self._next_uid()}'
             # Every member, constructs included: a bare `match` or `tlv` inside an
             # element has no name, and filtering on one dropped it from the codec.
-            members = [m for m in field['fields'] if isinstance(m, dict)]
+            members = [m for m in element_members if isinstance(m, dict)]
             lines.append(f'{i}  var {arr} = [];')
             # Iterations, not reported elements: present_if drops an element and it still
             # advances the index and counts toward `count` and `max` (PS-386).
@@ -2434,8 +2580,7 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append(f'{i}  var {arr}_buf = buf; buf = buf.slice(0, {arr}_end);')
             # PS-378 to PS-380: a carried field starts from its `carry` value each time the
             # repeat begins, and its own name resolves to its previous value.
-            carried = [(m['name'], m['carry']) for m in field['fields']
-                       if isinstance(m, dict) and 'carry' in m]
+            carried = [(m['name'], m['carry']) for m in members if 'carry' in m]
             if carried:
                 initial = ', '.join(
                     f'{json.dumps(to_js_name(name))}: '
@@ -2500,8 +2645,16 @@ function writeS(buf, pos, size, value, endian) {
             # PS-368: an element's names do not outlive it; `vars` is restored after it.
             lines.append(f'{i}    var {arr}_vars = Object.assign({{}}, vars), '
                          f'{arr}_lbl = Object.assign({{}}, lbl);')
+            # PS-541: an element reaching `records` collects them in `rcs`, and reports
+            # them in its place. Emitted only where the element can reach one.
+            yields_records = records_reachable(members)
+            if yields_records:
+                lines.append(f'{i}    var {arr}_rcs = rcs; rcs = [];')
             if field.get('index'):
-                lines.append(f'{i}    vars.{to_js_name(field["index"])} = {arr}_i;')   # PS-366
+                # PS-366, PS-530: the position counted from index_base.
+                base = index_base(field)    # the field's 'index_base' (PS-530)
+                lines.append(f'{i}    vars.{to_js_name(field["index"])} = {arr}_i'
+                             + (f' + {base}' if base else '') + ';')
             for name, _ in carried:
                 lines.append(f'{i}    vars.{to_js_name(name)} = {arr}_carry.{to_js_name(name)};')
             ragged = None
@@ -2511,7 +2664,7 @@ function writeS(buf, pos, size, value, endian) {
                 # end of the buffer, so without this a short tail decoded as a final
                 # element of zeros and reported success.
                 from schema_interpreter import fixed_element_size
-                size = fixed_element_size(field['fields'])
+                size = fixed_element_size(members)
                 ragged = ('throw new Error("repeat \'" + ' + rname + ' + "\' ends in a ragged tail: " + '
                           f'(buf.length - {arr}_before) + " byte(s) at offset " + {arr}_before'
                           + (f' + ", fewer than the {size} an element takes (PS-343)");' if size
@@ -2527,6 +2680,8 @@ function writeS(buf, pos, size, value, endian) {
                 if str(member.get('name', '')).startswith('_'):
                     # Internal members stay out of the record.
                     lines.append(f'{i}    delete {arr}_rec.{to_js_name(member["name"])};')
+            if yields_records:
+                lines.append(f'{i}    var {arr}_rs = rcs; rcs = {arr}_rcs;')
             if ragged:
                 lines.append(f'{i}    if (pos > buf.length) {{ {ragged} }}')
             for name, _ in carried:
@@ -2534,7 +2689,24 @@ function writeS(buf, pos, size, value, endian) {
             keep = condition_to_js(field['present_if']) if field.get('present_if') else 'true'
             lines.append(f'{i}    var {arr}_keep = {keep};')
             lines.append(f'{i}    vars = {arr}_vars; lbl = {arr}_lbl; {arr}_i++;')
-            lines.append(f'{i}    if ({arr}_keep) {arr}.push({arr}_rec);')
+            if yields_records:
+                # PS-541: each record, after the element's other reported fields.
+                r = f'{arr}_r'
+                lines.append(f'{i}    if ({arr}_keep && {arr}_rs.length) {{ '
+                             f'for (var {r} = 0; {r} < {arr}_rs.length; {r}++) '
+                             f'{arr}.push(Object.assign({{}}, {arr}_rec, {arr}_rs[{r}])); }}')
+                lines.append(f'{i}    else if ({arr}_keep) {arr}.push({arr}_rec);')
+            elif element_name is None:
+                lines.append(f'{i}    if ({arr}_keep) {arr}.push({arr}_rec);')
+            else:
+                # PS-528: the record's one value, or null where it was omitted, so the
+                # values after it keep their positions.
+                lines.append(f'{i}    if ({arr}_keep) {{ var {arr}_v = null;')
+                lines.append(f'{i}      for (var {arr}_k in {arr}_rec) {{ if ({arr}_k !== "_quality" '
+                             f'&& {arr}_k !== "_warnings") {{ {arr}_v = {arr}_rec[{arr}_k]; break; }} }}')
+                lines.append(f'{i}      if ({arr}_v === undefined || (typeof {arr}_v === "number" '
+                             f'&& !isFinite({arr}_v))) {arr}_v = null;')
+                lines.append(f'{i}      {arr}.push({arr}_v); }}')
             # The zero-progress guard is for the loops bounded by bytes. A counted one
             # ends by its count, and elements reading no bytes - computed fields, bit
             # ranges with no consume - are still `count` elements; it stopped at one.
@@ -2618,7 +2790,18 @@ function writeS(buf, pos, size, value, endian) {
                     lines.extend(self._gen_decode_field(member))
             # An internal member is bound in `vars` and not reported, as at the top level.
             lines.append(f"{i}  for (var _k in d) {{ if (_k.charAt(0) === '_') delete d[_k]; }}")
-            lines.append(f'{i}  {outer}.{obj_name} = d; d = {outer};')
+            # A `name_from` names the object as it names any field (PS-265); the object
+            # was always reported under its declared `name`, so rakwireless's
+            # `accelerometer_${ch}` came out as `accelerometer`. The template resolves
+            # against `vars` once `d` is the enclosing object again.
+            guards, target = name_from_to_js(field, obj_name)
+            if guards:
+                lines.append(f'{i}  var {obj_name}_obj = d; d = {outer};')
+                for guard in guards:
+                    lines.append(f'{i}  {guard}')
+                lines.append(f'{i}  {target} = {obj_name}_obj;')
+            else:
+                lines.append(f'{i}  {outer}.{obj_name} = d; d = {outer};')
             return lines
 
         # type: number or integer (computed, decode-only). `integer` reports its value
@@ -3220,7 +3403,10 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append(f'{i}    pos += {tfsz};')
             # A component is read as a field, so its `var:` is bound for the case body -
             # a `name_from: "voc_${ch}"` with `ch` on the channel component found nothing
-            # (rakwireless standardized payload).
+            # (rakwireless standardized payload). Its name is bound too: a component is
+            # a field decoded earlier in the payload, so `ref: $rsn` in a case reads it
+            # (PS-265), where the codec read an undefined value.
+            lines.append(f'{i}    vars.{tfname} = {tfname};')
             if tf.get('var'):
                 lines.append(f'{i}    vars.{to_js_name(str(tf["var"]))} = {tfname};')
         if not tag_fields:
@@ -3855,16 +4041,9 @@ function writeS(buf, pos, size, value, endian) {
 
         return self._restore_output_keys('\n'.join(lines))
 
-    def _output_key_renames(self) -> Dict[str, str]:
-        """Map each mangled JS spelling back to the schema name it came from.
-
-        Fields are staged under `to_js_name(name)`, which is right for a local variable
-        and wrong for an output key: `pm1.0` was reported as `pm1_0`, so a vendor key
-        with a dot or a space never survived generation (arwin lrs10701). Two names
-        that mangle to one spelling cannot both be restored, so that is an error rather
-        than a silent collision.
-        """
-        names = set()
+    def _field_names(self) -> Set[str]:
+        """Every literal field name the schema declares, in any field list."""
+        names: Set[str] = set()
 
         def walk(node):
             if isinstance(node, dict):
@@ -3880,22 +4059,21 @@ function writeS(buf, pos, size, value, endian) {
         walk(self.schema.get('fields', []))
         walk(self.schema.get('ports', {}))
         walk(self.schema.get('definitions', {}))
+        return names
+
+    def _output_key_renames(self) -> Dict[str, str]:
+        """Map each JS spelling back to the schema name it came from.
+
+        Fields are staged under `to_js_name(name)`, which is right for a local variable
+        and wrong for an output key: `pm1.0` was reported as `pm1_0`, so a vendor key
+        with a dot or a space never survived generation (arwin lrs10701). Two names
+        that mangle to one spelling used to be a generation error; `unique_js_names`
+        now gives them distinct spellings, so each is restored to its own name.
+        """
         renames: Dict[str, str] = {}
-        for name in sorted(names):
-            mangled = to_js_name(name)
-            if mangled == name:
-                continue
-            if mangled in renames and renames[mangled] != name:
-                raise ValueError(
-                    'field names %r and %r both become %r in JavaScript'
-                    % (renames[mangled], name, mangled)
-                )
-            if mangled in names:
-                raise ValueError(
-                    'field name %r becomes %r in JavaScript, which is also a field name'
-                    % (name, mangled)
-                )
-            renames[mangled] = name
+        for name, js in sorted(unique_js_names(self._field_names()).items()):
+            if js != name:
+                renames[js] = name
         return renames
 
     def _restore_output_keys(self, code: str) -> str:

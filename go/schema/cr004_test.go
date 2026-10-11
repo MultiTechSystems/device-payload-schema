@@ -82,8 +82,22 @@ fields:
 }
 
 func TestNameFromUnresolvedIsAnError(t *testing.T) {
-	s, _ := ParseSchema("name: bad\nfields:\n  - name: v\n    type: u8\n    name_from: \"x_${nope}\"\n")
-	if _, err := s.Decode([]byte{0x01}); err == nil {
+	// A name the schema never declares is refused at load (PS-539, CR-2026-117).
+	if _, err := ParseSchema("name: bad\nfields:\n  - name: v\n    type: u8\n    name_from: \"x_${nope}\"\n"); err == nil {
+		t.Error("expected a load error for an undeclared name_from reference")
+	}
+	// One declared only later is refused at load too (CR-2026-127).
+	if _, err := ParseSchema("name: bad\nfields:\n  - name: v\n    type: u8\n    name_from: \"x_${later}\"\n  - {name: later, type: u8}\n"); err == nil {
+		t.Error("expected a load error for a forward name_from reference")
+	}
+	// One declared earlier in a branch not taken is the decode error.
+	s, err := ParseSchema("name: bad\nfields:\n  - {name: k, type: u8}\n" +
+		"  - match: {field: $k, default: skip, cases: {1: [{name: later, type: u8}]}}\n" +
+		"  - name: v\n    type: u8\n    name_from: \"x_${later}\"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Decode([]byte{0x02, 0x02}); err == nil {
 		t.Error("expected an error for an unresolved name_from reference")
 	}
 }

@@ -214,6 +214,12 @@ C_UNSUPPORTED_KEYS = {
     "flagged": "this format has no flagged record",
     "byte_group": "this format has no byte_group record",
     "repeat": "this format has no repeat record",
+    # CR-2026-111: a repeat of single values and its index base (PS-528, PS-530). A
+    # `type: repeat` is refused already; these name the keys where they appear.
+    "element": "this format has no repeat record (PS-528)",
+    "index_base": "this format has no repeat record (PS-530)",
+    # CR-2026-118: several records from one repeat element (PS-541).
+    "records": "this format has no repeat record (PS-541)",
     "fields": "this format has no nested object record",
     "name_from": "this format has no name template",
     # A bytes rendering other than lowercase hex (PS-079, PS-391); the C interpreter
@@ -380,6 +386,10 @@ def schema_errors(schema: Dict) -> List[str]:
     """Every field_errors() finding in a schema, plus what the C loader would cut."""
     errors = []
     endian = schema.get('endian', 'big')
+    # PS-539 (CR-2026-117): a reference naming nothing declared is a schema error on
+    # every path, the binary blob the C interpreter loads included.
+    from schema_interpreter import expand_refs, reference_errors
+    errors.extend(reference_errors(expand_refs(schema)[0]))     # after splicing (CR-2026-127)
     if schema.get('ports'):
         errors.append("`ports` - the C interpreter has no port selection; refused "
                       "rather than dropped (PS-446)")

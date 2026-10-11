@@ -1,0 +1,40 @@
+# An omitted value in a repeat of single values is null in its position (PS-528,
+# CR-2026-111), so the values after it keep their index. Two of the reasons a value is
+# omitted, one per vector: a reserved raw value (PS-427), and a label table with no entry
+# for the value (PS-269). Anywhere else an omitted value is an absent key; inside this
+# array it cannot be absent without moving every later value.
+#
+# In `expected`, null at a position asserts that null was reported there (PS-043 as
+# amended), not that the array is shorter.
+#
+# Neither round-trips: what an encoder writes for null is left open by the CR, and every
+# encoder here refuses it, naming the position. The third vector has no null and does.
+name: probe_repeat_element_null
+endian: big
+fields:
+- name: levels
+  type: repeat
+  count: 3
+  element:
+    type: u8
+    sentinel: [255]
+    lookup:
+      1: low
+      2: mid
+      3: high
+test_vectors:
+- name: reserved_value
+  source: spec-example
+  payload: "01 FF 03"
+  expected:
+    levels: [low, null, high]
+- name: no_label
+  source: spec-example
+  payload: "02 07 01"
+  expected:
+    levels: [mid, null, low]
+- name: every_value_present
+  source: spec-example
+  payload: "03 02 01"
+  expected:
+    levels: [high, mid, low]

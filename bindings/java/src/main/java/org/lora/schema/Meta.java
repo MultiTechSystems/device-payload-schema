@@ -90,6 +90,10 @@ final class Meta {
                     if (g instanceof Map<?, ?> gm) visitDeclarations(gm.get("fields"), found);
                 }
             }
+            if (f.get("records") instanceof List<?> bodies && f.get("type") == null) {
+                for (Object body : bodies) visitDeclarations(body, found);          // PS-541
+                continue;
+            }
             if (f.get("match") instanceof Map<?, ?> match) {
                 if (match.get("cases") instanceof Map<?, ?> cases) {
                     for (Object body : cases.values()) {
@@ -157,10 +161,14 @@ final class Meta {
             if (!isInteger(count)) count = repeat.get("max");
             listing.put("index", name);
             listing.put("count", count);
+            Object base = repeat.get("index_base");
+            if (isInteger(base) && ((Number) base).longValue() != 0) {
+                listing.put("index_base", base);                    // PS-375, PS-530
+            }
             return listing;
         }
         Map<?, ?> target = Map.of();
-        for (Object member : listOrEmpty(repeat.get("fields"))) {
+        for (Object member : Wave6a.repeatMembers(repeat)) {
             if (member instanceof Map<?, ?> m && name.equals(m.get("name"))) {
                 target = m;
                 break;
@@ -212,7 +220,16 @@ final class Meta {
             entry.put("senml", out);
         }
         if (truthy(fieldDef.get("description"))) entry.put("description", fieldDef.get("description"));
-        if ("repeat".equals(declaredType)) {
+        if ("repeat".equals(declaredType) && Wave6a.isElementRepeat(fieldDef)) {
+            // PS-531: the element's own entry, nested, without its name; the repeat keeps
+            // `type: repeat` and its identity.
+            Map<Object, Object> element = new LinkedHashMap<>((Map<?, ?>) fieldDef.get("element"));
+            element.remove("name");
+            entry.put("element", fieldMeta(element, fieldDef));
+            if (fieldDef.containsKey("identity")) {
+                entry.put("identity", reference(fieldDef.get("identity"), fieldDef, true));
+            }
+        } else if ("repeat".equals(declaredType)) {
             Map<String, Object> elements = new LinkedHashMap<>();
             for (Map.Entry<String, Map<?, ?>> member : declarations(fieldDef.get("fields")).entrySet()) {
                 elements.put(member.getKey(), fieldMeta(member.getValue(), fieldDef));   // PS-371
@@ -356,6 +373,10 @@ final class Meta {
                 for (Object g : listOrEmpty(flagged.get("groups"))) {
                     if (g instanceof Map<?, ?> gm) visitAgreement(gm.get("fields"), where, seen, errors);
                 }
+            }
+            if (f.get("records") instanceof List<?> bodies && f.get("type") == null) {
+                for (Object body : bodies) visitAgreement(body, where, seen, errors);  // PS-541
+                continue;
             }
             if (f.get("match") instanceof Map<?, ?> match) {
                 if (match.get("cases") instanceof Map<?, ?> cases) {

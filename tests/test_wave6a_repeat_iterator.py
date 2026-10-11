@@ -127,7 +127,8 @@ def test_a_reference_from_outside_to_an_element_name_is_an_error():
 def test_a_reference_to_a_field_not_yet_decoded_is_an_error():
     schema = {"name": "p", "fields": [{"name": "r", "type": "repeat", "count": 1, "fields": [
         {"name": "early", "type": "number", "ref": "$v"}, {"name": "v", "type": "u8"}]}]}
-    assert any("PS-368" in e for e in decode(schema, "05").errors)
+    # Refused before decoding as a forward reference (PS-539, PS-122, CR-2026-127).
+    assert any("PS-122" in e for e in decode(schema, "05").errors)
 
 
 def test_count_as_is_not_bound_inside_the_elements():
@@ -137,7 +138,8 @@ def test_count_as_is_not_bound_inside_the_elements():
                                             {"name": "v", "type": "u8"},
                                             {"name": "seen", "type": "number", "ref": "$n"}]}]}
     result = decode(schema, "05")
-    assert result.data["r"] == [{"v": 5, "seen": 0}]
+    # A reference to it from inside has no value, so `seen` is absent (PS-314, PS-429).
+    assert result.data["r"] == [{"v": 5}]
 
 
 def test_neither_index_nor_count_as_is_reported():

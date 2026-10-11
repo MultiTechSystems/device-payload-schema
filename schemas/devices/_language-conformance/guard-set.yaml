@@ -1,0 +1,57 @@
+# A guard condition may test one value against a list of numbers (PS-543, CR-2026-118):
+# `in` holds where the value equals one of them, and the guard's `else` is reported
+# where it does not (PS-444). An empty `in` never holds, and an empty `not_in` always
+# does (CR-2026-124).
+#
+# Round-trips: the guarded field is computed and writes no bytes.
+name: probe_guard_set
+endian: big
+fields:
+- name: mode
+  type: u8
+- name: setting
+  type: number
+  ref: $mode
+  mult: 10
+  guard:
+    when:
+    - field: $mode
+      in: [2, 4]
+    else: -1
+- name: never
+  type: number
+  ref: $mode
+  guard:
+    when:
+    - field: $mode
+      in: []
+    else: -1
+- name: always
+  type: number
+  ref: $mode
+  guard:
+    when:
+    - field: $mode
+      not_in: []
+    else: -1
+test_vectors:
+- name: in_holds
+  source: spec-example
+  payload: "04"
+  expected:
+    setting: 40
+- name: in_fails_reports_else
+  source: spec-example
+  payload: "05"
+  expected:
+    setting: -1
+- name: empty_in_never_holds
+  source: spec-example
+  payload: "04"
+  expected:
+    never: -1
+- name: empty_not_in_always_holds
+  source: spec-example
+  payload: "04"
+  expected:
+    always: 4

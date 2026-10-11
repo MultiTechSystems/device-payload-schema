@@ -1,0 +1,30 @@
+# A repeat of single values whose element is itself a group of fields (PS-528,
+# CR-2026-111): the element is one field definition, and a `type: object` field is one.
+# Each position reports the object's value, which is a mapping, so the array holds the
+# objects themselves and not records naming them.
+#
+# Round-trips: each value is written as the element, the object's members in order.
+name: probe_repeat_element_object
+endian: big
+fields:
+- name: pairs
+  type: repeat
+  until: end
+  element:
+    type: object
+    fields:
+    - name: kind
+      type: u8
+    - name: level
+      type: u8
+      div: 2
+test_vectors:
+- name: two_pairs
+  source: spec-example
+  payload: "01 14 02 0A"
+  expected:
+    pairs:
+    - kind: 1
+      level: 10
+    - kind: 2
+      level: 5

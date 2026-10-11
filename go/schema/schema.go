@@ -124,6 +124,10 @@ type Field struct {
 	// is TypeNumber.
 	IntegerResult bool `json:"-" yaml:"-"`
 	Length      int            `json:"length,omitempty" yaml:"length,omitempty"`
+	// LengthDeclared records a `length` written as a number, so that `length: 0` - a
+	// field of no bytes (PS-392) - is told apart from no length at all, which takes the
+	// type's width.
+	LengthDeclared bool `json:"-" yaml:"-"`
 	ByteOffset  int            `json:"byte_offset,omitempty" yaml:"byte_offset,omitempty"`
 	BitOffset   int            `json:"bit_offset,omitempty" yaml:"bit_offset,omitempty"`
 	Bits        int            `json:"bits,omitempty" yaml:"bits,omitempty"`
@@ -215,9 +219,17 @@ type Field struct {
 	Index     string          `json:"-" yaml:"-"`
 	CountAs   string          `json:"-" yaml:"-"`
 	PresentIf *GuardCondition `json:"-" yaml:"-"`
+	// IndexBase is the number Index starts at (PS-530). ElementName is set on a repeat
+	// of single values (PS-528): its one element field, named this, is Fields[0], and the
+	// repeat reports each element's value rather than a record holding it.
+	IndexBase   int    `json:"-" yaml:"-"`
+	ElementName string `json:"-" yaml:"-"`
 	// Carry is a computed element field's value before the first element: a number or a
 	// `$name` (PS-378). nil when the field carries nothing.
 	Carry any `json:"-" yaml:"-"`
+	// Records is a `records` entry's field lists, each yielding one element of the
+	// enclosing repeat (PS-541; see cr118.go). nil where the field is not one.
+	Records [][]Field `json:"-" yaml:"-"`
 
 	// The field-level rules of 0.5.2 wave 6b (see wave6b.go). LengthRef is a `length`
 	// naming a preceding field, without its `$` (PS-464). Optional fields end a list
@@ -282,6 +294,12 @@ type GuardCondition struct {
 	Lte   *float64 `json:"lte,omitempty" yaml:"lte,omitempty"`
 	Eq    *float64 `json:"eq,omitempty" yaml:"eq,omitempty"`
 	Ne    *float64 `json:"ne,omitempty" yaml:"ne,omitempty"`
+	// In and NotIn are the set operators (PS-543), each a list of numbers; HasIn and
+	// HasNotIn record that the key was written, since an empty list is still one.
+	In       []float64 `json:"-" yaml:"-"`
+	NotIn    []float64 `json:"-" yaml:"-"`
+	HasIn    bool      `json:"-" yaml:"-"`
+	HasNotIn bool      `json:"-" yaml:"-"`
 }
 
 // GuardDef represents conditional evaluation with fallback.
@@ -374,6 +392,9 @@ type DecodeContext struct {
 	// name_from templates (PS-523, PS-532). See cr109.go.
 	lookupNumber lookupNumber
 	labels       map[string]labelEntry
+	// pendingRecords collects what a repeat element's `records` entry yields (PS-541);
+	// nil outside an element.
+	pendingRecords *[]map[string]any
 }
 
 // EncodeContext maintains state during encoding.
@@ -438,6 +459,23 @@ func (ctx *EncodeContext) mergeWarnings(child *EncodeContext) {
 }
 
 // inferLengthFromType returns the byte length for shorthand types like u8, s16, etc.
+// declaresZeroLength reports a field whose type reads `length` bytes and which declares
+// `length: 0`: it reads nothing (PS-392 for a skip - "advance the read position by
+// `length` bytes"). Length 0 was taken as no length and the type's width of one byte was
+// read, so a zero-length skip in a tlv case swallowed the next entry's tag (milesight
+// gs601's 0xEE request) and one in a match case shifted every field after it.
+func declaresZeroLength(field Field) bool {
+	if !field.LengthDeclared || field.Length != 0 {
+		return false
+	}
+	switch field.Type {
+	case TypeSkip, TypeSkipLower, TypeBytes, TypeBytesLower, TypeAscii, TypeAsciiLower, TypeString,
+		TypeStringLower, TypeHex, TypeHexLower, TypeHexUpperLower, TypeBase64, TypeBase64Lower:
+		return true
+	}
+	return false
+}
+
 func inferLengthFromType(t FieldType) int {
 	switch t {
 	case TypeU8, TypeS8, TypeI8:
@@ -887,9 +925,17 @@ func ParseSchema(data string) (*Schema, error) {
 	if err := checkIteratorRules(raw); err != nil {
 		return nil, err
 	}
+	// CR-2026-118: where `records` may appear (PS-541), and the set conditions (PS-543).
+	if err := checkRecordsRules(raw); err != nil {
+		return nil, err
+	}
 	// 0.5.2 wave 6b: optional fields end their list (PS-404), and the names reserved
 	// for interpreter metadata name no field (PS-433).
 	if err := checkWave6bRules(raw); err != nil {
+		return nil, err
+	}
+	// CR-2026-117: every `$` reference names something the schema declares (PS-539).
+	if err := checkReferences(raw); err != nil {
 		return nil, err
 	}
 
@@ -1071,9 +1117,11 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	}
 	if length, ok := fm["length"].(int); ok {
 		f.Length = length
+		f.LengthDeclared = true
 	}
 	if length, ok := fm["length"].(float64); ok {
 		f.Length = int(length)
+		f.LengthDeclared = true
 	}
 	// `length: remaining` consumes to the end of the payload (PS-014). It is stored
 	// as the negative sentinel Read already resolves, so Length can stay an int. Any
@@ -1616,6 +1664,7 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 						nef := float64(ne)
 						gc.Ne = &nef
 					}
+					parseSetConditions(&gc, wm) // PS-543
 					gd.When = append(gd.When, gc)
 				}
 			}
@@ -1653,6 +1702,11 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 		tlvField := parseFieldMap(tlvRaw, nil)
 		tlvField.Type = "tlv"
 		f.TLVInline = &tlvField
+	}
+
+	// PS-541: several field lists, each yielding one element of the enclosing repeat.
+	if bodies, ok := fm["records"].([]any); ok && fm["type"] == nil {
+		f.Records = parseRecords(bodies)
 	}
 
 	// Match inline (for Option B syntax: `- match: { field: $var, cases: {...} }`)
@@ -2051,6 +2105,16 @@ func decodeFieldsWithSchema(fields []Field, ctx *DecodeContext, schema *Schema) 
 			continue
 		}
 
+		// PS-541: each field list yields one record, which the enclosing repeat reports
+		// in place of the element. checkRecordsRules confines it, at load, to a repeat's
+		// element or a match case within it.
+		if field.Records != nil {
+			if err := decodeRecords(field, ctx, schema); err != nil {
+				return nil, err
+			}
+			continue
+		}
+
 		// Match inline (Option B syntax: `- match: { field: $var, cases: {...} }`)
 		if field.MatchInline != nil {
 			matchResult, err := decodeMatch(*field.MatchInline, ctx)
@@ -2343,7 +2407,7 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 			return nil, err
 		}
 		length = n
-	} else if length == 0 {
+	} else if length == 0 && !declaresZeroLength(field) {
 		// Infer length from shorthand type names
 		length = inferLengthFromType(field.Type)
 	}
@@ -2814,6 +2878,20 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 	return finishComputedValue(value, field, ctx)
 }
 
+// bindTagComponent binds a tlv tag component for the case body. A component is a field
+// decoded earlier in the payload, so its name is a reference the case may make (`ref:
+// $rsn`, PS-265), and its `var:` binds as a field's does - a `name_from` template such as
+// "temperature_${ch}" reads it. Only `var:` was bound, and only on the whole-byte path, so
+// `ref: $rsn` beside a bit-range component failed with "ref field not found".
+func bindTagComponent(tf Field, val int64, ctx *DecodeContext) {
+	if tf.Name != "" {
+		ctx.Variables[tf.Name] = val
+	}
+	if tf.Var != "" {
+		ctx.Variables[tf.Var] = val
+	}
+}
+
 // computedSource is a computed field's source (PS-443): the referenced value with its
 // polynomial applied, or the compute result. Everything after it is
 // applyLookupAndModifiers' job.
@@ -2827,7 +2905,10 @@ func computedSource(field Field, ctx *DecodeContext) (float64, error) {
 		if err := ctx.scopeError(refName); err != nil {
 			return 0, err
 		}
-		return 0, fmt.Errorf("ref field not found: %s", refName)
+		// PS-314/PS-429: a reference with no value - a field omitted earlier by a zero
+		// divisor, a log of x <= 0, a sentinel or a lookup with no entry - cannot be
+		// resolved, so this field is absent too. It failed the whole decode.
+		return 0, errComputeOmitted
 	}
 	numVal, _ := toFloat64(refVal)
 	if len(field.Polynomial) > 0 {
@@ -3187,6 +3268,7 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 					if tf.Name != "" {
 						tagValues[tf.Name] = int(v.(float64))
 					}
+					bindTagComponent(tf, int64(v.(float64)), ctx)
 					continue
 				}
 				data, err := ctx.Read(tagFieldWidth(tf))
@@ -3197,12 +3279,7 @@ func decodeTLV(field Field, ctx *DecodeContext) (map[string]any, error) {
 				if tf.Name != "" {
 					tagValues[tf.Name] = val
 				}
-				// A component's `var:` binds for the case body, as a field's does - a
-				// `name_from` template such as "temperature_${ch}" reads it. It bound
-				// nothing, so every such case failed.
-				if tf.Var != "" {
-					ctx.Variables[tf.Var] = int64(val)
-				}
+				bindTagComponent(tf, int64(val), ctx)
 			}
 
 			// Build tag key
@@ -4548,9 +4625,27 @@ func encodeRepeat(field Field, data map[string]any, ctx *EncodeContext) error {
 
 // encodeRepeatRecords writes a repeat's records back to back.
 func encodeRepeatRecords(field Field, records []any, ctx *EncodeContext) error {
+	if recordsReachable(field.Fields) {
+		// PS-542: the records do not say which element they came from.
+		return fmt.Errorf("Repeat '%s' has elements that yield several records, which cannot be encoded (PS-542)", field.Name)
+	}
 	if presentIfBlocksEncode(field) {
 		return fmt.Errorf("repeat field %q declares present_if and its elements read payload "+
 			"bytes, so the elements it dropped cannot be encoded (PS-387)", field.Name)
+	}
+	if field.ElementName != "" {
+		// PS-529: each value is encoded as the element, wrapped as it was decoded.
+		// CR-2026-111 leaves open what a null position encodes as; the spec prototype
+		// refuses it rather than guess, and so does every encoder here.
+		wrapped := make([]any, len(records))
+		for position, item := range records {
+			if item == nil {
+				return fmt.Errorf("Repeat '%s' has null at position %d, which has no encoding (PS-529)",
+					field.Name, position)
+			}
+			wrapped[position] = map[string]any{field.ElementName: item}
+		}
+		records = wrapped
 	}
 	for position, item := range records {
 		record, ok := item.(map[string]any)
@@ -4564,7 +4659,7 @@ func encodeRepeatRecords(field Field, records []any, ctx *EncodeContext) error {
 			for k, v := range record {
 				bound[k] = v
 			}
-			bound[field.Index] = position
+			bound[field.Index] = position + field.IndexBase // PS-530
 			record = bound
 		}
 		if err := encodeFields(field.Fields, record, ctx); err != nil {
@@ -4803,7 +4898,7 @@ func encodeFields(fields []Field, data map[string]any, ctx *EncodeContext) error
 				// `remaining` and a length naming a field give no count to pad on
 				// encode, and the reference pads them to nothing (PS-014, PS-464).
 				length = 0
-			case length == 0:
+			case length == 0 && !field.LengthDeclared:
 				// An absent length is one byte, as in Python's f.get('length', 1).
 				length = 1
 			}
@@ -5829,10 +5924,11 @@ func evaluateCompute(cd *ComputeDef, ctx *DecodeContext) (float64, error) {
 	}
 }
 
-// errComputeOmitted signals a zero divisor. PS-278: the field is reported absent and
-// decoding of the rest of the payload continues. Previously this was a plain error,
-// which abandoned the field and, through the caller, could take the payload with it.
-var errComputeOmitted = errors.New("compute omitted: division by zero")
+// errComputeOmitted signals a zero divisor (PS-278), or a reference to a field with no
+// value (PS-314, PS-429): the field is reported absent and decoding of the rest of the
+// payload continues. Previously this was a plain error, which abandoned the field and,
+// through the caller, could take the payload with it.
+var errComputeOmitted = errors.New("compute omitted: no value")
 
 // floorDiv is integer division rounded toward negative infinity (PS-276).
 //
@@ -5863,10 +5959,14 @@ func resolveOperand(op string, ctx *DecodeContext) (float64, error) {
 			if f, ok := toFloat64(val); ok {
 				return f, nil
 			}
+			return 0, fmt.Errorf("operand field %s is not a number", name)
 		} else if err := ctx.scopeError(name); err != nil {
 			return 0, err
 		}
-		return 0, fmt.Errorf("operand field not found: %s", name)
+		// PS-314/PS-429: an operand with no value makes the field absent, as a zero
+		// divisor does (PS-278). dragino wsc2-lb's `rain` multiplies by a quotient whose
+		// divisor can be 0; "operand field not found" failed the whole decode.
+		return 0, errComputeOmitted
 	}
 	return strconv.ParseFloat(op, 64)
 }
@@ -5899,6 +5999,9 @@ func guardConditionsHold(gd *GuardDef, ctx *DecodeContext) bool {
 			return false
 		}
 		if cond.Ne != nil && !(fv != *cond.Ne) {
+			return false
+		}
+		if !setConditionHolds(cond, fv) { // PS-543
 			return false
 		}
 	}

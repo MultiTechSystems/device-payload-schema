@@ -50,7 +50,7 @@ class CorpusConformanceTest {
     // CR-2026-096 added nine vectors (the meta-* fixtures); with _meta compared exactly
     // where a vector carries expected_meta, all pass: 2549.
     // CR-2026-097 added meta-tlv-channels.yaml: 2550.
-    private static final int CORPUS_FLOOR = 2610;   // +7: lookup-reference-binding (CR-2026-109); +2: flagged-group-field-list; +8: name-from-rendering (CR-2026-112); +2: boolean-literal (CR-2026-107); +14: the nine TS013-defect fixtures (bitfield-string-wide, wide-bit-range, ...); +8: CR-2026-104 lookup-boolean-labels and lookup-number-labels; +3: byte-group-bool; +11: tlv-case-field-list, object-member-field-list, tlv-tag-var-name-from; +5: tlv-case-key-patterns; dl-atm41g2's two vendor vectors (+2); +121: vendor-codec vectors that kill vobo's mutation survivors
+    private static final int CORPUS_FLOOR = 2646;   // +2: CR-2026-124 guard-set empty in/not_in; +8: match-u32-peek-discriminator and match-u32-inline-discriminator; +4: names-mangling-alike; +2: CR-2026-127 guard-boolean-operand; +2: CR-2026-117 guard-absent-operand; +10: CR-2026-118 element-several-readings, element-case-several-readings, present-if-set, guard-set; +8: registry divergence fixtures (tag-component-ref, reference-to-absent, zero-length, numeric-looking-text, name-from-object, round-large-value); +7: CR-2026-111 repeat-element-* and repeat-index-base; +2: flagged-group-field-list; +8: name-from-rendering (CR-2026-112); +2: boolean-literal (CR-2026-107); +14: the nine TS013-defect fixtures (bitfield-string-wide, wide-bit-range, ...); +8: CR-2026-104 lookup-boolean-labels and lookup-number-labels; +3: byte-group-bool; +11: tlv-case-field-list, object-member-field-list, tlv-tag-var-name-from; +5: tlv-case-key-patterns; dl-atm41g2's two vendor vectors (+2); +121: vendor-codec vectors that kill vobo's mutation survivors
 
     @Test
     void corpusVectorsDecodeAsExpected() throws IOException {
@@ -287,6 +287,12 @@ class CorpusConformanceTest {
         // identical one: this binding decodes a u8 to a Double, so ts007's package
         // list printed as {package_id=0.0} where the vector says 0, even though every
         // value in it compared equal numerically.
+        //
+        // A null reaching here sits at a position in an array: an `element` repeat's
+        // omitted value, which null asserts was reported as null there (PS-043 as amended
+        // by CR-2026-111). It used to fall through to a printed comparison, where null
+        // equalled the string "null".
+        if (want == null || got == null) return want == got;
         if (want instanceof List<?> wantList && got instanceof List<?> gotList) {
             if (wantList.size() != gotList.size()) return false;
             for (int i = 0; i < wantList.size(); i++) {
@@ -306,6 +312,13 @@ class CorpusConformanceTest {
             return true;
         }
 
+        // A string decoded to the very string expected matches, whatever it looks like.
+        // "3E6388" - a hex rendering of three bytes - parses as a double overflowing to
+        // Infinity, and |Infinity - Infinity| is NaN, so two identical strings failed.
+        if (want instanceof String wantText && got instanceof String gotText
+                && wantText.equals(gotText)) {
+            return true;
+        }
         Double a = asNumber(want);
         Double b = asNumber(got);
         if (a != null && b != null) {
@@ -394,7 +407,10 @@ class CorpusConformanceTest {
             if (text.equalsIgnoreCase("true")) return 1.0;
             if (text.equalsIgnoreCase("false")) return 0.0;
             if (text.toLowerCase().startsWith("0x")) return (double) Long.parseLong(text.substring(2), 16);
-            return Double.parseDouble(text);
+            // Text that overflows to an infinity, or spells NaN, is not a number a decode
+            // reports (PS-282): compare it as the text it is.
+            double parsed = Double.parseDouble(text);
+            return Double.isFinite(parsed) ? parsed : null;
         } catch (NumberFormatException e) {
             return null;
         }

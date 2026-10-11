@@ -62,9 +62,17 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # +3: tlv-case-field-list.
 # +2: boolean-literal (CR-2026-107).
 # +8: name-from-rendering (CR-2026-112), all plain fixed.
-# +5: lookup-reference-binding (CR-2026-109), match; its miss and plain-default vectors
-# carry no value to write back.
-FLOOR_TOTAL = 1788
+# +6: the registry divergence fixtures, all plain fixed (tag-component-ref does not
+# round-trip: its cases match a range of tags).
+# +5: repeat-element-named, -unnamed, -object, repeat-index-base and the null fixture's
+# vector with no null (CR-2026-111), all repeat. Its two null vectors are refused.
+# +2: guard-set (CR-2026-118), plain fixed. The other three CR-2026-118 fixtures are
+# refused (PS-542, PS-387).
+# +2: guard-set's empty `in` and `not_in` vectors (CR-2026-124), plain fixed.
+# +4: match-u32-inline-discriminator.
+# +4: names-mangling-alike, plain fixed.
+# +2: CR-2026-127 guard-boolean-operand, plain fixed.
+FLOOR_TOTAL = 1808
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -74,13 +82,13 @@ FLOOR_BY_SHAPE = {
     # for an internal field with no value. It now reports such a field instead.
     "tlv": 1299,
     "flagged": 193,
-    "plain fixed": 127,
-    "match": 130,
+    "plain fixed": 143,
+    "match": 129,  # +4: match-u32-inline-discriminator
     "byte_group": 25,
     # 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now
     # carry only the definitions they reach, so one no longer has a `repeat` in an
     # unreferenced definition for the classifier to find.
-    "repeat": 14,
+    "repeat": 19,
 }
 
 #: Encoding must never raise. It used to, 26 times: "Cannot encode type: number" for any

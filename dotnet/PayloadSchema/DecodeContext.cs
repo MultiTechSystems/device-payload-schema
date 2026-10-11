@@ -56,6 +56,11 @@ public class DecodeContext
     /// <summary>Whether a lookup label is a number, which PS-523 binds as itself.</summary>
     internal static bool IsNumericLabel(object? label) =>
         label is not bool && label is not string && Helpers.ToFloat64(label).ok;
+    /// <summary>
+    /// The records the current repeat element yields through `records` (PS-541); null
+    /// outside an element.
+    /// </summary>
+    internal List<Dictionary<string, object?>>? PendingRecords { get; set; }
     public Dictionary<string, string> Quality { get; } = new();
     public List<string> Warnings { get; } = new();
     /// <summary>

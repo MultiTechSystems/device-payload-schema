@@ -243,6 +243,24 @@ def field_to_json_schema(field_def: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if name.startswith('_'):
         return None
     
+    # PS-528: a repeat declaring `element` reports an array of the element's values,
+    # with null at a position whose value was omitted, so each item is nullable.
+    if field_type == 'repeat' and isinstance(field_def.get('element'), dict) \
+            and 'fields' not in field_def:
+        element = {k: v for k, v in field_def['element'].items() if k != 'name'}
+        items = field_to_json_schema(element) or {}
+        declared = items.get('type')
+        if declared is not None:
+            current = declared if isinstance(declared, list) else [declared]
+            if 'null' not in current:
+                items['type'] = list(current) + ['null']
+        if 'enum' in items and None not in items['enum']:
+            items['enum'] = list(items['enum']) + [None]
+        schema = {"type": "array", "items": items}
+        if field_def.get('description'):
+            schema['description'] = field_def['description']
+        return schema
+
     # Get base schema from type
     schema = yaml_type_to_json_schema(field_type, field_def)
     

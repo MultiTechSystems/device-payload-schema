@@ -205,6 +205,19 @@ public static class SchemaDecoder
                 continue;
             }
 
+            // PS-541: each field list yields one record, which the enclosing repeat
+            // reports in place of the element. RecordsErrors confines it, at load, to a
+            // repeat's element or a match case within it.
+            if (field.Records != null)
+            {
+                if (ctx.PendingRecords == null)
+                    throw new InvalidOperationException(
+                        "`records` belongs in a repeat's element, or a match case within it (PS-541)");
+                foreach (var body in field.Records)
+                    ctx.PendingRecords.Add(DecodeFields(body, ctx, schema));
+                continue;
+            }
+
             // Byte group
             if (field.ByteGroup.Count > 0)
             {
@@ -405,6 +418,17 @@ public static class SchemaDecoder
         finally { ctx.MetaDepth--; }
     }
 
+    /// <summary>
+    /// A field whose type reads <c>length</c> bytes and which declares <c>length: 0</c>
+    /// reads nothing (PS-392 for a skip). Length 0 was taken as no length and one byte was
+    /// read, so a zero-length skip in a tlv case swallowed the next entry's tag (milesight
+    /// gs601's 0xEE request) and one in a match case shifted every field after it.
+    /// </summary>
+    static bool DeclaresZeroLength(SchemaField field) =>
+        field.LengthDeclared && field.Length == 0
+        && field.Type is FieldType.Skip or FieldType.Bytes or FieldType.Ascii
+            or FieldType.String or FieldType.Hex or FieldType.Base64;
+
     static object? DecodeFieldBody(SchemaField field, DecodeContext ctx, PayloadSchemaDefinition? schema)
     {
         // A negative Length is the `remaining` sentinel and is passed through to
@@ -412,7 +436,9 @@ public static class SchemaDecoder
         int length = field.LengthRef != null && field.Type is FieldType.Bytes or FieldType.Ascii
                          or FieldType.Hex or FieldType.Base64 or FieldType.Skip
             ? ResolveLengthRef(field, ctx)
-            : field.Length != 0 ? field.Length : Helpers.InferLengthFromType(field.Type);
+            : field.Length != 0 || DeclaresZeroLength(field)
+                ? field.Length
+                : Helpers.InferLengthFromType(field.Type);
         string endian = field.Endian ?? ctx.Endian;
         object? value = null;
         // The integer as read, before any `encoding` is decoded, for PS-427.
@@ -1133,7 +1159,11 @@ public static class SchemaDecoder
             if (!ctx.Variables.TryGetValue(refName, out var refVal))
             {
                 ctx.CheckUnbound(refName);    // PS-368
-                throw new InvalidOperationException($"Ref field not found: {refName}");
+                // PS-314/PS-429: a reference with no value - a field omitted earlier by
+                // a zero divisor, a log of x <= 0, a sentinel or a lookup with no entry -
+                // cannot be resolved, so this field is absent too. It threw, failing the
+                // whole decode.
+                return null;
             }
             var (ok, rv) = Helpers.ToFloat64(refVal);
             source = ok ? rv : 0;
@@ -1156,6 +1186,9 @@ public static class SchemaDecoder
     {
         double a = ResolveOperand(cd.A, ctx);
         double b = ResolveOperand(cd.B, ctx);
+        // PS-314/PS-429: an operand with no value makes the field absent, as a zero
+        // divisor does. NaN arithmetic is not relied on to carry the sentinel through.
+        if (IsComputeOmitted(a) || IsComputeOmitted(b)) return ComputeOmitted;
 
         return cd.Op switch
         {
@@ -1185,21 +1218,35 @@ public static class SchemaDecoder
                 var (ok, f) = Helpers.ToFloat64(val);
                 if (ok) return f;
             }
-            else ctx.CheckUnbound(name);    // PS-368
-            throw new InvalidOperationException($"Operand field not found: {op}");
+            else
+            {
+                ctx.CheckUnbound(name);    // PS-368
+                // PS-314/PS-429: an operand with no value omits the field. dragino
+                // wsc2-lb's `rain` multiplies by a quotient whose divisor can be 0, and
+                // "Operand field not found" failed the whole decode.
+                return ComputeOmitted;
+            }
+            throw new InvalidOperationException($"Operand field {op} is not a number");
         }
         return double.Parse(op, CultureInfo.InvariantCulture);
     }
 
-    internal static bool EvaluateGuardConditions(GuardDef gd, DecodeContext ctx)
+    /// <summary>
+    /// PS-540 (CR-2026-117): a condition whose field is absent (PS-314) or unbound fails,
+    /// so the guard's <c>else</c> applies, or the field is omitted without one (PS-400).
+    /// The PS-368 scope errors stay errors, except for a repeat's <c>present_if</c>,
+    /// evaluated once its element is whole (<paramref name="elementComplete"/>).
+    /// </summary>
+    internal static bool EvaluateGuardConditions(GuardDef gd, DecodeContext ctx,
+                                                 bool elementComplete = false)
     {
         foreach (var cond in gd.When)
         {
             var fieldName = cond.Field.TrimStart('$');
-            if (!ctx.Variables.TryGetValue(fieldName, out var fieldVal))
+            if (!ctx.Variables.TryGetValue(fieldName, out var fieldVal) || fieldVal == null)
             {
-                ctx.CheckUnbound(fieldName);    // PS-368
-                return false;
+                if (!elementComplete) ctx.CheckUnbound(fieldName);    // PS-368
+                return false;                                         // PS-540
             }
             var (ok, fv) = Helpers.ToFloat64(fieldVal);
             if (!ok) return false;
@@ -1209,13 +1256,22 @@ public static class SchemaDecoder
             if (cond.Lte.HasValue && !(fv <= cond.Lte.Value)) return false;
             if (cond.Eq.HasValue && fv != cond.Eq.Value) return false;
             if (cond.Ne.HasValue && fv == cond.Ne.Value) return false;
+            if (cond.In != null && !cond.In.Contains(fv)) return false;            // PS-543
+            if (cond.NotIn != null && cond.NotIn.Contains(fv)) return false;
         }
         return true;
     }
 
     static object? DecodeMatch(SchemaField field, DecodeContext ctx)
     {
-        int matchValue;
+        // A long, not an int: a u32 discriminator above 0x7FFFFFFF is an ordinary value,
+        // and narrowing it to int sent every such value to int.MinValue, which is also
+        // where (int)2147483648.0 lands. So 0xFFFFFFFF and 0x80000001 both matched a
+        // case keyed 2147483648 and decoded the wrong branch with success. Null where the
+        // discriminator is no integer at all - a u64 above 2^63-1, say - which then
+        // matches no case rather than the 0 a failed conversion would give.
+        long? matchValue;
+        object? discriminator;
         // What this construct contributes on its own: the discriminator under `name`,
         // where it was read here and named. Null where there is nothing to report.
         Dictionary<string, object?>? inline = null;
@@ -1225,20 +1281,23 @@ public static class SchemaDecoder
             // PS-414: the bytes from here to the end of the region - a reserving repeat's
             // buffer already stops short of the reserve. Nothing is read.
             matchValue = ctx.Remaining;
+            discriminator = matchValue;
         }
         else if (!string.IsNullOrEmpty(field.On))
         {
             var varName = field.On.TrimStart('$');
             if (!ctx.Variables.TryGetValue(varName, out var val))
                 throw new InvalidOperationException($"Variable not found: ${varName}");
-            var (_, iv) = Helpers.ToInt(val);
-            matchValue = iv;
+            var (ok, lv) = Helpers.ToLong(val);
+            matchValue = ok ? lv : null;
+            discriminator = val;
         }
         else
         {
             int length = field.Length > 0 ? field.Length : 1;
             var data = ctx.Read(length);
-            matchValue = (int)Helpers.DecodeUint(data, ctx.Endian);
+            matchValue = (long)Helpers.DecodeUint(data, ctx.Endian);
+            discriminator = matchValue;
 
             // A discriminator read from the payload is reported where `name` asks for it
             // and stored where `var` does (CR-2026-020). Both were parsed and then
@@ -1264,7 +1323,7 @@ public static class SchemaDecoder
             var caseVal = c.CaseValue;
             if (caseVal == null) continue;
 
-            if (MatchesCase(matchValue, caseVal))
+            if (matchValue is long numeric && MatchesCase(numeric, caseVal))
                 return MergeMatch(inline, DecodeFields(c.Fields, ctx, null));
         }
 
@@ -1274,7 +1333,7 @@ public static class SchemaDecoder
         if (field.MatchDefault is List<SchemaField> fallbackFields)
             return MergeMatch(inline, DecodeFields(fallbackFields, ctx, null));
         if (field.MatchDefault is null || (field.MatchDefault as string) != "skip")
-            throw new InvalidOperationException($"No matching case for value {matchValue}");
+            throw new InvalidOperationException($"No matching case for value {matchValue?.ToString() ?? discriminator?.ToString()}");
         return inline;
     }
 
@@ -1286,14 +1345,18 @@ public static class SchemaDecoder
     /// compared, so a range key matched nothing at all and the construct decoded silently
     /// empty (CR-2026-020).
     /// </summary>
-    static bool MatchesCase(int matchValue, object caseVal)
+    static bool MatchesCase(long matchValue, object caseVal)
     {
         switch (caseVal)
         {
             case int iv:
                 return matchValue == iv;
+            case long lv:
+                return matchValue == lv;
             case double dv:
-                return matchValue == (int)dv;
+                // The parser gives a key beyond int's range as a double; compare it as
+                // the integer it spells, never through an int cast.
+                return Helpers.ToLong(dv) is (true, var key) && matchValue == key;
             case string text when Helpers.ParseListCaseKey(text) is { } listed:
                 // A quoted flow sequence, "[1, 2, 3]", matches any element (PS-398).
                 return listed.Contains(matchValue);
@@ -1301,22 +1364,22 @@ public static class SchemaDecoder
                 var separator = text.IndexOf("..", StringComparison.Ordinal);
                 if (separator > 0)
                 {
-                    return int.TryParse(text[..separator].Trim(), out var lo)
-                           && int.TryParse(text[(separator + 2)..].Trim(), out var hi)
+                    return long.TryParse(text[..separator].Trim(), out var lo)
+                           && long.TryParse(text[(separator + 2)..].Trim(), out var hi)
                            && matchValue >= lo && matchValue <= hi;
                 }
-                return int.TryParse(text.Trim(), out var exact) && matchValue == exact;
+                return long.TryParse(text.Trim(), out var exact) && matchValue == exact;
             case List<object?> list:
                 return list.Any(item =>
                 {
-                    var (ok, itemInt) = Helpers.ToInt(item);
-                    return ok && matchValue == itemInt;
+                    var (ok, itemLong) = Helpers.ToLong(item);
+                    return ok && matchValue == itemLong;
                 });
             case Dictionary<string, object?> rangeMap:
                 var low = rangeMap.TryGetValue("min", out var minNode)
-                    ? Helpers.ToInt(minNode).Item2 : int.MinValue;
+                    && Helpers.ToLong(minNode) is (true, var lowKey) ? lowKey : long.MinValue;
                 var high = rangeMap.TryGetValue("max", out var maxNode)
-                    ? Helpers.ToInt(maxNode).Item2 : int.MaxValue;
+                    && Helpers.ToLong(maxNode) is (true, var highKey) ? highKey : long.MaxValue;
                 return matchValue >= low && matchValue <= high;
         }
         return false;
@@ -1410,7 +1473,13 @@ public static class SchemaDecoder
                         val = (int)Helpers.DecodeUint(data, ctx.Endian);
                     }
                     if (!string.IsNullOrEmpty(tf.Name))
+                    {
                         tagValues[tf.Name] = val;
+                        // A component is a field decoded earlier in the payload, so its
+                        // name is a reference the case body may make (`ref: $rsn`,
+                        // PS-265). Only `var:` was bound: "Ref field not found: rsn".
+                        ctx.Variables[tf.Name] = (long)val;
+                    }
                     // A component's `var:` binds for the case body, as a field's does; a
                     // name_from template such as "temperature_${ch}" reads it.
                     if (!string.IsNullOrEmpty(tf.Var))
@@ -1677,6 +1746,19 @@ public static class SchemaDecoder
         return (true, specificity);
     }
 
+    /// <summary>
+    /// The value a repeat of single values reports for one element: the record's one
+    /// reported value, or null where it was omitted (PS-528). Interpreter metadata beside
+    /// it (`_quality`) is not the value.
+    /// </summary>
+    static object? ElementValue(Dictionary<string, object?> record)
+    {
+        foreach (var kv in record)
+            if (kv.Key is not ("_meta" or "_quality" or "_warnings"))
+                return kv.Value;
+        return null;
+    }
+
     static List<object?> DecodeRepeat(SchemaField field, DecodeContext ctx, PayloadSchemaDefinition? schema)
     {
         int maxIterations = field.Max > 0 ? field.Max : 1000;
@@ -1703,11 +1785,15 @@ public static class SchemaDecoder
             var savedNames = ctx.ElementNames;
             ctx.ElementNames = elementNames;
             if (!string.IsNullOrEmpty(field.Index))
-                ctx.Variables[field.Index!] = iterations;                          // PS-366
+                ctx.Variables[field.Index!] = iterations + field.IndexBase;        // PS-366, PS-530
             foreach (var kv in carryState)
                 ctx.Variables[kv.Key] = kv.Value;                                  // PS-379
             Dictionary<string, object?> element;
             bool keep;
+            // PS-541: the records this element's `records` entry yields, if it reaches one.
+            var savedRecords = ctx.PendingRecords;
+            var records = new List<Dictionary<string, object?>>();
+            ctx.PendingRecords = records;
             try
             {
                 element = DecodeFields(field.Fields, ctx, schema);
@@ -1715,7 +1801,8 @@ public static class SchemaDecoder
                     if (ctx.Variables.TryGetValue(name, out var carried))
                         carryState[name] = carried;
                 keep = field.PresentIf == null
-                       || EvaluateGuardConditions(new GuardDef { When = { field.PresentIf } }, ctx);
+                       || EvaluateGuardConditions(new GuardDef { When = { field.PresentIf } }, ctx,
+                                                  elementComplete: true);   // PS-540
             }
             finally
             {
@@ -1726,10 +1813,24 @@ public static class SchemaDecoder
                 foreach (var kv in outerReported)
                     ctx.Reported[kv.Key] = kv.Value;
                 ctx.ElementNames = savedNames;
+                ctx.PendingRecords = savedRecords;
             }
             iterations++;
-            if (keep)
-                result.Add(element);
+            if (keep && records.Count > 0)
+            {
+                // PS-541: the records, as consecutive elements, in place of the element;
+                // the element's other reported fields go into each, before its own.
+                foreach (var record in records)
+                {
+                    var merged = new Dictionary<string, object?>(element);
+                    foreach (var kv in record) merged[kv.Key] = kv.Value;
+                    result.Add(merged);
+                }
+            }
+            else if (keep)
+                // PS-528: a repeat of single values reports the element's value, or null
+                // where it was omitted, so the values after it keep their position.
+                result.Add(field.ElementName == null ? element : ElementValue(element));
         }
 
         if (field.Count != null)
@@ -1967,6 +2068,8 @@ public static class SemanticFormatter
                 if (f.Flagged != null)
                     foreach (var g in f.Flagged.Groups) Visit(g.Fields);
                 foreach (var c in f.Cases) Visit(c.Fields);
+                if (f.Records != null)
+                    foreach (var body in f.Records) Visit(body);                  // PS-541
                 if (f.MatchDefault is List<SchemaField> fallback) Visit(fallback);
                 if (f.MatchInline != null) Visit(new[] { f.MatchInline });
                 var tlv = f.TLVInline ?? f;
@@ -2091,6 +2194,9 @@ public static class SemanticFormatter
             }
             foreach (var c in f.Cases)
                 result.AddRange(FlattenFields(c.Fields));
+            if (f.Records != null)
+                foreach (var body in f.Records)
+                    result.AddRange(FlattenFields(body));                         // PS-541
         }
         return result;
     }

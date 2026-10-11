@@ -128,7 +128,9 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "min": (("py", "go"), "repeat floor (CR-2026-021)"),
         "reserve": (_DECODERS, "bytes at the end a repeat must not read (PS-350)"),
         "trailer": (_DECODERS, "fields decoded from a repeat's reserved bytes (PS-383)"),
-        "index": (_DECODERS, "a repeat element's zero-based position (PS-366)"),
+        "index": (_DECODERS, "a repeat element's position, from index_base (PS-366)"),
+        "index_base": (_DECODERS, "the number a repeat's index starts at (PS-530)"),
+        "element": (_DECODERS, "a repeat's one field, reported as an array of values (PS-528)"),
         "count_as": (_DECODERS, "the number of elements a repeat reports (PS-367)"),
         "present_if": (_DECODERS, "drops an element whose condition is false (PS-386)"),
         "carry": (_DECODERS, "a computed field's value from the previous element (PS-378)"),
@@ -140,6 +142,7 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "tlv": (_DECODERS, "tag dispatch"),
         "flagged": (_DECODERS, "bitmask-gated groups"),
         "byte_group": (_DECODERS, "fields sharing bytes"),
+        "records": (_DECODERS, "field lists, each one element of a repeat (PS-541)"),
         "size": (_DECODERS, "byte count of the array `byte_group` spelling"),
         "$ref": (_DECODERS, "splices a definition"),
         "bit": (_DECODERS, "bit index of a `type: bool`"),
@@ -241,6 +244,8 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "lte": (_DECODERS, "comparison"),
         "eq": (_DECODERS, "comparison"),
         "ne": (_DECODERS, "comparison"),
+        "in": (_DECODERS, "a list of numbers, one of which the value equals (PS-543)"),
+        "not_in": (_DECODERS, "a list of numbers the value equals none of (PS-543)"),
     },
     "ipso": {
         "object": (("py", "score"), "IPSO object id, checked by the scorer"),
@@ -442,6 +447,13 @@ def iter_keys(schema: Any) -> Iterator[Tuple[str, str, str]]:
             kpath = _p(path, key)
             if key in ("fields", "trailer"):
                 yield from field_list(value, kpath)
+            elif key == "element" and isinstance(value, dict):
+                # A repeat of single values: one field definition (PS-528).
+                yield from field(value, kpath)
+            elif key == "records" and isinstance(value, list):
+                # Several field lists, each yielding one element (PS-541).
+                for i, body in enumerate(value):
+                    yield from field_list(body, "%s[%d]" % (kpath, i))
             elif key == "present_if" and isinstance(value, dict):
                 # One guard condition (PS-386), with the guard condition's keys.
                 yield from rec("guard_when", value, kpath)

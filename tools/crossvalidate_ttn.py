@@ -39,7 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from schema_interpreter import SchemaInterpreter  # noqa: E402
 from score_schema import CONFORMANCE_TOLERANCE  # noqa: E402
-from validate_schema import values_match  # noqa: E402
+from validate_schema import correction_path, values_match  # noqa: E402
 
 
 class _CoreBoolLoader(yaml.SafeLoader):
@@ -126,8 +126,12 @@ console.log(JSON.stringify(out));
         # (dragino's -LB codecs), which no engine loads as written. The intent is plain, so
         # the escapes are undone, as the registry's oracle does; otherwise the vendor
         # decoder silently never ran for these units.
-        code = (code.replace("\\r\\n", "\n").replace("\\n", "\n")
-                .replace("\\t", "\t").replace('\\"', '"'))
+        code = (
+            code.replace("\\r\\n", "\n")
+            .replace("\\n", "\n")
+            .replace("\\t", "\t")
+            .replace('\\"', '"')
+        )
     script = "%s\nconst REQUESTS = %s;\n%s" % (
         code,
         json.dumps(requests),
@@ -150,19 +154,48 @@ console.log(JSON.stringify(out));
 
 
 # PS-512: a vendor codec's string rendering of a number - `(x / 10).toFixed(2)` - is
-# compared by value. Only a plain decimal is taken as one: "0x1A", "1e3" and "3.1(low
-# battery)" stay strings, and so does every string compared against a string.
+# compared by value. "1e3" and "3.1(low battery)" stay strings, and so does every string
+# compared against a string.
 _DECIMAL = re.compile(r"-?\d+(\.\d+)?\Z")
-# PS-512 as amended: a decimal followed only by a unit symbol ("257mm", "18℃", "-70dBm",
-# "80 %"). Letters, °, ℃, %, / and whitespace only - "3.1(low battery)" and "0x0a 10 Min"
-# stay strings.
-_DECIMAL_UNIT = re.compile(r"(-?\d+(?:\.\d+)?)\s*[A-Za-z°℃%/]+\Z")
+# PS-512 as amended by CR-2026-119: a unit symbol begins with a letter, ℃, °, % or /, and
+# may continue with those, superscript digits (² ³) and spaces ("3.073mw/cm ²"). It never
+# begins with a digit, so a second number is never read as part of a unit, and
+# "3.1(low battery)" stays a string.
+_UNIT = r"[A-Za-z°℃%/][A-Za-z°℃%/²³ ]*"
+# A decimal followed only by a unit symbol ("257mm", "18℃", "-70dBm", "80 %").
+_DECIMAL_UNIT = re.compile(r"(-?\d+(?:\.\d+)?)\s*" + _UNIT + r"\Z")
+# PS-512 as amended by CR-2026-108: "0x" and hex digits followed by a decimal, optionally
+# with a unit symbol ("0x0a 10 Min", "0x07 7"), renders the decimal; a bare "0x01" renders
+# its integer value.
+_HEX_DECIMAL = re.compile(
+    r"0[xX][0-9A-Fa-f]+\s+(-?\d+(?:\.\d+)?)(?:\s*" + _UNIT + r")?\Z"
+)
+_HEX_BARE = re.compile(r"0[xX]([0-9A-Fa-f]+)\Z")
+
+
+def _is_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def as_number(want, got):
-    """`want` as the number it denotes where it is a decimal string and `got` a number."""
-    if isinstance(got, (int, float)) and not isinstance(got, bool) and isinstance(want, str):
+    """`want` as the number it denotes where it is a PS-512 rendering and `got` a number.
+
+    Descends into objects and lists, so a rendering nested inside a reported object
+    (`{"unit": "W", "value": "1.70"}`) is compared by value too.
+    """
+    if isinstance(want, dict) and isinstance(got, dict):
+        return {k: as_number(v, got[k]) if k in got else v for k, v in want.items()}
+    if isinstance(want, list) and isinstance(got, list) and len(want) == len(got):
+        return [as_number(w, g) for w, g in zip(want, got)]
+    if _is_number(got) and isinstance(want, str):
         text = want.strip()
+        # The 0x forms first: "0xff" would otherwise read as 0 with the unit "xff".
+        h = _HEX_BARE.match(text)
+        if h:
+            return float(int(h.group(1), 16))
+        if text[:2].lower() == "0x":
+            m = _HEX_DECIMAL.match(text)
+            return float(m.group(1)) if m else want
         if _DECIMAL.match(text):
             return float(text)
         m = _DECIMAL_UNIT.match(text)
@@ -179,16 +212,59 @@ def corrections(schema):
     """{(payload hex, fPort): {field, ...}} for the schema's `vendor-codec-corrected` vectors.
 
     PS-514: such a vector says which fields the vendor codec gets wrong for its payload, so a
-    comparison against that codec on the same payload skips exactly those fields.
+    comparison against that codec on the same payload skips exactly those fields. A field
+    may be a `/`-joined path to a nested member (CR-2026-120); `skip_corrected` drops
+    exactly that member.
     """
     out = {}
     for vec in (schema or {}).get("test_vectors") or []:
         if not isinstance(vec, dict) or vec.get("source") != "vendor-codec-corrected":
             continue
         port = vec.get("fPort", vec.get("fport", vec.get("port")))
-        names = {c.get("field") for c in vec.get("correction") or [] if isinstance(c, dict)}
+        names = {
+            c.get("field") for c in vec.get("correction") or [] if isinstance(c, dict)
+        }
         out.setdefault((_hex(vec.get("payload", "")), port), set()).update(names)
     return out
+
+
+def _drop_member(value, segments):
+    """`value` with the member at `segments` removed: popped from an object, and set to
+    None in an array so that the indices after it still line up."""
+    if not segments:
+        return value
+    head, rest = segments[0], segments[1:]
+    if isinstance(value, dict) and head in value:
+        copy = dict(value)
+        if rest:
+            copy[head] = _drop_member(value[head], rest)
+        else:
+            del copy[head]
+        return copy
+    if isinstance(value, list) and head.isdigit() and int(head) < len(value):
+        copy = list(value)
+        copy[int(head)] = _drop_member(value[int(head)], rest) if rest else None
+        return copy
+    return value
+
+
+def skip_corrected(expected, got, fields):
+    """(expected, got) with the members a PS-514 correction names left out of both.
+
+    A plain name skips that top-level key; a path (`payload/device/batteryLevel`,
+    `readings/0/value`) skips exactly that member and compares its siblings
+    (CR-2026-120).
+    """
+    for field in fields or ():
+        if not isinstance(field, str):
+            continue
+        if field in expected or field in got:
+            segments = [field]
+        else:
+            segments = correction_path(field)
+        expected = _drop_member(expected, segments)
+        got = _drop_member(got, segments)
+    return expected, got
 
 
 def compare(schema, payload, fport, expected):
@@ -201,14 +277,15 @@ def compare(schema, payload, fport, expected):
     if not result.success:
         return ["our decode failed: %s" % result.errors[:2]]
     got = {k: v for k, v in result.data.items() if not k.startswith("_")}
+    expected, got = skip_corrected(expected or {}, got, skip)
     problems = []
-    for key, want in (expected or {}).items():
-        if key in skip:
-            continue
+    for key, want in expected.items():
         if key not in got:
             problems.append("%s: vendor %r, ours <missing>" % (key, want))
             continue
-        match, _message = values_match(as_number(want, got[key]), got[key], CONFORMANCE_TOLERANCE)
+        match, _message = values_match(
+            as_number(want, got[key]), got[key], CONFORMANCE_TOLERANCE
+        )
         if not match:
             problems.append("%s: vendor %r, ours %r" % (key, want, got[key]))
     return problems
@@ -235,13 +312,18 @@ def check_schema(path, vendor_dir, use_decoder):
             # was compared as data instead, so every port-based schema "disagreed" with
             # the vendor's own unknown-FPort example.
             try:
-                succeeded = SchemaInterpreter(schema).decode(payload, fPort=fport).success
-            except Exception:  # noqa: BLE001 - an undeclared fPort raises; that is a failure
+                succeeded = (
+                    SchemaInterpreter(schema).decode(payload, fPort=fport).success
+                )
+            except (
+                Exception
+            ):  # noqa: BLE001 - an undeclared fPort raises; that is a failure
                 succeeded = False
             if succeeded:
                 problems.append(
                     "%s (declared example): the vendor declares an error (%s), and our "
-                    "decode succeeded" % (payload.hex(), declared["errors"][0]))
+                    "decode succeeded" % (payload.hex(), declared["errors"][0])
+                )
             continue
         expected = declared.get("data") or {}
         problems += [

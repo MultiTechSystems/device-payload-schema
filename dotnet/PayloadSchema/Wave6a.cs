@@ -18,7 +18,9 @@ namespace PayloadSchema;
 public static partial class SchemaParser
 {
     static readonly string[] IteratorKeys = { "index", "count_as" };
-    static readonly string[] GuardOps = { "gt", "gte", "lt", "lte", "eq", "ne" };
+    static readonly string[] GuardOps = { "gt", "gte", "lt", "lte", "eq", "ne", "in", "not_in" };
+    /// <summary>The set operators (PS-543): each takes a list of numbers.</summary>
+    static readonly string[] SetOps = { "in", "not_in" };
     static readonly string[] IteratorConstructs = { "match", "tlv", "flagged", "byte_group" };
 
     static YamlNode? Get(YamlMappingNode map, string key)
@@ -62,6 +64,46 @@ public static partial class SchemaParser
         node is YamlScalarNode s && s.Style == ScalarStyle.Plain && (YamlInt(node) != null
             || double.TryParse(s.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out _));
 
+    /// <summary>The name an `element` (PS-528) is decoded under where it declares none.</summary>
+    public const string ElementName = "element";
+
+    /// <summary>
+    /// A repeat's element fields and, for a repeat of single values, the element's name
+    /// (repeat_members in the reference). An `element` is decoded as a one-field list whose
+    /// field is the element under its own name, or <see cref="ElementName"/>, so
+    /// `present_if` and `name_from` in it can refer to the current value.
+    /// </summary>
+    internal static (YamlSequenceNode? members, string? elementName) RepeatMembers(YamlMappingNode repeat)
+    {
+        if (Get(repeat, "element") is YamlMappingNode element && !Has(repeat, "fields"))
+        {
+            var name = YamlString(Get(element, "name")) is { Length: > 0 } n ? n : ElementName;
+            var copy = new YamlMappingNode();
+            copy.Add("name", name);
+            foreach (var kv in element.Children)
+                if (Scalar(kv.Key) != "name") copy.Add(kv.Key, kv.Value);
+            return (new YamlSequenceNode(copy), name);
+        }
+        return (Get(repeat, "fields") as YamlSequenceNode, null);
+    }
+
+    /// <summary>
+    /// PS-083, PS-528, PS-530: exactly one of `fields` and `element`, an `element` that is
+    /// one field definition, and an integer `index_base`. Worded as the spec prototype.
+    /// </summary>
+    static void ElementRepeatErrors(YamlMappingNode f, List<string> errors)
+    {
+        var label = $"Repeat '{(Get(f, "name") is { } nm ? Scalar(nm) : "<unnamed>")}'";
+        bool hasFields = Has(f, "fields"), hasElement = Has(f, "element");
+        if (hasFields == hasElement)
+            errors.Add($"{label} declares {(hasFields ? "both" : "neither")} of `fields` and `element`; "
+                + "it declares exactly one (PS-083, PS-528)");
+        else if (hasElement && Get(f, "element") is not YamlMappingNode)
+            errors.Add($"{label}: `element` is a single field definition (PS-528)");
+        if (Get(f, "index_base") is { } ib && YamlInt(ib) == null)
+            errors.Add($"{label}: `index_base` is an integer (PS-530)");
+    }
+
     static bool IsLiteralNode(YamlMappingNode f) =>
         YamlString(Get(f, "type")) is "string" or "number" && Has(f, "value");
 
@@ -85,8 +127,200 @@ public static partial class SchemaParser
         }
         foreach (var node in TlvHolders(root))
             TlvReserveErrors(node, errors);
+        RecordsErrors(root, errors);                                               // PS-541
+        ConditionErrors(root, errors);                                             // PS-543
         if (errors.Count > 0)
             throw new InvalidOperationException(string.Join("; ", errors));
+    }
+
+    static bool Typed(YamlMappingNode f) => Get(f, "type") is { } t && Scalar(t) != "";
+
+    /// <summary>
+    /// Whether a field list reaches a `records` entry (PS-541): directly, or through a
+    /// match case or default (records_reachable in the reference).
+    /// </summary>
+    internal static bool RecordsReachable(YamlSequenceNode? fields)
+    {
+        foreach (var f in fields?.Children.OfType<YamlMappingNode>() ?? Enumerable.Empty<YamlMappingNode>())
+        {
+            if (Has(f, "records") && !Typed(f)) return true;
+            if (Get(f, "match") is YamlMappingNode match && !Typed(f))
+            {
+                var bodies = (Get(match, "cases") as YamlMappingNode)?.Children.Values.ToList() ?? new List<YamlNode>();
+                if (Get(match, "default") is { } d) bodies.Add(d);
+                if (bodies.Any(b => b is YamlSequenceNode bs && RecordsReachable(bs))) return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// PS-541: a `records` entry is a non-empty list of field lists, in a repeat's element
+    /// or a match case within it, and never reached from an `element` (PS-528). Worded as
+    /// records_errors in the reference.
+    /// </summary>
+    static void RecordsErrors(YamlMappingNode root, List<string> errors)
+    {
+        void Walk(YamlNode? fields, bool inElement)
+        {
+            if (fields is not YamlSequenceNode seq) return;
+            foreach (var item in seq.Children.OfType<YamlMappingNode>())
+            {
+                if (Has(item, "records") && !Typed(item))
+                {
+                    if (!inElement)
+                        errors.Add("`records` belongs in a repeat's element, or a match case within it (PS-541)");
+                    if (Get(item, "records") is not YamlSequenceNode bodies || bodies.Children.Count == 0
+                        || bodies.Children.Any(b => b is not YamlSequenceNode))
+                    {
+                        errors.Add("`records` is a non-empty list of field lists (PS-541)");
+                        continue;
+                    }
+                    foreach (var body in bodies.Children) Walk(body, false);
+                    continue;
+                }
+                if (YamlString(Get(item, "type")) == "repeat")
+                {
+                    if (Get(item, "element") is YamlMappingNode element)
+                    {
+                        if (RecordsReachable(new YamlSequenceNode(element)))
+                            errors.Add($"Repeat '{(Get(item, "name") is { } nm ? Scalar(nm) : "<unnamed>")}': "
+                                + "an `element` cannot reach a `records` entry (PS-541)");
+                        else
+                            Walk(new YamlSequenceNode(element), false);
+                    }
+                    Walk(Get(item, "fields"), true);
+                    Walk(Get(item, "trailer"), false);
+                    var clash = RecordsClash(Get(item, "fields") as YamlSequenceNode);
+                    if (clash.Count > 0)
+                        errors.Add($"Repeat '{(Get(item, "name") is { } rn ? Scalar(rn) : "<unnamed>")}': "
+                            + "[" + string.Join(", ", clash.Select(n => $"'{n}'")) + "]"
+                            + " is reported both by a record and by the element outside `records` (PS-541)");
+                    continue;
+                }
+                if (Get(item, "match") is YamlMappingNode match && !Typed(item))
+                {
+                    if (Get(match, "cases") is YamlMappingNode cases)
+                        foreach (var body in cases.Children.Values) Walk(body, inElement);
+                    Walk(Get(match, "default"), inElement);
+                }
+                if (Get(item, "cases") is YamlMappingNode legacy)
+                    foreach (var body in legacy.Children.Values) Walk(body, false);
+                Walk(Get(item, "fields"), false);
+                if (Get(item, "tlv") is YamlMappingNode tlv && Get(tlv, "cases") is YamlMappingNode tlvCases)
+                    foreach (var body in tlvCases.Children.Values) Walk(body, false);
+                if (Get(item, "flagged") is YamlMappingNode flagged && Get(flagged, "groups") is YamlSequenceNode groups)
+                    foreach (var g in groups.Children.OfType<YamlMappingNode>()) Walk(Get(g, "fields"), false);
+                var group = Get(item, "byte_group");
+                Walk(group is YamlMappingNode gm ? Get(gm, "fields") : group, false);
+            }
+        }
+
+        Walk(Get(root, "fields"), false);
+        if (Get(root, "ports") is YamlMappingNode ports)
+            foreach (var kv in ports.Children)
+                Walk(kv.Value is YamlMappingNode entry ? Get(entry, "fields") : kv.Value, false);
+    }
+
+    /// <summary>
+    /// The names a field list reports at its own level (level_names in the reference): its
+    /// named fields, and those merged from match and tlv cases and default, flagged groups
+    /// and byte_group members. An object or repeat contributes its own name; internal and
+    /// `name_from` fields and `records` bodies contribute none.
+    /// </summary>
+    static HashSet<string> LevelNames(YamlNode? fields)
+    {
+        var found = new HashSet<string>(StringComparer.Ordinal);
+        if (fields is not YamlSequenceNode seq) return found;
+        foreach (var item in seq.Children.OfType<YamlMappingNode>())
+        {
+            if (Has(item, "records") && !Typed(item)) continue;
+            if (Typed(item))
+            {
+                if (Get(item, "name") is YamlScalarNode n && n.Value is { } name && name != ""
+                    && !name.StartsWith("_") && !(Get(item, "name_from") is { } nf && Scalar(nf) != ""))
+                    found.Add(name);
+                continue;
+            }
+            foreach (var key in new[] { "match", "tlv" })
+            {
+                if (Get(item, key) is not YamlMappingNode spec) continue;
+                if (Get(spec, "cases") is YamlMappingNode cases)
+                    foreach (var body in cases.Children.Values) found.UnionWith(LevelNames(body));
+                found.UnionWith(LevelNames(Get(spec, "default")));
+            }
+            if (Get(item, "flagged") is YamlMappingNode flagged && Get(flagged, "groups") is YamlSequenceNode groups)
+                foreach (var g in groups.Children.OfType<YamlMappingNode>()) found.UnionWith(LevelNames(Get(g, "fields")));
+            var group = Get(item, "byte_group");
+            found.UnionWith(LevelNames(group is YamlMappingNode gm ? Get(gm, "fields") : group));
+        }
+        return found;
+    }
+
+    /// <summary>
+    /// PS-541 (CR-2026-124): the names a record shares with a field the element reports
+    /// outside `records`, sorted ordinally (records_clash in the reference).
+    /// </summary>
+    static List<string> RecordsClash(YamlSequenceNode? fields)
+    {
+        var outside = LevelNames(fields);
+        var inside = new HashSet<string>(StringComparer.Ordinal);
+        void Collect(YamlNode? items)
+        {
+            if (items is not YamlSequenceNode seq) return;
+            foreach (var item in seq.Children.OfType<YamlMappingNode>())
+            {
+                if (Has(item, "records") && !Typed(item) && Get(item, "records") is YamlSequenceNode bodies)
+                    foreach (var body in bodies.Children) inside.UnionWith(LevelNames(body));
+                if (Get(item, "match") is YamlMappingNode match && !Typed(item))
+                {
+                    if (Get(match, "cases") is YamlMappingNode cases)
+                        foreach (var body in cases.Children.Values) Collect(body);
+                    Collect(Get(match, "default"));
+                }
+            }
+        }
+        Collect(fields);
+        var clash = inside.Where(outside.Contains).ToList();
+        clash.Sort(StringComparer.Ordinal);
+        return clash;
+    }
+
+    /// <summary>
+    /// PS-126: every guard condition and `present_if` has exactly one comparison operator.
+    /// PS-543: `in` and `not_in` take a list of numbers, never a boolean. Worded as
+    /// condition_errors in the reference (the spec prototype's wording).
+    /// </summary>
+    static void ConditionErrors(YamlMappingNode root, List<string> errors)
+    {
+        void Check(YamlNode? node, string where)
+        {
+            if (node is not YamlMappingNode cond) return;
+            var used = GuardOps.Count(op => Has(cond, op));
+            if (used != 1)
+                errors.Add($"{where} has {used} comparison operators; a condition has exactly one (PS-126)");
+            foreach (var op in SetOps)
+                if (Get(cond, op) is { } values && !(values is YamlSequenceNode vs
+                        && vs.Children.All(v => YamlNumber(v))))
+                    errors.Add($"`{op}` in {where} is a list of numbers (PS-543)");
+        }
+
+        void Walk(YamlNode node)
+        {
+            if (node is YamlMappingNode map)
+            {
+                var name = Get(map, "name") is { } nm ? Scalar(nm) : "?";
+                Check(Get(map, "present_if"), $"the present_if of '{name}'");
+                if (Get(map, "guard") is YamlMappingNode guard && Get(guard, "when") is YamlSequenceNode when)
+                    foreach (var c in when.Children) Check(c, $"a guard condition of '{name}'");
+                foreach (var kv in map.Children)
+                    if (Scalar(kv.Key) != "test_vectors") Walk(kv.Value);
+            }
+            else if (node is YamlSequenceNode seq)
+                foreach (var item in seq.Children) Walk(item);
+        }
+
+        Walk(root);
     }
 
     static IEnumerable<YamlMappingNode> TlvHolders(YamlNode node)
@@ -141,7 +375,9 @@ public static partial class SchemaParser
 
             if (type == "repeat")
             {
-                var members = Get(f, "fields") as YamlSequenceNode;
+                ElementRepeatErrors(f, errors);                                    // PS-528, PS-530
+                var (members, elementName) = RepeatMembers(f);
+                var memberKey = elementName != null ? "element" : "fields";
                 var names = new HashSet<string>();
                 foreach (var m in members?.Children.OfType<YamlMappingNode>() ?? Enumerable.Empty<YamlMappingNode>())
                     if (Get(m, "name") is { } mn) names.Add(Scalar(mn));
@@ -217,10 +453,10 @@ public static partial class SchemaParser
                         j++;
                         if (member is YamlMappingNode mm)
                             RepeatMemberRefErrors(f, members, mm,
-                                $"{at}.fields[{j}] ({(Get(mm, "name") is { } n2 ? Scalar(n2) : "?")})", errors);
+                                $"{at}.{memberKey}[{j}] ({(Get(mm, "name") is { } n2 ? Scalar(n2) : "?")})", errors);
                     }
                 }
-                IteratorErrors(members, enclosing.Concat(own).ToList(), true, $"{at}.fields", errors);
+                IteratorErrors(members, enclosing.Concat(own).ToList(), true, $"{at}.{memberKey}", errors);
                 if (Get(f, "trailer") is YamlSequenceNode trailerList)
                     IteratorErrors(trailerList, enclosing, false, $"{at}.trailer", errors);
                 continue;
@@ -307,7 +543,7 @@ public static partial class SchemaParser
                 {
                     var key = Scalar(kv.Key);
                     if (key is "test_vectors" or "definitions") continue;
-                    Walk(kv.Value, inElements || (key == "fields" && isRepeat));
+                    Walk(kv.Value, inElements || (key is "fields" or "element" && isRepeat));
                 }
             }
             else if (node is YamlSequenceNode seq)

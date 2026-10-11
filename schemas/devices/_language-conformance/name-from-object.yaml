@@ -1,0 +1,24 @@
+# A key template names a nested group as it names any field (PS-265): the group is
+# reported under the resolved key, and its declared name is not reported. The generated
+# codec reported it under the declared name, `reading`, whatever the template said.
+name: probe_name_from_object
+endian: big
+fields:
+- name: slot
+  type: u8
+- name: reading
+  type: object
+  name_from: "reading_${slot}"
+  fields:
+  - name: x
+    type: u8
+  - name: y
+    type: u8
+test_vectors:
+- name: slot_two
+  source: spec-example
+  payload: "02 0A 0B"
+  expected:
+    slot: 2
+    reading_2: {x: 10, y: 11}
+    reading: null

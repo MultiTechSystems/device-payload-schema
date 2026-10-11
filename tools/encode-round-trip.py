@@ -55,6 +55,9 @@ The `inherent` reasons, each of which is a decision recorded elsewhere:
   dropped-element   A repeat declaring `present_if` omits the elements whose condition is
                     false (PS-386); their bytes are not in the output, so an encoder
                     refuses the schema rather than invent them (PS-387).
+  several-records   A repeat element yields several records through `records` (PS-541),
+                    reported as consecutive elements; nothing in them says which element
+                    each came from, so an encoder refuses the schema (PS-542).
   absent-value      A declared field was left out of the output because it had no value to
                     report - a zero divisor (PS-100), the log of a non-positive number
                     (PS-117), a failed guard with no `else` (PS-400), an unmapped lookup
@@ -71,6 +74,9 @@ loss:
                     `channels` (Clause 4). Encoding that list is not defined yet, so the
                     encoders refuse it by name rather than write a payload with the entries
                     missing, which they used to do silently.
+  null-element      A repeat declaring `element` reports an omitted value as `null` in its
+                    position (PS-528). CR-2026-111 leaves open what an encoder writes for
+                    it, so every encoder refuses the array, naming the position (PS-529).
 """
 
 import argparse
@@ -90,6 +96,7 @@ from validate_schema import is_encode_vector  # noqa: E402
 CORPUS = REPO_ROOT / "schemas" / "devices"
 
 INHERENT = (
+    "several-records",
     "dropped-element",
     "pattern-tag",
     "absent-value",
@@ -102,7 +109,7 @@ INHERENT = (
 )
 
 #: Recoverable in principle, so counted apart from the inherent set.
-FIXABLE = ("templated-name", "separate-tlv")
+FIXABLE = ("templated-name", "separate-tlv", "null-element")
 
 #: What a decode says when it could not read part of the payload. CR-2026-013 and
 #: CR-2026-021 put these there; they are the evidence this tool reads.
@@ -131,6 +138,8 @@ def schema_traits(schema):
             traits.add("skip-field")
         if node.get("type") == "repeat" and node.get("present_if"):
             traits.add("dropped-element")
+        if "records" in node and not node.get("type"):
+            traits.add("several-records")                              # PS-542
         if node.get("type") in ("version_string", "bitfield_string"):
             covered = 0
             for part in node.get("parts") or []:
@@ -205,6 +214,15 @@ def absent_fields(schema, data, port=None):
     return [n for n in names if n not in data]
 
 
+def has_null_element(node):
+    """A null inside an array: an `element` repeat's omitted value (PS-528)."""
+    if isinstance(node, dict):
+        return any(has_null_element(v) for v in node.values())
+    if isinstance(node, list):
+        return any(item is None or has_null_element(item) for item in node)
+    return False
+
+
 def classify(decoded, traits, schema=None, port=None):
     """Why this vector cannot round-trip, or None where nothing explains it."""
     if decoded.warnings:
@@ -213,6 +231,8 @@ def classify(decoded, traits, schema=None, port=None):
         for warning in decoded.warnings:
             if any(marker in warning for marker in UNREAD_MARKERS):
                 return "undecoded-bytes"
+    if has_null_element(decoded.data):
+        return "null-element"
     for trait in INHERENT + FIXABLE:
         if trait in traits:
             return trait

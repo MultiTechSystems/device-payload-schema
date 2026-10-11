@@ -188,18 +188,19 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2610 payload vectors in `schemas/devices/` (measured 2026-10-10 with
-`tools/check-floors.py`, after the CR-2026-109 lookup-reference-binding fixture) are the shared
-cross-language test set. Every implementation has a runner that reads the same YAML and
-the same vectors:
+The 2646 payload vectors in `schemas/devices/` (measured 2026-10-11 with
+`tools/check-floors.py`, after the CR-2026-118 and CR-2026-124 fixtures, CR-2026-117's
+guard-absent-operand, the `match-u32-*` and names-mangling-alike fixtures, and CR-2026-127's
+guard-boolean-operand) are the shared cross-language test set. Every implementation has a
+runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1788 |
-| Go | `go/schema/corpus_conformance_test.go` | 2610 | 1805 (plain API 1782) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2610 | 1788 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2610 | 1788 |
-| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 546 of 546 attempted | n/a |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1808 |
+| Go | `go/schema/corpus_conformance_test.go` | 2646 | 1825 (plain API 1802) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2646 | 1808 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2646 | 1808 |
+| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 554 of 554 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
 its own implementation's actual; trust it over this table.
@@ -509,6 +510,22 @@ encoder has one run packer, wired through its field list, its construct bodies a
 `flagged` path, and `test_cr_2026_024_encode_bitfield_parity.py` reads all three sources
 so a removal shows up there rather than as a puzzling floor break.
 
+**A `match` discriminator above 0x7FFFFFFF is compared as a 64-bit integer in Java and
+C#.** Both narrowed it to a 32-bit int, and the private registry found the two ways
+that goes wrong in one vendor family's "not available" sentinel - peek a word with
+`u32[0:31]`, take case `2147483648` if it is 0x80000000, else read it as a value.
+Java holds case keys as text (`expandNode` stringifies every mapping key while splicing
+references) and parsed them with `Integer.parseInt`, which rejects 2147483648, so the
+sentinel never matched. C# holds such a key as a double, and `(int)` of an out-of-range
+double is `int.MinValue` on x64 - so the key, 0xFFFFFFFF and 0x80000001 all compared
+equal and two ordinary values decoded as the sentinel. Both also cast an inline
+four-byte discriminator to int and reported 0x80000001 under `name` as -2147483647.
+A discriminator that is no integer at all (a u64 peek above 2^63-1) now matches no
+case in either, rather than the 0 a default conversion would give.
+`match-u32-peek-discriminator.yaml` and `match-u32-inline-discriminator.yaml` hold all
+five to it. Still open: a fractional discriminator truncates to a key in Java and C#,
+where Python compares it exactly.
+
 **Read `make check-floors`, not any table here.** The per-implementation counts in this
 file have gone stale three times; the corpus-table figures above were measured
 2026-09-24.
@@ -756,10 +773,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1788 |
-| Go | `go/schema/corpus_encode_test.go` | 1805 (plain 1782) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1788 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1788 |
+| Python | `tests/test_encode_round_trip.py` | 1808 |
+| Go | `go/schema/corpus_encode_test.go` | 1825 (plain 1802) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1808 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1808 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1075,8 +1092,12 @@ corpus before those schemas existed.** Each is fixed; the list is here so nobody
   strings), and **Go dropped a non-string lookup label silently**. CR-2026-104 since allows
   boolean labels and fixed Go's labels to hold any scalar (see below).
 - **The generator renamed output keys** to JS identifiers — `pm1.0` came out as `pm1_0`. Keys are
-  now restored at the entry points from a table built at generation time; two names mangling to
-  one spelling is a generation error.
+  now restored at the entry points from a table built at generation time. Two names mangling to
+  one spelling (adeunis `ER+P-1_s` and `ER-P-1_s`) used to be a generation error; now
+  `unique_js_names` suffixes all but one of them (`ER_P_1_s`, `ER_P_1_s_2`, skipping any suffix
+  that is another name's spelling), and `to_js_name` reads that mapping during `generate()`, so
+  every staging and reference site agrees. A schema with no collision generates unchanged.
+  `_language-conformance/names-mangling-alike.yaml` holds all five to it.
 - **`generate_output_schema.py` kept the first branch's enum** when two branches report one key
   with the same type — r718x's `Status` is ON/OFF in one message and Success/Failure in another.
   Same-typed branches now union their enums and widen their bounds.
@@ -1283,8 +1304,9 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   computed fields, internal fields and constructs, in a scope of its own (PS-368). An
   element's names are restored away after it; a reference to one from after the array,
   or to a field of the element not yet decoded, is an error. Every other unbound
-  reference keeps its old behaviour, which differs: Python reads 0, Go and C# error,
-  Java reads 0. `index`, `count_as` (after `present_if`, CR-2026-080), `present_if` and
+  reference from a `ref` or a `compute` operand makes its field absent in all five
+  (PS-314, PS-429; see the registry divergences below); a guard condition on one fails
+  in all five (PS-540, CR-2026-117 below). `index`, `count_as` (after `present_if`, CR-2026-080), `present_if` and
   `carry` follow; `reserve` on a repeat and on a `tlv` is a buffer cut at the region's
   end with absolute positions, so nothing inside can read the trailer, and a repeat's
   `trailer` decodes first into the enclosing scope. Schema rules are rejected at load by
@@ -1532,6 +1554,158 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     load, as the spec prototype does; PS-524 asks only for "matches nothing".
   - The generated codec took `default` for a `match` on an unbound name; it now throws, as
     every interpreter does.
+- **Registry divergences (2026-10-10).** The private registry's 29,541 vectors, run through
+  all five at cd874f1, found six defects the corpus could not see. Each has a fixture in
+  `_language-conformance/`:
+  - **A tag component's name is a reference** (`tag-component-ref.yaml`). A `ref: $rsn` in
+    a case read the 0 every unbound name read in Python and Java, and was "not found" in
+    Go and C#; only `var:` was bound. All five bind the name now, and Go binds a
+    bit-range component's `var:`, which it skipped. dnt lw-ats's reason, 16 vectors, had
+    failed in four implementations - Python "passed" five of them only because their
+    expected value was the lookup's miss. CR-2026-116 covers `var:` alone.
+  - **A reference with no value makes its field absent** (`reference-to-absent.yaml`,
+    PS-314, PS-429). A `ref` or `compute` operand naming a field omitted upstream - a zero
+    divisor, a log of 0, a sentinel - read 0 in Python and Java and failed the decode in
+    Go and C#. The generated codec already omitted it, through NaN. A reference to a name
+    the schema never declares now omits too, silently; no validator check catches that
+    typo yet.
+  - **`length: 0` reads nothing** (`zero-length.yaml`, PS-392). Go, Java and C# took 0
+    for no length and read the type's one byte; each now records whether `length` was
+    declared (`LengthDeclared` / `isLengthDeclared`). The C interpreter's skip did the
+    same (`size ? size : 1`); the one-byte default for an absent length is the builder's.
+  - **Java's and C#'s runners compared numeric-looking text as numbers**
+    (`numeric-looking-text.yaml`): `"3E6388"` is Infinity and `"NaN"` NaN, and neither is
+    within tolerance of itself. Equal strings now match first, and non-finite text is not
+    a number.
+  - **The generated codec ignored `name_from` on a `type: object`**, and Python's, Java's,
+    C#'s and the codec's encoders read such an object back by its declared name
+    (`name-from-object.yaml`). Go's general path already resolved it.
+  - **Python's `round` raised InvalidOperation on a large value** (`round-large-value.yaml`):
+    `quantize` needs every digit, and 3.4e38 to six places is 45, past the default 28.
+  Left open: `elv/elv-bm-trx1` [164] (two tags report one name; four collect into a list,
+  the codec keeps the last), Python's computed path ignoring `name_from`, and Python
+  writing a huge integral float as a 39-digit integer where JavaScript writes `3.4e+38`.
+- **CR-2026-111 (PS-528 to PS-531): `element` and `index_base` on a repeat.**
+  - **What it does:** `element`, one field in place of `fields`, reports an array of values.
+    Each element is decoded as a one-field record under its own `name`, or `element` where it
+    has none, through the existing element function, so `present_if` and `name_from` work
+    unchanged. The repeat then reports that record's value. A record with nothing reported
+    gives `null` in its position, whatever the reason: a sentinel, a lookup miss, a log of
+    x <= 0. **This is the one place a decoded value is `null`.**
+  - **One helper per language reads the members:** Python `repeat_members`, Go
+    `rawRepeatMembers`, Java `Wave6a.repeatMembers`, C# `SchemaParser.RepeatMembers`. The
+    PS-369/372/373/374 checks, the PS-368 name walk and `_meta` all go through it. A check
+    that still reads `fields` directly misses the element.
+  - **Load-time rules, in the spec prototype's wording:** "Repeat '{name}' declares
+    both|neither of \`fields\` and \`element\`; it declares exactly one (PS-083, PS-528)",
+    "Repeat '{name}': \`element\` is a single field definition (PS-528)" and
+    "Repeat '{name}': \`index_base\` is an integer (PS-530)". They live in Python
+    `element_repeat_errors` (reached from `schema_iterator_errors`, so the validator and
+    the TS013 generator get them too), Go `elementRepeatError`, Java
+    `Wave6a.elementRepeatErrors` and C# `Wave6a`'s `ElementRepeatErrors`.
+  - **Encoding:** each value is wrapped back into its record. A `null` position is refused
+    everywhere with "Repeat '{name}' has null at position {p}, which has no encoding
+    (PS-529)", because the CR leaves open what it encodes as. `encode-round-trip.py` files
+    those vectors as `null-element`.
+  - **`index`** binds the position plus `index_base` on decode and on encode. `count_as` is
+    unaffected.
+  - **`_meta`:** an element repeat's entry is `{type: repeat, element: {...}, identity}`,
+    with the element's name left out. An index listing gains `index_base` after `count`
+    when the base is not 0.
+  - **Runners:** the Java and C# corpus runners compared a `null` inside an expected array
+    by its printed form, so it never matched. Java's `normalizeOutput` also dropped null
+    list items. All three are fixed.
+  - **Where implementations differ:** Go accepts a whole float such as `index_base: 1.0`,
+    because a JSON-authored schema gives it floats; the others reject it.
+  - **C:** has no repeat. `schema_binary.py` refuses `element` and `index_base` by name.
+  - **Fixtures:** `repeat-element-named`, `-unnamed`, `-null` and `-object`, and
+    `repeat-index-base`.
+- **CR-2026-118 (PS-541 to PS-543): `records`, and `in` / `not_in`.**
+  - **What it does:** a `records` entry in a repeat's element, or in a match case within it,
+    is a non-empty list of field lists. Each one decodes in order, in the element's scope,
+    and yields one record. The repeat reports the records as consecutive elements in place
+    of the element. The element's other reported fields go into each record first, so `_`
+    fields are copied nowhere. A record field sharing a name with a field the element
+    reports outside `records` is a load error (CR-2026-124). `present_if`
+    drops all of an element's records. `index` counts source elements and `count_as`
+    counts the records reported.
+  - **Where it is checked:** load-time, in Python `records_errors` and `condition_errors`
+    (reached from `schema_iterator_errors`, so the validator and the TS013 generator give
+    the same errors), Go `cr118.go`, Java `Wave6a` and C# `Wave6a`. Each gives the same
+    wording: "\`records\` belongs in a repeat's element, or a match case within it
+    (PS-541)", "\`records\` is a non-empty list of field lists (PS-541)", "Repeat '{name}':
+    an \`element\` cannot reach a \`records\` entry (PS-541)", "Repeat '{name}': ['a'] is
+    reported both by a record and by the element outside \`records\` (PS-541)" (the
+    names sorted, as a Python list), "\`in\` in the present_if of '{name}' is a list of
+    numbers (PS-543)" and "a guard condition of '{name}' has 2 comparison operators; a
+    condition has exactly one (PS-126)".
+  - **CR-2026-124 settled the open questions.** Placement stays as above. An empty `in`
+    never holds and an empty `not_in` always does. A boolean is not a number. `_meta` takes
+    a name's first declaration. **PS-126 holds for every condition**, so a guard condition
+    or `present_if` with no operator, or with two, is rejected at load. Measured before
+    enforcing: no condition in `schemas/devices`, `schemas/library`, `examples` or the
+    private registry had other than one operator. The clash rule reads the names the
+    element reports at its own level: an object contributes its own name, not its
+    members'. The spec prototype also counts an object member's name.
+  - **Rejected:** `records` in an object's members, a tlv case, a flagged group, a
+    byte_group, a trailer or another record, even inside an element. CR-2026-124 wrote
+    this into PS-541.
+  - **Encoding:** every encoder, the generated codec's included, refuses a repeat whose
+    elements can reach `records` (directly or through a match case or default): "Repeat
+    '{name}' has elements that yield several records, which cannot be encoded (PS-542)".
+    `encode-round-trip.py` files it as `several-records`, which is inherent, like
+    `dropped-element`.
+  - **`_meta`:** the repeat's `elements` lists every record's fields, keyed by name, in
+    declaration order. The PS-491 agreement check also walks record bodies.
+  - **Generated codec:** a `rcs` stack holds the current element's records. It is emitted
+    only where an element can reach `records`, so no other generated codec changes.
+  - **C:** has no repeat. `schema_binary.py` refuses `records` by name, and the harness
+    files all four fixtures as C gaps (repeat, guard).
+  - **Fixtures:** `element-several-readings`, `element-case-several-readings`,
+    `present-if-set` and `guard-set`, 12 vectors, one assertion each. Only `guard-set`
+    round-trips, and it carries the empty `in` / `not_in` cases. Floors: decode 2618 ->
+    2630 in Go, Java and C# (2632 with CR-2026-117's fixture); re-encode +4 everywhere
+    (Python, Java, C# 1794 -> 1798; Go
+    1811 -> 1815, plain 1788 -> 1792); `plain fixed` 133 -> 137 in all four.
+- **CR-2026-117 (PS-539, PS-540, 2026-10-11).** PS-536's tag component name binding
+  landed with PR #93; this adds the other two.
+  - **PS-539: a `$` reference must name something declared, and declared first**
+    (CR-2026-127 added the order). The two messages are the prototype's, identical in
+    all four: "`$batery` (ref) names no field, var, tag component, index or count_as the
+    schema declares (PS-539)" and "`$late` (ref) is referenced before the schema declares
+    it (PS-539, PS-122)". One walk per language over the **`$ref`-spliced** document, the
+    prototype's `check_references`: Python `reference_errors` (interpreter at decode per
+    PS-328, validator, TS013 generator, `schema_binary.py` for C's blob), Go
+    `references.go`, Java `References`, C# `References.cs`. A definition is checked where
+    it is spliced, after the fields before the splice, and an unused one is never checked -
+    walking definitions first, unspliced, falsely rejected 565 references in 62 registry
+    schemas (watteco's `report_body` reads the `_clu` its port declares). Within a mapping,
+    `tag_fields`, `trailer`, `fields` and `element` are walked first, so tag components
+    precede cases and elements precede `present_if`/`identity`; the rest in source order,
+    except in Go, whose maps keep none - it walks scalars before nested values, which
+    differs only where a reference names something declared in a later sibling of its own
+    mapping. Declared: every `name`, `var`, `index`, `count_as` (a `byte_group`/`flagged`
+    member and a tag component included) and `metadata` include/timestamp names. **A
+    nameless element declares no name**: `$element` needs `element: {name: element, ...}`.
+    A name declared earlier in a branch not taken is absent at decode (PS-314), not an
+    error. Not checked: `lookup`, `values`, `else`, `value`, a non-match `default`, a
+    `metadata.include` `source`. Measured: no device, library or example schema, and none
+    of the 506 registry schemas, is rejected. Go, Java and C# report the first violation;
+    Python all.
+  - **PS-540: a guard or `present_if` condition on an absent value fails**, so `else`
+    applies or the field is omitted. Python and Java read 0, so `gte: 0` passed; the
+    generated codec compared `undefined !== 3` as true and `null >= 0` as true, and now
+    tests `!= null` first, `not_in` (CR-2026-118) included. A repeat's `present_if` is evaluated with its element whole, so
+    a name of the element with no value is absent there, not a PS-368 "not yet decoded"
+    error. C has no guard. Fixture: `guard-absent-operand.yaml` (decode floors
+    2628 -> 2630 in Go, Java and C#; re-encode unchanged, PS-387).
+  - **PS-549 (CR-2026-127): a condition whose operand is a boolean fails**, as an absent
+    one does; `true` is not 1 (PS-513). Python and Java compared it as 1/0; Go and C#
+    already failed it; the generated codec's operand test is now `!= null && typeof !==
+    'boolean'`. A schema testing a flag reads it as a number (a bit range). Fixture:
+    `guard-boolean-operand.yaml`: decode floors 2630 -> 2632; both vectors round-trip, so
+    re-encode +2 everywhere (Python, Java, C# 1796 -> 1798; Go 1813 -> 1815, plain 1790 ->
+    1792) and `plain fixed` 135 -> 137 in all four.
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.
@@ -1738,7 +1912,7 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   (CR-2026-032).** `make test-c` builds the three previously-orphaned C test files and runs
   `tools/c-corpus-harness.py`, which generates C that builds each expressible corpus schema
   through the struct API, compiles it, and compares the decode against the vectors.
-  **546 of 546 attempted vectors pass** (2026-10-10) since CR-2026-033 added `tlv` and CR-2026-034
+  **550 of 550 attempted vectors pass** (2026-10-10) since CR-2026-033 added `tlv` and CR-2026-034
   `flagged` (it was 50 of 50 before either). 751 of 1239 are still in schemas the struct API
   cannot build - 26 use a `transform` chain, 24 a `bitfield_string`, 15 more cases than
   `SCHEMA_MAX_CASES` allows, 3 `repeat`, 3 a `u32le16` **the interpreter has and the harness

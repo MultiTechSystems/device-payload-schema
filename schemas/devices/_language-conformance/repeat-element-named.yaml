@@ -1,0 +1,35 @@
+# A repeat of single values (PS-528, CR-2026-111): `element`, one field, in place of
+# `fields`. The array holds the element's values, [23.1, -10], not records holding them.
+#
+# The element's `name` is how a reference inside it refers to the current value; it is
+# never reported. `_meta` nests the element's entry under `element`, without that name,
+# and the repeat keeps `type: repeat` (PS-531).
+#
+# Round-trips: an encoder takes the array of values and writes each as the element (PS-529).
+name: probe_repeat_element_named
+endian: big
+fields:
+- name: n
+  type: u8
+- name: readings
+  type: repeat
+  count: $n
+  element:
+    name: reading
+    type: s16
+    div: 10
+    unit: Cel
+test_vectors:
+- name: two_values
+  source: spec-example
+  payload: "02 00E7 FF9C"
+  expected:
+    n: 2
+    readings: [23.1, -10]
+  expected_meta:
+    schema: probe_repeat_element_named
+    fields:
+      n: {type: u8}
+      readings:
+        type: repeat
+        element: {type: s16, unit: Cel}
