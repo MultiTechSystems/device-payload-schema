@@ -1,0 +1,200 @@
+# CR-2026-141 (PS-551): a peek whose bits other fields write is derived.
+#
+# A bit range or bool that does not consume (PS-060, PS-066) has its bits read again by
+# the fields after it, so their bytes fix its value. Absent from the input, it is derived
+# and writes no bits; where any of its bits is written by no other field, it is missing.
+# Supplied, it must agree with the bits the finished frame holds.
+#
+# One case list, read by the reference and the generated codec's runtime
+# (tests/test_cr_2026_141_covered_peek.py), Go (go/schema/cr141_test.go), Java
+# (CR2026141Test.java), C# (CR2026_141Tests.cs). C has its own copy of the bit-range cases
+# in src/selftest_schema.c, since it builds schemas through its struct API.
+#
+# Same layout as tests/cr-2026-134-cases.yaml: `schema` is YAML text, `input` JSON text,
+# and either `payload` (hex) or `error` (text one of the encoder's errors contains, with
+# no payload returned). `decoded`, where given, is the JSON every decoder reads back from
+# `payload`.
+#
+# The messages are the spec prototype's:
+#   Missing required field: {name}
+#   Field '{name}' is given {raw}, but the fields that share its bits write {found} (PS-551)
+# `raw` and `found` are the range's unsigned bits.
+
+cases:
+
+# --- The prototype's TestCR2026141CoveredPeek: Milesight ct10x's status word -------------
+
+- name: an_absent_covered_peek_is_derived
+  schema: |
+    name: t
+    fields:
+      - {name: status, type: "u16[0:15]", lookup: {0xFFFF: sensor_error}}
+      - {name: reading, type: u16}
+  input: '{"reading": 300}'
+  payload: "012c"
+  decoded: '{"reading": 300}'
+
+- name: a_supplied_peek_that_agrees
+  schema: |
+    name: t
+    fields:
+      - {name: status, type: "u16[0:15]", lookup: {0xFFFF: sensor_error}}
+      - {name: reading, type: u16}
+  input: '{"status": "sensor_error", "reading": 65535}'
+  payload: "ffff"
+
+- name: a_supplied_peek_that_disagrees_is_rejected
+  schema: |
+    name: t
+    fields:
+      - {name: status, type: "u16[0:15]", lookup: {0xFFFF: sensor_error}}
+      - {name: reading, type: u16}
+  input: '{"status": "sensor_error", "reading": 300}'
+  error: "Field 'status' is given 65535, but the fields that share its bits write 300 (PS-551)"
+
+- name: an_absent_peek_whose_bits_nothing_writes_is_missing
+  schema: |
+    name: t
+    fields:
+      - {name: a, type: "u8[0:3]"}
+      - {name: b, type: "u8[4:7]", consume: 1}
+  input: '{"b": 2}'
+  error: "Missing required field: a"
+
+# --- A bool, and a peek in a construct ----------------------------------------------------
+
+- name: an_absent_covered_bool_is_derived
+  schema: |
+    name: t
+    fields:
+      - {name: f, type: bool, bit: 7}
+      - {name: x, type: u8}
+  input: '{"x": 128}'
+  payload: "80"
+  decoded: '{"f": true, "x": 128}'
+
+- name: a_supplied_bool_that_disagrees_is_rejected
+  schema: |
+    name: t
+    fields:
+      - {name: f, type: bool, bit: 7}
+      - {name: x, type: u8}
+  input: '{"f": true, "x": 1}'
+  error: "Field 'f' is given 1, but the fields that share its bits write 0 (PS-551)"
+
+- name: an_absent_bool_whose_bit_nothing_writes_is_missing
+  schema: |
+    name: t
+    fields:
+      - {name: f, type: bool, bit: 7}
+      - {name: g, type: bool, bit: 0, consume: 1}
+  input: '{"g": true}'
+  error: "Missing required field: f"
+
+- name: a_peek_in_a_tlv_case_is_derived
+  schema: |
+    name: t
+    fields:
+      - tlv:
+          tag_size: 1
+          cases:
+            3:
+              - {name: status, type: "u16[0:15]", lookup: {0xFFFF: sensor_error}}
+              - {name: reading, type: u16}
+  input: '{"reading": 300}'
+  payload: "03012c"
+  decoded: '{"reading": 300}'
+
+- name: a_peek_in_a_tlv_case_that_disagrees_is_rejected
+  schema: |
+    name: t
+    fields:
+      - tlv:
+          tag_size: 1
+          cases:
+            3:
+              - {name: status, type: "u16[0:15]", lookup: {0xFFFF: sensor_error}}
+              - {name: reading, type: u16}
+  input: '{"status": "sensor_error", "reading": 300}'
+  error: "Field 'status' is given 65535, but the fields that share its bits write 300 (PS-551)"
+
+- name: a_peek_at_the_end_of_an_object_is_covered_by_the_field_after_it
+  schema: |
+    name: t
+    fields:
+      - name: o
+        type: object
+        fields:
+          - {name: p, type: "u8[0:7]"}
+      - {name: y, type: u8}
+  input: '{"o": {}, "y": 5}'
+  payload: "05"
+  decoded: '{"o": {"p": 5}, "y": 5}'
+
+- name: a_peek_at_the_end_of_an_object_that_disagrees_is_rejected
+  schema: |
+    name: t
+    fields:
+      - name: o
+        type: object
+        fields:
+          - {name: p, type: "u8[0:7]"}
+      - {name: y, type: u8}
+  input: '{"o": {"p": 6}, "y": 5}'
+  error: "Field 'p' is given 6, but the fields that share its bits write 5 (PS-551)"
+
+# CR-2026-135's peeked_range_then_whole_byte gave `whole: 5` and expected 35, the OR of
+# the two; 35 reads back as `whole: 53`, so that input contradicts itself.
+- name: a_whole_byte_that_contradicts_the_range_before_it_is_rejected
+  schema: |
+    name: t
+    fields:
+      - {name: hi, type: "u8[4:7]"}
+      - {name: whole, type: u8}
+  input: '{"hi": 3, "whole": 5}'
+  error: "Field 'hi' is given 3, but the fields that share its bits write 0 (PS-551)"
+
+# --- What this repository decides where the prototype is silent -------------------------
+#
+# A skip is padding: a decoder reads past its bytes, so its zeros fix no peek's bits and
+# contradict none. Schemas move past peeked bits with one (dnt-lw-wsci's status report;
+# registry mutelcor, moko lw001-bg, nexelec sign-codec). The spec prototype writes a
+# skip's zeros like any field's, so there it fixes the peek at 0 and rejects the input.
+
+- name: a_skip_after_a_peek_keeps_its_bits
+  schema: |
+    name: t
+    fields:
+      - {name: p, type: "u8[0:3]"}
+      - {name: pad, type: skip, length: 1}
+  input: '{"p": 5}'
+  payload: "05"
+  decoded: '{"p": 5}'
+
+- name: an_absent_peek_a_skip_reads_past_is_missing
+  schema: |
+    name: t
+    fields:
+      - {name: p, type: "u8[0:3]"}
+      - {name: pad, type: skip, length: 1}
+  input: '{}'
+  error: "Missing required field: p"
+
+# A tlv case is chosen without a peek only where the case's next field writes its bits:
+# wt303 reports `mode` from case 5, beside a status nibble nothing else writes, and from
+# case 0x68 alone. Taking case 5 would leave the status missing.
+- name: a_tlv_case_whose_peek_nothing_covers_is_not_chosen_without_it
+  schema: |
+    name: t
+    fields:
+      - tlv:
+          tag_size: 1
+          cases:
+            5:
+              - {name: status, type: "u8[0:3]"}
+              - {name: mode, type: "u8[4:7]", consume: 1}
+            0x68:
+              - {name: mode, type: u8}
+  input: '{"mode": 2}'
+  payload: "6802"
+  decoded: '{"mode": 2}'
