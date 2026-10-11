@@ -58,20 +58,52 @@ python3 tools/generate_ts013_codec.py <schema.yaml> -o <output-dir> --slim
 python3 tools/convert_decentlab.py <vendor-codec.js>
 python3 tools/convert_milesight.py <vendor-codec.js>
 
+# Full verification: use this before pushing, not the targets one by one
+make verify        # test-languages once, then every corpus floor read from its logs
+
 # Tests
 make test          # C self-tests + pytest
-make pytest        # Python only
+make pytest        # Python only, on every core (pytest-xdist, -n auto)
+make pytest PYTEST_ARGS=          # ...serially; PYTEST_ARGS takes any pytest options
 make fuzz-quick    # 10-second fuzz, cheap enough for every commit
 
-# The Go, Java and C# interpreters, in containers - no local toolchain needed
+# The Go, Java and C# interpreters, in containers - no local toolchain needed.
+# Each keeps its output in build/lang-logs/<lang>.log for check-floors --from-logs.
 make test-go
 make test-java
 make test-dotnet
 make test-languages   # every implementation: Python, C, Go, Java, C#
+make check-floors     # runs Go, Java and C# again to read their counts
+make check-floors-from-logs   # reads them from the logs above instead
 
 # Regenerate the repository index after adding docs, tools or schemas
 python3 tools/generate_docs_index.py
 ```
+
+**Verify with `make verify`, once.** It runs `make test-languages` (pytest on every
+core, the C self-tests, Go, Java and C#) and then `check-floors --from-logs`, which reads
+the Go, Java and C# corpus counts from the logs those suites just wrote instead of
+running each a second time. A log missing, unfinished, or older than any edit to a file
+git sees (tracked or untracked-not-ignored) makes check-floors run that one suite itself,
+and its report says where each implementation's numbers came from. So do not edit while
+it runs, and do not follow it with `make pytest` and `make check-floors` - that repeats
+work it has already done. Measured 2026-10-11 on a 32-core machine with warm container
+caches: the suite took 17.5 minutes serially and under 2 on every core, and a whole pass
+(`make verify`) took 3 minutes where `make pytest`, `make test-languages` and
+`make check-floors` in turn had taken about 36 - pytest twice, Go, Java and C# twice.
+
+Two rules keep the suite safe to parallelise, and a new test must follow both:
+
+- **Never write into the working tree.** Use `tmp_path`. Two `test_floor_checker` tests
+  used to rewrite `tests/test_encode_round_trip.py` and restore it in a `finally`; under
+  xdist one could take the other's rewrite as its original and leave a wrong floor on
+  disk. `check-floors --floor-root DIR` exists so those tests point at a copy.
+- **A corpus-wide computation shared by several tests is computed once.** A module
+  fixture is built once per *worker*, so eight workers rebuilt `test_corpus_invariants`'
+  70-second decode eight times. Mark such a module or class
+  `pytest.mark.xdist_group(...)`; `make pytest` passes `--dist loadgroup`, which keeps a
+  group on one worker. Cache a repeated tool run with `functools.lru_cache` and group its
+  callers, as `test_cr_2026_025_encode_parity_method.py` does.
 
 Note: `make validate` only covers `examples/*.yaml`. Device schemas under
 `schemas/devices/` are not part of that target — validate and score those
@@ -188,20 +220,20 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2652 payload vectors in `schemas/devices/` (measured 2026-10-11 with
+The 2661 payload vectors in `schemas/devices/` (measured 2026-10-11 with
 `tools/check-floors.py`, after the CR-2026-118 and CR-2026-124 fixtures, CR-2026-117's
 guard-absent-operand, the `match-u32-*` and names-mangling-alike fixtures, CR-2026-127's
-guard-boolean-operand, the CR-2026-121 and CR-2026-123 fixtures, and the mutation-gate
-vector in round-large-value) are the shared
-cross-language test set. Every implementation has a runner that reads the same YAML and
-the same vectors:
+guard-boolean-operand, the CR-2026-121 and CR-2026-123 fixtures, CR-2026-110's,
+CR-2026-125's and CR-2026-128's tlv-repeat-* fixtures, and the mutation-gate vector in
+round-large-value) are the shared cross-language test set. Every implementation has a
+runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1817 |
-| Go | `go/schema/corpus_conformance_test.go` | 2652 | 1834 (plain API 1811) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2652 | 1817 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2652 | 1817 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1823 |
+| Go | `go/schema/corpus_conformance_test.go` | 2661 | 1840 (plain API 1817) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2661 | 1824 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2661 | 1823 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 554 of 554 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -589,7 +621,8 @@ languages in four syntaxes, and it prints each beside the actual *its own implem
 reaches. Use it before claiming a floor is loose or tight. The rule below was broken a
 second time without it - `tlv` reported loose at "900 against an actual of 910", which was
 Python's floor next to Go's actual, both exactly at their own. `check-floors-python` is
-instant; the full run drives four Docker toolchains.
+instant; the full run drives four Docker toolchains, and `--from-logs` (what `make verify`
+uses) reads their counts from the last `make test-go`/`test-java`/`test-dotnet` instead.
 
 **Never compare implementations by their per-shape round-trip counts.** Those counts are
 ratchets for one harness over time. Across implementations they are not comparable: each
@@ -774,10 +807,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1817 |
-| Go | `go/schema/corpus_encode_test.go` | 1834 (plain 1811) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1817 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1817 |
+| Python | `tests/test_encode_round_trip.py` | 1823 |
+| Go | `go/schema/corpus_encode_test.go` | 1840 (plain 1817) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1823 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1824 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1783,6 +1816,90 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   `References`). The index is declared by the repeat itself, so it is always in order; a
   sibling declared after the reference is both a PS-539 forward reference and a PS-546
   error. Python lists both; Go, Java and C# report the first they meet.
+- **CR-2026-110 (PS-157 amended, PS-525 to PS-527): `on_repeat` on a tlv.**
+  - **What it does:** with `merge: true`, a name more than one entry reports - same tag or
+    not - is combined by its mode: `collect` (default, an array in payload order), `last`
+    (the last value wins) or `merge` (objects combined member by member; a member reported
+    twice is an error naming both, unless the member declares `on_repeat: last`). A field's
+    own `on_repeat` beats the tlv's. **Two departures from the CR text, at Jason's
+    decision, are implemented:** a tlv's `merge` default reaches its `type: object` fields
+    only (the rest keep `collect`), and a merged member may declare `last`.
+  - **One helper set per language, mirroring the spec prototype:** Python
+    `reported_fields`/`tlv_repeat_modes`/`on_repeat_schema_errors`/`combine_repeated`,
+    Go `go/schema/cr110.go`, Java `OnRepeat`, C# `OnRepeat.cs` plus `CombineRepeated` in
+    the decoder. The generator calls the Python helpers at generation time and folds each
+    entry through `tlvFold`, so the generated codec now collects as the interpreters do -
+    it used to keep the last value for every repeated name.
+  - **PS-526 is checked at load** in all four and by the validator and generator, in the
+    prototype's wording, over every tlv in the document.
+  - **A collected value that is itself a list stays one element.** All four appended a
+    second report *into* a first value that was a list (a repeat), splicing the elements;
+    the decoders now track which names they turned into arrays.
+  - **Encoding (PS-527):** a merged object is written one entry per case declaring members
+    the input supplies, in case declaration order; a `last` value once, under the first
+    case declaring it. CR-2026-125 settled the rest (next entry). The reference used to
+    fail inside `int()` on a collected scalar array and zero-fill an object's members, and
+    the generated codec wrote one wrong entry. `encode-round-trip.py` files `last` losses
+    as `last-value`.
+  - **Found on the way:** Go and Java parsed no cases for an inline `tlv:` block declaring
+    none of `tag_size`/`tag_fields`/`tag_key` (a one-byte tag is the default), so every
+    tag was unknown and the decode succeeded empty; C#'s tlv candidate sort was unstable
+    on ties, and now keeps declaration order as the reference does, which round-trips one
+    more vobo vector (C#'s encode floor is +2, not +1).
+  - **C:** no `on_repeat`; the harness skips such schemas with a named interpreter-gap
+    reason, and a vector expecting a PS-157 array, which `decode_result_t` cannot hold.
+    `schema_binary.py` refuses the key.
+  - **Fixtures:** `tlv-repeat-collect`, `-last`, `-merge`, `-member-last`,
+    `-object-collect`. Decode floors +6 everywhere; re-encode +1 (tlv-repeat-merge's
+    `object_members_combine`).
+- **CR-2026-125 and CR-2026-128 (PS-525, PS-526, PS-527): `on_repeat` encoding and
+  placement.** CR-2026-125's "first case declaring it" could not be honoured - a tlv entry
+  carries every field its case declares, so it zero-filled or dropped - and CR-2026-128
+  replaced it, from this branch's report. In all five encoders:
+  - **Each value goes under the first case whose declared fields it supplies in full**: a
+    scalar, each element of an array PS-157 collected (`_reports_list` tells a field whose
+    own value is a list), a `last` value, a merged object's members. An object element
+    supplies exactly the case's members; a merged case is written once the input supplies
+    all its members and one of them is still unwritten. A shared `last` member rides, with
+    the input's value, in every case written. Nothing is zero-filled or dropped; a value no
+    case takes is "tlv: no case takes the value of '{n}' ... in full (PS-502, PS-527)", and a
+    supplied member no case declares "tlv: the merged object '{n}' is given ['{m}'], which no
+    case declares (PS-527)". `{dr: 5}` gives `0311 05`, `[{adr: 1}, {dr: 5}]` gives
+    `0310 01 0311 05`, a scalar follows the same rule.
+  - **Two choices, both needed to keep the corpus, which CR-2026-129 adopted into PS-527.**
+    A case requiring more fields is tried before declaration order - an object counting
+    its members, so a merged {adr, dr} case outranks a {dr} one declared before it
+    (`_claim_width`, Go `claimWidth`, Java `claimWidth`, C# `Width`, the generator's
+    `width`): em400-mud declares
+    [3, 103] (temperature) before [131, 103] (temperature, temperature_alarm), and strict
+    declaration order hands temperature to the first and strands the alarm. And a case
+    takes no value it cannot write (the old fidelity check, per field): am308's `tvoc` of
+    4369 does not fit one case's `div: 100` u16. Without the two, 92 vectors in 20 schemas
+    (Milesight, vobo, one fixture) went from round-tripping to an error when measured; with
+    them the Python residue is unchanged but for tlv-repeat-object-collect, which now
+    round-trips.
+  - **The algorithm** is one queue per name and a pending set per merged object, swept
+    case by case until nothing moves: `_case_claims` (a flagged group's fields and
+    `optional: true` ones do not block a case), then the entries go out in payload order.
+    Go has no payload order: it uses `TLVOrder` when given, else ascending tag, and tries
+    the cases `TLVOrder` names first, so the tag that wrote a value gets it back.
+  - **PS-526 as amended: merged cases may share a member only where it declares `last`**,
+    else "tlv: cases share the member '{m}' of the merged object '{o}' without
+    `on_repeat: last` (PS-526)" at load, in all four loaders, the validator and the
+    generator (via `tlv_repeat_modes`). Measured 2026-10-11: nothing in the corpus or the
+    registry is rejected.
+  - **`on_repeat` where it has no effect is rejected at load** - anywhere but a tlv, a
+    field a tlv case reports, or `last` on a merged object's member - by Python
+    (`on_repeat_schema_errors`, so the validator and generator too), Go `checkOnRepeat`,
+    Java `OnRepeat.checkPlacement` and C# `CheckOnRepeat`, in the prototype's wording.
+    Declarations are compared by identity; `definitions` is skipped and held to the rule
+    where `$ref` splices it. Measured 2026-10-10: no schema in the corpus (5 use
+    `on_repeat`) or the private registry (none) is rejected.
+  - **Fixtures:** `tlv-repeat-collect-first-case` (`3a 01 3a 02` round-trips),
+    `tlv-repeat-merge-shared-member` (`dr` declares `last`; `0310 01 05` stays one entry)
+    and `tlv-repeat-merge-shared-last` (the shared `last` member in both written cases).
+    CR-2026-128 moved decode +1 and re-encode +2 in all four: shared-last, and
+    tlv-repeat-object-collect, which now round-trips.
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.

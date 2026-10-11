@@ -141,7 +141,9 @@ cases:
               - {name: a, type: u8}
               - {name: c, type: u8}
   input: '{"a": 1}'
-  error: "Missing required field: c"
+  # A tlv case is written only when the input gives every field it declares (PS-527,
+  # CR-2026-128), so the rejection is PS-527's, naming the value no case takes in full.
+  error: "tlv: no case takes the value of 'a' 1 in full (PS-502, PS-527)"
 
 # --- A framed repeat whose list is absent writes nothing no longer (PS-442) ----------
 
@@ -208,7 +210,8 @@ cases:
                 count: 2
                 element: {type: u8}
   input: '{"a": 1}'
-  error: "Missing required field: v"
+  # Rejected by PS-527 before the repeat is reached, as tlv_case_member is.
+  error: "tlv: no case takes the value of 'a' 1 in full (PS-502, PS-527)"
 
 - name: repeat_trailer_list_absent
   schema: |

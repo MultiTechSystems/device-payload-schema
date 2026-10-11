@@ -125,22 +125,23 @@ class TestEveryEncoderResolvesTheTemplate:
             assert "func resolveFieldName(" in text
 
 
+@pytest.mark.xdist_group("cr030-encode-round-trip-tool")
 class TestTheResidueHasNothingRecoverableLeft:
     """The point of the CR: the classified residue is now all genuine loss."""
 
-    def test_the_tool_still_explains_everything(self):
+    @pytest.fixture(scope="class")
+    def done(self):
+        """One run of the tool for both tests: it re-encodes the whole corpus each time."""
         import subprocess
-        done = subprocess.run(
+        return subprocess.run(
             [sys.executable, str(REPO_ROOT / "tools" / "encode-round-trip.py")],
             cwd=REPO_ROOT, capture_output=True, text=True)
+
+    def test_the_tool_still_explains_everything(self, done):
         assert done.returncode == 0, done.stderr[:400]
         assert re.search(r"0\s+unexplained", done.stdout), done.stdout[-600:]
 
-    def test_no_templated_name_is_left_in_the_residue(self):
-        import subprocess
-        done = subprocess.run(
-            [sys.executable, str(REPO_ROOT / "tools" / "encode-round-trip.py")],
-            cwd=REPO_ROOT, capture_output=True, text=True)
+    def test_no_templated_name_is_left_in_the_residue(self, done):
         assert "templated-name" not in done.stdout, (
             "a name_from vector is still failing to re-encode"
         )

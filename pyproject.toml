@@ -24,6 +24,12 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+# Registered here as well as by pytest-xdist, so a run without xdist installed does not warn.
+# `make pytest` passes `--dist loadgroup`, which keeps a group's tests on one worker; the
+# groups are tests sharing one expensive corpus-wide tool run through a cache.
+markers = [
+    "xdist_group(name): run on the same xdist worker as the rest of the group",
+]
 filterwarnings = [
     "ignore::DeprecationWarning",
 ]

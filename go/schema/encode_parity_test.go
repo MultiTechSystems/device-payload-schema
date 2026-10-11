@@ -208,9 +208,10 @@ fields:
 }
 
 // A tlv case is encoded into its own buffer so its length prefix can be measured
-// before it is written. A value missing inside it is rejected from in there as at
-// the top level (PS-551); it used to be a zero with a warning the branch had to carry
-// back out.
+// before it is written. A value missing inside it - here in a record of a repeat
+// in the case (PS-527 writes a case only once the input supplies every field it
+// declares) - is rejected from in there as at the top level (PS-551); it used to
+// be a zero with a warning the branch had to carry back out.
 func TestMissingValueInATLVCaseIsRejected(t *testing.T) {
 	s, err := ParseSchema(`
 name: tlv-warning
@@ -223,16 +224,21 @@ fields:
       tag_key: [channel_id]
       cases:
         "3":
-          - name: temperature
-            type: u8
-          - name: humidity
-            type: u8
+          - name: samples
+            type: repeat
+            count: 1
+            fields:
+              - name: temperature
+                type: u8
+              - name: humidity
+                type: u8
 `)
 	if err != nil {
 		t.Fatalf("parse failed: %v", err)
 	}
 
-	result, err := s.EncodeToResult(map[string]any{"temperature": 20}, 0)
+	result, err := s.EncodeToResult(map[string]any{
+		"samples": []any{map[string]any{"temperature": 20}}}, 0)
 	if err == nil || !strings.Contains(err.Error(), "Missing required field: humidity") || result != nil {
 		t.Fatalf("EncodeToResult = %v, %v, want the rejection naming humidity", result, err)
 	}

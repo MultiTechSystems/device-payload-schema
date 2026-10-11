@@ -1,0 +1,39 @@
+# Merged cases may share a member only where it declares `on_repeat: last` (PS-526 as
+# CR-2026-128 amends it); without it the schema is rejected at load. Here 0x0310
+# declares `adr` and `dr`, and 0x0311 `dr` alone, so `dr` declares `last` in both.
+#
+# Each value goes under the first case whose declared fields it supplies in full
+# (PS-527, CR-2026-128): `{adr: 1, dr: 5}` fills 0x0310, and 0x0311 then has nothing
+# left to write, so the payload's one entry round-trips as one entry. `{dr: 5}` alone
+# would fill only 0x0311 (`0311 05`), and is a unit test in each language.
+name: probe_tlv_repeat_merge_shared_member
+endian: big
+fields:
+- tlv:
+    tag_size: 2
+    on_repeat: merge
+    cases:
+      0x0310:
+      - name: loramac
+        type: object
+        fields:
+        - name: adr
+          type: u8
+        - name: dr
+          type: u8
+          on_repeat: last
+      0x0311:
+      - name: loramac
+        type: object
+        fields:
+        - name: dr
+          type: u8
+          on_repeat: last
+test_vectors:
+- name: shared_member_written_once
+  source: spec-example
+  payload: "0310 01 05"
+  expected:
+    loramac:
+      adr: 1
+      dr: 5

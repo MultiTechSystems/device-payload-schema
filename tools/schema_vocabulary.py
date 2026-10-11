@@ -140,6 +140,7 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "out_of_range": (_DECODERS, "omit or flag a value outside valid_range (PS-428)"),
         "match": (_DECODERS, "inline discriminated union (Option B)"),
         "tlv": (_DECODERS, "tag dispatch"),
+        "on_repeat": (_DECODERS, "collect | merge | last, in a tlv case (PS-525)"),
         "flagged": (_DECODERS, "bitmask-gated groups"),
         "byte_group": (_DECODERS, "fields sharing bytes"),
         "records": (_DECODERS, "field lists, each one element of a repeat (PS-541)"),
@@ -191,6 +192,7 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "merge": (("py", "go", "java", "cs"), "merge case output into the parent"),
         "unknown": (_DECODERS, "skip | error | raw (PS-301)"),
         "reserve": (_DECODERS, "bytes at the end the loop must not read (PS-471)"),
+        "on_repeat": (_DECODERS, "default for the cases' fields (PS-525)"),
     },
     "flagged": {
         "field": (_DECODERS, "the mask field"),

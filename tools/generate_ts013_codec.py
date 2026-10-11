@@ -921,31 +921,136 @@ function encTlvTag(out, key, tlv, ctx) {              // _encode_tlv_tag
   encWriteInt(out, encParseInt0(key), tlv.tag_size === undefined ? 1 : tlv.tag_size, false, ctx.endian);
 }
 
+function encCaseClaims(fields, optional) {             // _case_claims
+  var out = [];
+  (fields || []).forEach(function (f) {
+    if (!f || typeof f !== "object") return;
+    if ("byte_group" in f && !f.type) {
+      var g = f.byte_group;
+      out = out.concat(encCaseClaims(Array.isArray(g) ? g : (g.fields || []), optional));
+      return;
+    }
+    if ("flagged" in f && !f.type) {
+      (f.flagged.groups || []).forEach(function (grp) { out = out.concat(encCaseClaims(grp.fields || [], true)); });
+      return;
+    }
+    if (!f.name || String(f.name).charAt(0) === "_" || ENC_COMPUTED.indexOf(f.type) >= 0) return;
+    out.push([f, !!optional || f.optional === true]);
+  });
+  return out;
+}
+
 function encTlv(out, f, data, ctx) {                  // _encode_tlv
   var tlv = f.tlv || {}, cases = tlv.cases || {}, lsize = tlv.length_size || 0;
   if (tlv.merge === false) encFail("a tlv with merge: false reports its entries under 'channels', and encoding them is not supported");
-  var order = Object.keys(data), cands = [];
-  for (var key in cases) {
-    if (key === "default" || !Array.isArray(cases[key])) continue;
-    var claimed = encClaimable(cases[key]).map(function (c) { return c.name; })
-      .filter(function (n) { return Object.prototype.hasOwnProperty.call(data, n); });
-    if (!claimed.length) continue;
-    var fid = encCaseFidelity(cases[key], data);
-    var position = Math.min.apply(null, claimed.map(function (n) { return order.indexOf(n); }));
-    cands.push({ p: position, l: fid[1] ? 0 : 1, m: -fid[0], key: key, body: cases[key], claimed: claimed, seq: cands.length });
-  }
-  cands.sort(function (a, b) { return a.p - b.p || a.l - b.l || a.m - b.m || a.seq - b.seq; });
-  var spent = {}, emitted = [];
-  cands.forEach(function (c) {
-    if (c.claimed.every(function (n) { return spent[n]; })) return;
-    c.claimed.forEach(function (n) { spent[n] = true; });
-    emitted.push(c);
+  var order = Object.keys(data), has = Object.prototype.hasOwnProperty;
+  // PS-525 to PS-527 (CR-2026-110, -125, -128). `rep` is tlv_repeat_modes and
+  // tlv_encode_plan, resolved at generation time, with the cases' declaration order: an
+  // object's integer-like keys iterate in ascending order, not the order written.
+  var rep = tlv.__on_repeat || {};
+  var modes = rep.modes || {}, members = rep.members || {};
+  var keys = rep.order || Object.keys(cases);
+  // A supplied member of a merged object that no case declares has nowhere to go.
+  Object.keys(members).forEach(function (n) {
+    var v = data[n];
+    if (v === null || typeof v !== "object" || Array.isArray(v)) return;
+    var stray = Object.keys(v).filter(function (m) { return members[n].indexOf(m) < 0; }).sort();
+    if (stray.length) encFail("tlv: the merged object '" + n + "' is given [" + stray.map(function (m) { return "'" + m + "'"; }).join(", ") + "], which no case declares (PS-527)");
   });
-  emitted.sort(function (a, b) { return a.p - b.p || a.seq - b.seq; });
-  emitted.forEach(function (c) {
-    encTlvTag(out, c.key, tlv, ctx);
+  // Each value goes under the first case whose declared fields it supplies in full;
+  // nothing is zero-filled or dropped. A case requiring more fields is tried first.
+  var entries = [];
+  keys.forEach(function (key) {
+    if (key === "default" || !Array.isArray(cases[key])) return;
+    var req = [], opt = [];
+    encCaseClaims(cases[key]).forEach(function (c) { (c[1] ? opt : req).push(c[0]); });
+    entries.push({ key: key, body: cases[key], req: req, opt: opt, seq: entries.length });
+  });
+  // An object counts its members (CR-2026-129), so a merged {adr, dr} case outranks {dr}.
+  function width(list) {
+    return list.reduce(function (n, c) {
+      return n + (c.type === "object" ? Math.max(1, encCaseClaims(c.fields || []).length) : 1);
+    }, 0);
+  }
+  entries.forEach(function (e) { e.width = width(e.req); });
+  entries.sort(function (a, b) { return b.width - a.width || a.seq - b.seq; });
+  var queues = {}, pending = {};
+  entries.forEach(function (e) {
+    e.req.concat(e.opt).forEach(function (c) {
+      var n = c.name;
+      if (!has.call(data, n) || has.call(queues, n) || modes[n] === "merge") return;
+      var v = data[n];
+      var collected = Array.isArray(v) && c.type !== "repeat" && !(c.type === "bytes" && c.format === "array") && (modes[n] || "collect") === "collect";
+      queues[n] = collected ? v.slice() : [v];
+    });
+  });
+  Object.keys(members).forEach(function (n) {
+    var v = data[n];
+    if (v !== null && typeof v === "object" && !Array.isArray(v)) pending[n] = Object.keys(v);
+  });
+  function membersOf(c) { return (c.fields || []).filter(function (m) { return m && m.name; }).map(function (m) { return m.name; }); }
+  function fits(c, v) {
+    if (c.type === "object" && v !== null && typeof v === "object" && !Array.isArray(v) && modes[c.name] !== "merge") {
+      var claims = encCaseClaims(c.fields || []), every = {}, ok = true;
+      claims.forEach(function (x) { every[x[0].name] = true; if (!x[1] && !has.call(v, x[0].name)) ok = false; });
+      Object.keys(v).forEach(function (k) { if (!every[k]) ok = false; });
+      return ok;
+    }
+    var one = {}; one[c.name] = v;
+    return encCaseFidelity([c], one)[1];
+  }
+  var written = [], progress = true;
+  while (progress) {
+    progress = false;
+    entries.forEach(function (e) {
+      for (;;) {
+        var values = {}, taken = 0, complete = true;
+        for (var i = 0; i < e.req.length; i++) {
+          var c = e.req[i], n = c.name;
+          if (modes[n] === "merge") {
+            var ms = membersOf(c);
+            if (!has.call(pending, n) || ms.some(function (m) { return !has.call(data[n], m); })) { complete = false; break; }
+            var sub = {};
+            ms.forEach(function (m) { sub[m] = data[n][m]; });
+            values[n] = sub;
+            if (ms.some(function (m) { return pending[n].indexOf(m) >= 0; })) taken++;
+          } else {
+            var q = queues[n];
+            if (!q || !q.length || !fits(c, q[0])) { complete = false; break; }
+            values[n] = q[0]; taken++;
+          }
+        }
+        if (!complete) break;
+        e.opt.forEach(function (c) {
+          var q = queues[c.name];
+          if (q && q.length && fits(c, q[0])) { values[c.name] = q[0]; taken++; }
+        });
+        if (!taken) break;
+        var entry = {}, pos = Infinity;
+        for (var k in data) entry[k] = data[k];
+        Object.keys(values).forEach(function (n) {
+          entry[n] = values[n];
+          pos = Math.min(pos, order.indexOf(n));
+          if (modes[n] === "merge") pending[n] = pending[n].filter(function (m) { return !has.call(values[n], m); });
+          else queues[n].shift();
+        });
+        written.push({ key: e.key, body: e.body, data: entry, p: pos, seq: written.length });
+        progress = true;
+      }
+    });
+  }
+  Object.keys(queues).forEach(function (n) {
+    if (queues[n].length) encFail("tlv: no case takes the value of '" + n + "' " + JSON.stringify(queues[n][0]) + " in full (PS-502, PS-527)");
+  });
+  Object.keys(pending).forEach(function (n) {
+    if (pending[n].length) encFail("tlv: no case takes the members [" + pending[n].slice().sort().map(function (m) { return "'" + m + "'"; }).join(", ") + "] of the merged object '" + n + "' in full (PS-527)");
+  });
+  // Payload order, so a payload round-trips; entries of one name keep the order taken.
+  written.sort(function (a, b) { return a.p - b.p || a.seq - b.seq; });
+  written.forEach(function (w) {
+    encTlvTag(out, w.key, tlv, ctx);
     var value = [];
-    encList(value, c.body, data, ctx);
+    encList(value, w.body, w.data, ctx);
     if (lsize > 0) encWriteInt(out, value.length, lsize, false, ctx.endian);
     for (var i = 0; i < value.length; i++) out.push(value[i]);
   });
@@ -1234,6 +1339,40 @@ def _codec_globals() -> set:
                   'encodeCommand'}
         _CODEC_GLOBALS = names
     return _CODEC_GLOBALS
+
+
+def _tlv_repeat_modes(tlv):
+    """tlv_repeat_modes() for a tlv that declares `on_repeat` on itself or on a case
+    field (PS-525); otherwise every name collects (PS-157), and the codec carries no
+    table for it."""
+    from schema_interpreter import tlv_repeat_modes, reported_fields
+    declared = 'on_repeat' in tlv or any(
+        'on_repeat' in field_def
+        for body in (tlv.get('cases') or {}).values() if isinstance(body, list)
+        for field_def in reported_fields(body).values())
+    return tlv_repeat_modes(tlv) if declared else ({}, {}, [])
+
+
+def _annotate_on_repeat(node):
+    """A copy of an encoder plan with each tlv carrying `__on_repeat`: its names' modes
+    (PS-525), each merged object's declared members (PS-527) and the cases' declaration
+    order, which a JSON object with integer-like keys does not keep."""
+    from schema_interpreter import tlv_encode_plan
+    if isinstance(node, list):
+        return [_annotate_on_repeat(item) for item in node]
+    if not isinstance(node, dict):
+        return node
+    out = {k: _annotate_on_repeat(v) for k, v in node.items()}
+    tlv = node.get('tlv')
+    if isinstance(tlv, dict) and isinstance(tlv.get('cases'), dict):
+        modes, last_members, _ = _tlv_repeat_modes(tlv)
+        plan = tlv_encode_plan(tlv, modes, last_members)
+        out['tlv'] = dict(out['tlv'], __on_repeat={
+            'modes': {k: v for k, v in modes.items() if v != 'collect'},
+            'members': {k: sorted(v) for k, v in plan['members'].items()},
+            'order': [str(key) for key in tlv['cases']],
+        })
+    return out
 
 
 #: Per-generation spellings for names whose plain mangling collides with another
@@ -1764,6 +1903,9 @@ class TS013Generator:
         from schema_interpreter import reference_errors
         iterator_problems += reference_errors(schema)            # PS-539
         iterator_problems += meta_declaration_errors(schema)    # PS-491
+        # PS-525, PS-526: on_repeat's values, merge on objects only, one mode per name.
+        from schema_interpreter import on_repeat_schema_errors
+        iterator_problems += on_repeat_schema_errors(schema)
         # PS-358, PS-519, PS-520: a malformed literal, as the interpreter refuses it.
         from schema_interpreter import literal_errors, typed_field_dicts
         for field_def in typed_field_dicts(schema):
@@ -1890,6 +2032,43 @@ function tlvUnknownRaw(d, tag, buf, from, span, separate) {
   var key = separate ? "channels" : "unknown_tags";
   if (!d[key]) { d[key] = []; }
   d[key].push({ tag: tag, raw: hex });
+}
+
+// --- A name reported again (PS-157, PS-525) ---
+// One tlv entry's output folded into the tlv's. A name already reported is combined as
+// its on_repeat says: collected into an array by default, kept from the last entry
+// under `last`, combined member by member under `merge`. `collected` holds the names
+// already turned into arrays: a value that is itself a list is one element, not
+// appended into. The generated codec kept the last value for every name, so where two
+// entries reported one name the interpreters gave an array and this gave one value.
+function tlvFold(outer, entry, modes, lastMembers, collected) {
+  for (var k in entry) {
+    if (!Object.prototype.hasOwnProperty.call(entry, k)) continue;
+    var v = entry[k];
+    if (v === undefined) continue;
+    var mode = modes[k] || "collect";
+    if (!Object.prototype.hasOwnProperty.call(outer, k) || outer[k] === undefined) {
+      outer[k] = v;
+    } else if (mode === "last") {
+      outer[k] = v;
+    } else if (mode === "merge") {
+      var combined = {}, before = outer[k];
+      for (var a in before) if (Object.prototype.hasOwnProperty.call(before, a)) combined[a] = before[a];
+      for (var m in v) {
+        if (!Object.prototype.hasOwnProperty.call(v, m)) continue;
+        if (Object.prototype.hasOwnProperty.call(combined, m) && !(lastMembers[k] && lastMembers[k][m])) {
+          throw new Error("tlv: the merged object '" + k + "' reports its member '" + m + "' twice (PS-525)");
+        }
+        combined[m] = v[m];
+      }
+      outer[k] = combined;
+    } else if (collected[k]) {
+      outer[k].push(v);
+    } else {
+      outer[k] = [outer[k], v];
+      collected[k] = true;
+    }
+  }
 }
 
 // --- Absent values ---
@@ -3514,6 +3693,17 @@ function writeS(buf, pos, size, value, endian) {
         tag_parts_expr = '[' + ', '.join(tag_parts) + ']'
 
         separate = tlv.get('merge', True) is False
+        # PS-157, PS-525: each entry of a merged tlv decodes into an object of its own,
+        # folded into the output by tlvFold, so a name two entries report is combined
+        # as its on_repeat says. The tables are keyed as the output is staged.
+        repeat_modes, repeat_last, _ = _tlv_repeat_modes(tlv)
+        fold_modes = json.dumps({to_js_name(k): v for k, v in repeat_modes.items()
+                                 if v != 'collect'}, sort_keys=True)
+        fold_last = json.dumps({to_js_name(k): {to_js_name(m): True for m in sorted(ms)}
+                                for k, ms in repeat_last.items() if ms}, sort_keys=True)
+        fold_id = self._tlv_fold_seq = getattr(self, '_tlv_fold_seq', 0) + 1
+        if not separate:
+            lines.insert(1, f'{i}  var _tlvC{fold_id} = {{}};')
         # PS-270: exact keys are tried first, then negated (`!n`), then wildcard (`*`), so
         # a broad key never shadows a specific one; within a rank, schema order. A
         # composite key is compared component by component, as the interpreters do. It
@@ -3539,6 +3729,8 @@ function writeS(buf, pos, size, value, endian) {
                 # by swapping it in as `d` for their length. This was not generated at
                 # all, so `channels` was missing from the codec's output with no error.
                 lines.append(f'{i}      var _tlvOuter = d; d = {{ tag: {tag_parts_expr} }};')
+            else:
+                lines.append(f'{i}      var _tlvO{fold_id} = d; d = {{}};')
             self.indent += 2
             for cf in case_fields:
                 lines.extend(self._gen_decode_field(cf))
@@ -3546,6 +3738,9 @@ function writeS(buf, pos, size, value, endian) {
             if separate:
                 lines.append(f'{i}      if (!_tlvOuter.channels) {{ _tlvOuter.channels = []; }}')
                 lines.append(f'{i}      _tlvOuter.channels.push(d); d = _tlvOuter;')
+            else:
+                lines.append(f'{i}      tlvFold(_tlvO{fold_id}, d, {fold_modes}, {fold_last}, '
+                             f'_tlvC{fold_id}); d = _tlvO{fold_id};')
 
         if not first:
             lines.append(f'{i}    }} else {{')
@@ -3798,6 +3993,7 @@ function writeS(buf, pos, size, value, endian) {
         exactly as the decoder sees it.
         """
         plan = self._expand_refs(list(fields)) if isinstance(fields, list) else fields
+        plan = _annotate_on_repeat(plan)
         return '\n'.join([
             f'var {fname}_FIELDS = {json.dumps(plan, default=str, separators=(",", ":"))};',
             f'function {fname}(d, endian) {{',
