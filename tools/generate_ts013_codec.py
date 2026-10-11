@@ -2970,9 +2970,13 @@ function writeS(buf, pos, size, value, endian) {
             vals = field.get('values', {})
             # The description form reports its `name` (PS-394); the mapping was emitted
             # whole and reported as the value.
+            if isinstance(vals, list):
+                vals = dict(enumerate(vals))
             val_json = json.dumps({str(k): enum_label(v) for k, v in vals.items()})
-            default = field.get('default', None)
-            default_js = json.dumps(default) if default else f'{js_name}_raw'
+            # PS-068 (CR-2026-132): with no `default` an unmatched code is omitted, as a
+            # lookup miss is (PS-269); `undefined` is dropped from the output, and the
+            # reference still binds the code below. This reported the code itself.
+            default_js = json.dumps(field['default']) if 'default' in field else 'undefined'
             lines.append(f'{i}  var {js_name}_map = {val_json};')
             lines.append(f'{i}  var {js_name}_out = {js_name}_map[{js_name}_raw] !== undefined ? {js_name}_map[{js_name}_raw] : {default_js};')
             # PS-523 (CR-2026-132): an enum is a lookup by another spelling, so a reference

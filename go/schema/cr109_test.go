@@ -311,3 +311,29 @@ fields:
 		}
 	}
 }
+
+// PS-068 (CR-2026-132): an enum code with no name and no default is omitted, as a lookup
+// miss is, in the mapping and the sequence form alike; a reference still binds the code.
+func TestCR132UnmatchedEnumIsOmittedButBound(t *testing.T) {
+	for _, values := range []string{`{1: "on", 2: "off"}`, `["zero", "one"]`} {
+		out, err := cr109Decode(t, `
+name: cr132
+endian: big
+fields:
+  - {name: code, type: enum, base: u8, var: c, values: `+values+`}
+  - {name: doubled, type: number, compute: {op: mul, a: $code, b: 2}}
+  - {name: held, type: number, ref: $c}
+`, []byte{5})
+		if err != nil {
+			t.Fatalf("%s: decode: %v", values, err)
+		}
+		if v, ok := out["code"]; ok {
+			t.Errorf("%s: code reported as %#v, want it omitted", values, v)
+		}
+		for k, w := range map[string]float64{"doubled": 10, "held": 5} {
+			if g, ok := toFloat64(out[k]); !ok || g != w {
+				t.Errorf("%s: %s = %#v, want %v", values, k, out[k], w)
+			}
+		}
+	}
+}

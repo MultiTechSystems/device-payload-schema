@@ -294,7 +294,8 @@ public static class SchemaDecoder
                 // A mapping lookup with no entry and no default: the device
                 // reported nothing this schema can name (PS-269). The reference stays
                 // bound to the number (PS-523).
-                if (field.Lookup != null && !string.IsNullOrEmpty(field.Name)
+                if ((field.Lookup != null || field.Type == FieldType.Enum)
+                    && !string.IsNullOrEmpty(field.Name)
                     && ctx.LookupBinding.ContainsKey(field))
                     ctx.Bind(field, field.Name, Omitted);
                 continue;
@@ -596,7 +597,9 @@ public static class SchemaDecoder
                 else if (field.EnumDefault != null)
                     value = field.EnumDefault;
                 else
-                    value = (double)intVal;
+                    // With no default the field is omitted, as a lookup miss is (PS-068,
+                    // PS-269, CR-2026-132); a reference still binds the code (PS-523).
+                    value = Omitted;
                 break;
             }
 

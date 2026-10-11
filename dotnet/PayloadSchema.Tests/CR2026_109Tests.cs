@@ -184,6 +184,22 @@ public class CR2026_109Tests
         Assert.True(output.ContainsKey("m_" + name));
     }
 
+    [Theory]
+    [InlineData("{1: \"on\", 2: \"off\"}")]
+    [InlineData("[\"zero\", \"one\"]")]
+    public void AnUnnamedEnumCodeIsOmittedButBound(string values)
+    {
+        // PS-068 (CR-2026-132): no name and no default omits the field, as a lookup miss
+        // does; never the raw integer or "unknown(N)". A reference still binds the code.
+        var output = Decode(
+            $"  - {{name: mode, type: enum, base: u8, var: m, values: {values}}}\n"
+            + "  - {name: doubled, type: number, compute: {op: mul, a: $mode, b: 2}}\n"
+            + "  - {name: held, type: number, ref: $m}\n", "05");
+        Assert.False(output.ContainsKey("mode"));
+        Assert.Equal(10.0, Convert.ToDouble(output["doubled"]));
+        Assert.Equal(5.0, Convert.ToDouble(output["held"]));
+    }
+
     [Fact]
     public void AMatchOnAnEnumRoundTrips()
     {

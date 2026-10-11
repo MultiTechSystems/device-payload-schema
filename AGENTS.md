@@ -188,7 +188,7 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2657 payload vectors in `schemas/devices/` (measured 2026-10-11 with
+The 2658 payload vectors in `schemas/devices/` (measured 2026-10-11 with
 `tools/check-floors.py`, after the CR-2026-118 and CR-2026-124 fixtures, CR-2026-117's
 guard-absent-operand, the `match-u32-*` and names-mangling-alike fixtures, CR-2026-127's
 guard-boolean-operand, CR-2026-109's lookup-reference-binding and CR-2026-132's
@@ -198,9 +198,9 @@ runner that reads the same YAML and the same vectors:
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
 | Python | `tests/test_corpus_conformance.py` | every vector | 1814 |
-| Go | `go/schema/corpus_conformance_test.go` | 2657 | 1831 (plain API 1808) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2657 | 1814 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2657 | 1814 |
+| Go | `go/schema/corpus_conformance_test.go` | 2658 | 1831 (plain API 1808) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2658 | 1814 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2658 | 1814 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 554 of 554 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -1542,6 +1542,17 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     fixtures changed. Fixtures: ports 8 and 9 of `lookup-reference-binding.yaml`, and
     `tag-component-reference-binding.yaml`: decode floors +4 in Go, Java and C#, re-encode
     and `match` +1 everywhere (only the enum's mapped vector round-trips).
+  - **PS-068 as CR-2026-132 amends it: an enum code with no name and no `default` is omitted**,
+    as PS-269 omits a lookup miss, so the field keeps one type; a reference still binds the
+    code. Before, Python reported `unknown(N)` and Go, Java, C# and the generated codec the
+    raw integer - a string or a number by payload. Go and Java also never read `values`
+    written as a list, so every such enum reported its integer; both read it now. Encoding
+    an omitted enum takes the missing-field path, as a lookup miss does; `unknown(N)` input
+    is still accepted. The output schema now enumerates an enum without a default. No corpus,
+    example or registry vector reports an unnamed code, so only port 10 of
+    `lookup-reference-binding.yaml` changed (decode floors +1). C already omitted it (see
+    `src/test_comprehensive.c` above, whose stale `unknown(N)` assertions the spec now
+    contradicts as well).
   - **Measured before, the CR's own table was wrong:** it said Go, Java and C# already bound
     the number. On 81 probes (6 lookup kinds x compute/match/var/template, at the top level,
     in a tlv case and in a match body) **all five bound the label**: a text label failed

@@ -437,3 +437,26 @@ def test_a_numeric_tag_component_label_binds_itself(run):
         ],
     )
     assert run(schema({"tlv": tlv}), "011007") == ({"reading_125": 7, "n": 125}, [])
+
+
+# PS-068 as CR-2026-132 amends it: an unmatched code with no default is omitted ----
+
+
+@BOTH
+@pytest.mark.parametrize(
+    "values", [{1: "on", 2: "off"}, ["idle", "on", "off"]], ids=["mapping", "sequence"]
+)
+def test_an_unnamed_enum_code_is_omitted_but_bound(run, values):
+    # Python reported "unknown(5)", the others the code 5: a string or a number by payload.
+    doc = schema(
+        {"name": "mode", "type": "enum", "base": "u8", "values": values},
+        {"name": "c", "type": "number", "ref": "$mode"},
+    )
+    assert run(doc, "05") == ({"c": 5}, [])
+
+
+@BOTH
+def test_a_template_over_an_unnamed_enum_code_is_an_error(run):
+    doc = schema(ENUM, {"name": "k", "type": "u8", "name_from": "m_${mode}"})
+    _, errors = run(doc, "0507")
+    assert errors and "reported no value (PS-266, PS-532)" in errors[0]

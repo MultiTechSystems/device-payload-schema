@@ -820,6 +820,21 @@ public class Schema {
             if (fm.get("default") != null) {
                 f.setEnumDefault(String.valueOf(fm.get("default")));
             }
+        } else if (fm.get("values") instanceof List<?> valuesList) {
+            // The sequence form names codes from zero; it was not parsed, so every code
+            // of such an enum read as unmapped.
+            Map<Integer, String> values = new HashMap<>();
+            for (int i = 0; i < valuesList.size(); i++) {
+                Object label = valuesList.get(i);
+                if (label instanceof Map<?, ?> described) {
+                    label = described.get("name");
+                }
+                values.put(i, String.valueOf(label));
+            }
+            f.setValues(values);
+            if (fm.get("default") != null) {
+                f.setEnumDefault(String.valueOf(fm.get("default")));
+            }
         }
 
         // Computed fields (type: number). None of this was parsed, so every schema
@@ -1825,6 +1840,8 @@ public class Schema {
                     // An unmapped value reports the declared default (PS-068).
                     value = field.getEnumDefault();
                 } else {
+                    // No name and no default: omitted in applyGroupMember (PS-068, as
+                    // amended by CR-2026-132), still bound to the code.
                     value = (long) raw;
                 }
             }
@@ -1955,7 +1972,21 @@ public class Schema {
         // number a reference binds, its name the label a template writes.
         if (field.getType() == FieldType.ENUM) {
             Object code = ctx.takeEnumCode(field);
-            if (code != null) ctx.recordLookup(field, code, value);
+            if (code != null) {
+                Map<Integer, String> names = field.getValues();
+                boolean named = names != null && names.containsKey(((Number) code).intValue());
+                if (!named && field.getEnumDefault() == null) {
+                    // PS-068 (CR-2026-132): a code with no name and no default is omitted,
+                    // as a lookup miss is (PS-269) - never the raw integer - and a
+                    // reference still binds the code (PS-523).
+                    ctx.recordLookup(field, code, DecodeContext.NO_LABEL);
+                    if (field.getVar() != null && !field.getVar().isEmpty()) {
+                        ctx.bind(field.getVar(), field, code);
+                    }
+                    return OMITTED;
+                }
+                ctx.recordLookup(field, code, value);
+            }
         }
         
         // PS-428: outside the range is no reading, not a flagged one, so the field is

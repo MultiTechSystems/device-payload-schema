@@ -10,7 +10,9 @@
 # - A default label: it is reported, and the reference binds the number.
 #
 # - An enum is a lookup by another spelling (CR-2026-132): a reference binds its code,
-#   its `default` name included, and a template writes its name (ports 8 and 9).
+#   its `default` name included, and a template writes its name (ports 8 and 9). A code
+#   with no name and no default is not reported, as a lookup miss is not (PS-068), and the
+#   reference is still bound to it (port 10).
 #
 # A key template is not a reference: it writes the value reported, the label (PS-532).
 # Each port is one rule. On every port `code` is read and labelled, `doubled` reads it by
@@ -110,6 +112,17 @@ ports:
           cases:
             5: [{name: reading, type: u8, name_from: "reading_${code}"}]
           default: [{name: other, type: u8}]
+  10:
+    fields:
+      - {name: code, type: enum, base: u8, var: c, values: {1: "on", 2: "off"}}
+      - {name: doubled, type: number, compute: {op: mul, a: $code, b: 2}}
+      - {name: held, type: number, ref: $c}
+      - match:
+          field: $code
+          cases:
+            2: [{name: reading, type: u8, name_from: "reading_${code}"}]
+            5: [{name: unlisted, type: u8}]
+          default: [{name: other, type: u8}]
 test_vectors:
   - name: a_text_label_binds_its_number
     payload: "81 07"
@@ -200,4 +213,14 @@ test_vectors:
       doubled: 10
       held: 5
       reading_spare: 7
+      other: null
+  - name: an_unnamed_enum_code_is_omitted_but_bound
+    payload: "05 07"
+    fPort: 10
+    source: spec-example
+    expected:
+      code: null
+      doubled: 10
+      held: 5
+      unlisted: 7
       other: null

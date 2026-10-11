@@ -3091,14 +3091,17 @@ class SchemaInterpreter:
                 # default the schema asked for.
                 if 'default' in field_def:
                     return field_def['default'], new_pos
-                return f"unknown({raw_value})", new_pos
+                # PS-068 (CR-2026-132): with no `default` the field is omitted, as a
+                # lookup miss is (PS-269), so it keeps one type; a reference still binds
+                # the code (PS-523). This reported "unknown(N)", and the others the code.
+                return OMITTED, new_pos
         elif isinstance(values, list):
             if 0 <= raw_value < len(values):
                 return enum_label(values[raw_value]), new_pos
             elif 'default' in field_def:
                 return field_def['default'], new_pos
             else:
-                return f"unknown({raw_value})", new_pos
+                return OMITTED, new_pos      # PS-068, as above
         
         # No mapping - return raw value
         return raw_value, new_pos

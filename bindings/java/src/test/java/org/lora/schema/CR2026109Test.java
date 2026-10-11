@@ -162,6 +162,27 @@ public class CR2026109Test {
     }
 
     @Test
+    public void anUnnamedEnumCodeIsOmittedButBound() {
+        // PS-068 as amended by CR-2026-132: no name and no default omits the field - never
+        // the raw integer - and a reference still binds the code.
+        Map<String, Object> m = decodeEnum("", COMPUTE, 5);
+        assertFalse(m.containsKey("code"), m.toString());
+        assertNum(10, m.get("doubled"));
+        assertNum(5, decodeEnum("", VAR, 5).get("held"));
+        assertNum(7, decodeEnum("", select(5), 5, 7).get("hit"));
+        // The sequence form: an index past the end with no default is omitted too.
+        Map<String, Object> seq = Schema.fromYaml("name: p\nendian: big\nfields:\n"
+                + "  - {name: code, type: enum, base: u8, values: [\"on\", \"off\"]}\n"
+                + COMPUTE).decode(new byte[] {0x01});
+        assertEquals("off", seq.get("code"));
+        Map<String, Object> past = Schema.fromYaml("name: p\nendian: big\nfields:\n"
+                + "  - {name: code, type: enum, base: u8, values: [\"on\", \"off\"]}\n"
+                + COMPUTE).decode(new byte[] {0x04});
+        assertFalse(past.containsKey("code"), past.toString());
+        assertNum(8, past.get("doubled"));
+    }
+
+    @Test
     public void anEnumSelectsItsCaseOnEncode() {
         Schema schema = Schema.fromYaml("name: p\nendian: big\nfields:\n"
                 + "  - {name: code, type: enum, base: u8, values: {1: \"on\", 2: \"off\"}}\n"

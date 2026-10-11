@@ -21,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from schema_interpreter import (  # noqa: E402
-    lookup_template, lookup_template_pattern, render_template_value)
+    enum_label, lookup_template, lookup_template_pattern, render_template_value)
 
 
 def scalar_json_type(value: Any) -> str:
@@ -204,24 +204,21 @@ def yaml_type_to_json_schema(field_type: str, field_def: Dict[str, Any]) -> Dict
         values = field_def.get('values', {})
         if values:
             listed = list(values.values()) if isinstance(values, dict) else list(values)
-            fallback = field_def.get('default')
-            if fallback is not None:
-                # PS-068: an unmapped value is reported as `default`, so the set is
-                # closed and can be enumerated.
-                listed = listed + [fallback]
-                types = union_types(listed)
-                schema = {"type": types[0] if len(types) == 1 else types}
-                unique = []
-                for value in listed:
-                    if value not in unique:
-                        unique.append(value)
-                schema['enum'] = unique
-                return schema
-            # With no `default`, an unmapped value is reported as the string
-            # "unknown(<n>)", so the set is open: no `enum`, and `string` belongs in the
-            # type even where every declared value is a number.
-            types = union_types(listed + ['unknown(0)'])
-            return {"type": types[0] if len(types) == 1 else types}
+            # The description form reports its `name` (PS-394).
+            listed = [enum_label(value) for value in listed]
+            # PS-068: an unmapped value is reported as `default`, and with none the field
+            # is omitted (CR-2026-132), as a lookup miss is (PS-269). Either way the set is
+            # closed and can be enumerated. It used to admit "unknown(<n>)" and stay open.
+            if 'default' in field_def:
+                listed = listed + [field_def['default']]
+            types = union_types(listed)
+            schema = {"type": types[0] if len(types) == 1 else types}
+            unique = []
+            for value in listed:
+                if value not in unique:
+                    unique.append(value)
+            schema['enum'] = unique
+            return schema
         return {"type": ["string", "integer"]}
     
     # Default to number (most fields with modifiers become numbers)

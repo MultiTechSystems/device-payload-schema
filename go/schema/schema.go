@@ -1463,6 +1463,16 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 			}
 		}
 	}
+	// The sequence form names codes from 0; it was not read, so every code was reported
+	// as its integer, and one past the end could not be told from one in range (PS-068).
+	if valuesRaw, ok := fm["values"].([]any); ok {
+		f.Values = make(map[int]string)
+		for i, v := range valuesRaw {
+			if str, ok := enumLabel(v); ok {
+				f.Values[i] = str
+			}
+		}
+	}
 
 	// Byte group (inline grouped bitfields) - array format
 	if bgRaw, ok := fm["byte_group"].([]any); ok {
@@ -2578,7 +2588,10 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 				// the raw integer here ignored the default the schema asked for.
 				value = *field.EnumDefault
 			} else {
-				value = intVal
+				// PS-068 (CR-2026-132): with no default an unmatched code is omitted,
+				// as a lookup miss is (PS-269), so the field keeps one type; a
+				// reference to it still binds the code (PS-523).
+				value = omitted
 			}
 		} else {
 			value = intVal
@@ -2758,6 +2771,10 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 	}
 	ctx.enumCode = lookupNumber{}
 	if value == omitted {
+		// An unmatched enum code (PS-068): its `var` is still bound to the code (PS-523).
+		if isEnumField(field) && field.Var != "" {
+			ctx.bindReference(field.Var, field, omitted)
+		}
 		return omitted, nil
 	}
 	// Formula takes precedence over top-level modifiers (per spec section 03)
