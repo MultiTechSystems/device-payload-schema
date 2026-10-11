@@ -252,6 +252,12 @@ func (s *Schema) metaDeclarations(fields any) *declarations {
 					}
 				}
 			}
+			if bodies, ok := f["records"].([]any); ok && f["type"] == nil {
+				for _, body := range bodies { // PS-541
+					visit(body)
+				}
+				continue
+			}
 			if match := asStringMap(f["match"]); match != nil {
 				visitCases(match["cases"])
 				if def, ok := match["default"].([]any); ok {
@@ -659,6 +665,12 @@ func checkMetaDeclarations(raw map[string]any, order keyOrder) error {
 							}
 						}
 					}
+				}
+				if bodies, ok := f["records"].([]any); ok && f["type"] == nil {
+					for _, body := range bodies { // PS-541
+						visit(body)
+					}
+					continue
 				}
 				if match := asStringMap(f["match"]); match != nil {
 					visitCases(match["cases"], visitList)

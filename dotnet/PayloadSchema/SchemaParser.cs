@@ -450,7 +450,7 @@ public static partial class SchemaParser
     }
 
     /// <summary>The keys that make a field a construct, declaring no type of its own.</summary>
-    static readonly string[] ConstructKeys = { "$ref", "flagged", "tlv", "byte_group", "match" };
+    static readonly string[] ConstructKeys = { "$ref", "flagged", "tlv", "byte_group", "match", "records" };
 
     /// <summary>
     /// PS-347, PS-441: a <c>match</c> or <c>tlv</c> case body is a field list, <c>[]</c> for a
@@ -1004,6 +1004,14 @@ public static partial class SchemaParser
             f.TLVInline = tlvField;
         }
 
+        // PS-541: `records`, field lists each yielding one record of the enclosing repeat
+        // element. Where it may appear, and its shape, are checked by RecordsErrors.
+        if (fm.TryGetValue("records", out var recordsNode) && recordsNode is YamlSequenceNode recordsSeq
+            && !fm.Children.ContainsKey(new YamlScalarNode("type")))
+        {
+            f.Records = recordsSeq.Children.OfType<YamlSequenceNode>().Select(ParseFields).ToList();
+        }
+
         // Match inline (Option B: `- match: { field: $var, cases: {...} }`)
         if (fm.TryGetValue("match", out var matchNode) && matchNode is YamlMappingNode matchMap)
         {
@@ -1069,6 +1077,11 @@ public static partial class SchemaParser
         // fail: vicki's _tempStandard stayed live on the firmware 3.5 path and was added
         // to _tempFw35, reporting 46.95 where the vendor gives 14.76.
         if (wm.TryGetValue("ne", out var ne)) gc.Ne = Double(ne);
+        // PS-543: a list of numbers; its form is checked at load (ConditionErrors).
+        if (wm.TryGetValue("in", out var inNode) && inNode is YamlSequenceNode inSeq)
+            gc.In = inSeq.Children.Select(Double).ToArray();
+        if (wm.TryGetValue("not_in", out var notInNode) && notInNode is YamlSequenceNode notInSeq)
+            gc.NotIn = notInSeq.Children.Select(Double).ToArray();
         return gc;
     }
 

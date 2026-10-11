@@ -1,0 +1,61 @@
+# One element yields several readings, each reported as its own element of the array,
+# in order and in place of the element (PS-541, CR-2026-118).
+#
+# The element's other reported field, `channel`, is copied into each reading before the
+# reading's own fields; the internal `_spare` is not reported, so it is copied nowhere.
+#
+# Encoders refuse this schema (PS-542): a reading does not say which element it came from.
+name: probe_element_several_readings
+endian: big
+fields:
+- name: readings
+  type: repeat
+  count: 2
+  fields:
+  - name: channel
+    type: u8
+  - name: _spare
+    type: u8
+  - records:
+    - - name: kind
+        type: string
+        value: level
+      - name: value
+        type: u8
+    - - name: kind
+        type: string
+        value: rate
+      - name: value
+        type: u16
+test_vectors:
+- name: each_element_yields_two_in_order
+  source: spec-example
+  payload: "03 00 07 0102 04 FF 08 0304"
+  expected:
+    readings:
+    - kind: level
+      value: 7
+    - kind: rate
+      value: 258
+    - kind: level
+      value: 8
+    - kind: rate
+      value: 772
+- name: element_field_copied_into_each
+  source: spec-example
+  payload: "03 00 07 0102 04 FF 08 0304"
+  expected:
+    readings:
+    - channel: 3
+    - channel: 3
+    - channel: 4
+    - channel: 4
+- name: internal_field_copied_nowhere
+  source: spec-example
+  payload: "03 00 07 0102 04 FF 08 0304"
+  expected:
+    readings:
+    - _spare: null
+    - _spare: null
+    - _spare: null
+    - _spare: null
