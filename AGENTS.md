@@ -1710,8 +1710,16 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     `index`; the sibling's element carries a lookup or is a literal (PS-374). Load-time, in
     Python `sibling_errors` (from `iterator_errors`), Go `cr121.go`, Java and C# `Wave6a`.
   - **Decode** is unchanged, two arrays, except that different lengths are an error naming
-    both, also in the generated codec. **Encoding** is unchanged: each array encodes on its
-    own, and the spec says nothing about an encoder meeting different lengths.
+    both, also in the generated codec. **Encoding** each array on its own wrote a frame the
+    decoder refused, so CR-2026-133 (PS-550) rejects it: "Repeat 'values' is given 1 values
+    and 'codes', which identifies them, 2 (PS-550)" (`none` where the sibling is not a list).
+    Checked against the data map the repeat is encoded from, before any element is written,
+    in Python `_encode_repeat`, Go `encodeRepeat` (via `Field.Siblings`), Java
+    `Encoder.encodeRepeat`, C# `SchemaEncoder.EncodeRepeat` (`SiblingNames`) and the
+    runtime's `encRepeat` (`encSiblings` mirrors `sibling_references`). An absent repeat
+    still encodes to nothing, so the check runs only when the identified repeat is given.
+    No vector can expect a rejection, so no floor moves; `test_cr_2026_133_*`, Go
+    `cr133_test.go`, Java `CR2026133Test`, C# `CR2026_133Tests` hold the text.
   - **`_meta`:** `{"repeat": name, "values": [...], "open": true}` in that key order, the
     PS-375 listing of the sibling's element with `field` replaced by `repeat`. The sibling
     is found through `element_repeats` of the field list the repeat sits in, passed down
