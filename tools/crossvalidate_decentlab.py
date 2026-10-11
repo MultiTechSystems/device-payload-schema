@@ -34,7 +34,7 @@ SCHEMA_DIR = REPO_ROOT / "schemas" / "devices" / "decentlab"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from schema_interpreter import SchemaInterpreter  # noqa: E402
-from crossvalidate_ttn import corrections  # noqa: E402
+from crossvalidate_ttn import corrections, skip_corrected  # noqa: E402
 
 #: Relative tolerance used when comparing against the vendor's floating point
 #: results, plus an absolute floor for values near zero.
@@ -141,9 +141,8 @@ def check_schema(path, vendor_root, available):
         for (hexed, _port), names in corrections(schema).items():
             if hexed == payload.lower():
                 skip |= names
+        expected, actual = skip_corrected(expected, actual, skip)
         for key, want in expected.items():
-            if key in skip:
-                continue
             if key not in actual:
                 problems.append((payload, "%s missing from our output" % key))
             elif not agrees(actual[key], want):

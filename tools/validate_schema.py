@@ -387,6 +387,52 @@ def is_encode_vector(vector) -> bool:
 CORRECTED_SOURCE = 'vendor-codec-corrected'
 
 
+def correction_path(field: Any) -> List[str]:
+    """PS-514 as amended by CR-2026-120: a correction's `field` as its path segments.
+
+    A plain reported name is a one-segment path. A member of a reported object or array
+    is named by its path, the names joined by `/` with zero-based array indices
+    (`payload/device/batteryLevel`, `readings/0/value`). PS-009 keeps `/` out of field
+    names, so a path never collides with a name.
+    """
+    return str(field).split('/')
+
+
+def resolve_member(expected: Any, field: Any) -> Tuple[bool, Any]:
+    """(found, value) for a correction's `field` resolved into `expected` (PS-044 nesting)."""
+    if isinstance(expected, dict) and field in expected:
+        return True, expected[field]
+    node = expected
+    for segment in correction_path(field):
+        if isinstance(node, dict) and segment in node:
+            node = node[segment]
+        elif (isinstance(node, list) and segment.isdigit()
+              and int(segment) < len(node)):
+            node = node[int(segment)]
+        else:
+            return False, None
+    return True, node
+
+
+def asserted_paths(expected: Any, depth: int,
+                   prefix: Tuple[str, ...] = ()) -> List[List[str]]:
+    """The fields `expected` asserts, counted at `depth` (PS-515).
+
+    An object or array above `depth` is descended into; a value at `depth`, or a leaf or
+    empty container above it, is one asserted field.
+    """
+    if len(prefix) < depth and isinstance(expected, dict) and expected:
+        items = [(str(k), v) for k, v in expected.items()]
+    elif len(prefix) < depth and isinstance(expected, list) and expected:
+        items = [(str(i), v) for i, v in enumerate(expected)]
+    else:
+        return [list(prefix)] if prefix else []
+    out: List[List[str]] = []
+    for name, value in items:
+        out.extend(asserted_paths(value, depth, prefix + (name,)))
+    return out
+
+
 def correction_errors(tv: Dict[str, Any]) -> List[str]:
     """PS-514's rules for one vector's `source: vendor-codec-corrected` and `correction`."""
     corrected = str(tv.get('source', '')).strip().lower() == CORRECTED_SOURCE
@@ -409,7 +455,7 @@ def correction_errors(tv: Dict[str, Any]) -> List[str]:
             errors.append(f"correction {n}: missing {', '.join(missing)} (PS-514)")
         if extra:
             errors.append(f"correction {n}: unknown key(s) {', '.join(extra)}")
-        if 'field' in entry and entry['field'] not in expected:
+        if 'field' in entry and not resolve_member(expected, entry['field'])[0]:
             errors.append(f"correction {n}: field {entry['field']!r} is not in 'expected'; "
                           "a corrected field is asserted, as null where it is omitted")
     return errors
@@ -419,15 +465,19 @@ def is_independent_vector(tv: Dict[str, Any], independent_sources) -> bool:
     """PS-264/PS-515: whether a vector's expected values are independently sourced.
 
     A `vendor-codec-corrected` vector is, unless its `correction` names every field it
-    asserts - then nothing in it is the codec's.
+    asserts - then nothing in it is the codec's. A path names one member, so the fields
+    asserted are counted at the depth of the deepest path the correction names (PS-515 as
+    amended by CR-2026-120): correcting one leaf of a nested object leaves its siblings.
     """
     source = str(tv.get('source', '')).strip().lower()
     if source in independent_sources:
         return True
     if source != CORRECTED_SOURCE or correction_errors(tv):
         return False
-    named = {c.get('field') for c in tv['correction']}
-    return bool(set(tv.get('expected') or {}) - named)
+    named = [correction_path(c.get('field')) for c in tv['correction']]
+    depth = max(len(path) for path in named)
+    asserted = asserted_paths(tv.get('expected') or {}, depth)
+    return any(not any(path[:len(n)] == n for n in named) for path in asserted)
 
 
 def expected_fields_match(expected: Dict[str, Any], actual: Dict[str, Any],
