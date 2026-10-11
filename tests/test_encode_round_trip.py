@@ -166,6 +166,12 @@ def round_trip_results():
     return tally, raises
 
 
+# Under pytest-xdist a module fixture is built once per worker that runs one of its tests,
+# so without this every worker would rebuild the corpus round trip (about 50 seconds). `make pytest` passes
+# `--dist loadgroup`, which keeps the module on one worker and builds it once.
+pytestmark = pytest.mark.xdist_group("encode-round-trip")
+
+
 @pytest.fixture(scope="module")
 def results():
     return round_trip_results()

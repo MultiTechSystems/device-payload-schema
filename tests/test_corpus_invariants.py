@@ -88,6 +88,12 @@ def _load_corpus() -> List[Tuple[str, dict]]:
     return schemas
 
 
+# Under pytest-xdist a module fixture is built once per worker that runs one of its tests,
+# so without this every worker would rebuild the decoded corpus (about 70 seconds). `make pytest` passes
+# `--dist loadgroup`, which keeps the module on one worker and builds it once.
+pytestmark = pytest.mark.xdist_group("corpus-invariants")
+
+
 @pytest.fixture(scope="module")
 def corpus() -> List[Tuple[str, dict]]:
     return _load_corpus()
