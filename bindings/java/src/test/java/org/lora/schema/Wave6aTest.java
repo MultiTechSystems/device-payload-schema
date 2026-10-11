@@ -122,21 +122,21 @@ public class Wave6aTest {
 
     @Test
     public void aReferenceToAFieldNotYetDecodedIsAnError() {
-        Schema schema = Schema.fromYaml("name: p\nfields:\n"
-            + "  - {name: r, type: repeat, count: 1, fields: [{name: early, type: number, ref: $v}, {name: v, type: u8}]}\n");
-        Exception e = assertThrows(SchemaException.DecodeException.class, () -> schema.decode(hex("05")));
-        assertTrue(e.getMessage().contains("PS-368"), e.getMessage());
+        // Refused at load as a forward reference (PS-539, PS-122, CR-2026-127).
+        Exception e = assertThrows(SchemaException.class, () -> Schema.fromYaml("name: p\nfields:\n"
+            + "  - {name: r, type: repeat, count: 1, fields: [{name: early, type: number, ref: $v}, {name: v, type: u8}]}\n"));
+        assertTrue(e.getMessage().contains("PS-122"), e.getMessage());
     }
 
     @Test
     public void anOtherwiseUnboundReferenceIsAbsent() {
         // PS-314, PS-429: a reference with no value cannot be resolved, so the field is
         // left out. It read 0, which reported a value the payload never carried. The name
-        // is declared (PS-539) and its optional field is not in the payload.
+        // is declared first (PS-539) and its sentinel omits it.
         Schema schema = Schema.fromYaml("name: p\nfields:\n"
-            + "  - {name: v, type: u8}\n  - {name: w, type: number, ref: $nowhere}\n"
-            + "  - {name: nowhere, type: u8, optional: true}\n");
-        Map<String, Object> out = schema.decode(hex("05"));
+            + "  - {name: nowhere, type: u8, sentinel: [255]}\n"
+            + "  - {name: v, type: u8}\n  - {name: w, type: number, ref: $nowhere}\n");
+        Map<String, Object> out = schema.decode(hex("FF05"));
         assertFalse(out.containsKey("w"), out.toString());
         assertEquals(5L, out.get("v"));
     }

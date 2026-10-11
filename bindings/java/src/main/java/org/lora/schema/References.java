@@ -9,12 +9,16 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * PS-539 (CR-2026-117): every {@code $} reference names something the schema declares - a
- * field, a {@code var}, a tag component, a repeat's {@code index} or {@code count_as} - in
- * the header, the fields, a port or a definition, at any depth. A {@code metadata} include
- * or timestamp name counts as declared; a {@code metadata.include} {@code source} names
- * runtime input (PS-315) and is not checked. Whether the name is bound when it is read is a
- * decode matter (PS-314), so a name declared later, or in a branch not taken, is valid here.
+ * PS-539 (CR-2026-117, CR-2026-127): every {@code $} reference names something the schema
+ * declares - a field, a {@code var}, a tag component, a repeat's {@code index} or
+ * {@code count_as} - and the declaration comes before the reference in schema order
+ * (PS-122, PS-147): a tlv's tag components before its cases, a repeat's {@code trailer} and
+ * elements before its {@code present_if} and {@code identity}. The document is walked with
+ * every {@code $ref} already spliced, so a definition's references are checked where it is
+ * used and an unused definition is never checked. A nameless repeat element declares no
+ * name (PS-528). {@code metadata} include and timestamp names count as declared first; a
+ * {@code metadata.include} {@code source} names runtime input (PS-315) and is not checked.
+ * Whether a name declared earlier is bound when it is read is a decode matter (PS-314).
  *
  * <p>The walk is the spec prototype's {@code key_vocabulary.check_references} and
  * {@code reference_errors} in the reference implementation; Go and C# walk the same way,
@@ -38,17 +42,18 @@ final class References {
                 + "count_as the schema declares (PS-539)";
     }
 
-    /** Every undeclared reference's message, in source order, each once. */
+    /** PS-539's ordering rule (CR-2026-127), the spec prototype's wording. */
+    static String orderMessage(String name, String key) {
+        return "`$" + name + "` (" + key + ") is referenced before the schema declares it (PS-539, PS-122)";
+    }
+
+    /** Keys walked before the rest of their mapping: what the rest reads comes after them. */
+    static final List<String> FIRST_KEYS = List.of("tag_fields", "trailer", "fields", "element");
+
+    /** Every undeclared or forward reference's message, in schema order, each once. */
     static List<String> errors(Map<String, Object> raw) {
         Set<String> declared = new HashSet<>();
-        List<String[]> references = new ArrayList<>();
-        walk(raw.get("header"), null, false, declared, references);
-        walk(raw.get("fields"), null, false, declared, references);
-        for (String part : List.of("ports", "definitions")) {
-            if (raw.get(part) instanceof Map<?, ?> groups) {
-                for (Object group : groups.values()) walk(group, null, false, declared, references);
-            }
-        }
+        List<String[]> ahead = new ArrayList<>();
         if (raw.get("metadata") instanceof Map<?, ?> metadata) {
             for (String part : List.of("include", "timestamps")) {
                 if (metadata.get(part) instanceof List<?> entries) {
@@ -60,12 +65,16 @@ final class References {
                 }
             }
         }
+        walk(raw.get("header"), null, false, declared, ahead);
+        walk(raw.get("fields"), null, false, declared, ahead);
+        if (raw.get("ports") instanceof Map<?, ?> groups) {
+            for (Object group : groups.values()) walk(group, null, false, declared, ahead);
+        }
         List<String> errors = new ArrayList<>();
-        for (String[] reference : references) {
-            if (!declared.contains(reference[0])) {
-                String message = message(reference[0], reference[1]);
-                if (!errors.contains(message)) errors.add(message);
-            }
+        for (String[] reference : ahead) {
+            String message = declared.contains(reference[0]) ? orderMessage(reference[0], reference[1])
+                    : message(reference[0], reference[1]);
+            if (!errors.contains(message)) errors.add(message);
         }
         return errors;
     }
@@ -77,9 +86,9 @@ final class References {
     }
 
     private static void walk(Object node, String key, boolean inSenml, Set<String> declared,
-                             List<String[]> references) {
+                             List<String[]> ahead) {
         if (node instanceof List<?> list) {
-            for (Object item : list) walk(item, null, false, declared, references);
+            for (Object item : list) walk(item, null, false, declared, ahead);
             return;
         }
         if (!(node instanceof Map<?, ?> map)) return;
@@ -87,29 +96,29 @@ final class References {
             for (String nameKey : List.of("name", "var", "index", "count_as")) {
                 if (map.get(nameKey) instanceof String s) declared.add(s);
             }
-            // An `element` that declares no name is decoded as `element` (PS-528), so its
-            // `present_if` and `name_from` can name it.
-            if (map.get("element") instanceof Map<?, ?> element && !(element.get("name") instanceof String)) {
-                declared.add("element");
-            }
         }
-        for (Map.Entry<?, ?> entry : map.entrySet()) {
-            String k = String.valueOf(entry.getKey());
-            Object v = entry.getValue();
+        List<Object> order = new ArrayList<>();
+        for (String first : FIRST_KEYS) if (map.containsKey(first)) order.add(first);
+        for (Object k : map.keySet()) if (!FIRST_KEYS.contains(String.valueOf(k))) order.add(k);
+        for (Object rawKey : order) {
+            String k = String.valueOf(rawKey);
+            Object v = map.get(rawKey);
             if (DATA_KEYS.contains(k)) continue;
             if (v instanceof String s) {
+                List<String> names = new ArrayList<>();
                 if (REFERENCE_KEYS.contains(k) && s.startsWith("$")) {
-                    references.add(new String[] {s.substring(1), k});
+                    names.add(s.substring(1));
                 } else if (k.equals("name_from") || (inSenml && k.equals("name"))) {
                     Matcher m = TEMPLATE_REFERENCE.matcher(s);
-                    while (m.find()) references.add(new String[] {m.group(1), k});
+                    while (m.find()) names.add(m.group(1));
                 }
+                for (String n : names) if (!declared.contains(n)) ahead.add(new String[] {n, k});
             } else if (k.equals("default")) {
                 if ("match".equals(key) && (v instanceof Map || v instanceof List)) {
-                    walk(v, null, false, declared, references);   // a match's default is a field list
+                    walk(v, null, false, declared, ahead);   // a match's default is a field list
                 }
             } else {
-                walk(v, k, k.equals("senml"), declared, references);
+                walk(v, k, k.equals("senml"), declared, ahead);
             }
         }
     }

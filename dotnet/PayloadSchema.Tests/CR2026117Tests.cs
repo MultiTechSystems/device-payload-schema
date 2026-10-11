@@ -38,7 +38,12 @@ public class CR2026117Tests
                 + "cases: {1: [{name: r, type: number, ref: $rsn}]}}\n")]
     [InlineData("fields:\n  - {name: e, type: repeat, count: 1, index: i, count_as: k, fields: [{name: v, type: number, ref: $i}]}\n"
                 + "  - {name: after, type: number, ref: $k}\n")]
-    [InlineData("fields:\n  - {name: v, type: repeat, count: 2, present_if: {field: $element, ne: 0}, element: {type: u8}}\n")]
+    [InlineData("fields:\n  - {name: v, type: repeat, count: 2, present_if: {field: $element, ne: 0}, element: {name: element, type: u8}}\n")]
+    [InlineData("fields:\n  - tlv: {cases: {1: [{name: r, type: number, ref: $rsn}]}, tag_key: ch, "
+                + "tag_fields: [{name: rsn, type: u8}, {name: ch, type: u8}]}\n")]
+    [InlineData("fields:\n  - {name: _clu, type: u8}\n  - $ref: '#/definitions/d'\n"
+                + "definitions:\n  d: {fields: [{name: x, type: number, ref: $_clu}]}\n"
+                + "  unused: {fields: [{name: y, type: number, ref: $batery}]}\n")]
     [InlineData("fields:\n  - {name: a, type: u8}\n  - {name: b, type: number, ref: $eui}\n"
                 + "metadata: {include: [{name: eui, source: $device_eui}]}\n")]
     [InlineData("fields:\n  - {name: a, type: u8, lookup: {1: $nothing}}\n")]
@@ -62,5 +67,26 @@ public class CR2026117Tests
             Assert.False(output.ContainsKey("c"));
         else
             Assert.Equal(expected.Value, Convert.ToDouble(output["c"]));
+    }
+
+    [Fact]
+    public void AForwardReferenceIsRefusedAtLoad()
+    {
+        var e = Assert.ThrowsAny<Exception>(() => SchemaParser.Parse(
+            "name: t\nfields:\n  - {name: early, type: number, ref: $late}\n  - {name: late, type: u8}\n"));
+        Assert.Equal("`$late` (ref) is referenced before the schema declares it (PS-539, PS-122)", e.Message);
+        var f = Assert.ThrowsAny<Exception>(() => SchemaParser.Parse(
+            "name: t\nfields:\n  - {name: v, type: repeat, count: 2, present_if: {field: $element, ne: 0}, element: {type: u8}}\n"));
+        Assert.Contains("PS-539", f.Message);
+    }
+
+    [Fact]
+    public void ABooleanOperandFails()
+    {
+        var schema = SchemaParser.Parse("name: t\nfields:\n  - {name: flag, type: bool, bit: 0, consume: 1}\n"
+            + "  - {name: r, type: u8}\n"
+            + "  - {name: c, type: number, ref: $r, guard: {when: [{field: $flag, gte: 1}], else: -1}}\n");
+        var output = SchemaDecoder.Decode(schema, new byte[] { 0x01, 0x05 });
+        Assert.Equal(-1.0, Convert.ToDouble(output["c"]));   // PS-549
     }
 }
