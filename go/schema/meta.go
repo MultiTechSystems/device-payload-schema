@@ -100,6 +100,7 @@ func (s *Schema) Interpret(payload []byte, in InputContext) (map[string]any, err
 		selected = s.Fields
 	}
 	declared := s.metaDeclarations(fieldDecls(selected))
+	siblings := elementRepeats(fieldDecls(selected)) // PS-546
 	fields := map[string]any{}
 	for key := range result {
 		if strings.HasPrefix(key, "_") {
@@ -112,7 +113,7 @@ func (s *Schema) Interpret(payload []byte, in InputContext) (map[string]any, err
 		if source == nil {
 			fields[key] = map[string]any{}
 		} else {
-			fields[key] = s.fieldMeta(source, nil)
+			fields[key] = s.fieldMeta(source, nil, siblings)
 		}
 	}
 	meta["fields"] = fields
@@ -307,13 +308,16 @@ func (s *Schema) metaDeclarations(fields any) *declarations {
 // `identity` as PS-375 lists it - the repeat's index as {index, count}, or an element
 // field as {field, values}, open where a lookup default carries ${value} (PS-489). A
 // literal is itself.
-func (s *Schema) metaReference(value any, repeat map[string]any, bare bool) any {
+func (s *Schema) metaReference(value any, repeat map[string]any, bare bool, siblings map[string]map[string]any) any {
 	text, isString := value.(string)
 	if repeat == nil || !isString {
 		return value
 	}
 	if !(bare || strings.HasPrefix(text, "$")) {
 		return value
+	}
+	if m := siblingReference.FindStringSubmatch(text); m != nil {
+		return s.siblingListing(m[1], siblings) // PS-546, PS-547
 	}
 	name := strings.TrimPrefix(text, "$")
 	if index, ok := repeat["index"].(string); ok && name == index {
@@ -364,7 +368,7 @@ func (s *Schema) metaReference(value any, repeat map[string]any, bare bool) any 
 // fieldMeta mirrors field_meta: one `_meta.fields` entry from one declaration (PS-178,
 // PS-493, PS-480, PS-371, PS-481). repeat is the repeat whose elements the field belongs
 // to, for the per-element references of PS-373 and PS-375.
-func (s *Schema) fieldMeta(decl map[string]any, repeat map[string]any) map[string]any {
+func (s *Schema) fieldMeta(decl map[string]any, repeat map[string]any, siblings map[string]map[string]any) map[string]any {
 	entry := map[string]any{}
 	declaredType := metaType(decl)
 	if declaredType != "" {
@@ -379,7 +383,7 @@ func (s *Schema) fieldMeta(decl map[string]any, repeat map[string]any) map[strin
 		unit = decl["unit"]
 	}
 	if unit != nil {
-		entry["unit"] = s.metaReference(unit, repeat, false)
+		entry["unit"] = s.metaReference(unit, repeat, false, siblings)
 	}
 	if ipso := asStringMap(decl["ipso"]); ipso != nil {
 		if object, present := ipso["object"]; present {
@@ -393,7 +397,7 @@ func (s *Schema) fieldMeta(decl map[string]any, repeat map[string]any) map[strin
 			}
 			entry["ipso"] = map[string]any{
 				"object":   object,
-				"instance": s.metaReference(instance, repeat, false),
+				"instance": s.metaReference(instance, repeat, false, siblings),
 				"resource": resource,
 			}
 		}
@@ -415,25 +419,27 @@ func (s *Schema) fieldMeta(decl map[string]any, repeat map[string]any) map[strin
 				declared[k] = v
 			}
 		}
-		entry["element"] = s.fieldMeta(declared, decl)
+		entry["element"] = s.fieldMeta(declared, decl, siblings)
 		if identity, present := decl["identity"]; present {
-			entry["identity"] = s.metaReference(identity, decl, true)
+			entry["identity"] = s.metaReference(identity, decl, true, siblings)
 		}
 	case declaredType == "repeat":
 		elements := map[string]any{} // PS-371
 		members := s.metaDeclarations(decl["fields"])
+		inner := elementRepeats(decl["fields"])
 		for _, name := range members.names {
-			elements[name] = s.fieldMeta(members.decls[name], decl)
+			elements[name] = s.fieldMeta(members.decls[name], decl, inner)
 		}
 		entry["elements"] = elements
 		if identity, present := decl["identity"]; present {
-			entry["identity"] = s.metaReference(identity, decl, true)
+			entry["identity"] = s.metaReference(identity, decl, true, siblings)
 		}
 	case declaredType == "object":
 		nested := map[string]any{} // PS-481
 		members := s.metaDeclarations(decl["fields"])
+		inner := elementRepeats(decl["fields"])
 		for _, name := range members.names {
-			nested[name] = s.fieldMeta(members.decls[name], nil)
+			nested[name] = s.fieldMeta(members.decls[name], nil, inner)
 		}
 		entry["fields"] = nested
 	}

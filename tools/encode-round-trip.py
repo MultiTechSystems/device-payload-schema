@@ -62,6 +62,12 @@ The `inherent` reasons, each of which is a decision recorded elsewhere:
                     report - a zero divisor (PS-100), the log of a non-positive number
                     (PS-117), a failed guard with no `else` (PS-400), an unmapped lookup
                     (PS-269). The bytes that produced the absence are not in the output.
+  null-element      A repeat declaring `element` reports an omitted value as `null` in its
+                    position (PS-528). An encoder writes the element's first `sentinel` for
+                    it, and refuses the array, naming the position, where the element
+                    declares none (PS-544, CR-2026-121). Either way the bytes that produced
+                    a null from a lookup miss, an uncomputable value or a second sentinel
+                    are not in the output.
 
 One reason is *not* inherent and is reported separately, because it is a gap rather than a
 loss:
@@ -74,9 +80,6 @@ loss:
                     `channels` (Clause 4). Encoding that list is not defined yet, so the
                     encoders refuse it by name rather than write a payload with the entries
                     missing, which they used to do silently.
-  null-element      A repeat declaring `element` reports an omitted value as `null` in its
-                    position (PS-528). CR-2026-111 leaves open what an encoder writes for
-                    it, so every encoder refuses the array, naming the position (PS-529).
 """
 
 import argparse
@@ -106,10 +109,11 @@ INHERENT = (
     "lossy-value",
     "undescribed-bits",
     "ambiguous-case",
+    "null-element",
 )
 
 #: Recoverable in principle, so counted apart from the inherent set.
-FIXABLE = ("templated-name", "separate-tlv", "null-element")
+FIXABLE = ("templated-name", "separate-tlv")
 
 #: What a decode says when it could not read part of the payload. CR-2026-013 and
 #: CR-2026-021 put these there; they are the evidence this tool reads.

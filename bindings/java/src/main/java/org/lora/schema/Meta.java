@@ -152,8 +152,34 @@ final class Meta {
      * {@code ${value}} (PS-489). Anything else is itself.
      */
     static Object reference(Object value, Map<?, ?> repeat, boolean bare) {
+        return reference(value, repeat, bare, null);
+    }
+
+    /**
+     * As {@link #reference(Object, Map, boolean)}, where a {@code $name[i]} names the
+     * sibling repeat {@code name} in {@code siblings} (PS-546) and is listed as
+     * {repeat, values[, open]} from that repeat's element (PS-547).
+     */
+    static Object reference(Object value, Map<?, ?> repeat, boolean bare, Map<String, Map<?, ?>> siblings) {
         if (repeat == null || !(value instanceof String text)) return value;
         if (!(bare || text.startsWith("$"))) return value;
+        java.util.regex.Matcher sibling = Wave6a.SIBLING_REFERENCE.matcher(text);
+        if (sibling.matches()) {
+            Map<?, ?> target = siblings == null ? null : siblings.get(sibling.group(1));
+            Map<Object, Object> element = new LinkedHashMap<>();
+            if (target != null && target.get("element") instanceof Map<?, ?> el) element.putAll(el);
+            if (target != null) element.put("name", Wave6a.ELEMENT_NAME);
+            Map<String, Object> holder = new LinkedHashMap<>();
+            holder.put("element", element);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> inner = (Map<String, Object>) reference("$" + Wave6a.ELEMENT_NAME, holder, false, null);
+            Map<String, Object> listing = new LinkedHashMap<>();
+            listing.put("repeat", sibling.group(1));                       // PS-547
+            for (Map.Entry<String, Object> e : inner.entrySet()) {
+                if (!"field".equals(e.getKey())) listing.put(e.getKey(), e.getValue());
+            }
+            return listing;
+        }
         String name = text.startsWith("$") ? text.substring(1) : text;
         Map<String, Object> listing = new LinkedHashMap<>();
         if (name.equals(repeat.get("index"))) {
@@ -200,17 +226,25 @@ final class Meta {
      * PS-481). {@code repeat} is the repeat whose elements the field belongs to, or null.
      */
     static Map<String, Object> fieldMeta(Map<?, ?> fieldDef, Map<?, ?> repeat) {
+        return fieldMeta(fieldDef, repeat, null);
+    }
+
+    /**
+     * As {@link #fieldMeta(Map, Map)}; {@code siblings} are the element repeats of the field
+     * list the field is declared in, which a {@code $name[i]} names (PS-546).
+     */
+    static Map<String, Object> fieldMeta(Map<?, ?> fieldDef, Map<?, ?> repeat, Map<String, Map<?, ?>> siblings) {
         Map<String, Object> entry = new LinkedHashMap<>();
         String declaredType = metaType(fieldDef);
         if (declaredType != null) entry.put("type", declaredType);
         Map<?, ?> senml = fieldDef.get("senml") instanceof Map<?, ?> s ? s : Map.of();
         Object unit = truthy(senml.get("unit")) ? senml.get("unit") : fieldDef.get("unit");
-        if (unit != null) entry.put("unit", reference(unit, repeat, false));   // PS-178
+        if (unit != null) entry.put("unit", reference(unit, repeat, false, siblings));   // PS-178
         if (fieldDef.get("ipso") instanceof Map<?, ?> ipso && ipso.containsKey("object")) {
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("object", ipso.get("object"));
             out.put("instance", reference(ipso.containsKey("instance") ? ipso.get("instance") : 0,
-                    repeat, false));
+                    repeat, false, siblings));
             out.put("resource", ipso.containsKey("resource") ? ipso.get("resource") : 5700);
             entry.put("ipso", out);
         }
@@ -225,23 +259,25 @@ final class Meta {
             // `type: repeat` and its identity.
             Map<Object, Object> element = new LinkedHashMap<>((Map<?, ?>) fieldDef.get("element"));
             element.remove("name");
-            entry.put("element", fieldMeta(element, fieldDef));
+            entry.put("element", fieldMeta(element, fieldDef, siblings));
             if (fieldDef.containsKey("identity")) {
-                entry.put("identity", reference(fieldDef.get("identity"), fieldDef, true));
+                entry.put("identity", reference(fieldDef.get("identity"), fieldDef, true, siblings));
             }
         } else if ("repeat".equals(declaredType)) {
             Map<String, Object> elements = new LinkedHashMap<>();
+            Map<String, Map<?, ?>> inner = Wave6a.elementRepeats(fieldDef.get("fields"));
             for (Map.Entry<String, Map<?, ?>> member : declarations(fieldDef.get("fields")).entrySet()) {
-                elements.put(member.getKey(), fieldMeta(member.getValue(), fieldDef));   // PS-371
+                elements.put(member.getKey(), fieldMeta(member.getValue(), fieldDef, inner));   // PS-371
             }
             entry.put("elements", elements);
             if (fieldDef.containsKey("identity")) {
-                entry.put("identity", reference(fieldDef.get("identity"), fieldDef, true));
+                entry.put("identity", reference(fieldDef.get("identity"), fieldDef, true, siblings));
             }
         } else if ("object".equals(declaredType)) {
             Map<String, Object> members = new LinkedHashMap<>();
+            Map<String, Map<?, ?>> inner = Wave6a.elementRepeats(fieldDef.get("fields"));
             for (Map.Entry<String, Map<?, ?>> member : declarations(fieldDef.get("fields")).entrySet()) {
-                members.put(member.getKey(), fieldMeta(member.getValue(), null));        // PS-481
+                members.put(member.getKey(), fieldMeta(member.getValue(), null, inner));        // PS-481
             }
             entry.put("fields", members);
         }

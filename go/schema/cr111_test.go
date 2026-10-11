@@ -112,7 +112,7 @@ func TestCR111Encode(t *testing.T) {
 			t.Errorf("encode = %x, %v", got, err)
 		}
 		_, err = encode(map[string]any{"increments": []any{12, nil}})
-		want := "Repeat 'increments' has null at position 1, which has no encoding (PS-529)"
+		want := "Repeat 'increments' has null at position 1, and its element declares no `sentinel` to write for it (PS-544)"
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("null position: got %v, want %s", err, want)
 		}
