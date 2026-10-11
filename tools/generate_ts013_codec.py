@@ -115,7 +115,26 @@ function encReverseCanonical(v, f) {                  // reverse_canonical_modif
 var ENC_FLOAT_TYPES = ["f16", "f32", "f64", "udec", "sdec", "f32le16", "f32be16le",
                        "uflt16", "sflt16", "sflt24"];
 
+/* PS-168, PS-552: the value as the input gave it, for a rejection to name (_given_value). */
+var encGivenRec = null;
+function encGiven(f, v) { return (encGivenRec && encGivenRec.f === f) ? encGivenRec.v : v; }
+
+function encBounds(bits, signed) {                    // integer_bounds
+  return signed ? [-Math.pow(2, bits - 1), Math.pow(2, bits - 1) - 1] : [0, Math.pow(2, bits) - 1];
+}
+
+function encFits(raw, bits, signed, f, given, rangeType) {   // check_fits
+  if (bits > 48 || typeof raw !== "number") return raw;   // 64-bit: encIntBytes checks exactly
+  var b = encBounds(bits, signed);
+  if (raw < b[0] || raw > b[1]) {
+    encFail("Field '" + f.name + "': " + String(given) + " encodes as " + raw + ", outside " +
+            b[0] + " to " + b[1] + (rangeType ? " for " + rangeType : "") + " (PS-168)");
+  }
+  return raw;
+}
+
 function encReverseModifiers(v, f) {                  // _reverse_modifiers
+  encGivenRec = { f: f, v: v };
   v = encReverseLookup(v, f.lookup, f.name);
   if (typeof v === "boolean" && f.lookup) {
     encFail(v + " is not a label with a key of its own in the lookup for " +
@@ -320,8 +339,18 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
   var type = f.type;
   if (!type) encFail("Field '" + (f.name || "?") + "' declares no type");
   type = String(type);
-  if (/[\[:<]/.test(type)) { out.push(Number(value) & 0xFF); return; }
+  if (/[\[:<]/.test(type)) {
+    // A lone bit range, rounded and checked against its width (PS-552, PS-168). It was
+    // masked to a byte, silently.
+    var lbt = encBitType(type), lraw = encRint(Number(value));
+    encFits(lraw, lbt[2], type.charAt(0) === "s", f, encGiven(f, value), type);
+    encPacked(out, encPlace({}, lraw, lbt[1], lbt[2]), Math.max(1, lbt[0]), endian);
+    return;
+  }
   if (ENC_WORD_ORDERED[type]) {
+    if (typeof value === "number" && ENC_WORD_ORDERED[type][1] !== "f") {
+      value = encFits(encRint(value), 32, type.charAt(0) === "s", f, encGiven(f, value));
+    }
     var tmp = [];
     writeWordOrdered(tmp, 0, value, ENC_WORD_ORDERED[type][0], ENC_WORD_ORDERED[type][1]);
     for (var w = 0; w < 4; w++) out.push(tmp[w]);
@@ -330,10 +359,13 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
   if (ENC_TYPES[type]) {
     var size = ENC_TYPES[type][0], signed = ENC_TYPES[type][1];
     var iv = value;
+    // PS-552: the nearest integer, a tie to even, before any encoding; PS-168 after it.
+    if (typeof iv === "number") iv = encRint(iv);
     if (f.encoding) {
-      iv = encEncoding(Number(value) < 0 ? Math.ceil(Number(value)) : Math.floor(Number(value)), f.encoding, size);
+      iv = encEncoding(Number(iv), f.encoding, size);
       signed = false;
     }
+    encFits(iv, size * 8, signed, f, encGiven(f, value));
     encWriteInt(out, iv, size, signed, endian);
     return;
   }
@@ -582,8 +614,11 @@ function encLabelValue(label, f) {                    // _bitfield_label_value
   encFail(JSON.stringify(label) + " is not a declared value of " + JSON.stringify(f.name));
 }
 
-function encBitRun(out, run, data, ctx) {             // _encode_bitfield_run
-  var packed = {}, size = 1;
+function encBitRun(fr, run, data, ctx) {              // _encode_bitfield_run
+  // The run shares one base, in its fields' effective byte order (PS-059). Each range is
+  // ORed into the pending base and advances only by its own consume (CR-2026-136).
+  var endian = ctx.endian;
+  for (var j = 0; j < run.length; j++) if (run[j].endian) { endian = run[j].endian; break; }
   for (var i = 0; i < run.length; i++) {
     var f = run[i], name = f.name || "", v;   // a nameless range is refused at load (PS-553)
     if ("value" in f || name.charAt(0) === "_") v = encInternalValue(f, data);
@@ -595,12 +630,10 @@ function encBitRun(out, run, data, ctx) {             // _encode_bitfield_run
     if (!encIsNumber(v)) encFail("cannot encode " + JSON.stringify(f.name) + " into its bit range: " + JSON.stringify(v) + " is not a number");
     v = encRint(v);
     var bt = encBitType(f.type);
-    size = Math.max(size, bt[0], parseInt(f.consume || 0, 10) || 0);
-    packed = encPlace(packed, v, bt[1], bt[2]);
+    // PS-064 before PS-062: rejected, never masked into a neighbour's bits.
+    encFits(v, bt[2], String(f.type).charAt(0) === "s", f, encGiven(f, v), f.type);
+    encPlaceBits(fr, Math.max(1, bt[0]), endian, bt[1], bt[2], v, parseInt(f.consume || 0, 10) || 0);
   }
-  var endian = ctx.endian;
-  for (var j = 0; j < run.length; j++) if (run[j].endian) { endian = run[j].endian; break; }
-  encPacked(out, packed, Math.max(1, size), endian);
 }
 
 function encGroupWidth(f) {                          // byte_group_width
@@ -639,9 +672,12 @@ function encByteGroup(out, f, data, ctx) {            // _encode_byte_group
     v = encRint(v);
     if (String(g.type || "").indexOf("[") >= 0) {
       var bt = encBitType(g.type);
+      encFits(v, bt[2], String(g.type).charAt(0) === "s", g, encGiven(g, v), g.type);  // PS-168
       packed = encPlace(packed, v, bt[1], bt[2]);
     } else {                                    // a whole integer is its full range (PS-070)
-      packed = encPlace(packed, v, 0, ENC_TYPES[String(g.type)][0] * 8);
+      var wt = ENC_TYPES[String(g.type)];
+      encFits(v, wt[0] * 8, wt[1], g, encGiven(g, v));                       // PS-168
+      packed = encPlace(packed, v, 0, wt[0] * 8);
     }
   }
   var endian = (!Array.isArray(group) && group.endian) ? group.endian : ctx.endian;
@@ -704,29 +740,20 @@ function encGroupGiven(group, data) {                 // _flagged_group_given
 }
 
 function encFlagged(out, fg, data, ctx) {             // _encode_flagged
-  var groups = fg.groups || [];
+  // CR-2026-136: the given groups' members are one field list, laid out as a decoder
+  // reads them (a bool or bit range is its bits of a shared byte; an object is encoded).
+  var groups = fg.groups || [], members = [];
   for (var i = 0; i < groups.length; i++) {
     var gfs = groups[i].fields || [];
     if (!encGroupGiven(groups[i], data)) continue;
     if (gfs.some(function (g) { return g && typeof g === "object" && !g.name; })) {
-      encList(out, gfs, data, ctx);              // a construct in the group
+      // A construct in the group (a nested flagged block, a byte_group): all of it.
+      gfs.forEach(function (g) { if (g && typeof g === "object") members.push(g); });
       continue;
     }
-    for (var j = 0; j < gfs.length; j++) {
-      var g = gfs[j], name = g.name || "", v;
-      if (!name) continue;
-      if (ENC_COMPUTED.indexOf(g.type || "u8") >= 0) continue;
-      if (encIsLiteral(g)) continue;
-      if ("value" in g && name.charAt(0) !== "_") { encField(out, g, g.value, ctx); continue; }
-      if (name.charAt(0) === "_") v = encInternalValue(g, data);
-      else if (!encHas(data, name) && g.sentinel) {
-        encField(out, encRawBits(g), g.sentinel[0], ctx);
-        continue;
-      } else if (!encHas(data, name)) encFail(encMissing(name));   // PS-551
-      else v = data[name];
-      encField(out, g, encReverseModifiers(v, g), ctx);
-    }
+    gfs.forEach(function (g) { if (g && typeof g === "object" && g.name) members.push(g); });
   }
+  return encList(out, members, data, ctx);
 }
 
 function encCasePattern(value, pattern) {             // _match_case_pattern
@@ -783,12 +810,22 @@ function encParseInt0(text) {                         // int(text, 0)
   return neg ? -n : n;
 }
 
-function encMatch(out, f, data, ctx) {                // _encode_match
+function encMatch(out, f, data, ctx, peeked) {        // _encode_match
   var m = f.match || {}, cases = m.cases || {}, length = m.length;
   var dflt = m["default"] === undefined ? "error" : m["default"];
   var disc = null;
   if (m.name && Object.prototype.hasOwnProperty.call(data, m.name)) disc = data[m.name];
   else if (m.field) disc = encReference(String(m.field).replace(/^\$+/, ""), data);
+  if ((disc === null || disc === undefined) && m["var"] && encHas(data, m["var"])) disc = data[m["var"]];
+  if ((disc === null || disc === undefined) && length !== undefined && length !== null &&
+      peeked && peeked.length >= Number(length)) {
+    // CR-2026-136: a bit range before the match peeked and filled these bytes.
+    disc = 0;
+    for (var pb = 0; pb < Number(length); pb++) {
+      var at = ctx.endian === "little" ? Number(length) - 1 - pb : pb;
+      disc = disc * 256 + peeked[at];
+    }
+  }
   var key = null, body = null;
   if (disc !== null && disc !== undefined) {
     for (var k in cases) {
@@ -818,7 +855,7 @@ function encMatch(out, f, data, ctx) {                // _encode_match
     }
     encWriteInt(out, value, parseInt(length, 10), false, ctx.endian);
   }
-  encList(out, body, data, ctx);
+  return encList(out, body, data, ctx);
 }
 
 function encRecords(f, data) {                        // _repeat_records
@@ -1154,6 +1191,38 @@ function encHas(data, name) {
   return Object.prototype.hasOwnProperty.call(data, name) && data[name] !== null && data[name] !== undefined;
 }
 
+/* CR-2026-136 (FrameBuffer): OR `bytes` into what is pending, then write them. */
+function encEmit(fr, bytes, carried) {
+  var shared = Math.min(fr.pend.length, bytes.length);
+  var merged = [];
+  for (var i = 0; i < bytes.length; i++) merged.push(i < shared ? (bytes[i] | fr.pend[i]) : bytes[i]);
+  fr.pend.splice(0, shared);
+  carried = Math.min(carried || 0, merged.length);
+  // A nested list's unconsumed tail stays pending here (Frame in the reference).
+  for (var o = 0; o < merged.length - carried; o++) fr.out.push(merged[o]);
+  if (carried) {
+    var tail = merged.slice(merged.length - carried);
+    for (var t = 0; t < fr.pend.length; t++) {
+      if (t < tail.length) tail[t] |= fr.pend[t]; else tail.push(fr.pend[t]);
+    }
+    fr.pend = tail;
+  }
+}
+
+/* OR `value`, `width` bits at `start`, into the pending base of `base` bytes, then
+ * consume as declared (FrameBuffer.place_bits). */
+function encPlaceBits(fr, base, endian, start, width, value, consume) {
+  var bits = [];
+  encPacked(bits, encPlace({}, value, start, width), base, endian);
+  while (fr.pend.length < base) fr.pend.push(0);
+  for (var i = 0; i < base; i++) fr.pend[i] |= bits[i];
+  if (consume > 0) {
+    while (fr.pend.length < consume) fr.pend.push(0);
+    for (var c = 0; c < consume; c++) fr.out.push(fr.pend[c]);
+    fr.pend.splice(0, consume);
+  }
+}
+
 /* PS-551: what the input omits but the rest of it fixes (_derive_inputs and helpers). */
 function encSizeSource(fields, ref) {                 // _size_source
   for (var i = 0; i < (fields || []).length; i++) {
@@ -1261,18 +1330,30 @@ function encDerive(fields, data, ctx) {                 // _derive_inputs
 function encList(out, fields, data, ctx, top) {
   var omitted = null;
   data = encDerive(fields, data, ctx);
+  // CR-2026-136: a frame laid out as a decoder reads it (FrameBuffer). A bit range or
+  // bool that does not consume leaves its bytes pending, and the next field's are ORed in.
+  var fr = { out: [], pend: [] };
   encRuns(fields).forEach(function (item) {
-    if (item.bits) { encBitRun(out, item.bits, data, ctx); return; }
+    if (item.bits) { encBitRun(fr, item.bits, data, ctx); return; }
+    var tmp = [];
+    var carried = encOne(item, tmp);
+    encEmit(fr, tmp, typeof carried === "number" ? carried : 0);
+  });
+  for (var fo = 0; fo < fr.out.length; fo++) out.push(fr.out[fo]);
+  for (var fp = 0; fp < fr.pend.length; fp++) out.push(fr.pend[fp]);
+  return fr.pend.length;     // the bytes at the end still pending (Frame.pending)
+
+  function encOne(item, out) {
     var f = item.field, name = f.name || "", type = f.type === undefined ? "u8" : f.type;
     if (f.optional === true && f.name) {
       var okey = encResolveName(f, f.name, data);
       if (!encHas(data, okey === null ? f.name : okey)) { omitted = omitted || f.name; return; }
       if (omitted) encFail("optional field " + JSON.stringify(f.name) + " is supplied while the earlier optional field " + JSON.stringify(omitted) + " is not (PS-405)");
     }
-    if ("match" in f && !f.type) { encMatch(out, f, data, ctx); return; }
+    if ("match" in f && !f.type) { return encMatch(out, f, data, ctx, fr.pend); }
     if ("tlv" in f && !f.type) { encTlv(out, f, data, ctx); return; }
     if ("byte_group" in f) { encByteGroup(out, f, data, ctx); return; }
-    if ("flagged" in f && !f.type) { encFlagged(out, f.flagged, data, ctx); return; }
+    if ("flagged" in f && !f.type) { return encFlagged(out, f.flagged, data, ctx); }
     if (type === "repeat") { encRepeat(out, f, data, ctx, fields); return; }
     if (type === "object") {
       // Read back from the key a `name_from` object was reported under (CR-2026-030).
@@ -1280,8 +1361,7 @@ function encList(out, fields, data, ctx, top) {
       if (objKey === null) objKey = name;
       var nested = data[objKey];
       if (nested === null || typeof nested !== "object" || Array.isArray(nested)) encFail(encMissing(objKey));   // PS-551
-      encList(out, f.fields || [], nested, ctx);
-      return;
+      return encList(out, f.fields || [], nested, ctx);
     }
     if (ENC_COMPUTED.indexOf(type) >= 0) return;
     if (type === "skip") {
@@ -1309,8 +1389,13 @@ function encList(out, fields, data, ctx, top) {
       value = data[key];
     }
     if (type === "bitfield_string") { encBitfieldString(out, f, value, ctx); return; }
+    if (type === "bool") {                       // its bit of the byte it peeks
+      encPlaceBits(fr, 1, "big", Number(f.bit || 0), 1, value ? 1 : 0,
+                   parseInt(f.consume || 0, 10) || 0);
+      return;
+    }
     encField(out, f, encReverseModifiers(value, f), ctx);
-  });
+  }
 }
 
 function encodeRoot(fields, data, endian) {

@@ -73,6 +73,10 @@ final class Encoder {
             return new EncodeResult(EMPTY, warnings, errors);
         }
 
+        // deriveInputs also makes the masks the groups fix visible to the constructs before
+        // the block, as the decoder's variables are: dnt binds its mask with an inline
+        // match (CR-2026-136).
+
         // Bit ranges sharing a byte are packed together rather than a byte apiece
         // (CR-2026-024), so the whole list is walked at once: a run cannot be found by
         // looking at one field in isolation.
@@ -316,9 +320,17 @@ final class Encoder {
         return false;
     }
 
-    /** Encode the groups whose fields the data carries; the absent ones cost no bytes. */
+    /**
+     * Encode the groups whose fields the data carries; the absent ones cost no bytes.
+     *
+     * <p>CR-2026-136: the given groups' named members are one field list, laid out as a
+     * decoder reads them, so a bool or bit range in a group is its bits of a shared byte
+     * (vobo's digital groups) and a peek at the end of the block stays pending for the
+     * field after it. Each group used to be its own list, written whole. A member with no
+     * name is taken only where it is a construct in its group, as the reference takes it.
+     */
     private byte[] encodeFlagged(Field.FlaggedDef fd, Map<String, Object> data) {
-        ByteBuf out = new ByteBuf();
+        List<Field> members = new ArrayList<>();
         for (Field.FlaggedGroup group : fd.getGroups()) {
             if (!groupHasData(group, data)) continue;
             boolean hasConstruct = false;
@@ -327,30 +339,22 @@ final class Encoder {
             }
             if (hasConstruct) {
                 // A construct in the group - a nested flagged block, a byte_group - is
-                // encoded as any field list is. It was passed over as nameless, so a nested
-                // group's values were dropped without a word.
-                out.write(encodeFieldList(group.getFields(), data));
+                // encoded as any field list is, so the whole group joins the list. It was
+                // passed over as nameless, so a nested group's values were dropped.
+                members.addAll(group.getFields());
                 continue;
             }
-            // Routed through the run packing for consistency with every other field
-            // list, not because anything needs it today: no `flagged` group in the corpus
-            // holds a bit range - they are u16, u32le16 and computed members. A group
-            // that grows one will pack correctly rather than silently not.
-            // An internal member that reads bytes is encoded under PS-434 - its value, else
-            // the input's, else an error naming it - by encodeOne. It was skipped, writing
-            // none of its bytes, so every later member landed in its place.
-            List<Field> emit = new ArrayList<>();
             for (Field gf : group.getFields()) {
                 String name = gf.getName();
                 if (name == null || name.isEmpty()) continue;
                 if (isComputed(gf)) continue;
-                emit.add(gf);
+                members.add(gf);
             }
-            // A given group's members are each required (PS-551): encodeOne rejects one the
-            // input omits, which was written as zero.
-            out.write(encodeWithBitfieldRuns(emit, data, false));
         }
-        return out.toArray();
+        // A given group's members are each required (PS-551): encodeOne rejects one the
+        // input omits, which was written as zero. They are a field list like any other, so
+        // a nested block's mask is derived (deriveInputs) and a run of bit ranges is packed.
+        return encodeWithBitfieldRuns(members, deriveInputs(members, data), false);
     }
 
     /**
@@ -380,7 +384,10 @@ final class Encoder {
      */
     private byte[] encodeWithBitfieldRuns(List<Field> list, Map<String, Object> data,
                                           boolean topLevel) {
-        ByteBuf out = new ByteBuf();
+        // CR-2026-136: laid out as the decoder reads it. A range or bool that does not
+        // consume leaves its bytes pending, and the next field's bytes are ORed into them
+        // rather than written after them.
+        FrameBuffer out = new FrameBuffer();
         List<Field> run = new ArrayList<>();
         String omittedOptional = null;      // the first optional field the input left out
         for (Field field : list) {
@@ -404,8 +411,21 @@ final class Encoder {
                         continue;
                     }
                 }
+                byte[] savedPeek = peeked;
+                peeked = out.pending();
                 try {
-                    out.write(encodeOne(field, data, list));
+                    byte[] bytes = encodeOne(field, data, list);
+                    if (isPlacedBool(field)) {
+                        // A bool is its `bit` of the byte it peeks, advancing only where it
+                        // declares `consume` (PS-389, PS-066). It was written as a whole
+                        // byte of 0 or 1.
+                        int bit = field.getBoolBit() >= 0 ? field.getBoolBit() : field.getBitOffset();
+                        boolean set = bytes.length > 0 && bytes[0] != 0;
+                        out.placeBits(1, false, Math.max(0, bit), set ? 1 : 0, field.getConsume());
+                    } else {
+                        Integer tail = carriedTail.remove(bytes);
+                        out.extend(bytes, tail == null ? 0 : tail);
+                    }
                 } catch (RuntimeException e) {
                     if (!topLevel) throw e;
                     if (e instanceof MissingFieldException missing
@@ -417,6 +437,8 @@ final class Encoder {
                     } else {
                         errors.add("Error encoding " + describe(field) + ": " + e.getMessage());
                     }
+                } finally {
+                    peeked = savedPeek;
                 }
                 continue;
             }
@@ -427,15 +449,41 @@ final class Encoder {
             }
         }
         flushRun(out, run, data, topLevel);
-        return out.toArray();
+        int tail = out.pendingLength();
+        return carrying(out.frame(), tail);
+    }
+
+    /** A bool outside a byte_group: placed as its bit, not written as a byte. */
+    private static boolean isPlacedBool(Field field) {
+        return field.getType() == FieldType.BOOL
+                && (field.getByteGroup() == null || field.getByteGroup().isEmpty())
+                && field.getMatchInline() == null && field.getFlagged() == null
+                && field.getTlvInline() == null;
+    }
+
+    /** The bytes a bit range before the current field peeked and filled, if any. */
+    private byte[] peeked;
+
+    /**
+     * CR-2026-136: how many trailing bytes of a nested field list's result are still
+     * pending - peeked by a bit range or bool and consumed by nothing in that list. The
+     * enclosing list keeps them pending, so the field after the construct shares them, as
+     * a decoder reads it. Keyed by the array's identity, so a construct returning a nested
+     * list's bytes unchanged carries its tail with no extra plumbing.
+     */
+    private final Map<byte[], Integer> carriedTail = new java.util.IdentityHashMap<>();
+
+    private byte[] carrying(byte[] bytes, int tail) {
+        if (tail > 0 && bytes.length > 0) carriedTail.put(bytes, Math.min(tail, bytes.length));
+        return bytes;
     }
 
     /** Emit a pending run, if any, and clear it. */
-    private void flushRun(ByteBuf out, List<Field> run, Map<String, Object> data,
+    private void flushRun(FrameBuffer out, List<Field> run, Map<String, Object> data,
                           boolean topLevel) {
         if (run.isEmpty()) return;
         try {
-            out.write(encodeBitfieldRun(run, data));
+            encodeBitfieldRun(run, data, out);
         } catch (RuntimeException e) {
             if (!topLevel) {
                 run.clear();
@@ -449,10 +497,18 @@ final class Encoder {
         run.clear();
     }
 
-    /** Pack one run of bit ranges into the byte or bytes they share. */
-    private byte[] encodeBitfieldRun(List<Field> run, Map<String, Object> data) {
-        long packed = 0;
-        int size = 1;
+    /**
+     * Place one run of bit ranges into the byte or bytes they share. Each range is ORed
+     * into the frame's pending base and advances only by its own {@code consume}
+     * (CR-2026-136, PS-016), so bytes a range peeks are shared with the field that comes
+     * next, as a decoder reads them. The run used to be written whole, and the next
+     * field's bytes after it.
+     */
+    private void encodeBitfieldRun(List<Field> run, Map<String, Object> data, FrameBuffer out) {
+        // The run's shared base is in its fields' effective byte order (PS-059): a field's
+        // own `endian` where one declares it, else the schema's.
+        String declared = run.stream().map(Field::getEndian).filter(e -> e != null).findFirst().orElse(null);
+        boolean runLittle = declared != null ? "little".equals(declared) : little;
         for (Field member : run) {
             String name = member.getName() == null ? "" : member.getName();
             // A nameless range is refused at load (PS-553); it was written as zero bits.
@@ -472,15 +528,13 @@ final class Encoder {
                 // which would be the silent wrong answer this fix exists to remove.
                 raw = bitfieldLabelValue(value, member);
             }
-            size = Math.max(size, Math.max(1, Math.max(member.getBitBaseBytes(),
-                    member.getConsume())));
+            // PS-064 before PS-062: a value the range cannot hold is rejected, never masked
+            // into a neighbour's bits; the mask only keeps a signed value within the width.
+            checkBitRange(raw, member);                                  // PS-168, PS-552
             long mask = member.getBits() >= 64 ? -1L : (1L << member.getBits()) - 1;
-            packed |= (raw & mask) << member.getBitOffset();
+            out.placeBits(Math.max(1, member.getBitBaseBytes()), runLittle,
+                    member.getBitOffset(), raw & mask, member.getConsume());
         }
-        // The run's shared base is in its fields' effective byte order (PS-059): a field's
-        // own `endian` where one declares it, else the schema's.
-        String declared = run.stream().map(Field::getEndian).filter(e -> e != null).findFirst().orElse(null);
-        return writeInt(packed, size, false, declared != null ? "little".equals(declared) : little);
     }
 
     /** The number a bit range's {@code enum} or {@code values} label stands for. */
@@ -533,11 +587,14 @@ final class Encoder {
             if (raw == null) continue;
             if (member.getBits() > 0) {
                 // The width is the group's (PS-070, CR-2026-131), set when it was parsed.
+                checkBitRange(raw, member);                              // PS-168, PS-552
                 long mask = member.getBits() >= 64 ? -1L : (1L << member.getBits()) - 1;
                 packed |= (raw & mask) << member.getBitOffset();
             } else {
                 // A whole integer is its full range (PS-070), masked like any other member.
                 int bits = member.getType().defaultLength() * 8;
+                long[] wb = integerBounds(bits, member.getType().isSigned());
+                checkFits(raw, wb[0], wb[1], member.getName(), given(member, raw));   // PS-168
                 packed |= bits >= 64 ? raw : raw & ((1L << bits) - 1);
             }
         }
@@ -907,6 +964,25 @@ final class Encoder {
             }
         }
 
+        if (discriminator == null && match.getVar() != null && data.get(match.getVar()) != null) {
+            // An inline discriminator bound to a variable the rest of the input fixes -
+            // dnt's presence mask, which the flagged block after it reads.
+            discriminator = data.get(match.getVar());
+        }
+        byte[] peek = peeked;
+        if (discriminator == null && match.getLength() > 0 && peek != null
+                && peek.length >= match.getLength()) {
+            // CR-2026-136: a bit range before the match peeked these bytes and has filled
+            // them, so they are the discriminator the decoder will read (r718x's command
+            // and device bytes, dnt's first command).
+            long v = 0;
+            for (int i = 0; i < match.getLength(); i++) {
+                int b = peek[little ? match.getLength() - 1 - i : i] & 0xFF;
+                v = (v << 8) | b;
+            }
+            discriminator = v;
+        }
+
         Field.Case matched = null;
         if (discriminator != null) {
             for (Field.Case c : cases) {
@@ -976,8 +1052,10 @@ final class Encoder {
                 fallbackOut.write(writeInt(value == null ? 0 : value,
                         match.getLength(), false));
             }
-            fallbackOut.write(encodeFieldList(fallbackFields, data));
-            return fallbackOut.toArray();
+            byte[] body = encodeFieldList(fallbackFields, data);
+            Integer tail = carriedTail.remove(body);
+            fallbackOut.write(body);
+            return carrying(fallbackOut.toArray(), tail == null ? 0 : tail);
         }
 
         ByteBuf out = new ByteBuf();
@@ -997,8 +1075,11 @@ final class Encoder {
             }
             out.write(writeInt(value, match.getLength(), false));
         }
-        out.write(encodeFieldList(matched.getFields(), data));
-        return out.toArray();
+        byte[] body = encodeFieldList(matched.getFields(), data);
+        Integer tail = carriedTail.remove(body);
+        out.write(body);
+        // The body's unconsumed tail stays pending in the enclosing list (CR-2026-136).
+        return carrying(out.toArray(), tail == null ? 0 : tail);
     }
 
     /** The case whose fields the data carries most of, or null. */
@@ -1578,6 +1659,9 @@ final class Encoder {
      * reaches integer parsing as "Class A".
      */
     private Object reverseModifiers(Object value, Field field) {
+        // The value as given, for a PS-168 rejection to name (PS-552).
+        givenField = field;
+        givenValue = value;
         Object reversed = reverseLookup(value, field.getLookup());
 
         if (reversed instanceof Boolean flag && field.getLookup() != null
@@ -1742,6 +1826,8 @@ final class Encoder {
                 throw new SchemaException.EncodeException("field '" + field.getName()
                         + "': expected a number, got " + describeValue(value));
             }
+            long[] wb = integerBounds(32, type == FieldType.S32LE16);
+            checkFits(raw, wb[0], wb[1], field.getName(), given(field, raw));   // PS-168
             long combined = raw < 0 ? raw + 0x100000000L : raw;
             combined &= 0xFFFFFFFFL;
             ByteBuf wordOrdered = new ByteBuf();
@@ -1774,15 +1860,20 @@ final class Encoder {
                 throw new SchemaException.EncodeException("field '" + field.getName()
                         + "': expected a number, got " + describeValue(value));
             }
+            boolean signed = type.isSigned();
             if (field.getEncoding() != null) {
-                // The inverse of the named code, after the modifiers are reversed (PS-463).
+                // The inverse of the named code, after the modifiers are reversed (PS-463),
+                // and after rounding (PS-552). Written unsigned.
                 raw = Wave4.encodeEncoding(raw, field.getEncoding(), type.defaultLength(), field.getName());
+                signed = false;
             }
+            long[] ib = integerBounds(type.defaultLength() * 8, signed);
+            checkFits(raw, ib[0], ib[1], field.getName(), given(field, raw));   // PS-168
             // BINT is big-endian whatever the schema says, matching the decoder.
             boolean bigEndianOverride = type == FieldType.BINT;
             String fieldEndian = field.getEffectiveEndian(schema.getEndian());
             boolean useLittle = !bigEndianOverride && "little".equalsIgnoreCase(fieldEndian);
-            return writeInt(raw, type.defaultLength(), type.isSigned(), useLittle);
+            return writeInt(raw, type.defaultLength(), signed, useLittle);
         }
 
         if (type.isFloat()) {
@@ -2007,6 +2098,81 @@ final class Encoder {
         return writeInt(value, size, signed, little);
     }
 
+    /** The field whose value reverseModifiers last saw, and that value as given. */
+    private Field givenField;
+    private Object givenValue;
+
+    /** The value the input gave for {@code field}, before its arithmetic was inverted. */
+    private Object given(Field field, Object fallback) {
+        return field == givenField ? givenValue : fallback;
+    }
+
+    /**
+     * PS-168, PS-552: the rounded integer fits the field's type, or the input is rejected
+     * naming the field and the value given, in the spec prototype's words. The value is
+     * written as JavaScript's String(number) writes it, so a cross-language diff compares
+     * equal strings. Writing it masked or wrapped put another number on the air.
+     */
+    static long checkFits(long raw, long low, long high, String name, Object given) {
+        if (raw < low || raw > high) {
+            throw new SchemaException.EncodeException("Field '" + name + "': "
+                    + jsNumber(given) + " encodes as " + raw + ", outside " + low + " to "
+                    + high + " (PS-168)");
+        }
+        return raw;
+    }
+
+    /** The range of a whole integer of {@code bits} bits. */
+    static long[] integerBounds(int bits, boolean signed) {
+        if (bits >= 64) {
+            return signed ? new long[] {Long.MIN_VALUE, Long.MAX_VALUE}
+                    : new long[] {0, Long.MAX_VALUE};
+        }
+        return signed ? new long[] {-(1L << (bits - 1)), (1L << (bits - 1)) - 1}
+                : new long[] {0, (1L << bits) - 1};
+    }
+
+    /**
+     * A bit range's type is its width (PS-168, PS-552): the one place the bit-range reading
+     * of the rule lives, so it can be adjusted alone.
+     */
+    private long checkBitRange(long raw, Field member) {
+        long[] b = integerBounds(member.getBits(), member.isSignedBits());
+        if (raw < b[0] || raw > b[1]) {
+            // PS-064 (CR-2026-136): a bit range names its type after the range, as the
+            // prototype does: "... outside 0 to 15 for u8[0:3] (PS-168)".
+            throw new SchemaException.EncodeException("Field '" + member.getName() + "': "
+                    + jsNumber(given(member, raw)) + " encodes as " + raw + ", outside "
+                    + b[0] + " to " + b[1] + " for " + bitRangeType(member) + " (PS-168)");
+        }
+        return raw;
+    }
+
+    /** A bit range's type as the schema spells it, e.g. {@code u8[0:3]}. */
+    private static String bitRangeType(Field member) {
+        Object declared = member.getRaw() == null ? null : member.getRaw().get("type");
+        if (declared instanceof String text && text.contains("[")) return text;
+        return (member.isSignedBits() ? "s" : "u") + (Math.max(1, member.getBitBaseBytes()) * 8)
+                + "[" + member.getBitOffset() + ":" + (member.getBitOffset() + member.getBits() - 1) + "]";
+    }
+
+    /** A number as JavaScript's String(number) writes it; anything else as String.valueOf. */
+    static String jsNumber(Object value) {
+        if (value instanceof Boolean || !(value instanceof Number n)) return String.valueOf(value);
+        if (value instanceof Long || value instanceof Integer || value instanceof Short
+                || value instanceof Byte || value instanceof java.math.BigInteger) {
+            return value.toString();
+        }
+        double d = n.doubleValue();
+        if (d == Math.rint(d) && Math.abs(d) < 1e21) {
+            return new java.math.BigDecimal(d).toBigInteger().toString();
+        }
+        if (Math.abs(d) >= 1e-6 && Math.abs(d) < 1e21) {
+            return new java.math.BigDecimal(Double.toString(d)).stripTrailingZeros().toPlainString();
+        }
+        return Double.toString(d);
+    }
+
     private static byte[] writeInt(long value, int size, boolean signed, boolean little) {
         if (size <= 0) return EMPTY;
         if (size < 8) {
@@ -2128,6 +2294,82 @@ final class Encoder {
     }
 
     /** A growable byte sink; the encoders append to one of these rather than concatenate. */
+    /**
+     * The bytes a field list writes, laid out as a decoder reads them (CR-2026-136).
+     *
+     * <p>A bit range or a bool that does not {@code consume} leaves the bytes it filled
+     * pending: a decoder peeks them (PS-059, PS-066), so the next field reads the same
+     * bytes, and its own bits or bytes are ORed into them. Bytes still pending at the end
+     * are written too, since a decoder reads them. Mirrors the reference's FrameBuffer.
+     */
+    private static final class FrameBuffer {
+        private final ByteBuf buf = new ByteBuf();
+        private byte[] pending = new byte[0];
+
+        byte[] pending() {
+            return pending.clone();
+        }
+
+        int pendingLength() {
+            return pending.length;
+        }
+
+        void extend(byte[] data) {
+            extend(data, 0);
+        }
+
+        /**
+         * OR {@code data} over the pending bytes and write it, keeping its last
+         * {@code carried} bytes pending - a nested list's unconsumed tail - ORed with any
+         * older pending bytes beyond them.
+         */
+        void extend(byte[] data, int carried) {
+            if (data == null || data.length == 0) return;
+            carried = Math.min(carried, data.length);
+            if (pending.length > 0) {
+                data = data.clone();
+                int shared = Math.min(pending.length, data.length);
+                for (int i = 0; i < shared; i++) data[i] = (byte) (data[i] | pending[i]);
+                pending = java.util.Arrays.copyOfRange(pending, shared, pending.length);
+            }
+            if (carried > 0) {
+                buf.write(java.util.Arrays.copyOfRange(data, 0, data.length - carried));
+                byte[] tail = java.util.Arrays.copyOfRange(data, data.length - carried, data.length);
+                if (pending.length > tail.length) tail = java.util.Arrays.copyOf(tail, pending.length);
+                for (int i = 0; i < pending.length; i++) tail[i] = (byte) (tail[i] | pending[i]);
+                pending = tail;
+                return;
+            }
+            buf.write(data);
+        }
+
+        /** OR {@code bits} at {@code start} into the pending base; then consume (PS-016). */
+        void placeBits(int baseSize, boolean little, int start, long bits, int consume) {
+            if (pending.length < baseSize) pending = java.util.Arrays.copyOf(pending, baseSize);
+            long base = 0;
+            for (int i = 0; i < baseSize; i++) {
+                int b = pending[little ? baseSize - 1 - i : i] & 0xFF;
+                base = (base << 8) | b;
+            }
+            base |= bits << start;
+            for (int i = 0; i < baseSize; i++) {
+                int shift = (baseSize - 1 - i) * 8;
+                pending[little ? baseSize - 1 - i : i] = (byte) ((base >>> shift) & 0xFF);
+            }
+            if (consume > 0) {
+                if (pending.length < consume) pending = java.util.Arrays.copyOf(pending, consume);
+                buf.write(java.util.Arrays.copyOfRange(pending, 0, consume));
+                pending = java.util.Arrays.copyOfRange(pending, consume, pending.length);
+            }
+        }
+
+        byte[] frame() {
+            buf.write(pending);
+            pending = new byte[0];
+            return buf.toArray();
+        }
+    }
+
     private static final class ByteBuf {
         private byte[] buffer = new byte[64];
         private int size;

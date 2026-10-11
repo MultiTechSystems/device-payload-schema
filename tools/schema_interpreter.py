@@ -125,6 +125,107 @@ def read_word_ordered(field_type, data):
     return word
 
 
+class Frame(bytes):
+    """A field list's bytes, with how many at the end are still pending - peeked by a bit
+    range or bool and consumed by nothing in the list. The enclosing list keeps them
+    pending, so the field after the construct shares them, as a decoder reads it: vobo's
+    digital inputs peek a word inside a flagged block that the field after it reads."""
+
+    def __new__(cls, data=b'', pending=0):
+        frame = super().__new__(cls, data)
+        frame.pending = pending
+        return frame
+
+
+class FrameBuffer:
+    """The bytes a field list writes, laid out as a decoder reads them (CR-2026-136).
+
+    A bit range or a bool that does not `consume` leaves the bytes it filled *pending*: a
+    decoder peeks them (PS-059, PS-066), so the next field reads the same bytes, and its
+    own bits or bytes are ORed into them. Bytes still pending at the end are written too,
+    since a decoder reads them. The encoder used to write a run's bytes and then the next
+    field's after them - two bytes where the decoder reads one.
+    """
+
+    def __init__(self):
+        self.buf = bytearray()
+        self.pending = bytearray()
+
+    def extend(self, data) -> None:
+        carried = min(getattr(data, 'pending', 0), len(data))
+        data = bytes(data)
+        if self.pending and data:
+            shared = min(len(self.pending), len(data))
+            data = bytes(b | self.pending[i] if i < shared else b
+                         for i, b in enumerate(data))
+            del self.pending[:shared]
+        if carried:
+            # A nested list's unconsumed tail stays pending here (Frame).
+            self.buf.extend(data[:len(data) - carried])
+            tail = bytearray(data[len(data) - carried:])
+            for i, b in enumerate(self.pending):
+                if i < len(tail):
+                    tail[i] |= b
+                else:
+                    tail.append(b)
+            self.pending = tail
+            return
+        self.buf.extend(data)
+
+    def place_bits(self, base_size: int, byteorder: str, start: int, bits: int,
+                   consume: int) -> None:
+        """OR `bits` at `start` into the pending base; then consume as declared (PS-016)."""
+        if len(self.pending) < base_size:
+            self.pending.extend(bytes(base_size - len(self.pending)))
+        base = int.from_bytes(self.pending[:base_size], byteorder) | (bits << start)
+        self.pending[:base_size] = base.to_bytes(base_size, byteorder)
+        if consume > 0:
+            if len(self.pending) < consume:
+                self.pending.extend(bytes(consume - len(self.pending)))
+            self.buf.extend(self.pending[:consume])
+            del self.pending[:consume]
+
+    def frame(self) -> 'Frame':
+        return Frame(bytes(self.buf + self.pending), len(self.pending))
+
+
+def integer_bounds(size_bytes=None, signed=False, bits=None):
+    """The range a whole integer of `size_bytes` bytes, or of `bits` bits, holds."""
+    bits = bits if bits is not None else size_bytes * 8
+    if signed:
+        return -(1 << (bits - 1)), (1 << (bits - 1)) - 1
+    return 0, (1 << bits) - 1
+
+
+def round_to_integer(value):
+    """PS-552: the nearest integer to the binary64 value, a tie to even. Python's round()
+    on a float is exactly that; an int is already one."""
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    return int(round(float(value)))
+
+
+def check_fits(raw, low, high, name, given, bit_range=None):
+    """PS-168, PS-552: the rounded integer fits the field's type, a bit range's being its
+    width, or the encoder rejects the input naming the field and the value given. The spec
+    prototype's text; the value is written as JavaScript's String(number) writes it, so a
+    cross-language diff compares equal strings. Masking or wrapping it wrote another
+    number than the one given, silently.
+
+    A bit range (PS-064, CR-2026-136) names its type after the range, as the prototype
+    does: "... outside 0 to 15 for u8[0:3] (PS-168)"."""
+    if not low <= raw <= high:
+        shown = (format_lookup_value(given)
+                 if isinstance(given, (int, float)) and not isinstance(given, bool)
+                 else str(given))
+        where = f" for {bit_range}" if bit_range else ""
+        raise ValueError(f"Field '{name}': {shown} encodes as {raw}, outside {low} to "
+                         f"{high}{where} (PS-168)")
+    return raw
+
+
 def write_word_ordered(field_type, value):
     """The inverse of read_word_ordered."""
     layout, kind = WORD_ORDERED_TYPES[field_type]
@@ -134,7 +235,7 @@ def write_word_ordered(field_type, value):
         word = int(value)
         if word < 0:
             word += 0x100000000
-        word &= 0xFFFFFFFF
+        word &= 0xFFFFFFFF   # the caller has checked the value fits (PS-168)
     high, low = word >> 16, word & 0xFFFF
     if layout == 'le16':
         return low.to_bytes(2, 'big') + high.to_bytes(2, 'big')
@@ -5933,8 +6034,8 @@ class SchemaInterpreter:
             result.errors.append(direction_error)
             return result
 
-        output = bytearray()
-        
+        output = FrameBuffer()          # CR-2026-136: laid out as the decoder reads it
+
         fields = self._resolve_fields(fPort)
         # The fields this message is encoded from: a reference is looked for among them
         # before the rest of the schema, since each port may declare its own `code`.
@@ -5958,7 +6059,7 @@ class SchemaInterpreter:
             # come back as three bytes of unshifted values: `40` encoded as `020000`.
             if _kind == 'bits':
                 try:
-                    output.extend(self._encode_bitfield_run(_item, data))
+                    self._encode_bitfield_run(_item, data, output)
                 except Exception as e:
                     names = ", ".join(str(f.get('name')) for f in _item)
                     result.errors.append(error_text(f"Error encoding bit range(s) {names}: ", e))
@@ -6004,7 +6105,7 @@ class SchemaInterpreter:
             
             if 'match' in field_def and not field_def.get('type'):
                 try:
-                    output.extend(self._encode_match(field_def, data))
+                    output.extend(self._encode_match(field_def, data, output.pending))
                 except Exception as e:
                     result.errors.append(error_text(f"Error encoding match: ", e))
                 continue
@@ -6140,7 +6241,10 @@ class SchemaInterpreter:
                     continue
                 # Reverse modifiers
                 value = self._reverse_modifiers(value, field_def)
-                
+                if field_type == 'bool':
+                    self._place_bool(field_def, value, output)        # CR-2026-136
+                    continue
+
                 encoded = self._encode_field(field_def, value)
                 output.extend(encoded)
             except Exception as e:
@@ -6148,7 +6252,7 @@ class SchemaInterpreter:
         
         # A rejected input produces no payload: the bytes written before the error are a
         # frame short of the rest, as Go has always returned nothing.
-        result.payload = b'' if result.errors else bytes(output)
+        result.payload = b'' if result.errors else bytes(output.frame())
         result.warnings.extend(self._encode_warnings)
         return result
     
@@ -6331,10 +6435,14 @@ class SchemaInterpreter:
     def _encode_flagged(self, flagged_def: Dict[str, Any], data: Dict[str, Any]) -> bytes:
         """Encode flagged groups: only encode groups where data is present."""
         groups = flagged_def.get('groups', [])
-        output = bytearray()
-        
+        # CR-2026-136: the given groups' members are one field list, laid out as a
+        # decoder reads them, so a bool or bit range in a group is its bits of a shared
+        # byte (vobo's digital groups) and a construct in one is encoded as any is (dnt's
+        # object). Each member used to be written whole through _encode_field: a bool as
+        # a byte, an object as "Cannot encode type: object". A nameless member is taken
+        # only where it is a construct in its group (a nested flagged block, a byte_group).
+        members = []
         for group in groups:
-            bit = group.get('bit', 0)
             group_fields = group.get('fields', [])
             if not self._flagged_group_given(group, data):
                 continue
@@ -6342,41 +6450,14 @@ class SchemaInterpreter:
                 # A construct in the group - a nested flagged block, a byte_group - is
                 # encoded as any field list is. It was passed over as nameless, so a
                 # nested group's values were dropped without a word.
-                output.extend(self._encode_field_list(group_fields, data))
+                members.extend(gf for gf in group_fields if isinstance(gf, dict))
                 continue
-            for gf in group_fields:
-                gf_name = gf.get('name', '')
-                gf_type = gf.get('type', 'u8')
-                if not gf_name:
-                    continue
-                if is_literal(gf):
-                    continue                    # PS-359: a literal writes no bytes
-                if 'value' in gf and not gf_name.startswith('_'):
-                    output.extend(self._encode_field(gf, gf['value']))      # PS-360
-                    continue
-                if gf_type in COMPUTED_TYPES:
-                    # A derived value: computed from other fields, so it has no bytes of
-                    # its own. This skipped only the deprecated `formula` spelling, so a
-                    # field using `ref`, `compute`, `polynomial` or `guard` was encoded
-                    # as though it were on the wire.
-                    continue
-                if gf_name.startswith('_'):
-                    # PS-434. An internal member was skipped outright, writing none of
-                    # the bytes the decoder reads, so every later member was misplaced.
-                    value = self._internal_encode_value(gf, data)
-                elif data.get(gf_name) is None and gf.get('sentinel'):
-                    output.extend(self._encode_field(raw_bits_field(gf), gf['sentinel'][0]))   # PS-427
-                    continue
-                elif data.get(gf_name) is None:
-                    # PS-551: the group is given, so each of its values is required. A
-                    # member was written as zero, which reads back as a real zero.
-                    raise ValueError(missing_field_message(gf_name))
-                else:
-                    value = data[gf_name]
-                value = self._reverse_modifiers(value, gf)
-                output.extend(self._encode_field(gf, value))
-        
-        return bytes(output)
+            members.extend(gf for gf in group_fields
+                           if isinstance(gf, dict) and gf.get('name'))
+        # PS-551 holds here as in any field list: a given group's members are each
+        # required, and a missing one is rejected naming it.
+        return self._encode_field_list(members, data)
+
     
     def _encode_bitfield_string(self, field_def: Dict[str, Any], value: str) -> bytes:
         """Encode bitfield_string: parse string back into packed integer bytes."""
@@ -6448,11 +6529,15 @@ class SchemaInterpreter:
             value = self._reverse_modifiers(value, gf)
             if not isinstance(value, (int, float)):
                 continue
-            value = int(round(value))
+            value = round_to_integer(value)                                    # PS-552
             # A whole-integer member is its full range (PS-070): masked like any other, so
             # a negative s8 writes its own byte, not a sign extended across the group.
-            _, start, end, _ = byte_group_member_range(gf)
-            packed |= (value & ((1 << (end - start + 1)) - 1)) << start
+            _, start, end, signed = byte_group_member_range(gf)
+            width = end - start + 1
+            low, high = integer_bounds(signed=signed, bits=width)
+            check_fits(value, low, high, name, self._given_value(gf, value),
+                       gtype if '[' in gtype else None)                        # PS-168
+            packed |= (value & ((1 << width) - 1)) << start
         group_endian = byte_group_endian(field_def, self.endian)
         byteorder = 'little' if group_endian == Endian.LITTLE else 'big'
         return int(packed).to_bytes(max(1, size), byteorder)
@@ -6522,15 +6607,28 @@ class SchemaInterpreter:
         raise ValueError(
             f"{label!r} is not a declared value of {field_def.get('name')!r}")
 
+    def _place_bool(self, field_def: Dict[str, Any], value: Any, out: 'FrameBuffer') -> None:
+        """A bool is its `bit` of the byte it peeks, advancing only where it declares
+        `consume` (PS-389, PS-066). It was written as a whole byte of 0 or 1."""
+        out.place_bits(1, 'big', int(field_def.get('bit', 0) or 0), 1 if value else 0,
+                       int(field_def.get('consume', 0) or 0))
+
     def _encode_bitfield_run(self, run: List[Dict[str, Any]],
-                             data: Dict[str, Any]) -> bytes:
-        """Pack one run of bit ranges into the byte(s) they share.
+                             data: Dict[str, Any], out: 'FrameBuffer') -> None:
+        """Place one run of bit ranges into the byte(s) they share.
 
         The same shape as `_encode_byte_group`, which is the construct that already did
         this correctly - a run of bare bitfields is the same thing without the wrapper.
+        Each range is ORed into the frame's pending base and advances only by its own
+        `consume` (CR-2026-136, PS-016), so bytes a range peeks are shared with whatever
+        field comes next, as a decoder reads them. The run used to be written whole, and
+        the next field's bytes after it.
         """
-        packed = 0
-        size = 1
+        # The run shares one base, assembled in its fields' effective byte order (PS-059):
+        # a field's own `endian` where one declares it, else the schema's.
+        declared = next((f.get('endian') for f in run if f.get('endian')), None)
+        endian = Endian(declared) if declared else self.endian
+        byteorder = 'little' if endian == Endian.LITTLE else 'big'
         for field_def in run:
             name = field_def.get('name', '')
             ftype = str(field_def.get('type', ''))
@@ -6553,16 +6651,17 @@ class SchemaInterpreter:
                 raise ValueError(
                     f"cannot encode {field_def.get('name')!r} into its bit range: "
                     f"{value!r} is not a number")
-            value = int(round(value))
+            value = round_to_integer(value)                                    # PS-552
             base_size, start, width = self._parse_bitfield_type(ftype)
-            size = max(size, base_size, int(field_def.get('consume', 0) or 0))
-            packed |= (value & ((1 << width) - 1)) << start
-        # The run shares one base, assembled in its fields' effective byte order (PS-059):
-        # a field's own `endian` where one declares it, else the schema's.
-        declared = next((f.get('endian') for f in run if f.get('endian')), None)
-        endian = Endian(declared) if declared else self.endian
-        byteorder = 'little' if endian == Endian.LITTLE else 'big'
-        return int(packed).to_bytes(max(1, size), byteorder)
+            low, high = integer_bounds(signed=ftype.startswith('s'), bits=width)
+            # PS-064 before PS-062: a value the range cannot hold is rejected, never
+            # masked into a neighbour's bits; the mask only keeps a signed value's two's
+            # complement within the width.
+            check_fits(value, low, high, name,
+                       self._given_value(field_def, value), ftype)             # PS-168
+            out.place_bits(max(1, base_size), byteorder, start,
+                           value & ((1 << width) - 1),
+                           int(field_def.get('consume', 0) or 0))
 
     def _field_declaring_var(self, var_name: str) -> Optional[Dict[str, Any]]:
         """The field that declared ``var: <var_name>``: in the fields being encoded, else
@@ -6655,7 +6754,8 @@ class SchemaInterpreter:
                 best_key, best_fields, best_hits = case_key, case_fields, hits
         return best_key, best_fields
 
-    def _encode_match(self, field_def: Dict[str, Any], data: Dict[str, Any]) -> bytes:
+    def _encode_match(self, field_def: Dict[str, Any], data: Dict[str, Any],
+                      peeked: Optional[bytes] = None) -> bytes:
         """Rebuild a ``match`` construct's bytes from decoded output.
 
         Two sources of the discriminator, and they encode differently. An inline match
@@ -6677,6 +6777,18 @@ class SchemaInterpreter:
             discriminator = data[match_name]
         elif field_ref:
             discriminator = self._encode_reference(str(field_ref).lstrip('$'), data)
+
+        if discriminator is None and match_def.get('var') \
+                and data.get(match_def['var']) is not None:
+            # An inline discriminator bound to a variable the rest of the input fixes -
+            # dnt's presence mask, which the flagged block after it reads.
+            discriminator = data[match_def['var']]
+        if discriminator is None and length is not None and peeked \
+                and len(peeked) >= int(length):
+            # CR-2026-136: a bit range before the match peeked these bytes and has filled
+            # them, so they are the discriminator the decoder will read (r718x's command
+            # and device bytes, dnt's first command).
+            discriminator = int.from_bytes(bytes(peeked[:int(length)]), byteorder)
 
         matched_key, matched_fields = None, None
         if discriminator is not None:
@@ -6723,8 +6835,9 @@ class SchemaInterpreter:
                     raise ValueError(
                         f"match case {matched_key!r} names no single discriminator value")
             out.extend(int(value).to_bytes(int(length), byteorder))
-        out.extend(self._encode_field_list(matched_fields, data))
-        return bytes(out)
+        body = self._encode_field_list(matched_fields, data)
+        out.extend(body)
+        return Frame(bytes(out), getattr(body, 'pending', 0))
 
     def _encode_tlv_tag(self, case_key: Any, tlv_def: Dict[str, Any]) -> bytes:
         """Rebuild a TLV tag from the case key that matched it while decoding.
@@ -6769,13 +6882,13 @@ class SchemaInterpreter:
     def _encode_field_list(self, fields: List[Dict[str, Any]], data: Dict[str, Any]) -> bytes:
         """Encode a list of fields - a TLV case, match branch, repeat element or object."""
         data = self._derive_inputs(fields, data)                           # PS-551
-        out = bytearray()
+        out = FrameBuffer()             # CR-2026-136: laid out as the decoder reads it
         omitted_optional = None     # the first optional field the input left out (PS-405)
         for kind, item in self._bitfield_runs(fields):
             # A run of bit ranges shares one span of bytes, so it is packed once rather
             # than a byte per field (CR-2026-023).
             if kind == 'bits':
-                out.extend(self._encode_bitfield_run(item, data))
+                self._encode_bitfield_run(item, data, out)
                 continue
             f = item
             if not isinstance(f, dict):
@@ -6793,7 +6906,7 @@ class SchemaInterpreter:
                                      f"optional field {omitted_optional!r} is not (PS-405)")
             # A case body may hold another construct rather than a plain field.
             if 'match' in f and not f.get('type'):
-                out.extend(self._encode_match(f, data))
+                out.extend(self._encode_match(f, data, out.pending))
                 continue
             if 'tlv' in f and not f.get('type'):
                 out.extend(self._encode_tlv(f, data))
@@ -6856,8 +6969,11 @@ class SchemaInterpreter:
                 out.extend(self._encode_bitfield_string(f, str(value)))
                 continue
             value = self._reverse_modifiers(value, f)
+            if ftype == 'bool':
+                self._place_bool(f, value, out)                       # CR-2026-136
+                continue
             out.extend(self._encode_field(f, value))
-        return bytes(out)
+        return out.frame()
 
     def _encode_repeat_elements(self, field_def: Dict[str, Any], data: Dict[str, Any],
                                 records: List[Any], count: Optional[int] = None) -> bytes:
@@ -7228,6 +7344,8 @@ class SchemaInterpreter:
         # guard returned it untouched - reverse_lookup was dead code for every label,
         # and the label then reached int() as "invalid literal for int() with base 10:
         # 'Class A'". 69 corpus vectors failed to encode on exactly that.
+        # The value as given, for a PS-168 rejection to name (PS-552).
+        self._encode_given = (id(field_def), value)
         value = reverse_lookup(value, field_def.get('lookup'))
 
         if isinstance(value, bool) and field_def.get('lookup'):
@@ -7302,6 +7420,13 @@ class SchemaInterpreter:
                 self.endian = saved
         return self._encode_field_inner(field_def, value)
 
+    def _given_value(self, field_def: Dict[str, Any], value: Any) -> Any:
+        """The value the input gave for this field, before its arithmetic was inverted."""
+        recorded = getattr(self, '_encode_given', None)
+        if recorded is not None and recorded[0] == id(field_def):
+            return recorded[1]
+        return value
+
     def _encode_field_inner(self, field_def: Dict[str, Any], value: Any) -> bytes:
         """Encode a single field value."""
         field_type = field_def.get('type')
@@ -7310,26 +7435,43 @@ class SchemaInterpreter:
                 f"Field '{field_def.get('name', '?')}' declares no type"
             )
         
-        # Handle bitfields - simplified (just return byte with value)
+        given = self._given_value(field_def, value)
+
+        # A lone bit range: its byte, the value in place. Rounded and checked against the
+        # range's width (PS-552, PS-168), where it was masked to a byte silently.
         if any(c in str(field_type) for c in ['[', ':', '<']):
-            return bytes([int(value) & 0xFF])
+            base_size, start, width = self._parse_bitfield_type(str(field_type))
+            raw = round_to_integer(value)
+            low, high = integer_bounds(signed=str(field_type).startswith('s'), bits=width)
+            check_fits(raw, low, high, field_def.get('name'), given, str(field_type))
+            packed = (raw & ((1 << width) - 1)) << start
+            return packed.to_bytes(max(1, base_size), 'little' if self.endian == Endian.LITTLE
+                                   else 'big')
         
         type_info = INTEGER_TYPE_INFO
 
         # The inverse of the word-ordered read (PS-271): least significant 16-bit unit
         # first, each unit big-endian, and `endian` plays no part (PS-272).
         if field_type in WORD_ORDERED_TYPES:
+            if WORD_ORDERED_TYPES[field_type][1] != 'f':
+                raw = round_to_integer(value)                                 # PS-552
+                low, high = integer_bounds(4, field_type.startswith('s'))
+                check_fits(raw, low, high, field_def.get('name'), given)      # PS-168
+                value = raw
             return write_word_ordered(field_type, value)
 
         if field_type in type_info:
             size, signed = type_info[field_type]
-            int_val = int(value)
+            # PS-552: nearest, a tie to even, before any encoding; int() truncated.
+            int_val = round_to_integer(value)
             # Apply encoding if specified (sign_magnitude, bcd, gray)
             encoding = field_def.get('encoding')
             if encoding:
                 int_val = self._encode_encoding(int_val, encoding, size)
                 # Encoded values are written as unsigned
                 signed = False
+            low, high = integer_bounds(size, signed)
+            check_fits(int_val, low, high, field_def.get('name'), given)     # PS-168
             return self._write_int(int_val, size, signed)
         
         if field_type in MINIFLOAT_SIZES:

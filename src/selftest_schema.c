@@ -644,6 +644,134 @@ static void test_an_unknown_tag_is_left_over_from_the_tag(void) {
     TCHECK(r.bytes_unread == 2);
 }
 
+/* CR-2026-135 (PS-552, PS-168): nearest, a tie to even, on the binary64 value, and a
+ * value that rounds outside its type is rejected naming the field and the value given.
+ * The same figures as tests/cr-2026-135-cases.yaml, built through the struct API. */
+static int encode_one(field_def_t f, bool is_int, int64_t iv, double dv,
+                      encode_result_t* out) {
+    schema_t s;
+    encode_inputs_t inputs;
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    schema_add_field(&s, &f);
+    encode_inputs_init(&inputs);
+    if (is_int) encode_inputs_add_int(&inputs, f.name, iv);
+    else encode_inputs_add_double(&inputs, f.name, dv);
+    return schema_encode(&s, &inputs, out);
+}
+
+static bool encodes_to(field_def_t f, double v, const uint8_t* want, int len) {
+    encode_result_t out;
+    return encode_one(f, false, 0, v, &out) == SCHEMA_OK && out.len == len
+           && memcmp(out.data, want, (size_t)len) == 0;
+}
+
+static bool rejects(field_def_t f, bool is_int, int64_t iv, double dv, const char* msg) {
+    encode_result_t out;
+    return encode_one(f, is_int, iv, dv, &out) == SCHEMA_ERR_OVERFLOW && out.len == 0
+           && strcmp(out.error_msg, msg) == 0;
+}
+
+static void test_an_encoder_rounds_ties_to_even(void) {
+    field_def_t div10 = field_u16("x", ENDIAN_BIG);
+    field_def_t half = field_s8("x");
+    field_set_div(&div10, 10);
+    field_set_div(&half, 2);
+    TCHECK(encodes_to(field_u8("x"), 2.5, (const uint8_t[]){0x02}, 1));
+    TCHECK(encodes_to(field_u8("x"), 3.5, (const uint8_t[]){0x04}, 1));
+    TCHECK(encodes_to(field_u8("x"), 0.5, (const uint8_t[]){0x00}, 1));
+    /* (int64_t)(v + 0.5) rounded this twice, to 1. */
+    TCHECK(encodes_to(field_u8("x"), 0.49999999999999994, (const uint8_t[]){0x00}, 1));
+    TCHECK(encodes_to(field_s8("x"), -2.5, (const uint8_t[]){0xFE}, 1));
+    TCHECK(encodes_to(field_s8("x"), -3.5, (const uint8_t[]){0xFC}, 1));
+    TCHECK(encodes_to(div10, 0.15, (const uint8_t[]){0x00, 0x02}, 2));
+    TCHECK(encodes_to(div10, 0.25, (const uint8_t[]){0x00, 0x02}, 2));
+    /* 23.45 * 10 is 234.49999999999997: the binary64 value is rounded, so 234. */
+    TCHECK(encodes_to(div10, 23.45, (const uint8_t[]){0x00, 0xEA}, 2));
+    TCHECK(encodes_to(half, -1.25, (const uint8_t[]){0xFE}, 1));
+}
+
+static void test_a_value_that_does_not_fit_is_named(void) {
+    field_def_t div10 = field_u8("x");
+    field_set_div(&div10, 10);
+    TCHECK(rejects(div10, false, 0, 25.55,
+                   "Field 'x': 25.55 encodes as 256, outside 0 to 255 (PS-168)"));
+    TCHECK(rejects(field_u8("x"), false, 0, 255.5,
+                   "Field 'x': 255.5 encodes as 256, outside 0 to 255 (PS-168)"));
+    TCHECK(rejects(field_u8("x"), true, 256, 0,
+                   "Field 'x': 256 encodes as 256, outside 0 to 255 (PS-168)"));
+    TCHECK(rejects(field_u8("x"), true, -1, 0,
+                   "Field 'x': -1 encodes as -1, outside 0 to 255 (PS-168)"));
+    TCHECK(rejects(field_s8("x"), false, 0, -128.6,
+                   "Field 'x': -128.6 encodes as -129, outside -128 to 127 (PS-168)"));
+    TCHECK(rejects(field_u16("x", ENDIAN_BIG), true, 65536, 0,
+                   "Field 'x': 65536 encodes as 65536, outside 0 to 65535 (PS-168)"));
+    TCHECK(rejects(field_bits("x", 4, 4, true), true, 16, 0,
+                   "Field 'x': 16 encodes as 16, outside 0 to 15 for u8[4:7] (PS-168)"));
+    TCHECK(encodes_to(field_u8("x"), 255.4, (const uint8_t[]){0xFF}, 1));
+    TCHECK(encodes_to(field_bits("x", 4, 4, true), 2.5, (const uint8_t[]){0x20}, 1));
+}
+
+/* CR-2026-136 (PS-064, PS-062): bit ranges and bools are written as a decoder reads
+ * them - a non-consuming one shares its byte with the next field - and a value the range
+ * cannot hold is rejected rather than masked into its neighbour. */
+static int encode_fields(field_def_t* fields, int n, const char** names, const int64_t* vals,
+                         encode_result_t* out) {
+    schema_t s;
+    encode_inputs_t inputs;
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    for (int i = 0; i < n; i++) schema_add_field(&s, &fields[i]);
+    encode_inputs_init(&inputs);
+    for (int i = 0; i < n; i++) encode_inputs_add_int(&inputs, names[i], vals[i]);
+    return schema_encode(&s, &inputs, out);
+}
+
+static void test_bit_ranges_are_laid_out_as_decoded(void) {
+    encode_result_t out;
+    {
+        field_def_t f[] = { field_bits("a", 0, 4, false), field_bits("b", 4, 4, true),
+                            field_u8("c") };
+        const char* n[] = {"a", "b", "c"};
+        const int64_t v[] = {1, 2, 9};
+        TCHECK(encode_fields(f, 3, n, v, &out) == SCHEMA_OK);
+        TCHECK(out.len == 2 && out.data[0] == 0x21 && out.data[1] == 0x09);
+    }
+    {
+        field_def_t f[] = { field_bool("x", 0, false), field_bool("y", 7, true),
+                            field_u8("z") };
+        const char* n[] = {"x", "y", "z"};
+        const int64_t v[] = {1, 1, 5};
+        TCHECK(encode_fields(f, 3, n, v, &out) == SCHEMA_OK);
+        TCHECK(out.len == 2 && out.data[0] == 0x81 && out.data[1] == 0x05);
+    }
+    {
+        /* A peeked range, then the byte read whole: one byte, not two. */
+        field_def_t f[] = { field_bits("hi", 4, 4, false), field_u8("whole") };
+        const char* n[] = {"hi", "whole"};
+        const int64_t v[] = {3, 5};
+        TCHECK(encode_fields(f, 2, n, v, &out) == SCHEMA_OK);
+        TCHECK(out.len == 1 && out.data[0] == 0x35);
+    }
+    {
+        /* A range nothing consumes after it is still written. */
+        field_def_t f[] = { field_u8("a"), field_bits("b", 0, 4, false) };
+        const char* n[] = {"a", "b"};
+        const int64_t v[] = {1, 2};
+        TCHECK(encode_fields(f, 2, n, v, &out) == SCHEMA_OK);
+        TCHECK(out.len == 2 && out.data[0] == 0x01 && out.data[1] == 0x02);
+    }
+    {
+        field_def_t f[] = { field_bits("a", 0, 4, false), field_bits("b", 4, 4, true) };
+        const char* n[] = {"a", "b"};
+        const int64_t v[] = {16, 2};
+        TCHECK(encode_fields(f, 2, n, v, &out) == SCHEMA_ERR_OVERFLOW);
+        TCHECK(out.len == 0);
+        TCHECK(strcmp(out.error_msg,
+                      "Field 'a': 16 encodes as 16, outside 0 to 15 for u8[0:3] (PS-168)") == 0);
+    }
+}
+
 static void test_a_missing_input_is_named(void) {
     /* PS-551 (CR-2026-134): rejected, naming the field, with no payload. The code alone
      * was returned before, so a caller could not tell which input it had left out. */
@@ -703,6 +831,9 @@ void selftest_schema(void) {
     test_a_short_read_names_the_field();
     test_a_skip_is_written_on_encode();
     test_an_unknown_tag_is_left_over_from_the_tag();
+    test_an_encoder_rounds_ties_to_even();
+    test_a_value_that_does_not_fit_is_named();
+    test_bit_ranges_are_laid_out_as_decoded();
     test_a_missing_input_is_named();
 
     LOG(LOG_INFO, MOD, "Schema interpreter self-tests complete");

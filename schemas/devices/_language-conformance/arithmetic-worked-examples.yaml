@@ -1,0 +1,68 @@
+# The worked examples of Clause 3, "Choosing the order" (CR-2026-135): the figures the
+# table states, decoded by every implementation from one payload. Each field is one row.
+# The encoder side of the table - rounding ties to even (PS-552) - is in
+# encoder-rounding.yaml, since its vectors give values rather than bytes.
+name: probe_arithmetic_worked_examples
+endian: big
+fields:
+# raw / 10 - 40: 660 -> 26.0
+- name: scale_then_offset
+  type: u16
+  div: 10
+  add: -40
+# (raw - 400) / 10, as stages: 660 -> 26.0
+- name: offset_then_scale
+  type: u16
+  transform:
+  - add: -400
+  - div: 10
+# the same two numbers as bare keys mean 660 / 10 - 400 (PS-101)
+- name: bare_keys_mean_canonical
+  type: u16
+  div: 10
+  add: -400
+# raw * 100 / 4095: 2048 -> 50.01
+- name: adc_to_percent
+  type: u16
+  mult: 100
+  div: 4095
+# (raw - 2800) / 1400 * 100: 3600 mV -> 57.14
+- name: span_to_percent
+  type: u16
+  transform:
+  - add: -2800
+  - div: 1400
+  - mult: 100
+# (raw / 10 - 32) * 5/9: 770 -> 25.0
+- name: tenths_fahrenheit_to_celsius
+  type: u16
+  transform:
+  - div: 10
+  - add: -32
+  - mult: 0.5555555555555556
+# 1001 -> 100.1, outside the range, so omitted (PS-475)
+- name: ranged
+  type: u16
+  div: 10
+  valid_range: [0, 100]
+  out_of_range: omit
+# raw 10 -> 1 -> "one": table keys are in the scaled value (PS-107)
+- name: labelled_after_scaling
+  type: u8
+  div: 10
+  lookup:
+    1: one
+test_vectors:
+- name: the_table
+  source: spec-example
+  description: "Clause 3, Choosing the order: one row per field"
+  payload: "0294 0294 0294 0800 0E10 0302 03E9 0A"
+  expected:
+    scale_then_offset: 26.0
+    offset_then_scale: 26.0
+    bare_keys_mean_canonical: -334.0
+    adc_to_percent: 50.0122
+    span_to_percent: 57.1429
+    tenths_fahrenheit_to_celsius: 25.0
+    ranged: null
+    labelled_after_scaling: one

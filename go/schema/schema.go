@@ -421,6 +421,9 @@ type EncodeContext struct {
 	// returned bare bytes and so had nowhere to put them, which is why its
 	// encoder was the silent one. Read them with Schema.EncodeToResult.
 	Warnings []string
+	// pending holds the bytes a bit range or bool filled without consuming them
+	// (CR-2026-136); the next write is ORed into them. See placeBits.
+	pending []byte
 	// order is the schema's source key order, from which encodeTLV recovers the cases'
 	// declaration order (PS-527). A Go map has none.
 	order keyOrder
@@ -439,9 +442,10 @@ func NewEncodeContext(endian string) *EncodeContext {
 	}
 }
 
-// Write appends bytes to the buffer.
+// Write appends bytes to the buffer, ORed with whatever a bit range or bool before them
+// left pending: they are the bytes it peeked (CR-2026-136).
 func (ctx *EncodeContext) Write(data []byte) {
-	ctx.Buffer = append(ctx.Buffer, data...)
+	ctx.extend(data, 0)
 }
 
 // branch returns a context that writes to its own buffer while sharing the
@@ -4090,6 +4094,7 @@ func (s *Schema) encodeToContext(
 	if err := encodeFields(fields, data, ctx); err != nil {
 		return nil, err
 	}
+	ctx.flushPending() // a decoder reads the bytes still pending at the end
 
 	return ctx, nil
 }
@@ -4666,6 +4671,7 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 		if err := encodeFields(w.fields, w.data, inner); err != nil {
 			return err
 		}
+		inner.flushPending() // a tlv value is measured whole
 		ctx.Write(tag)
 		if field.LengthSize > 0 {
 			ctx.Write(encodeUint(uint64(len(inner.Buffer)), field.LengthSize, ctx.Endian))
@@ -4699,6 +4705,18 @@ func encodeMatch(field Field, siblings []Field, data map[string]any, ctx *Encode
 		} else if v, ok := ctx.Variables[varName]; ok {
 			discriminator = v
 		}
+	}
+
+	if discriminator == nil && field.Var != "" && data[field.Var] != nil {
+		// An inline discriminator bound to a variable the rest of the input fixes - dnt's
+		// presence mask, which the flagged block after it reads.
+		discriminator = data[field.Var]
+	}
+	if discriminator == nil && field.Length > 0 && len(ctx.pending) >= field.Length {
+		// CR-2026-136: a bit range before the match peeked these bytes and has filled
+		// them, so they are the discriminator the decoder will read (r718x's command and
+		// device bytes, dnt's first command).
+		discriminator = int(decodeUint(ctx.pending[:field.Length], ctx.Endian))
 	}
 
 	var chosen []Field
@@ -4839,10 +4857,22 @@ func encodeByteGroup(field Field, data map[string]any, ctx *EncodeContext) error
 		if !ok {
 			continue
 		}
-		num := uint64(int64(math.Round(raw)))
+		// PS-552: a tie to even; this rounded half up (math.Round), so 2.5 wrote 3.
+		rounded := roundToInteger(raw)
+		num := uint64(int64(rounded))
 		// A whole integer is its full range (PS-070), masked like any other member.
 		r := fieldMemberRange(gf)
 		width := uint(r.high - r.low + 1)
+		// PS-168: a value past the member's width is rejected; it was masked silently.
+		var fitErr error
+		if bitRangePattern.MatchString(string(gf.Type)) {
+			fitErr = bitRangeFitError(rounded, int(width), gf.Type, gf.Name, value)
+		} else {
+			fitErr = integerFitError(rounded, int(width), r.signed, gf.Name, value)
+		}
+		if fitErr != nil {
+			return fitErr
+		}
 		mask := ^uint64(0)
 		if width < 64 {
 			mask = (1 << width) - 1
@@ -4922,7 +4952,7 @@ func encodeRepeat(field Field, data map[string]any, ctx *EncodeContext, siblings
 	ctx.mergeWarnings(elements)
 	// PS-385: the elements, then the trailer, whose values sit beside the repeat.
 	if len(field.Trailer) > 0 {
-		return encodeFields(field.Trailer, data, ctx)
+		return encodeFieldsSealed(field.Trailer, data, ctx)
 	}
 	return nil
 }
@@ -4973,7 +5003,7 @@ func encodeRepeatRecords(field Field, records []any, ctx *EncodeContext, count i
 			bound[field.Index] = position + field.IndexBase // PS-530
 			record = bound
 		}
-		if err := encodeFields(field.Fields, record, ctx); err != nil {
+		if err := encodeFieldsSealed(field.Fields, record, ctx); err != nil {
 			return err
 		}
 	}
@@ -5022,8 +5052,15 @@ func isBareBitfieldField(f Field) bool {
 // thing without the wrapper - never was. CR-2026-023 fixed the Python reference encoder;
 // this is the same fix here (CR-2026-024).
 func encodeBitfieldRun(run []Field, data map[string]any, ctx *EncodeContext) error {
-	packed := uint64(0)
-	size := 1
+	// The run's shared base is assembled in its fields' effective byte order (PS-059):
+	// a field's own `endian` where one declares it, else the schema's.
+	endian := ctx.Endian
+	for _, gf := range run {
+		if gf.Endian != "" {
+			endian = gf.Endian
+			break
+		}
+	}
 	for _, gf := range run {
 		var value any = 0
 		if gf.Value != nil || strings.HasPrefix(gf.Name, "_") {
@@ -5051,30 +5088,26 @@ func encodeBitfieldRun(run []Field, data map[string]any, ctx *EncodeContext) err
 			}
 			raw = resolved
 		}
-		num := uint64(int64(math.Round(raw)))
+		// PS-552: a tie to even; this rounded half up (math.Round), so 2.5 wrote 3.
+		rounded := roundToInteger(raw)
 		m := bitRangePattern.FindStringSubmatch(string(gf.Type))
 		bits, _ := strconv.Atoi(strings.TrimLeft(m[1], "usf"))
 		start, _ := strconv.Atoi(m[2])
 		end, _ := strconv.Atoi(m[3])
-		if base := bits / 8; base > size {
-			size = base
-		}
-		if gf.Consume > size {
-			size = gf.Consume
-		}
 		width := uint(end - start + 1)
-		packed |= (num & ((1 << width) - 1)) << uint(start)
-	}
-	// The run's shared base is assembled in its fields' effective byte order (PS-059):
-	// a field's own `endian` where one declares it, else the schema's.
-	endian := ctx.Endian
-	for _, gf := range run {
-		if gf.Endian != "" {
-			endian = gf.Endian
-			break
+		// PS-064 before PS-062: a value the range cannot hold is rejected, never masked
+		// into a neighbour's bits; the mask only keeps a signed value's two's complement
+		// within the width (PS-168).
+		if err := bitRangeFitError(rounded, int(width), gf.Type, gf.Name, value); err != nil {
+			return err
 		}
+		// CR-2026-136: ORed into the pending base, advancing only by its own `consume`
+		// (PS-016), so bytes the range peeks are shared with whatever field comes next,
+		// as a decoder reads them. The run used to be written whole and the next field's
+		// bytes after it.
+		num := uint64(int64(rounded)) & (uint64(1)<<width - 1)
+		ctx.placeBits(bits/8, endian, uint(start), num, gf.Consume)
 	}
-	ctx.Write(encodeUint(packed, size, endian))
 	return nil
 }
 
@@ -5097,7 +5130,31 @@ func bitfieldLabelValue(value any, gf Field) (float64, error) {
 		gf.Name, label)
 }
 
+// encodeFields encodes a field list whose unconsumed tail - bytes a bit range or bool
+// peeked and nothing in the list consumed - stays pending for the field after the
+// construct, as a decoder reads it (CR-2026-136, the reference's Frame). A case body,
+// object, flagged members, a match body and a $ref carry it.
 func encodeFields(fields []Field, data map[string]any, ctx *EncodeContext) error {
+	outer, start := ctx.beginFieldList()
+	if err := encodeFieldList(fields, data, ctx); err != nil {
+		return err
+	}
+	ctx.endFieldList(outer, start, true)
+	return nil
+}
+
+// encodeFieldsSealed is encodeFields for a list whose bytes are written whole - a repeat
+// element or trailer, whose bytes the reference concatenates rather than carries.
+func encodeFieldsSealed(fields []Field, data map[string]any, ctx *EncodeContext) error {
+	outer, start := ctx.beginFieldList()
+	if err := encodeFieldList(fields, data, ctx); err != nil {
+		return err
+	}
+	ctx.endFieldList(outer, start, false)
+	return nil
+}
+
+func encodeFieldList(fields []Field, data map[string]any, ctx *EncodeContext) error {
 	// PS-551: a value the input omits but the rest of it fixes - a repeat's count or
 	// byte_length field, a match's discriminator, a flagged mask - is derived before
 	// anything is written, and a supplied one that disagrees is rejected. The flagged
@@ -5106,6 +5163,9 @@ func encodeFields(fields []Field, data map[string]any, ctx *EncodeContext) error
 	if err != nil {
 		return err
 	}
+	// deriveInputs also makes the masks the groups fix visible to the constructs before
+	// the block, as the decoder's variables are: dnt binds its mask with an inline match
+	// (CR-2026-136).
 	// The first optional field the input left out (PS-405).
 	omittedOptional := ""
 
@@ -5318,6 +5378,15 @@ func matchLabel(field Field) string {
 }
 
 func encodeFlagged(fd *FlaggedDef, data map[string]any, ctx *EncodeContext) error {
+	// CR-2026-136: the given groups' members are one field list, laid out as a decoder
+	// reads them, so a bool or bit range in a group is its bits of a shared byte (vobo's
+	// digital groups) and a construct in one is encoded as any is (dnt's object). Each
+	// group used to be written member by member, a run flushed whole at the group's end.
+	// Mirrors _encode_flagged in tools/schema_interpreter.py: a nameless member is taken
+	// only where it is a construct in its group (a nested flagged block, a byte_group),
+	// and the list goes through encodeFields, so PS-551 holds for each given group's
+	// members and a run of bit ranges is packed by encodeBitfieldRun (CR-2026-024).
+	var members []Field
 	for _, group := range fd.Groups {
 		if !flaggedGroupGiven(group, data) {
 			continue
@@ -5330,91 +5399,16 @@ func encodeFlagged(fd *FlaggedDef, data map[string]any, ctx *EncodeContext) erro
 			}
 		}
 		if hasConstruct {
-			// A construct in the group - a nested flagged block, a byte_group - is
-			// encoded as any field list is. It was passed over as nameless, so a nested
-			// group's values were dropped without a word.
-			if err := encodeFields(group.Fields, data, ctx); err != nil {
-				return err
-			}
+			members = append(members, group.Fields...)
 			continue
 		}
-		// Routed through the run packing for consistency with every other field list,
-		// not because anything needs it today: no `flagged` group in the corpus holds a
-		// bit range - they are u16, u32le16 and computed members. A group that grows one
-		// will pack correctly rather than silently not (CR-2026-024).
-		var run []Field
-		flush := func() error {
-			if len(run) == 0 {
-				return nil
-			}
-			pending := run
-			run = nil
-			return encodeBitfieldRun(pending, data, ctx)
-		}
 		for _, gf := range group.Fields {
-			// Unnamed and computed members are skipped. An internal member that reads
-			// bytes follows PS-434 below; it used to be skipped too, so its bytes went
-			// missing from the group and every later member landed at the wrong offset.
-			if gf.Name == "" {
-				continue
+			if gf.Name != "" {
+				members = append(members, gf)
 			}
-			// A derived value is computed from other fields and occupies no bytes of
-			// its own. Requiring the deprecated `formula` spelling here - the same
-			// defect encodeFields already had fixed - meant a field using `ref`,
-			// `compute`, `polynomial` or `guard` was encoded as though it were on the
-			// wire. It wrote nothing, because the type switch had no case for
-			// `number`, so the group's bytes came out right by accident; the switch's
-			// default now reports it, which is how this was found.
-			if isComputedField(gf) || isLiteralField(gf) {
-				continue
-			}
-			if isBareBitfieldField(gf) {
-				run = append(run, gf)
-				if gf.Consume >= 1 {
-					if err := flush(); err != nil {
-						return err
-					}
-				}
-				continue
-			}
-			if err := flush(); err != nil {
-				return err
-			}
-			var value any
-			if gf.Value != nil || strings.HasPrefix(gf.Name, "_") {
-				// PS-360, PS-434: its value, else the input's, else an error naming it.
-				v, err := internalEncodeValue(gf, data)
-				if err != nil {
-					return err
-				}
-				value = v
-			} else {
-				v, ok := data[gf.Name]
-				if !ok || v == nil {
-					if len(gf.Sentinel) > 0 {
-						// A reading omitted as "no reading" (PS-427) goes back as the
-						// sentinel's raw bits.
-						if err := encodeSentinel(gf, ctx); err != nil {
-							return err
-						}
-						continue
-					}
-					// PS-551: the group is given, so each of its values is required. A
-					// member the input omitted wrote nothing, and every later member
-					// landed at the wrong offset.
-					return missingFieldError(gf.Name)
-				}
-				value = v
-			}
-			if err := encodeField(gf, value, ctx); err != nil {
-				return err
-			}
-		}
-		if err := flush(); err != nil {
-			return err
 		}
 	}
-	return nil
+	return encodeFields(members, data, ctx)
 }
 
 func encodeBitfieldString(field Field, strVal string, ctx *EncodeContext) error {
@@ -5503,6 +5497,9 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 		endian = ctx.Endian
 	}
 
+	// The value as the input gave it, for a PS-168 rejection to name (CR-2026-135).
+	given := value
+
 	// Reverse the lookup first, before the numeric reversal below: a lookup's whole
 	// purpose is to report a label, so that is the form the value arrives in.
 	reversed, err := reverseLookupLabel(field, value)
@@ -5546,12 +5543,23 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 	// which left `u8[0:0]` falling through to write nothing. One byte of the value, as
 	// the reference interpreter writes it: a bare range does not own the byte it shares,
 	// so there is nothing better to reconstruct from a single field.
-	if bitRangePattern.MatchString(string(field.Type)) {
+	if m := bitRangePattern.FindStringSubmatch(string(field.Type)); m != nil {
 		numVal, ok := toFloat64(value)
 		if !ok {
 			return notANumber(field, value)
 		}
-		ctx.Write([]byte{byte(uint64(numVal) & 0xFF)})
+		// PS-552, PS-168: rounded and checked against the range's width, then placed in
+		// its base, as the reference writes it. It was masked to one byte silently.
+		bits, _ := strconv.Atoi(strings.TrimLeft(m[1], "usf"))
+		start, _ := strconv.Atoi(m[2])
+		end, _ := strconv.Atoi(m[3])
+		width := end - start + 1
+		raw := roundToInteger(numVal)
+		if err := bitRangeFitError(raw, width, field.Type, field.Name, given); err != nil {
+			return err
+		}
+		packed := (uint64(int64(raw)) & (uint64(1)<<uint(width) - 1)) << uint(start)
+		ctx.Write(encodeUint(packed, maxInt(bits/8, 1), endian))
 		return nil
 	}
 
@@ -5574,7 +5582,11 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 		if !ok {
 			return notANumber(field, value)
 		}
-		combined := int64(math.RoundToEven(numVal))
+		combined := int64(roundToInteger(numVal)) // PS-552
+		if err := integerFitError(float64(combined), 32, field.Type == TypeS32LE16,
+			field.Name, given); err != nil {
+			return err // PS-168: it was wrapped into 32 bits
+		}
 		if combined < 0 {
 			combined += 0x100000000
 		}
@@ -5588,6 +5600,13 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 		numVal, ok := toFloat64(value)
 		if !ok {
 			return notANumber(field, value)
+		}
+		if field.Type == TypeU32BE16LE || field.Type == TypeS32BE16LE {
+			numVal = roundToInteger(numVal) // PS-552
+			if err := integerFitError(numVal, 32, field.Type == TypeS32BE16LE,
+				field.Name, given); err != nil {
+				return err // PS-168
+			}
 		}
 		ctx.Write(writeWordOrdered(field.Type, numVal))
 
@@ -5615,16 +5634,31 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 		// and a conversion that truncates writes 4999. The reference interpreter rounds
 		// here (`int(round(value))`), and half-to-even is the repo's convention, so
 		// RoundToEven rather than Round (CR-2026-026).
+		raw := roundToInteger(numVal) // PS-552, before any encoding
 		if field.Encoding != "" {
 			// The inverse of the named code, after the modifiers are reversed (PS-463).
-			coded, err := encodeEncoding(int64(math.RoundToEven(numVal)), field.Encoding, length)
+			coded, err := encodeEncoding(int64(raw), field.Encoding, length)
 			if err != nil {
 				return fmt.Errorf("field %q: %v", field.Name, err)
+			}
+			if err := integerFitError(float64(coded), length*8, false, field.Name, given); err != nil {
+				return err // PS-168
 			}
 			ctx.Write(encodeUint(coded, length, endian))
 			break
 		}
-		ctx.Write(encodeUint(uint64(math.RoundToEven(numVal)), length, endian))
+		if _, exact, isUnsigned, ok := exactInteger(given, field); ok && isUnsigned {
+			// A u64 past 2^53, given as an integer, is written as given.
+			if length < 8 && exact > uint64(1)<<uint(length*8)-1 {
+				return integerFitError(float64(exact), length*8, false, field.Name, given)
+			}
+			ctx.Write(encodeUint(exact, length, endian))
+			break
+		}
+		if err := integerFitError(raw, length*8, false, field.Name, given); err != nil {
+			return err // PS-168: it was wrapped, u8 256 written as 00
+		}
+		ctx.Write(encodeUint(uint64(raw), length, endian))
 
 	case TypeSInt, TypeS8, TypeS16, TypeS24, TypeS32, TypeS64, TypeI8, TypeI16, TypeI32,
 		TypeI64:
@@ -5632,8 +5666,12 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 		if !ok {
 			return notANumber(field, value)
 		}
-		// Rounded, not truncated, for the reason the unsigned case above gives.
-		ctx.Write(encodeSint(int64(math.RoundToEven(numVal)), length, endian))
+		// Rounded, not truncated, for the reason the unsigned case above gives (PS-552).
+		raw := roundToInteger(numVal)
+		if err := integerFitError(raw, length*8, true, field.Name, given); err != nil {
+			return err // PS-168: it was wrapped, s8 -128.6 written as 7f
+		}
+		ctx.Write(encodeSint(int64(raw), length, endian))
 
 	case TypeF16:
 		// The encoder had no f16 case, so a schema that decoded one could not write it.
@@ -5750,7 +5788,9 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 				b = 1
 			}
 		}
-		ctx.Write([]byte{b})
+		// A bool is its `bit` of the byte it peeks, advancing only where it declares
+		// `consume` (PS-389, PS-066, CR-2026-136). It was written as a whole byte of 0 or 1.
+		ctx.placeBits(1, "big", uint(field.Bit), uint64(b), field.Consume)
 
 	case TypeEnum, TypeEnumLower:
 		// The label maps back through `values`; an unmapped one cannot be recovered.

@@ -1836,16 +1836,19 @@ def check_best_practices(schema: Dict[str, Any], result: ValidationResult) -> No
                         )
                     break
             
-            # Multiple bare modifiers: the arithmetic is applied in the canonical
-            # order (mult, div, add) whatever order the keys appear in, so a
-            # reader cannot tell the intent from the source. PS-262.
-            bare_modifiers = [key for key in ('mult', 'div', 'add') if key in fld]
-            if len(bare_modifiers) >= 2:
+            # PS-262 (amended by CR-2026-135): bare modifiers apply in the canonical
+            # order mult, div, add whatever order the keys are written in (PS-101), so
+            # keys written in another order suggest an author who meant that order,
+            # which is a transform (PS-102). Keys written canonically - `div: 10` then
+            # `add: -40`, the pattern Clause 3 recommends - are not warned about.
+            written = [key for key in fld if key in ('mult', 'div', 'add')]
+            canonical = [key for key in ('mult', 'div', 'add') if key in fld]
+            if written != canonical:
                 result.add_warning(
-                    "Uses %s together; these apply in the canonical order "
-                    "mult, div, add regardless of key order. Write the intended "
-                    "sequence as a transform array to make it explicit."
-                    % ", ".join(bare_modifiers),
+                    "Writes %s in that order; they apply in the canonical order %s "
+                    "regardless of key order (PS-101). Write the intended sequence as a "
+                    "transform array, or the keys in the canonical order (PS-262)."
+                    % (", ".join(written), ", ".join(canonical)),
                     f"{name}"
                 )
 
