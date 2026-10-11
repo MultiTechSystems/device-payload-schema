@@ -1,0 +1,44 @@
+# CR-2026-114 (la-payload-schema main c932961). A byte above 0x7F in text read from the
+# payload is reported as the ISO 8859-1 character of the same number - 0xE9 is "é" -
+# with PS-073's warning (PS-538). It is never U+FFFD, "?", a dropped byte or raw bytes.
+# Only trailing 0x00 bytes are padding: a 0x00 followed by any other byte is kept, and a
+# value of nothing but 0x00 is the empty string (PS-534).
+#
+# Round-trips: the encoder writes U+0080..U+00FF as the byte of the same number and pads
+# with 0x00 (PS-537), so each payload below re-encodes to itself.
+#
+# The C interpreter holds text as a C string, so it stops at the first 0x00 and reports
+# a high byte as itself; both are recorded C gaps, and its harness skips this file.
+name: probe_ascii_latin1
+endian: big
+fields:
+- name: label
+  type: ascii
+  length: 6
+test_vectors:
+- name: e_acute
+  source: spec-example
+  payload: "41 E9 00 00 00 00"
+  expected:
+    label: "Aé"
+  expected_warnings:
+    - "Field 'label': a byte above 0x7F in an ascii value (PS-073, PS-538)"
+- name: high_byte_bounds
+  source: spec-example
+  payload: "80 A0 FF 41 00 00"
+  expected:
+    label: "\u0080 ÿA"
+  expected_warnings:
+    - "Field 'label': a byte above 0x7F in an ascii value (PS-073, PS-538)"
+- name: interior_nul_kept
+  source: spec-example
+  payload: "41 42 00 43 00 00"
+  expected:
+    label: "AB\0C"
+  expected_warnings: []
+- name: all_nul
+  source: spec-example
+  payload: "00 00 00 00 00 00"
+  expected:
+    label: ""
+  expected_warnings: []

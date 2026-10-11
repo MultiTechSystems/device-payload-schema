@@ -1,0 +1,43 @@
+# `on_repeat: merge` on the tag-value loop combines the objects two entries report
+# under one name, member by member (PS-525, CR-2026-110). It reaches the loop's
+# `type: object` fields only: `battery` is a number, so it keeps collecting.
+#
+# This is the specification's own example, with a scalar case added. Both vectors
+# round-trip: an encoder writes one entry per case declaring members of the object,
+# in case declaration order (PS-527), and a collected array one entry per element under
+# the first case declaring the name (PS-502, CR-2026-125).
+name: probe_tlv_repeat_merge
+endian: big
+fields:
+- tlv:
+    tag_size: 2
+    on_repeat: merge
+    cases:
+      0x0310:
+      - name: loramac
+        type: object
+        fields:
+        - name: adr
+          type: u8
+      0x0311:
+      - name: loramac
+        type: object
+        fields:
+        - name: dr
+          type: u8
+      0x0001:
+      - name: battery
+        type: u8
+test_vectors:
+- name: object_members_combine
+  source: spec-example
+  payload: "0310 01 0311 05"
+  expected:
+    loramac:
+      adr: 1
+      dr: 5
+- name: number_keeps_collecting
+  source: spec-example
+  payload: "0001 02 0001 03"
+  expected:
+    battery: [2, 3]

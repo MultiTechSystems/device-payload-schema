@@ -20,6 +20,49 @@ public class SchemaException extends RuntimeException {
         }
     }
     
+    /**
+     * A read or skip past the end of the payload, less any {@code reserve} (PS-535).
+     *
+     * <p>Thrown unnamed by {@link DecodeContext#read} and {@link DecodeContext#peek}; the
+     * innermost field that made the read restates it as {@code Field '<name>': ... (PS-535)}
+     * ({@link #named}), and every enclosing field passes it through unchanged. The text is
+     * the spec prototype's, so a cross-language diff compares equal strings.
+     */
+    public static class BufferUnderflow extends DecodeException {
+        private final boolean named;
+        private final String detail;
+
+        public BufferUnderflow(String detail) {
+            super(detail);
+            this.named = false;
+            this.detail = detail;
+        }
+
+        private BufferUnderflow(String message, String detail) {
+            super(message);
+            this.named = true;
+            this.detail = detail;
+        }
+
+        public boolean isNamed() { return named; }
+
+        /** The unnamed text: "Buffer underflow: need ...". */
+        public String getDetail() { return detail; }
+
+        /** How PS-535 identifies a field: its name, else what it is. */
+        public static String label(String name, String kind) {
+            if (name != null && !name.isEmpty()) return "'" + name + "'";
+            return "an unnamed " + (kind == null || kind.isEmpty() ? "field" : kind);
+        }
+
+        /** This error as the field's, unless an inner field has already named it. */
+        public BufferUnderflow named(String name, String kind) {
+            if (named) return this;
+            return new BufferUnderflow("Field " + label(name, kind) + ": " + detail + " (PS-535)",
+                    detail);
+        }
+    }
+
     public static class EncodeException extends SchemaException {
         public EncodeException(String message) {
             super(message);
@@ -30,6 +73,16 @@ public class SchemaException extends RuntimeException {
         }
     }
     
+    /**
+     * An encode error whose text already names its field in full (PS-537), reported
+     * verbatim: the encoder does not prefix it with "Error encoding x: ".
+     */
+    public static class FieldEncodeException extends EncodeException {
+        public FieldEncodeException(String message) {
+            super(message);
+        }
+    }
+
     public static class ParseException extends SchemaException {
         public ParseException(String message) {
             super(message);

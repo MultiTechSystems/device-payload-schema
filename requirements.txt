@@ -6,6 +6,10 @@ pytest-asyncio>=0.21.0
 pytest-timeout>=2.1.0
 pytest-cov>=4.0.0
 hypothesis>=6.0.0
+# Parallel test runs (`make pytest` uses -n auto). 3.7 dropped Python 3.8, which tools
+# must still support, so 3.8 gets the last release that runs on it.
+pytest-xdist==3.8.0; python_version >= "3.9"
+pytest-xdist==3.6.1; python_version < "3.9"
 
 # Async networking
 aiohttp>=3.8.0

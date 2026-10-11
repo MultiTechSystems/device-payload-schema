@@ -95,13 +95,15 @@ def assert_same_verdict(schema, payload):
     if reference.success:
         assert not js["errors"], js
     else:
-        assert js["errors"] and js["data"] == {}, (reference.errors, js)
+        # PS-535: the same text as the reference, naming the same field.
+        assert js["errors"] == reference.errors and js["data"] == {}, (reference.errors, js)
 
 
 def test_flood_sensor_one_byte_is_an_error():
     js = decode_js(FLOOD, b"\x42")
     assert js["data"] == {} and js["errors"] == [
-        "Buffer too short: need 1 bytes at pos 1"
+        "Field 'battery': Buffer underflow: need 1 bytes at offset 1, but only 0 "
+        "remaining (PS-535)"
     ]
 
 

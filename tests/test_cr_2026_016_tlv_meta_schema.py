@@ -41,6 +41,7 @@ TLV = META["definitions"]["tlv"]
 IMPLEMENTED_KEYS = {
     "tag_size", "tag_fields", "tag_key", "length_size", "merge", "unknown", "cases",
     "reserve",   # PS-471, CR-2026-081
+    "on_repeat",  # PS-525, CR-2026-110
 }
 
 
@@ -110,6 +111,15 @@ class TestTheUnknownEnumAgreesWithTheValidator:
 
     def test_merge_defaults_to_true(self):
         assert TLV["properties"]["merge"]["default"] is True
+
+    def test_on_repeat_agrees_with_the_interpreter(self):
+        """CR-2026-110: the three modes, `collect` by default, as PS-525 defines them."""
+        from schema_interpreter import ON_REPEAT
+
+        assert TLV["properties"]["on_repeat"]["enum"] == list(ON_REPEAT)
+        assert TLV["properties"]["on_repeat"]["default"] == "collect"
+        field = META["definitions"]["field"]["properties"]["on_repeat"]
+        assert field["enum"] == list(ON_REPEAT)
 
 
 class TestTheCorpusConforms:

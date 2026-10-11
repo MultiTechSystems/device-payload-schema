@@ -68,6 +68,14 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # vector with no null (CR-2026-111), all repeat. Its two null vectors are refused.
 # +2: guard-set (CR-2026-118), plain fixed. The other three CR-2026-118 fixtures are
 # refused (PS-542, PS-387).
+# +1: tlv-repeat-merge's object_members_combine (CR-2026-110), tlv. The other
+# tlv-repeat-* vectors are lossy by design (last) or ambiguous (which tag carried an
+# element is not in the output).
+# +3: CR-2026-125 writes a collected array per element under the first declaring case
+# and a shared merged member once: tlv-repeat-merge number_keeps_collecting,
+# tlv-repeat-collect-first-case and tlv-repeat-merge-shared-member, all tlv.
+# +2: CR-2026-128, tlv-repeat-merge-shared-last and tlv-repeat-object-collect (each
+# collected object now finds the case whose members it supplies), both tlv.
 # +2: guard-set's empty `in` and `not_in` vectors (CR-2026-124), plain fixed.
 # +4: match-u32-inline-discriminator.
 # +4: names-mangling-alike, plain fixed.
@@ -78,7 +86,10 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # +6: lookup-reference-binding (CR-2026-109, CR-2026-132), match; the miss, default
 # and unnamed-enum vectors carry no value to write back.
 # +4: lookup-reference-binding vectors added for the mutation gate, match.
-FLOOR_TOTAL = 1824
+# (merged with master's +6 tlv-repeat/mutation-gate vectors)
+# +4: ascii-latin1 (CR-2026-114), all plain fixed: a byte above 0x7F re-encodes to itself.
+# +3: byte-group-width (CR-2026-131), byte_group.
+FLOOR_TOTAL = 1837
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -86,11 +97,11 @@ FLOOR_BY_SHAPE = {
     # 1283 -> 1281 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped
     # only because their internal byte halves were all zero, which the encoder wrote
     # for an internal field with no value. It now reports such a field instead.
-    "tlv": 1299,
+    "tlv": 1305,   # +2: CR-2026-128; +3: CR-2026-125 fixtures; +1: tlv-repeat-merge (CR-2026-110)
     "flagged": 193,
-    "plain fixed": 143,
+    "plain fixed": 147,
     "match": 139,  # +1: CR-2026-132 enum port; +5: lookup-reference-binding (CR-2026-109); +4: match-u32-inline-discriminator
-    "byte_group": 25,
+    "byte_group": 28,  # +3: byte-group-width (CR-2026-131)
     # 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now
     # carry only the definitions they reach, so one no longer has a `repeat` in an
     # unreferenced definition for the classifier to find.
@@ -159,6 +170,12 @@ def round_trip_results():
                 verdict = "bytes differ"
             tally[(shape, verdict)] += 1
     return tally, raises
+
+
+# Under pytest-xdist a module fixture is built once per worker that runs one of its tests,
+# so without this every worker would rebuild the corpus round trip (about 50 seconds). `make pytest` passes
+# `--dist loadgroup`, which keeps the module on one worker and builds it once.
+pytestmark = pytest.mark.xdist_group("encode-round-trip")
 
 
 @pytest.fixture(scope="module")

@@ -25,14 +25,15 @@ from dataclasses import dataclass, field
 
 # Add tools to path
 sys.path.insert(0, str(Path(__file__).parent))
-from schema_interpreter import (SchemaInterpreter, DecodeResult, check_byte_group_overlap,
+from schema_interpreter import (SchemaInterpreter, DecodeResult, byte_group_errors,
                                 byte_group_endian,
                                 encoding_errors, expand_refs, fport_declaration_errors,
                                 annotation_schema_errors, reference_errors,
                                 arithmetic_schema_errors, case_body_errors,
                                 internal_name_errors, meta_declaration_errors,
                                 literal_errors,
-                                lookup_template_errors, optional_errors, repeat_members,
+                                lookup_template_errors, on_repeat_schema_errors,
+                                optional_errors, repeat_members,
                                 CONDITION_OPS,
                                 schema_iterator_errors,
                                 timestamp_errors,
@@ -900,8 +901,9 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
             if span is not None and (not isinstance(span, int)
                                      or isinstance(span, bool) or span < 1):
                 errors.append(f"{bgpath}: 'size' must be an integer of at least 1")
+            # PS-070 and PS-397 (member kinds, overlap, a size no narrower than the widest
+            # member) are byte_group_errors', over every group wherever it sits.
             try:
-                check_byte_group_overlap(bg_fields)
                 byte_group_endian(fld, None)       # PS-364: no member endian
             except ValueError as exc:
                 errors.append(f"{bgpath}: {exc}")
@@ -1453,6 +1455,8 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
         # PS-539: every `$` reference names something the schema declares.
         errors.extend(reference_errors(expand_refs(schema)[0]))
         errors.extend(meta_declaration_errors(schema))           # PS-491
+        # PS-525, PS-526: on_repeat's values, merge on objects only, one mode per name.
+        errors.extend(on_repeat_schema_errors(expand_refs(schema)[0]))
         # PS-350, PS-366 to PS-387, PS-471: the repeat iterator and reserve.
         errors.extend(schema_iterator_errors(schema))
         # PS-014, PS-015, PS-464, PS-465: what `length` may be. Checked only on the
@@ -1464,6 +1468,7 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
             group = entry.get('fields') if isinstance(entry, dict) else entry
             errors.extend(optional_errors(group, f"ports[{port}].fields"))
         errors.extend(internal_name_errors(schema))
+        errors.extend(byte_group_errors(schema))                 # PS-070, PS-397
         for field_def in typed_field_dicts(schema):
             # PS-427: a list of integers. PS-428: omit or flag.
             sentinel = field_def.get('sentinel')

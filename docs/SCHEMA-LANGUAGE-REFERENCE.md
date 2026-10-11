@@ -96,7 +96,7 @@ the range is an error (PS-420).
 
 | Type | Description |
 |------|-------------|
-| `ascii` | ASCII string (requires `length:`) |
+| `ascii` | Text of `length:` bytes; trailing 0x00 padding dropped, a byte above 0x7F reported as its ISO 8859-1 character with a warning (PS-534, PS-538). Encoding pads with 0x00 and rejects a value too long or above U+00FF (PS-537) |
 | `hex` | Lowercase hex string (requires `length:`) |
 | `bytes` | Raw bytes, reported as declared by `format:` (requires `length:`, PS-456) |
 | `base64` | Base64 encoded output (requires `length:`) |
@@ -290,6 +290,18 @@ Shorthand (size inferred from field types):
     - name: value_b
       type: u8[4:7]
 ```
+
+Without `size`, a group covers its widest member's base type, whichever bytes that
+member's bits fall in: a `u16[0:3]` member makes the group two bytes, a `u32[...]` member
+four (PS-070, CR-2026-131). `size` may widen the group but not narrow it: a `size: 5`
+beside a `u64[...]` member is rejected when the schema is loaded, with `byte_group declares
+size 5, narrower than its widest member's 8 bytes (PS-070)`. Every implementation used to
+read a sizeless group as one byte.
+
+A member is a bit range, a whole integer (`u16` is `u16[0:15]` of the group's value) or a
+`bool` with `bit` (one bit of a `u8`, so `bit` is 0 to 7). Every member reads from the
+group's start, none moves the position, and all of them take part in the width and
+overlap checks; any other member is rejected.
 
 ## Arithmetic Modifiers
 
@@ -986,6 +998,37 @@ Parse tag-based variable content. Supports single and multi-byte tags.
 
 The loop stops where the reserved bytes begin, and the fields after it read them. Fewer
 bytes than `reserve` at the start is an error.
+
+### A name reported more than once (`on_repeat`)
+
+With `merge: true`, a name two entries report - whether they share a tag or not - is
+combined as its `on_repeat` says (PS-157, PS-525): `collect` (the default) gathers the
+values into an array in payload order, `last` keeps the value reported last, and `merge`
+combines `type: object` values member by member.
+
+```yaml
+- tlv:
+    tag_size: 2
+    on_repeat: merge      # default for this tlv's object fields; others keep collect
+    cases:
+      0x0310: [{name: loramac, type: object, fields: [{name: adr, type: u8}]}]
+      0x0311: [{name: loramac, type: object, fields: [{name: dr, type: u8}]}]
+# 0310 01 0311 05  ->  {"loramac": {"adr": 1, "dr": 5}}
+```
+
+A field's own `on_repeat` takes precedence over the tlv's. Only a `type: object` field may
+declare `merge`, and every field reporting one name must resolve to the same mode, or the
+schema is rejected (PS-526). A merged object reporting one member twice is an error,
+unless that member declares `on_repeat: last`. `on_repeat` anywhere else - outside a tlv,
+or on a member of an object that is not merged - is rejected (PS-525).
+
+Merged cases may share a member only where it declares `on_repeat: last` (PS-526).
+
+The encoder writes each value - a scalar, each element of an array PS-157 collected, a
+`last` value, a merged object's members - under the first case whose declared fields it
+supplies in full, and never zero-fills or drops one (PS-527). A shared `last` member is
+written in every case written for its object. A value no case takes in full, or a member
+no case declares, is an error naming it.
 
 ### Multi-Byte Tags (Tektelic-style)
 
