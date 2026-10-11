@@ -1209,15 +1209,22 @@ public static class SchemaDecoder
         return double.Parse(op, CultureInfo.InvariantCulture);
     }
 
-    internal static bool EvaluateGuardConditions(GuardDef gd, DecodeContext ctx)
+    /// <summary>
+    /// PS-540 (CR-2026-117): a condition whose field is absent (PS-314) or unbound fails,
+    /// so the guard's <c>else</c> applies, or the field is omitted without one (PS-400).
+    /// The PS-368 scope errors stay errors, except for a repeat's <c>present_if</c>,
+    /// evaluated once its element is whole (<paramref name="elementComplete"/>).
+    /// </summary>
+    internal static bool EvaluateGuardConditions(GuardDef gd, DecodeContext ctx,
+                                                 bool elementComplete = false)
     {
         foreach (var cond in gd.When)
         {
             var fieldName = cond.Field.TrimStart('$');
-            if (!ctx.Variables.TryGetValue(fieldName, out var fieldVal))
+            if (!ctx.Variables.TryGetValue(fieldName, out var fieldVal) || fieldVal == null)
             {
-                ctx.CheckUnbound(fieldName);    // PS-368
-                return false;
+                if (!elementComplete) ctx.CheckUnbound(fieldName);    // PS-368
+                return false;                                         // PS-540
             }
             var (ok, fv) = Helpers.ToFloat64(fieldVal);
             if (!ok) return false;
@@ -1747,7 +1754,8 @@ public static class SchemaDecoder
                     if (ctx.Variables.TryGetValue(name, out var carried))
                         carryState[name] = carried;
                 keep = field.PresentIf == null
-                       || EvaluateGuardConditions(new GuardDef { When = { field.PresentIf } }, ctx);
+                       || EvaluateGuardConditions(new GuardDef { When = { field.PresentIf } }, ctx,
+                                                  elementComplete: true);   // PS-540
             }
             finally
             {

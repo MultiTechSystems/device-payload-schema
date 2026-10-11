@@ -810,6 +810,88 @@ def annotation_schema_errors(node, _top=True):
     return errors
 
 
+#: Keys whose string value may be a `$` reference (PS-539), as the spec prototype's
+#: key_vocabulary.REFERENCE_KEYS lists them.
+REFERENCE_KEYS = ('ref', 'a', 'b', 'field', 'count', 'byte_length', 'carry', 'instance',
+                  'unit', 'identity')
+#: Keys whose string value is a template of `${name}` references (PS-265, PS-373).
+TEMPLATE_KEYS = ('name_from',)
+#: Keys under which a field tree holds data, not declarations or references. A
+#: `default` is data too, except a match's, which is a field list.
+REFERENCE_DATA_KEYS = ('lookup', 'values', 'else', 'value')
+TEMPLATE_REFERENCE = re.compile(r'\$\{(\w+)\}')
+
+
+def reference_errors(schema):
+    """PS-539 (CR-2026-117): every `$` reference names something the schema declares - a
+    field, a `var`, a tag component, a repeat's `index` or `count_as` - in the header,
+    the fields, a port or a definition, at any depth. A `metadata` include or timestamp
+    name counts as declared; a `metadata.include` `source` names runtime input (PS-315)
+    and is not checked. Whether the name is bound when it is read is a decode matter
+    (PS-314), so a name declared later or in a branch not taken is valid here.
+
+    The walk is the spec prototype's `key_vocabulary.check_references`, and Go, Java and
+    C# walk the raw document the same way and give the message identically."""
+    if not isinstance(schema, dict):
+        return []
+    declared, references = set(), []
+
+    def walk(node, key=None, in_senml=False):
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+            return
+        if not isinstance(node, dict):
+            return
+        if not in_senml:
+            for name_key in ('name', 'var', 'index', 'count_as'):
+                if isinstance(node.get(name_key), str):
+                    declared.add(node[name_key])
+            # An `element` that declares no name is decoded as `element` (PS-528), so
+            # its `present_if` and `name_from` can name it.
+            if isinstance(node.get('element'), dict) and \
+                    not isinstance(node['element'].get('name'), str):
+                declared.add('element')
+        for k, v in node.items():
+            if k in REFERENCE_DATA_KEYS:
+                continue
+            if isinstance(v, str):
+                if k in REFERENCE_KEYS and v.startswith('$'):
+                    references.append((v[1:], k))
+                elif k in TEMPLATE_KEYS or (in_senml and k == 'name'):
+                    references.extend((r, k) for r in TEMPLATE_REFERENCE.findall(v))
+            elif k == 'default':
+                if key == 'match' and isinstance(v, (dict, list)):
+                    walk(v)                     # a match's default is a field list
+            else:
+                walk(v, k, in_senml=(k == 'senml'))
+
+    for part in ('header', 'fields'):
+        walk(schema.get(part))
+    for part in ('ports', 'definitions'):
+        if isinstance(schema.get(part), dict):
+            for group in schema[part].values():
+                walk(group)
+    metadata = schema.get('metadata')
+    if isinstance(metadata, dict):
+        for entry in (metadata.get('include') or []) + (metadata.get('timestamps') or []):
+            if isinstance(entry, dict) and isinstance(entry.get('name'), str):
+                declared.add(entry['name'])
+    errors = []
+    for name, key in references:
+        if name not in declared:
+            message = reference_error_message(name, key)
+            if message not in errors:
+                errors.append(message)
+    return errors
+
+
+def reference_error_message(name, key):
+    """PS-539's wording, the spec prototype's, identical in Go, Java and C#."""
+    return (f"`${name}` ({key}) names no field, var, tag component, index or count_as "
+            f"the schema declares (PS-539)")
+
+
 #: The literal types (PS-357). `boolean` is a literal type only (PS-519): it is not
 #: an alias of `bool`, which reads a bit (PS-065).
 LITERAL_TYPES = ('string', 'number', 'boolean')
@@ -2193,6 +2275,7 @@ class SchemaInterpreter:
             self._load_errors.extend(lookup_template_errors(field_def))
         self._load_errors.extend(arithmetic_schema_errors(schema))    # PS-445, PS-452
         self._load_errors.extend(annotation_schema_errors(schema))    # PS-510
+        self._load_errors.extend(reference_errors(schema))            # PS-539
         self._load_errors.extend(meta_declaration_errors(schema))      # PS-491
         self._load_errors.extend(timestamp_errors(schema.get('metadata')))
         self._load_errors.extend(schema_iterator_errors(schema))
@@ -2979,8 +3062,11 @@ class SchemaInterpreter:
                 for carried in carry_state:
                     if carried in self._variables:
                         carry_state[carried] = self._variables[carried]
+                # The element is whole here, so a name of it with no value is absent,
+                # not "not yet decoded", and the condition fails (PS-540).
                 keep = (not field_def.get('present_if')
-                        or self._evaluate_guard({'when': [field_def['present_if']]})[0])
+                        or self._evaluate_guard({'when': [field_def['present_if']]},
+                                                element_complete=True)[0])
             finally:
                 # PS-368: an element's names do not outlive it.
                 self._variables = outer
@@ -3756,13 +3842,20 @@ class SchemaInterpreter:
         else:
             raise ValueError(f"Unknown compute op: {op}")
     
-    def _evaluate_guard(self, guard_def: Dict[str, Any]) -> Tuple[bool, Any]:
+    def _evaluate_guard(self, guard_def: Dict[str, Any],
+                        element_complete: bool = False) -> Tuple[bool, Any]:
         """
         Evaluate guard conditions.
         
         guard_def: {when: [{field: '$x', gt: 0}, ...], else: fallback}
         
         Returns: (conditions_passed, fallback_value)
+
+        PS-540 (CR-2026-117): a condition whose field is absent (PS-314) or unbound
+        fails, so `else` applies, or the field is omitted without one (PS-400). It was
+        read as 0 here, which passed `gte: 0` on a value the device never sent. The
+        PS-368 scope errors stay errors, except for a repeat's `present_if`, evaluated
+        once its element is whole (`element_complete`).
         """
         when_conditions = guard_def.get('when', [])
         else_value = guard_def.get('else', None)
@@ -3771,7 +3864,11 @@ class SchemaInterpreter:
             field_ref = condition.get('field', '')
             if isinstance(field_ref, str) and field_ref.startswith('$'):
                 field_name = field_ref[1:]
-                field_value = float(self._ref(field_name))
+                field_value = (self._variables.get(field_name, OMITTED) if element_complete
+                               else self._ref_value(field_name))
+                if field_value is OMITTED:
+                    return (False, else_value)
+                field_value = float(field_value)
             else:
                 continue  # Invalid condition
             

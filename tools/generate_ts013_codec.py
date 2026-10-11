@@ -1253,9 +1253,12 @@ def condition_to_js(cond: Dict[str, Any]) -> str:
     for op, js in (('gt', '>'), ('gte', '>='), ('lt', '<'), ('lte', '<='),
                    ('eq', '==='), ('ne', '!==')):
         if op in cond:
-            return f'({field_js} {js} {cond[op]})'
+            # PS-540: an absent operand fails the condition. JS would compare
+            # `undefined !== 3` as true and `null >= 0` as true.
+            return f'({field_js} != null && {field_js} {js} {cond[op]})'
     if 'in' in cond or 'not_in' in cond:
-        return f'({set_condition_to_js(field_js, cond)})'
+        # PS-540: an absent operand fails `not_in` too.
+        return f'({field_js} != null && {set_condition_to_js(field_js, cond)})'
     return 'true'
 
 
@@ -1282,7 +1285,10 @@ def guard_to_js(guard: Dict[str, Any], value_expr: str, else_hook: str = '') -> 
             field_js = f'vars.{to_js_name(field_ref[1:])}'  # see ref_to_js
         else:
             continue
-        
+        # PS-540: an absent operand fails the condition; JS would pass `undefined !== 3`
+        # and `null >= 0`.
+        if any(op in cond for op in ('gt', 'gte', 'lt', 'lte', 'eq', 'ne', 'in', 'not_in')):
+            conditions.append(f'{field_js} != null')
         if 'gt' in cond:
             conditions.append(f'{field_js} > {cond["gt"]}')
         elif 'gte' in cond:
@@ -1525,6 +1531,8 @@ class TS013Generator:
         # PS-510: ipso and senml are mappings, and ipso carries `object`.
         from schema_interpreter import annotation_schema_errors
         iterator_problems += annotation_schema_errors(schema)
+        from schema_interpreter import reference_errors
+        iterator_problems += reference_errors(schema)            # PS-539
         iterator_problems += meta_declaration_errors(schema)    # PS-491
         # PS-358, PS-519, PS-520: a malformed literal, as the interpreter refuses it.
         from schema_interpreter import literal_errors, typed_field_dicts
