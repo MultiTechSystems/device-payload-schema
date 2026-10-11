@@ -3,13 +3,13 @@
   "min_score_new": 0.8,
   "include_library_composed": false,
   "distribution": {
-    "100%": 181,
-    "95-99%": 19,
-    "90-94%": 2,
-    "80-89%": 8,
+    "100%": 211,
+    "95-99%": 21,
+    "90-94%": 3,
+    "80-89%": 10,
     "70-79%": 1,
     "<70%": 1,
-    "unscored": 5
+    "unscored": 13
   },
   "schemas": {
     "_language-conformance/arithmetic-order-computed.yaml": {
@@ -29,6 +29,16 @@
       "unreached": 0,
       "generated": 42,
       "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/ascii-nul-padding.yaml": {
+      "score": null,
+      "killed": 0,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 0,
+      "vectors": 3,
       "provenance": "independent",
       "failing_original": 0
     },
@@ -52,6 +62,16 @@
       "provenance": "independent",
       "failing_original": 0
     },
+    "_language-conformance/bitfield-string-wide.yaml": {
+      "score": null,
+      "killed": 0,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 2,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "_language-conformance/bitfield-string.yaml": {
       "score": null,
       "killed": 0,
@@ -60,6 +80,26 @@
       "generated": 0,
       "vectors": 1,
       "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/boolean-literal.yaml": {
+      "score": 1.0,
+      "killed": 9,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 17,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/byte-group-bool.yaml": {
+      "score": 1.0,
+      "killed": 6,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 10,
+      "vectors": 3,
+      "provenance": "independent",
       "failing_original": 0
     },
     "_language-conformance/bytes-format.yaml": {
@@ -90,6 +130,36 @@
       "generated": 9,
       "vectors": 8,
       "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/digit-leading-name.yaml": {
+      "score": 1.0,
+      "killed": 20,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 27,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/element-case-several-readings.yaml": {
+      "score": 1.0,
+      "killed": 11,
+      "survived": 0,
+      "unreached": 1,
+      "generated": 17,
+      "vectors": 3,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/element-several-readings.yaml": {
+      "score": 0.8333,
+      "killed": 5,
+      "survived": 1,
+      "unreached": 1,
+      "generated": 11,
+      "vectors": 3,
+      "provenance": "independent",
       "failing_original": 0
     },
     "_language-conformance/encode-padding.yaml": {
@@ -142,6 +212,16 @@
       "provenance": "generated-only",
       "failing_original": 0
     },
+    "_language-conformance/flagged-group-field-list.yaml": {
+      "score": 1.0,
+      "killed": 22,
+      "survived": 0,
+      "unreached": 3,
+      "generated": 33,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "_language-conformance/float-endian.yaml": {
       "score": 1.0,
       "killed": 8,
@@ -152,12 +232,42 @@
       "provenance": "independent",
       "failing_original": 0
     },
+    "_language-conformance/guard-absent-operand.yaml": {
+      "score": 1.0,
+      "killed": 8,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 17,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/guard-boolean-operand.yaml": {
+      "score": 1.0,
+      "killed": 5,
+      "survived": 0,
+      "unreached": 2,
+      "generated": 12,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "_language-conformance/guard-else-as-declared.yaml": {
       "score": 1.0,
       "killed": 12,
       "survived": 0,
       "unreached": 0,
       "generated": 15,
+      "vectors": 4,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/guard-set.yaml": {
+      "score": 1.0,
+      "killed": 6,
+      "survived": 0,
+      "unreached": 1,
+      "generated": 11,
       "vectors": 4,
       "provenance": "independent",
       "failing_original": 0
@@ -212,6 +322,16 @@
       "provenance": "independent",
       "failing_original": 0
     },
+    "_language-conformance/lookup-boolean-labels.yaml": {
+      "score": 0.8333,
+      "killed": 5,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 7,
+      "vectors": 4,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "_language-conformance/lookup-default-template.yaml": {
       "score": 0.8571,
       "killed": 12,
@@ -230,6 +350,16 @@
       "generated": 5,
       "vectors": 1,
       "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/lookup-number-labels.yaml": {
+      "score": 1.0,
+      "killed": 11,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 14,
+      "vectors": 4,
+      "provenance": "independent",
       "failing_original": 0
     },
     "_language-conformance/match-case-range.yaml": {
@@ -300,6 +430,26 @@
       "generated": 16,
       "vectors": 2,
       "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/match-u32-inline-discriminator.yaml": {
+      "score": 1.0,
+      "killed": 3,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 4,
+      "vectors": 4,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/match-u32-peek-discriminator.yaml": {
+      "score": 1.0,
+      "killed": 7,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 9,
+      "vectors": 4,
+      "provenance": "generated-only",
       "failing_original": 0
     },
     "_language-conformance/match-var.yaml": {
@@ -392,6 +542,26 @@
       "provenance": "independent",
       "failing_original": 0
     },
+    "_language-conformance/name-from-object.yaml": {
+      "score": 1.0,
+      "killed": 6,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 11,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/name-from-rendering.yaml": {
+      "score": 0.95,
+      "killed": 38,
+      "survived": 2,
+      "unreached": 0,
+      "generated": 62,
+      "vectors": 8,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "_language-conformance/name-from-var.yaml": {
       "score": 1.0,
       "killed": 4,
@@ -412,6 +582,46 @@
       "provenance": "generated-only",
       "failing_original": 0
     },
+    "_language-conformance/names-mangling-alike.yaml": {
+      "score": 1.0,
+      "killed": 8,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 15,
+      "vectors": 4,
+      "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/numeric-looking-text.yaml": {
+      "score": null,
+      "killed": 0,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 1,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/object-member-field-list.yaml": {
+      "score": 1.0,
+      "killed": 21,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 36,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/object-unnamed-skip.yaml": {
+      "score": 1.0,
+      "killed": 8,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 15,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "_language-conformance/optional-trailing.yaml": {
       "score": 1.0,
       "killed": 10,
@@ -425,6 +635,16 @@
     "_language-conformance/out-of-range-omit.yaml": {
       "score": 1.0,
       "killed": 5,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 7,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/present-if-set.yaml": {
+      "score": 1.0,
+      "killed": 4,
       "survived": 0,
       "unreached": 0,
       "generated": 7,
@@ -462,6 +682,16 @@
       "provenance": "generated-only",
       "failing_original": 0
     },
+    "_language-conformance/reference-to-absent.yaml": {
+      "score": 1.0,
+      "killed": 9,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 17,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "_language-conformance/repeat-byte-length-span.yaml": {
       "score": 1.0,
       "killed": 7,
@@ -492,6 +722,26 @@
       "provenance": "independent",
       "failing_original": 0
     },
+    "_language-conformance/repeat-count-computed.yaml": {
+      "score": 1.0,
+      "killed": 2,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 5,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/repeat-count-zero-width.yaml": {
+      "score": 1.0,
+      "killed": 3,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 5,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "_language-conformance/repeat-count.yaml": {
       "score": 1.0,
       "killed": 4,
@@ -502,12 +752,92 @@
       "provenance": "generated-only",
       "failing_original": 0
     },
+    "_language-conformance/repeat-element-internal-name.yaml": {
+      "score": null,
+      "killed": 0,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 0,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/repeat-element-named.yaml": {
+      "score": 1.0,
+      "killed": 2,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 4,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/repeat-element-null-sentinel.yaml": {
+      "score": null,
+      "killed": 0,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 0,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/repeat-element-null.yaml": {
+      "score": null,
+      "killed": 0,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 0,
+      "vectors": 3,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/repeat-element-object.yaml": {
+      "score": null,
+      "killed": 0,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 0,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/repeat-element-unnamed.yaml": {
+      "score": null,
+      "killed": 0,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 0,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/repeat-identity-sibling.yaml": {
+      "score": 1.0,
+      "killed": 2,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 5,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "_language-conformance/repeat-identity.yaml": {
       "score": 1.0,
       "killed": 10,
       "survived": 0,
       "unreached": 0,
       "generated": 13,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/repeat-index-base.yaml": {
+      "score": 1.0,
+      "killed": 6,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 9,
       "vectors": 1,
       "provenance": "independent",
       "failing_original": 0
@@ -540,6 +870,16 @@
       "generated": 3,
       "vectors": 1,
       "provenance": "generated-only",
+      "failing_original": 0
+    },
+    "_language-conformance/repeat-member-shares-name.yaml": {
+      "score": 1.0,
+      "killed": 7,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 9,
+      "vectors": 1,
+      "provenance": "independent",
       "failing_original": 0
     },
     "_language-conformance/repeat-present-if.yaml": {
@@ -582,6 +922,16 @@
       "provenance": "generated-only",
       "failing_original": 0
     },
+    "_language-conformance/round-large-value.yaml": {
+      "score": 1.0,
+      "killed": 5,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 7,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "_language-conformance/round-ties-away.yaml": {
       "score": 1.0,
       "killed": 29,
@@ -612,6 +962,36 @@
       "provenance": "generated-only",
       "failing_original": 0
     },
+    "_language-conformance/tag-component-ref.yaml": {
+      "score": 0.9333,
+      "killed": 14,
+      "survived": 1,
+      "unreached": 0,
+      "generated": 18,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/tlv-case-field-list.yaml": {
+      "score": 1.0,
+      "killed": 31,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 38,
+      "vectors": 7,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/tlv-case-key-patterns.yaml": {
+      "score": 1.0,
+      "killed": 18,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 24,
+      "vectors": 5,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "_language-conformance/tlv-nameless-case.yaml": {
       "score": 1.0,
       "killed": 5,
@@ -628,6 +1008,26 @@
       "survived": 0,
       "unreached": 0,
       "generated": 17,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/tlv-tag-bit-range.yaml": {
+      "score": 1.0,
+      "killed": 16,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 26,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/tlv-tag-var-name-from.yaml": {
+      "score": 1.0,
+      "killed": 14,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 18,
       "vectors": 2,
       "provenance": "independent",
       "failing_original": 0
@@ -692,12 +1092,42 @@
       "provenance": "independent",
       "failing_original": 0
     },
+    "_language-conformance/wide-bit-range.yaml": {
+      "score": 1.0,
+      "killed": 3,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 5,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/wide-group.yaml": {
+      "score": 1.0,
+      "killed": 2,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 3,
+      "vectors": 2,
+      "provenance": "independent",
+      "failing_original": 0
+    },
     "_language-conformance/word-ordered.yaml": {
       "score": null,
       "killed": 0,
       "survived": 0,
       "unreached": 0,
       "generated": 3,
+      "vectors": 1,
+      "provenance": "independent",
+      "failing_original": 0
+    },
+    "_language-conformance/zero-length.yaml": {
+      "score": 1.0,
+      "killed": 4,
+      "survived": 0,
+      "unreached": 0,
+      "generated": 8,
       "vectors": 1,
       "provenance": "independent",
       "failing_original": 0
@@ -2173,9 +2603,9 @@
       "failing_original": 0
     },
     "volley-boast/vobo.yaml": {
-      "score": 1.0,
-      "killed": 20351,
-      "survived": 0,
+      "score": 0.9997,
+      "killed": 20345,
+      "survived": 6,
       "unreached": 854,
       "generated": 24927,
       "vectors": 436,
