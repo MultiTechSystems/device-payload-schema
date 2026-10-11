@@ -9,11 +9,24 @@ name: Gates
 #   crossval     schemas agree with the vendors' own decoders (TTN, Decentlab)
 #   mutation     a schema's vectors notice small semantic changes to it
 #   verdicts     every vector decodes the same in Python, Go, Java, C# and TS013
+#
+# The mutation gate is the expensive one: about 84 minutes for the whole corpus on one
+# runner, nearly all of it one schema (volley-boast/vobo). So it runs as a matrix of
+# shards that split the work - that schema's mutants included - and write their reports
+# unjudged, then one job reassembles and judges them against the baseline. On a pull
+# request only the schemas the PR adds or modifies are scored, unless the PR touches the
+# mutation tooling, its baseline or the interpreter, which can move any schema's score
+# and so run the full sweep (tools/mutation-gate.py --only-changed). Pushes to master and
+# the nightly schedule always run the full sweep.
 
 on:
     push:
         branches: [master, main]
     pull_request:
+    schedule:
+        # Nightly full sweep, after the fuzz workflow's 02:00 run.
+        - cron: "30 3 * * *"
+    workflow_dispatch:
 
 env:
     # The Go and Java toolchain images, from Google's mirror of Docker Hub. Pulled from
@@ -53,8 +66,8 @@ jobs:
               if: github.event_name == 'pull_request'
               run: make gate-provenance PYTHON=python BASE=origin/${{ github.base_ref }}
 
-    crossval-mutation:
-        name: Vendor cross-validation and mutation floors
+    crossval:
+        name: Vendor cross-validation
         runs-on: ubuntu-24.04
         steps:
             - uses: actions/checkout@v5
@@ -84,11 +97,68 @@ jobs:
                   echo "DECENTLAB_DECODERS=$RUNNER_TEMP/decentlab-decoders" >> "$GITHUB_ENV"
             - name: Schemas agree with the vendor decoders
               run: make gate-crossval PYTHON=python
+
+    # Each shard plans the same units from the same tree and baseline and runs its slice
+    # of them; the shard count is MUTATION_SHARDS below and the matrix list together.
+    # --workers is pinned so the plan cannot differ between runners.
+    mutation-shard:
+        name: Mutation sweep (shard ${{ matrix.shard }}/6)
+        runs-on: ubuntu-24.04
+        strategy:
+            fail-fast: true
+            matrix:
+                shard: [1, 2, 3, 4, 5, 6]
+        env:
+            MUTATION_SHARDS: 6
+        steps:
+            - uses: actions/checkout@v5
+              with:
+                  fetch-depth: 0
+            - uses: actions/setup-python@v6
+              with:
+                  python-version: "3.11"
+            - name: Install dependencies
+              run: pip install -r requirements.txt
+            - name: Run this shard's mutants
+              run: |
+                  args=()
+                  if [ "${{ github.event_name }}" = "pull_request" ]; then
+                      args=(--changed-since "origin/${{ github.base_ref }}" --only-changed)
+                  fi
+                  python tools/mutation-gate.py "${args[@]}" --workers 4 \
+                      --shard "${{ matrix.shard }}/$MUTATION_SHARDS" \
+                      --parts-out "build/mutation/${{ matrix.shard }}.json"
+            - uses: actions/upload-artifact@v6
+              with:
+                  name: mutation-shard-${{ matrix.shard }}
+                  path: build/mutation/${{ matrix.shard }}.json
+                  if-no-files-found: error
+                  retention-days: 3
+
+    mutation:
+        name: Mutation floors
+        needs: mutation-shard
+        runs-on: ubuntu-24.04
+        steps:
+            - uses: actions/checkout@v5
+              with:
+                  fetch-depth: 0
+            - uses: actions/setup-python@v6
+              with:
+                  python-version: "3.11"
+            - name: Install dependencies
+              run: pip install -r requirements.txt
+            - uses: actions/download-artifact@v6
+              with:
+                  pattern: mutation-shard-*
+                  path: build/mutation
+            # Fails if any schema in scope is missing from the shards, or any part of
+            # a split one, so a lost shard cannot pass as a clean run.
             - name: Mutation scores hold
               run: |
-                  args=""
+                  args="--parts-in build/mutation"
                   if [ "${{ github.event_name }}" = "pull_request" ]; then
-                      args="--changed-since origin/${{ github.base_ref }}"
+                      args="$args --changed-since origin/${{ github.base_ref }} --only-changed"
                   fi
                   make gate-mutation PYTHON=python GATE_MUTATION_ARGS="$args"
 
