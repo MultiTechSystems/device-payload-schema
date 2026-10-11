@@ -600,6 +600,16 @@ public static class SchemaEncoder
                 _ => throw new InvalidOperationException(
                     $"repeat field '{field.Name}': expected a list of records, got {records.GetType().Name}")
             };
+            // PS-550: a sibling identifying these values position by position is given as
+            // many values as this repeat, as a decoder requires (PS-546).
+            foreach (var sibling in field.SiblingNames)
+            {
+                data.TryGetValue(sibling, out var given);
+                if (given is not System.Collections.IList siblingValues || siblingValues.Count != list.Count)
+                    throw new InvalidOperationException($"Repeat '{field.Name}' is given {list.Count} values "
+                        + $"and '{sibling}', which identifies them, "
+                        + $"{(given is System.Collections.IList l ? l.Count.ToString() : "none")} (PS-550)");
+            }
             if (RecordsReachable(field.Fields))
                 // PS-542: the records do not say which element they came from.
                 throw new InvalidOperationException($"Repeat '{field.Name}' has elements that yield "

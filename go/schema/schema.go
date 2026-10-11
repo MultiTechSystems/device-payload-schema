@@ -4746,6 +4746,19 @@ func encodeRepeat(field Field, data map[string]any, ctx *EncodeContext) error {
 	if !ok {
 		return fmt.Errorf("repeat field %q: expected a list of records", field.Name)
 	}
+	// PS-550: a sibling identifying these values position by position is given as many
+	// values as this repeat, as a decoder requires (PS-546).
+	for _, sibling := range field.Siblings {
+		given, isList := data[sibling].([]any)
+		if !isList || len(given) != len(records) {
+			have := "none"
+			if isList {
+				have = strconv.Itoa(len(given))
+			}
+			return fmt.Errorf("Repeat '%s' is given %d values and '%s', which identifies them, %s (PS-550)",
+				field.Name, len(records), sibling, have)
+		}
+	}
 	if err := encodeRepeatRecords(field, records, ctx); err != nil {
 		return err
 	}

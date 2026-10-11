@@ -500,6 +500,21 @@ final class Encoder {
             throw new SchemaException.EncodeException("repeat field '" + name
                     + "': expected a list of records, got " + records.getClass().getSimpleName());
         }
+        // PS-550: a sibling identifying these values position by position is given as many
+        // values as this repeat, as a decoder requires (PS-546).
+        if (field.getRaw() != null) {
+            Set<String> seen = new LinkedHashSet<>();
+            for (String[] ref : Wave6a.siblingReferences(field.getRaw())) {
+                if (!seen.add(ref[1])) continue;
+                Object given = data.get(ref[1]);
+                if (!(given instanceof List<?> l) || l.size() != list.size()) {
+                    Object have = given instanceof List<?> l2 ? (Object) l2.size() : "none";
+                    throw new SchemaException.EncodeException("Repeat '" + name + "' is given "
+                            + list.size() + " values and '" + ref[1] + "', which identifies them, "
+                            + have + " (PS-550)");
+                }
+            }
+        }
         if (field.getRaw() != null && Wave6a.recordsReachable(Wave6a.repeatMembers(field.getRaw()))) {
             // PS-542: the records do not say which element they came from.
             throw new SchemaException.EncodeException("Repeat '" + name + "' has elements that yield "

@@ -6210,6 +6210,14 @@ class SchemaInterpreter:
             raise ValueError(
                 f"repeat field {name!r}: expected a list of records, got "
                 f"{type(records).__name__}")
+        # PS-550: a sibling identifying these values position by position is given as
+        # many values as this repeat, as a decoder requires (PS-546).
+        for sibling in dict.fromkeys(n for _, n, _ in sibling_references(field_def)):
+            given = data.get(sibling)
+            if not isinstance(given, (list, tuple)) or len(given) != len(records):
+                have = len(given) if isinstance(given, (list, tuple)) else 'none'
+                raise ValueError(f"Repeat '{name}' is given {len(records)} values and "
+                                 f"'{sibling}', which identifies them, {have} (PS-550)")
         record_fields, element_name = repeat_members(field_def)
         if records_reachable(record_fields):
             # PS-542: the records do not say which element they came from.
