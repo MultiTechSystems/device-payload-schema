@@ -859,6 +859,199 @@ def arithmetic_schema_errors(node, _top=True):
     return errors
 
 
+#: CR-2026-110 (PS-525): how a name reported by more than one tlv entry combines.
+ON_REPEAT = ('collect', 'merge', 'last')
+
+#: The constructs whose fields report into the enclosing object, so a tlv case reports
+#: their names as its own (the spec prototype's STRUCTURAL_KEYS).
+_REPORTING_CONSTRUCTS = ('match', 'byte_group', 'flagged', 'tlv')
+
+
+def reported_fields(fields):
+    """Every named field a field list reports, by name, first declaration first, looking
+    through the constructs whose fields merge into the enclosing object. An object's or
+    repeat's members are not descended into: they report under the field's own name.
+    The spec prototype's `declared_fields`."""
+    found = {}  # type: Dict[str, Dict[str, Any]]
+
+    def walk(items):
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            if 'type' in item:
+                if item.get('name'):
+                    found.setdefault(item['name'], item)
+                walk(item.get('trailer'))
+                continue
+            spec = next((item[k] for k in _REPORTING_CONSTRUCTS if k in item), None)
+            if isinstance(spec, list):
+                walk(spec)
+            elif isinstance(spec, dict):
+                walk(spec.get('fields'))
+                for body in (spec.get('cases') or {}).values():
+                    walk(body if isinstance(body, list) else None)
+                for group in spec.get('groups') or []:
+                    walk(group.get('fields') if isinstance(group, dict) else None)
+    walk(fields)
+    return found
+
+
+def tlv_repeat_modes(tlv_def):
+    """How each name a tlv reports combines when more than one entry reports it (PS-157,
+    PS-525, PS-526): (mode by name, the members of each merged object that declare
+    `last`, the schema errors).
+
+    A field's own `on_repeat` takes precedence over the tlv's. A tlv's `merge` reaches
+    its `type: object` fields only; any other field keeps `collect`, since only an
+    object can merge. With no `on_repeat` anywhere every field collects, as PS-157
+    always has.
+    Every declaration of one name must agree. The wording is the spec prototype's.
+    """
+    errors = []  # type: List[str]
+    modes = {}  # type: Dict[str, str]
+    last_members = {}  # type: Dict[str, set]
+    shared = {}  # type: Dict[tuple, list]
+    if not isinstance(tlv_def, dict):
+        return modes, last_members, errors
+    default = tlv_def.get('on_repeat', 'collect')
+    if default not in ON_REPEAT:
+        errors.append(f"tlv `on_repeat` is one of {', '.join(ON_REPEAT)}, not "
+                      f"{default!r} (PS-525)")
+        default = 'collect'
+    for body in (tlv_def.get('cases') or {}).values():
+        if not isinstance(body, list):
+            continue
+        for name, field_def in reported_fields(body).items():
+            own = field_def.get('on_repeat')
+            if own is not None and own not in ON_REPEAT:
+                errors.append(f"Field '{name}': `on_repeat` is one of "
+                              f"{', '.join(ON_REPEAT)}, not {own!r} (PS-525)")
+                continue
+            is_object = field_def.get('type') == 'object'
+            if own == 'merge' and not is_object:
+                errors.append(f"Field '{name}': only a `type: object` field may "
+                              f"declare `on_repeat: merge` (PS-526)")
+                continue
+            mode = own or (default if default != 'merge' or is_object else 'collect')
+            if modes.setdefault(name, mode) != mode:
+                errors.append(f"tlv: the fields reporting '{name}' declare different "
+                              f"`on_repeat`, {modes[name]} and {mode} (PS-526)")
+                continue
+            if mode == 'merge':
+                last_members.setdefault(name, set()).update(
+                    member['name'] for member in field_def.get('fields') or []
+                    if isinstance(member, dict) and member.get('on_repeat') == 'last'
+                    and member.get('name'))
+                for member in field_def.get('fields') or []:
+                    if isinstance(member, dict) and member.get('name'):
+                        shared.setdefault((name, member['name']), []).append(member)
+    for (name, member), declarations in shared.items():
+        # CR-2026-128: merged cases share a member only where it declares `last`.
+        if len(declarations) > 1 and any(d.get('on_repeat') != 'last'
+                                         for d in declarations):
+            errors.append(f"tlv: cases share the member '{member}' of the merged object "
+                          f"'{name}' without `on_repeat: last` (PS-526)")
+    return modes, last_members, errors
+
+
+#: Mappings whose keys are data, not schema, so nothing under them declares a field -
+#: and `definitions`, which is held to the rule where a `$ref` splices it.
+_ON_REPEAT_OPAQUE = ('lookup', 'values', 'test_vectors', 'metadata', 'definitions')
+
+
+def on_repeat_schema_errors(node):
+    """tlv_repeat_modes()'s errors for every tlv in a schema, wherever it sits (PS-526),
+    and every `on_repeat` declared where it has no effect (PS-525, CR-2026-125): it
+    belongs on a tlv, on a field a tlv case reports, and as `last` on a member of a
+    merged object. A schema breaking either is invalid whether or not a payload
+    reaches it. The placement wording is the spec prototype's."""
+    errors = []  # type: List[str]
+    allowed = set()
+
+    def tlvs(item):
+        if isinstance(item, list):
+            for child in item:
+                tlvs(child)
+        elif isinstance(item, dict):
+            tlv = item.get('tlv')
+            if isinstance(tlv, dict):
+                allowed.add(id(tlv))
+                modes, _, tlv_errors = tlv_repeat_modes(tlv)
+                errors.extend(tlv_errors)
+                for body in (tlv.get('cases') or {}).values():
+                    if not isinstance(body, list):
+                        continue
+                    for name, field_def in reported_fields(body).items():
+                        allowed.add(id(field_def))
+                        if modes.get(name) != 'merge':
+                            continue
+                        for member in field_def.get('fields') or []:
+                            if isinstance(member, dict) \
+                                    and member.get('on_repeat') == 'last':
+                                allowed.add(id(member))
+            for key, value in item.items():
+                if key not in _ON_REPEAT_OPAQUE:
+                    tlvs(value)
+
+    def strays(item):
+        if isinstance(item, list):
+            for child in item:
+                strays(child)
+        elif isinstance(item, dict):
+            if 'on_repeat' in item and id(item) not in allowed:
+                errors.append(
+                    f"`on_repeat` on '{item.get('name', 'an entry')}' has no effect "
+                    f"there: it belongs on a tlv, a field of a tlv case, or a merged "
+                    f"object's member (PS-525)")
+            for key, value in item.items():
+                if key not in _ON_REPEAT_OPAQUE:
+                    strays(value)
+
+    tlvs(node)
+    strays(node)
+    return errors
+
+
+def _reports_list(field_def):
+    """Whether a field's own value is a list - a repeat, or bytes rendered as an array -
+    so that a list under its name is not PS-157's collection of several entries."""
+    kind = field_def.get('type')
+    return kind == 'repeat' or (kind == 'bytes' and field_def.get('format') == 'array')
+
+
+def tlv_encode_plan(tlv_def, modes, last_members):
+    """What PS-527 needs of a tlv's cases: `members`, for each merged object, every
+    member some case declares - a supplied member outside it is an error. Shared
+    members are `last` ones, as PS-526 requires, so each written case carries them.
+    `last_members` is accepted for the callers' symmetry with tlv_repeat_modes."""
+    members = {}  # type: Dict[str, set]
+    for case_key, body in (tlv_def.get('cases') or {}).items():
+        if case_key == 'default' or not isinstance(body, list):
+            continue
+        for name, field_def in reported_fields(body).items():
+            if modes.get(name) != 'merge':
+                continue
+            for member in field_def.get('fields') or []:
+                if isinstance(member, dict) and member.get('name'):
+                    members.setdefault(name, set()).add(member['name'])
+    return {'members': members}
+
+
+def combine_repeated(name, earlier, value, mode, last_members):
+    """`last` keeps the later value; `merge` combines two objects member by member,
+    and a member reported twice is an error unless it declares `on_repeat: last`
+    (PS-525)."""
+    if mode == 'last':
+        return value
+    combined = dict(earlier)
+    for member, member_value in value.items():
+        if member in combined and member not in last_members:
+            raise ValueError(f"tlv: the merged object '{name}' reports its member "
+                             f"'{member}' twice (PS-525)")
+        combined[member] = member_value
+    return combined
+
+
 def annotation_errors(field_def):
     """PS-510 (CR-2026-102): a field's `ipso` is a mapping carrying `object`, and its
     `senml` a mapping. `ipso: 3303` loaded and every implementation dropped it, so the
@@ -922,7 +1115,11 @@ def reference_errors(schema):
     tag components before its cases, a repeat's `trailer` and elements before its
     `present_if` and `identity`. The schema is walked with every `$ref` already spliced,
     so a definition's references are checked where it is used, after the fields declared
-    before the splice, and an unused definition is never checked. A nameless repeat
+    before the splice, and an unused definition is never checked. Each port's field list
+    is a decode of its own (CR-2026-130): it sees what the top level declares and its own
+    names, never another port's; such a reference reads as declared too late. Within a
+    mapping, `tag_fields`, `trailer`, `fields` and `element` come first, then the rest in
+    source order (CR-2026-127). A nameless repeat
     element declares no name (PS-528). `metadata` include and timestamp names count as
     declared first; a `metadata.include` `source` names runtime input (PS-315) and is not
     checked. Whether a name declared earlier is bound when it is read is a decode matter
@@ -973,9 +1170,17 @@ def reference_errors(schema):
                 declared.add(entry['name'])
     for part in ('header', 'fields'):
         walk(schema.get(part))
+    # Each port is a decode of its own (CR-2026-130): what one port declares is never bound
+    # while another is decoded, so each starts from what the top level declares.
+    shared, seen = set(declared), set(declared)
     if isinstance(schema.get('ports'), dict):
         for group in schema['ports'].values():
+            declared.clear()
+            declared.update(shared)
             walk(group)
+            seen |= declared
+    declared.clear()
+    declared.update(seen)       # to tell "never declared" from "declared too late"
     errors = []
     for name, key in ahead:
         message = (reference_error_message(name, key) if name not in declared
@@ -1111,6 +1316,113 @@ class LookupIndexError(ValueError):
     Every implementation used to report the raw index instead, silently, so a payload
     that did not match its schema decoded as though it did.
     """
+
+
+class FieldError(ValueError):
+    """An error whose text already names its field in full, reported verbatim.
+
+    An enclosing construct must not prefix it ("Error in tlv: ...") or name another
+    field: the message is compared as an exact string across the five implementations.
+    """
+    named = True
+
+
+class BufferUnderflow(FieldError):
+    """A read or skip past the end of the payload, less any `reserve` (PS-535).
+
+    Raised unnamed by the read; the innermost field that made the read restates it as
+    `Field '<name>': ... (PS-535)` (`_name_underflow`), and every enclosing field then
+    passes it through unchanged. The text is the spec prototype's.
+    """
+    named = False
+
+    @classmethod
+    def need(cls, length: int, pos: int, end: int) -> 'BufferUnderflow':
+        return cls(f"Buffer underflow: need {length} bytes at offset {pos}, "
+                   f"but only {max(0, end - pos)} remaining")
+
+    @classmethod
+    def peek(cls, pos: int) -> 'BufferUnderflow':
+        # A bit range or a bool reads its byte(s) without consuming them.
+        return cls(f"Buffer underflow at peek offset {pos}")
+
+
+def _member_base_bytes(member: Dict[str, Any]) -> int:
+    """The bytes a byte_group member's own base reads: `u16[0:3]` reads two, a whole `u16`
+    two, a bool one (PS-070, CR-2026-131)."""
+    try:
+        return byte_group_member_range(member)[0]
+    except ValueError:
+        return 1
+
+
+def underflow_label(name: Any, kind: Any) -> str:
+    """How a PS-535 error identifies a field: its name, else what it is."""
+    return f"'{name}'" if name else f"an unnamed {kind or 'field'}"
+
+
+def name_underflow(exc: 'BufferUnderflow', name: Any, kind: Any) -> FieldError:
+    """PS-535: restate an unnamed short read as the error of the field that made it."""
+    if exc.named:
+        return exc
+    named = BufferUnderflow(f"Field {underflow_label(name, kind)}: {exc} (PS-535)")
+    named.named = True
+    named.detail = str(exc)
+    return named
+
+
+def error_text(prefix: str, exc: BaseException) -> str:
+    """An error for `result.errors`: a FieldError verbatim, anything else prefixed."""
+    if getattr(exc, 'named', False):
+        return str(exc)
+    return f"{prefix}{exc}"
+
+
+_NAMED_UNDERFLOW = re.compile(r"^Field .*\(PS-535\)$", re.S)
+
+
+def reraise_text(text: str) -> ValueError:
+    """The exception for a nested field list's first error, keeping a PS-535 message
+    verbatim so the enclosing field does not prefix it."""
+    if _NAMED_UNDERFLOW.match(text):
+        exc = BufferUnderflow(text)
+        exc.named = True
+        return exc
+    return ValueError(text)
+
+
+ASCII_HIGH_BYTE_WARNING = "Field '{}': a byte above 0x7F in an ascii value (PS-073, PS-538)"
+
+
+def decode_ascii(name: Any, raw: bytes, warnings: List[str]) -> str:
+    """PS-534, PS-538: each byte is the ISO 8859-1 character of the same number, so the
+    value is lossless and re-encodes to the same bytes (PS-537); trailing 0x00 padding
+    only is dropped. A byte above 0x7F is reported with PS-073's warning."""
+    if any(byte > 0x7F for byte in raw):
+        warnings.append(ASCII_HIGH_BYTE_WARNING.format(name))
+    return raw.decode('latin-1').rstrip('\x00')
+
+
+def encode_ascii(name: Any, value: Any, length: Optional[int],
+                 warnings: List[str]) -> bytes:
+    """PS-537: a character above U+00FF, or a value longer than a fixed `length`, is
+    rejected naming the field; U+0080..U+00FF is written as the byte of the same number
+    with a warning; a short value is padded with 0x00. `length` is None where the field's
+    length is not fixed (`remaining`, a reference), and the value then supplies it."""
+    text = str(value)
+    if any(ord(ch) > 0xFF for ch in text):
+        raise FieldError(f"Field '{name}': an ascii value holds a character above "
+                         f"U+00FF, which has no byte (PS-537)")
+    encoded = text.encode('latin-1')
+    if length is not None and len(encoded) > length:
+        raise FieldError(f"Field '{name}': an ascii value of {len(encoded)} bytes is "
+                         f"longer than its length of {length} (PS-537)")
+    if any(byte > 0x7F for byte in encoded):
+        warnings.append(f"Field '{name}': a character above U+007F in an ascii value "
+                        f"(PS-537)")
+    if length is None:
+        return encoded
+    return encoded + b'\x00' * (length - len(encoded))
 
 
 #: The token a mapping's `default` substitutes with the unmapped value (PS-406).
@@ -2612,6 +2924,7 @@ class SchemaInterpreter:
             self._load_errors.extend(lookup_template_errors(field_def))
         self._load_errors.extend(arithmetic_schema_errors(schema))    # PS-445, PS-452
         self._load_errors.extend(annotation_schema_errors(schema))    # PS-510
+        self._load_errors.extend(on_repeat_schema_errors(schema))     # PS-525, PS-526
         self._load_errors.extend(reference_errors(schema))            # PS-539
         self._load_errors.extend(meta_declaration_errors(schema))      # PS-491
         self._load_errors.extend(timestamp_errors(schema.get('metadata')))
@@ -2628,6 +2941,7 @@ class SchemaInterpreter:
         self._leftover_reported = False
         self._case_quality: Dict[str, str] = {}     # reset by decode
         self._nested_warnings: List[str] = []       # reset by decode
+        self._encode_warnings: List[str] = []       # PS-537, reset by encode
         #: What the last get_semantic_output call could not express, such as a unit
         #: the SenML registry does not have (PS-488). Its return value stays the
         #: records alone, as callers already read it.
@@ -2823,7 +3137,7 @@ class SchemaInterpreter:
     def _read_int(self, buf: bytes, pos: int, size: int, signed: bool) -> Tuple[int, int]:
         """Read integer from buffer."""
         if pos + size > len(buf):
-            raise ValueError(f"Buffer too short: need {size} bytes at pos {pos}")
+            raise BufferUnderflow.need(size, pos, len(buf))
         
         data = buf[pos:pos + size]
         
@@ -2842,7 +3156,7 @@ class SchemaInterpreter:
     def _read_float(self, buf: bytes, pos: int, size: int) -> Tuple[float, int]:
         """Read float from buffer."""
         if pos + size > len(buf):
-            raise ValueError(f"Buffer too short: need {size} bytes at pos {pos}")
+            raise BufferUnderflow.need(size, pos, len(buf))
         
         data = buf[pos:pos + size]
         fmt = '<f' if self.endian == Endian.LITTLE else '>f'
@@ -2855,7 +3169,7 @@ class SchemaInterpreter:
     def _read_float16(self, buf: bytes, pos: int) -> Tuple[float, int]:
         """Read IEEE 754 half-precision float (2 bytes)."""
         if pos + 2 > len(buf):
-            raise ValueError(f"Buffer too short: need 2 bytes at pos {pos}")
+            raise BufferUnderflow.need(2, pos, len(buf))
         
         data = buf[pos:pos + 2]
         # Use struct 'e' format for half-precision (Python 3.6+)
@@ -3001,7 +3315,7 @@ class SchemaInterpreter:
         Returns: (value, new_pos, consumed_byte)
         """
         if pos >= len(buf):
-            raise ValueError(f"Buffer too short at pos {pos}")
+            raise BufferUnderflow.peek(pos)
 
         # The base width is part of the type - `u24[4:23]` means bits 4-23 of a
         # 24-bit big-endian value - so read that many bytes before masking. Reading
@@ -3009,9 +3323,7 @@ class SchemaInterpreter:
         # byte alone: rakwireless/qingping declares a 12-bit humidity as u24[0:11]
         # and got 11 where the device means 1320.
         if pos + base_size > len(buf):
-            raise ValueError(
-                "Buffer too short for %d-bit bitfield at pos %d" % (base_size * 8, pos)
-            )
+            raise BufferUnderflow.peek(pos)
         # PS-059 (CR-2026-052): the base is assembled in the field's effective byte
         # order, which `self.endian` carries here. This read it big-endian whatever the
         # schema said, while the encoder packed it in the schema's order - so a range
@@ -3044,15 +3356,22 @@ class SchemaInterpreter:
         one of the five that got it wrong, and it is the surface `td-tools` imports.
         """
         self._produced(field_def)
-        if field_def.get('type') in ('object', 'repeat'):
-            # Its members are another level of output, described by the declaration's
-            # nested entries (PS-371, PS-481), not by what they wrote.
-            self._meta_depth += 1
-            try:
-                return self._decode_field_endian(field_def, buf, pos)
-            finally:
-                self._meta_depth -= 1
-        return self._decode_field_endian(field_def, buf, pos)
+        try:
+            if field_def.get('type') in ('object', 'repeat'):
+                # Its members are another level of output, described by the
+                # declaration's nested entries (PS-371, PS-481), not by what they wrote.
+                self._meta_depth += 1
+                try:
+                    return self._decode_field_endian(field_def, buf, pos)
+                finally:
+                    self._meta_depth -= 1
+            return self._decode_field_endian(field_def, buf, pos)
+        except BufferUnderflow as exc:
+            # PS-535: the innermost field that read past the end is named; an enclosing
+            # object or repeat passes its member's error through unchanged.
+            if exc.named:
+                raise
+            raise name_underflow(exc, field_def.get('name'), field_def.get('type')) from exc
 
     def _produced(self, field_def: Dict[str, Any], key: Optional[str] = None) -> None:
         """PS-490: record the declaration about to report `key` (its name by default).
@@ -3110,6 +3429,8 @@ class SchemaInterpreter:
             
             # Determine position advancement
             if consume is not None:
+                if pos + consume > len(buf):
+                    raise BufferUnderflow.need(consume, pos, len(buf))   # PS-535
                 new_pos = pos + consume
             elif auto_consumed:
                 new_pos = pos + 1
@@ -3141,7 +3462,7 @@ class SchemaInterpreter:
         # little-endian u32 (PS-272).
         if field_type in WORD_ORDERED_TYPES:
             if pos + 4 > len(buf):
-                raise ValueError(f"Buffer too short: need 4 bytes at pos {pos}")
+                raise BufferUnderflow.need(4, pos, len(buf))
             return read_word_ordered(field_type, buf[pos:pos + 4]), pos + 4
 
         if field_type in type_info:
@@ -3165,14 +3486,14 @@ class SchemaInterpreter:
         # `UDec`/`SDec` are not spellings of them (PS-331).
         if field_type == 'udec':
             if pos >= len(buf):
-                raise ValueError("Buffer too short for udec")
+                raise BufferUnderflow.need(1, pos, len(buf))
             byte = buf[pos]
             value = (byte >> 4) + (byte & 0x0F) * 0.1
             return value, pos + 1
         
         if field_type == 'sdec':
             if pos >= len(buf):
-                raise ValueError("Buffer too short for sdec")
+                raise BufferUnderflow.need(1, pos, len(buf))
             byte = buf[pos]
             whole = byte >> 4
             # Sign extend the 4-bit whole part
@@ -3200,9 +3521,11 @@ class SchemaInterpreter:
         if field_type == 'bool':
             bit = field_def.get('bit', 0)
             if pos >= len(buf):
-                raise ValueError("Buffer too short for bool")
+                raise BufferUnderflow.peek(pos)
             value = bool((buf[pos] >> bit) & 1)
             # Bool doesn't advance position by default
+            if consume and pos + consume > len(buf):
+                raise BufferUnderflow.need(consume, pos, len(buf))       # PS-535
             if consume:
                 return value, pos + consume
             return value, pos
@@ -3210,7 +3533,7 @@ class SchemaInterpreter:
         if field_type == 'bytes':
             length = resolve_length(field_def, buf, pos, variables=self._variables)
             if pos + length > len(buf):
-                raise ValueError("Buffer too short for bytes")
+                raise BufferUnderflow.need(length, pos, len(buf))
             return format_bytes(field_def, buf[pos:pos + length]), pos + length
         
         if field_type == 'string':
@@ -3238,8 +3561,9 @@ class SchemaInterpreter:
         if field_type == 'ascii':
             length = resolve_length(field_def, buf, pos, variables=self._variables)
             if pos + length > len(buf):
-                raise ValueError("Buffer too short for ascii")
-            value = buf[pos:pos + length].decode('ascii', errors='replace').rstrip('\x00')
+                raise BufferUnderflow.need(length, pos, len(buf))
+            value = decode_ascii(field_def.get('name'), buf[pos:pos + length],
+                                 self._nested_warnings)
             return value, pos + length
         
         # `hex:upper` is a `bytes` format (PS-079), not a type (CR-2026-037), so it
@@ -3247,7 +3571,7 @@ class SchemaInterpreter:
         if field_type == 'hex':
             length = resolve_length(field_def, buf, pos, variables=self._variables)
             if pos + length > len(buf):
-                raise ValueError("Buffer too short for hex")
+                raise BufferUnderflow.need(length, pos, len(buf))
             # PS-074: `hex` output MUST be lowercase without separators. This
             # emitted uppercase, so it disagreed with the specification, with the
             # Go and Java interpreters, and with every vendor decoder. Uppercase
@@ -3258,7 +3582,7 @@ class SchemaInterpreter:
             import base64 as b64
             length = resolve_length(field_def, buf, pos, variables=self._variables)
             if pos + length > len(buf):
-                raise ValueError("Buffer too short for base64")
+                raise BufferUnderflow.need(length, pos, len(buf))
             value = b64.b64encode(buf[pos:pos + length]).decode('ascii')
             return value, pos + length
         
@@ -3268,7 +3592,7 @@ class SchemaInterpreter:
             # A skip past the end is a short read like any other, as in Go, Java and C#.
             # It succeeded, so a truncated payload decoded with no error.
             if pos + length > len(buf):
-                raise ValueError("Buffer too short for skip")
+                raise BufferUnderflow.need(length, pos, len(buf))
             return None, pos + length
         
         if field_type == 'object':
@@ -3307,7 +3631,13 @@ class SchemaInterpreter:
         
         # Decode the base integer type
         base_field = {'type': base_type}
-        raw_value, new_pos = self._decode_field(base_field, buf, pos)
+        try:
+            raw_value, new_pos = self._decode_field(base_field, buf, pos)
+        except BufferUnderflow as exc:
+            # PS-535 names the enum, not its base. Unnamed until here: the base's own
+            # declaration is synthetic and has no name.
+            raise name_underflow(BufferUnderflow(getattr(exc, 'detail', str(exc))),
+                                 field_def.get('name'), 'enum') from exc
         
         # Map to string value
         # Values can be dict {0: 'idle', 1: 'running'} or list ['idle', 'running']
@@ -3394,7 +3724,7 @@ class SchemaInterpreter:
             try:
                 new_pos = self._decode_field_list(nested_fields, region, at, scratch)
                 if scratch.errors:
-                    raise ValueError(scratch.errors[0])
+                    raise reraise_text(scratch.errors[0])
                 records = self._pending_records
                 for carried in carry_state:
                     if carried in self._variables:
@@ -3801,7 +4131,10 @@ class SchemaInterpreter:
         elif length is not None:
             # Inline: read bytes from payload
             if pos + length > len(buf):
-                raise ValueError(f"Buffer too short for match: need {length} bytes at pos {pos}")
+                # PS-535: the discriminator is the field that read; it is named by the
+                # match's `name`, where it declares one.
+                raise name_underflow(BufferUnderflow.need(length, pos, len(buf)),
+                                     match_def.get('name'), 'match')
             if length == 1:
                 discriminator = buf[pos]
             elif length == 2:
@@ -3872,7 +4205,7 @@ class SchemaInterpreter:
         finally:
             self._current_data = saved_current
         if scratch.errors:
-            raise ValueError(scratch.errors[0])
+            raise reraise_text(scratch.errors[0])
         result.update(scratch.data)
         if saved_current is not None:
             saved_current.update(scratch.data)
@@ -3902,7 +4235,7 @@ class SchemaInterpreter:
         finally:
             self._current_data = saved_current
         if scratch.errors:
-            raise ValueError(scratch.errors[0])
+            raise reraise_text(scratch.errors[0])
         self._case_quality.update(scratch.quality)
         self._nested_warnings.extend(scratch.warnings)
         return scratch.data, pos
@@ -4027,7 +4360,7 @@ class SchemaInterpreter:
         prefix = field_def.get('prefix', '')
         
         if pos + length > len(buf):
-            raise ValueError(f"Buffer too short for bitfield_string at pos {pos}")
+            raise BufferUnderflow.need(length, pos, len(buf))
         
         data = buf[pos:pos + length]
         if self.endian == Endian.LITTLE:
@@ -4448,7 +4781,16 @@ class SchemaInterpreter:
         # that value. Each member used to read its own base from the group's start, which
         # agrees only where every member is as wide as the group.
         if pos + group_size > len(buf):
-            raise ValueError(f"Buffer too short for a {group_size}-byte byte_group at pos {pos}")
+            # PS-535: a member reads the group's bytes from its start, so the first
+            # member whose base does not fit is the field that read past the end, as the
+            # spec prototype names it. Where every base fits and the group's `size` does
+            # not, the group itself made the read.
+            for gf in group_fields:
+                if _member_base_bytes(gf) > len(buf) - pos:
+                    raise name_underflow(BufferUnderflow.peek(pos), gf.get('name'),
+                                         gf.get('type'))
+            raise name_underflow(BufferUnderflow.need(group_size, pos, len(buf)), None,
+                                 'byte_group')
         group_value = int.from_bytes(buf[pos:pos + group_size],
                                      'little' if self.endian == Endian.LITTLE else 'big')
         for gf in group_fields:
@@ -4471,7 +4813,7 @@ class SchemaInterpreter:
                 # Add to variables so field can be referenced by compute/formula
                 self._variables[name] = value
             except Exception as e:
-                result.errors.append(f"Error in byte_group field {name}: {e}")
+                result.errors.append(error_text(f"Error in byte_group field {name}: ", e))
     
     def _decode_tlv(self, field_def: Dict[str, Any], buf: bytes,
                     pos: int,
@@ -4510,7 +4852,11 @@ class SchemaInterpreter:
         
         result = {}
         channels = []
-        
+        # PS-525: how a name reported again combines. Its schema errors were reported
+        # at load (on_repeat_schema_errors), so only the modes are needed here.
+        modes, last_members, _ = tlv_repeat_modes(tlv_def)
+        collected = set()       # names already turned into arrays (PS-157)
+
         while pos < len(buf):
             # Where this entry begins, so PS-302 can count the bytes abandoned from the
             # unknown tag itself rather than from after it.
@@ -4681,14 +5027,21 @@ class SchemaInterpreter:
 
             if merge:
                 for k, v in tag_result.items():
-                    if k in result:
-                        # Repeated tag -> collect into array
-                        if isinstance(result[k], list):
-                            result[k].append(v)
-                        else:
-                            result[k] = [result[k], v]
-                    else:
+                    mode = modes.get(k, 'collect')
+                    if k not in result:
                         result[k] = v
+                    elif mode != 'collect':                         # PS-525
+                        result[k] = combine_repeated(k, result[k], v, mode,
+                                                     last_members.get(k, set()))
+                    elif k in collected:                            # PS-157
+                        result[k].append(v)
+                    else:
+                        # A name reported again becomes an array. Whether it already is
+                        # one is not the test: a value that is itself a list (a repeat)
+                        # was appended into, so its second report was spliced among the
+                        # first's elements.
+                        result[k] = [result[k], v]
+                        collected.add(k)
             else:
                 entry = {'tag': list(tag_tuple)}
                 entry.update(tag_result)
@@ -5002,7 +5355,7 @@ class SchemaInterpreter:
                         else:
                             _, pos = self._decode_field(rf, payload, pos)
                 except Exception as e:
-                    result.errors.append(f"Error resolving $ref: {e}")
+                    result.errors.append(error_text(f"Error resolving $ref: ", e))
                     # A construct that fails to read stops the decode, as a plain field's error
                     # does. These went on from wherever the failed read left the position, so a
                     # following field was read from the wrong offset and reported beside the error
@@ -5018,7 +5371,7 @@ class SchemaInterpreter:
                 except Exception as e:
                     # A schema error such as overlapping members (PS-397) fails the
                     # decode like any other field's error, rather than raising out of it.
-                    result.errors.append(f"Error decoding byte_group: {e}")
+                    result.errors.append(error_text(f"Error decoding byte_group: ", e))
                     break
                 continue
             
@@ -5045,7 +5398,7 @@ class SchemaInterpreter:
                     match_result, pos = self._decode_match(field_def, payload, pos)
                     result.data.update(match_result)
                 except Exception as e:
-                    result.errors.append(f"Error in match: {e}")
+                    result.errors.append(error_text(f"Error in match: ", e))
                     break
                 continue
             
@@ -5062,7 +5415,7 @@ class SchemaInterpreter:
                     tlv_result, pos = self._decode_tlv(field_def, payload, pos, result)
                     result.data.update(tlv_result)
                 except Exception as e:
-                    result.errors.append(f"Error in tlv: {e}")
+                    result.errors.append(error_text(f"Error in tlv: ", e))
                     break
                 continue
             
@@ -5075,7 +5428,7 @@ class SchemaInterpreter:
                     # The groups' fields are bound and range-checked by the field-list
                     # decoder that read them.
                 except Exception as e:
-                    result.errors.append(f"Error in flagged: {e}")
+                    result.errors.append(error_text(f"Error in flagged: ", e))
                     break
                 continue
             
@@ -5088,8 +5441,12 @@ class SchemaInterpreter:
                     value, pos = self._decode_bitfield_string(field_def, payload, pos)
                     result.data[name] = value
                     self._variables[name] = value
+                except BufferUnderflow as e:
+                    result.errors.append(str(name_underflow(e, field_def.get('name'),
+                                                            field_type)))
+                    break
                 except Exception as e:
-                    result.errors.append(f"Error decoding {name}: {e}")
+                    result.errors.append(error_text(f"Error decoding {name}: ", e))
                     break
                 continue
             
@@ -5139,7 +5496,7 @@ class SchemaInterpreter:
                             quality = self._check_valid_range(value, field_def, result)
                             result.quality[name] = quality
                 except Exception as e:
-                    result.errors.append(f"Error computing {name}: {e}")
+                    result.errors.append(error_text(f"Error computing {name}: ", e))
                 continue
             
             # Handle match at field level (legacy: no name, type: match)
@@ -5148,7 +5505,7 @@ class SchemaInterpreter:
                     match_result, pos = self._decode_match(field_def, payload, pos)
                     result.data.update(match_result)
                 except Exception as e:
-                    result.errors.append(f"Error in match: {e}")
+                    result.errors.append(error_text(f"Error in match: ", e))
                     break
                 continue
             
@@ -5167,7 +5524,7 @@ class SchemaInterpreter:
                     if not self._sentinel_hit(field_def, value, payload, start):
                         self._bind_internal(field_def, name, value)
                 except Exception as e:
-                    result.errors.append(f"Error in internal field: {e}")
+                    result.errors.append(error_text(f"Error in internal field: ", e))
                 continue
             
             try:
@@ -5212,7 +5569,7 @@ class SchemaInterpreter:
                 result.errors.append(str(e))                    # PS-343, bare
                 break
             except Exception as e:
-                result.errors.append(f"Error decoding {name}: {e}")
+                result.errors.append(error_text(f"Error decoding {name}: ", e))
                 break
         
         return pos
@@ -5383,6 +5740,7 @@ class SchemaInterpreter:
             EncodeResult with encoded payload
         """
         result = EncodeResult(payload=b'')
+        self._encode_warnings = []
         if self._load_errors:
             result.errors.extend(self._load_errors)
             return result
@@ -5426,7 +5784,7 @@ class SchemaInterpreter:
                     output.extend(self._encode_bitfield_run(_item, data))
                 except Exception as e:
                     names = ", ".join(str(f.get('name')) for f in _item)
-                    result.errors.append(f"Error encoding bit range(s) {names}: {e}")
+                    result.errors.append(error_text(f"Error encoding bit range(s) {names}: ", e))
                 continue
             field_def = _item
             # PS-405, before any construct: an optional object or repeat the input omits
@@ -5450,28 +5808,28 @@ class SchemaInterpreter:
                     output.extend(
                         self._encode_field_list(ref_def.get('fields') or [], data))
                 except Exception as e:
-                    result.errors.append(f"Error encoding $ref: {e}")
+                    result.errors.append(error_text(f"Error encoding $ref: ", e))
                 continue
             
             if 'byte_group' in field_def:
                 try:
                     output.extend(self._encode_byte_group(field_def, data))
                 except Exception as e:
-                    result.errors.append(f"Error encoding byte_group: {e}")
+                    result.errors.append(error_text(f"Error encoding byte_group: ", e))
                 continue
             
             if 'tlv' in field_def and not field_def.get('type'):
                 try:
                     output.extend(self._encode_tlv(field_def, data))
                 except Exception as e:
-                    result.errors.append(f"Error encoding tlv: {e}")
+                    result.errors.append(error_text(f"Error encoding tlv: ", e))
                 continue
             
             if 'match' in field_def and not field_def.get('type'):
                 try:
                     output.extend(self._encode_match(field_def, data))
                 except Exception as e:
-                    result.errors.append(f"Error encoding match: {e}")
+                    result.errors.append(error_text(f"Error encoding match: ", e))
                 continue
             
             if field_def.get('type') == 'repeat':
@@ -5509,7 +5867,7 @@ class SchemaInterpreter:
                 except Exception as e:
                     # The per-field path below reports its errors; this one used to
                     # propagate, so one unencodable group killed the whole call.
-                    result.errors.append(f"Error encoding flagged group: {e}")
+                    result.errors.append(error_text(f"Error encoding flagged group: ", e))
                 continue
             
             name = field_def.get('name', 'unknown')
@@ -5547,7 +5905,7 @@ class SchemaInterpreter:
                 try:
                     output.extend(self._encode_field(field_def, field_def['value']))
                 except Exception as e:
-                    result.errors.append(f"Error encoding {name}: {e}")
+                    result.errors.append(error_text(f"Error encoding {name}: ", e))
                 continue
 
             # PS-434: an internal field that reads bytes writes its value, else the
@@ -5556,7 +5914,7 @@ class SchemaInterpreter:
                 try:
                     value = self._internal_encode_value(field_def, data)
                 except ValueError as e:
-                    result.errors.append(f"Error encoding {name}: {e}")
+                    result.errors.append(error_text(f"Error encoding {name}: ", e))
                     continue
             elif name in flags_patches:
                 value = flags_patches[name]
@@ -5566,7 +5924,7 @@ class SchemaInterpreter:
                 try:
                     lookup_name = self._resolve_encode_name(field_def, name, data)
                 except ValueError as e:
-                    result.errors.append(f"Error encoding {name}: {e}")
+                    result.errors.append(error_text(f"Error encoding {name}: ", e))
                     continue
                 if lookup_name is None:
                     result.errors.append(
@@ -5592,7 +5950,7 @@ class SchemaInterpreter:
                         output.extend(self._encode_field(raw_bits_field(field_def),
                                                          field_def['sentinel'][0]))
                     except Exception as e:
-                        result.errors.append(f"Error encoding {name}: {e}")
+                        result.errors.append(error_text(f"Error encoding {name}: ", e))
                     continue
                 if value is None:
                     result.warnings.append(f"Missing field: {lookup_name}")
@@ -5605,9 +5963,10 @@ class SchemaInterpreter:
                 encoded = self._encode_field(field_def, value)
                 output.extend(encoded)
             except Exception as e:
-                result.errors.append(f"Error encoding {name}: {e}")
+                result.errors.append(error_text(f"Error encoding {name}: ", e))
         
         result.payload = bytes(output)
+        result.warnings.extend(self._encode_warnings)
         return result
     
     def _encode_flagged(self, flagged_def: Dict[str, Any], data: Dict[str, Any]) -> bytes:
@@ -6074,6 +6433,14 @@ class SchemaInterpreter:
             raise ValueError(
                 f"repeat field {name!r}: expected a list of records, got "
                 f"{type(records).__name__}")
+        # PS-550: a sibling identifying these values position by position is given as
+        # many values as this repeat, as a decoder requires (PS-546).
+        for sibling in dict.fromkeys(n for _, n, _ in sibling_references(field_def)):
+            given = data.get(sibling)
+            if not isinstance(given, (list, tuple)) or len(given) != len(records):
+                have = len(given) if isinstance(given, (list, tuple)) else 'none'
+                raise ValueError(f"Repeat '{name}' is given {len(records)} values and "
+                                 f"'{sibling}', which identifies them, {have} (PS-550)")
         record_fields, element_name = repeat_members(field_def)
         if records_reachable(record_fields):
             # PS-542: the records do not say which element they came from.
@@ -6157,6 +6524,40 @@ class SchemaInterpreter:
             out.append(f)
         return out
 
+    def _claim_width(self, field_def):
+        """How many fields a case's claim counts for when ranking cases (PS-527 as
+        CR-2026-129 states it): an object counts its members, so a merged {adr, dr} case
+        outranks a {dr} one, and anything else counts one."""
+        if field_def.get('type') == 'object':
+            return max(1, len(self._case_claims(field_def.get('fields') or [])))
+        return 1
+
+    def _case_claims(self, case_fields, optional=False):
+        """_claimable_fields with each field marked optional or not (PS-527): a case is
+        filled only once the input supplies every required field. A flagged group's
+        fields are optional, since its mask says which are present, as is a field
+        declaring `optional: true` (PS-405)."""
+        out = []
+        for f in case_fields:
+            if not isinstance(f, dict):
+                continue
+            if 'byte_group' in f and not f.get('type'):
+                group = f['byte_group']
+                group_fields = (
+                    group.get('fields') or [] if isinstance(group, dict) else group
+                )
+                out.extend(self._case_claims(group_fields or [], optional))
+                continue
+            if 'flagged' in f and not f.get('type'):
+                for group in (f['flagged'].get('groups') or []):
+                    out.extend(self._case_claims(group.get('fields') or [], True))
+                continue
+            name = f.get('name')
+            if not name or str(name).startswith('_') or f.get('type') in COMPUTED_TYPES:
+                continue
+            out.append((f, optional or f.get('optional') is True))
+        return out
+
     def _case_fidelity(self, case_fields: List[Dict[str, Any]], data: Dict[str, Any]):
         """How well a candidate case explains the data: (matches, lossless).
 
@@ -6215,40 +6616,122 @@ class SchemaInterpreter:
         length_size = tlv_def.get('length_size', 0) or 0
         byteorder = 'little' if self.endian == Endian.LITTLE else 'big'
         order = list(data)
+        modes, last_members, _ = tlv_repeat_modes(tlv_def)
+        plan = tlv_encode_plan(tlv_def, modes, last_members)
+        # PS-527: a supplied member of a merged object that no case declares has
+        # nowhere to be written.
+        for n, members in plan['members'].items():
+            if isinstance(data.get(n), dict):
+                stray = sorted(set(data[n]) - members)
+                if stray:
+                    raise ValueError(f"tlv: the merged object '{n}' is given {stray}, "
+                                     f"which no case declares (PS-527)")
 
-        candidates = []
+        # PS-527 as CR-2026-128 replaces it: each value - a scalar, each element of an
+        # array PS-157 collected, a `last` value, a merged object's members - goes under
+        # the first case in declaration order whose declared fields it supplies in full.
+        # Nothing is zero-filled and nothing dropped; what no case takes is an error.
+        entries = []  # (case key, fields, required, optional)
         for case_key, case_fields in cases.items():
             if case_key == 'default' or not isinstance(case_fields, list):
                 continue
-            names = [f['name'] for f in self._claimable_fields(case_fields)]
-            claimed = [n for n in names if n in data]
-            if not claimed:
-                continue
-            matches, lossless = self._case_fidelity(case_fields, data)
-            candidates.append((
-                min(order.index(n) for n in claimed),   # payload order
-                0 if lossless else 1,                   # one that can reproduce the value
-                -matches,                               # then the fuller explanation
-                case_key, case_fields, claimed,
-            ))
+            required, optional = [], []
+            for f, is_optional in self._case_claims(case_fields):
+                (optional if is_optional else required).append(f)
+            entries.append((case_key, case_fields, required, optional))
+        # A case requiring more fields is tried first, then declaration order. Among
+        # cases sharing a name, only the fuller one can take the others it declares:
+        # em400-mud's [3, 103] (temperature) is declared before [131, 103]
+        # (temperature, temperature_alarm), and taking temperature first strands the
+        # alarm, which no case would then take in full (CR-2026-029).
+        entries.sort(key=lambda entry: -sum(self._claim_width(f) for f in entry[2]))
 
-        candidates.sort(key=lambda item: item[:3])
+        queues = {}  # type: Dict[str, list]
+        for _, _, required, optional in entries:
+            for f in required + optional:
+                n = f['name']
+                if n in data and n not in queues and modes.get(n) != 'merge':
+                    value = data[n]
+                    collected = isinstance(value, list) and not _reports_list(f) \
+                        and modes.get(n, 'collect') == 'collect'
+                    queues[n] = list(value) if collected else [value]
+        pending = {n: set(data[n]) for n in plan['members']
+                   if isinstance(data.get(n), dict)}
 
+        def members_of(f):
+            return {m['name'] for m in f.get('fields') or []
+                    if isinstance(m, dict) and m.get('name')}
+
+        def fits(f, value):
+            # An object element supplies exactly the members its case declares, and a
+            # case takes no value it cannot write: am308's `tvoc` of 4369 needs 436900
+            # through one case's `div: 100`, which its u16 cannot hold.
+            if f.get('type') == 'object' and isinstance(value, dict) \
+                    and modes.get(f['name']) != 'merge':
+                claims = self._case_claims(f.get('fields') or [])
+                every = {m['name'] for m, _ in claims}
+                needed = {m['name'] for m, is_optional in claims if not is_optional}
+                return needed <= set(value) <= every
+            return self._case_fidelity([f], {f['name']: value})[1]
+
+        written = []  # (case key, fields, data for the entry)
+        progress = True
+        while progress:
+            progress = False
+            for case_key, case_fields, required, optional in entries:
+                while True:
+                    values, taken, complete = {}, [], True
+                    for f in required:
+                        n = f['name']
+                        if modes.get(n) == 'merge':
+                            members = members_of(f)
+                            if n not in pending or not members <= set(data[n]):
+                                complete = False
+                                break
+                            values[n] = {m: data[n][m] for m in members}
+                            if members & pending[n]:
+                                taken.append(n)
+                        else:
+                            queue = queues.get(n)
+                            if not queue or not fits(f, queue[0]):
+                                complete = False
+                                break
+                            values[n] = queue[0]
+                            taken.append(n)
+                    if not complete:
+                        break
+                    for f in optional:
+                        queue = queues.get(f['name'])
+                        if queue and fits(f, queue[0]):
+                            values[f['name']] = queue[0]
+                            taken.append(f['name'])
+                    if not taken:
+                        break
+                    for n in values:
+                        if modes.get(n) == 'merge':
+                            pending[n] -= set(values[n])
+                        else:
+                            queues[n].pop(0)
+                    written.append((case_key, case_fields, dict(data, **values),
+                                    min(order.index(n) for n in values)))
+                    progress = True
+        for n, queue in queues.items():
+            if queue:
+                raise ValueError(f"tlv: no case takes the value of '{n}' {queue[0]!r} in "
+                                 f"full (PS-502, PS-527)")
+        for n, members in pending.items():
+            if members:
+                raise ValueError(f"tlv: no case takes the members {sorted(members)} of "
+                                 f"the merged object '{n}' in full (PS-527)")
+
+        # The entries go out in payload order - the order of the names in decoded
+        # output - so a payload round-trips; entries of one name keep the order the
+        # cases took them in.
+        written.sort(key=lambda item: item[3])
         out = bytearray()
-        spent: set = set()
-        emitted = []
-        for position, _, _, case_key, case_fields, claimed in candidates:
-            # Every decoded field belongs to one channel. Without this a name defined
-            # under two tags emitted both of them, so am308 grew an extra channel.
-            if all(name in spent for name in claimed):
-                continue
-            spent.update(claimed)
-            emitted.append((position, case_key, case_fields))
-
-        emitted.sort(key=lambda item: item[0])
-        for _, case_key, case_fields in emitted:
+        for case_key, case_fields, case_data, _ in written:
             tag = self._encode_tlv_tag(case_key, tlv_def)
-            value = self._encode_field_list(case_fields, data)
+            value = self._encode_field_list(case_fields, case_data)
             out.extend(tag)
             if length_size > 0:
                 out.extend(len(value).to_bytes(length_size, byteorder))
@@ -6442,9 +6925,13 @@ class SchemaInterpreter:
             # A literal came from no bytes, so it writes none (PS-359).
             return b''
         if field_type in ('string', 'ascii'):
-            length = encode_length(field_def, len(str(value).encode('utf-8')))
-            encoded = str(value).encode('utf-8')[:length]
-            return encoded.ljust(length, b'\x00')
+            # PS-537. A fixed `length` pads and bounds the value; `remaining` or a
+            # reference has no fixed count, so the value supplies it.
+            fixed = field_def.get('length')
+            if not isinstance(fixed, int) or isinstance(fixed, bool) or fixed < 0:
+                fixed = None
+            return encode_ascii(field_def.get('name'), value, fixed,
+                                self._encode_warnings)
         
         if field_type == 'hex':
             length = encode_length(field_def, len(str(value)) // 2)
@@ -6511,6 +6998,7 @@ class SchemaInterpreter:
             EncodeResult with encoded payload starting with command_id
         """
         result = EncodeResult(payload=b'')
+        self._encode_warnings = []
         data = data or {}
         
         if command_name not in self.downlink_commands:
@@ -6545,9 +7033,10 @@ class SchemaInterpreter:
                 encoded = self._encode_field(field_def, value)
                 output.extend(encoded)
             except Exception as e:
-                result.errors.append(f"Error encoding command field {name}: {e}")
+                result.errors.append(error_text(f"Error encoding command field {name}: ", e))
         
         result.payload = bytes(output)
+        result.warnings.extend(self._encode_warnings)
         return result
     
     def decode_command(self, payload: bytes) -> DecodeResult:
@@ -6600,7 +7089,7 @@ class SchemaInterpreter:
                     if not name.startswith('_'):
                         result.data[name] = value
             except Exception as e:
-                result.errors.append(f"Error decoding command field {name}: {e}")
+                result.errors.append(error_text(f"Error decoding command field {name}: ", e))
                 break
         
         result.bytes_consumed = pos

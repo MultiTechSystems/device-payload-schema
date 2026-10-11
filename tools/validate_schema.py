@@ -32,7 +32,8 @@ from schema_interpreter import (SchemaInterpreter, DecodeResult, byte_group_erro
                                 arithmetic_schema_errors, case_body_errors,
                                 internal_name_errors, meta_declaration_errors,
                                 literal_errors,
-                                lookup_template_errors, optional_errors, repeat_members,
+                                lookup_template_errors, on_repeat_schema_errors,
+                                optional_errors, repeat_members,
                                 CONDITION_OPS,
                                 schema_iterator_errors,
                                 timestamp_errors,
@@ -1375,6 +1376,8 @@ def validate_schema_structure(schema: Dict[str, Any]) -> List[str]:
         # PS-539: every `$` reference names something the schema declares.
         errors.extend(reference_errors(expand_refs(schema)[0]))
         errors.extend(meta_declaration_errors(schema))           # PS-491
+        # PS-525, PS-526: on_repeat's values, merge on objects only, one mode per name.
+        errors.extend(on_repeat_schema_errors(expand_refs(schema)[0]))
         # PS-350, PS-366 to PS-387, PS-471: the repeat iterator and reserve.
         errors.extend(schema_iterator_errors(schema))
         # PS-014, PS-015, PS-464, PS-465: what `length` may be. Checked only on the

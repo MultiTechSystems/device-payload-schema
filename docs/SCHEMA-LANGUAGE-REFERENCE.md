@@ -96,7 +96,7 @@ the range is an error (PS-420).
 
 | Type | Description |
 |------|-------------|
-| `ascii` | ASCII string (requires `length:`) |
+| `ascii` | Text of `length:` bytes; trailing 0x00 padding dropped, a byte above 0x7F reported as its ISO 8859-1 character with a warning (PS-534, PS-538). Encoding pads with 0x00 and rejects a value too long or above U+00FF (PS-537) |
 | `hex` | Lowercase hex string (requires `length:`) |
 | `bytes` | Raw bytes, reported as declared by `format:` (requires `length:`, PS-456) |
 | `base64` | Base64 encoded output (requires `length:`) |
@@ -998,6 +998,37 @@ Parse tag-based variable content. Supports single and multi-byte tags.
 
 The loop stops where the reserved bytes begin, and the fields after it read them. Fewer
 bytes than `reserve` at the start is an error.
+
+### A name reported more than once (`on_repeat`)
+
+With `merge: true`, a name two entries report - whether they share a tag or not - is
+combined as its `on_repeat` says (PS-157, PS-525): `collect` (the default) gathers the
+values into an array in payload order, `last` keeps the value reported last, and `merge`
+combines `type: object` values member by member.
+
+```yaml
+- tlv:
+    tag_size: 2
+    on_repeat: merge      # default for this tlv's object fields; others keep collect
+    cases:
+      0x0310: [{name: loramac, type: object, fields: [{name: adr, type: u8}]}]
+      0x0311: [{name: loramac, type: object, fields: [{name: dr, type: u8}]}]
+# 0310 01 0311 05  ->  {"loramac": {"adr": 1, "dr": 5}}
+```
+
+A field's own `on_repeat` takes precedence over the tlv's. Only a `type: object` field may
+declare `merge`, and every field reporting one name must resolve to the same mode, or the
+schema is rejected (PS-526). A merged object reporting one member twice is an error,
+unless that member declares `on_repeat: last`. `on_repeat` anywhere else - outside a tlv,
+or on a member of an object that is not merged - is rejected (PS-525).
+
+Merged cases may share a member only where it declares `on_repeat: last` (PS-526).
+
+The encoder writes each value - a scalar, each element of an array PS-157 collected, a
+`last` value, a merged object's members - under the first case whose declared fields it
+supplies in full, and never zero-fills or drops one (PS-527). A shared `last` member is
+written in every case written for its object. A value no case takes in full, or a member
+no case declares, is an error naming it.
 
 ### Multi-Byte Tags (Tektelic-style)
 

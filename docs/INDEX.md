@@ -42,7 +42,7 @@ Generated inventory of this repository: what lives where, what each document cov
 | [`LANGUAGE-ANALYSIS.md`](LANGUAGE-ANALYSIS.md) | This document explains the design decisions behind the Payload Schema language. | 390 |
 | [`OUTPUT-FORMATS.md`](OUTPUT-FORMATS.md) | The Payload Schema decoder can output data in multiple formats for different platforms and... | 602 |
 | [`SCHEMA-DEVELOPMENT-GUIDE.md`](SCHEMA-DEVELOPMENT-GUIDE.md) | Best practices for creating complete, validated payload schemas. | 215 |
-| [`SCHEMA-LANGUAGE-REFERENCE.md`](SCHEMA-LANGUAGE-REFERENCE.md) | Complete reference for the LoRa Alliance Payload Schema specification (v0.5.0). | 1722 |
+| [`SCHEMA-LANGUAGE-REFERENCE.md`](SCHEMA-LANGUAGE-REFERENCE.md) | Complete reference for the LoRa Alliance Payload Schema specification (v0.5.0). | 1753 |
 | [`SESSION-NOTES-2026-02-25.md`](SESSION-NOTES-2026-02-25.md) | The prototype tests were using a custom REQ-xxx-yyy numbering scheme that was inconsistent with the... | 78 |
 | [`SPEC-IMPLEMENTATION-STATUS.md`](SPEC-IMPLEMENTATION-STATUS.md) | Feature support matrix across the reference implementations. | 353 |
 | [`TTN-CODEC-CONVERSION-GUIDE.md`](TTN-CODEC-CONVERSION-GUIDE.md) | Complete guide for AI-assisted conversion of The Things Network device repository codecs to Payload... | 575 |
@@ -108,6 +108,7 @@ Generated inventory of this repository: what lives where, what each document cov
 | `tools/payload_size_calc.py` | Calculate payload sizes for all flag/port combinations. |
 | `tools/provenance-gate.py` | independent provenance for the device schemas a change touches. |
 | `tools/qr_schema.py` | QR Code Schema Embedding Utilities |
+| `tools/run-logged.py` | Run a command, stream its output, and keep a copy of it in a log file. |
 | `tools/schema-mutation.py` | How well do a schema's test vectors constrain it? Mutate the schema and see. |
 | `tools/schema_base64.py` | Encode/decode Payload Schemas to/from base64 |
 | `tools/schema_binary.py` | Compact Binary Schema Encoder/Decoder |
@@ -122,14 +123,14 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Device schemas
 
-325 schemas under `schemas/devices/`.
-Mean quality score 75.9% (PLATINUM 37, GOLD 40, SILVER 207, BRONZE 26, REJECTED 15). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+334 schemas under `schemas/devices/`.
+Mean quality score 75.8% (PLATINUM 37, GOLD 40, SILVER 216, BRONZE 26, REJECTED 15). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
-| _language-conformance | 113 | 220 | SILVER 97, BRONZE 16 |
+| _language-conformance | 122 | 234 | SILVER 106, BRONZE 16 |
 | milesight | 84 | 1427 | PLATINUM 21, GOLD 33, SILVER 27, REJECTED 3 |
 | decentlab | 58 | 204 | PLATINUM 13, GOLD 6, SILVER 27, BRONZE 8, REJECTED 4 |
 | _library-composed | 49 | 57 | SILVER 48, BRONZE 1 |
@@ -155,6 +156,7 @@ Mean quality score 75.9% (PLATINUM 37, GOLD 40, SILVER 207, BRONZE 26, REJECTED 
 |---|---|---|---|---|---|
 | `_language-conformance/arithmetic-order-computed` | 8 | 2 | fields | 71% | SILVER |
 | `_language-conformance/arithmetic-order-read` | 5 | 2 | fields | 73% | SILVER |
+| `_language-conformance/ascii-latin1` | 1 | 4 | fields | 77% | SILVER |
 | `_language-conformance/ascii-nul-padding` | 1 | 3 | fields | 73% | SILVER |
 | `_language-conformance/bit-range-order` | 6 | 1 | fields | 71% | SILVER |
 | `_language-conformance/bitfield-string-hex-case` | 2 | 1 | fields | 71% | SILVER |
@@ -245,7 +247,7 @@ Mean quality score 75.9% (PLATINUM 37, GOLD 40, SILVER 207, BRONZE 26, REJECTED 
 | `_language-conformance/repeat-reserve` | 3 | 2 | fields | 71% | SILVER |
 | `_language-conformance/repeat-trailer` | 4 | 1 | fields | 69% | BRONZE |
 | `_language-conformance/round-half-to-even` | 5 | 1 | fields | 71% | SILVER |
-| `_language-conformance/round-large-value` | 2 | 1 | fields | 69% | BRONZE |
+| `_language-conformance/round-large-value` | 2 | 2 | fields | 69% | BRONZE |
 | `_language-conformance/round-ties-away` | 4 | 1 | fields | 71% | SILVER |
 | `_language-conformance/sentinel` | 2 | 2 | fields | 69% | BRONZE |
 | `_language-conformance/skip-type` | 3 | 1 | fields | 71% | SILVER |
@@ -253,6 +255,14 @@ Mean quality score 75.9% (PLATINUM 37, GOLD 40, SILVER 207, BRONZE 26, REJECTED 
 | `_language-conformance/tlv-case-field-list` | 10 | 7 | fields | 78% | SILVER |
 | `_language-conformance/tlv-case-key-patterns` | 6 | 5 | fields | 76% | SILVER |
 | `_language-conformance/tlv-nameless-case` | 2 | 1 | fields | 71% | SILVER |
+| `_language-conformance/tlv-repeat-collect-first-case` | 2 | 1 | fields | 71% | SILVER |
+| `_language-conformance/tlv-repeat-collect` | 2 | 1 | fields | 71% | SILVER |
+| `_language-conformance/tlv-repeat-last` | 2 | 1 | fields | 71% | SILVER |
+| `_language-conformance/tlv-repeat-member-last` | 6 | 1 | fields | 71% | SILVER |
+| `_language-conformance/tlv-repeat-merge-shared-last` | 6 | 1 | fields | 71% | SILVER |
+| `_language-conformance/tlv-repeat-merge-shared-member` | 5 | 1 | fields | 71% | SILVER |
+| `_language-conformance/tlv-repeat-merge` | 5 | 2 | fields | 71% | SILVER |
+| `_language-conformance/tlv-repeat-object-collect` | 4 | 1 | fields | 71% | SILVER |
 | `_language-conformance/tlv-reserve` | 3 | 2 | fields | 71% | SILVER |
 | `_language-conformance/tlv-tag-bit-range` | 7 | 1 | fields | 71% | SILVER |
 | `_language-conformance/tlv-tag-var-name-from` | 4 | 2 | fields | 73% | SILVER |

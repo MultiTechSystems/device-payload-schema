@@ -63,7 +63,7 @@ PROTO_C = $(patsubst proto/%.proto,src/%.pb.c,$(PROTO_SRCS))
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra -O3 -Iinclude
 
-.PHONY: all clean test test-c selftest validate-devices ci docs-index docs-index-check score-check validate-examples hypothesis coverage proto help codec benchmark bench-c check-floors check-floors-python generate-codec pytest pytest-cov coverage-html coverage-all validate fuzz fuzz-quick fuzz-hypothesis fuzz-go fuzz-c test-go test-java test-dotnet test-languages
+.PHONY: all clean test test-c selftest validate-devices ci docs-index docs-index-check score-check validate-examples hypothesis coverage proto help codec benchmark bench-c check-floors check-floors-python check-floors-from-logs verify generate-codec pytest pytest-cov coverage-html coverage-all validate fuzz fuzz-quick fuzz-hypothesis fuzz-go fuzz-c test-go test-java test-dotnet test-languages
 
 all: $(TEST_BIN)
 
@@ -111,24 +111,32 @@ GO_IMAGE ?= golang:1.22
 JAVA_IMAGE ?= maven:3.9-eclipse-temurin-21
 DOTNET_IMAGE ?= mcr.microsoft.com/dotnet/sdk:8.0
 
+# Each suite's output is also kept in $(LANG_LOG_DIR)/<lang>.log (tools/run-logged.py), so
+# `check-floors --from-logs` can read the corpus counts instead of running the suite a
+# second time. That is why Go runs with -v (t.Log lines print only under -v; a cached
+# result replays them) and C# with the detailed console logger: those lines carry the
+# counts. The exit status is the suite's own.
+LANG_LOG_DIR = build/lang-logs
+RUN_LOGGED = python3 tools/run-logged.py
+
 test-go:
 	@mkdir -p $(CACHE_DIR)/go
-	$(DOCKER_RUN) -w /work/go/schema \
+	$(RUN_LOGGED) $(LANG_LOG_DIR)/go.log -- $(DOCKER_RUN) -w /work/go/schema \
 		-v $(CACHE_DIR)/go:/tmp/gocache \
 		-e GOFLAGS=-mod=mod -e GOCACHE=/tmp/gocache \
-		$(GO_IMAGE) sh -c "go vet ./... && go test ./..."
+		$(GO_IMAGE) sh -c "go vet ./... && go test -v ./..."
 
 test-java:
 	@mkdir -p $(CACHE_DIR)/m2
-	$(DOCKER_RUN) -w /work/bindings/java \
+	$(RUN_LOGGED) $(LANG_LOG_DIR)/java.log -- $(DOCKER_RUN) -w /work/bindings/java \
 		-v $(CACHE_DIR)/m2:/root/.m2 \
 		$(JAVA_IMAGE) mvn -B test
 
 test-dotnet:
 	@mkdir -p $(CACHE_DIR)/nuget
-	$(DOCKER_RUN) -w /work/dotnet \
+	$(RUN_LOGGED) $(LANG_LOG_DIR)/dotnet.log -- $(DOCKER_RUN) -w /work/dotnet \
 		-v $(CACHE_DIR)/nuget:/root/.nuget \
-		$(DOTNET_IMAGE) dotnet test --nologo
+		$(DOTNET_IMAGE) dotnet test --nologo --logger "console;verbosity=detailed"
 
 # Every corpus vector through both conformance paths - the interpreted schema and the
 # generated TS013 codec - with a verdict apiece. The corpus runners cover the interpreted
@@ -148,12 +156,19 @@ PYTEST = $(VENV)/bin/pytest
 
 $(VENV)/bin/activate:
 	python3 -m venv $(VENV)
-	$(PIP) install --quiet pytest pytest-cov pyyaml
+	$(PIP) install --quiet pytest pytest-cov pytest-xdist pyyaml
 
 # Python tests
+# The suite runs on every core through pytest-xdist. `make pytest PYTEST_ARGS=` runs it
+# serially; any other pytest options go there too. A venv without pytest-xdist runs
+# serially and says so, rather than failing on an unrecognised -n.
+XDIST_AVAILABLE = $(shell $(PYTHON) -c "import xdist" 2>/dev/null && echo yes)
+PYTEST_ARGS ?= $(if $(XDIST_AVAILABLE),-n auto --dist loadgroup,)
+
 pytest: $(VENV)/bin/activate
 	@echo "Running Python tests..."
-	PYTHONPATH=tools $(PYTEST) tests/ -v
+	@$(if $(XDIST_AVAILABLE),,echo "pytest-xdist is not installed in $(VENV); running serially (pip install -r requirements.txt)")
+	PYTHONPATH=tools $(PYTEST) tests/ -v $(PYTEST_ARGS)
 
 # Mirrors the `Validate every device schema` job in .github/workflows/quality.yml.
 # `make test` ran the five interpreters and the Python suite but never the validator,
@@ -278,8 +293,21 @@ benchmark: $(BENCHMARK_BIN)
 check-floors: $(VENV)/bin/activate
 	$(PYTHON) tools/check-floors.py
 
+# Reads Go, Java and C# actuals from the logs the last test-go/test-java/test-dotnet wrote,
+# running a suite only where its log is missing, unfinished or stale. `make verify` uses it.
+check-floors-from-logs: $(VENV)/bin/activate
+	$(PYTHON) tools/check-floors.py --from-logs
+
 check-floors-python: $(VENV)/bin/activate
 	$(PYTHON) tools/check-floors.py --python
+
+# One full local verification pass: every implementation's tests once, then every corpus
+# floor against its own actual, read from the logs those tests just wrote rather than by
+# running Go, Java and C# again (`make check-floors` alone still runs them). A log that is
+# missing, unfinished or older than a source edit makes check-floors run that suite itself.
+verify: $(VENV)/bin/activate
+	$(MAKE) test-languages
+	$(PYTHON) tools/check-floors.py --from-logs
 
 bench-c: $(VENV)/bin/activate
 	$(PYTHON) tools/benchmark-c-interpreter.py
@@ -432,6 +460,7 @@ help:
 	@echo "  test-java     Java interpreter tests (in docker)"
 	@echo "  test-dotnet   C# interpreter tests (in docker)"
 	@echo "  test-languages Every implementation: Python, C, Go, Java, C#"
+	@echo "  verify        test-languages, then every corpus floor read from its logs"
 	@echo "  clean         Remove build artifacts"
 	@echo "  help          Show this help"
 	@echo ""

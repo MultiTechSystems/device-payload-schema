@@ -336,6 +336,20 @@ public static class SchemaDecoder
     static Dictionary<string, object?> DecodeByteGroup(SchemaField field, DecodeContext ctx)
     {
         int size = Cr131.ByteGroupWidth(field);                    // PS-070, CR-2026-131
+        if (ctx.Remaining < size)
+        {
+            // PS-535: a member reads the group's bytes from its start, so the first
+            // member whose own base does not fit is the field that read past the end, as
+            // the spec prototype names it. Where every base fits and the group's `size`
+            // does not, the group itself made the read. A member's base is CR-2026-131's:
+            // a bit range's base, a whole integer's width, one byte for a bool.
+            foreach (var member in field.ByteGroup)
+            {
+                if (Cr131.MemberRange(member).baseBytes > ctx.Remaining)
+                    throw BufferUnderflowException.PeekAt(ctx.Offset).Name(member.Name, member.RawType);
+            }
+            throw BufferUnderflowException.Need(size, ctx.Offset, ctx.Data.Length).Name(null, "byte_group");
+        }
         var data = ctx.Read(size);
         var result = new Dictionary<string, object?>();
 
@@ -401,11 +415,20 @@ public static class SchemaDecoder
         // members and a repeat's elements are another level of output, described by the
         // declaration's nested entries (PS-371, PS-481), not by what they wrote.
         ctx.Produced(field);
-        if (field.Type is not (FieldType.Object or FieldType.Repeat))
-            return DecodeFieldBody(field, ctx, schema);
-        ctx.MetaDepth++;
-        try { return DecodeFieldBody(field, ctx, schema); }
-        finally { ctx.MetaDepth--; }
+        try
+        {
+            if (field.Type is not (FieldType.Object or FieldType.Repeat))
+                return DecodeFieldBody(field, ctx, schema);
+            ctx.MetaDepth++;
+            try { return DecodeFieldBody(field, ctx, schema); }
+            finally { ctx.MetaDepth--; }
+        }
+        catch (BufferUnderflowException e) when (!e.Named)
+        {
+            // PS-535: the innermost field that read past the end is named; an enclosing
+            // object or repeat passes its member's error through unchanged.
+            throw e.Name(field.Name, field.RawType);
+        }
     }
 
     /// <summary>
@@ -562,7 +585,7 @@ public static class SchemaDecoder
             case FieldType.Ascii:
             {
                 var data = ctx.Read(length);
-                value = Encoding.ASCII.GetString(data).TrimEnd('\0');
+                value = Helpers.DecodeAscii(field.Name, data, ctx.Warnings);
                 break;
             }
 
@@ -1274,7 +1297,11 @@ public static class SchemaDecoder
         else
         {
             int length = field.Length > 0 ? field.Length : 1;
-            var data = ctx.Read(length);
+            ReadOnlySpan<byte> data;
+            // PS-535: the discriminator is the field that read; it is named by the
+            // match's `name`, where it declares one.
+            try { data = ctx.Read(length); }
+            catch (BufferUnderflowException e) when (!e.Named) { throw e.Name(field.Name, "match"); }
             matchValue = (long)Helpers.DecodeUint(data, ctx.Endian);
             discriminator = matchValue;
 
@@ -1404,6 +1431,7 @@ public static class SchemaDecoder
 
         var result = new Dictionary<string, object?>();
         var channels = new List<Dictionary<string, object?>>();
+        var collected = new HashSet<string>();      // names already turned into arrays (PS-157)
 
         while (ctx.Remaining > 0)
         {
@@ -1518,16 +1546,28 @@ public static class SchemaDecoder
                 {
                     foreach (var kv in caseResult)
                     {
-                        if (result.ContainsKey(kv.Key))
+                        var mode = field.TLVRepeatModes.TryGetValue(kv.Key, out var m) ? m : "collect";
+                        if (!result.ContainsKey(kv.Key))
                         {
-                            if (result[kv.Key] is List<object?> arr)
-                                arr.Add(kv.Value);
-                            else
-                                result[kv.Key] = new List<object?> { result[kv.Key], kv.Value };
+                            result[kv.Key] = kv.Value;
+                        }
+                        else if (mode != "collect")                              // PS-525
+                        {
+                            result[kv.Key] = CombineRepeated(kv.Key, result[kv.Key], kv.Value, mode,
+                                field.TLVLastMembers.TryGetValue(kv.Key, out var lm) ? lm : null);
+                        }
+                        else if (collected.Contains(kv.Key))                       // PS-157
+                        {
+                            ((List<object?>)result[kv.Key]!).Add(kv.Value);
                         }
                         else
                         {
-                            result[kv.Key] = kv.Value;
+                            // A name reported again becomes an array. Whether it already is
+                            // one is not the test: a value that is itself a list (a repeat)
+                            // was appended into, so its second report was spliced among the
+                            // first's elements.
+                            result[kv.Key] = new List<object?> { result[kv.Key], kv.Value };
+                            collected.Add(kv.Key);
                         }
                     }
                 }
@@ -1605,6 +1645,27 @@ public static class SchemaDecoder
             result["channels"] = channels;
 
         return result;
+    }
+
+    /// <summary>
+    /// `last` keeps the later value; `merge` combines two objects member by member, and a
+    /// member reported twice is an error unless it declares `on_repeat: last` (PS-525).
+    /// </summary>
+    static object? CombineRepeated(string name, object? earlier, object? value, string mode,
+        HashSet<string>? lastMembers)
+    {
+        if (mode == "last" || earlier is not Dictionary<string, object?> before
+            || value is not Dictionary<string, object?> after)
+            return value;
+        var combined = new Dictionary<string, object?>(before);
+        foreach (var kv in after)
+        {
+            if (combined.ContainsKey(kv.Key) && (lastMembers == null || !lastMembers.Contains(kv.Key)))
+                throw new InvalidOperationException(
+                    $"tlv: the merged object '{name}' reports its member '{kv.Key}' twice (PS-525)");
+            combined[kv.Key] = kv.Value;
+        }
+        return combined;
     }
 
     static string? FindTLVCaseKey(Dictionary<string, List<SchemaField>>? cases, List<int> tag)

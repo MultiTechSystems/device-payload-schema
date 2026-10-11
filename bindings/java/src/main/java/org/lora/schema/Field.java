@@ -71,6 +71,8 @@ public class Field {
     private Boolean merge;
     private String unknown;
     private Map<String, List<Field>> tlvCases;
+    // CR-2026-110: how a name reported by more than one entry combines (PS-525).
+    private OnRepeat.Modes repeatModes = OnRepeat.NONE;
     
     // Bitfield string
     private List<List<Object>> parts;
@@ -341,6 +343,8 @@ public class Field {
     
     public Map<String, List<Field>> getTlvCases() { return tlvCases; }
     public void setTlvCases(Map<String, List<Field>> tlvCases) { this.tlvCases = tlvCases; }
+    OnRepeat.Modes getRepeatModes() { return repeatModes; }
+    void setRepeatModes(OnRepeat.Modes repeatModes) { this.repeatModes = repeatModes; }
     
     public List<List<Object>> getParts() { return parts; }
     public void setParts(List<List<Object>> parts) { this.parts = parts; }

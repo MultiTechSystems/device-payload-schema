@@ -196,11 +196,15 @@ jobs:
             PYTHONPATH=tools python tools/validate_schema.py "$schema"
           done
 
-  # Coverage report
+  # Coverage report, on master and the nightly schedule only. It runs the same
+  # test set as Quality's "Python tests" job (tests/, 5378 collected, same skips),
+  # under coverage, which takes about 58 minutes against that job's 23. On a pull
+  # request "Python tests" is the check; coverage adds a report, not a test.
   coverage:
     name: Test Coverage
     runs-on: ubuntu-24.04
-    
+    if: github.event_name != 'pull_request'
+
     steps:
       - uses: actions/checkout@v5
       
@@ -212,11 +216,11 @@ jobs:
       
       - name: Install dependencies
         run: |
-          pip install pytest pytest-cov pyyaml hypothesis
+          pip install pytest pytest-cov pytest-xdist pyyaml hypothesis
       
       - name: Run tests with coverage
         run: |
-          PYTHONPATH=tools pytest tests/ -v \
+          PYTHONPATH=tools pytest tests/ -v -n auto --dist loadgroup \
             --cov=tools \
             --cov-report=term-missing \
             --cov-report=xml:coverage.xml

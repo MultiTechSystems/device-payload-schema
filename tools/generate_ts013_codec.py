@@ -300,12 +300,6 @@ function encBase64(text) {
   return out;
 }
 
-function encUtf8(text) {
-  var s = unescape(encodeURIComponent(String(text))), out = [];
-  for (var i = 0; i < s.length; i++) out.push(s.charCodeAt(i));
-  return out;
-}
-
 function encEnumLabel(entry) {
   return entry !== null && typeof entry === "object" && "name" in entry ? entry.name : entry;
 }
@@ -376,9 +370,22 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
     return;
   }
   if (encIsLiteral(f)) return;                       // PS-359: a literal writes nothing
-  if (type === "string" || type === "ascii") {
-    var u = encUtf8(value);
-    encPad(out, u, encLength(f, u.length));
+  if (type === "string" || type === "ascii") {        // encode_ascii (PS-537)
+    var text = String(value), u = [], high = false;
+    var fixed = typeof f.length === "number" && f.length >= 0 ? f.length : null;
+    for (var c = 0; c < text.length; c++) {
+      var code = text.charCodeAt(c);
+      if (code > 0xFF) {
+        encFail("Field '" + f.name + "': an ascii value holds a character above U+00FF, which has no byte (PS-537)");
+      }
+      if (code > 0x7F) high = true;
+      u.push(code);                                  // PS-538: the byte of the same number
+    }
+    if (fixed !== null && u.length > fixed) {
+      encFail("Field '" + f.name + "': an ascii value of " + u.length + " bytes is longer than its length of " + fixed + " (PS-537)");
+    }
+    if (high) ctx.wa.push("Field '" + f.name + "': a character above U+007F in an ascii value (PS-537)");
+    encPad(out, u, fixed !== null ? fixed : u.length);
     return;
   }
   if (type === "hex") {
@@ -734,6 +741,14 @@ function encRepeat(out, f, data, ctx) {               // _encode_repeat
   if (records === undefined || records === null) return;
   if (!Array.isArray(records) && typeof records === "object") records = [records];
   if (!Array.isArray(records)) encFail("repeat field " + JSON.stringify(name) + ": expected a list of records, got " + typeof records);
+  // PS-550: a sibling identifying these values position by position is given as many
+  // values as this repeat, as a decoder requires (PS-546).
+  encSiblings(f).forEach(function (sib) {
+    var given = data[sib];
+    if (!Array.isArray(given) || given.length !== records.length) {
+      encFail("Repeat '" + name + "' is given " + records.length + " values and '" + sib + "', which identifies them, " + (Array.isArray(given) ? given.length : "none") + " (PS-550)");
+    }
+  });
   var rf = f.fields || [];
   if (f.element && typeof f.element === "object" && !f.fields) {
     // PS-529: each value is encoded as the element, wrapped as it was decoded. PS-544: a
@@ -766,6 +781,23 @@ function encRepeat(out, f, data, ctx) {               // _encode_repeat
     encList(out, rf, rec, ctx);
   }
   if (f.trailer) encList(out, f.trailer, data, ctx);
+}
+
+function encSiblings(f) {                             // sibling_references
+  // The distinct sibling names a repeat's `$name[i]` references name (PS-546): its
+  // identity, and its elements' `unit` and `ipso.instance`.
+  var refs = [f.identity], names = [];
+  var members = (f.element && typeof f.element === "object" && !f.fields) ? [f.element] : (f.fields || []);
+  members.forEach(function (m) {
+    if (!m || typeof m !== "object") return;
+    var ipso = (m.ipso && typeof m.ipso === "object") ? m.ipso : {};
+    refs.push(m.unit, ipso.instance);
+  });
+  refs.forEach(function (r) {
+    var mm = typeof r === "string" ? /^\$(\w+)\[(\w+)\]$/.exec(r) : null;
+    if (mm && names.indexOf(mm[1]) < 0) names.push(mm[1]);
+  });
+  return names;
 }
 
 function encReachesRecords(fields) {                  // records_reachable
@@ -848,31 +880,136 @@ function encTlvTag(out, key, tlv, ctx) {              // _encode_tlv_tag
   encWriteInt(out, encParseInt0(key), tlv.tag_size === undefined ? 1 : tlv.tag_size, false, ctx.endian);
 }
 
+function encCaseClaims(fields, optional) {             // _case_claims
+  var out = [];
+  (fields || []).forEach(function (f) {
+    if (!f || typeof f !== "object") return;
+    if ("byte_group" in f && !f.type) {
+      var g = f.byte_group;
+      out = out.concat(encCaseClaims(Array.isArray(g) ? g : (g.fields || []), optional));
+      return;
+    }
+    if ("flagged" in f && !f.type) {
+      (f.flagged.groups || []).forEach(function (grp) { out = out.concat(encCaseClaims(grp.fields || [], true)); });
+      return;
+    }
+    if (!f.name || String(f.name).charAt(0) === "_" || ENC_COMPUTED.indexOf(f.type) >= 0) return;
+    out.push([f, !!optional || f.optional === true]);
+  });
+  return out;
+}
+
 function encTlv(out, f, data, ctx) {                  // _encode_tlv
   var tlv = f.tlv || {}, cases = tlv.cases || {}, lsize = tlv.length_size || 0;
   if (tlv.merge === false) encFail("a tlv with merge: false reports its entries under 'channels', and encoding them is not supported");
-  var order = Object.keys(data), cands = [];
-  for (var key in cases) {
-    if (key === "default" || !Array.isArray(cases[key])) continue;
-    var claimed = encClaimable(cases[key]).map(function (c) { return c.name; })
-      .filter(function (n) { return Object.prototype.hasOwnProperty.call(data, n); });
-    if (!claimed.length) continue;
-    var fid = encCaseFidelity(cases[key], data);
-    var position = Math.min.apply(null, claimed.map(function (n) { return order.indexOf(n); }));
-    cands.push({ p: position, l: fid[1] ? 0 : 1, m: -fid[0], key: key, body: cases[key], claimed: claimed, seq: cands.length });
-  }
-  cands.sort(function (a, b) { return a.p - b.p || a.l - b.l || a.m - b.m || a.seq - b.seq; });
-  var spent = {}, emitted = [];
-  cands.forEach(function (c) {
-    if (c.claimed.every(function (n) { return spent[n]; })) return;
-    c.claimed.forEach(function (n) { spent[n] = true; });
-    emitted.push(c);
+  var order = Object.keys(data), has = Object.prototype.hasOwnProperty;
+  // PS-525 to PS-527 (CR-2026-110, -125, -128). `rep` is tlv_repeat_modes and
+  // tlv_encode_plan, resolved at generation time, with the cases' declaration order: an
+  // object's integer-like keys iterate in ascending order, not the order written.
+  var rep = tlv.__on_repeat || {};
+  var modes = rep.modes || {}, members = rep.members || {};
+  var keys = rep.order || Object.keys(cases);
+  // A supplied member of a merged object that no case declares has nowhere to go.
+  Object.keys(members).forEach(function (n) {
+    var v = data[n];
+    if (v === null || typeof v !== "object" || Array.isArray(v)) return;
+    var stray = Object.keys(v).filter(function (m) { return members[n].indexOf(m) < 0; }).sort();
+    if (stray.length) encFail("tlv: the merged object '" + n + "' is given [" + stray.map(function (m) { return "'" + m + "'"; }).join(", ") + "], which no case declares (PS-527)");
   });
-  emitted.sort(function (a, b) { return a.p - b.p || a.seq - b.seq; });
-  emitted.forEach(function (c) {
-    encTlvTag(out, c.key, tlv, ctx);
+  // Each value goes under the first case whose declared fields it supplies in full;
+  // nothing is zero-filled or dropped. A case requiring more fields is tried first.
+  var entries = [];
+  keys.forEach(function (key) {
+    if (key === "default" || !Array.isArray(cases[key])) return;
+    var req = [], opt = [];
+    encCaseClaims(cases[key]).forEach(function (c) { (c[1] ? opt : req).push(c[0]); });
+    entries.push({ key: key, body: cases[key], req: req, opt: opt, seq: entries.length });
+  });
+  // An object counts its members (CR-2026-129), so a merged {adr, dr} case outranks {dr}.
+  function width(list) {
+    return list.reduce(function (n, c) {
+      return n + (c.type === "object" ? Math.max(1, encCaseClaims(c.fields || []).length) : 1);
+    }, 0);
+  }
+  entries.forEach(function (e) { e.width = width(e.req); });
+  entries.sort(function (a, b) { return b.width - a.width || a.seq - b.seq; });
+  var queues = {}, pending = {};
+  entries.forEach(function (e) {
+    e.req.concat(e.opt).forEach(function (c) {
+      var n = c.name;
+      if (!has.call(data, n) || has.call(queues, n) || modes[n] === "merge") return;
+      var v = data[n];
+      var collected = Array.isArray(v) && c.type !== "repeat" && !(c.type === "bytes" && c.format === "array") && (modes[n] || "collect") === "collect";
+      queues[n] = collected ? v.slice() : [v];
+    });
+  });
+  Object.keys(members).forEach(function (n) {
+    var v = data[n];
+    if (v !== null && typeof v === "object" && !Array.isArray(v)) pending[n] = Object.keys(v);
+  });
+  function membersOf(c) { return (c.fields || []).filter(function (m) { return m && m.name; }).map(function (m) { return m.name; }); }
+  function fits(c, v) {
+    if (c.type === "object" && v !== null && typeof v === "object" && !Array.isArray(v) && modes[c.name] !== "merge") {
+      var claims = encCaseClaims(c.fields || []), every = {}, ok = true;
+      claims.forEach(function (x) { every[x[0].name] = true; if (!x[1] && !has.call(v, x[0].name)) ok = false; });
+      Object.keys(v).forEach(function (k) { if (!every[k]) ok = false; });
+      return ok;
+    }
+    var one = {}; one[c.name] = v;
+    return encCaseFidelity([c], one)[1];
+  }
+  var written = [], progress = true;
+  while (progress) {
+    progress = false;
+    entries.forEach(function (e) {
+      for (;;) {
+        var values = {}, taken = 0, complete = true;
+        for (var i = 0; i < e.req.length; i++) {
+          var c = e.req[i], n = c.name;
+          if (modes[n] === "merge") {
+            var ms = membersOf(c);
+            if (!has.call(pending, n) || ms.some(function (m) { return !has.call(data[n], m); })) { complete = false; break; }
+            var sub = {};
+            ms.forEach(function (m) { sub[m] = data[n][m]; });
+            values[n] = sub;
+            if (ms.some(function (m) { return pending[n].indexOf(m) >= 0; })) taken++;
+          } else {
+            var q = queues[n];
+            if (!q || !q.length || !fits(c, q[0])) { complete = false; break; }
+            values[n] = q[0]; taken++;
+          }
+        }
+        if (!complete) break;
+        e.opt.forEach(function (c) {
+          var q = queues[c.name];
+          if (q && q.length && fits(c, q[0])) { values[c.name] = q[0]; taken++; }
+        });
+        if (!taken) break;
+        var entry = {}, pos = Infinity;
+        for (var k in data) entry[k] = data[k];
+        Object.keys(values).forEach(function (n) {
+          entry[n] = values[n];
+          pos = Math.min(pos, order.indexOf(n));
+          if (modes[n] === "merge") pending[n] = pending[n].filter(function (m) { return !has.call(values[n], m); });
+          else queues[n].shift();
+        });
+        written.push({ key: e.key, body: e.body, data: entry, p: pos, seq: written.length });
+        progress = true;
+      }
+    });
+  }
+  Object.keys(queues).forEach(function (n) {
+    if (queues[n].length) encFail("tlv: no case takes the value of '" + n + "' " + JSON.stringify(queues[n][0]) + " in full (PS-502, PS-527)");
+  });
+  Object.keys(pending).forEach(function (n) {
+    if (pending[n].length) encFail("tlv: no case takes the members [" + pending[n].slice().sort().map(function (m) { return "'" + m + "'"; }).join(", ") + "] of the merged object '" + n + "' in full (PS-527)");
+  });
+  // Payload order, so a payload round-trips; entries of one name keep the order taken.
+  written.sort(function (a, b) { return a.p - b.p || a.seq - b.seq; });
+  written.forEach(function (w) {
+    encTlvTag(out, w.key, tlv, ctx);
     var value = [];
-    encList(value, c.body, data, ctx);
+    encList(value, w.body, w.data, ctx);
     if (lsize > 0) encWriteInt(out, value.length, lsize, false, ctx.endian);
     for (var i = 0; i < value.length; i++) out.push(value[i]);
   });
@@ -977,9 +1114,10 @@ function encList(out, fields, data, ctx, top) {
 }
 
 function encodeRoot(fields, data, endian) {
-  var ctx = { endian: endian, w: [] }, out = [];
+  // wa: PS-537's warnings, reported after the others as the reference reports them.
+  var ctx = { endian: endian, w: [], wa: [] }, out = [];
   encList(out, fields, data || {}, ctx, true);
-  return { bytes: out, warnings: ctx.w };
+  return { bytes: out, warnings: ctx.w.concat(ctx.wa) };
 }
 '''
 
@@ -1052,7 +1190,7 @@ _CODEC_LOCALS = {
     'pos', 'd', 'vars', 'w', 'aqr', 'aqp', 'endian', 'buf', 'bgVal', 'bgStart', 'q',
     'qn', 'r', 'port', 'bytes', 'cmdName', 'cmdId', 'input', 'e', 'i', 'k',
     '_si', '_tlvTag', '_tlvStart', '_tlvSpan', '_tlvLen', '_mv', '_mr', '_k', '_a', '_p',
-    '_i', '_flags',
+    '_i', '_flags', 'wn',
 }
 _JS_RESERVED = {
     'arguments', 'await', 'break', 'case', 'catch', 'class', 'const', 'continue',
@@ -1081,6 +1219,40 @@ def _codec_globals() -> set:
                   'encodeCommand'}
         _CODEC_GLOBALS = names
     return _CODEC_GLOBALS
+
+
+def _tlv_repeat_modes(tlv):
+    """tlv_repeat_modes() for a tlv that declares `on_repeat` on itself or on a case
+    field (PS-525); otherwise every name collects (PS-157), and the codec carries no
+    table for it."""
+    from schema_interpreter import tlv_repeat_modes, reported_fields
+    declared = 'on_repeat' in tlv or any(
+        'on_repeat' in field_def
+        for body in (tlv.get('cases') or {}).values() if isinstance(body, list)
+        for field_def in reported_fields(body).values())
+    return tlv_repeat_modes(tlv) if declared else ({}, {}, [])
+
+
+def _annotate_on_repeat(node):
+    """A copy of an encoder plan with each tlv carrying `__on_repeat`: its names' modes
+    (PS-525), each merged object's declared members (PS-527) and the cases' declaration
+    order, which a JSON object with integer-like keys does not keep."""
+    from schema_interpreter import tlv_encode_plan
+    if isinstance(node, list):
+        return [_annotate_on_repeat(item) for item in node]
+    if not isinstance(node, dict):
+        return node
+    out = {k: _annotate_on_repeat(v) for k, v in node.items()}
+    tlv = node.get('tlv')
+    if isinstance(tlv, dict) and isinstance(tlv.get('cases'), dict):
+        modes, last_members, _ = _tlv_repeat_modes(tlv)
+        plan = tlv_encode_plan(tlv, modes, last_members)
+        out['tlv'] = dict(out['tlv'], __on_repeat={
+            'modes': {k: v for k, v in modes.items() if v != 'collect'},
+            'members': {k: sorted(v) for k, v in plan['members'].items()},
+            'order': [str(key) for key in tlv['cases']],
+        })
+    return out
 
 
 #: Per-generation spellings for names whose plain mangling collides with another
@@ -1611,6 +1783,9 @@ class TS013Generator:
         from schema_interpreter import reference_errors
         iterator_problems += reference_errors(schema)            # PS-539
         iterator_problems += meta_declaration_errors(schema)    # PS-491
+        # PS-525, PS-526: on_repeat's values, merge on objects only, one mode per name.
+        from schema_interpreter import on_repeat_schema_errors
+        iterator_problems += on_repeat_schema_errors(schema)
         # PS-358, PS-519, PS-520: a malformed literal, as the interpreter refuses it.
         from schema_interpreter import literal_errors, typed_field_dicts
         for field_def in typed_field_dicts(schema):
@@ -1739,6 +1914,43 @@ function tlvUnknownRaw(d, tag, buf, from, span, separate) {
   d[key].push({ tag: tag, raw: hex });
 }
 
+// --- A name reported again (PS-157, PS-525) ---
+// One tlv entry's output folded into the tlv's. A name already reported is combined as
+// its on_repeat says: collected into an array by default, kept from the last entry
+// under `last`, combined member by member under `merge`. `collected` holds the names
+// already turned into arrays: a value that is itself a list is one element, not
+// appended into. The generated codec kept the last value for every name, so where two
+// entries reported one name the interpreters gave an array and this gave one value.
+function tlvFold(outer, entry, modes, lastMembers, collected) {
+  for (var k in entry) {
+    if (!Object.prototype.hasOwnProperty.call(entry, k)) continue;
+    var v = entry[k];
+    if (v === undefined) continue;
+    var mode = modes[k] || "collect";
+    if (!Object.prototype.hasOwnProperty.call(outer, k) || outer[k] === undefined) {
+      outer[k] = v;
+    } else if (mode === "last") {
+      outer[k] = v;
+    } else if (mode === "merge") {
+      var combined = {}, before = outer[k];
+      for (var a in before) if (Object.prototype.hasOwnProperty.call(before, a)) combined[a] = before[a];
+      for (var m in v) {
+        if (!Object.prototype.hasOwnProperty.call(v, m)) continue;
+        if (Object.prototype.hasOwnProperty.call(combined, m) && !(lastMembers[k] && lastMembers[k][m])) {
+          throw new Error("tlv: the merged object '" + k + "' reports its member '" + m + "' twice (PS-525)");
+        }
+        combined[m] = v[m];
+      }
+      outer[k] = combined;
+    } else if (collected[k]) {
+      outer[k].push(v);
+    } else {
+      outer[k] = [outer[k], v];
+      collected[k] = true;
+    }
+  }
+}
+
 // --- Absent values ---
 // A field with no value to report is absent (PS-278, PS-100, PS-117), and NaN and the
 // infinities are not JSON values (PS-282). An omitted step yields undefined, which
@@ -1821,11 +2033,24 @@ var SAFE_INTEGER = 9007199254740991;
 
 /* A read past the end of the payload is an error, as it is in every interpreter. The
  * readers below used to substitute 0 for a missing byte, so a truncated payload decoded
- * to plausible values with no error at all. */
+ * to plausible values with no error at all.
+ *
+ * PS-535 (CR-2026-115): the error identifies the field. Each field's code sets `_fld` to
+ * its label before it reads - `'name'`, or `an unnamed skip` - so the innermost field
+ * reading is the one named, and the text is the reference's exactly. */
+var _fld = null;
+function underflow(detail) {
+  return new Error(_fld === null ? detail : "Field " + _fld + ": " + detail + " (PS-535)");
+}
 function need(buf, pos, size) {
   if (pos + size > buf.length) {
-    throw new Error("Buffer too short: need " + size + " bytes at pos " + pos);
+    throw underflow("Buffer underflow: need " + size + " bytes at offset " + pos +
+                    ", but only " + Math.max(0, buf.length - pos) + " remaining");
   }
+}
+/* A bit range or a bool reads its byte(s) without consuming them. */
+function needPeek(buf, pos, size) {
+  if (pos + size > buf.length) throw underflow("Buffer underflow at peek offset " + pos);
 }
 
 function orderedBytes(buf, pos, size, endian) {
@@ -2278,7 +2503,8 @@ function writeS(buf, pos, size, value, endian) {
 
     def _gen_decode_fn(self, fname: str, fields: List[Dict]) -> str:
         lines = [f'function {fname}(buf, endian) {{']
-        lines.append(f'  var pos = 0, d = {{}}, vars = {{}}, w = [];')
+        lines.append(f'  var pos = 0, d = {{}}, vars = {{}}, w = [], wn = [];')
+        lines.append('  _fld = null;')
         # Readings omitted as "no reading" (PS-427, PS-428), for `_quality` if produced.
         lines.append('  var aqr = {}, aqp = {};')
         # rv: a looked-up field's value before its lookup, which valid_range compares
@@ -2323,7 +2549,7 @@ function writeS(buf, pos, size, value, endian) {
         lines.append('  if (!_leftDone && pos < buf.length) w.push((buf.length - pos) + '
                      '" byte(s) after the last field left undecoded, from offset " + pos + '
                      '" (PS-472)");')
-        lines.append('  return { data: d, pos: pos, warnings: w };')
+        lines.append('  return { data: d, pos: pos, warnings: w.concat(wn) };')
         lines.append('}')
         return '\n'.join(lines)
 
@@ -2354,6 +2580,12 @@ function writeS(buf, pos, size, value, endian) {
         problems = encoding_errors(field) if isinstance(field, dict) and 'type' in field else []
         if problems:
             raise ValueError(problems[0])
+        if isinstance(field, dict) and field.get('type'):
+            # PS-535: the field about to read, for a short read's error. A member of an
+            # object or a repeat element sets its own, so the innermost field is named.
+            from schema_interpreter import underflow_label
+            label = underflow_label(field.get('name'), field.get('type'))
+            lines.append(f'{i}  _fld = {json.dumps(label)};')
 
         # PS-541: each field list yields one record of the enclosing repeat element,
         # decoded into a fresh `d` and collected in `rcs`; the element reports them.
@@ -2388,6 +2620,20 @@ function writeS(buf, pos, size, value, endian) {
             group_endian = f'"{bg["endian"]}"' if isinstance(bg, dict) and bg.get('endian') else 'endian'
             lines.append(f'{i}  // byte_group')
             lines.append(f'{i}  var bgStart = pos;')
+            # PS-535: a member reads the group's bytes from its start, so the first member
+            # whose base does not fit is the field named, in the peek form; where every
+            # base fits and the group's size does not, the group itself is.
+            from schema_interpreter import underflow_label
+            members = bg_fields if isinstance(bg_fields, list) else []
+            lines.append(f'{i}  if (buf.length - pos < {int(bg_size)}) {{')
+            for bf in members:
+                bm = re.match(r'^[us](\d+)\[', str(bf.get('type', '')))
+                bbytes = int(bm.group(1)) // 8 if bm else 1
+                blabel = json.dumps(underflow_label(bf.get('name'), bf.get('type')))
+                lines.append(f'{i}    if (buf.length - pos < {bbytes}) {{ _fld = {blabel}; '
+                             f'needPeek(buf, pos, {bbytes}); }}')
+            lines.append(f'{i}    _fld = {json.dumps(underflow_label(None, "byte_group"))};')
+            lines.append(f'{i}  }}')
             wide_group = int(bg_size) >= 7
             if wide_group:
                 # Past 2^53 readU gives a decimal string; take each range from the bytes.
@@ -2856,6 +3102,7 @@ function writeS(buf, pos, size, value, endian) {
             # integer and corrupts a u32 base with its top bit set. An `sN` base is
             # sign-extended from the range's width (PS-352, PS-353).
             signed = base_type.startswith('s')
+            lines.append(f'{i}  needPeek(buf, pos, {base_size});')         # PS-535
             if base_size >= 7:
                 # readU gives a seven- or eight-byte base as a decimal string past 2^53,
                 # and the division below then read every range of it as 0.
@@ -2868,6 +3115,7 @@ function writeS(buf, pos, size, value, endian) {
                 if signed:
                     lines.append(f'{i}  if ({js_name} >= {2 ** (bit_width - 1)}) {js_name} -= {2 ** bit_width};')
             if consume:
+                lines.append(f'{i}  need(buf, pos, {int(consume)});')            # PS-535
                 lines.append(f'{i}  pos += {int(consume)};')
 
             val_expr = self._apply_modifiers_expr(js_name, field)
@@ -2909,9 +3157,10 @@ function writeS(buf, pos, size, value, endian) {
         if ftype == 'bool':
             bit = int(field.get('bit', 0))
             consume = field.get('consume', 0)
-            lines.append(f'{i}  if (pos >= buf.length) throw new Error("Buffer too short for bool");')
+            lines.append(f'{i}  needPeek(buf, pos, 1);')
             lines.append(f'{i}  var {js_name}_out = ((buf[pos] >> {bit}) & 1) === 1;')
             if consume:
+                lines.append(f'{i}  need(buf, pos, {int(consume)});')            # PS-535
                 lines.append(f'{i}  pos += {int(consume)};')
             if field.get('var'):
                 lines.append(f'{i}  vars.{to_js_name(field["var"])} = {js_name}_out;')
@@ -2928,7 +3177,7 @@ function writeS(buf, pos, size, value, endian) {
             # A skip past the end is a short read, as in every interpreter; the codec
             # advanced past the payload and reported success.
             lines.append(f'{i}  var _skipN = {length_to_js(field)};')
-            lines.append(f'{i}  if (pos + _skipN > buf.length) throw new Error("Buffer too short for skip");')
+            lines.append(f'{i}  need(buf, pos, _skipN);')
             lines.append(f'{i}  pos += _skipN;')
             return lines
 
@@ -2936,7 +3185,7 @@ function writeS(buf, pos, size, value, endian) {
         # integer path, which then had no size for it.
         if ftype == 'base64':
             lines.append(f'{i}  var {js_name}_n = {length_to_js(field)};')
-            lines.append(f'{i}  if (pos + {js_name}_n > buf.length) throw new Error("Buffer too short for base64");')
+            lines.append(f'{i}  need(buf, pos, {js_name}_n);')
             lines.append(f'{i}  var {js_name} = toBase64(buf, pos, {js_name}_n);')
             lines.append(f'{i}  pos += {js_name}_n;')
             if not name.startswith('_'):
@@ -2955,12 +3204,18 @@ function writeS(buf, pos, size, value, endian) {
             lines.append(f'{i}  var {js_name}_n = {length_to_js(field)};')
             # A declared length the payload cannot supply is an error, as in every
             # interpreter; the loops below stopped at the end and reported what was left.
-            lines.append(f'{i}  if (pos + {js_name}_n > buf.length) throw new Error("Buffer too short for {ftype}");')
+            lines.append(f'{i}  need(buf, pos, {js_name}_n);')
             if ftype == 'ascii':
                 lines.append(f'{i}  for (var _si = 0; _si < {js_name}_n && pos < buf.length; _si++)'
                              f' {{ {js_name} += String.fromCharCode(buf[pos++]); }}')
                 # Trailing NUL padding is not part of the text, as in the reference
                 # (`rstrip` of NUL); the codec used to report "HC" followed by two NULs.
+                # PS-538: each byte is its ISO 8859-1 character, with PS-073's warning
+                # for one above 0x7F. Collected apart and reported after the decode's
+                # own warnings, where the reference reports a nested one.
+                from schema_interpreter import ASCII_HIGH_BYTE_WARNING
+                warning = json.dumps(ASCII_HIGH_BYTE_WARNING.format(field.get('name')))
+                lines.append(f'{i}  if (/[\\u0080-\\u00ff]/.test({js_name})) wn.push({warning});')
                 lines.append(f'{i}  {js_name} = {js_name}.replace(/\\u0000+$/, "");')
             elif ftype == 'bytes' and field.get('format', 'hex') in ('base64', 'array'):
                 # PS-079: the declared format. Ignored before, so every bytes field was
@@ -3037,7 +3292,7 @@ function writeS(buf, pos, size, value, endian) {
         # Nibble-decimal (PS-329, PS-330): upper nibble whole, lower nibble tenths, the
         # upper nibble a 4-bit two's-complement value for sdec.
         if ftype in ('udec', 'sdec'):
-            lines.append(f'{i}  if (pos >= buf.length) throw new Error("Buffer too short for {ftype}");')
+            lines.append(f'{i}  need(buf, pos, 1);')
             if ftype == 'sdec':
                 lines.append(f'{i}  var {js_name}_w = buf[pos] >> 4; if ({js_name}_w >= 8) {js_name}_w -= 16;')
             else:
@@ -3276,6 +3531,7 @@ function writeS(buf, pos, size, value, endian) {
         length_size = int(tlv.get('length_size', 0))
 
         lines.append(f'{i}  // TLV loop')
+        lines.append(f'{i}  _fld = null;')
         # PS-477: a tag is never partly read - fewer bytes than the tag at the start of an
         # entry is an error identifying the tlv. The loop used to require tag and length
         # to fit and stop silently otherwise. PS-486 extends it to the rest of the entry:
@@ -3358,6 +3614,17 @@ function writeS(buf, pos, size, value, endian) {
         tag_parts_expr = '[' + ', '.join(tag_parts) + ']'
 
         separate = tlv.get('merge', True) is False
+        # PS-157, PS-525: each entry of a merged tlv decodes into an object of its own,
+        # folded into the output by tlvFold, so a name two entries report is combined
+        # as its on_repeat says. The tables are keyed as the output is staged.
+        repeat_modes, repeat_last, _ = _tlv_repeat_modes(tlv)
+        fold_modes = json.dumps({to_js_name(k): v for k, v in repeat_modes.items()
+                                 if v != 'collect'}, sort_keys=True)
+        fold_last = json.dumps({to_js_name(k): {to_js_name(m): True for m in sorted(ms)}
+                                for k, ms in repeat_last.items() if ms}, sort_keys=True)
+        fold_id = self._tlv_fold_seq = getattr(self, '_tlv_fold_seq', 0) + 1
+        if not separate:
+            lines.insert(1, f'{i}  var _tlvC{fold_id} = {{}};')
         # PS-270: exact keys are tried first, then negated (`!n`), then wildcard (`*`), so
         # a broad key never shadows a specific one; within a rank, schema order. A
         # composite key is compared component by component, as the interpreters do. It
@@ -3383,6 +3650,8 @@ function writeS(buf, pos, size, value, endian) {
                 # by swapping it in as `d` for their length. This was not generated at
                 # all, so `channels` was missing from the codec's output with no error.
                 lines.append(f'{i}      var _tlvOuter = d; d = {{ tag: {tag_parts_expr} }};')
+            else:
+                lines.append(f'{i}      var _tlvO{fold_id} = d; d = {{}};')
             self.indent += 2
             for cf in case_fields:
                 lines.extend(self._gen_decode_field(cf))
@@ -3390,6 +3659,9 @@ function writeS(buf, pos, size, value, endian) {
             if separate:
                 lines.append(f'{i}      if (!_tlvOuter.channels) {{ _tlvOuter.channels = []; }}')
                 lines.append(f'{i}      _tlvOuter.channels.push(d); d = _tlvOuter;')
+            else:
+                lines.append(f'{i}      tlvFold(_tlvO{fold_id}, d, {fold_modes}, {fold_last}, '
+                             f'_tlvC{fold_id}); d = _tlvO{fold_id};')
 
         if not first:
             lines.append(f'{i}    }} else {{')
@@ -3524,6 +3796,9 @@ function writeS(buf, pos, size, value, endian) {
             # Read it here, and consume it: the bytes belong to this construct.
             span = int(width) if width else 1
             lines.append(f'{i}  // match on an inline {span}-byte discriminator')
+            from schema_interpreter import underflow_label
+            mlabel = underflow_label(match.get('name'), 'match')
+            lines.append(f'{i}  _fld = {json.dumps(mlabel)};')       # PS-535
             lines.append(f'{i}  var _mv = readU(buf, pos, {span}, endian);')
             lines.append(f'{i}  pos += {span};')
             discriminator = '_mv'
@@ -3642,6 +3917,7 @@ function writeS(buf, pos, size, value, endian) {
         exactly as the decoder sees it.
         """
         plan = self._expand_refs(list(fields)) if isinstance(fields, list) else fields
+        plan = _annotate_on_repeat(plan)
         return '\n'.join([
             f'var {fname}_FIELDS = {json.dumps(plan, default=str, separators=(",", ":"))};',
             f'function {fname}(d, endian) {{',

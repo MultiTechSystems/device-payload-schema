@@ -47,6 +47,9 @@ The `inherent` reasons, each of which is a decision recorded elsewhere:
   undescribed-bits  A `version_string` or `bitfield_string` whose `parts` do not cover
                     every bit of the field it reads: the uncovered bits are not in the
                     output. ws50x's `v11.1` leaves the low nibble undescribed.
+  last-value        A tlv name or merged member declaring `on_repeat: last` keeps the value
+                    reported last and discards the others (PS-525); the discarded values
+                    and the tag that carried the kept one are not in the output.
   ambiguous-case    Several TLV or match cases carry the same field names, so the tag that
                     produced them is not recoverable from the names alone.
   pattern-tag       A tlv case keyed `[1, !0]` or `[9, *]` stands for many tags (PS-270),
@@ -108,6 +111,7 @@ INHERENT = (
     "skip-field",
     "lossy-value",
     "undescribed-bits",
+    "last-value",
     "ambiguous-case",
     "null-element",
 )
@@ -176,6 +180,8 @@ def schema_traits(schema):
         tlv = node.get("tlv")
         if isinstance(tlv, dict) and tlv.get("merge", True) is False:
             traits.add("separate-tlv")
+        if node.get("on_repeat") == "last":
+            traits.add("last-value")
         if isinstance(tlv, dict) and any(
                 "!" in str(key) or "*" in str(key) for key in (tlv.get("cases") or {})):
             traits.add("pattern-tag")

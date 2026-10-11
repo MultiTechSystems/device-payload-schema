@@ -377,6 +377,42 @@ def test_sign_in_the_lower_half_range_is_possibly_equivalent_not_scored():
     assert report["survived"] == 0 and report["score"] == 1.0
 
 
+def _guarded(payloads):
+    return {
+        "name": "t",
+        "fields": [
+            {"name": "g", "type": "u8"},
+            {
+                "name": "v",
+                "type": "number",
+                "ref": "$g",
+                "guard": {"when": [{"field": "$g", "gt": 0}], "else": -1},
+            },
+        ],
+        "test_vectors": [
+            {"name": p, "payload": p, "expected": {"g": int(p, 16), "v": e}}
+            for p, e in payloads
+        ],
+    }
+
+
+def test_modifiers_behind_a_guard_that_never_passed_are_unreached():
+    # PS-444: a failed guard reports its `else` as declared, skipping the modifiers.
+    # With no vector passing it, an inserted `add` was never applied - unreached, not
+    # a survivor no payload could kill.
+    report = sm.mutate_schema(_guarded([("00", -1)]))
+    unreached = {(u["field"], u["operator"]) for u in report["unreached_sites"]}
+    assert ("v", "ADD") in unreached
+    assert not [s for s in report["survivors"] if s["field"] == "v"]
+
+
+def test_modifiers_behind_a_guard_that_passed_are_scored():
+    report = sm.mutate_schema(_guarded([("00", -1), ("05", 5)]))
+    unreached = {(u["field"], u["operator"]) for u in report["unreached_sites"]}
+    assert ("v", "ADD") not in unreached
+    assert report["by_operator"]["ADD"]["killed"] >= 1
+
+
 def test_an_unreferenced_internal_field_skips_value_mutants():
     schema = {
         "name": "t",

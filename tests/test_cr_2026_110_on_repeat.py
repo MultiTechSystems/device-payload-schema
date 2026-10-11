@@ -1,0 +1,502 @@
+"""CR-2026-110: `on_repeat` combines a name reported by more than one tlv entry
+(PS-157, PS-525 to PS-527).
+
+The cases mirror the spec prototype's `TestCR2026110OnRepeat`, and the messages are its
+wording. The decodes that succeed are fixtures in `_language-conformance/tlv-repeat-*`,
+checked in every implementation; this file holds what a fixture cannot - the schema
+rejections, the twice-reported member and the encoder's output where it is lossy.
+"""
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tools"))
+
+from schema_interpreter import SchemaInterpreter  # noqa: E402
+from validate_schema import validate_schema_structure  # noqa: E402
+from generate_ts013_codec import TS013Generator  # noqa: E402
+
+
+def schema(tlv):
+    return {"name": "t", "version": 1, "fields": [{"tlv": tlv}]}
+
+
+LORAMAC = {
+    "tag_size": 2,
+    "on_repeat": "merge",
+    "cases": {
+        0x0310: [
+            {
+                "name": "loramac",
+                "type": "object",
+                "fields": [{"name": "adr", "type": "u8"}],
+            }
+        ],
+        0x0311: [
+            {
+                "name": "loramac",
+                "type": "object",
+                "fields": [{"name": "dr", "type": "u8"}],
+            }
+        ],
+        0x0001: [{"name": "battery", "type": "u8"}],
+    },
+}
+EVENT = {
+    "cases": {
+        0x3A: [{"name": "event", "type": "u8"}],
+        0x40: [{"name": "event", "type": "u8"}],
+    }
+}
+
+
+def decode(tlv, hex_payload):
+    return SchemaInterpreter(schema(tlv)).decode(bytes.fromhex(hex_payload))
+
+
+def encode(tlv, data):
+    return SchemaInterpreter(schema(tlv)).encode(data)
+
+
+def test_merge_combines_objects_and_the_default_spares_other_fields():
+    out = decode(LORAMAC, "031001031105000102000103")
+    assert out.errors == []
+    assert out.data == {"loramac": {"adr": 1, "dr": 5}, "battery": [2, 3]}
+
+
+def test_a_member_reported_twice_is_an_error():
+    out = decode(LORAMAC, "031001031002")
+    message = "tlv: the merged object 'loramac' reports its member 'adr' twice (PS-525)"
+    assert any(message in e for e in out.errors), out.errors
+    assert out.data == {}
+
+
+def test_last_keeps_the_last_value():
+    assert decode(dict(EVENT, on_repeat="last"), "3a014002").data == {"event": 2}
+
+
+def test_collect_is_the_default_across_different_tags():
+    assert decode(EVENT, "3a014002").data == {"event": [1, 2]}
+
+
+def test_an_object_collects_with_no_on_repeat():
+    """Merge is never a default of its own: with no `on_repeat` an object collects."""
+    tlv = {k: v for k, v in LORAMAC.items() if k != "on_repeat"}
+    assert decode(tlv, "031001031105031002").data == {
+        "loramac": [{"adr": 1}, {"dr": 5}, {"adr": 2}]
+    }
+
+
+def test_a_collected_list_value_is_an_element_not_spliced():
+    """A value that is itself a list - a repeat - stays one element of the array. It
+    used to be appended into, so the second report landed among the first's elements."""
+    tlv = {
+        "cases": {
+            1: [
+                {
+                    "name": "vals",
+                    "type": "repeat",
+                    "count": 2,
+                    "fields": [{"name": "v", "type": "u8"}],
+                }
+            ]
+        }
+    }
+    assert decode(tlv, "010102010304").data == {
+        "vals": [[{"v": 1}, {"v": 2}], [{"v": 3}, {"v": 4}]]
+    }
+
+
+def test_merge_encodes_one_entry_per_case():
+    result = encode(LORAMAC, {"loramac": {"adr": 1, "dr": 5}})
+    assert result.errors == []
+    assert bytes(result.payload) == bytes.fromhex("031001031105")
+
+
+def test_merge_encodes_in_case_declaration_order():
+    """PS-527: the order the members arrive in does not decide the entries' order."""
+    result = encode(LORAMAC, {"loramac": {"dr": 5, "adr": 1}})
+    assert bytes(result.payload) == bytes.fromhex("031001031105")
+
+
+def test_last_encodes_once_under_the_first_case():
+    result = encode(dict(EVENT, on_repeat="last"), {"event": 2})
+    assert result.errors == []
+    assert bytes(result.payload) == bytes.fromhex("3a02")
+
+
+def test_a_last_member_round_trips_once_per_case():
+    tlv = {
+        "on_repeat": "merge",
+        "cases": {
+            1: [
+                {
+                    "name": "s",
+                    "type": "object",
+                    "fields": [
+                        {"name": "mode", "type": "u8"},
+                        {"name": "seq", "type": "u8", "on_repeat": "last"},
+                    ],
+                }
+            ],
+            2: [
+                {
+                    "name": "s",
+                    "type": "object",
+                    "fields": [
+                        {"name": "level", "type": "u8"},
+                        {"name": "seq", "type": "u8", "on_repeat": "last"},
+                    ],
+                }
+            ],
+        },
+    }
+    out = decode(tlv, "010702020902")
+    assert out.data == {"s": {"mode": 7, "seq": 2, "level": 9}}
+    assert bytes(encode(tlv, out.data).payload) == bytes.fromhex("010702020902")
+
+
+MERGE_ON_SCALAR = {"cases": {1: [{"name": "e", "type": "u8", "on_repeat": "merge"}]}}
+DISAGREE = {
+    "cases": {
+        1: [{"name": "e", "type": "u8", "on_repeat": "last"}],
+        2: [{"name": "e", "type": "u8"}],
+    }
+}
+BAD_VALUE = {"on_repeat": "first", "cases": {1: [{"name": "e", "type": "u8"}]}}
+BAD_FIELD_VALUE = {"cases": {1: [{"name": "e", "type": "u8", "on_repeat": "keep"}]}}
+
+REJECTIONS = [
+    (
+        MERGE_ON_SCALAR,
+        "Field 'e': only a `type: object` field may declare `on_repeat: merge` (PS-526)",
+    ),
+    (
+        DISAGREE,
+        "tlv: the fields reporting 'e' declare different `on_repeat`, last and collect (PS-526)",
+    ),
+    (BAD_VALUE, "tlv `on_repeat` is one of collect, merge, last, not 'first' (PS-525)"),
+    (
+        BAD_FIELD_VALUE,
+        "Field 'e': `on_repeat` is one of collect, merge, last, not 'keep' (PS-525)",
+    ),
+]
+
+
+@pytest.mark.parametrize("tlv,message", REJECTIONS)
+def test_rejected_by_the_interpreter(tlv, message):
+    assert message in decode(tlv, "0101").errors
+    assert message in encode(tlv, {"e": 1}).errors
+
+
+@pytest.mark.parametrize("tlv,message", REJECTIONS)
+def test_rejected_by_the_validator(tlv, message):
+    assert message in validate_schema_structure(schema(tlv))
+
+
+@pytest.mark.parametrize("tlv,message", REJECTIONS)
+def test_rejected_by_the_generator(tlv, message):
+    with pytest.raises(ValueError, match="PS-52[56]"):
+        TS013Generator(schema(tlv))
+
+
+def test_merge_on_a_tlv_spares_a_scalar():
+    """A tlv's `merge` reaches its object fields only, so a scalar under it is valid."""
+    assert validate_schema_structure(schema(LORAMAC)) == []
+
+
+def test_rejected_inside_a_nested_construct():
+    """The check walks the whole schema: a tlv inside a port's fields is held to it."""
+    s = {"name": "t", "version": 1, "ports": {"1": {"fields": [{"tlv": DISAGREE}]}}}
+    errors = SchemaInterpreter(s).decode(bytes.fromhex("0101"), fPort=1).errors
+    assert any("PS-526" in e for e in errors)
+
+
+# CR-2026-125 and CR-2026-128 (PS-525 to PS-527): each value goes under the first case
+# whose declared fields it supplies in full, nothing zero-filled or dropped; merged cases
+# share a member only where it declares `last`. The spec prototype's
+# TestCR2026125OnRepeatEncoding and TestCR2026128FirstCaseThatFits, with the generated
+# codec held to the reference on each encode.
+
+LORAMAC_SHARED = {
+    "tag_size": 2,
+    "on_repeat": "merge",
+    "cases": {
+        0x0310: [
+            {
+                "name": "loramac",
+                "type": "object",
+                "fields": [
+                    {"name": "adr", "type": "u8"},
+                    {"name": "dr", "type": "u8", "on_repeat": "last"},
+                ],
+            }
+        ],
+        0x0311: [
+            {
+                "name": "loramac",
+                "type": "object",
+                "fields": [{"name": "dr", "type": "u8", "on_repeat": "last"}],
+            }
+        ],
+    },
+}
+COLLECTED_OBJECTS = {
+    "tag_size": 2,
+    "cases": {
+        0x0310: [
+            {"name": "mac", "type": "object", "fields": [{"name": "adr", "type": "u8"}]}
+        ],
+        0x0311: [
+            {"name": "mac", "type": "object", "fields": [{"name": "dr", "type": "u8"}]}
+        ],
+    },
+}
+SHARED_LAST = {
+    "on_repeat": "merge",
+    "cases": {
+        1: [
+            {
+                "name": "o",
+                "type": "object",
+                "fields": [
+                    {"name": "a", "type": "u8"},
+                    {"name": "m", "type": "u8", "on_repeat": "last"},
+                ],
+            }
+        ],
+        2: [
+            {
+                "name": "o",
+                "type": "object",
+                "fields": [
+                    {"name": "b", "type": "u8"},
+                    {"name": "m", "type": "u8", "on_repeat": "last"},
+                ],
+            }
+        ],
+    },
+}
+
+
+def generated_encode(tlv, data):
+    code = TS013Generator(schema(tlv)).generate()
+    script = code + "\nprocess.stdout.write(JSON.stringify(encodeDownlink(%s)));" % (
+        json.dumps({"data": data})
+    )
+    out = subprocess.run(
+        ["node"], input=script, capture_output=True, text=True, check=True
+    )
+    return json.loads(out.stdout)
+
+
+@pytest.mark.parametrize(
+    "tlv,data,want",
+    [
+        # A collected scalar: each element under the first case it fills.
+        (EVENT, {"event": [1, 2]}, "3a013a02"),
+        # A scalar follows the same rule.
+        (EVENT, {"event": 3}, "3a03"),
+        # Each collected object finds the case whose members it supplies exactly.
+        (COLLECTED_OBJECTS, {"mac": [{"adr": 1}, {"dr": 5}]}, "031001031105"),
+        # {dr: 5} fills 0x0311, not 0x0310, which would need adr zero-filled.
+        (LORAMAC_SHARED, {"loramac": {"dr": 5}}, "031105"),
+        # {adr, dr} fills 0x0310; 0x0311 then has nothing new to write.
+        (LORAMAC_SHARED, {"loramac": {"adr": 1, "dr": 5}}, "03100105"),
+        # A shared `last` member rides in every case written for the object.
+        (SHARED_LAST, {"o": {"a": 1, "b": 2, "m": 9}}, "010109020209"),
+    ],
+)
+def test_each_value_goes_under_the_first_case_it_fills(tlv, data, want):
+    result = encode(tlv, data)
+    assert result.errors == []
+    assert bytes(result.payload).hex() == want
+    assert bytes(generated_encode(tlv, data)["bytes"]).hex() == want
+
+
+def test_a_shared_last_member_round_trips():
+    out = decode(SHARED_LAST, "010109020209")
+    assert out.data == {"o": {"a": 1, "m": 9, "b": 2}}
+    assert bytes(encode(SHARED_LAST, out.data).payload).hex() == "010109020209"
+
+
+@pytest.mark.parametrize(
+    "tlv,data,message",
+    [
+        (
+            LORAMAC_SHARED,
+            {"loramac": {"adr": 1, "dr": 5, "fw": 3}},
+            "tlv: the merged object 'loramac' is given ['fw'], which no case declares "
+            "(PS-527)",
+        ),
+        (
+            COLLECTED_OBJECTS,
+            {"mac": [{"adr": 1, "dr": 5}]},
+            "tlv: no case takes the value of 'mac' {'adr': 1, 'dr': 5} in full",
+        ),
+        (
+            {"cases": {1: [{"name": "a", "type": "u8"}, {"name": "b", "type": "u8"}]}},
+            {"a": [1, 2], "b": [3]},
+            "tlv: no case takes the value of 'a' 2 in full",
+        ),
+    ],
+)
+def test_a_value_no_case_takes_in_full_is_an_error(tlv, data, message):
+    assert any(message in e for e in encode(tlv, data).errors), encode(tlv, data).errors
+    generated = generated_encode(tlv, data)
+    assert generated.get("errors"), generated
+
+
+def test_collected_arrays_pair_element_by_element():
+    tlv = {"cases": {1: [{"name": "a", "type": "u8"}, {"name": "b", "type": "u8"}]}}
+    result = encode(tlv, {"a": [1, 2], "b": [3, 4]})
+    assert bytes(result.payload).hex() == "010103010204"
+
+
+SHARED_WITHOUT_LAST = {
+    "tag_size": 2,
+    "on_repeat": "merge",
+    "cases": {
+        1: [{"name": "o", "type": "object", "fields": [{"name": "m", "type": "u8"}]}],
+        2: [
+            {
+                "name": "o",
+                "type": "object",
+                "fields": [{"name": "m", "type": "u8"}, {"name": "n", "type": "u8"}],
+            }
+        ],
+    },
+}
+SHARED_MESSAGE = (
+    "tlv: cases share the member 'm' of the merged object 'o' without "
+    "`on_repeat: last` (PS-526)"
+)
+
+
+def test_a_shared_member_without_last_is_rejected_at_load():
+    assert SHARED_MESSAGE in decode(SHARED_WITHOUT_LAST, "000105").errors
+    assert SHARED_MESSAGE in validate_schema_structure(schema(SHARED_WITHOUT_LAST))
+    with pytest.raises(ValueError, match="PS-526"):
+        TS013Generator(schema(SHARED_WITHOUT_LAST))
+
+
+PLACEMENT = "has no effect there: it belongs on a tlv, a field of a tlv case, or a"
+
+
+@pytest.mark.parametrize(
+    "fields,name",
+    [
+        ([{"name": "a", "type": "u8", "on_repeat": "last"}], "a"),
+        (
+            [
+                {
+                    "tlv": {
+                        "cases": {
+                            1: [
+                                {
+                                    "name": "o",
+                                    "type": "object",
+                                    "fields": [
+                                        {"name": "m", "type": "u8", "on_repeat": "last"}
+                                    ],
+                                }
+                            ]
+                        }
+                    }
+                }
+            ],
+            "m",
+        ),
+        (
+            [
+                {
+                    "name": "o",
+                    "type": "object",
+                    "fields": [{"name": "m", "type": "u8", "on_repeat": "collect"}],
+                }
+            ],
+            "m",
+        ),
+    ],
+)
+def test_on_repeat_where_it_means_nothing_is_rejected(fields, name):
+    doc = {"name": "t", "version": 1, "fields": fields}
+    message = f"`on_repeat` on '{name}' {PLACEMENT} merged object's member (PS-525)"
+    assert message in SchemaInterpreter(doc).decode(b"\x01\x05").errors
+    assert message in validate_schema_structure(doc)
+    with pytest.raises(ValueError, match="has no effect there"):
+        TS013Generator(doc)
+
+
+def test_last_on_a_merged_member_is_accepted():
+    tlv = {
+        "on_repeat": "merge",
+        "cases": {
+            1: [
+                {
+                    "name": "o",
+                    "type": "object",
+                    "fields": [{"name": "m", "type": "u8", "on_repeat": "last"}],
+                }
+            ]
+        },
+    }
+    assert validate_schema_structure(schema(tlv)) == []
+    assert decode(tlv, "01050107").data == {"o": {"m": 7}}
+
+
+def test_on_repeat_in_a_definition_is_held_to_the_rule_where_spliced():
+    """A definition is checked where `$ref` splices it, not where it is written."""
+    doc = {
+        "name": "t",
+        "version": 1,
+        "definitions": {
+            "d": {"fields": [{"name": "e", "type": "u8", "on_repeat": "last"}]}
+        },
+        "fields": [{"tlv": {"cases": {1: [{"$ref": "#/definitions/d"}]}}}],
+    }
+    assert SchemaInterpreter(doc).decode(bytes.fromhex("01050107")).data == {"e": 7}
+    doc["fields"] = [{"$ref": "#/definitions/d"}]
+    assert any(PLACEMENT in e for e in SchemaInterpreter(doc).decode(b"\x01").errors)
+
+
+# CR-2026-129: among the cases a value fills, the one declaring the most fields wins, and
+# an object counts its members. A merged {adr, dr} case declared after a {dr} case still
+# takes {adr, dr} whole; counting the object as one field would let {dr} take dr first
+# and then write 0x0311 for adr too.
+WIDER_LATER = {
+    "tag_size": 2,
+    "on_repeat": "merge",
+    "cases": {
+        0x0310: [
+            {
+                "name": "loramac",
+                "type": "object",
+                "fields": [{"name": "dr", "type": "u8", "on_repeat": "last"}],
+            }
+        ],
+        0x0311: [
+            {
+                "name": "loramac",
+                "type": "object",
+                "fields": [
+                    {"name": "adr", "type": "u8"},
+                    {"name": "dr", "type": "u8", "on_repeat": "last"},
+                ],
+            }
+        ],
+    },
+}
+
+
+def test_an_object_case_is_as_wide_as_its_members():
+    data = {"loramac": {"adr": 1, "dr": 5}}
+    result = encode(WIDER_LATER, data)
+    assert result.errors == []
+    assert bytes(result.payload).hex() == "03110105"
+    assert bytes(generated_encode(WIDER_LATER, data)["bytes"]).hex() == "03110105"

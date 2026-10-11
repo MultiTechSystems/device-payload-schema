@@ -3,6 +3,53 @@
 
 namespace PayloadSchema;
 
+/// <summary>
+/// A read or skip past the end of the payload, less any `reserve` in force (PS-535,
+/// CR-2026-115). Thrown unnamed by <see cref="DecodeContext.Read"/> and
+/// <see cref="DecodeContext.Peek"/>; the innermost field that made the read restates it as
+/// <c>Field '&lt;name&gt;': ... (PS-535)</c> (<see cref="Name"/>), and every enclosing field
+/// passes it through unchanged. The text is the spec prototype's and the reference's
+/// (BufferUnderflow in tools/schema_interpreter.py), so a cross-language diff compares
+/// equal strings.
+/// </summary>
+public sealed class BufferUnderflowException : InvalidOperationException
+{
+    /// <summary>True once the message identifies the field.</summary>
+    public bool Named { get; }
+    /// <summary>The unnamed text, before a field was named.</summary>
+    public string Detail { get; }
+
+    BufferUnderflowException(string message, string detail, bool named) : base(message)
+    {
+        Detail = detail;
+        Named = named;
+    }
+
+    internal static BufferUnderflowException Need(int n, int offset, int end)
+    {
+        var text = $"Buffer underflow: need {n} bytes at offset {offset}, "
+            + $"but only {Math.Max(0, end - offset)} remaining";
+        return new BufferUnderflowException(text, text, false);
+    }
+
+    /// <summary>A bit range or a bool reads its byte(s) without consuming them.</summary>
+    internal static BufferUnderflowException PeekAt(int pos)
+    {
+        var text = $"Buffer underflow at peek offset {pos}";
+        return new BufferUnderflowException(text, text, false);
+    }
+
+    /// <summary>How a PS-535 error identifies a field: its name, else what it is.</summary>
+    internal static string Label(string? name, string? kind) =>
+        !string.IsNullOrEmpty(name) ? $"'{name}'"
+            : $"an unnamed {(string.IsNullOrEmpty(kind) ? "field" : kind)}";
+
+    /// <summary>PS-535: the error of the field that made the read; a named one is kept.</summary>
+    internal BufferUnderflowException Name(string? name, string? kind) =>
+        Named ? this
+            : new BufferUnderflowException($"Field {Label(name, kind)}: {Detail} (PS-535)", Detail, true);
+}
+
 public class DecodeContext
 {
     public byte[] Data { get; internal set; }
@@ -123,8 +170,7 @@ public class DecodeContext
         if (n < 0)
             n = Remaining;
         if (Offset + n > Data.Length)
-            throw new InvalidOperationException(
-                $"Buffer underflow: need {n} bytes at offset {Offset}, but only {Remaining} remaining");
+            throw BufferUnderflowException.Need(n, Offset, Data.Length);
         var result = Data.AsSpan(Offset, n);
         Offset += n;
         return result;
@@ -134,7 +180,7 @@ public class DecodeContext
     {
         int pos = Offset + relativeOffset;
         if (pos + n > Data.Length)
-            throw new InvalidOperationException($"Buffer underflow at peek offset {pos}");
+            throw BufferUnderflowException.PeekAt(pos);
         return Data.AsSpan(pos, n);
     }
 

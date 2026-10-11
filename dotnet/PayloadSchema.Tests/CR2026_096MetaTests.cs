@@ -52,7 +52,7 @@ public class CR2026_096MetaTests
     public void AFailedDecodeHasNoMeta()
     {
         // PS-497: Interpret fails exactly as the decode does.
-        Assert.Throws<InvalidOperationException>(() =>
+        Assert.ThrowsAny<InvalidOperationException>(() =>
             SchemaDecoder.Interpret(SchemaParser.Parse(Flat), new byte[] { 0x01 }, new InputContext()));
     }
 
