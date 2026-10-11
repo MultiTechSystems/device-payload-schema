@@ -69,6 +69,7 @@ public static class SchemaDecoder
             meta["fPort"] = (long)context.FPort.Value;                 // PS-340, PS-342: as supplied
 
         var declared = Meta.Declarations(fields.Select(f => f.Node).OfType<YamlMappingNode>());
+        var siblings = Meta.ElementRepeats(fields.Select(f => f.Node).OfType<YamlMappingNode>());   // PS-546
         var entries = new Dictionary<string, object?>();
         foreach (var key in result.Keys)
         {
@@ -76,7 +77,7 @@ public static class SchemaDecoder
             var source = ctx.Producers.TryGetValue(key, out var producer) && producer.Node != null
                 ? producer.Node
                 : declared.GetValueOrDefault(key);
-            entries[key] = source != null ? Meta.FieldMeta(source) : new Dictionary<string, object?>();
+            entries[key] = source != null ? Meta.FieldMeta(source, null, siblings) : new Dictionary<string, object?>();
         }
         meta["fields"] = entries;
 
@@ -1970,6 +1971,17 @@ public static class SchemaDecoder
 
         if (result.Count < minIterations)
             throw new InvalidOperationException($"Repeat produced {result.Count} elements, but minimum is {minIterations}");
+
+        // PS-546: a sibling identifying these values position by position reported as
+        // many values as this repeat, or the pairing names nothing.
+        foreach (var name in field.SiblingNames)
+        {
+            ctx.Variables.TryGetValue(name, out var reported);
+            if (reported is not System.Collections.IList list || list.Count != result.Count)
+                throw new InvalidOperationException($"Repeat '{field.Name}' has {result.Count} values "
+                    + $"and '{name}', which identifies them, has "
+                    + $"{(reported is System.Collections.IList l ? l.Count.ToString() : "none")} (PS-546)");
+        }
 
         // PS-367: the number of elements reported (CR-2026-080), bound for later fields only.
         if (!string.IsNullOrEmpty(field.CountAs))

@@ -789,13 +789,19 @@ function encRepeat(out, f, data, ctx) {               // _encode_repeat
   if (!Array.isArray(records)) encFail("repeat field " + JSON.stringify(name) + ": expected a list of records, got " + typeof records);
   var rf = f.fields || [];
   if (f.element && typeof f.element === "object" && !f.fields) {
-    // PS-529: each value is encoded as the element, wrapped as it was decoded. A null
-    // position has no encoding (CR-2026-111 leaves it open), so it is refused.
+    // PS-529: each value is encoded as the element, wrapped as it was decoded. PS-544: a
+    // null is written as the element's first sentinel - an absent value, which encList
+    // writes as the sentinel's raw bits - and is an error where it declares none.
+    // PS-545: an element named with `_` is decoded and encoded under "element".
     var en = f.element.name || "element", el = {};
+    if (en.charAt(0) === "_") en = "element";
     for (var ek in f.element) el[ek] = f.element[ek];
     el.name = en; rf = [el];
     records = records.map(function (v, p) {
-      if (v === null || v === undefined) encFail("Repeat '" + name + "' has null at position " + p + ", which has no encoding (PS-529)");
+      if (v === null || v === undefined) {
+        if (!el.sentinel) encFail("Repeat '" + name + "' has null at position " + p + ", and its element declares no `sentinel` to write for it (PS-544)");
+        return {};
+      }
       var w = {}; w[en] = v; return w;
     });
   }
@@ -2781,6 +2787,14 @@ function writeS(buf, pos, size, value, endian) {
                     lines.append(f'{i}  pos = buf.length;')   # the trailer was read already
             if field.get('count_as'):
                 lines.append(f'{i}  vars.{to_js_name(field["count_as"])} = {arr}.length;')  # PS-367
+            # PS-546: a sibling identifying these values reported as many as this repeat.
+            from schema_interpreter import sibling_references
+            for sib in dict.fromkeys(n for _, n, _ in sibling_references(field)):
+                sv = f'vars.{to_js_name(sib)}'
+                lines.append(f'{i}  if (!Array.isArray({sv}) || {sv}.length !== {arr}.length) '
+                             f'throw new Error("Repeat \'{field.get("name")}\' has " + {arr}.length'
+                             f' + " values and \'{sib}\', which identifies them, has " + '
+                             f'(Array.isArray({sv}) ? {sv}.length : "none") + " (PS-546)");')
             lines.append(f'{i}  vars.{key} = {arr};')
             if not str(field.get('name', '')).startswith('_'):
                 lines.append(f'{i}  d.{key} = {arr};')

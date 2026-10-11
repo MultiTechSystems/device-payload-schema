@@ -188,19 +188,20 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2658 payload vectors in `schemas/devices/` (measured 2026-10-11 with
+The 2663 payload vectors in `schemas/devices/` (measured 2026-10-11 with
 `tools/check-floors.py`, after the CR-2026-118 and CR-2026-124 fixtures, CR-2026-117's
 guard-absent-operand, the `match-u32-*` and names-mangling-alike fixtures, CR-2026-127's
-guard-boolean-operand, CR-2026-109's lookup-reference-binding and CR-2026-132's
-tag-component-reference-binding) are the shared cross-language test set. Every implementation has a
-runner that reads the same YAML and the same vectors:
+guard-boolean-operand, the CR-2026-121 and CR-2026-123 fixtures, CR-2026-109's
+lookup-reference-binding and CR-2026-132's tag-component-reference-binding) are the
+shared cross-language test set. Every implementation has a runner that reads the same
+YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1814 |
-| Go | `go/schema/corpus_conformance_test.go` | 2658 | 1831 (plain API 1808) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2658 | 1814 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2658 | 1814 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1820 |
+| Go | `go/schema/corpus_conformance_test.go` | 2663 | 1837 (plain API 1814) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2663 | 1820 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2663 | 1820 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 554 of 554 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -774,10 +775,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1814 |
-| Go | `go/schema/corpus_encode_test.go` | 1831 (plain 1808) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1814 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1814 |
+| Python | `tests/test_encode_round_trip.py` | 1820 |
+| Go | `go/schema/corpus_encode_test.go` | 1837 (plain 1814) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1820 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1820 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1632,10 +1633,8 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     `element_repeat_errors` (reached from `schema_iterator_errors`, so the validator and
     the TS013 generator get them too), Go `elementRepeatError`, Java
     `Wave6a.elementRepeatErrors` and C# `Wave6a`'s `ElementRepeatErrors`.
-  - **Encoding:** each value is wrapped back into its record. A `null` position is refused
-    everywhere with "Repeat '{name}' has null at position {p}, which has no encoding
-    (PS-529)", because the CR leaves open what it encodes as. `encode-round-trip.py` files
-    those vectors as `null-element`.
+  - **Encoding:** each value is wrapped back into its record. What a `null` position
+    encodes as was left open here and settled by CR-2026-121 (PS-544), below.
   - **`index`** binds the position plus `index_base` on decode and on encode. `count_as` is
     unaffected.
   - **`_meta`:** an element repeat's entry is `{type: repeat, element: {...}, identity}`,
@@ -1728,6 +1727,8 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     a name of the element with no value is absent there, not a PS-368 "not yet decoded"
     error. C has no guard. Fixture: `guard-absent-operand.yaml` (decode floors
     2628 -> 2630 in Go, Java and C#; re-encode unchanged, PS-387).
+  - Tests that used an undeclared name to mean "absent" now declare it as a trailing
+    `optional` field (Go `TestRefFieldNotFound`, Java `Wave6aTest`, C# `CR2026_071_073Tests`).
   - **PS-549 (CR-2026-127): a condition whose operand is a boolean fails**, as an absent
     one does; `true` is not 1 (PS-513). Python and Java compared it as 1/0; Go and C#
     already failed it; the generated codec's operand test is now `!= null && typeof !==
@@ -1735,6 +1736,58 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     `guard-boolean-operand.yaml`: decode floors 2630 -> 2632; both vectors round-trip, so
     re-encode +2 everywhere (Python, Java, C# 1796 -> 1798; Go 1813 -> 1815, plain 1790 ->
     1792) and `plain fixed` 135 -> 137 in all four.
+- **CR-2026-121 (PS-544, PS-545): a null element, and what an element may be.**
+  - **Encoding a `null`:** an element repeat writes the element's first `sentinel` as raw
+    bits, through the existing absent-sentinel path, so modifiers are not reversed onto it.
+    With no sentinel every encoder, the generated codec's included, says "Repeat '{name}'
+    has null at position {p}, and its element declares no \`sentinel\` to write for it
+    (PS-544)". `null-element` in `encode-round-trip.py` is now inherent: a null from a lookup
+    miss or a second sentinel re-encodes as the first sentinel, a different byte.
+  - **Shape:** "Repeat '{name}': \`element\` is a data field that declares \`type\`, not a
+    construct (PS-545)" at load, for an element with no `type` or with `match`,
+    `byte_group`, `flagged`, `tlv` or `records`. Go and C# check it before recursing into
+    the element, so a typeless one is not reported as "declares no type" first. Go and C#
+    report one error, so an element that is a `match` reaching `records` now reads PS-545
+    there, where Python lists PS-541 too.
+  - **An `_x` element** is decoded under `element` with `var: _x` (unless it declares a
+    `var`), in each language's `repeat_members` helper, so its value is reported and `$_x`
+    still reads it. Before, every position read `null`.
+- **CR-2026-123 (PS-546, PS-547): identity from a sibling repeat.**
+  - `identity: $codes[i]`, or an element's `unit` / `ipso.instance` written that way,
+    names an element repeat earlier in the same field list, indexed by this repeat's own
+    `index`; the sibling's element carries a lookup or is a literal (PS-374). Load-time, in
+    Python `sibling_errors` (from `iterator_errors`), Go `cr121.go`, Java and C# `Wave6a`.
+  - **Decode** is unchanged, two arrays, except that different lengths are an error naming
+    both, also in the generated codec. **Encoding** is unchanged: each array encodes on its
+    own, and the spec says nothing about an encoder meeting different lengths.
+  - **`_meta`:** `{"repeat": name, "values": [...], "open": true}` in that key order, the
+    PS-375 listing of the sibling's element with `field` replaced by `repeat`. The sibling
+    is found through `element_repeats` of the field list the repeat sits in, passed down
+    `field_meta` as `siblings`.
+  - **A computed count** (`count: $_n` with `_n` a `type: integer` compute) already worked in
+    all four, and with `type: number` too; `repeat-count-computed` pins it.
+- **CR-2026-126 (PS-548): an IPSO instance is an integer from 0 to 65534.** Checked at load
+    through the listing `_meta` would carry: a literal, an index whose range from
+    `index_base` fits, or a lookup (own-element or sibling) whose labels are all such
+    integers with no `${value}` default. "Field '{name}': its ipso.instance can be other
+    than an integer from 0 to 65534 (PS-548)", in Python `ipso_instance_errors` (from
+    `schema_iterator_errors`, so the validator and generator too), Go `cr121.go`, Java and C#
+    `Wave6a`. It rejects nothing in the corpus, library, examples or the private registry.
+    Go reports the first violation in map order, so with several it may name a different
+    field than Python; it also accepts an authored `1.0`, which Python rejects.
+- **C** has no repeat and no semantic mappings; the harness files the four fixtures under
+  "no 'repeat' field type".
+- **Fixtures:** `repeat-element-null-sentinel`, `repeat-element-internal-name`,
+  `repeat-identity-sibling` (two vectors, one with `expected_meta`) and
+  `repeat-count-computed`, five vectors, all round-trip; `repeat-element-null`'s
+  reserved-value vector now round-trips too. Floors: decode +5 in Go, Java and C#
+  (2646 -> 2651 on top of master at c1b5dbf); re-encode +6 everywhere (Python, Java, C#
+  1808 -> 1814; Go 1825 -> 1831, plain 1802 -> 1808); `repeat` shape 19 -> 25 in all four.
+- **CR-2026-127 meets PS-546.** PS-539's order walk reads `$codes[i]` as two references,
+  `codes` and `i`, in all four (`reference_errors`, `references.go`, Java and C#
+  `References`). The index is declared by the repeat itself, so it is always in order; a
+  sibling declared after the reference is both a PS-539 forward reference and a PS-546
+  error. Python lists both; Go, Java and C# report the first they meet.
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.

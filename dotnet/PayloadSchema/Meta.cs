@@ -180,6 +180,40 @@ public static class Meta
         return null;
     }
 
+    /// <summary>
+    /// Name -> declaration of each repeat declaring `element` in one field list, the
+    /// sibling a `$name[i]` reference can name (PS-546). A construct that merges into its
+    /// parent (`match`, `tlv`, `flagged`) is part of the list; an object or repeat is not.
+    /// Mirrors element_repeats.
+    /// </summary>
+    public static Dictionary<string, YamlMappingNode> ElementRepeats(IEnumerable<YamlMappingNode> fields)
+    {
+        var found = new Dictionary<string, YamlMappingNode>();
+        void Visit(IEnumerable<YamlMappingNode> items)
+        {
+            foreach (var f in items)
+            {
+                if (Value(f, "type") is "repeat")
+                {
+                    if (Get(f, "element") is YamlMappingNode && Value(f, "name") is string n)
+                        found.TryAdd(n, f);
+                    continue;
+                }
+                foreach (var construct in new[] { "match", "tlv" })
+                {
+                    if (Get(f, construct) is not YamlMappingNode body) continue;
+                    foreach (var c in CaseBodies(Get(body, "cases"))) Visit(Items(c));
+                    Visit(Items(Get(body, "default")));
+                }
+                if (Get(f, "flagged") is YamlMappingNode flagged)
+                    foreach (var g in Items(Get(flagged, "groups")))
+                        Visit(Items(Get(g, "fields")));
+            }
+        }
+        Visit(fields);
+        return found;
+    }
+
     static IEnumerable<YamlMappingNode> Items(YamlNode? list) =>
         list is YamlSequenceNode seq ? seq.Children.OfType<YamlMappingNode>() : Enumerable.Empty<YamlMappingNode>();
 
@@ -273,12 +307,37 @@ public static class Meta
     /// lookup's `default` last, marked `open` where that default carries `${value}`
     /// (PS-489). Anything else is itself. Mirrors meta_reference.
     /// </summary>
-    public static object? Reference(object? value, YamlMappingNode? repeat, bool bare = false)
+    public static object? Reference(object? value, YamlMappingNode? repeat, bool bare = false,
+        Dictionary<string, YamlMappingNode>? siblings = null)
     {
         if (repeat == null || value is not string text)
             return value;
         if (!(bare || text.StartsWith('$')))
             return value;
+        if (SchemaParser.SiblingReference.Match(text) is { Success: true } sibling)
+        {
+            // PS-547: identified, position by position, by a sibling's value (PS-546),
+            // listed from the sibling's element as PS-375 lists an element field.
+            var siblingName = sibling.Groups[1].Value;
+            var holder = new YamlMappingNode();
+            if (siblings != null && siblings.TryGetValue(siblingName, out var target0)
+                && Get(target0, "element") is YamlMappingNode siblingElement)
+            {
+                var element = new YamlMappingNode();
+                element.Add("name", SchemaParser.ElementName);
+                foreach (var kv in siblingElement.Children)
+                    if (KeyText(kv.Key) != "name") element.Add(kv.Key, kv.Value);
+                holder.Add("element", element);
+            }
+            else
+                holder.Add("element", new YamlMappingNode(new YamlScalarNode("name"),
+                    new YamlScalarNode(SchemaParser.ElementName)));
+            var inner = (Dictionary<string, object?>)Reference("$" + SchemaParser.ElementName, holder)!;
+            var listingS = new Dictionary<string, object?> { ["repeat"] = siblingName };
+            foreach (var kv in inner)
+                if (kv.Key != "field") listingS[kv.Key] = kv.Value;
+            return listingS;
+        }
         var name = text.StartsWith('$') ? text[1..] : text;
         if (Value(repeat, "index") is string index && index == name)
         {
@@ -330,7 +389,8 @@ public static class Meta
     /// PS-371, PS-481). <paramref name="repeat"/> is the repeat whose elements the field
     /// belongs to, for PS-373 and PS-375. Mirrors field_meta.
     /// </summary>
-    public static Dictionary<string, object?> FieldMeta(YamlMappingNode field, YamlMappingNode? repeat = null)
+    public static Dictionary<string, object?> FieldMeta(YamlMappingNode field, YamlMappingNode? repeat = null,
+        Dictionary<string, YamlMappingNode>? siblings = null)
     {
         var entry = new Dictionary<string, object?>();
         var declaredType = MetaType(field);
@@ -340,12 +400,13 @@ public static class Meta
         var senmlUnit = Value(senml, "unit");
         var unit = Truthy(senmlUnit) ? senmlUnit : Value(field, "unit");      // PS-178
         if (unit != null)
-            entry["unit"] = Reference(unit, repeat);
+            entry["unit"] = Reference(unit, repeat, siblings: siblings);
         if (Get(field, "ipso") is YamlMappingNode ipso && Has(ipso, "object"))
             entry["ipso"] = new Dictionary<string, object?>
             {
                 ["object"] = Value(ipso, "object"),
-                ["instance"] = Reference(Has(ipso, "instance") ? Value(ipso, "instance") : 0L, repeat),
+                ["instance"] = Reference(Has(ipso, "instance") ? Value(ipso, "instance") : 0L, repeat,
+                    siblings: siblings),
                 ["resource"] = Has(ipso, "resource") ? Value(ipso, "resource") : 5700L,
             };
         if (Value(senml, "name") is string senmlName)
@@ -361,24 +422,26 @@ public static class Meta
             var element = new YamlMappingNode();
             foreach (var kv in elementNode.Children)
                 if (KeyText(kv.Key) != "name") element.Add(kv.Key, kv.Value);
-            entry["element"] = FieldMeta(element, field);
+            entry["element"] = FieldMeta(element, field, siblings);
             if (Has(field, "identity"))
-                entry["identity"] = Reference(Value(field, "identity"), field, bare: true);
+                entry["identity"] = Reference(Value(field, "identity"), field, bare: true, siblings: siblings);
         }
         else if (declaredType == "repeat")
         {
             var elements = new Dictionary<string, object?>();
+            var inner = ElementRepeats(Items(Get(field, "fields")));
             foreach (var (name, member) in Declarations(Items(Get(field, "fields"))))
-                elements[name] = FieldMeta(member, field);                        // PS-371
+                elements[name] = FieldMeta(member, field, inner);                 // PS-371
             entry["elements"] = elements;
             if (Has(field, "identity"))
-                entry["identity"] = Reference(Value(field, "identity"), field, bare: true);
+                entry["identity"] = Reference(Value(field, "identity"), field, bare: true, siblings: siblings);
         }
         else if (declaredType == "object")
         {
             var members = new Dictionary<string, object?>();
+            var inner = ElementRepeats(Items(Get(field, "fields")));
             foreach (var (name, member) in Declarations(Items(Get(field, "fields"))))
-                members[name] = FieldMeta(member);                               // PS-481
+                members[name] = FieldMeta(member, null, inner);                  // PS-481
             entry["fields"] = members;
         }
         return entry;
