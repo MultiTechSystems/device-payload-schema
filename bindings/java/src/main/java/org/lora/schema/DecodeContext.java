@@ -145,9 +145,9 @@ public class DecodeContext {
             n = remaining();
         }
         if (offset + n > limit) {
-            throw new SchemaException.DecodeException(
+            throw new SchemaException.BufferUnderflow(
                 String.format("Buffer underflow: need %d bytes at offset %d, but only %d remaining",
-                    n, offset, remaining()));
+                    n, offset, Math.max(0, remaining())));
         }
         byte[] result = new byte[n];
         System.arraycopy(data, offset, result, 0, n);
@@ -158,7 +158,7 @@ public class DecodeContext {
     public byte[] peek(int n, int relativeOffset) {
         int pos = offset + relativeOffset;
         if (pos + n > limit) {
-            throw new SchemaException.DecodeException(
+            throw new SchemaException.BufferUnderflow(
                 String.format("Buffer underflow at peek offset %d", pos));
         }
         byte[] result = new byte[n];

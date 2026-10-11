@@ -220,20 +220,20 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2661 payload vectors in `schemas/devices/` (measured 2026-10-11 with
+The 2665 payload vectors in `schemas/devices/` (measured 2026-10-11 with
 `tools/check-floors.py`, after the CR-2026-118 and CR-2026-124 fixtures, CR-2026-117's
 guard-absent-operand, the `match-u32-*` and names-mangling-alike fixtures, CR-2026-127's
 guard-boolean-operand, the CR-2026-121 and CR-2026-123 fixtures, CR-2026-110's,
-CR-2026-125's and CR-2026-128's tlv-repeat-* fixtures, and the mutation-gate vector in
-round-large-value) are the shared cross-language test set. Every implementation has a
-runner that reads the same YAML and the same vectors:
+CR-2026-125's and CR-2026-128's tlv-repeat-* fixtures, the mutation-gate vector in
+round-large-value and CR-2026-114's ascii-latin1) are the shared cross-language test set.
+Every implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 1820 |
-| Go | `go/schema/corpus_conformance_test.go` | 2661 | 1837 (plain API 1814) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2661 | 1821 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2661 | 1820 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 1824 |
+| Go | `go/schema/corpus_conformance_test.go` | 2665 | 1841 (plain API 1818) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2665 | 1825 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2665 | 1824 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 554 of 554 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -807,10 +807,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 1820 |
-| Go | `go/schema/corpus_encode_test.go` | 1837 (plain 1814) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1820 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1821 |
+| Python | `tests/test_encode_round_trip.py` | 1824 |
+| Go | `go/schema/corpus_encode_test.go` | 1841 (plain 1818) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 1824 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 1825 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1898,6 +1898,61 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     and `tlv-repeat-merge-shared-last` (the shared `last` member in both written cases).
     CR-2026-128 moved decode +1 and re-encode +2 in all four: shared-last, and
     tlv-repeat-object-collect, which now round-trips.
+- **CR-2026-115 (PS-535): a read or skip past the end names the field**, in the spec
+  prototype's words, identical in Python, Go, Java, C#, the generated codec and C (spec main
+  c932961): `Field 'n': Buffer underflow: need 2 bytes at offset 0, but only 1 remaining
+  (PS-535)`, `Field an unnamed skip: ...` where there is no name, and `Field 'b': Buffer
+  underflow at peek offset 0 (PS-535)` for a bit range or bool (a `consume` past the end
+  takes the need form). "Remaining" is to the end less any `reserve`.
+  - **The innermost field is named, and nothing prefixes it.** Python's `Error decoding o:
+    Error decoding x: Buffer too short...` is gone: the read raises an unnamed underflow,
+    the field that made it names it once (`name_underflow`, Go `nameUnderflow`, Java
+    `SchemaException.BufferUnderflow`, C# `BufferUnderflowException`, TS013 `_fld`), and
+    every enclosing object, repeat, case body, flag group or `$ref` passes it through. An
+    enum names itself, not its base; an inline match discriminator is named by the match's
+    `name`, else `an unnamed match` (the prototype names nothing there).
+  - **A byte_group** names the first member whose own base does not fit, as the prototype's
+    per-member peek does; where every base fits and the group's `size` does not, `an unnamed
+    byte_group`. Note that a group with no `size` is one byte wide in all five, where the
+    prototype derives the span from the members - outside PS-535, still open.
+  - Unchanged, as PS-535 excepts them: `remaining`, PS-403's optional message, PS-477/486
+    for a tlv entry, and PS-343's ragged tail for an `until: end` element.
+  - Found on the way: Go's `bool` discarded its `consume` read's error, and Python and the
+    generated codec never bounded `consume` on a bit range or bool, so both decoded
+    successfully past the end.
+  - C puts the same text in `error_msg` (`schema_underflow_message`); the worst case is 141
+    characters, inside the 152-byte buffer. An unnamed C bit range reads `an unnamed bit
+    range`, since the binary schema does not keep the type's spelling. C's `consume` is a
+    flag advancing one byte, so a `consume: 2` past the end cannot arise there - and the
+    harness turns any `consume >= 1` into that flag, which would build such a schema
+    advancing one byte instead of two. No corpus vector reaches it; open.
+  - No vector kind expects a failure, so the messages are pinned by unit tests in each
+    language: `test_cr_2026_114_115.py`, `test_cr_2026_114_115_ts013.py`,
+    `cr114_115_test.go`, `CR2026114115Test.java`, `CR2026_114_115Tests.cs`, and
+    `selftest_schema.c`.
+- **CR-2026-114 (PS-534, PS-537, PS-538): `ascii` is ISO 8859-1, padded with 0x00.**
+  - Decode keeps every byte as the character of the same number and drops trailing 0x00
+    only, warning `Field '<name>': a byte above 0x7F in an ascii value (PS-073, PS-538)`.
+    Before it: U+FFFD in Python and Java, `?` in C#, raw bytes (invalid JSON text) in Go;
+    the generated codec was already Latin-1 and only gained the warning.
+  - Encode rejects `Field '<name>': an ascii value holds a character above U+00FF, which has
+    no byte (PS-537)` and `Field '<name>': an ascii value of {n} bytes is longer than its
+    length of {length} (PS-537)`, writes U+0080..U+00FF as its byte with `Field '<name>': a
+    character above U+007F in an ascii value (PS-537)` in the encode warnings, and pads to
+    a fixed `length`. A length that is not fixed (`remaining`, a reference) is neither padded
+    nor bounded. All five wrote UTF-8 and truncated, so `"ABCé"` became `414243c3`. The
+    rejections reach `errors` verbatim, with no `Error encoding x:` prefix.
+  - One helper pair per language: `decode_ascii`/`encode_ascii` (Python), `decodeASCII`/
+    `encodeASCII` (Go, `cr114_115.go`), Java `Encoder.encodeAscii` and the ascii case of
+    `Schema.decodeFieldBody`, C# `Helpers.DecodeAscii`/`EncodeAscii`, TS013 `encField` in
+    `ENCODER_RUNTIME_JS`.
+  - **C holds text as a C string**, so it stops at the first 0x00 and reports a high byte as
+    itself, and it cannot encode `ascii` at all: PS-534, PS-538 and PS-537 are C gaps. The
+    harness skips a schema whose vectors expect such text as an interpreter gap
+    (`expects_text_c_cannot_hold`), which today is `ascii-latin1.yaml` alone.
+  - No corpus vector relied on U+FFFD, `?`, raw bytes or truncation: every implementation's
+    counts rose by exactly the new fixture's four vectors. Fixture: `ascii-latin1.yaml`
+    (high bytes, interior 0x00, all 0x00, each round-tripping).
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.

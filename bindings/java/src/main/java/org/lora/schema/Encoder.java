@@ -364,7 +364,9 @@ final class Encoder {
                     out.write(encodeOne(field, data, patches, topLevel));
                 } catch (RuntimeException e) {
                     if (!topLevel) throw e;
-                    errors.add("Error encoding " + describe(field) + ": " + e.getMessage());
+                    errors.add(e instanceof SchemaException.FieldEncodeException
+                            ? e.getMessage()
+                            : "Error encoding " + describe(field) + ": " + e.getMessage());
                 }
                 continue;
             }
@@ -1462,8 +1464,7 @@ final class Encoder {
             return new byte[0];
         }
         if (type == FieldType.ASCII || type == FieldType.STRING) {
-            byte[] raw = String.valueOf(value).getBytes(StandardCharsets.UTF_8);
-            return pad(raw, encodeLength(field, raw.length));
+            return encodeAscii(field, String.valueOf(value));
         }
 
         if (type == FieldType.BASE64) {
@@ -1551,6 +1552,39 @@ final class Encoder {
     private static final byte[] EMPTY = new byte[0];
 
     /** The byte count to write for a variable-length field. */
+    /**
+     * PS-537: a character above U+00FF, or a value longer than a fixed {@code length}, is
+     * rejected naming the field; U+0080..U+00FF is written as the byte of the same number
+     * with a warning; a short value is padded with 0x00. A length that is not fixed
+     * ({@code remaining}, a reference) lets the value supply it. This wrote UTF-8 and
+     * truncated, which could split a character ("ABCé" became 414243c3).
+     */
+    private byte[] encodeAscii(Field field, String text) {
+        String name = field.getName();
+        for (int i = 0; i < text.length(); i++) {
+            // A character outside the BMP is a surrogate pair, each half above U+00FF.
+            if (text.charAt(i) > 0xFF) {
+                throw new SchemaException.FieldEncodeException("Field '" + name
+                        + "': an ascii value holds a character above U+00FF, which has no byte (PS-537)");
+            }
+        }
+        byte[] raw = text.getBytes(StandardCharsets.ISO_8859_1);
+        Object declared = field.getRaw() != null ? field.getRaw().get("length") : null;
+        Integer fixed = declared instanceof Integer n && n >= 0 ? n : null;
+        if (fixed != null && raw.length > fixed) {
+            throw new SchemaException.FieldEncodeException(String.format(
+                    "Field '%s': an ascii value of %d bytes is longer than its length of %d (PS-537)",
+                    name, raw.length, fixed));
+        }
+        for (byte b : raw) {
+            if ((b & 0xFF) > 0x7F) {
+                warnings.add("Field '" + name + "': a character above U+007F in an ascii value (PS-537)");
+                break;
+            }
+        }
+        return fixed == null ? raw : pad(raw, fixed);
+    }
+
     private static int encodeLength(Field field, int natural) {
         // `length: remaining` has no fixed count when encoding (PS-014) - the value
         // supplies it. It arrives as the negative sentinel the parser stores.

@@ -83,7 +83,9 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # +6: repeat-element-null-sentinel, -internal-name, repeat-identity-sibling (2) and
 # repeat-count-computed (CR-2026-121, CR-2026-123), plus the null fixture's
 # reserved-value vector, whose null now writes the sentinel (PS-544); all repeat.
-FLOOR_TOTAL = 1820
+# (merged with master's +6 tlv-repeat/mutation-gate vectors)
+# +4: ascii-latin1 (CR-2026-114), all plain fixed: a byte above 0x7F re-encodes to itself.
+FLOOR_TOTAL = 1824
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -93,7 +95,7 @@ FLOOR_BY_SHAPE = {
     # for an internal field with no value. It now reports such a field instead.
     "tlv": 1305,   # +2: CR-2026-128; +3: CR-2026-125 fixtures; +1: tlv-repeat-merge (CR-2026-110)
     "flagged": 193,
-    "plain fixed": 143,
+    "plain fixed": 147,
     "match": 129,  # +4: match-u32-inline-discriminator
     "byte_group": 25,
     # 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now

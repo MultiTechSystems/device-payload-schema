@@ -407,7 +407,9 @@ public static class SchemaEncoder
                     catch (Exception e)
                     {
                         if (!topLevel) throw;
-                        _result.Errors.Add($"Error encoding {Describe(field)}: {e.Message}");
+                        // A FieldErrorException already names its field in full (PS-537).
+                        _result.Errors.Add(e is FieldErrorException ? e.Message
+                            : $"Error encoding {Describe(field)}: {e.Message}");
                     }
                     continue;
                 }
@@ -1493,10 +1495,11 @@ public static class SchemaEncoder
                     // A literal came from no bytes, so it writes none.
                     return Array.Empty<byte>();
                 case FieldType.Ascii or FieldType.String:
-                {
-                    var raw = System.Text.Encoding.UTF8.GetBytes(value?.ToString() ?? "");
-                    return Pad(raw, EncodeLength(field, raw.Length));
-                }
+                    // PS-537. A fixed `length` pads and bounds the value; `remaining` or a
+                    // reference has no fixed count, so the value supplies it.
+                    return Helpers.EncodeAscii(field.Name, value?.ToString() ?? "",
+                        field.Length > 0 && field.LengthRef == null ? field.Length : null,
+                        _result.Warnings);
             }
 
             throw new InvalidOperationException($"Cannot encode type: {field.Type}");

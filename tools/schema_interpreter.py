@@ -1229,6 +1229,110 @@ class LookupIndexError(ValueError):
     """
 
 
+class FieldError(ValueError):
+    """An error whose text already names its field in full, reported verbatim.
+
+    An enclosing construct must not prefix it ("Error in tlv: ...") or name another
+    field: the message is compared as an exact string across the five implementations.
+    """
+    named = True
+
+
+class BufferUnderflow(FieldError):
+    """A read or skip past the end of the payload, less any `reserve` (PS-535).
+
+    Raised unnamed by the read; the innermost field that made the read restates it as
+    `Field '<name>': ... (PS-535)` (`_name_underflow`), and every enclosing field then
+    passes it through unchanged. The text is the spec prototype's.
+    """
+    named = False
+
+    @classmethod
+    def need(cls, length: int, pos: int, end: int) -> 'BufferUnderflow':
+        return cls(f"Buffer underflow: need {length} bytes at offset {pos}, "
+                   f"but only {max(0, end - pos)} remaining")
+
+    @classmethod
+    def peek(cls, pos: int) -> 'BufferUnderflow':
+        # A bit range or a bool reads its byte(s) without consuming them.
+        return cls(f"Buffer underflow at peek offset {pos}")
+
+
+def _member_base_bytes(member: Dict[str, Any]) -> int:
+    """The bytes a byte_group member's own base reads: `u16[0:3]` reads two."""
+    found = re.match(r'^[us](\d+)\[', str(member.get('type', '')))
+    return int(found.group(1)) // 8 if found else 1
+
+
+def underflow_label(name: Any, kind: Any) -> str:
+    """How a PS-535 error identifies a field: its name, else what it is."""
+    return f"'{name}'" if name else f"an unnamed {kind or 'field'}"
+
+
+def name_underflow(exc: 'BufferUnderflow', name: Any, kind: Any) -> FieldError:
+    """PS-535: restate an unnamed short read as the error of the field that made it."""
+    if exc.named:
+        return exc
+    named = BufferUnderflow(f"Field {underflow_label(name, kind)}: {exc} (PS-535)")
+    named.named = True
+    named.detail = str(exc)
+    return named
+
+
+def error_text(prefix: str, exc: BaseException) -> str:
+    """An error for `result.errors`: a FieldError verbatim, anything else prefixed."""
+    if getattr(exc, 'named', False):
+        return str(exc)
+    return f"{prefix}{exc}"
+
+
+_NAMED_UNDERFLOW = re.compile(r"^Field .*\(PS-535\)$", re.S)
+
+
+def reraise_text(text: str) -> ValueError:
+    """The exception for a nested field list's first error, keeping a PS-535 message
+    verbatim so the enclosing field does not prefix it."""
+    if _NAMED_UNDERFLOW.match(text):
+        exc = BufferUnderflow(text)
+        exc.named = True
+        return exc
+    return ValueError(text)
+
+
+ASCII_HIGH_BYTE_WARNING = "Field '{}': a byte above 0x7F in an ascii value (PS-073, PS-538)"
+
+
+def decode_ascii(name: Any, raw: bytes, warnings: List[str]) -> str:
+    """PS-534, PS-538: each byte is the ISO 8859-1 character of the same number, so the
+    value is lossless and re-encodes to the same bytes (PS-537); trailing 0x00 padding
+    only is dropped. A byte above 0x7F is reported with PS-073's warning."""
+    if any(byte > 0x7F for byte in raw):
+        warnings.append(ASCII_HIGH_BYTE_WARNING.format(name))
+    return raw.decode('latin-1').rstrip('\x00')
+
+
+def encode_ascii(name: Any, value: Any, length: Optional[int],
+                 warnings: List[str]) -> bytes:
+    """PS-537: a character above U+00FF, or a value longer than a fixed `length`, is
+    rejected naming the field; U+0080..U+00FF is written as the byte of the same number
+    with a warning; a short value is padded with 0x00. `length` is None where the field's
+    length is not fixed (`remaining`, a reference), and the value then supplies it."""
+    text = str(value)
+    if any(ord(ch) > 0xFF for ch in text):
+        raise FieldError(f"Field '{name}': an ascii value holds a character above "
+                         f"U+00FF, which has no byte (PS-537)")
+    encoded = text.encode('latin-1')
+    if length is not None and len(encoded) > length:
+        raise FieldError(f"Field '{name}': an ascii value of {len(encoded)} bytes is "
+                         f"longer than its length of {length} (PS-537)")
+    if any(byte > 0x7F for byte in encoded):
+        warnings.append(f"Field '{name}': a character above U+007F in an ascii value "
+                        f"(PS-537)")
+    if length is None:
+        return encoded
+    return encoded + b'\x00' * (length - len(encoded))
+
+
 #: The token a mapping's `default` substitutes with the unmapped value (PS-406).
 LOOKUP_VALUE_TOKEN = '${value}'
 
@@ -2745,6 +2849,7 @@ class SchemaInterpreter:
         self._leftover_reported = False
         self._case_quality: Dict[str, str] = {}     # reset by decode
         self._nested_warnings: List[str] = []       # reset by decode
+        self._encode_warnings: List[str] = []       # PS-537, reset by encode
         #: What the last get_semantic_output call could not express, such as a unit
         #: the SenML registry does not have (PS-488). Its return value stays the
         #: records alone, as callers already read it.
@@ -2940,7 +3045,7 @@ class SchemaInterpreter:
     def _read_int(self, buf: bytes, pos: int, size: int, signed: bool) -> Tuple[int, int]:
         """Read integer from buffer."""
         if pos + size > len(buf):
-            raise ValueError(f"Buffer too short: need {size} bytes at pos {pos}")
+            raise BufferUnderflow.need(size, pos, len(buf))
         
         data = buf[pos:pos + size]
         
@@ -2959,7 +3064,7 @@ class SchemaInterpreter:
     def _read_float(self, buf: bytes, pos: int, size: int) -> Tuple[float, int]:
         """Read float from buffer."""
         if pos + size > len(buf):
-            raise ValueError(f"Buffer too short: need {size} bytes at pos {pos}")
+            raise BufferUnderflow.need(size, pos, len(buf))
         
         data = buf[pos:pos + size]
         fmt = '<f' if self.endian == Endian.LITTLE else '>f'
@@ -2972,7 +3077,7 @@ class SchemaInterpreter:
     def _read_float16(self, buf: bytes, pos: int) -> Tuple[float, int]:
         """Read IEEE 754 half-precision float (2 bytes)."""
         if pos + 2 > len(buf):
-            raise ValueError(f"Buffer too short: need 2 bytes at pos {pos}")
+            raise BufferUnderflow.need(2, pos, len(buf))
         
         data = buf[pos:pos + 2]
         # Use struct 'e' format for half-precision (Python 3.6+)
@@ -3118,7 +3223,7 @@ class SchemaInterpreter:
         Returns: (value, new_pos, consumed_byte)
         """
         if pos >= len(buf):
-            raise ValueError(f"Buffer too short at pos {pos}")
+            raise BufferUnderflow.peek(pos)
 
         # The base width is part of the type - `u24[4:23]` means bits 4-23 of a
         # 24-bit big-endian value - so read that many bytes before masking. Reading
@@ -3126,9 +3231,7 @@ class SchemaInterpreter:
         # byte alone: rakwireless/qingping declares a 12-bit humidity as u24[0:11]
         # and got 11 where the device means 1320.
         if pos + base_size > len(buf):
-            raise ValueError(
-                "Buffer too short for %d-bit bitfield at pos %d" % (base_size * 8, pos)
-            )
+            raise BufferUnderflow.peek(pos)
         # PS-059 (CR-2026-052): the base is assembled in the field's effective byte
         # order, which `self.endian` carries here. This read it big-endian whatever the
         # schema said, while the encoder packed it in the schema's order - so a range
@@ -3161,15 +3264,22 @@ class SchemaInterpreter:
         one of the five that got it wrong, and it is the surface `td-tools` imports.
         """
         self._produced(field_def)
-        if field_def.get('type') in ('object', 'repeat'):
-            # Its members are another level of output, described by the declaration's
-            # nested entries (PS-371, PS-481), not by what they wrote.
-            self._meta_depth += 1
-            try:
-                return self._decode_field_endian(field_def, buf, pos)
-            finally:
-                self._meta_depth -= 1
-        return self._decode_field_endian(field_def, buf, pos)
+        try:
+            if field_def.get('type') in ('object', 'repeat'):
+                # Its members are another level of output, described by the
+                # declaration's nested entries (PS-371, PS-481), not by what they wrote.
+                self._meta_depth += 1
+                try:
+                    return self._decode_field_endian(field_def, buf, pos)
+                finally:
+                    self._meta_depth -= 1
+            return self._decode_field_endian(field_def, buf, pos)
+        except BufferUnderflow as exc:
+            # PS-535: the innermost field that read past the end is named; an enclosing
+            # object or repeat passes its member's error through unchanged.
+            if exc.named:
+                raise
+            raise name_underflow(exc, field_def.get('name'), field_def.get('type')) from exc
 
     def _produced(self, field_def: Dict[str, Any], key: Optional[str] = None) -> None:
         """PS-490: record the declaration about to report `key` (its name by default).
@@ -3227,6 +3337,8 @@ class SchemaInterpreter:
             
             # Determine position advancement
             if consume is not None:
+                if pos + consume > len(buf):
+                    raise BufferUnderflow.need(consume, pos, len(buf))   # PS-535
                 new_pos = pos + consume
             elif auto_consumed:
                 new_pos = pos + 1
@@ -3258,7 +3370,7 @@ class SchemaInterpreter:
         # little-endian u32 (PS-272).
         if field_type in WORD_ORDERED_TYPES:
             if pos + 4 > len(buf):
-                raise ValueError(f"Buffer too short: need 4 bytes at pos {pos}")
+                raise BufferUnderflow.need(4, pos, len(buf))
             return read_word_ordered(field_type, buf[pos:pos + 4]), pos + 4
 
         if field_type in type_info:
@@ -3282,14 +3394,14 @@ class SchemaInterpreter:
         # `UDec`/`SDec` are not spellings of them (PS-331).
         if field_type == 'udec':
             if pos >= len(buf):
-                raise ValueError("Buffer too short for udec")
+                raise BufferUnderflow.need(1, pos, len(buf))
             byte = buf[pos]
             value = (byte >> 4) + (byte & 0x0F) * 0.1
             return value, pos + 1
         
         if field_type == 'sdec':
             if pos >= len(buf):
-                raise ValueError("Buffer too short for sdec")
+                raise BufferUnderflow.need(1, pos, len(buf))
             byte = buf[pos]
             whole = byte >> 4
             # Sign extend the 4-bit whole part
@@ -3317,9 +3429,11 @@ class SchemaInterpreter:
         if field_type == 'bool':
             bit = field_def.get('bit', 0)
             if pos >= len(buf):
-                raise ValueError("Buffer too short for bool")
+                raise BufferUnderflow.peek(pos)
             value = bool((buf[pos] >> bit) & 1)
             # Bool doesn't advance position by default
+            if consume and pos + consume > len(buf):
+                raise BufferUnderflow.need(consume, pos, len(buf))       # PS-535
             if consume:
                 return value, pos + consume
             return value, pos
@@ -3327,7 +3441,7 @@ class SchemaInterpreter:
         if field_type == 'bytes':
             length = resolve_length(field_def, buf, pos, variables=self._variables)
             if pos + length > len(buf):
-                raise ValueError("Buffer too short for bytes")
+                raise BufferUnderflow.need(length, pos, len(buf))
             return format_bytes(field_def, buf[pos:pos + length]), pos + length
         
         if field_type == 'string':
@@ -3355,8 +3469,9 @@ class SchemaInterpreter:
         if field_type == 'ascii':
             length = resolve_length(field_def, buf, pos, variables=self._variables)
             if pos + length > len(buf):
-                raise ValueError("Buffer too short for ascii")
-            value = buf[pos:pos + length].decode('ascii', errors='replace').rstrip('\x00')
+                raise BufferUnderflow.need(length, pos, len(buf))
+            value = decode_ascii(field_def.get('name'), buf[pos:pos + length],
+                                 self._nested_warnings)
             return value, pos + length
         
         # `hex:upper` is a `bytes` format (PS-079), not a type (CR-2026-037), so it
@@ -3364,7 +3479,7 @@ class SchemaInterpreter:
         if field_type == 'hex':
             length = resolve_length(field_def, buf, pos, variables=self._variables)
             if pos + length > len(buf):
-                raise ValueError("Buffer too short for hex")
+                raise BufferUnderflow.need(length, pos, len(buf))
             # PS-074: `hex` output MUST be lowercase without separators. This
             # emitted uppercase, so it disagreed with the specification, with the
             # Go and Java interpreters, and with every vendor decoder. Uppercase
@@ -3375,7 +3490,7 @@ class SchemaInterpreter:
             import base64 as b64
             length = resolve_length(field_def, buf, pos, variables=self._variables)
             if pos + length > len(buf):
-                raise ValueError("Buffer too short for base64")
+                raise BufferUnderflow.need(length, pos, len(buf))
             value = b64.b64encode(buf[pos:pos + length]).decode('ascii')
             return value, pos + length
         
@@ -3385,7 +3500,7 @@ class SchemaInterpreter:
             # A skip past the end is a short read like any other, as in Go, Java and C#.
             # It succeeded, so a truncated payload decoded with no error.
             if pos + length > len(buf):
-                raise ValueError("Buffer too short for skip")
+                raise BufferUnderflow.need(length, pos, len(buf))
             return None, pos + length
         
         if field_type == 'object':
@@ -3424,7 +3539,13 @@ class SchemaInterpreter:
         
         # Decode the base integer type
         base_field = {'type': base_type}
-        raw_value, new_pos = self._decode_field(base_field, buf, pos)
+        try:
+            raw_value, new_pos = self._decode_field(base_field, buf, pos)
+        except BufferUnderflow as exc:
+            # PS-535 names the enum, not its base. Unnamed until here: the base's own
+            # declaration is synthetic and has no name.
+            raise name_underflow(BufferUnderflow(getattr(exc, 'detail', str(exc))),
+                                 field_def.get('name'), 'enum') from exc
         
         # Map to string value
         # Values can be dict {0: 'idle', 1: 'running'} or list ['idle', 'running']
@@ -3511,7 +3632,7 @@ class SchemaInterpreter:
             try:
                 new_pos = self._decode_field_list(nested_fields, region, at, scratch)
                 if scratch.errors:
-                    raise ValueError(scratch.errors[0])
+                    raise reraise_text(scratch.errors[0])
                 records = self._pending_records
                 for carried in carry_state:
                     if carried in self._variables:
@@ -3918,7 +4039,10 @@ class SchemaInterpreter:
         elif length is not None:
             # Inline: read bytes from payload
             if pos + length > len(buf):
-                raise ValueError(f"Buffer too short for match: need {length} bytes at pos {pos}")
+                # PS-535: the discriminator is the field that read; it is named by the
+                # match's `name`, where it declares one.
+                raise name_underflow(BufferUnderflow.need(length, pos, len(buf)),
+                                     match_def.get('name'), 'match')
             if length == 1:
                 discriminator = buf[pos]
             elif length == 2:
@@ -3989,7 +4113,7 @@ class SchemaInterpreter:
         finally:
             self._current_data = saved_current
         if scratch.errors:
-            raise ValueError(scratch.errors[0])
+            raise reraise_text(scratch.errors[0])
         result.update(scratch.data)
         if saved_current is not None:
             saved_current.update(scratch.data)
@@ -4019,7 +4143,7 @@ class SchemaInterpreter:
         finally:
             self._current_data = saved_current
         if scratch.errors:
-            raise ValueError(scratch.errors[0])
+            raise reraise_text(scratch.errors[0])
         self._case_quality.update(scratch.quality)
         self._nested_warnings.extend(scratch.warnings)
         return scratch.data, pos
@@ -4144,7 +4268,7 @@ class SchemaInterpreter:
         prefix = field_def.get('prefix', '')
         
         if pos + length > len(buf):
-            raise ValueError(f"Buffer too short for bitfield_string at pos {pos}")
+            raise BufferUnderflow.need(length, pos, len(buf))
         
         data = buf[pos:pos + length]
         if self.endian == Endian.LITTLE:
@@ -4566,7 +4690,16 @@ class SchemaInterpreter:
         # that value. Each member used to read its own base from the group's start, which
         # agrees only where every member is as wide as the group.
         if pos + group_size > len(buf):
-            raise ValueError(f"Buffer too short for a {group_size}-byte byte_group at pos {pos}")
+            # PS-535: a member reads the group's bytes from its start, so the first
+            # member whose base does not fit is the field that read past the end, as the
+            # spec prototype names it. Where every base fits and the group's `size` does
+            # not, the group itself made the read.
+            for gf in group_fields:
+                if _member_base_bytes(gf) > len(buf) - pos:
+                    raise name_underflow(BufferUnderflow.peek(pos), gf.get('name'),
+                                         gf.get('type'))
+            raise name_underflow(BufferUnderflow.need(group_size, pos, len(buf)), None,
+                                 'byte_group')
         group_value = int.from_bytes(buf[pos:pos + group_size],
                                      'little' if self.endian == Endian.LITTLE else 'big')
         for gf in group_fields:
@@ -4595,7 +4728,7 @@ class SchemaInterpreter:
                 # Add to variables so field can be referenced by compute/formula
                 self._variables[name] = value
             except Exception as e:
-                result.errors.append(f"Error in byte_group field {name}: {e}")
+                result.errors.append(error_text(f"Error in byte_group field {name}: ", e))
     
     def _decode_tlv(self, field_def: Dict[str, Any], buf: bytes,
                     pos: int,
@@ -5137,7 +5270,7 @@ class SchemaInterpreter:
                         else:
                             _, pos = self._decode_field(rf, payload, pos)
                 except Exception as e:
-                    result.errors.append(f"Error resolving $ref: {e}")
+                    result.errors.append(error_text(f"Error resolving $ref: ", e))
                     # A construct that fails to read stops the decode, as a plain field's error
                     # does. These went on from wherever the failed read left the position, so a
                     # following field was read from the wrong offset and reported beside the error
@@ -5153,7 +5286,7 @@ class SchemaInterpreter:
                 except Exception as e:
                     # A schema error such as overlapping members (PS-397) fails the
                     # decode like any other field's error, rather than raising out of it.
-                    result.errors.append(f"Error decoding byte_group: {e}")
+                    result.errors.append(error_text(f"Error decoding byte_group: ", e))
                     break
                 continue
             
@@ -5180,7 +5313,7 @@ class SchemaInterpreter:
                     match_result, pos = self._decode_match(field_def, payload, pos)
                     result.data.update(match_result)
                 except Exception as e:
-                    result.errors.append(f"Error in match: {e}")
+                    result.errors.append(error_text(f"Error in match: ", e))
                     break
                 continue
             
@@ -5197,7 +5330,7 @@ class SchemaInterpreter:
                     tlv_result, pos = self._decode_tlv(field_def, payload, pos, result)
                     result.data.update(tlv_result)
                 except Exception as e:
-                    result.errors.append(f"Error in tlv: {e}")
+                    result.errors.append(error_text(f"Error in tlv: ", e))
                     break
                 continue
             
@@ -5210,7 +5343,7 @@ class SchemaInterpreter:
                     # The groups' fields are bound and range-checked by the field-list
                     # decoder that read them.
                 except Exception as e:
-                    result.errors.append(f"Error in flagged: {e}")
+                    result.errors.append(error_text(f"Error in flagged: ", e))
                     break
                 continue
             
@@ -5223,8 +5356,12 @@ class SchemaInterpreter:
                     value, pos = self._decode_bitfield_string(field_def, payload, pos)
                     result.data[name] = value
                     self._variables[name] = value
+                except BufferUnderflow as e:
+                    result.errors.append(str(name_underflow(e, field_def.get('name'),
+                                                            field_type)))
+                    break
                 except Exception as e:
-                    result.errors.append(f"Error decoding {name}: {e}")
+                    result.errors.append(error_text(f"Error decoding {name}: ", e))
                     break
                 continue
             
@@ -5274,7 +5411,7 @@ class SchemaInterpreter:
                             quality = self._check_valid_range(value, field_def, result)
                             result.quality[name] = quality
                 except Exception as e:
-                    result.errors.append(f"Error computing {name}: {e}")
+                    result.errors.append(error_text(f"Error computing {name}: ", e))
                 continue
             
             # Handle match at field level (legacy: no name, type: match)
@@ -5283,7 +5420,7 @@ class SchemaInterpreter:
                     match_result, pos = self._decode_match(field_def, payload, pos)
                     result.data.update(match_result)
                 except Exception as e:
-                    result.errors.append(f"Error in match: {e}")
+                    result.errors.append(error_text(f"Error in match: ", e))
                     break
                 continue
             
@@ -5302,7 +5439,7 @@ class SchemaInterpreter:
                     if not self._sentinel_hit(field_def, value, payload, start):
                         self._bind_internal(field_def, name, value)
                 except Exception as e:
-                    result.errors.append(f"Error in internal field: {e}")
+                    result.errors.append(error_text(f"Error in internal field: ", e))
                 continue
             
             try:
@@ -5344,7 +5481,7 @@ class SchemaInterpreter:
                     # so $references keep working when name_from is in play.
                     self._variables[name] = value
             except Exception as e:
-                result.errors.append(f"Error decoding {name}: {e}")
+                result.errors.append(error_text(f"Error decoding {name}: ", e))
                 break
         
         return pos
@@ -5515,6 +5652,7 @@ class SchemaInterpreter:
             EncodeResult with encoded payload
         """
         result = EncodeResult(payload=b'')
+        self._encode_warnings = []
         if self._load_errors:
             result.errors.extend(self._load_errors)
             return result
@@ -5558,7 +5696,7 @@ class SchemaInterpreter:
                     output.extend(self._encode_bitfield_run(_item, data))
                 except Exception as e:
                     names = ", ".join(str(f.get('name')) for f in _item)
-                    result.errors.append(f"Error encoding bit range(s) {names}: {e}")
+                    result.errors.append(error_text(f"Error encoding bit range(s) {names}: ", e))
                 continue
             field_def = _item
             # PS-405, before any construct: an optional object or repeat the input omits
@@ -5582,28 +5720,28 @@ class SchemaInterpreter:
                     output.extend(
                         self._encode_field_list(ref_def.get('fields') or [], data))
                 except Exception as e:
-                    result.errors.append(f"Error encoding $ref: {e}")
+                    result.errors.append(error_text(f"Error encoding $ref: ", e))
                 continue
             
             if 'byte_group' in field_def:
                 try:
                     output.extend(self._encode_byte_group(field_def, data))
                 except Exception as e:
-                    result.errors.append(f"Error encoding byte_group: {e}")
+                    result.errors.append(error_text(f"Error encoding byte_group: ", e))
                 continue
             
             if 'tlv' in field_def and not field_def.get('type'):
                 try:
                     output.extend(self._encode_tlv(field_def, data))
                 except Exception as e:
-                    result.errors.append(f"Error encoding tlv: {e}")
+                    result.errors.append(error_text(f"Error encoding tlv: ", e))
                 continue
             
             if 'match' in field_def and not field_def.get('type'):
                 try:
                     output.extend(self._encode_match(field_def, data))
                 except Exception as e:
-                    result.errors.append(f"Error encoding match: {e}")
+                    result.errors.append(error_text(f"Error encoding match: ", e))
                 continue
             
             if field_def.get('type') == 'repeat':
@@ -5641,7 +5779,7 @@ class SchemaInterpreter:
                 except Exception as e:
                     # The per-field path below reports its errors; this one used to
                     # propagate, so one unencodable group killed the whole call.
-                    result.errors.append(f"Error encoding flagged group: {e}")
+                    result.errors.append(error_text(f"Error encoding flagged group: ", e))
                 continue
             
             name = field_def.get('name', 'unknown')
@@ -5679,7 +5817,7 @@ class SchemaInterpreter:
                 try:
                     output.extend(self._encode_field(field_def, field_def['value']))
                 except Exception as e:
-                    result.errors.append(f"Error encoding {name}: {e}")
+                    result.errors.append(error_text(f"Error encoding {name}: ", e))
                 continue
 
             # PS-434: an internal field that reads bytes writes its value, else the
@@ -5688,7 +5826,7 @@ class SchemaInterpreter:
                 try:
                     value = self._internal_encode_value(field_def, data)
                 except ValueError as e:
-                    result.errors.append(f"Error encoding {name}: {e}")
+                    result.errors.append(error_text(f"Error encoding {name}: ", e))
                     continue
             elif name in flags_patches:
                 value = flags_patches[name]
@@ -5698,7 +5836,7 @@ class SchemaInterpreter:
                 try:
                     lookup_name = self._resolve_encode_name(field_def, name, data)
                 except ValueError as e:
-                    result.errors.append(f"Error encoding {name}: {e}")
+                    result.errors.append(error_text(f"Error encoding {name}: ", e))
                     continue
                 if lookup_name is None:
                     result.errors.append(
@@ -5724,7 +5862,7 @@ class SchemaInterpreter:
                         output.extend(self._encode_field(raw_bits_field(field_def),
                                                          field_def['sentinel'][0]))
                     except Exception as e:
-                        result.errors.append(f"Error encoding {name}: {e}")
+                        result.errors.append(error_text(f"Error encoding {name}: ", e))
                     continue
                 if value is None:
                     result.warnings.append(f"Missing field: {lookup_name}")
@@ -5737,9 +5875,10 @@ class SchemaInterpreter:
                 encoded = self._encode_field(field_def, value)
                 output.extend(encoded)
             except Exception as e:
-                result.errors.append(f"Error encoding {name}: {e}")
+                result.errors.append(error_text(f"Error encoding {name}: ", e))
         
         result.payload = bytes(output)
+        result.warnings.extend(self._encode_warnings)
         return result
     
     def _encode_flagged(self, flagged_def: Dict[str, Any], data: Dict[str, Any]) -> bytes:
@@ -6702,9 +6841,13 @@ class SchemaInterpreter:
             # A literal came from no bytes, so it writes none (PS-359).
             return b''
         if field_type in ('string', 'ascii'):
-            length = encode_length(field_def, len(str(value).encode('utf-8')))
-            encoded = str(value).encode('utf-8')[:length]
-            return encoded.ljust(length, b'\x00')
+            # PS-537. A fixed `length` pads and bounds the value; `remaining` or a
+            # reference has no fixed count, so the value supplies it.
+            fixed = field_def.get('length')
+            if not isinstance(fixed, int) or isinstance(fixed, bool) or fixed < 0:
+                fixed = None
+            return encode_ascii(field_def.get('name'), value, fixed,
+                                self._encode_warnings)
         
         if field_type == 'hex':
             length = encode_length(field_def, len(str(value)) // 2)
@@ -6771,6 +6914,7 @@ class SchemaInterpreter:
             EncodeResult with encoded payload starting with command_id
         """
         result = EncodeResult(payload=b'')
+        self._encode_warnings = []
         data = data or {}
         
         if command_name not in self.downlink_commands:
@@ -6805,9 +6949,10 @@ class SchemaInterpreter:
                 encoded = self._encode_field(field_def, value)
                 output.extend(encoded)
             except Exception as e:
-                result.errors.append(f"Error encoding command field {name}: {e}")
+                result.errors.append(error_text(f"Error encoding command field {name}: ", e))
         
         result.payload = bytes(output)
+        result.warnings.extend(self._encode_warnings)
         return result
     
     def decode_command(self, payload: bytes) -> DecodeResult:
@@ -6860,7 +7005,7 @@ class SchemaInterpreter:
                     if not name.startswith('_'):
                         result.data[name] = value
             except Exception as e:
-                result.errors.append(f"Error decoding command field {name}: {e}")
+                result.errors.append(error_text(f"Error decoding command field {name}: ", e))
                 break
         
         result.bytes_consumed = pos
