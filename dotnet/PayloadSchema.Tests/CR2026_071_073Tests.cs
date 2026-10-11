@@ -121,9 +121,9 @@ public class CR2026_071_073Tests
     [Fact]
     public void AGuardIsEvaluatedBeforeTheSource()
     {
-        var output = Decode("- {name: g, type: u8}\n"
-            + "- {name: v, type: number, ref: $absent, guard: {when: [{field: $g, gt: 0}], else: -1}}\n"
-            + "- {name: absent, type: u8, optional: true}\n", "00");   // declared (PS-539), absent
+        var output = Decode("- {name: absent, type: u8, sentinel: [255]}\n"   // declared first (PS-539), omitted
+            + "- {name: g, type: u8}\n"
+            + "- {name: v, type: number, ref: $absent, guard: {when: [{field: $g, gt: 0}], else: -1}}\n", "FF00");
         Assert.Equal(-1.0, Decoded.Num(output["v"]));
     }
 

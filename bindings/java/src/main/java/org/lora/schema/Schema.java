@@ -1966,7 +1966,14 @@ public class Schema {
     }
 
     private Object decodeMatch(Field field, DecodeContext ctx) {
-        int matchValue;
+        // A long, not an int. A bit-range peek reports a Double, and narrowing a Double
+        // above Integer.MAX_VALUE saturates to 2147483647 while narrowing the Long case
+        // key 2147483648 wraps to -2147483648 - so a u32 discriminator of 0x80000000 never
+        // equalled the key that spells it, and the construct took its default instead.
+        // Null where the discriminator is no integer at all - a u64 above 2^63-1, say -
+        // which then matches no case rather than the 0 a default conversion would give.
+        Long matchValue;
+        Object discriminator;
         // What this construct contributes on its own: the discriminator under `name`,
         // where it was read here and named. Null where there is nothing to report.
         Map<String, Object> inline = null;
@@ -1974,18 +1981,21 @@ public class Schema {
         if (field.isMatchRemaining()) {
             // PS-414: the bytes from here to the end of the region, which a reserving
             // repeat or tlv has already narrowed. Nothing is read.
-            matchValue = ctx.remaining();
+            matchValue = (long) ctx.remaining();
+            discriminator = matchValue;
         } else if (field.getOn() != null && !field.getOn().isEmpty()) {
             String varName = field.getOn().startsWith("$") ? field.getOn().substring(1) : field.getOn();
             Object val = ctx.getVariable(varName);
             if (val == null) {
                 throw new SchemaException.DecodeException("Variable not found: $" + varName);
             }
-            matchValue = toInt(val, 0);
+            matchValue = asLong(val);
+            discriminator = val;
         } else {
             int length = field.getLength() > 0 ? field.getLength() : 1;
             byte[] data = ctx.read(length);
-            matchValue = (int) ctx.decodeUnsigned(data, ctx.getEndian());
+            matchValue = ctx.decodeUnsigned(data, ctx.getEndian());
+            discriminator = matchValue;
 
             // A discriminator read from the payload is reported where `name` asks for it
             // and stored where `var` does (CR-2026-020). Both were parsed and then
@@ -2012,7 +2022,7 @@ public class Schema {
             Object caseVal = c.getCaseValue();
             if (caseVal == null) continue;
 
-            if (matchesCase(matchValue, caseVal)) {
+            if (matchValue != null && matchesCase(matchValue, caseVal)) {
                 return mergeMatch(inline, decodeFields(c.getFields(), ctx));
             }
         }
@@ -2027,7 +2037,8 @@ public class Schema {
         }
         if (fallback == null || !"skip".equals(String.valueOf(fallback))) {
             throw new SchemaException.DecodeException(
-                    "No matching case for value " + matchValue);
+                    "No matching case for value "
+                    + (matchValue != null ? matchValue : discriminator));
         }
         return inline;
     }
@@ -2040,17 +2051,18 @@ public class Schema {
      * {@code {min,max}} maps were compared, so a range key matched nothing at all and the
      * construct decoded silently empty (CR-2026-020).
      */
-    private int rangeBound(String text) {
-        return Integer.parseInt(text.trim());
+    private long rangeBound(String text) {
+        return Long.parseLong(text.trim());
     }
 
-    private boolean matchesCase(int matchValue, Object caseVal) {
+    private boolean matchesCase(long matchValue, Object caseVal) {
         if (caseVal instanceof Number number) {
-            return matchValue == number.intValue();
+            Long key = asLong(number);
+            return key != null && key == matchValue;
         }
         if (caseVal instanceof String text && parseListCaseKey(text) != null) {
             // A quoted flow sequence, "[1, 2, 3]", matches any element (PS-398).
-            return parseListCaseKey(text).contains((long) matchValue);
+            return parseListCaseKey(text).contains(matchValue);
         }
         if (caseVal instanceof String text) {
             int separator = text.indexOf("..");
@@ -2070,15 +2082,16 @@ public class Schema {
         }
         if (caseVal instanceof List<?> list) {
             for (Object item : list) {
-                if (item instanceof Number number && matchValue == number.intValue()) {
+                if (item instanceof Number number && asLong(number) != null
+                        && asLong(number) == matchValue) {
                     return true;
                 }
             }
             return false;
         }
         if (caseVal instanceof Map<?, ?> rangeMap) {
-            int minVal = toInt(rangeMap.get("min"), Integer.MIN_VALUE);
-            int maxVal = toInt(rangeMap.get("max"), Integer.MAX_VALUE);
+            long minVal = toLong(rangeMap.get("min"), Long.MIN_VALUE);
+            long maxVal = toLong(rangeMap.get("max"), Long.MAX_VALUE);
             return matchValue >= minVal && matchValue <= maxVal;
         }
         return false;
@@ -3114,10 +3127,10 @@ public class Schema {
             if (!condition.getField().startsWith("$")) continue;
             String name = condition.getField().substring(1);
             Object raw = elementComplete ? ctx.getVariables().get(name) : ctx.ref(name); // PS-368
-            double value;
-            if (raw instanceof Number number) value = number.doubleValue();
-            else if (raw instanceof Boolean flag) value = flag ? 1.0 : 0.0;
-            else return false;                                    // absent: PS-540
+            // PS-540: an absent operand fails. PS-549 (CR-2026-127): so does a boolean one -
+            // comparisons take numbers, and `true` is not 1 (PS-513).
+            if (!(raw instanceof Number number)) return false;
+            double value = number.doubleValue();
             double operand = condition.getOperand() == null ? 0.0 : condition.getOperand();
             boolean passed = switch (condition.getOp()) {
                 case "gt" -> value > operand;
@@ -3133,6 +3146,43 @@ public class Schema {
             if (!passed) return false;
         }
         return true;
+    }
+
+    /**
+     * A value as a 64-bit integer, for comparing a discriminator with a case key, or null
+     * where it has none. {@code intValue()} cannot do it: a Double above
+     * Integer.MAX_VALUE saturates while a Long wraps, so the same number read two ways
+     * compared unequal. Integral types convert exactly; a Double truncates as {@code
+     * toInt} does; one outside long's range, NaN, or text that is not an integer is null.
+     */
+    private static Long asLong(Object obj) {
+        if (obj instanceof Long || obj instanceof Integer || obj instanceof Short
+                || obj instanceof Byte) {
+            return ((Number) obj).longValue();
+        }
+        if (obj instanceof java.math.BigInteger big) {
+            return big.bitLength() < 64 ? big.longValue() : null;
+        }
+        if (obj instanceof Number number) {
+            double d = number.doubleValue();
+            if (Double.isNaN(d) || d < -9.2233720368547758E18 || d >= 9.2233720368547758E18) {
+                return null;
+            }
+            return (long) d;
+        }
+        if (obj instanceof String text) {
+            try {
+                return Long.parseLong(text.trim());
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private static long toLong(Object obj, long defaultValue) {
+        Long value = asLong(obj);
+        return value != null ? value : defaultValue;
     }
 
     private static int toInt(Object obj, int defaultValue) {

@@ -21,7 +21,7 @@ import re
 import sys
 import yaml
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 
 #: What a port entry declaring no `direction` means (PS-287). `both` keeps the annotation
@@ -1068,7 +1068,63 @@ def _codec_globals() -> set:
     return _CODEC_GLOBALS
 
 
+#: Per-generation spellings for names whose plain mangling collides with another
+#: name's. `TS013Generator.generate` fills it for the schema it is generating and
+#: restores it afterwards; `to_js_name` consults it first, so every site that stages,
+#: reads or references a field - `$name`, `ref:`, compute operands, a match's field,
+#: name_from templates, guards, lengths - agrees on one spelling without each call
+#: site having to know about collisions.
+_JS_NAME_OVERRIDES: Dict[str, str] = {}
+
+
 def to_js_name(name: str) -> str:
+    override = _JS_NAME_OVERRIDES.get(name)
+    if override is not None:
+        return override
+    return _mangle_js_name(name)
+
+
+def unique_js_names(names: Iterable[str]) -> Dict[str, str]:
+    """Give every name a JS spelling no other name in the set shares.
+
+    A name keeps its plain mangling unless another name mangles to the same spelling
+    (vendor keys `ER+P-1_s` and `ER-P-1_s` both mangle to `ER_P_1_s`), so a schema with
+    no collision generates exactly the codec it always did. Within a colliding group a
+    name that is already its own spelling keeps it - it is the only one a reader would
+    expect there - and the rest follow in sorted order, the first keeping the plain
+    spelling and each later one taking `_2`, `_3`, ... A suffix is skipped where it is
+    some other name's plain spelling or already taken, so `a+b`, `a-b` and `a_b_2`
+    give `a_b`, `a_b_3` and `a_b_2`. The output keys are restored from this mapping at
+    the codec's entry points, so the suffix never reaches a caller.
+    """
+    unique = sorted(set(names))
+    plain = {name: _mangle_js_name(name) for name in unique}
+    reserved = set(plain.values())
+    groups: Dict[str, List[str]] = {}
+    for name in unique:
+        groups.setdefault(plain[name], []).append(name)
+    taken: Set[str] = set()
+    result: Dict[str, str] = {}
+    for spelling in sorted(groups):
+        members = sorted(groups[spelling], key=lambda n: (n != spelling, n))
+        result[members[0]] = spelling
+        taken.add(spelling)
+        suffix = 2
+        for name in members[1:]:
+            while True:
+                candidate = '%s_%d' % (spelling, suffix)
+                suffix += 1
+                if candidate in reserved or candidate in taken:
+                    continue
+                if _mangle_js_name(candidate) != candidate:   # a reserved identifier
+                    continue
+                break
+            result[name] = candidate
+            taken.add(candidate)
+    return result
+
+
+def _mangle_js_name(name: str) -> str:
     mangled = re.sub(r'[^a-zA-Z0-9_]', '_', name)
     # An identifier cannot start with a digit: Watteco's `4_20_mA` emitted
     # `var 4_20_mA`, a syntax error that stopped the whole codec loading. The key is
@@ -1246,6 +1302,11 @@ def compute_to_js(compute: Dict[str, Any]) -> str:
     return '0'
 
 
+def operand_ok_js(field_js: str) -> str:
+    """A condition's operand can be compared: present (PS-540) and not a boolean (PS-549)."""
+    return f"({field_js} != null && typeof {field_js} !== 'boolean')"
+
+
 def condition_to_js(cond: Dict[str, Any]) -> str:
     """One guard condition, {field: $x, <op>: value}, as a JS boolean (PS-386)."""
     field_ref = cond.get('field', '')
@@ -1254,11 +1315,12 @@ def condition_to_js(cond: Dict[str, Any]) -> str:
                    ('eq', '==='), ('ne', '!==')):
         if op in cond:
             # PS-540: an absent operand fails the condition. JS would compare
-            # `undefined !== 3` as true and `null >= 0` as true.
-            return f'({field_js} != null && {field_js} {js} {cond[op]})'
+            # `undefined !== 3` as true and `null >= 0` as true. PS-549: so does a
+            # boolean, which JS would compare as 1 or 0.
+            return f'({operand_ok_js(field_js)} && {field_js} {js} {cond[op]})'
     if 'in' in cond or 'not_in' in cond:
         # PS-540: an absent operand fails `not_in` too.
-        return f'({field_js} != null && {set_condition_to_js(field_js, cond)})'
+        return f'({operand_ok_js(field_js)} && {set_condition_to_js(field_js, cond)})'
     return 'true'
 
 
@@ -1288,7 +1350,7 @@ def guard_to_js(guard: Dict[str, Any], value_expr: str, else_hook: str = '') -> 
         # PS-540: an absent operand fails the condition; JS would pass `undefined !== 3`
         # and `null >= 0`.
         if any(op in cond for op in ('gt', 'gte', 'lt', 'lte', 'eq', 'ne', 'in', 'not_in')):
-            conditions.append(f'{field_js} != null')
+            conditions.append(operand_ok_js(field_js))                # PS-540, PS-549
         if 'gt' in cond:
             conditions.append(f'{field_js} > {cond["gt"]}')
         elif 'gte' in cond:
@@ -1557,6 +1619,18 @@ class TS013Generator:
         return '  ' * self.indent
 
     def generate(self) -> str:
+        global _JS_NAME_OVERRIDES
+        saved = _JS_NAME_OVERRIDES
+        _JS_NAME_OVERRIDES = {
+            name: js for name, js in unique_js_names(self._field_names()).items()
+            if js != _mangle_js_name(name)
+        }
+        try:
+            return self._generate()
+        finally:
+            _JS_NAME_OVERRIDES = saved
+
+    def _generate(self) -> str:
         lines = []
         lines.append(f'// TS013 Payload Codec — {self.name}')
         lines.append(f'// Schema version: {self.version}')
@@ -3859,16 +3933,9 @@ function writeS(buf, pos, size, value, endian) {
 
         return self._restore_output_keys('\n'.join(lines))
 
-    def _output_key_renames(self) -> Dict[str, str]:
-        """Map each mangled JS spelling back to the schema name it came from.
-
-        Fields are staged under `to_js_name(name)`, which is right for a local variable
-        and wrong for an output key: `pm1.0` was reported as `pm1_0`, so a vendor key
-        with a dot or a space never survived generation (arwin lrs10701). Two names
-        that mangle to one spelling cannot both be restored, so that is an error rather
-        than a silent collision.
-        """
-        names = set()
+    def _field_names(self) -> Set[str]:
+        """Every literal field name the schema declares, in any field list."""
+        names: Set[str] = set()
 
         def walk(node):
             if isinstance(node, dict):
@@ -3884,22 +3951,21 @@ function writeS(buf, pos, size, value, endian) {
         walk(self.schema.get('fields', []))
         walk(self.schema.get('ports', {}))
         walk(self.schema.get('definitions', {}))
+        return names
+
+    def _output_key_renames(self) -> Dict[str, str]:
+        """Map each JS spelling back to the schema name it came from.
+
+        Fields are staged under `to_js_name(name)`, which is right for a local variable
+        and wrong for an output key: `pm1.0` was reported as `pm1_0`, so a vendor key
+        with a dot or a space never survived generation (arwin lrs10701). Two names
+        that mangle to one spelling used to be a generation error; `unique_js_names`
+        now gives them distinct spellings, so each is restored to its own name.
+        """
         renames: Dict[str, str] = {}
-        for name in sorted(names):
-            mangled = to_js_name(name)
-            if mangled == name:
-                continue
-            if mangled in renames and renames[mangled] != name:
-                raise ValueError(
-                    'field names %r and %r both become %r in JavaScript'
-                    % (renames[mangled], name, mangled)
-                )
-            if mangled in names:
-                raise ValueError(
-                    'field name %r becomes %r in JavaScript, which is also a field name'
-                    % (name, mangled)
-                )
-            renames[mangled] = name
+        for name, js in sorted(unique_js_names(self._field_names()).items()):
+            if js != name:
+                renames[js] = name
         return renames
 
     def _restore_output_keys(self, code: str) -> str:

@@ -1,0 +1,43 @@
+# Output keys that differ only in characters a JavaScript identifier cannot hold.
+# Adeunis reports both `ER+P-1_s` and `ER-P-1_s`; each is a distinct key and is
+# reported exactly as the schema writes it. The generated codec stages a field
+# under an identifier, and `a+b`, `a-b` and `a_b` all become `a_b` there, so it
+# refused such a schema outright rather than read one field into another's slot.
+#
+# `a_b_2` is here so that the spelling chosen to tell the others apart is not
+# simply "add _2": that one is already a field's own name.
+#
+# Each vector asserts one key, so a swap between any two is caught by the key it
+# moved. Every value is distinct and exact, so the payload round-trips.
+name: probe_names_mangling_alike
+endian: big
+fields:
+- name: a+b
+  type: u8
+- name: a-b
+  type: u8
+- name: a_b
+  type: u8
+- name: a_b_2
+  type: u8
+test_vectors:
+- name: plus_keeps_its_byte
+  source: generated
+  payload: "01 02 03 04"
+  expected:
+    a+b: 1
+- name: minus_keeps_its_byte
+  source: generated
+  payload: "01 02 03 04"
+  expected:
+    a-b: 2
+- name: underscore_keeps_its_byte
+  source: generated
+  payload: "01 02 03 04"
+  expected:
+    a_b: 3
+- name: suffix_name_keeps_its_byte
+  source: generated
+  payload: "01 02 03 04"
+  expected:
+    a_b_2: 4

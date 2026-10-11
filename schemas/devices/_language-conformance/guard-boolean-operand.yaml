@@ -1,0 +1,58 @@
+# A condition whose operand is a boolean fails (PS-549, CR-2026-127): comparisons take
+# numbers, and `true` is not 1 (PS-513). `alarm` reads one bit as a bool. `level`
+# compares it with `gte: 1` and `level_ne` with `ne: 5`; both report their fallback,
+# whether the bit is set or clear. Python and Java read `true` as 1 and `false` as 0, so
+# `gte: 1` passed on a set bit and `ne: 5` passed on both; the generated codec did too.
+# `level_from_reading` compares a number, and passes.
+name: probe_guard_boolean_operand
+endian: big
+fields:
+- name: alarm
+  type: bool
+  bit: 0
+  consume: 1
+- name: reading
+  type: u8
+- name: level
+  type: number
+  ref: $reading
+  guard:
+    when:
+    - field: $alarm
+      gte: 1
+    else: -1
+- name: level_ne
+  type: number
+  ref: $reading
+  guard:
+    when:
+    - field: $alarm
+      ne: 5
+    else: -1
+- name: level_from_reading
+  type: number
+  ref: $reading
+  guard:
+    when:
+    - field: $reading
+      gte: 1
+    else: -1
+test_vectors:
+- name: bit_set
+  source: spec-example
+  payload: "01 2A"
+  expected:
+    alarm: true
+    reading: 42
+    level: -1
+    level_ne: -1
+    level_from_reading: 42
+- name: bit_clear
+  source: spec-example
+  payload: "00 07"
+  expected:
+    alarm: false
+    reading: 7
+    level: -1
+    level_ne: -1
+    level_from_reading: 7
