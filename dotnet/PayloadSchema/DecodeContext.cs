@@ -45,9 +45,23 @@ public sealed class BufferUnderflowException : InvalidOperationException
             : $"an unnamed {(string.IsNullOrEmpty(kind) ? "field" : kind)}";
 
     /// <summary>PS-535: the error of the field that made the read; a named one is kept.</summary>
-    internal BufferUnderflowException Name(string? name, string? kind) =>
+    internal BufferUnderflowException Name(string? name, string? kind) => NameAs(Label(name, kind));
+
+    /// <summary>This error identified by a ready-made PS-535 label.</summary>
+    internal BufferUnderflowException NameAs(string label) =>
         Named ? this
-            : new BufferUnderflowException($"Field {Label(name, kind)}: {Detail} (PS-535)", Detail, true);
+            : new BufferUnderflowException($"Field {label}: {Detail} (PS-535)", Detail, true);
+
+    /// <summary>
+    /// How PS-535 identifies a byte_group: by its members, as the spec prototype does -
+    /// <c>byte_group of 'f', 'w'</c>, every named member in declaration order, internal
+    /// <c>_</c> members included - else <c>an unnamed byte_group</c> (CR-2026-131).
+    /// </summary>
+    internal static string ByteGroupLabel(IEnumerable<string?> memberNames)
+    {
+        var quoted = memberNames.Where(n => !string.IsNullOrEmpty(n)).Select(n => $"'{n}'").ToList();
+        return quoted.Count == 0 ? "an unnamed byte_group" : "byte_group of " + string.Join(", ", quoted);
+    }
 }
 
 public class DecodeContext

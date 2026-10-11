@@ -78,9 +78,13 @@ public class CR2026_114_115Tests
         new object[] { "- {name: b, type: 'u8[0:3]', consume: 2}\n", "01", Need("'b'", 2, 0, 1) },
         new object[] { "- {name: bo, type: bool, consume: 2}\n", "01", Need("'bo'", 2, 0, 1) },
         new object[] { "- byte_group: {size: 2, fields: [{name: a, type: 'u16[0:3]'}, "
-            + "{name: c, type: 'u16[4:7]'}]}\n", "01", Peek("'a'", 0) },
+            + "{name: c, type: 'u16[4:7]'}]}\n", "01", Peek("byte_group of 'a', 'c'", 0) },
+        // CR-2026-131: the group is one read, named by every member in order, internal
+        // ones included, whichever member's base would have fitted.
         new object[] { "- byte_group: {size: 2, fields: [{name: a, type: 'u8[0:3]'}, "
-            + "{name: c, type: 'u8[4:7]'}]}\n", "01", Need("an unnamed byte_group", 2, 0, 1) },
+            + "{name: _r, type: 'u8[4:7]'}]}\n", "01", Peek("byte_group of 'a', '_r'", 0) },
+        new object[] { "- byte_group: {size: 2, fields: [{type: 'u8[0:3]'}]}\n", "01",
+            Peek("an unnamed byte_group", 0) },
     };
 
     [Theory]
