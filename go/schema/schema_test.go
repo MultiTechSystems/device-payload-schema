@@ -4036,6 +4036,9 @@ func TestRefFieldNotFound(t *testing.T) {
 	schemaYAML := `
 name: ref_not_found_test
 fields:
+  - name: nonexistent
+    type: u8
+    sentinel: [255]
   - name: result
     type: number
     ref: $nonexistent
@@ -4044,17 +4047,14 @@ fields:
     compute: {op: add, a: $nonexistent, b: 1}
   - name: after
     type: u8
-  - name: nonexistent
-    type: u8
-    optional: true
 `
-	// The name is declared (PS-539, CR-2026-117); its optional field is not in the payload.
+	// The name is declared first (PS-539, CR-2026-117/127); its sentinel omits it.
 	schema, err := ParseSchema(schemaYAML)
 	if err != nil {
 		t.Fatalf("ParseSchema() error = %v", err)
 	}
 
-	out, err := schema.Decode([]byte{7})
+	out, err := schema.Decode([]byte{0xFF, 7})
 	if err != nil {
 		t.Fatalf("expected the fields to be absent, not an error: %v", err)
 	}

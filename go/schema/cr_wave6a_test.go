@@ -149,9 +149,11 @@ func TestWave6aElementScope(t *testing.T) {
 		{"name": "r", "type": "repeat", "count": 2, "fields": [{"name": "v", "type": "u8"}]},
 		{"name": "sum", "type": "number", "compute": {"op": "add", "a": "$v", "b": 1}}]}`,
 		[]byte{0x01, 0x02}, "PS-368")
-	wave6aDecodeError(t, `{"name": "p", "fields": [{"name": "r", "type": "repeat", "count": 1, "fields": [
-		{"name": "early", "type": "number", "ref": "$v"}, {"name": "v", "type": "u8"}]}]}`,
-		[]byte{0x05}, "PS-368")
+	// A reference to an element field declared after it is refused at load (PS-539,
+	// PS-122, CR-2026-127), before PS-368 could see it.
+	_, err := ParseSchema(`{"name": "p", "fields": [{"name": "r", "type": "repeat", "count": 1, "fields": [
+		{"name": "early", "type": "number", "ref": "$v"}, {"name": "v", "type": "u8"}]}]}`)
+	expectErrorCiting(t, "element forward reference", err, "PS-122")
 }
 
 // PS-370: neither the index nor count_as is reported.

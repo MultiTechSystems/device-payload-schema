@@ -39,7 +39,12 @@ public class CR2026117Test {
                 + "cases: {1: [{name: r, type: number, ref: $rsn}]}}\n",
                 "fields:\n  - {name: e, type: repeat, count: 1, index: i, count_as: k, fields: [{name: v, type: number, ref: $i}]}\n"
                 + "  - {name: after, type: number, ref: $k}\n",
-                "fields:\n  - {name: v, type: repeat, count: 2, present_if: {field: $element, ne: 0}, element: {type: u8}}\n",
+                "fields:\n  - {name: v, type: repeat, count: 2, present_if: {field: $element, ne: 0}, element: {name: element, type: u8}}\n",
+                "fields:\n  - tlv: {cases: {1: [{name: r, type: number, ref: $rsn}]}, tag_key: ch, "
+                + "tag_fields: [{name: rsn, type: u8}, {name: ch, type: u8}]}\n",
+                "fields:\n  - {name: _clu, type: u8}\n  - $ref: '#/definitions/d'\n"
+                + "definitions:\n  d: {fields: [{name: x, type: number, ref: $_clu}]}\n"
+                + "  unused: {fields: [{name: y, type: number, ref: $batery}]}\n",
                 "fields:\n  - {name: a, type: u8}\n  - {name: b, type: number, ref: $eui}\n"
                 + "metadata: {include: [{name: eui, source: $device_eui}]}\n",
                 "fields:\n  - {name: a, type: u8, lookup: {1: $nothing}}\n"}) {
@@ -66,5 +71,24 @@ public class CR2026117Test {
                 assertEquals(Double.parseDouble(c[1]), ((Number) out.get("c")).doubleValue(), c[0] + ": " + out);
             }
         }
+    }
+
+    @Test
+    public void aForwardReferenceIsRefusedAtLoad() {
+        Exception e = assertThrows(SchemaException.class, () -> Schema.fromYaml(
+                "name: t\nfields:\n  - {name: early, type: number, ref: $late}\n  - {name: late, type: u8}\n"));
+        assertEquals("`$late` (ref) is referenced before the schema declares it (PS-539, PS-122)", e.getMessage());
+        Exception f = assertThrows(SchemaException.class, () -> Schema.fromYaml(
+                "name: t\nfields:\n  - {name: v, type: repeat, count: 2, present_if: {field: $element, ne: 0}, element: {type: u8}}\n"));
+        assertTrue(f.getMessage().contains("PS-539"), f.getMessage());
+    }
+
+    @Test
+    public void aBooleanOperandFails() {
+        Map<String, Object> out = Schema.fromYaml("name: t\nfields:\n  - {name: flag, type: bool, bit: 0, consume: 1}\n"
+                + "  - {name: r, type: u8}\n"
+                + "  - {name: c, type: number, ref: $r, guard: {when: [{field: $flag, gte: 1}], else: -1}}\n")
+                .decode(new byte[] {0x01, 0x05});
+        assertEquals(-1.0, ((Number) out.get("c")).doubleValue(), out.toString());   // PS-549
     }
 }

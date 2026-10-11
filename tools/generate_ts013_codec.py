@@ -1302,6 +1302,11 @@ def compute_to_js(compute: Dict[str, Any]) -> str:
     return '0'
 
 
+def operand_ok_js(field_js: str) -> str:
+    """A condition's operand can be compared: present (PS-540) and not a boolean (PS-549)."""
+    return f"({field_js} != null && typeof {field_js} !== 'boolean')"
+
+
 def condition_to_js(cond: Dict[str, Any]) -> str:
     """One guard condition, {field: $x, <op>: value}, as a JS boolean (PS-386)."""
     field_ref = cond.get('field', '')
@@ -1310,11 +1315,12 @@ def condition_to_js(cond: Dict[str, Any]) -> str:
                    ('eq', '==='), ('ne', '!==')):
         if op in cond:
             # PS-540: an absent operand fails the condition. JS would compare
-            # `undefined !== 3` as true and `null >= 0` as true.
-            return f'({field_js} != null && {field_js} {js} {cond[op]})'
+            # `undefined !== 3` as true and `null >= 0` as true. PS-549: so does a
+            # boolean, which JS would compare as 1 or 0.
+            return f'({operand_ok_js(field_js)} && {field_js} {js} {cond[op]})'
     if 'in' in cond or 'not_in' in cond:
         # PS-540: an absent operand fails `not_in` too.
-        return f'({field_js} != null && {set_condition_to_js(field_js, cond)})'
+        return f'({operand_ok_js(field_js)} && {set_condition_to_js(field_js, cond)})'
     return 'true'
 
 
@@ -1344,7 +1350,7 @@ def guard_to_js(guard: Dict[str, Any], value_expr: str, else_hook: str = '') -> 
         # PS-540: an absent operand fails the condition; JS would pass `undefined !== 3`
         # and `null >= 0`.
         if any(op in cond for op in ('gt', 'gte', 'lt', 'lte', 'eq', 'ne', 'in', 'not_in')):
-            conditions.append(f'{field_js} != null')
+            conditions.append(operand_ok_js(field_js))                # PS-540, PS-549
         if 'gt' in cond:
             conditions.append(f'{field_js} > {cond["gt"]}')
         elif 'gte' in cond:

@@ -3127,10 +3127,10 @@ public class Schema {
             if (!condition.getField().startsWith("$")) continue;
             String name = condition.getField().substring(1);
             Object raw = elementComplete ? ctx.getVariables().get(name) : ctx.ref(name); // PS-368
-            double value;
-            if (raw instanceof Number number) value = number.doubleValue();
-            else if (raw instanceof Boolean flag) value = flag ? 1.0 : 0.0;
-            else return false;                                    // absent: PS-540
+            // PS-540: an absent operand fails. PS-549 (CR-2026-127): so does a boolean one -
+            // comparisons take numbers, and `true` is not 1 (PS-513).
+            if (!(raw instanceof Number number)) return false;
+            double value = number.doubleValue();
             double operand = condition.getOperand() == null ? 0.0 : condition.getOperand();
             boolean passed = switch (condition.getOp()) {
                 case "gt" -> value > operand;
