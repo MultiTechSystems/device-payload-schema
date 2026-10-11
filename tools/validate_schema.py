@@ -32,7 +32,7 @@ from schema_interpreter import (SchemaInterpreter, DecodeResult, check_byte_grou
                                 arithmetic_schema_errors, case_body_errors,
                                 internal_name_errors, meta_declaration_errors,
                                 literal_errors,
-                                lookup_template_errors, optional_errors,
+                                lookup_template_errors, optional_errors, repeat_members,
                                 schema_iterator_errors,
                                 timestamp_errors,
                                 typed_field_dicts)
@@ -893,10 +893,15 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                     errors.append(
                         f"{path}[{i}] ({name}): repeat 'min' ({fld['min']}) exceeds "
                         f"'max' ({fld['max']}), so no decode can satisfy it")
-                if not isinstance(fld.get('fields'), list) or not fld['fields']:
+                # PS-528: `element`, one field, in place of `fields`. Declaring both or
+                # neither, and a non-mapping `element`, are schema_iterator_errors'
+                # (the wording shared with every implementation).
+                members, element_name = repeat_members(fld)
+                if 'fields' in fld and 'element' not in fld and (
+                        not isinstance(fld['fields'], list) or not fld['fields']):
                     errors.append(
                         f"{path}[{i}] ({name}): repeat needs a non-empty 'fields'")
-                else:
+                if members:
                     # PS-383: a trailer's names are bound for the elements and every later
                     # field. PS-366, PS-379: inside an element its index and its carried
                     # fields' own names resolve too. PS-368: the element's names are its
@@ -911,10 +916,11 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                     if isinstance(fld.get('index'), str):
                         element_names.append(fld['index'])
                     element_names.extend(
-                        m['name'] for m in fld['fields']
+                        m['name'] for m in members
                         if isinstance(m, dict) and 'carry' in m and m.get('name'))
-                    validate_field_list(fld['fields'], f"{path}[{i}].fields", errors,
-                                        element_names)
+                    validate_field_list(members, f"{path}[{i}]."
+                                        + ('fields' if element_name is None else 'element'),
+                                        errors, element_names)
                     if isinstance(fld.get('count_as'), str):
                         known_field_names.append(fld['count_as'])    # PS-367
                 continue

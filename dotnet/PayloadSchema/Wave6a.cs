@@ -62,6 +62,46 @@ public static partial class SchemaParser
         node is YamlScalarNode s && s.Style == ScalarStyle.Plain && (YamlInt(node) != null
             || double.TryParse(s.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out _));
 
+    /// <summary>The name an `element` (PS-528) is decoded under where it declares none.</summary>
+    public const string ElementName = "element";
+
+    /// <summary>
+    /// A repeat's element fields and, for a repeat of single values, the element's name
+    /// (repeat_members in the reference). An `element` is decoded as a one-field list whose
+    /// field is the element under its own name, or <see cref="ElementName"/>, so
+    /// `present_if` and `name_from` in it can refer to the current value.
+    /// </summary>
+    internal static (YamlSequenceNode? members, string? elementName) RepeatMembers(YamlMappingNode repeat)
+    {
+        if (Get(repeat, "element") is YamlMappingNode element && !Has(repeat, "fields"))
+        {
+            var name = YamlString(Get(element, "name")) is { Length: > 0 } n ? n : ElementName;
+            var copy = new YamlMappingNode();
+            copy.Add("name", name);
+            foreach (var kv in element.Children)
+                if (Scalar(kv.Key) != "name") copy.Add(kv.Key, kv.Value);
+            return (new YamlSequenceNode(copy), name);
+        }
+        return (Get(repeat, "fields") as YamlSequenceNode, null);
+    }
+
+    /// <summary>
+    /// PS-083, PS-528, PS-530: exactly one of `fields` and `element`, an `element` that is
+    /// one field definition, and an integer `index_base`. Worded as the spec prototype.
+    /// </summary>
+    static void ElementRepeatErrors(YamlMappingNode f, List<string> errors)
+    {
+        var label = $"Repeat '{(Get(f, "name") is { } nm ? Scalar(nm) : "<unnamed>")}'";
+        bool hasFields = Has(f, "fields"), hasElement = Has(f, "element");
+        if (hasFields == hasElement)
+            errors.Add($"{label} declares {(hasFields ? "both" : "neither")} of `fields` and `element`; "
+                + "it declares exactly one (PS-083, PS-528)");
+        else if (hasElement && Get(f, "element") is not YamlMappingNode)
+            errors.Add($"{label}: `element` is a single field definition (PS-528)");
+        if (Get(f, "index_base") is { } ib && YamlInt(ib) == null)
+            errors.Add($"{label}: `index_base` is an integer (PS-530)");
+    }
+
     static bool IsLiteralNode(YamlMappingNode f) =>
         YamlString(Get(f, "type")) is "string" or "number" && Has(f, "value");
 
@@ -141,7 +181,9 @@ public static partial class SchemaParser
 
             if (type == "repeat")
             {
-                var members = Get(f, "fields") as YamlSequenceNode;
+                ElementRepeatErrors(f, errors);                                    // PS-528, PS-530
+                var (members, elementName) = RepeatMembers(f);
+                var memberKey = elementName != null ? "element" : "fields";
                 var names = new HashSet<string>();
                 foreach (var m in members?.Children.OfType<YamlMappingNode>() ?? Enumerable.Empty<YamlMappingNode>())
                     if (Get(m, "name") is { } mn) names.Add(Scalar(mn));
@@ -217,10 +259,10 @@ public static partial class SchemaParser
                         j++;
                         if (member is YamlMappingNode mm)
                             RepeatMemberRefErrors(f, members, mm,
-                                $"{at}.fields[{j}] ({(Get(mm, "name") is { } n2 ? Scalar(n2) : "?")})", errors);
+                                $"{at}.{memberKey}[{j}] ({(Get(mm, "name") is { } n2 ? Scalar(n2) : "?")})", errors);
                     }
                 }
-                IteratorErrors(members, enclosing.Concat(own).ToList(), true, $"{at}.fields", errors);
+                IteratorErrors(members, enclosing.Concat(own).ToList(), true, $"{at}.{memberKey}", errors);
                 if (Get(f, "trailer") is YamlSequenceNode trailerList)
                     IteratorErrors(trailerList, enclosing, false, $"{at}.trailer", errors);
                 continue;
@@ -307,7 +349,7 @@ public static partial class SchemaParser
                 {
                     var key = Scalar(kv.Key);
                     if (key is "test_vectors" or "definitions") continue;
-                    Walk(kv.Value, inElements || (key == "fields" && isRepeat));
+                    Walk(kv.Value, inElements || (key is "fields" or "element" && isRepeat));
                 }
             }
             else if (node is YamlSequenceNode seq)

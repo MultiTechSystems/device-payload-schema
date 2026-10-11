@@ -249,6 +249,20 @@ public class Field {
     /** Fields decoded from a repeat's reserved bytes (PS-383). */
     private List<Field> trailer;
 
+    /**
+     * A repeat of single values (PS-528): the name its one element field is decoded under,
+     * the element's own name or "element". Null for a repeat declaring {@code fields}.
+     */
+    private String elementName;
+    /** The number a repeat's index starts at (PS-530). */
+    private long indexBase;
+
+    public String getElementName() { return elementName; }
+    public void setElementName(String elementName) { this.elementName = elementName; }
+
+    public long getIndexBase() { return indexBase; }
+    public void setIndexBase(long indexBase) { this.indexBase = indexBase; }
+
     public String getIndex() { return index; }
     public void setIndex(String index) { this.index = index; }
 

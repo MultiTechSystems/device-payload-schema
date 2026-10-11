@@ -42,7 +42,7 @@ public class CorpusConformanceTests
     // (4), and match-default-skip.yaml's skipped body now expects the PS-472 warning.
     // All six new vectors decode here, so the floor is the full 2371 (2382 vectors, 11
     // without a payload or an expected block).
-    const int CorpusFloor = 2611;   // +8: registry divergence fixtures (tag-component-ref, reference-to-absent, zero-length, numeric-looking-text, name-from-object, round-large-value); +2: flagged-group-field-list; +8: name-from-rendering (CR-2026-112); +2: boolean-literal (CR-2026-107); +14: the nine TS013-defect fixtures (bitfield-string-wide, wide-bit-range, ...); +8: CR-2026-104 lookup-boolean-labels and lookup-number-labels; +3: byte-group-bool; +11: tlv-case-field-list, object-member-field-list, tlv-tag-var-name-from; +5: tlv-case-key-patterns; +1: CR-2026-097 meta-tlv-channels; +9: CR-2026-096 meta fixtures; dl-atm41g2's two vendor vectors (+2); +121: vendor-codec vectors that kill vobo's mutation survivors
+    const int CorpusFloor = 2618;   // +8: registry divergence fixtures (tag-component-ref, reference-to-absent, zero-length, numeric-looking-text, name-from-object, round-large-value); +7: CR-2026-111 repeat-element-* and repeat-index-base; +2: flagged-group-field-list; +8: name-from-rendering (CR-2026-112); +2: boolean-literal (CR-2026-107); +14: the nine TS013-defect fixtures (bitfield-string-wide, wide-bit-range, ...); +8: CR-2026-104 lookup-boolean-labels and lookup-number-labels; +3: byte-group-bool; +11: tlv-case-field-list, object-member-field-list, tlv-tag-var-name-from; +5: tlv-case-key-patterns; +1: CR-2026-097 meta-tlv-channels; +9: CR-2026-096 meta fixtures; dl-atm41g2's two vendor vectors (+2); +121: vendor-codec vectors that kill vobo's mutation survivors
 
     readonly ITestOutputHelper _output;
 
@@ -391,7 +391,10 @@ public class CorpusConformanceTests
                 if (got is not System.Collections.IEnumerable gotSeq || got is string) return false;
                 var gotItems = gotSeq.Cast<object?>().ToList();
                 if (gotItems.Count != seq.Children.Count) return false;
-                return !seq.Children.Where((child, i) => !NodeMatches(child, gotItems[i])).Any();
+                // PS-043 as amended (CR-2026-111): null at a position asserts that null was
+                // reported there - an `element` repeat's omitted value (PS-528).
+                return !seq.Children.Where((child, i) =>
+                    IsNull(child) ? gotItems[i] != null : !NodeMatches(child, gotItems[i])).Any();
 
             case YamlMappingNode map:
                 if (got is not System.Collections.IDictionary gotMap) return false;

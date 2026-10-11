@@ -1038,11 +1038,63 @@ def lookup_template_errors(field_def):
 
 _ITERATOR_KEYS = ('index', 'count_as')
 
+#: The name an `element` (PS-528) is decoded under where it declares none. It is never
+#: reported: the repeat reports the element's value, not a record holding it.
+ELEMENT_NAME = 'element'
+
+
+def repeat_members(field_def):
+    """A repeat's element fields and, for a repeat of single values, the element's name.
+
+    A repeat declares exactly one of `fields` and `element` (PS-083, PS-528), which
+    iterator_errors() checks at load. An `element` is decoded as a one-field record under
+    its own name, or ELEMENT_NAME, so `present_if` and `name_from` in it can refer to the
+    current value; the repeat then reports the value (element_value). The spec prototype's
+    `repeat_members`, without its raising: here the rules are load-time errors.
+    """
+    element = field_def.get('element')
+    if isinstance(element, dict) and 'fields' not in field_def:
+        name = element.get('name') or ELEMENT_NAME
+        return [dict(element, name=name)], name
+    fields = field_def.get('fields')
+    return (fields if isinstance(fields, list) else []), None
+
+
+def element_value(record):
+    """The value a repeat of single values reports for one element: the record's one
+    reported value, or None where it was omitted (PS-528), so positions keep their
+    index. Interpreter metadata beside it (`_quality`) is not the value."""
+    return next((v for k, v in record.items() if k not in RESERVED_OUTPUT_NAMES), None)
+
+
+def index_base(field_def):
+    """A repeat's `index_base` (PS-530), 0 where it declares none."""
+    base = field_def.get('index_base', 0)
+    return base if isinstance(base, int) and not isinstance(base, bool) else 0
+
+
+def element_repeat_errors(field_def):
+    """PS-083, PS-528, PS-530: a repeat declares exactly one of `fields` and `element`,
+    an `element` is one field definition, and `index_base` is an integer. The wording is
+    the spec prototype's, and Go, Java, C# and the TS013 generator give it identically."""
+    label = f"Repeat '{field_def.get('name', '<unnamed>')}'"
+    errors = []
+    if ('fields' in field_def) == ('element' in field_def):
+        which = 'both' if 'fields' in field_def else 'neither'
+        errors.append(f"{label} declares {which} of `fields` and `element`; it declares "
+                      f"exactly one (PS-083, PS-528)")
+    elif not isinstance(field_def.get('element', {}), dict):
+        errors.append(f"{label}: `element` is a single field definition (PS-528)")
+    base = field_def.get('index_base', 0)
+    if isinstance(base, bool) or not isinstance(base, int):
+        errors.append(f"{label}: `index_base` is an integer (PS-530)")
+    return errors
+
 
 def _repeat_member_ref_errors(repeat, member, where):
     """PS-373, PS-374: a per-element unit, IPSO instance or SenML name, and what it names."""
     errors = []
-    by_name = {f.get('name'): f for f in repeat.get('fields') or [] if isinstance(f, dict)}
+    by_name = {f.get('name'): f for f in repeat_members(repeat)[0] if isinstance(f, dict)}
     index = repeat.get('index')
     refs = []
     if isinstance(member.get('unit'), str) and member['unit'].startswith('$'):
@@ -1095,7 +1147,8 @@ def iterator_errors(fields, enclosing=(), in_elements=False, where='fields'):
                 errors.append(f"{at}: carry must be a numeric literal or a $ reference to a "
                               f"field decoded before the repeat (PS-381)")
         if f.get('type') == 'repeat':
-            members = f.get('fields') or []
+            errors.extend(element_repeat_errors(f))                  # PS-528, PS-530
+            members = repeat_members(f)[0]
             names = {m.get('name') for m in members if isinstance(m, dict)}
             own = []
             for key in _ITERATOR_KEYS:
@@ -1141,12 +1194,13 @@ def iterator_errors(fields, enclosing=(), in_elements=False, where='fields'):
                         and identity[1:] in names)):
                 errors.append(f"{at}: identity must be the repeat's index or a $ reference "
                               f"to a field of its elements (PS-372)")
+            key = 'element' if repeat_members(f)[1] is not None else 'fields'
             for j, member in enumerate(members):
                 if isinstance(member, dict):
                     errors.extend(_repeat_member_ref_errors(
-                        f, member, f"{at}.fields[{j}] ({member.get('name', '?')})"))
+                        f, member, f"{at}.{key}[{j}] ({member.get('name', '?')})"))
             errors.extend(iterator_errors(members, tuple(enclosing) + tuple(own), True,
-                                          f"{at}.fields"))
+                                          f"{at}.{key}"))
             if isinstance(f.get('trailer'), list):
                 errors.extend(iterator_errors(f['trailer'], enclosing, False,
                                               f"{at}.trailer"))
@@ -1187,7 +1241,8 @@ def repeat_only_names(schema):
             for key, value in node.items():
                 if key in ('test_vectors', 'definitions'):
                     continue
-                walk(value, in_elements or (key == 'fields' and node.get('type') == 'repeat'))
+                walk(value, in_elements or (key in ('fields', 'element')
+                                            and node.get('type') == 'repeat'))
         elif isinstance(node, list):
             for item in node:
                 walk(item, in_elements)
@@ -1775,8 +1830,11 @@ def meta_reference(value, repeat=None, bare=False):
         count = repeat.get('count')
         if not (isinstance(count, int) and not isinstance(count, bool)):
             count = repeat.get('max')
-        return {'index': name, 'count': count}
-    target = next((f for f in repeat.get('fields') or [] if isinstance(f, dict)
+        listing = {'index': name, 'count': count}
+        if index_base(repeat):
+            listing['index_base'] = index_base(repeat)               # PS-375, PS-530
+        return listing
+    target = next((f for f in repeat_members(repeat)[0] if isinstance(f, dict)
                    and f.get('name') == name), {})
     lookup = target.get('lookup')
     if isinstance(lookup, dict):
@@ -1816,7 +1874,14 @@ def field_meta(field_def, repeat=None):
         entry['senml'] = {'name': senml['name']}               # PS-480; a template, PS-373
     if field_def.get('description'):
         entry['description'] = field_def['description']
-    if declared_type == 'repeat':
+    if declared_type == 'repeat' and repeat_members(field_def)[1] is not None:
+        # PS-531: the element's own entry, nested, without its name; the repeat keeps
+        # `type: repeat` and its identity.
+        element = {k: v for k, v in field_def['element'].items() if k != 'name'}
+        entry['element'] = field_meta(element, field_def)
+        if 'identity' in field_def:
+            entry['identity'] = meta_reference(field_def['identity'], field_def, bare=True)
+    elif declared_type == 'repeat':
         entry['elements'] = {name: field_meta(member, field_def)            # PS-371
                              for name, member in meta_declarations(
                                  field_def.get('fields')).items()}
@@ -2733,7 +2798,7 @@ class SchemaInterpreter:
         scope of its own: its names resolve within the element and are gone after it
         (PS-368). A carried field sees its own previous value (PS-378 to PS-380).
         """
-        nested_fields = field_def.get('fields', [])
+        nested_fields, element_name = repeat_members(field_def)    # PS-528
         max_iterations = field_def.get('max', 1000)
         min_iterations = field_def.get('min', 0)
 
@@ -2760,7 +2825,8 @@ class SchemaInterpreter:
             saved_names = getattr(self, '_element_names', None)
             self._element_names = {f.get('name') for f in nested_fields if isinstance(f, dict)}
             if field_def.get('index'):
-                self._variables[field_def['index']] = iterations       # PS-366
+                # PS-366, PS-530: the position counted from index_base.
+                self._variables[field_def['index']] = iterations + index_base(field_def)
             self._variables.update(carry_state)                      # PS-379
             scratch = DecodeResult(data={}, bytes_consumed=0)
             self._current_data = scratch.data
@@ -2780,7 +2846,9 @@ class SchemaInterpreter:
                 self._element_names = saved_names
             iterations += 1
             if keep:                                                 # PS-386
-                result.append(scratch.data)
+                # PS-528: an element repeat reports the value, or None where omitted.
+                result.append(scratch.data if element_name is None
+                              else element_value(scratch.data))
             return new_pos
 
         if count is not None:
@@ -5396,7 +5464,16 @@ class SchemaInterpreter:
             raise ValueError(
                 f"repeat field {name!r}: expected a list of records, got "
                 f"{type(records).__name__}")
-        record_fields = field_def.get('fields') or []
+        record_fields, element_name = repeat_members(field_def)
+        if element_name is not None:
+            # PS-529: each value is encoded as the element, wrapped as it was decoded.
+            # CR-2026-111 leaves open what a null position encodes as; the spec
+            # prototype refuses it rather than guess, and so does every encoder here.
+            for position, item in enumerate(records):
+                if item is None:
+                    raise ValueError(f"Repeat '{name}' has null at position {position}, "
+                                     f"which has no encoding (PS-529)")
+            records = [{element_name: item} for item in records]
         # PS-387: an element present_if dropped is not in the data, and its bytes were in
         # the payload, so they cannot be written back. Only elements that read nothing
         # (computed fields and literals) can be encoded.
@@ -5416,7 +5493,7 @@ class SchemaInterpreter:
             if index:
                 # PS-370: the index is bound while each element is encoded, as it was
                 # while each was decoded, so a name_from template resolves the same way.
-                record = dict(record, **{index: position})
+                record = dict(record, **{index: position + index_base(field_def)})
             out.extend(self._encode_field_list(record_fields, record))
         # PS-385: the elements, then the trailer, whose values sit beside the repeat.
         if field_def.get('trailer'):

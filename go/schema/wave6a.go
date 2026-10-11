@@ -67,6 +67,81 @@ func parseIteratorKeys(f *Field, fm map[string]any) {
 	if carry, ok := fm["carry"]; ok {
 		f.Carry = carry
 	}
+	// PS-530: the index's base; a non-integer is refused at load (elementRepeatError).
+	if base, ok := intValue(fm["index_base"]); ok {
+		f.IndexBase = base
+	}
+	// PS-528: a repeat of single values decodes its element as a one-field record.
+	if members, name := rawRepeatMembers(fm); name != "" {
+		f.Fields = parseFieldsRaw(members)
+		f.ElementName = name
+	}
+}
+
+// elementName is ELEMENT_NAME: the name an `element` is decoded under where it declares
+// none (PS-528). It is never reported.
+const elementName = "element"
+
+// rawRepeatMembers is repeat_members: a repeat's element fields as written and, for a
+// repeat of single values, the element's name - its own, or "element". The element is
+// returned as a copy carrying that name, so present_if and name_from can refer to it.
+func rawRepeatMembers(f map[string]any) ([]any, string) {
+	_, hasFields := f["fields"]
+	if element := asStringMap(f["element"]); element != nil && !hasFields {
+		name, _ := element["name"].(string)
+		if name == "" {
+			name = elementName
+		}
+		named := make(map[string]any, len(element)+1)
+		for k, v := range element {
+			named[k] = v
+		}
+		named["name"] = name
+		return []any{named}, name
+	}
+	members, _ := f["fields"].([]any)
+	return members, ""
+}
+
+// elementRepeatError is element_repeat_errors: PS-083 and PS-528 (exactly one of
+// `fields` and `element`, and an element is one field definition) and PS-530 (an
+// integer index_base). Worded as the spec prototype words it.
+func elementRepeatError(f map[string]any) error {
+	name, ok := f["name"].(string)
+	if !ok || name == "" {
+		name = "<unnamed>"
+	}
+	label := fmt.Sprintf("Repeat '%s'", name)
+	_, hasFields := f["fields"]
+	element, hasElement := f["element"]
+	if hasFields == hasElement {
+		which := "neither"
+		if hasFields {
+			which = "both"
+		}
+		return fmt.Errorf("%s declares %s of `fields` and `element`; it declares exactly one (PS-083, PS-528)", label, which)
+	}
+	if hasElement && asStringMap(element) == nil {
+		return fmt.Errorf("%s: `element` is a single field definition (PS-528)", label)
+	}
+	if base, present := f["index_base"]; present {
+		if _, ok := intValue(base); !ok {
+			return fmt.Errorf("%s: `index_base` is an integer (PS-530)", label)
+		}
+	}
+	return nil
+}
+
+// elementValue is element_value: the value a repeat of single values reports for one
+// element, or nil where it was omitted (PS-528), so positions keep their index.
+// Interpreter metadata beside it is not the value.
+func elementValue(record map[string]any) any {
+	for key, value := range record {
+		if key != "_quality" && key != "_warnings" && key != "_meta" {
+			return value
+		}
+	}
+	return nil
 }
 
 // --- schema rules, checked at load --------------------------------------------
@@ -87,7 +162,7 @@ func isRawLiteral(f map[string]any) bool {
 // SenML name, and what it names.
 func repeatMemberRefError(repeat, member map[string]any, where string) error {
 	byName := map[string]map[string]any{}
-	if list, ok := repeat["fields"].([]any); ok {
+	if list, _ := rawRepeatMembers(repeat); list != nil {
 		for _, raw := range list {
 			if f := asStringMap(raw); f != nil {
 				if name, ok := f["name"].(string); ok {
@@ -166,7 +241,14 @@ func iteratorError(fields any, enclosing []string, inElements bool, where string
 			}
 		}
 		if typ == "repeat" {
-			members, _ := f["fields"].([]any)
+			if err := elementRepeatError(f); err != nil { // PS-528, PS-530
+				return err
+			}
+			members, element := rawRepeatMembers(f)
+			membersKey := "fields"
+			if element != "" {
+				membersKey = "element"
+			}
 			names := map[string]bool{}
 			for _, m := range members {
 				if mm := asStringMap(m); mm != nil {
@@ -237,13 +319,13 @@ func iteratorError(fields any, enclosing []string, inElements bool, where string
 					if mname == "" {
 						mname = "?"
 					}
-					if err := repeatMemberRefError(f, mm, fmt.Sprintf("%s.fields[%d] (%s)", at, j, mname)); err != nil {
+					if err := repeatMemberRefError(f, mm, fmt.Sprintf("%s.%s[%d] (%s)", at, membersKey, j, mname)); err != nil {
 						return err
 					}
 				}
 			}
 			inner := append(append([]string{}, enclosing...), own...)
-			if err := iteratorError(members, inner, true, at+".fields"); err != nil {
+			if err := iteratorError(members, inner, true, at+"."+membersKey); err != nil {
 				return err
 			}
 			if trailer, ok := f["trailer"].([]any); ok {
@@ -389,7 +471,7 @@ func repeatOnlyNames(raw map[string]any) map[string]bool {
 				if key == "test_vectors" || key == "definitions" {
 					continue
 				}
-				walk(value, inElements || (key == "fields" && m["type"] == "repeat"))
+				walk(value, inElements || ((key == "fields" || key == "element") && m["type"] == "repeat"))
 			}
 		} else if list, ok := node.([]any); ok {
 			for _, item := range list {
@@ -496,7 +578,8 @@ func (r *repeatElements) element() error {
 	savedNames := ctx.elementNames
 	ctx.elementNames = r.names
 	if r.field.Index != "" {
-		ctx.Variables[r.field.Index] = r.iterations
+		// PS-366, PS-530: the position counted from index_base.
+		ctx.Variables[r.field.Index] = r.iterations + r.field.IndexBase
 	}
 	for _, name := range r.carryOrder {
 		ctx.Variables[name] = r.carry[name]
@@ -531,7 +614,12 @@ func (r *repeatElements) element() error {
 	}
 	r.iterations++
 	if keep {
-		r.result = append(r.result, element)
+		if r.field.ElementName != "" {
+			// PS-528: the element's value, or nil where it was omitted.
+			r.result = append(r.result, elementValue(element))
+		} else {
+			r.result = append(r.result, element)
+		}
 	}
 	return nil
 }

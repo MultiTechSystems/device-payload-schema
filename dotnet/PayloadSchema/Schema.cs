@@ -203,6 +203,14 @@ public class SchemaField
     public string? Index { get; set; }
     /// <summary>Bound to the number of elements reported, after the repeat (PS-367).</summary>
     public string? CountAs { get; set; }
+    /// <summary>
+    /// For a repeat declaring `element` (PS-528): the name its one field is decoded under,
+    /// its own or "element". <see cref="Fields"/> then holds that one field, and the repeat
+    /// reports each element's value rather than a record. Null for a `fields` repeat.
+    /// </summary>
+    public string? ElementName { get; set; }
+    /// <summary>The number <see cref="Index"/> counts from (PS-530), 0 by default.</summary>
+    public int IndexBase { get; set; }
     /// <summary>An element is reported only where this holds (PS-386).</summary>
     public GuardCondition? PresentIf { get; set; }
     /// <summary>

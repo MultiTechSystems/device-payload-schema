@@ -279,9 +279,12 @@ public static class Meta
             var count = Value(repeat, "count");
             if (count is not long)
                 count = Value(repeat, "max");
-            return new Dictionary<string, object?> { ["index"] = name, ["count"] = count };
+            var listing0 = new Dictionary<string, object?> { ["index"] = name, ["count"] = count };
+            if (Value(repeat, "index_base") is long indexBase && indexBase != 0)
+                listing0["index_base"] = indexBase;                             // PS-375, PS-530
+            return listing0;
         }
-        var target = Items(Get(repeat, "fields")).FirstOrDefault(f => Value(f, "name") is string n && n == name);
+        var target = Items(SchemaParser.RepeatMembers(repeat).members).FirstOrDefault(f => Value(f, "name") is string n && n == name);
         var values = new List<object?>();
         var lookup = Get(target, "lookup");
         bool open = false;
@@ -344,7 +347,19 @@ public static class Meta
         var description = Value(field, "description");
         if (Truthy(description))
             entry["description"] = description;
-        if (declaredType == "repeat")
+        if (declaredType == "repeat" && SchemaParser.RepeatMembers(field).elementName != null
+            && Get(field, "element") is YamlMappingNode elementNode)
+        {
+            // PS-531: the element's own entry, nested, without its name; the repeat keeps
+            // `type: repeat` and its identity.
+            var element = new YamlMappingNode();
+            foreach (var kv in elementNode.Children)
+                if (KeyText(kv.Key) != "name") element.Add(kv.Key, kv.Value);
+            entry["element"] = FieldMeta(element, field);
+            if (Has(field, "identity"))
+                entry["identity"] = Reference(Value(field, "identity"), field, bare: true);
+        }
+        else if (declaredType == "repeat")
         {
             var elements = new Dictionary<string, object?>();
             foreach (var (name, member) in Declarations(Items(Get(field, "fields"))))

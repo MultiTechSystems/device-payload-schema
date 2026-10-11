@@ -711,6 +711,28 @@ dropped element still advances `index` and consumes its bytes, and `count_as` co
 elements reported, not read (CR-2026-080). A repeat with `present_if` over elements that
 read bytes cannot be encoded - the dropped elements are not in the output (PS-387).
 
+`index_base`, an integer (default 0), is the number `index` starts at: vendors that count
+from 1 declare `index_base: 1`, so `name_from: "Device${i}ID"` gives `Device1ID` first.
+`count_as` is unaffected, and anything but an integer is rejected (PS-530).
+
+### Values rather than records (`element`)
+
+```yaml
+- name: increments
+  type: repeat
+  until: end
+  element: {type: u16, div: 10}     # in place of fields (PS-528)
+# 0078 0096 005A  ->  {"increments": [12, 15, 9]}
+```
+
+A repeat declares exactly one of `fields` and `element`. Each element is decoded as that
+one field and the array holds its values. An omitted value - a sentinel, a lookup miss, a
+value that cannot be computed - is `null` in its position, so later values keep their
+index; this is the one place a decoded value is `null`. The element's `name` (default
+`element`) is how `present_if` refers to the current value and is never reported. An
+encoder takes the array of values back (PS-529) and refuses a `null` position, whose
+encoding CR-2026-111 leaves open.
+
 ### Running values (`carry`)
 
 ```yaml

@@ -500,6 +500,23 @@ final class Encoder {
             throw new SchemaException.EncodeException("repeat field '" + name
                     + "': expected a list of records, got " + records.getClass().getSimpleName());
         }
+        if (field.getElementName() != null) {
+            // PS-529: each value is encoded as the element, wrapped as it was decoded.
+            // CR-2026-111 leaves open what a null position encodes as; the spec prototype
+            // refuses it rather than guess, and so does every encoder here.
+            List<Object> wrapped = new ArrayList<>();
+            for (int position = 0; position < list.size(); position++) {
+                Object item = list.get(position);
+                if (item == null) {
+                    throw new SchemaException.EncodeException("Repeat '" + name + "' has null at position "
+                            + position + ", which has no encoding (PS-529)");
+                }
+                Map<String, Object> record = new LinkedHashMap<>();
+                record.put(field.getElementName(), item);
+                wrapped.add(record);
+            }
+            list = wrapped;
+        }
 
         // PS-387: an element present_if dropped is not in the data, and its bytes were in
         // the payload, so they cannot be written back. Only elements that read nothing
@@ -531,7 +548,7 @@ final class Encoder {
                 // PS-370: the index is bound while each element is encoded, as it was
                 // while each was decoded, so a name_from template resolves the same way.
                 element = new LinkedHashMap<>(element);
-                element.put(index, (long) position);
+                element.put(index, (long) position + field.getIndexBase());   // PS-530
             }
             out.write(encodeFieldList(field.getFields(), element));
         }

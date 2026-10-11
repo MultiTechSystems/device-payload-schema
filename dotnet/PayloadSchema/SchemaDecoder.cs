@@ -1678,6 +1678,19 @@ public static class SchemaDecoder
         return (true, specificity);
     }
 
+    /// <summary>
+    /// The value a repeat of single values reports for one element: the record's one
+    /// reported value, or null where it was omitted (PS-528). Interpreter metadata beside
+    /// it (`_quality`) is not the value.
+    /// </summary>
+    static object? ElementValue(Dictionary<string, object?> record)
+    {
+        foreach (var kv in record)
+            if (kv.Key is not ("_meta" or "_quality" or "_warnings"))
+                return kv.Value;
+        return null;
+    }
+
     static List<object?> DecodeRepeat(SchemaField field, DecodeContext ctx, PayloadSchemaDefinition? schema)
     {
         int maxIterations = field.Max > 0 ? field.Max : 1000;
@@ -1703,7 +1716,7 @@ public static class SchemaDecoder
             var savedNames = ctx.ElementNames;
             ctx.ElementNames = elementNames;
             if (!string.IsNullOrEmpty(field.Index))
-                ctx.Variables[field.Index!] = iterations;                          // PS-366
+                ctx.Variables[field.Index!] = iterations + field.IndexBase;        // PS-366, PS-530
             foreach (var kv in carryState)
                 ctx.Variables[kv.Key] = kv.Value;                                  // PS-379
             Dictionary<string, object?> element;
@@ -1726,7 +1739,9 @@ public static class SchemaDecoder
             }
             iterations++;
             if (keep)
-                result.Add(element);
+                // PS-528: a repeat of single values reports the element's value, or null
+                // where it was omitted, so the values after it keep their position.
+                result.Add(field.ElementName == null ? element : ElementValue(element));
         }
 
         if (field.Count != null)

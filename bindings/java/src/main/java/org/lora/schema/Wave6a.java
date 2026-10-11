@@ -65,10 +65,8 @@ final class Wave6a {
     private static List<String> memberRefErrors(Map<?, ?> repeat, Map<?, ?> member, String where) {
         List<String> errors = new ArrayList<>();
         Map<Object, Map<?, ?>> byName = new HashMap<>();
-        if (repeat.get("fields") instanceof List<?> members) {
-            for (Object m : members) {
-                if (m instanceof Map<?, ?> mm) byName.put(mm.get("name"), mm);
-            }
+        for (Object m : repeatMembers(repeat)) {
+            if (m instanceof Map<?, ?> mm) byName.put(mm.get("name"), mm);
         }
         Object index = repeat.get("index");
         List<String[]> refs = new ArrayList<>();
@@ -128,7 +126,9 @@ final class Wave6a {
                 }
             }
             if ("repeat".equals(f.get("type"))) {
-                List<?> members = f.get("fields") instanceof List<?> l ? l : List.of();
+                errors.addAll(elementRepeatErrors(f));                          // PS-528, PS-530
+                List<?> members = repeatMembers(f);
+                String memberKey = isElementRepeat(f) ? "element" : "fields";
                 Set<Object> names = new HashSet<>();
                 for (Object m : members) {
                     if (m instanceof Map<?, ?> mm) names.add(mm.get("name"));
@@ -182,13 +182,13 @@ final class Wave6a {
                 }
                 for (int j = 0; j < members.size(); j++) {
                     if (members.get(j) instanceof Map<?, ?> member) {
-                        errors.addAll(memberRefErrors(f, member, at + ".fields[" + j + "] ("
+                        errors.addAll(memberRefErrors(f, member, at + "." + memberKey + "[" + j + "] ("
                                 + (member.containsKey("name") ? member.get("name") : "?") + ")"));
                     }
                 }
                 List<String> deeper = new ArrayList<>(enclosing);
                 deeper.addAll(own);
-                errors.addAll(iteratorErrors(members, deeper, true, at + ".fields"));
+                errors.addAll(iteratorErrors(members, deeper, true, at + "." + memberKey));
                 if (f.get("trailer") instanceof List<?> trailer) {
                     errors.addAll(iteratorErrors(trailer, enclosing, false, at + ".trailer"));
                 }
@@ -216,6 +216,49 @@ final class Wave6a {
                     }
                 }
             }
+        }
+        return errors;
+    }
+
+    /** The name an {@code element} (PS-528) is decoded under where it declares none. */
+    static final String ELEMENT_NAME = "element";
+
+    /** A repeat that declares {@code element}, a mapping, and no {@code fields} (PS-528). */
+    static boolean isElementRepeat(Map<?, ?> repeat) {
+        return repeat.get("element") instanceof Map<?, ?> && !repeat.containsKey("fields");
+    }
+
+    /**
+     * A repeat's element fields: its {@code fields}, or for a repeat of single values its one
+     * element under its own name or {@link #ELEMENT_NAME}. Mirrors repeat_members.
+     */
+    static List<?> repeatMembers(Map<?, ?> repeat) {
+        if (isElementRepeat(repeat)) {
+            Map<Object, Object> member = new java.util.LinkedHashMap<>((Map<?, ?>) repeat.get("element"));
+            Object name = member.get("name");
+            member.put("name", name instanceof String s && !s.isEmpty() ? s : ELEMENT_NAME);
+            return List.of(member);
+        }
+        return repeat.get("fields") instanceof List<?> l ? l : List.of();
+    }
+
+    /**
+     * PS-083, PS-528, PS-530: a repeat declares exactly one of {@code fields} and
+     * {@code element}, an element is one field definition, and {@code index_base} is an
+     * integer. The wording is the spec prototype's, as element_repeat_errors gives it.
+     */
+    static List<String> elementRepeatErrors(Map<?, ?> f) {
+        String label = "Repeat '" + (f.containsKey("name") ? f.get("name") : "<unnamed>") + "'";
+        List<String> errors = new ArrayList<>();
+        boolean hasFields = f.containsKey("fields");
+        if (hasFields == f.containsKey("element")) {
+            errors.add(label + " declares " + (hasFields ? "both" : "neither") + " of `fields` and `element`; "
+                    + "it declares exactly one (PS-083, PS-528)");
+        } else if (f.containsKey("element") && !(f.get("element") instanceof Map<?, ?>)) {
+            errors.add(label + ": `element` is a single field definition (PS-528)");
+        }
+        if (f.containsKey("index_base") && !isInt(f.get("index_base"))) {
+            errors.add(label + ": `index_base` is an integer (PS-530)");
         }
         return errors;
     }
@@ -258,7 +301,8 @@ final class Wave6a {
             for (Map.Entry<?, ?> e : map.entrySet()) {
                 if ("test_vectors".equals(e.getKey()) || "definitions".equals(e.getKey())) continue;
                 walkNames(e.getValue(),
-                        inElements || ("fields".equals(e.getKey()) && "repeat".equals(map.get("type"))),
+                        inElements || (("fields".equals(e.getKey()) || "element".equals(e.getKey()))
+                                && "repeat".equals(map.get("type"))),
                         inside, outside);
             }
         } else if (node instanceof List<?> list) {
