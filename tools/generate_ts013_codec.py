@@ -725,6 +725,14 @@ function encRepeat(out, f, data, ctx) {               // _encode_repeat
   if (records === undefined || records === null) return;
   if (!Array.isArray(records) && typeof records === "object") records = [records];
   if (!Array.isArray(records)) encFail("repeat field " + JSON.stringify(name) + ": expected a list of records, got " + typeof records);
+  // PS-550: a sibling identifying these values position by position is given as many
+  // values as this repeat, as a decoder requires (PS-546).
+  encSiblings(f).forEach(function (sib) {
+    var given = data[sib];
+    if (!Array.isArray(given) || given.length !== records.length) {
+      encFail("Repeat '" + name + "' is given " + records.length + " values and '" + sib + "', which identifies them, " + (Array.isArray(given) ? given.length : "none") + " (PS-550)");
+    }
+  });
   var rf = f.fields || [];
   if (f.element && typeof f.element === "object" && !f.fields) {
     // PS-529: each value is encoded as the element, wrapped as it was decoded. PS-544: a
@@ -757,6 +765,23 @@ function encRepeat(out, f, data, ctx) {               // _encode_repeat
     encList(out, rf, rec, ctx);
   }
   if (f.trailer) encList(out, f.trailer, data, ctx);
+}
+
+function encSiblings(f) {                             // sibling_references
+  // The distinct sibling names a repeat's `$name[i]` references name (PS-546): its
+  // identity, and its elements' `unit` and `ipso.instance`.
+  var refs = [f.identity], names = [];
+  var members = (f.element && typeof f.element === "object" && !f.fields) ? [f.element] : (f.fields || []);
+  members.forEach(function (m) {
+    if (!m || typeof m !== "object") return;
+    var ipso = (m.ipso && typeof m.ipso === "object") ? m.ipso : {};
+    refs.push(m.unit, ipso.instance);
+  });
+  refs.forEach(function (r) {
+    var mm = typeof r === "string" ? /^\$(\w+)\[(\w+)\]$/.exec(r) : null;
+    if (mm && names.indexOf(mm[1]) < 0) names.push(mm[1]);
+  });
+  return names;
 }
 
 function encReachesRecords(fields) {                  // records_reachable
