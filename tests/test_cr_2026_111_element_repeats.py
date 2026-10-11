@@ -83,10 +83,12 @@ class TestDecode:
                    "element": {"name": "x", "type": "u8"}}]
         assert decode(fields, "010002") == {"v": [1, 2]}
 
-    def test_an_unnamed_element_is_named_element_inside_it(self):
+    def test_a_named_element_is_referred_to_by_its_name(self):
+        # CR-2026-127: a nameless element declares no name (PS-528, PS-539), so the
+        # element is named to be referred to.
         fields = [{"name": "v", "type": "repeat", "count": 3,
                    "present_if": {"field": "$element", "ne": 0},
-                   "element": {"type": "u8"}}]
+                   "element": {"name": "element", "type": "u8"}}]
         assert decode(fields, "010002") == {"v": [1, 2]}
 
     def test_an_object_element_reports_the_object(self):

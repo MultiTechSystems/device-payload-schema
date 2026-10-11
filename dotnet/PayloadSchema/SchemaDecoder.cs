@@ -1243,7 +1243,14 @@ public static class SchemaDecoder
 
     static object? DecodeMatch(SchemaField field, DecodeContext ctx)
     {
-        int matchValue;
+        // A long, not an int: a u32 discriminator above 0x7FFFFFFF is an ordinary value,
+        // and narrowing it to int sent every such value to int.MinValue, which is also
+        // where (int)2147483648.0 lands. So 0xFFFFFFFF and 0x80000001 both matched a
+        // case keyed 2147483648 and decoded the wrong branch with success. Null where the
+        // discriminator is no integer at all - a u64 above 2^63-1, say - which then
+        // matches no case rather than the 0 a failed conversion would give.
+        long? matchValue;
+        object? discriminator;
         // What this construct contributes on its own: the discriminator under `name`,
         // where it was read here and named. Null where there is nothing to report.
         Dictionary<string, object?>? inline = null;
@@ -1253,20 +1260,23 @@ public static class SchemaDecoder
             // PS-414: the bytes from here to the end of the region - a reserving repeat's
             // buffer already stops short of the reserve. Nothing is read.
             matchValue = ctx.Remaining;
+            discriminator = matchValue;
         }
         else if (!string.IsNullOrEmpty(field.On))
         {
             var varName = field.On.TrimStart('$');
             if (!ctx.Variables.TryGetValue(varName, out var val))
                 throw new InvalidOperationException($"Variable not found: ${varName}");
-            var (_, iv) = Helpers.ToInt(val);
-            matchValue = iv;
+            var (ok, lv) = Helpers.ToLong(val);
+            matchValue = ok ? lv : null;
+            discriminator = val;
         }
         else
         {
             int length = field.Length > 0 ? field.Length : 1;
             var data = ctx.Read(length);
-            matchValue = (int)Helpers.DecodeUint(data, ctx.Endian);
+            matchValue = (long)Helpers.DecodeUint(data, ctx.Endian);
+            discriminator = matchValue;
 
             // A discriminator read from the payload is reported where `name` asks for it
             // and stored where `var` does (CR-2026-020). Both were parsed and then
@@ -1292,7 +1302,7 @@ public static class SchemaDecoder
             var caseVal = c.CaseValue;
             if (caseVal == null) continue;
 
-            if (MatchesCase(matchValue, caseVal))
+            if (matchValue is long numeric && MatchesCase(numeric, caseVal))
                 return MergeMatch(inline, DecodeFields(c.Fields, ctx, null));
         }
 
@@ -1302,7 +1312,7 @@ public static class SchemaDecoder
         if (field.MatchDefault is List<SchemaField> fallbackFields)
             return MergeMatch(inline, DecodeFields(fallbackFields, ctx, null));
         if (field.MatchDefault is null || (field.MatchDefault as string) != "skip")
-            throw new InvalidOperationException($"No matching case for value {matchValue}");
+            throw new InvalidOperationException($"No matching case for value {matchValue?.ToString() ?? discriminator?.ToString()}");
         return inline;
     }
 
@@ -1314,14 +1324,18 @@ public static class SchemaDecoder
     /// compared, so a range key matched nothing at all and the construct decoded silently
     /// empty (CR-2026-020).
     /// </summary>
-    static bool MatchesCase(int matchValue, object caseVal)
+    static bool MatchesCase(long matchValue, object caseVal)
     {
         switch (caseVal)
         {
             case int iv:
                 return matchValue == iv;
+            case long lv:
+                return matchValue == lv;
             case double dv:
-                return matchValue == (int)dv;
+                // The parser gives a key beyond int's range as a double; compare it as
+                // the integer it spells, never through an int cast.
+                return Helpers.ToLong(dv) is (true, var key) && matchValue == key;
             case string text when Helpers.ParseListCaseKey(text) is { } listed:
                 // A quoted flow sequence, "[1, 2, 3]", matches any element (PS-398).
                 return listed.Contains(matchValue);
@@ -1329,22 +1343,22 @@ public static class SchemaDecoder
                 var separator = text.IndexOf("..", StringComparison.Ordinal);
                 if (separator > 0)
                 {
-                    return int.TryParse(text[..separator].Trim(), out var lo)
-                           && int.TryParse(text[(separator + 2)..].Trim(), out var hi)
+                    return long.TryParse(text[..separator].Trim(), out var lo)
+                           && long.TryParse(text[(separator + 2)..].Trim(), out var hi)
                            && matchValue >= lo && matchValue <= hi;
                 }
-                return int.TryParse(text.Trim(), out var exact) && matchValue == exact;
+                return long.TryParse(text.Trim(), out var exact) && matchValue == exact;
             case List<object?> list:
                 return list.Any(item =>
                 {
-                    var (ok, itemInt) = Helpers.ToInt(item);
-                    return ok && matchValue == itemInt;
+                    var (ok, itemLong) = Helpers.ToLong(item);
+                    return ok && matchValue == itemLong;
                 });
             case Dictionary<string, object?> rangeMap:
                 var low = rangeMap.TryGetValue("min", out var minNode)
-                    ? Helpers.ToInt(minNode).Item2 : int.MinValue;
+                    && Helpers.ToLong(minNode) is (true, var lowKey) ? lowKey : long.MinValue;
                 var high = rangeMap.TryGetValue("max", out var maxNode)
-                    ? Helpers.ToInt(maxNode).Item2 : int.MaxValue;
+                    && Helpers.ToLong(maxNode) is (true, var highKey) ? highKey : long.MaxValue;
                 return matchValue >= low && matchValue <= high;
         }
         return false;

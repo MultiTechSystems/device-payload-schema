@@ -40,8 +40,14 @@ func TestCR2026117WhatCountsAsDeclared(t *testing.T) {
 			"cases: {1: [{name: r, type: number, ref: $rsn}]}}\n",
 		"fields:\n  - {name: e, type: repeat, count: 1, index: i, count_as: k, fields: [{name: v, type: number, ref: $i}]}\n" +
 			"  - {name: after, type: number, ref: $k}\n",
-		// an unnamed element is decoded as `element` (PS-528)
-		"fields:\n  - {name: v, type: repeat, count: 2, present_if: {field: $element, ne: 0}, element: {type: u8}}\n",
+		// a named element, read by its present_if (CR-2026-127: elements before present_if)
+		"fields:\n  - {name: v, type: repeat, count: 2, present_if: {field: $element, ne: 0}, element: {name: element, type: u8}}\n",
+		// tag components before the cases, whatever order they are written in
+		"fields:\n  - tlv: {cases: {1: [{name: r, type: number, ref: $rsn}]}, tag_key: ch, " +
+			"tag_fields: [{name: rsn, type: u8}, {name: ch, type: u8}]}\n",
+		// a definition reads what its splice site declared; an unused one is not checked
+		"fields:\n  - {name: _clu, type: u8}\n  - $ref: '#/definitions/d'\n" +
+			"definitions:\n  d: {fields: [{name: x, type: number, ref: $_clu}]}\n  unused: {fields: [{name: y, type: number, ref: $batery}]}\n",
 		// a metadata name counts, and its source is runtime input
 		"fields:\n  - {name: a, type: u8}\n  - {name: b, type: number, ref: $eui}\n" +
 			"metadata: {include: [{name: eui, source: $device_eui}]}\n",
@@ -100,4 +106,30 @@ func numericMapEqual(got, want map[string]any) bool {
 		}
 	}
 	return true
+}
+
+func TestCR2026127ForwardReferenceIsRefused(t *testing.T) {
+	want := "`$late` (ref) is referenced before the schema declares it (PS-539, PS-122)"
+	_, err := ParseSchema("name: t\nfields:\n  - {name: early, type: number, ref: $late}\n  - {name: late, type: u8}\n")
+	if err == nil || err.Error() != want {
+		t.Fatalf("got %v, want %q", err, want)
+	}
+	// A nameless element declares no name (PS-528).
+	_, err = ParseSchema("name: t\nfields:\n  - {name: v, type: repeat, count: 2, present_if: {field: $element, ne: 0}, element: {type: u8}}\n")
+	expectErrorCiting(t, "nameless element", err, "PS-539")
+}
+
+func TestCR2026127BooleanOperandFails(t *testing.T) {
+	s, err := ParseSchema("name: t\nfields:\n  - {name: flag, type: bool, bit: 0, consume: 1}\n  - {name: r, type: u8}\n" +
+		"  - {name: c, type: number, ref: $r, guard: {when: [{field: $flag, gte: 1}], else: -1}}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Decode([]byte{0x01, 0x05})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := toFloat64(got["c"]); c != -1 {
+		t.Errorf("c = %v, want -1 (PS-549)", got["c"])
+	}
 }

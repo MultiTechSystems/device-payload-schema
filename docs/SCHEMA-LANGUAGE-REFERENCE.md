@@ -460,8 +460,10 @@ plausible byte. The same applies to an `enum` `default` (PS-068).
 ```
 
 `in` and `not_in` take a list of numbers and hold where the value equals one of them, or
-none of them (PS-543): `{field: $mode, in: [2, 4]}`. A condition has exactly one operator
-(PS-126), so a range of values is two conditions, not one. The same conditions serve
+none of them (PS-543): `{field: $mode, in: [2, 4]}`. An empty `in` never holds, and an
+empty `not_in` always does; a boolean is not a number. Every condition has exactly one
+operator (PS-126), so a range of values is two conditions, not one, and a condition with
+none or two is rejected. The same conditions serve
 `present_if`.
 
 ### Formula (Deprecated)
@@ -773,9 +775,11 @@ A `records` entry, in a repeat's element or a `match` case within it, is a non-e
 of field lists. Each is decoded in order from the read position and yields one record, and
 the repeat reports the records as consecutive elements in place of the element (PS-541).
 The element's other reported fields are copied into each record, before the record's own;
-`_` fields are not reported, so they are not copied. `index` counts source elements, and
+`_` fields are not reported, so they are not copied. A record field may not share a name
+with a field the element reports outside `records` (CR-2026-124). `index` counts source elements, and
 `count_as` counts the records reported. `records` anywhere else - the top level, an
-object's members, a tlv case - and under `element` is rejected at load. An encoder refuses
+object's members, a tlv case, a flagged group, a byte_group, a trailer, another record -
+and under `element` is rejected at load. An encoder refuses
 a repeat whose elements can reach one, since a record does not say which element it came
 from (PS-542). `_meta`'s `elements` describes every record's fields, keyed by name.
 
@@ -871,7 +875,8 @@ codes and then one reading per code, `$name[i]` names an earlier sibling repeat 
 ```
 
 The decoded output is two arrays; `_meta` lists the identity as `{"repeat": "codes",
-"values": [...]}` (PS-547). The sibling's element must carry a `lookup` or be a literal, and
+"values": [...]}` (PS-547): the identity at each position is taken from the sibling's
+value at the same position. The sibling's element must carry a `lookup` or be a literal, and
 two arrays of different lengths are a decode error naming both. A per-element `unit` or
 `ipso.instance` may name a sibling the same way.
 

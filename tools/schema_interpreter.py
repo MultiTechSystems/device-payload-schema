@@ -820,21 +820,30 @@ TEMPLATE_KEYS = ('name_from',)
 #: `default` is data too, except a match's, which is a field list.
 REFERENCE_DATA_KEYS = ('lookup', 'values', 'else', 'value')
 TEMPLATE_REFERENCE = re.compile(r'\$\{(\w+)\}')
+#: Keys walked before the rest of their mapping, because what the rest reads comes after
+#: them: a tlv's tag components before its cases, a repeat's trailer (read first, PS-383)
+#: and its elements before its `present_if` and `identity` (PS-539, CR-2026-127).
+REFERENCE_FIRST_KEYS = ('tag_fields', 'trailer', 'fields', 'element')
 
 
 def reference_errors(schema):
-    """PS-539 (CR-2026-117): every `$` reference names something the schema declares - a
-    field, a `var`, a tag component, a repeat's `index` or `count_as` - in the header,
-    the fields, a port or a definition, at any depth. A `metadata` include or timestamp
-    name counts as declared; a `metadata.include` `source` names runtime input (PS-315)
-    and is not checked. Whether the name is bound when it is read is a decode matter
-    (PS-314), so a name declared later or in a branch not taken is valid here.
+    """PS-539 (CR-2026-117, CR-2026-127): every `$` reference names something the schema
+    declares - a field, a `var`, a tag component, a repeat's `index` or `count_as` - and
+    the declaration comes before the reference in schema order (PS-122, PS-147): a tlv's
+    tag components before its cases, a repeat's `trailer` and elements before its
+    `present_if` and `identity`. The schema is walked with every `$ref` already spliced,
+    so a definition's references are checked where it is used, after the fields declared
+    before the splice, and an unused definition is never checked. A nameless repeat
+    element declares no name (PS-528). `metadata` include and timestamp names count as
+    declared first; a `metadata.include` `source` names runtime input (PS-315) and is not
+    checked. Whether a name declared earlier is bound when it is read is a decode matter
+    (PS-314), so a name in a branch not taken is absent, not an error.
 
-    The walk is the spec prototype's `key_vocabulary.check_references`, and Go, Java and
-    C# walk the raw document the same way and give the message identically."""
+    The walk is the spec prototype's `key_vocabulary.check_references`; Go, Java and C#
+    walk the spliced document the same way and give the messages identically."""
     if not isinstance(schema, dict):
         return []
-    declared, references = set(), []
+    declared, ahead = set(), []
 
     def walk(node, key=None, in_senml=False):
         if isinstance(node, list):
@@ -847,45 +856,43 @@ def reference_errors(schema):
             for name_key in ('name', 'var', 'index', 'count_as'):
                 if isinstance(node.get(name_key), str):
                     declared.add(node[name_key])
-            # An `element` that declares no name is decoded as `element` (PS-528), so
-            # its `present_if` and `name_from` can name it.
-            if isinstance(node.get('element'), dict) and \
-                    not isinstance(node['element'].get('name'), str):
-                declared.add('element')
-        for k, v in node.items():
+        # What the rest of an entry reads comes first (REFERENCE_FIRST_KEYS).
+        first = [k for k in REFERENCE_FIRST_KEYS if k in node]
+        for k in first + [k for k in node if k not in first]:
+            v = node[k]
             if k in REFERENCE_DATA_KEYS:
                 continue
             if isinstance(v, str):
+                names = []
                 if k in REFERENCE_KEYS and v.startswith('$'):
                     # PS-546: `$name[i]` names a sibling repeat and this one's index.
                     indexed = re.fullmatch(r'(\w+)\[(\w+)\]', v[1:])
-                    references.extend([(n, k) for n in indexed.groups()] if indexed
-                                      else [(v[1:], k)])
+                    names = list(indexed.groups()) if indexed else [v[1:]]
                 elif k in TEMPLATE_KEYS or (in_senml and k == 'name'):
-                    references.extend((r, k) for r in TEMPLATE_REFERENCE.findall(v))
+                    names = TEMPLATE_REFERENCE.findall(v)
+                ahead.extend((n, k) for n in names if n not in declared)
             elif k == 'default':
                 if key == 'match' and isinstance(v, (dict, list)):
                     walk(v)                     # a match's default is a field list
             else:
                 walk(v, k, in_senml=(k == 'senml'))
 
-    for part in ('header', 'fields'):
-        walk(schema.get(part))
-    for part in ('ports', 'definitions'):
-        if isinstance(schema.get(part), dict):
-            for group in schema[part].values():
-                walk(group)
     metadata = schema.get('metadata')
     if isinstance(metadata, dict):
         for entry in (metadata.get('include') or []) + (metadata.get('timestamps') or []):
             if isinstance(entry, dict) and isinstance(entry.get('name'), str):
                 declared.add(entry['name'])
+    for part in ('header', 'fields'):
+        walk(schema.get(part))
+    if isinstance(schema.get('ports'), dict):
+        for group in schema['ports'].values():
+            walk(group)
     errors = []
-    for name, key in references:
-        if name not in declared:
-            message = reference_error_message(name, key)
-            if message not in errors:
-                errors.append(message)
+    for name, key in ahead:
+        message = (reference_error_message(name, key) if name not in declared
+                   else reference_order_message(name, key))
+        if message not in errors:
+            errors.append(message)
     return errors
 
 
@@ -893,6 +900,11 @@ def reference_error_message(name, key):
     """PS-539's wording, the spec prototype's, identical in Go, Java and C#."""
     return (f"`${name}` ({key}) names no field, var, tag component, index or count_as "
             f"the schema declares (PS-539)")
+
+
+def reference_order_message(name, key):
+    """PS-539's ordering rule (CR-2026-127), in the spec prototype's wording."""
+    return f"`${name}` ({key}) is referenced before the schema declares it (PS-539, PS-122)"
 
 
 #: The literal types (PS-357). `boolean` is a literal type only (PS-519): it is not
@@ -1467,6 +1479,63 @@ def records_reachable(fields):
     return False
 
 
+def level_names(fields):
+    """The names a field list reports at its own level: its named fields, and those of
+    the constructs that merge into it (match cases and default, tlv cases, flagged groups,
+    byte_group members). An object or repeat contributes its own name, not its members'.
+    Internal and `name_from` fields report under no fixed name, and a `records` entry's
+    bodies are records of their own (PS-541)."""
+    found = set()
+    for item in fields if isinstance(fields, list) else []:
+        if not isinstance(item, dict):
+            continue
+        if 'records' in item and not item.get('type'):
+            continue
+        if item.get('type'):
+            name = item.get('name')
+            if (isinstance(name, str) and not name.startswith('_')
+                    and not item.get('name_from')):
+                found.add(name)
+            continue
+        for key in ('match', 'tlv'):
+            spec = item.get(key)
+            if isinstance(spec, dict):
+                cases = spec.get('cases') if isinstance(spec.get('cases'), dict) else {}
+                for body in list(cases.values()) + [spec.get('default')]:
+                    found |= level_names(body)
+        flagged = item.get('flagged')
+        if isinstance(flagged, dict):
+            for group in flagged.get('groups') or []:
+                if isinstance(group, dict):
+                    found |= level_names(group.get('fields'))
+        group = item.get('byte_group')
+        found |= level_names(group.get('fields') if isinstance(group, dict) else group)
+    return found
+
+
+def records_clash(fields):
+    """PS-541 (CR-2026-124): the names a record shares with a field the element reports
+    outside `records`, sorted. A schema with any is invalid."""
+    outside = level_names(fields)
+    inside = set()
+
+    def collect(items):
+        for item in items if isinstance(items, list) else []:
+            if not isinstance(item, dict):
+                continue
+            if 'records' in item and not item.get('type'):
+                for body in item['records'] if isinstance(item['records'], list) else []:
+                    inside.update(level_names(body))
+            match = item.get('match')
+            if isinstance(match, dict) and not item.get('type'):
+                cases = match.get('cases') if isinstance(match.get('cases'), dict) else {}
+                for body in list(cases.values()) + [match.get('default')]:
+                    collect(body)
+
+    collect(fields)
+    return sorted(inside & outside)
+
+
 def records_errors(schema):
     """PS-541: a `records` entry is a non-empty list of field lists, in a repeat's
     element or a match case within it, and never reached from an `element` (PS-528).
@@ -1502,6 +1571,11 @@ def records_errors(schema):
                         walk([element], False)
                 walk(item.get('fields'), True)
                 walk(item.get('trailer'), False)
+                clash = records_clash(item.get('fields'))
+                if clash:
+                    label = item.get('name', '<unnamed>')
+                    errors.append(f"Repeat '{label}': {clash} is reported both by a "
+                                  f"record and by the element outside `records` (PS-541)")
                 continue
             match = item.get('match')
             if isinstance(match, dict) and not item.get('type'):
@@ -1532,30 +1606,33 @@ def records_errors(schema):
 
 
 def condition_errors(schema):
-    """PS-543: a condition's `in` or `not_in` is a list of numbers, and it is the
-    condition's one operator (PS-126). Over every guard condition and `present_if`."""
+    """PS-126: every guard condition and `present_if` has exactly one comparison
+    operator. PS-543: `in` and `not_in` take a list of numbers, never a boolean. The
+    wording is the spec prototype's, and Go, Java, C# and the TS013 generator give it."""
     errors = []
 
-    def check(cond):
-        if not isinstance(cond, dict) or not any(op in cond for op in SET_OPS):
+    def check(cond, where):
+        if not isinstance(cond, dict):
             return
-        if sum(op in cond for op in CONDITION_OPS) != 1:
-            errors.append("a condition with `in` or `not_in` has no other comparison "
-                          "operator (PS-126, PS-543)")
+        used = sum(op in cond for op in CONDITION_OPS)
+        if used != 1:
+            errors.append(f"{where} has {used} comparison operators; a condition has "
+                          f"exactly one (PS-126)")
         for op in SET_OPS:
             values = cond.get(op)
             if op in cond and not (isinstance(values, list) and all(
                     isinstance(v, (int, float)) and not isinstance(v, bool)
                     for v in values)):
-                errors.append(f"a condition's `{op}` is a list of numbers (PS-543)")
+                errors.append(f"`{op}` in {where} is a list of numbers (PS-543)")
 
     def walk(node):
         if isinstance(node, dict):
-            check(node.get('present_if'))
+            name = node.get('name', '?')
+            check(node.get('present_if'), f"the present_if of '{name}'")
             guard = node.get('guard')
             if isinstance(guard, dict) and isinstance(guard.get('when'), list):
                 for cond in guard['when']:
-                    check(cond)
+                    check(cond, f"a guard condition of '{name}'")
             for key, value in node.items():
                 if key != 'test_vectors':
                     walk(value)
@@ -4047,7 +4124,9 @@ class SchemaInterpreter:
                 field_name = field_ref[1:]
                 field_value = (self._variables.get(field_name, OMITTED) if element_complete
                                else self._ref_value(field_name))
-                if field_value is OMITTED:
+                # PS-540: an absent operand fails. PS-549 (CR-2026-127): so does a
+                # boolean one - comparisons take numbers, and `true` is not 1 (PS-513).
+                if field_value is OMITTED or isinstance(field_value, bool):
                     return (False, else_value)
                 field_value = float(field_value)
             else:

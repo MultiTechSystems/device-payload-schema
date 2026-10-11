@@ -287,6 +287,21 @@ class TestIdentityFromASibling:
         assert any("PS-546" in e for e in validator)
         assert any("PS-546" in e for e in generator)
 
+    def test_reference_order_reads_both_names(self):
+        """CR-2026-127 (PS-539 amended): `$codes[i]` is two references, the sibling and
+        the repeat's own index. In order, neither is reported; a sibling declared after
+        the reference is a forward reference as well as a PS-546 error."""
+        interp, validator, _ = load_errors(schema_of([CODES, values()]))
+        assert not [e for e in interp + validator if "PS-539" in e]
+        interp, validator, _ = load_errors(schema_of([values(), CODES]))
+        order = (
+            "`$codes` (identity) is referenced before the schema declares it (PS-539"
+        )
+        assert any(order in e for e in interp)
+        assert any(order in e for e in validator)
+        interp, _, _ = load_errors(schema_of([CODES, values(identity="$nosuch[i]")]))
+        assert any("`$nosuch` (identity) names no field" in e for e in interp)
+
     def test_the_generated_codec_decodes_both_arrays(self):
         out = run_codec(
             schema_of([CODES, values()]), bytes.fromhex("01090000007B000001C8")

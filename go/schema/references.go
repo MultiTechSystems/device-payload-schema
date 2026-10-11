@@ -6,16 +6,20 @@ import (
 	"strings"
 )
 
-// PS-539 (CR-2026-117): every `$` reference names something the schema declares - a
-// field, a `var`, a tag component, a repeat's `index` or `count_as` - in the fields, a
-// port or a definition, at any depth. A `metadata` include or timestamp name counts as
-// declared; a `metadata.include` `source` names runtime input (PS-315) and is not
-// checked. Whether the name is bound when it is read is a decode matter (PS-314), so a
-// name declared later, or in a branch not taken, is valid here.
+// PS-539 (CR-2026-117, CR-2026-127): every `$` reference names something the schema
+// declares - a field, a `var`, a tag component, a repeat's `index` or `count_as` - and the
+// declaration comes before the reference in schema order (PS-122, PS-147): a tlv's tag
+// components before its cases, a repeat's `trailer` and elements before its `present_if`
+// and `identity`. The document is walked with every `$ref` already spliced, so a
+// definition's references are checked where it is used, after the fields declared before
+// the splice, and an unused definition is never checked. A nameless repeat element
+// declares no name (PS-528). `metadata` include and timestamp names count as declared
+// first; a `metadata.include` `source` names runtime input (PS-315) and is not checked.
+// Whether a name declared earlier is bound when it is read is a decode matter (PS-314).
 //
-// The walk is the spec prototype's `key_vocabulary.check_references`, and
-// reference_errors in the reference implementation; Java and C# walk the same way and
-// give the message identically.
+// The walk is the spec prototype's `key_vocabulary.check_references` and
+// reference_errors in the reference implementation; Java and C# walk the same way and all
+// four give the messages identically.
 
 // referenceKeys are the keys whose string value may be a `$` reference.
 var referenceKeys = map[string]bool{"ref": true, "a": true, "b": true, "field": true,
@@ -26,6 +30,10 @@ var referenceKeys = map[string]bool{"ref": true, "a": true, "b": true, "field": 
 // except a match's, which is a field list.
 var referenceDataKeys = map[string]bool{"lookup": true, "values": true, "else": true,
 	"value": true}
+
+// referenceFirstKeys are walked before the rest of their mapping, because what the rest
+// reads comes after them.
+var referenceFirstKeys = []string{"tag_fields", "trailer", "fields", "element"}
 
 var declaredNameTemplate = regexp.MustCompile(`\$\{(\w+)\}`)
 
@@ -38,13 +46,52 @@ func referenceErrorMessage(name, key string) string {
 		"the schema declares (PS-539)", name, key)
 }
 
+// referenceOrderMessage is PS-539's ordering rule (CR-2026-127), the prototype's wording.
+func referenceOrderMessage(name, key string) string {
+	return fmt.Sprintf("`$%s` (%s) is referenced before the schema declares it (PS-539, PS-122)",
+		name, key)
+}
+
 type schemaReference struct{ name, key string }
 
-// checkReferences rejects the first reference that names nothing, walking each mapping
-// in sorted key order.
+// referenceWalkOrder is the order a mapping's keys are walked in. The other three
+// languages walk the rest in source order, which a Go map does not keep; scalars before
+// nested values is the order a schema is written in, and the two differ only where a
+// reference names something declared inside a later sibling of its own mapping.
+func referenceWalkOrder(m map[string]any) []string {
+	var order []string
+	for _, k := range referenceFirstKeys {
+		if _, ok := m[k]; ok {
+			order = append(order, k)
+		}
+	}
+	isFirst := func(k string) bool {
+		for _, f := range referenceFirstKeys {
+			if f == k {
+				return true
+			}
+		}
+		return false
+	}
+	var nested []string
+	for _, k := range sortedKeys(m) {
+		if isFirst(k) {
+			continue
+		}
+		if _, scalar := m[k].(string); scalar {
+			order = append(order, k)
+		} else {
+			nested = append(nested, k)
+		}
+	}
+	return append(order, nested...)
+}
+
+// checkReferences rejects the first reference that names nothing, or that precedes every
+// declaration of its name. `raw` is the document after expandRawRefs.
 func checkReferences(raw map[string]any) error {
 	declared := map[string]bool{}
-	var references []schemaReference
+	var ahead []schemaReference
 
 	var walk func(node any, key string, inSenml bool)
 	walk = func(node any, key string, inSenml bool) {
@@ -64,30 +111,29 @@ func checkReferences(raw map[string]any) error {
 					declared[s] = true
 				}
 			}
-			// An `element` that declares no name is decoded as `element` (PS-528), so its
-			// `present_if` and `name_from` can name it.
-			if element := asStringMap(m["element"]); element != nil {
-				if _, named := element["name"].(string); !named {
-					declared["element"] = true
-				}
-			}
 		}
-		for _, k := range sortedKeys(m) { // a Go map keeps no source order
+		for _, k := range referenceWalkOrder(m) {
 			v := m[k]
 			if referenceDataKeys[k] {
 				continue
 			}
 			if s, ok := v.(string); ok {
+				var names []string
 				if referenceKeys[k] && strings.HasPrefix(s, "$") {
 					// PS-546: `$name[i]` names a sibling repeat and this one's index.
 					if m := indexedReference.FindStringSubmatch(s[1:]); m != nil {
-						references = append(references, schemaReference{m[1], k}, schemaReference{m[2], k})
+						names = []string{m[1], m[2]}
 					} else {
-						references = append(references, schemaReference{s[1:], k})
+						names = []string{s[1:]}
 					}
 				} else if k == "name_from" || (inSenml && k == "name") {
 					for _, match := range declaredNameTemplate.FindAllStringSubmatch(s, -1) {
-						references = append(references, schemaReference{match[1], k})
+						names = append(names, match[1])
+					}
+				}
+				for _, n := range names {
+					if !declared[n] {
+						ahead = append(ahead, schemaReference{n, k})
 					}
 				}
 			} else if k == "default" {
@@ -103,15 +149,6 @@ func checkReferences(raw map[string]any) error {
 		}
 	}
 
-	walk(raw["header"], "", false)
-	walk(raw["fields"], "", false)
-	for _, part := range []string{"ports", "definitions"} {
-		if m := asStringMap(raw[part]); m != nil {
-			for _, k := range sortedKeys(m) {
-				walk(m[k], "", false)
-			}
-		}
-	}
 	if metadata := asStringMap(raw["metadata"]); metadata != nil {
 		for _, part := range []string{"include", "timestamps"} {
 			if list, ok := metadata[part].([]any); ok {
@@ -123,10 +160,18 @@ func checkReferences(raw map[string]any) error {
 			}
 		}
 	}
-	for _, r := range references {
+	walk(raw["header"], "", false)
+	walk(raw["fields"], "", false)
+	if ports := asStringMap(raw["ports"]); ports != nil {
+		for _, k := range sortedKeys(ports) {
+			walk(ports[k], "", false)
+		}
+	}
+	for _, r := range ahead {
 		if !declared[r.name] {
 			return fmt.Errorf("%s", referenceErrorMessage(r.name, r.key))
 		}
+		return fmt.Errorf("%s", referenceOrderMessage(r.name, r.key))
 	}
 	return nil
 }

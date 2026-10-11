@@ -124,8 +124,9 @@ public class Wave6aTests
     {
         const string schema = "{\"name\": \"p\", \"fields\": [{\"name\": \"r\", \"type\": \"repeat\", \"count\": 1, "
             + "\"fields\": [{\"name\": \"early\", \"type\": \"number\", \"ref\": \"$v\"}, {\"name\": \"v\", \"type\": \"u8\"}]}]}";
+        // Refused at load as a forward reference (PS-539, PS-122, CR-2026-127).
         var e = Assert.Throws<InvalidOperationException>(() => Decode(schema, "05"));
-        Assert.Contains("PS-368", e.Message);
+        Assert.Contains("PS-122", e.Message);
     }
 
     [Fact]

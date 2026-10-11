@@ -169,7 +169,13 @@ class TestDecode:
 
     @pytest.mark.parametrize(
         "cond,kept",
-        [({"in": [1, 3]}, [{"x": 1}, {"x": 3}]), ({"not_in": [1, 3]}, [{"x": 2}])],
+        [
+            ({"in": [1, 3]}, [{"x": 1}, {"x": 3}]),
+            ({"not_in": [1, 3]}, [{"x": 2}]),
+            # CR-2026-124 (PS-543): an empty `in` never holds, an empty `not_in` always.
+            ({"in": []}, []),
+            ({"not_in": []}, [{"x": 1}, {"x": 2}, {"x": 3}]),
+        ],
     )
     def test_present_if_in_and_not_in(self, cond, kept):
         fields = [
@@ -324,7 +330,7 @@ REFUSED = {
                 "fields": [{"name": "a", "type": "u8"}],
             }
         ],
-        "a condition's `in` is a list of numbers (PS-543)",
+        "`in` in the present_if of 'm' is a list of numbers (PS-543)",
     ),
     "not_in holding text": (
         [
@@ -336,7 +342,7 @@ REFUSED = {
                 "guard": {"when": [{"field": "$a", "not_in": ["1"]}], "else": 0},
             },
         ],
-        "a condition's `not_in` is a list of numbers (PS-543)",
+        "`not_in` in a guard condition of 'b' is a list of numbers (PS-543)",
     ),
     "two operators": (
         [
@@ -348,8 +354,74 @@ REFUSED = {
                 "guard": {"when": [{"field": "$a", "in": [1], "gt": 0}], "else": 0},
             },
         ],
-        "a condition with `in` or `not_in` has no other comparison operator "
-        "(PS-126, PS-543)",
+        "a guard condition of 'b' has 2 comparison operators; a condition has exactly "
+        "one (PS-126)",
+    ),
+    # CR-2026-124: PS-126 holds for every condition, not only a set one.
+    "two plain operators": (
+        [
+            {
+                "name": "m",
+                "type": "repeat",
+                "count": 1,
+                "present_if": {"field": "$a", "gt": 0, "lt": 3},
+                "fields": [{"name": "a", "type": "u8"}],
+            }
+        ],
+        "the present_if of 'm' has 2 comparison operators; a condition has exactly "
+        "one (PS-126)",
+    ),
+    "no operator": (
+        [
+            {"name": "a", "type": "u8"},
+            {
+                "name": "b",
+                "type": "number",
+                "ref": "$a",
+                "guard": {"when": [{"field": "$a"}], "else": 0},
+            },
+        ],
+        "a guard condition of 'b' has 0 comparison operators; a condition has exactly "
+        "one (PS-126)",
+    ),
+    "boolean in a set": (
+        [
+            {"name": "a", "type": "u8"},
+            {
+                "name": "b",
+                "type": "number",
+                "ref": "$a",
+                "guard": {"when": [{"field": "$a", "in": [True]}], "else": 0},
+            },
+        ],
+        "`in` in a guard condition of 'b' is a list of numbers (PS-543)",
+    ),
+    # CR-2026-124: a record field may not share a name the element reports outside.
+    "record shares an element name": (
+        [
+            {
+                "name": "m",
+                "type": "repeat",
+                "count": 1,
+                "fields": [
+                    {"name": "channel", "type": "u8"},
+                    {
+                        "match": {
+                            "length": 1,
+                            "cases": {1: [{"name": "kind", "type": "u8"}]},
+                        }
+                    },
+                    {
+                        "records": [
+                            [{"name": "kind", "type": "u8"}],
+                            [{"name": "channel", "type": "u8"}],
+                        ]
+                    },
+                ],
+            }
+        ],
+        "Repeat 'm': ['channel', 'kind'] is reported both by a record and by the "
+        "element outside `records` (PS-541)",
     ),
 }
 
@@ -364,7 +436,7 @@ def test_a_malformed_schema_is_refused_on_every_path(label):
     )
     # The generator raises the first error it finds; an element that is a construct is
     # refused under PS-545 (CR-2026-121) before PS-541 is reached.
-    with pytest.raises(ValueError, match="PS-54[135]"):
+    with pytest.raises(ValueError, match="PS-(54[135]|126)"):
         TS013Generator(schema).generate()
 
 

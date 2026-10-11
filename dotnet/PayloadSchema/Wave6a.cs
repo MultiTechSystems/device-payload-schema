@@ -265,6 +265,11 @@ public static partial class SchemaParser
                     }
                     Walk(Get(item, "fields"), true);
                     Walk(Get(item, "trailer"), false);
+                    var clash = RecordsClash(Get(item, "fields") as YamlSequenceNode);
+                    if (clash.Count > 0)
+                        errors.Add($"Repeat '{(Get(item, "name") is { } rn ? Scalar(rn) : "<unnamed>")}': "
+                            + "[" + string.Join(", ", clash.Select(n => $"'{n}'")) + "]"
+                            + " is reported both by a record and by the element outside `records` (PS-541)");
                     continue;
                 }
                 if (Get(item, "match") is YamlMappingNode match && !Typed(item))
@@ -292,29 +297,96 @@ public static partial class SchemaParser
     }
 
     /// <summary>
-    /// PS-543: a condition's `in` or `not_in` is a list of numbers, and the condition's one
-    /// operator (PS-126), over every guard condition and `present_if` (condition_errors).
+    /// The names a field list reports at its own level (level_names in the reference): its
+    /// named fields, and those merged from match and tlv cases and default, flagged groups
+    /// and byte_group members. An object or repeat contributes its own name; internal and
+    /// `name_from` fields and `records` bodies contribute none.
+    /// </summary>
+    static HashSet<string> LevelNames(YamlNode? fields)
+    {
+        var found = new HashSet<string>(StringComparer.Ordinal);
+        if (fields is not YamlSequenceNode seq) return found;
+        foreach (var item in seq.Children.OfType<YamlMappingNode>())
+        {
+            if (Has(item, "records") && !Typed(item)) continue;
+            if (Typed(item))
+            {
+                if (Get(item, "name") is YamlScalarNode n && n.Value is { } name && name != ""
+                    && !name.StartsWith("_") && !(Get(item, "name_from") is { } nf && Scalar(nf) != ""))
+                    found.Add(name);
+                continue;
+            }
+            foreach (var key in new[] { "match", "tlv" })
+            {
+                if (Get(item, key) is not YamlMappingNode spec) continue;
+                if (Get(spec, "cases") is YamlMappingNode cases)
+                    foreach (var body in cases.Children.Values) found.UnionWith(LevelNames(body));
+                found.UnionWith(LevelNames(Get(spec, "default")));
+            }
+            if (Get(item, "flagged") is YamlMappingNode flagged && Get(flagged, "groups") is YamlSequenceNode groups)
+                foreach (var g in groups.Children.OfType<YamlMappingNode>()) found.UnionWith(LevelNames(Get(g, "fields")));
+            var group = Get(item, "byte_group");
+            found.UnionWith(LevelNames(group is YamlMappingNode gm ? Get(gm, "fields") : group));
+        }
+        return found;
+    }
+
+    /// <summary>
+    /// PS-541 (CR-2026-124): the names a record shares with a field the element reports
+    /// outside `records`, sorted ordinally (records_clash in the reference).
+    /// </summary>
+    static List<string> RecordsClash(YamlSequenceNode? fields)
+    {
+        var outside = LevelNames(fields);
+        var inside = new HashSet<string>(StringComparer.Ordinal);
+        void Collect(YamlNode? items)
+        {
+            if (items is not YamlSequenceNode seq) return;
+            foreach (var item in seq.Children.OfType<YamlMappingNode>())
+            {
+                if (Has(item, "records") && !Typed(item) && Get(item, "records") is YamlSequenceNode bodies)
+                    foreach (var body in bodies.Children) inside.UnionWith(LevelNames(body));
+                if (Get(item, "match") is YamlMappingNode match && !Typed(item))
+                {
+                    if (Get(match, "cases") is YamlMappingNode cases)
+                        foreach (var body in cases.Children.Values) Collect(body);
+                    Collect(Get(match, "default"));
+                }
+            }
+        }
+        Collect(fields);
+        var clash = inside.Where(outside.Contains).ToList();
+        clash.Sort(StringComparer.Ordinal);
+        return clash;
+    }
+
+    /// <summary>
+    /// PS-126: every guard condition and `present_if` has exactly one comparison operator.
+    /// PS-543: `in` and `not_in` take a list of numbers, never a boolean. Worded as
+    /// condition_errors in the reference (the spec prototype's wording).
     /// </summary>
     static void ConditionErrors(YamlMappingNode root, List<string> errors)
     {
-        void Check(YamlNode? node)
+        void Check(YamlNode? node, string where)
         {
-            if (node is not YamlMappingNode cond || !SetOps.Any(op => Has(cond, op))) return;
-            if (GuardOps.Count(op => Has(cond, op)) != 1)
-                errors.Add("a condition with `in` or `not_in` has no other comparison operator (PS-126, PS-543)");
+            if (node is not YamlMappingNode cond) return;
+            var used = GuardOps.Count(op => Has(cond, op));
+            if (used != 1)
+                errors.Add($"{where} has {used} comparison operators; a condition has exactly one (PS-126)");
             foreach (var op in SetOps)
                 if (Get(cond, op) is { } values && !(values is YamlSequenceNode vs
                         && vs.Children.All(v => YamlNumber(v))))
-                    errors.Add($"a condition's `{op}` is a list of numbers (PS-543)");
+                    errors.Add($"`{op}` in {where} is a list of numbers (PS-543)");
         }
 
         void Walk(YamlNode node)
         {
             if (node is YamlMappingNode map)
             {
-                Check(Get(map, "present_if"));
+                var name = Get(map, "name") is { } nm ? Scalar(nm) : "?";
+                Check(Get(map, "present_if"), $"the present_if of '{name}'");
                 if (Get(map, "guard") is YamlMappingNode guard && Get(guard, "when") is YamlSequenceNode when)
-                    foreach (var c in when.Children) Check(c);
+                    foreach (var c in when.Children) Check(c, $"a guard condition of '{name}'");
                 foreach (var kv in map.Children)
                     if (Scalar(kv.Key) != "test_vectors") Walk(kv.Value);
             }

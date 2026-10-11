@@ -39,7 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from schema_interpreter import SchemaInterpreter  # noqa: E402
 from score_schema import CONFORMANCE_TOLERANCE  # noqa: E402
-from validate_schema import values_match  # noqa: E402
+from validate_schema import correction_path, values_match  # noqa: E402
 
 
 class _CoreBoolLoader(yaml.SafeLoader):
@@ -157,14 +157,18 @@ console.log(JSON.stringify(out));
 # compared by value. "1e3" and "3.1(low battery)" stay strings, and so does every string
 # compared against a string.
 _DECIMAL = re.compile(r"-?\d+(\.\d+)?\Z")
-# PS-512 as amended: a decimal followed only by a unit symbol ("257mm", "18℃", "-70dBm",
-# "80 %"). Letters, °, ℃, %, / and whitespace only - "3.1(low battery)" stays a string.
-_DECIMAL_UNIT = re.compile(r"(-?\d+(?:\.\d+)?)\s*[A-Za-z°℃%/]+\Z")
+# PS-512 as amended by CR-2026-119: a unit symbol begins with a letter, ℃, °, % or /, and
+# may continue with those, superscript digits (² ³) and spaces ("3.073mw/cm ²"). It never
+# begins with a digit, so a second number is never read as part of a unit, and
+# "3.1(low battery)" stays a string.
+_UNIT = r"[A-Za-z°℃%/][A-Za-z°℃%/²³ ]*"
+# A decimal followed only by a unit symbol ("257mm", "18℃", "-70dBm", "80 %").
+_DECIMAL_UNIT = re.compile(r"(-?\d+(?:\.\d+)?)\s*" + _UNIT + r"\Z")
 # PS-512 as amended by CR-2026-108: "0x" and hex digits followed by a decimal, optionally
 # with a unit symbol ("0x0a 10 Min", "0x07 7"), renders the decimal; a bare "0x01" renders
 # its integer value.
 _HEX_DECIMAL = re.compile(
-    r"0[xX][0-9A-Fa-f]+\s+(-?\d+(?:\.\d+)?)(?:\s*[A-Za-z°℃%/]+)?\Z"
+    r"0[xX][0-9A-Fa-f]+\s+(-?\d+(?:\.\d+)?)(?:\s*" + _UNIT + r")?\Z"
 )
 _HEX_BARE = re.compile(r"0[xX]([0-9A-Fa-f]+)\Z")
 
@@ -208,7 +212,9 @@ def corrections(schema):
     """{(payload hex, fPort): {field, ...}} for the schema's `vendor-codec-corrected` vectors.
 
     PS-514: such a vector says which fields the vendor codec gets wrong for its payload, so a
-    comparison against that codec on the same payload skips exactly those fields.
+    comparison against that codec on the same payload skips exactly those fields. A field
+    may be a `/`-joined path to a nested member (CR-2026-120); `skip_corrected` drops
+    exactly that member.
     """
     out = {}
     for vec in (schema or {}).get("test_vectors") or []:
@@ -222,6 +228,45 @@ def corrections(schema):
     return out
 
 
+def _drop_member(value, segments):
+    """`value` with the member at `segments` removed: popped from an object, and set to
+    None in an array so that the indices after it still line up."""
+    if not segments:
+        return value
+    head, rest = segments[0], segments[1:]
+    if isinstance(value, dict) and head in value:
+        copy = dict(value)
+        if rest:
+            copy[head] = _drop_member(value[head], rest)
+        else:
+            del copy[head]
+        return copy
+    if isinstance(value, list) and head.isdigit() and int(head) < len(value):
+        copy = list(value)
+        copy[int(head)] = _drop_member(value[int(head)], rest) if rest else None
+        return copy
+    return value
+
+
+def skip_corrected(expected, got, fields):
+    """(expected, got) with the members a PS-514 correction names left out of both.
+
+    A plain name skips that top-level key; a path (`payload/device/batteryLevel`,
+    `readings/0/value`) skips exactly that member and compares its siblings
+    (CR-2026-120).
+    """
+    for field in fields or ():
+        if not isinstance(field, str):
+            continue
+        if field in expected or field in got:
+            segments = [field]
+        else:
+            segments = correction_path(field)
+        expected = _drop_member(expected, segments)
+        got = _drop_member(got, segments)
+    return expected, got
+
+
 def compare(schema, payload, fport, expected):
     """Return a list of disagreements between our decode and `expected`."""
     skip = corrections(schema).get((payload.hex(), fport), set())
@@ -232,10 +277,9 @@ def compare(schema, payload, fport, expected):
     if not result.success:
         return ["our decode failed: %s" % result.errors[:2]]
     got = {k: v for k, v in result.data.items() if not k.startswith("_")}
+    expected, got = skip_corrected(expected or {}, got, skip)
     problems = []
-    for key, want in (expected or {}).items():
-        if key in skip:
-            continue
+    for key, want in expected.items():
         if key not in got:
             problems.append("%s: vendor %r, ours <missing>" % (key, want))
             continue
