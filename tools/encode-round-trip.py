@@ -80,9 +80,6 @@ loss:
   null-element      A repeat declaring `element` reports an omitted value as `null` in its
                     position (PS-528). CR-2026-111 leaves open what an encoder writes for
                     it, so every encoder refuses the array, naming the position (PS-529).
-  collected-array   A tlv name reported by several entries is collected into an array
-                    (PS-157). PS-502 writes one entry per element, which no encoder does
-                    yet, so every encoder refuses the array by name (CR-2026-110).
 """
 
 import argparse
@@ -116,10 +113,7 @@ INHERENT = (
 )
 
 #: Recoverable in principle, so counted apart from the inherent set.
-FIXABLE = ("templated-name", "separate-tlv", "null-element", "collected-array")
-
-#: The encoders' refusal of an array PS-157 collected (CR-2026-110).
-COLLECTED_MARKER = "was collected into an array (PS-157)"
+FIXABLE = ("templated-name", "separate-tlv", "null-element")
 
 #: What a decode says when it could not read part of the payload. CR-2026-013 and
 #: CR-2026-021 put these there; they are the evidence this tool reads.
@@ -235,7 +229,7 @@ def has_null_element(node):
     return False
 
 
-def classify(decoded, traits, schema=None, port=None, errors=()):
+def classify(decoded, traits, schema=None, port=None):
     """Why this vector cannot round-trip, or None where nothing explains it."""
     if decoded.warnings:
         # CR-2026-013 and CR-2026-021 made the decode say what it could not read. That
@@ -245,8 +239,6 @@ def classify(decoded, traits, schema=None, port=None, errors=()):
                 return "undecoded-bytes"
     if has_null_element(decoded.data):
         return "null-element"
-    if any(COLLECTED_MARKER in error for error in errors):
-        return "collected-array"
     for trait in INHERENT + FIXABLE:
         if trait in traits:
             return trait
@@ -308,8 +300,7 @@ def run():
             kind = ("error" if result.errors
                     else "length" if len(got) != len(want) else "bytes")
             counts[kind] += 1
-            reason = (classify(decoded, traits, schema, port, result.errors)
-                      or "unexplained")
+            reason = classify(decoded, traits, schema, port) or "unexplained"
             counts[reason] += 1
             detail = (result.errors[0][:120] if result.errors
                       else f"want {want.hex()} got {got.hex()}")

@@ -195,13 +195,69 @@ func normalizeNumbers(v any) any {
 	return v
 }
 
-// A name PS-157 collected into an array is refused by name: PS-502's one entry per
-// element is not supported, and the reference failed inside int() for a scalar and
-// zero-filled an object's members, where it now says so.
-func TestCR110CollectedArrayIsRefused(t *testing.T) {
+// CR-2026-125 (PS-527, PS-525), the spec prototype's TestCR2026125OnRepeatEncoding.
+
+const cr125Loramac = `
+name: t
+fields:
+  - tlv:
+      tag_size: 2
+      on_repeat: merge
+      cases:
+        0x0310: [{name: loramac, type: object, fields: [{name: adr, type: u8}, {name: dr, type: u8}]}]
+        0x0311: [{name: loramac, type: object, fields: [{name: dr, type: u8}]}]
+`
+
+// An array PS-157 collected is written under the first case declaring the name, one
+// entry per element, on both encode paths.
+func TestCR125CollectedNameWrittenUnderFirstCase(t *testing.T) {
 	s := cr110Parse(t, strings.Replace(cr110Event, "on_repeat: last", "on_repeat: collect", 1))
-	_, err := s.Encode(map[string]any{"event": []any{1, 2}})
-	if err == nil || !strings.Contains(err.Error(), "was collected into an array (PS-157)") {
-		t.Fatalf("encode error = %v, want the PS-157 refusal", err)
+	data := map[string]any{"event": []any{1, 2}}
+	for _, order := range [][]string{nil, {"58", "64"}} {
+		if got := hex.EncodeToString(mustEncode(t, s, data, order)); got != "3a013a02" {
+			t.Errorf("order %v: encode = %s, want 3a013a02", order, got)
+		}
+	}
+}
+
+func TestCR125StrayMemberIsAnError(t *testing.T) {
+	_, err := cr110Parse(t, cr125Loramac).Encode(map[string]any{
+		"loramac": map[string]any{"adr": 1, "dr": 5, "fw": 3}})
+	want := "tlv: the merged object 'loramac' is given ['fw'], which no case declares (PS-527)"
+	if err == nil || err.Error() != want {
+		t.Fatalf("encode error = %v, want %q", err, want)
+	}
+}
+
+func TestCR125MemberTwoCasesDeclareWrittenOnce(t *testing.T) {
+	data := map[string]any{"loramac": map[string]any{"adr": 1, "dr": 5}}
+	if got := hex.EncodeToString(mustEncode(t, cr110Parse(t, cr125Loramac), data, nil)); got != "03100105" {
+		t.Fatalf("encode = %s, want 03100105", got)
+	}
+}
+
+func TestCR125OnRepeatWithoutEffectIsRejected(t *testing.T) {
+	cases := []struct{ fields, name string }{
+		{"  - {name: a, type: u8, on_repeat: last}", "a"},
+		{"  - tlv:\n      cases:\n        1: [{name: o, type: object, fields: [{name: m, type: u8, on_repeat: last}]}]", "m"},
+	}
+	for _, c := range cases {
+		_, err := ParseSchema("name: t\nfields:\n" + c.fields + "\n")
+		want := "`on_repeat` on '" + c.name + "' has no effect there: it belongs on a tlv, a field of a tlv case, or a merged object's member (PS-525)"
+		if err == nil || err.Error() != want {
+			t.Errorf("got %v, want %q", err, want)
+		}
+	}
+}
+
+func TestCR125LastOnMergedMemberIsAccepted(t *testing.T) {
+	s := cr110Parse(t, "name: t\nfields:\n  - tlv:\n      on_repeat: merge\n      cases:\n"+
+		"        1: [{name: o, type: object, fields: [{name: m, type: u8, on_repeat: last}]}]\n")
+	out, err := s.Decode(cr110Hex(t, "01050107"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := normalizeNumbers(out); !reflect.DeepEqual(got, map[string]any{"o": map[string]any{"m": 7.0}}) {
+		t.Fatalf("decode = %#v", got)
 	}
 }

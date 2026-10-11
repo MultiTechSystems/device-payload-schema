@@ -855,19 +855,61 @@ def tlv_repeat_modes(tlv_def):
     return modes, last_members, errors
 
 
+#: Mappings whose keys are data, not schema, so nothing under them declares a field -
+#: and `definitions`, which is held to the rule where a `$ref` splices it.
+_ON_REPEAT_OPAQUE = ('lookup', 'values', 'test_vectors', 'metadata', 'definitions')
+
+
 def on_repeat_schema_errors(node):
-    """tlv_repeat_modes()'s errors for every tlv in a schema, wherever it sits (PS-526):
-    a schema that breaks the rules is invalid whether or not a payload reaches it."""
+    """tlv_repeat_modes()'s errors for every tlv in a schema, wherever it sits (PS-526),
+    and every `on_repeat` declared where it has no effect (PS-525, CR-2026-125): it
+    belongs on a tlv, on a field a tlv case reports, and as `last` on a member of a
+    merged object. A schema breaking either is invalid whether or not a payload
+    reaches it. The placement wording is the spec prototype's."""
     errors = []  # type: List[str]
-    if isinstance(node, dict):
-        if isinstance(node.get('tlv'), dict):
-            errors.extend(tlv_repeat_modes(node['tlv'])[2])
-        for key, value in node.items():
-            if key != 'test_vectors':
-                errors.extend(on_repeat_schema_errors(value))
-    elif isinstance(node, list):
-        for item in node:
-            errors.extend(on_repeat_schema_errors(item))
+    allowed = set()
+
+    def tlvs(item):
+        if isinstance(item, list):
+            for child in item:
+                tlvs(child)
+        elif isinstance(item, dict):
+            tlv = item.get('tlv')
+            if isinstance(tlv, dict):
+                allowed.add(id(tlv))
+                modes, _, tlv_errors = tlv_repeat_modes(tlv)
+                errors.extend(tlv_errors)
+                for body in (tlv.get('cases') or {}).values():
+                    if not isinstance(body, list):
+                        continue
+                    for name, field_def in reported_fields(body).items():
+                        allowed.add(id(field_def))
+                        if modes.get(name) != 'merge':
+                            continue
+                        for member in field_def.get('fields') or []:
+                            if isinstance(member, dict) \
+                                    and member.get('on_repeat') == 'last':
+                                allowed.add(id(member))
+            for key, value in item.items():
+                if key not in _ON_REPEAT_OPAQUE:
+                    tlvs(value)
+
+    def strays(item):
+        if isinstance(item, list):
+            for child in item:
+                strays(child)
+        elif isinstance(item, dict):
+            if 'on_repeat' in item and id(item) not in allowed:
+                errors.append(
+                    f"`on_repeat` on '{item.get('name', 'an entry')}' has no effect "
+                    f"there: it belongs on a tlv, a field of a tlv case, or a merged "
+                    f"object's member (PS-525)")
+            for key, value in item.items():
+                if key not in _ON_REPEAT_OPAQUE:
+                    strays(value)
+
+    tlvs(node)
+    strays(node)
     return errors
 
 
@@ -876,6 +918,33 @@ def _reports_list(field_def):
     so that a list under its name is not PS-157's collection of several entries."""
     kind = field_def.get('type')
     return kind == 'repeat' or (kind == 'bytes' and field_def.get('format') == 'array')
+
+
+def tlv_encode_plan(tlv_def, modes, last_members):
+    """What PS-527 (CR-2026-125) needs to know of a tlv's cases, in declaration order:
+    `first`, the first case declaring each name - a `last` value and an array PS-157
+    collected are written under it; for each merged object, `members`, every member
+    some case declares, `owner`, the first case declaring each member, which writes it
+    once, and `declaring`, every case declaring each member, all of which write a member
+    that declares `last`."""
+    first = {}  # type: Dict[str, Any]
+    members = {}  # type: Dict[str, set]
+    owner = {}  # type: Dict[str, Dict[str, Any]]
+    declaring = {}  # type: Dict[str, Dict[str, list]]
+    for case_key, body in (tlv_def.get('cases') or {}).items():
+        if case_key == 'default' or not isinstance(body, list):
+            continue
+        for name, field_def in reported_fields(body).items():
+            first.setdefault(name, case_key)
+            if modes.get(name) != 'merge':
+                continue
+            for member in field_def.get('fields') or []:
+                if isinstance(member, dict) and member.get('name'):
+                    m = member['name']
+                    members.setdefault(name, set()).add(m)
+                    owner.setdefault(name, {}).setdefault(m, case_key)
+                    declaring.setdefault(name, {}).setdefault(m, []).append(case_key)
+    return {'first': first, 'members': members, 'owner': owner, 'declaring': declaring}
 
 
 def combine_repeated(name, earlier, value, mode, last_members):
@@ -5908,16 +5977,16 @@ class SchemaInterpreter:
         length_size = tlv_def.get('length_size', 0) or 0
         byteorder = 'little' if self.endian == Endian.LITTLE else 'big'
         order = list(data)
-        modes = tlv_repeat_modes(tlv_def)[0]
-        # PS-527: a `last` value is written once, under the first case in declaration
-        # order that declares it, so no other case may claim it.
-        last_owner = {}  # type: Dict[str, Any]
-        for case_key, case_fields in cases.items():
-            if case_key == 'default' or not isinstance(case_fields, list):
-                continue
-            for name in reported_fields(case_fields):
-                if modes.get(name) == 'last':
-                    last_owner.setdefault(name, case_key)
+        modes, last_members, _ = tlv_repeat_modes(tlv_def)
+        plan = tlv_encode_plan(tlv_def, modes, last_members)
+        # PS-527 (CR-2026-125): a supplied member of a merged object that no case
+        # declares has nowhere to be written.
+        for n, members in plan['members'].items():
+            if isinstance(data.get(n), dict):
+                stray = sorted(set(data[n]) - members)
+                if stray:
+                    raise ValueError(f"tlv: the merged object '{n}' is given {stray}, "
+                                     f"which no case declares (PS-527)")
 
         candidates = []
         for case_key, case_fields in cases.items():
@@ -5926,27 +5995,28 @@ class SchemaInterpreter:
             claimed = []
             units = []          # what claiming this case spends
             case_data = data
+            arrays = []         # names PS-157 collected, one entry per element
             for f in self._claimable_fields(case_fields):
                 n = f['name']
                 if n not in data:
                     continue
                 mode = modes.get(n, 'collect')
-                if mode == 'last' and last_owner.get(n) != case_key:
+                collected = isinstance(data[n], list) and not _reports_list(f)
+                if (mode == 'last' or collected) and plan['first'].get(n) != case_key:
+                    # PS-527: a `last` value, and an array PS-157 collected, are written
+                    # under the first case in declaration order that declares the name.
                     continue
-                if isinstance(data[n], list) and not _reports_list(f):
-                    # PS-157 collected this name into an array. PS-502 writes one entry
-                    # per element, which this encoder does not do yet: say so, rather
-                    # than fail inside int() or write an object's members as zeros.
-                    raise ValueError(
-                        f"tlv: '{n}' was collected into an array (PS-157), and writing "
-                        f"one entry per element (PS-502) is not supported")
                 if mode == 'merge' and isinstance(data[n], dict):
                     # PS-527: one entry per case declaring any of the merged object's
-                    # members the input supplies, holding those members - every such
-                    # case, so what it spends is its own and never already spent.
-                    members = [m.get('name') for m in f.get('fields') or []
-                               if isinstance(m, dict) and m.get('name')]
-                    subset = {m: v for m, v in data[n].items() if m in members}
+                    # members the input supplies, holding those members. A member
+                    # several cases declare is written once, under the first, unless it
+                    # declares `last`, which every declaring case writes. So what each
+                    # case spends is its own and never already spent.
+                    owner = plan['owner'].get(n, {})
+                    subset = {m: v for m, v in data[n].items()
+                              if owner.get(m) == case_key
+                              or (m in last_members.get(n, set())
+                                  and case_key in plan['declaring'][n].get(m, ()))}
                     if not subset:
                         continue
                     if case_data is data:
@@ -5955,16 +6025,30 @@ class SchemaInterpreter:
                     claimed.append(n)
                     units.append((n, case_key))
                     continue
+                if collected:
+                    arrays.append(n)
                 claimed.append(n)
                 units.append(n)
             if not claimed:
                 continue
-            matches, lossless = self._case_fidelity(case_fields, case_data)
+            entries = [case_data]
+            if arrays:
+                # PS-502: one entry per element. Every name the case writes must then be
+                # an array of one length, or the elements cannot be paired into entries.
+                lengths = {len(data[n]) for n in arrays}
+                if len(arrays) != len(claimed) or len(lengths) != 1:
+                    raise ValueError(
+                        f"tlv case {case_key!r}: {claimed} cannot be written one entry "
+                        f"per element: the collected arrays differ in length or sit "
+                        f"beside a single value (PS-502)")
+                entries = [dict(case_data, **{n: data[n][i] for n in arrays})
+                           for i in range(lengths.pop())]
+            matches, lossless = self._case_fidelity(case_fields, entries[0])
             candidates.append((
                 min(order.index(n) for n in claimed),   # payload order
                 0 if lossless else 1,                   # one that can reproduce the value
                 -matches,                               # then the fuller explanation
-                case_key, case_fields, units, case_data,
+                case_key, case_fields, units, entries,
             ))
 
         # Stable, so cases that tie keep their declaration order (PS-527).
@@ -5973,22 +6057,23 @@ class SchemaInterpreter:
         out = bytearray()
         spent: set = set()
         emitted = []
-        for position, _, _, case_key, case_fields, units, case_data in candidates:
+        for position, _, _, case_key, case_fields, units, entries in candidates:
             # Every decoded field belongs to one channel. Without this a name defined
             # under two tags emitted both of them, so am308 grew an extra channel.
             if all(unit in spent for unit in units):
                 continue
             spent.update(units)
-            emitted.append((position, case_key, case_fields, case_data))
+            emitted.append((position, case_key, case_fields, entries))
 
         emitted.sort(key=lambda item: item[0])
-        for _, case_key, case_fields, case_data in emitted:
+        for _, case_key, case_fields, entries in emitted:
             tag = self._encode_tlv_tag(case_key, tlv_def)
-            value = self._encode_field_list(case_fields, case_data)
-            out.extend(tag)
-            if length_size > 0:
-                out.extend(len(value).to_bytes(length_size, byteorder))
-            out.extend(value)
+            for case_data in entries:
+                value = self._encode_field_list(case_fields, case_data)
+                out.extend(tag)
+                if length_size > 0:
+                    out.extend(len(value).to_bytes(length_size, byteorder))
+                out.extend(value)
         return bytes(out)
 
     def _reverse_modifiers(self, value: Any, field_def: Dict[str, Any]) -> Any:

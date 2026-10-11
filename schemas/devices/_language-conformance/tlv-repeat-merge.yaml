@@ -2,11 +2,10 @@
 # under one name, member by member (PS-525, CR-2026-110). It reaches the loop's
 # `type: object` fields only: `battery` is a number, so it keeps collecting.
 #
-# This is the specification's own example, with a scalar case added. The first vector
-# round-trips: an encoder writes one entry per case declaring members of the object,
-# in case declaration order (PS-527). The second cannot, since a collected array of
-# one tag's values is written one entry per element (PS-502), which none of the
-# encoders do yet.
+# This is the specification's own example, with a scalar case added. Both vectors
+# round-trip: an encoder writes one entry per case declaring members of the object,
+# in case declaration order (PS-527), and a collected array one entry per element under
+# the first case declaring the name (PS-502, CR-2026-125).
 name: probe_tlv_repeat_merge
 endian: big
 fields:

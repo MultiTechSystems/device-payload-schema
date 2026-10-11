@@ -3,8 +3,9 @@
 # an array as PS-157 has always done. Every field reporting the name declares it, as
 # PS-526 requires.
 #
-# Does not round-trip: the array's elements are written one entry per element (PS-502),
-# which none of the encoders do yet.
+# Does not round-trip: the array's elements are written one entry per element under the
+# first case declaring the name (PS-502, PS-527 as CR-2026-125 amends it), so `dr`,
+# which that case's object does not declare, is not written.
 name: probe_tlv_repeat_object_collect
 endian: big
 fields:

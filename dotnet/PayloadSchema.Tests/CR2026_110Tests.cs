@@ -109,13 +109,60 @@ public class CR2026_110Tests
     [Fact]
     public void MergeOnATlvSparesAScalar() => SchemaParser.Parse(Loramac);
 
-    /// <summary>PS-502's one entry per element is not supported, so a collected array
-    /// is refused by name rather than written wrong.</summary>
+    // CR-2026-125 (PS-527, PS-525): the spec prototype's TestCR2026125OnRepeatEncoding.
+
+    const string LoramacShared = "name: t\nendian: big\nfields:\n- tlv:\n    tag_size: 2\n    on_repeat: merge\n"
+        + "    cases:\n"
+        + "      0x0310: [{name: loramac, type: object, fields: [{name: adr, type: u8}, {name: dr, type: u8}]}]\n"
+        + "      0x0311: [{name: loramac, type: object, fields: [{name: dr, type: u8}]}]\n";
+
     [Fact]
-    public void ACollectedArrayIsRefusedByName()
+    public void ACollectedNameIsWrittenUnderTheFirstCase()
     {
         var result = SchemaEncoder.Encode(SchemaParser.Parse(Event("")),
             new Dictionary<string, object?> { ["event"] = new List<object?> { 1L, 2L } });
-        Assert.Contains(result.Errors, e => e.Contains("was collected into an array (PS-157)"));
+        Assert.Empty(result.Errors);
+        Assert.Equal(Convert.FromHexString("3a013a02"), result.Payload);
+    }
+
+    [Fact]
+    public void AMemberNoCaseDeclaresIsAnError()
+    {
+        var result = SchemaEncoder.Encode(SchemaParser.Parse(LoramacShared), new Dictionary<string, object?>
+        {
+            ["loramac"] = new Dictionary<string, object?> { ["adr"] = 1L, ["dr"] = 5L, ["fw"] = 3L },
+        });
+        Assert.Contains(result.Errors, e => e.Contains(
+            "tlv: the merged object 'loramac' is given ['fw'], which no case declares (PS-527)"));
+    }
+
+    [Fact]
+    public void AMemberTwoCasesDeclareIsWrittenOnce()
+    {
+        var result = SchemaEncoder.Encode(SchemaParser.Parse(LoramacShared), new Dictionary<string, object?>
+        {
+            ["loramac"] = new Dictionary<string, object?> { ["adr"] = 1L, ["dr"] = 5L },
+        });
+        Assert.Empty(result.Errors);
+        Assert.Equal(Convert.FromHexString("03100105"), result.Payload);
+    }
+
+    [Theory]
+    [InlineData("- {name: a, type: u8, on_repeat: last}\n", "a")]
+    [InlineData("- tlv:\n    cases:\n      1: [{name: o, type: object, fields: [{name: m, type: u8, on_repeat: last}]}]\n", "m")]
+    public void OnRepeatWhereItMeansNothingIsRejected(string fields, string name)
+    {
+        var e = Assert.ThrowsAny<Exception>(() => SchemaParser.Parse("name: t\nfields:\n" + fields));
+        Assert.Equal($"`on_repeat` on '{name}' has no effect there: it belongs on a tlv, a field of a "
+            + "tlv case, or a merged object's member (PS-525)", e.Message);
+    }
+
+    [Fact]
+    public void LastOnAMergedMemberIsAccepted()
+    {
+        var out_ = Decode("name: t\nendian: big\nfields:\n- tlv:\n    on_repeat: merge\n    cases:\n"
+            + "      1: [{name: o, type: object, fields: [{name: m, type: u8, on_repeat: last}]}]\n", "01050107");
+        var o = Assert.IsType<Dictionary<string, object?>>(out_["o"]);
+        Assert.Equal(7.0, Convert.ToDouble(o["m"]));
     }
 }

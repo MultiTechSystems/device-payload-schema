@@ -4324,34 +4324,56 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 		key     string
 		fields  []Field
 		claimed []string
-		data    map[string]any
+		// entries is one map per entry the case writes: one, or one per element of an
+		// array PS-157 collected (PS-502).
+		entries []map[string]any
 	}
-	// PS-527: a `last` value is written once, under the first case in declaration order
-	// that declares it, and a merged object once per case declaring any member the
-	// input supplies, holding those members.
+	// PS-527 (CR-2026-110, CR-2026-125): a `last` value and an array PS-157 collected are
+	// written under the first case in declaration order declaring the name; a merged
+	// object once per case declaring any member the input supplies, each member under
+	// the first case declaring it unless it declares `last`; a supplied member no case
+	// declares is an error.
+	writeEntries := func(tag []byte, fields []Field, entries []map[string]any) error {
+		for _, entry := range entries {
+			inner := ctx.branch()
+			if err := encodeFields(fields, entry, inner); err != nil {
+				return err
+			}
+			ctx.Write(tag)
+			if field.LengthSize > 0 {
+				ctx.Write(encodeUint(uint64(len(inner.Buffer)), field.LengthSize, ctx.Endian))
+			}
+			ctx.Write(inner.Buffer)
+			ctx.mergeWarnings(inner)
+		}
+		return nil
+	}
 	repeat, _ := tlvRepeatModes(field.decl, ctx.order)
+	plan := tlvEncodePlan(field.decl, ctx.order, repeat)
+	if err := plan.strayMember(data); err != nil {
+		return err
+	}
 	candidates := []candidate{}
 	for key, caseFields := range field.TLVCases {
 		claimed := []string{}
 		caseData := data
+		arrays := []string{}
 		for _, f := range claimableFields(caseFields, nil) {
 			value, ok := data[f.Name]
 			if !ok {
 				continue
 			}
 			mode := repeat.mode(f.Name)
-			if mode == "last" && repeat.lastOwner[f.Name] != key {
+			_, isList := value.([]any)
+			collected := isList && !reportsList(f)
+			if (mode == "last" || collected) && plan.first[f.Name] != key {
 				continue
-			}
-			if _, isList := value.([]any); isList && !reportsList(f) {
-				// PS-157 collected the name into an array; PS-502's one entry per
-				// element is not supported, so say so rather than write a wrong frame.
-				return fmt.Errorf("tlv: '%s' was collected into an array (PS-157), and writing one entry per element (PS-502) is not supported", f.Name)
 			}
 			if obj, isMap := value.(map[string]any); isMap && mode == "merge" {
 				subset := map[string]any{}
 				for _, member := range f.Fields {
-					if v, supplied := obj[member.Name]; supplied && member.Name != "" {
+					if v, supplied := obj[member.Name]; supplied && member.Name != "" &&
+						plan.writes(f.Name, member.Name, key) {
 						subset[member.Name] = v
 					}
 				}
@@ -4368,10 +4390,21 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 				claimed = append(claimed, f.Name+"\x00"+key)
 				continue
 			}
+			if collected {
+				arrays = append(arrays, f.Name)
+			}
 			claimed = append(claimed, f.Name)
 		}
 		if len(claimed) == 0 {
 			continue
+		}
+		entries := []map[string]any{caseData}
+		if len(arrays) > 0 {
+			split, err := splitCollected(key, claimed, arrays, caseData)
+			if err != nil {
+				return err
+			}
+			entries = split
 		}
 		tag, err := encodeTLVTag(key, field, ctx)
 		if err != nil {
@@ -4379,12 +4412,12 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 			// written, so it is not a candidate.
 			continue
 		}
-		matches, lossless := caseFidelity(caseFields, caseData)
+		matches, lossless := caseFidelity(caseFields, entries[0])
 		lossy := 0
 		if !lossless {
 			lossy = 1
 		}
-		candidates = append(candidates, candidate{tag, lossy, matches, key, caseFields, claimed, caseData})
+		candidates = append(candidates, candidate{tag, lossy, matches, key, caseFields, claimed, entries})
 	}
 
 	// Ordered for the claiming pass below, not for emission - the chosen set is re-sorted
@@ -4420,21 +4453,18 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 			byKey[c.key] = c
 		}
 		emittedAny := false
+		written := map[string]bool{}
 		for _, key := range ctx.TLVOrder {
 			c, ok := byKey[key]
-			if !ok {
+			// A case writing an array's elements writes them all where its tag first
+			// occurs; later occurrences of the tag are those same elements.
+			if !ok || written[key] {
 				continue
 			}
-			inner := ctx.branch()
-			if err := encodeFields(c.fields, c.data, inner); err != nil {
+			written[key] = true
+			if err := writeEntries(c.tag, c.fields, c.entries); err != nil {
 				return err
 			}
-			ctx.Write(c.tag)
-			if field.LengthSize > 0 {
-				ctx.Write(encodeUint(uint64(len(inner.Buffer)), field.LengthSize, ctx.Endian))
-			}
-			ctx.Write(inner.Buffer)
-			ctx.mergeWarnings(inner)
 			emittedAny = true
 		}
 		if emittedAny {
@@ -4463,16 +4493,9 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 	sort.SliceStable(chosen, func(i, j int) bool { return bytes.Compare(chosen[i].tag, chosen[j].tag) < 0 })
 
 	for _, c := range chosen {
-		inner := ctx.branch()
-		if err := encodeFields(c.fields, c.data, inner); err != nil {
+		if err := writeEntries(c.tag, c.fields, c.entries); err != nil {
 			return err
 		}
-		ctx.Write(c.tag)
-		if field.LengthSize > 0 {
-			ctx.Write(encodeUint(uint64(len(inner.Buffer)), field.LengthSize, ctx.Endian))
-		}
-		ctx.Write(inner.Buffer)
-		ctx.mergeWarnings(inner)
 	}
 	return nil
 }

@@ -137,27 +137,70 @@ public static partial class SchemaParser
         return (modes, last, errors);
     }
 
+    /// <summary>Mappings whose keys are data, and `definitions`, checked where spliced.</summary>
+    static readonly string[] OnRepeatOpaque = { "lookup", "values", "test_vectors", "metadata", "definitions" };
+
     /// <summary>
     /// PS-526: a schema breaking the on_repeat rules is invalid whether or not a payload
-    /// reaches the tlv (on_repeat_schema_errors in the reference). The first error throws.
+    /// reaches the tlv, and PS-525 (CR-2026-125): an `on_repeat` where it has no effect -
+    /// anywhere but a tlv, a field a tlv case reports, or `last` on a member of a merged
+    /// object - makes the schema invalid (on_repeat_schema_errors in the reference). The
+    /// first error throws. Declarations are compared by identity.
     /// </summary>
-    static void CheckOnRepeat(YamlNode node)
+    static void CheckOnRepeat(YamlNode root)
     {
-        if (node is YamlMappingNode map)
+        var allowed = new HashSet<YamlNode>(ReferenceEqualityComparer.Instance);
+        void Tlvs(YamlNode node)
         {
-            if (Get(map, "tlv") is YamlMappingNode tlv)
+            if (node is YamlMappingNode map)
             {
-                var errors = TlvRepeatModes(tlv).errors;
-                if (errors.Count > 0) throw new InvalidOperationException(errors[0]);
+                if (Get(map, "tlv") is YamlMappingNode tlv)
+                {
+                    allowed.Add(tlv);
+                    var (modes, _, errors) = TlvRepeatModes(tlv);
+                    if (errors.Count > 0) throw new InvalidOperationException(errors[0]);
+                    if (Get(tlv, "cases") is YamlMappingNode cases)
+                        foreach (var kv in cases.Children)
+                        {
+                            if (kv.Value is not YamlSequenceNode) continue;
+                            foreach (var (name, decl) in ReportedFields(kv.Value))
+                            {
+                                allowed.Add(decl);
+                                if (!modes.TryGetValue(name, out var mode) || mode != "merge") continue;
+                                if (Get(decl, "fields") is YamlSequenceNode members)
+                                    foreach (var m in members.Children)
+                                        if (m is YamlMappingNode mm && YamlString(Get(mm, "on_repeat")) == "last")
+                                            allowed.Add(mm);
+                            }
+                        }
+                }
+                foreach (var kv in map.Children)
+                    if (!OnRepeatOpaque.Contains(Scalar(kv.Key)))
+                        Tlvs(kv.Value);
             }
-            foreach (var kv in map.Children)
-                if (Scalar(kv.Key) != "test_vectors")
-                    CheckOnRepeat(kv.Value);
+            else if (node is YamlSequenceNode seq)
+                foreach (var item in seq.Children)
+                    Tlvs(item);
         }
-        else if (node is YamlSequenceNode seq)
+        void Strays(YamlNode node)
         {
-            foreach (var item in seq.Children)
-                CheckOnRepeat(item);
+            if (node is YamlMappingNode map)
+            {
+                if (Has(map, "on_repeat") && !allowed.Contains(map))
+                {
+                    var name = Get(map, "name") is YamlScalarNode n ? n.Value : "an entry";
+                    throw new InvalidOperationException($"`on_repeat` on '{name}' has no effect there: "
+                        + "it belongs on a tlv, a field of a tlv case, or a merged object's member (PS-525)");
+                }
+                foreach (var kv in map.Children)
+                    if (!OnRepeatOpaque.Contains(Scalar(kv.Key)))
+                        Strays(kv.Value);
+            }
+            else if (node is YamlSequenceNode seq)
+                foreach (var item in seq.Children)
+                    Strays(item);
         }
+        Tlvs(root);
+        Strays(root);
     }
 }

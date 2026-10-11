@@ -108,6 +108,9 @@ public class Schema {
         // Wave 6b (CR-2026-059, -067): optional fields form the tail of their list (PS-404)
         // and no field takes a name reserved for interpreter metadata (PS-433).
         Wave6b.checkSchema(raw);
+        // CR-2026-110/125: PS-525 and PS-526 over every tlv, and an `on_repeat` where it
+        // has no effect, refused wherever it sits.
+        OnRepeat.checkPlacement(raw);
         Schema schema = new Schema();
         schema.repeatOnlyNames = Wave6a.repeatOnlyNames(raw);
         schema.metaName = raw.get("name");

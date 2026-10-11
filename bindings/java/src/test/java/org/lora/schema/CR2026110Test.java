@@ -134,13 +134,60 @@ public class CR2026110Test {
         return v;
     }
 
-    /** PS-502's one entry per element is not supported, so a collected array is refused. */
+    // CR-2026-125 (PS-527, PS-525): the spec prototype's TestCR2026125OnRepeatEncoding.
+
+    private static final String LORAMAC_SHARED = "name: t\nfields:\n- tlv:\n"
+            + "    tag_size: 2\n    on_repeat: merge\n    cases:\n"
+            + "      0x0310: [{name: loramac, type: object, fields: [{name: adr, type: u8}, {name: dr, type: u8}]}]\n"
+            + "      0x0311: [{name: loramac, type: object, fields: [{name: dr, type: u8}]}]\n";
+
     @Test
-    public void aCollectedArrayIsRefusedByName() {
+    public void aCollectedNameIsWrittenUnderTheFirstCase() {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("event", List.of(1, 2));
-        List<String> errors = Schema.fromYaml(event("")).encode(data).getErrors();
-        assertTrue(errors.stream().anyMatch(e -> e.contains("was collected into an array (PS-157)")),
+        EncodeResult result = Schema.fromYaml(event("")).encode(data);
+        assertTrue(result.getErrors().isEmpty(), result.getErrors().toString());
+        assertArrayEquals(hex("3a013a02"), result.getPayload());
+    }
+
+    @Test
+    public void aMemberNoCaseDeclaresIsAnError() {
+        Map<String, Object> loramac = new LinkedHashMap<>();
+        loramac.put("adr", 1);
+        loramac.put("dr", 5);
+        loramac.put("fw", 3);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("loramac", loramac);
+        List<String> errors = Schema.fromYaml(LORAMAC_SHARED).encode(data).getErrors();
+        assertTrue(errors.stream().anyMatch(e -> e.contains(
+                "tlv: the merged object 'loramac' is given ['fw'], which no case declares (PS-527)")),
                 errors.toString());
+    }
+
+    @Test
+    public void aMemberTwoCasesDeclareIsWrittenOnce() {
+        Map<String, Object> loramac = new LinkedHashMap<>();
+        loramac.put("adr", 1);
+        loramac.put("dr", 5);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("loramac", loramac);
+        assertArrayEquals(hex("03100105"), Schema.fromYaml(LORAMAC_SHARED).encode(data).getPayload());
+    }
+
+    @Test
+    public void onRepeatWhereItMeansNothingIsRejected() {
+        String tail = "' has no effect there: it belongs on a tlv, a field of a tlv case, or a"
+                + " merged object's member (PS-525)";
+        rejected("name: t\nfields:\n- {name: a, type: u8, on_repeat: last}\n", "`on_repeat` on 'a" + tail);
+        rejected("name: t\nfields:\n- tlv:\n    cases:\n"
+                + "      1: [{name: o, type: object, fields: [{name: m, type: u8, on_repeat: last}]}]\n",
+                "`on_repeat` on 'm" + tail);
+    }
+
+    @Test
+    public void lastOnAMergedMemberIsAccepted() {
+        Schema s = Schema.fromYaml("name: t\nfields:\n- tlv:\n    on_repeat: merge\n    cases:\n"
+                + "      1: [{name: o, type: object, fields: [{name: m, type: u8, on_repeat: last}]}]\n");
+        assertEquals(Map.of("o", Map.of("m", 7L)), normalise(s.decode(hex("01050107"))));
     }
 }

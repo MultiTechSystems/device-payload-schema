@@ -167,4 +167,67 @@ final class OnRepeat {
         if (f.getType() == FieldType.REPEAT) return true;
         return f.getType() == FieldType.BYTES && "array".equals(f.getFormat());
     }
+
+    /** Mappings whose keys are data, and `definitions`, held to the rule where spliced. */
+    private static final Set<String> OPAQUE =
+            Set.of("lookup", "values", "test_vectors", "metadata", "definitions");
+
+    /**
+     * PS-525 (CR-2026-125): {@code on_repeat} declared where it has no effect makes the
+     * schema invalid. It belongs on a tlv, on a field a tlv case reports, and as
+     * {@code last} on a member of a merged object; anything else is refused at load, in the
+     * reference's wording ({@code on_repeat_schema_errors}). Declarations are compared by
+     * identity, so a field is recognised as the one a case reports.
+     */
+    static void checkPlacement(Object root) {
+        Set<Object> allowed = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        allowTlvs(root, allowed);
+        refuseStrays(root, allowed);
+    }
+
+    private static void allowTlvs(Object node, Set<Object> allowed) {
+        if (node instanceof List<?> list) {
+            for (Object item : list) allowTlvs(item, allowed);
+        } else if (node instanceof Map<?, ?> map) {
+            if (map.get("tlv") instanceof Map<?, ?> tlv) {
+                allowed.add(tlv);
+                Modes modes = of(tlv);
+                if (tlv.get("cases") instanceof Map<?, ?> cases) {
+                    for (Object body : cases.values()) {
+                        if (!(body instanceof List<?> fields)) continue;
+                        for (Map.Entry<String, Map<?, ?>> e : reportedFields(fields).entrySet()) {
+                            allowed.add(e.getValue());
+                            if (!"merge".equals(modes.mode(e.getKey()))) continue;
+                            if (e.getValue().get("fields") instanceof List<?> members) {
+                                for (Object m : members) {
+                                    if (m instanceof Map<?, ?> member && "last".equals(member.get("on_repeat"))) {
+                                        allowed.add(member);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                if (!OPAQUE.contains(String.valueOf(e.getKey()))) allowTlvs(e.getValue(), allowed);
+            }
+        }
+    }
+
+    private static void refuseStrays(Object node, Set<Object> allowed) {
+        if (node instanceof List<?> list) {
+            for (Object item : list) refuseStrays(item, allowed);
+        } else if (node instanceof Map<?, ?> map) {
+            if (map.containsKey("on_repeat") && !allowed.contains(map)) {
+                Object name = map.get("name");
+                throw new SchemaException("`on_repeat` on '" + (name != null ? name : "an entry")
+                        + "' has no effect there: it belongs on a tlv, a field of a tlv case, or a"
+                        + " merged object's member (PS-525)");
+            }
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                if (!OPAQUE.contains(String.valueOf(e.getKey()))) refuseStrays(e.getValue(), allowed);
+            }
+        }
+    }
 }

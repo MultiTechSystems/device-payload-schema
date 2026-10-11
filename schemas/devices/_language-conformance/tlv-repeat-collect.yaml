@@ -3,8 +3,9 @@
 # holds whether the two entries share a tag or not: here two different tags report
 # `event`. The payload is the third row of CR-2026-110's table.
 #
-# Does not round-trip: either tag could have written either value, so the encoders
-# cannot recover which one did.
+# Does not round-trip: either tag could have written either value, and the encoders
+# write every element under the first case declaring the name (PS-527, CR-2026-125):
+# `3a 01 3a 02`. tlv-repeat-collect-first-case.yaml is the payload that does.
 name: probe_tlv_repeat_collect
 endian: big
 fields:

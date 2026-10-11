@@ -69,9 +69,12 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # +2: guard-set (CR-2026-118), plain fixed. The other three CR-2026-118 fixtures are
 # refused (PS-542, PS-387).
 # +1: tlv-repeat-merge's object_members_combine (CR-2026-110), tlv. The other
-# tlv-repeat-* vectors are lossy by design (last) or collected arrays, which the
-# encoders refuse (PS-502 per element is not supported).
-FLOOR_TOTAL = 1797
+# tlv-repeat-* vectors are lossy by design (last) or ambiguous (which tag carried an
+# element is not in the output).
+# +3: CR-2026-125 writes a collected array per element under the first declaring case
+# and a shared merged member once: tlv-repeat-merge number_keeps_collecting,
+# tlv-repeat-collect-first-case and tlv-repeat-merge-shared-member, all tlv.
+FLOOR_TOTAL = 1800
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -79,7 +82,7 @@ FLOOR_BY_SHAPE = {
     # 1283 -> 1281 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped
     # only because their internal byte halves were all zero, which the encoder wrote
     # for an internal field with no value. It now reports such a field instead.
-    "tlv": 1300,   # +1: tlv-repeat-merge (CR-2026-110)
+    "tlv": 1303,   # +3: CR-2026-125 fixtures; +1: tlv-repeat-merge (CR-2026-110)
     "flagged": 193,
     "plain fixed": 135,
     "match": 125,

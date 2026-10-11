@@ -837,32 +837,40 @@ function encTlv(out, f, data, ctx) {                  // _encode_tlv
   var tlv = f.tlv || {}, cases = tlv.cases || {}, lsize = tlv.length_size || 0;
   if (tlv.merge === false) encFail("a tlv with merge: false reports its entries under 'channels', and encoding them is not supported");
   var order = Object.keys(data), cands = [];
-  // PS-527. `rep` is tlv_repeat_modes, resolved at generation time, with the cases'
-  // declaration order: an object's integer-like keys iterate in ascending order, not
-  // the order the schema wrote them.
-  var rep = tlv.__on_repeat || {};
-  var modes = rep.modes || {}, owner = rep.owner || {};
+  // PS-527 (CR-2026-110, CR-2026-125). `rep` is tlv_repeat_modes and tlv_encode_plan,
+  // resolved at generation time, with the cases' declaration order: an object's
+  // integer-like keys iterate in ascending order, not the order the schema wrote them.
+  var rep = tlv.__on_repeat || {}, has = Object.prototype.hasOwnProperty;
+  var modes = rep.modes || {}, first = rep.first || {}, members = rep.members || {};
+  var mowner = rep.owner || {}, declaring = rep.declaring || {}, lastm = rep.last || {};
   var keys = rep.order || Object.keys(cases);
+  // A supplied member of a merged object that no case declares has nowhere to go.
+  Object.keys(members).forEach(function (n) {
+    var v = data[n];
+    if (v === null || typeof v !== "object" || Array.isArray(v)) return;
+    var stray = Object.keys(v).filter(function (m) { return members[n].indexOf(m) < 0; }).sort();
+    if (stray.length) encFail("tlv: the merged object '" + n + "' is given [" + stray.map(function (m) { return "'" + m + "'"; }).join(", ") + "], which no case declares (PS-527)");
+  });
   keys.forEach(function (key) {
     if (key === "default" || !Array.isArray(cases[key])) return;
-    var caseData = data, claimed = [], units = [];
+    var caseData = data, claimed = [], units = [], arrays = [];
     encClaimable(cases[key]).forEach(function (c) {
       var n = c.name;
-      if (!Object.prototype.hasOwnProperty.call(data, n)) return;
+      if (!has.call(data, n)) return;
       var mode = modes[n] || "collect", v = data[n];
-      // A `last` value is written once, under the first case declaring it.
-      if (mode === "last" && owner[n] !== key) return;
-      // _reports_list: PS-157 collected this name into an array, and PS-502's one
-      // entry per element is not supported yet.
-      if (Array.isArray(v) && c.type !== "repeat" && !(c.type === "bytes" && c.format === "array"))
-        encFail("tlv: '" + n + "' was collected into an array (PS-157), and writing one entry per element (PS-502) is not supported");
+      // _reports_list: an array PS-157 collected, unless the field's own value is a list.
+      var collected = Array.isArray(v) && c.type !== "repeat" && !(c.type === "bytes" && c.format === "array");
+      // A `last` value and a collected array are written under the first case declaring the name.
+      if ((mode === "last" || collected) && first[n] !== key) return;
       if (mode === "merge" && v !== null && typeof v === "object" && !Array.isArray(v)) {
         // One entry per case declaring any of the merged object's members the input
-        // supplies, holding those members - every such case, so what it spends is
-        // its own and never already spent.
+        // supplies, each member under the first case declaring it, or under every one
+        // for a member declaring `last` - so what a case spends is its own.
         var sub = {}, any = false;
-        (c.fields || []).forEach(function (m) {
-          if (m && m.name && Object.prototype.hasOwnProperty.call(v, m.name)) { sub[m.name] = v[m.name]; any = true; }
+        Object.keys(v).forEach(function (m) {
+          var mine = (mowner[n] || {})[m] === key ||
+            ((lastm[n] || []).indexOf(m) >= 0 && ((declaring[n] || {})[m] || []).indexOf(key) >= 0);
+          if (mine) { sub[m] = v[m]; any = true; }
         });
         if (!any) return;
         if (caseData === data) { caseData = {}; for (var k in data) caseData[k] = data[k]; }
@@ -870,12 +878,27 @@ function encTlv(out, f, data, ctx) {                  // _encode_tlv
         claimed.push(n); units.push(n + "\u0000" + key);
         return;
       }
+      if (collected) arrays.push(n);
       claimed.push(n); units.push(n);
     });
     if (!claimed.length) return;
-    var fid = encCaseFidelity(cases[key], caseData);
+    var entries = [caseData];
+    if (arrays.length) {
+      // PS-502: one entry per element; every name the case writes must be an array of one length.
+      var len = data[arrays[0]].length;
+      if (arrays.length !== claimed.length || arrays.some(function (n) { return data[n].length !== len; }))
+        encFail("tlv case " + key + ": [" + claimed.map(function (n) { return "'" + n + "'"; }).join(", ") + "] cannot be written one entry per element: the collected arrays differ in length or sit beside a single value (PS-502)");
+      entries = [];
+      for (var i = 0; i < len; i++) {
+        var one = {};
+        for (var k2 in caseData) one[k2] = caseData[k2];
+        arrays.forEach(function (n) { one[n] = data[n][i]; });
+        entries.push(one);
+      }
+    }
+    var fid = encCaseFidelity(cases[key], entries[0]);
     var position = Math.min.apply(null, claimed.map(function (n) { return order.indexOf(n); }));
-    cands.push({ p: position, l: fid[1] ? 0 : 1, m: -fid[0], key: key, body: cases[key], units: units, data: caseData, seq: cands.length });
+    cands.push({ p: position, l: fid[1] ? 0 : 1, m: -fid[0], key: key, body: cases[key], units: units, entries: entries, seq: cands.length });
   });
   cands.sort(function (a, b) { return a.p - b.p || a.l - b.l || a.m - b.m || a.seq - b.seq; });
   var spent = {}, emitted = [];
@@ -886,11 +909,13 @@ function encTlv(out, f, data, ctx) {                  // _encode_tlv
   });
   emitted.sort(function (a, b) { return a.p - b.p || a.seq - b.seq; });
   emitted.forEach(function (c) {
-    encTlvTag(out, c.key, tlv, ctx);
-    var value = [];
-    encList(value, c.body, c.data, ctx);
-    if (lsize > 0) encWriteInt(out, value.length, lsize, false, ctx.endian);
-    for (var i = 0; i < value.length; i++) out.push(value[i]);
+    c.entries.forEach(function (entry) {
+      encTlvTag(out, c.key, tlv, ctx);
+      var value = [];
+      encList(value, c.body, entry, ctx);
+      if (lsize > 0) encWriteInt(out, value.length, lsize, false, ctx.endian);
+      for (var i = 0; i < value.length; i++) out.push(value[i]);
+    });
   });
 }
 
@@ -1113,9 +1138,9 @@ def _tlv_repeat_modes(tlv):
 
 def _annotate_on_repeat(node):
     """A copy of an encoder plan with each tlv carrying `__on_repeat`: its names' modes
-    (PS-525), the case each `last` name is written under (PS-527) and the cases'
-    declaration order, which a JSON object with integer-like keys does not keep."""
-    from schema_interpreter import reported_fields
+    (PS-525), tlv_encode_plan's tables (PS-527) and the cases' declaration order, which
+    a JSON object with integer-like keys does not keep."""
+    from schema_interpreter import tlv_encode_plan
     if isinstance(node, list):
         return [_annotate_on_repeat(item) for item in node]
     if not isinstance(node, dict):
@@ -1123,16 +1148,17 @@ def _annotate_on_repeat(node):
     out = {k: _annotate_on_repeat(v) for k, v in node.items()}
     tlv = node.get('tlv')
     if isinstance(tlv, dict) and isinstance(tlv.get('cases'), dict):
-        modes = _tlv_repeat_modes(tlv)[0]
-        owner = {}
-        for key, body in tlv['cases'].items():
-            if isinstance(body, list):
-                for name in reported_fields(body):
-                    if modes.get(name) == 'last':
-                        owner.setdefault(name, str(key))
+        modes, last_members, _ = _tlv_repeat_modes(tlv)
+        plan = tlv_encode_plan(tlv, modes, last_members)
         out['tlv'] = dict(out['tlv'], __on_repeat={
             'modes': {k: v for k, v in modes.items() if v != 'collect'},
-            'owner': owner,
+            'first': {k: str(v) for k, v in plan['first'].items()},
+            'members': {k: sorted(v) for k, v in plan['members'].items()},
+            'owner': {k: {m: str(c) for m, c in v.items()}
+                      for k, v in plan['owner'].items()},
+            'declaring': {k: {m: [str(c) for c in cs] for m, cs in v.items()}
+                          for k, v in plan['declaring'].items()},
+            'last': {k: sorted(v) for k, v in last_members.items() if v},
             'order': [str(key) for key in tlv['cases']],
         })
     return out

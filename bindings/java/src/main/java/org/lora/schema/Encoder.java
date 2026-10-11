@@ -805,7 +805,7 @@ final class Encoder {
 
     private record Candidate(int position, int lossPenalty, int matches, String caseKey,
                              List<Field> caseFields, List<String> claimed,
-                             Map<String, Object> caseData) {}
+                             List<Map<String, Object>> entries) {}
 
     /**
      * Rebuild a TLV payload from decoded output.
@@ -827,70 +827,117 @@ final class Encoder {
 
         List<String> order = new ArrayList<>(data.keySet());
         OnRepeat.Modes modes = tlv.getRepeatModes();
-        // PS-527: a `last` value is written once, under the first case in declaration
-        // order that declares it, so no other case may claim it.
-        Map<String, String> lastOwner = new LinkedHashMap<>();
+        // PS-527 (CR-2026-125), the reference's tlv_encode_plan, in declaration order: the
+        // first case declaring each name, which writes a `last` value and an array PS-157
+        // collected; for each merged object every member some case declares, the first
+        // case declaring each member, which writes it once, and every case declaring it,
+        // all of which write a member declaring `last`.
+        Map<String, String> first = new LinkedHashMap<>();
+        Map<String, Set<String>> declaredMembers = new LinkedHashMap<>();
+        Map<String, Map<String, String>> memberOwner = new LinkedHashMap<>();
+        Map<String, Map<String, Set<String>>> declaring = new LinkedHashMap<>();
         for (Map.Entry<String, List<Field>> entry : cases.entrySet()) {
             if ("default".equals(entry.getKey()) || entry.getValue() == null) continue;
             for (Field f : claimableFields(entry.getValue())) {
                 String name = payloadName(f);
-                if (name != null && "last".equals(modes.mode(name))) {
-                    lastOwner.putIfAbsent(name, entry.getKey());
+                if (name == null) continue;
+                first.putIfAbsent(name, entry.getKey());
+                if (!"merge".equals(modes.mode(name)) || f.getFields() == null) continue;
+                for (Field m : f.getFields()) {
+                    if (m.getName() == null || m.getName().isEmpty()) continue;
+                    declaredMembers.computeIfAbsent(name, k -> new LinkedHashSet<>()).add(m.getName());
+                    memberOwner.computeIfAbsent(name, k -> new LinkedHashMap<>())
+                            .putIfAbsent(m.getName(), entry.getKey());
+                    declaring.computeIfAbsent(name, k -> new LinkedHashMap<>())
+                            .computeIfAbsent(m.getName(), k -> new LinkedHashSet<>()).add(entry.getKey());
                 }
+            }
+        }
+        // A supplied member of a merged object that no case declares has nowhere to go.
+        for (Map.Entry<String, Set<String>> e : declaredMembers.entrySet()) {
+            if (!(data.get(e.getKey()) instanceof Map<?, ?> object)) continue;
+            List<String> stray = new ArrayList<>();
+            for (Object k : object.keySet()) {
+                if (!e.getValue().contains(String.valueOf(k))) stray.add("'" + k + "'");
+            }
+            if (!stray.isEmpty()) {
+                java.util.Collections.sort(stray);
+                throw new SchemaException.EncodeException("tlv: the merged object '" + e.getKey()
+                        + "' is given [" + String.join(", ", stray) + "], which no case declares (PS-527)");
             }
         }
 
         List<Candidate> candidates = new ArrayList<>();
         for (Map.Entry<String, List<Field>> entry : cases.entrySet()) {
             if ("default".equals(entry.getKey()) || entry.getValue() == null) continue;
+            String caseKey = entry.getKey();
             List<String> claimed = new ArrayList<>();
             List<String> units = new ArrayList<>();     // what claiming this case spends
+            List<String> arrays = new ArrayList<>();    // PS-157 arrays, one entry per element
             Map<String, Object> caseData = data;
             for (Field f : claimableFields(entry.getValue())) {
                 String name = payloadName(f);
                 if (name == null || !data.containsKey(name)) continue;
                 String mode = modes.mode(name);
-                if ("last".equals(mode) && !entry.getKey().equals(lastOwner.get(name))) continue;
-                if (data.get(name) instanceof List<?> && !OnRepeat.reportsList(f)) {
-                    // PS-157 collected the name into an array; PS-502's one entry per
-                    // element is not supported, so say so rather than write a wrong frame.
-                    throw new SchemaException.EncodeException("tlv: '" + name + "' was collected into an array"
-                            + " (PS-157), and writing one entry per element (PS-502) is not supported");
-                }
+                boolean collected = data.get(name) instanceof List<?> && !OnRepeat.reportsList(f);
+                if (("last".equals(mode) || collected) && !caseKey.equals(first.get(name))) continue;
                 if ("merge".equals(mode) && data.get(name) instanceof Map<?, ?> object) {
                     // PS-527: one entry per case declaring any of the merged object's
-                    // members the input supplies, holding those members - every such
-                    // case, so what it spends is its own and never already spent.
-                    Set<String> members = new LinkedHashSet<>();
-                    if (f.getFields() != null) {
-                        for (Field m : f.getFields()) {
-                            if (m.getName() != null && !m.getName().isEmpty()) members.add(m.getName());
-                        }
-                    }
+                    // members the input supplies, each member under the first case
+                    // declaring it, or under every one for a member declaring `last` - so
+                    // what a case spends is its own and never already spent.
+                    Map<String, String> owner = memberOwner.getOrDefault(name, Map.of());
+                    Map<String, Set<String>> by = declaring.getOrDefault(name, Map.of());
                     Map<String, Object> subset = new LinkedHashMap<>();
                     for (Map.Entry<?, ?> member : object.entrySet()) {
                         String key = String.valueOf(member.getKey());
-                        if (members.contains(key)) subset.put(key, member.getValue());
+                        boolean writes = caseKey.equals(owner.get(key))
+                                || (modes.last(name).contains(key)
+                                    && by.getOrDefault(key, Set.of()).contains(caseKey));
+                        if (writes) subset.put(key, member.getValue());
                     }
                     if (subset.isEmpty()) continue;
                     if (caseData == data) caseData = new LinkedHashMap<>(data);
                     caseData.put(name, subset);
                     claimed.add(name);
-                    units.add(name + "\u0000" + entry.getKey());
+                    units.add(name + "\u0000" + caseKey);
                     continue;
                 }
+                if (collected) arrays.add(name);
                 claimed.add(name);
                 units.add(name);
             }
             if (claimed.isEmpty()) continue;
+            List<Map<String, Object>> entries = List.of(caseData);
+            if (!arrays.isEmpty()) {
+                // PS-502: one entry per element. Every name the case writes must then be an
+                // array of one length, or the elements cannot be paired into entries.
+                Set<Integer> lengths = new LinkedHashSet<>();
+                for (String name : arrays) lengths.add(((List<?>) data.get(name)).size());
+                if (arrays.size() != claimed.size() || lengths.size() != 1) {
+                    List<String> quoted = new ArrayList<>();
+                    for (String name : claimed) quoted.add("'" + name + "'");
+                    throw new SchemaException.EncodeException("tlv case " + caseKey + ": ["
+                            + String.join(", ", quoted) + "] cannot be written one entry per element:"
+                            + " the collected arrays differ in length or sit beside a single value (PS-502)");
+                }
+                int length = lengths.iterator().next();
+                List<Map<String, Object>> split = new ArrayList<>();
+                for (int i = 0; i < length; i++) {
+                    Map<String, Object> one = new LinkedHashMap<>(caseData);
+                    for (String name : arrays) one.put(name, ((List<?>) data.get(name)).get(i));
+                    split.add(one);
+                }
+                entries = split;
+            }
             int position = Integer.MAX_VALUE;
             for (String name : claimed) {
                 position = Math.min(position, order.indexOf(name));
             }
-            Fidelity fidelity = caseFidelity(entry.getValue(), caseData);
+            Fidelity fidelity = caseFidelity(entry.getValue(), entries.get(0));
             // Stable sort below, so cases that tie keep their declaration order (PS-527).
             candidates.add(new Candidate(position, fidelity.lossless() ? 0 : 1,
-                    fidelity.matches(), entry.getKey(), entry.getValue(), units, caseData));
+                    fidelity.matches(), caseKey, entry.getValue(), units, entries));
         }
 
         // Payload order first, then the case that can reproduce the value, then the fuller
@@ -917,12 +964,14 @@ final class Encoder {
         ByteBuf out = new ByteBuf();
         for (Candidate candidate : emitted) {
             byte[] tag = encodeTLVTag(candidate.caseKey(), tlv);
-            byte[] value = encodeFieldList(candidate.caseFields(), candidate.caseData());
-            out.write(tag);
-            if (lengthSize > 0) {
-                out.write(writeInt(value.length, lengthSize, false));
+            for (Map<String, Object> caseData : candidate.entries()) {
+                byte[] value = encodeFieldList(candidate.caseFields(), caseData);
+                out.write(tag);
+                if (lengthSize > 0) {
+                    out.write(writeInt(value.length, lengthSize, false));
+                }
+                out.write(value);
             }
-            out.write(value);
         }
         return out.toArray();
     }

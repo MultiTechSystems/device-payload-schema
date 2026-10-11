@@ -217,32 +217,168 @@ def test_rejected_inside_a_nested_construct():
     assert any("PS-526" in e for e in errors)
 
 
-COLLECTED = "was collected into an array (PS-157), and writing one entry per element"
+# CR-2026-125 (PS-525, PS-527): the spec prototype's TestCR2026125OnRepeatEncoding,
+# with the generated codec held to the reference on each encode.
+
+LORAMAC_SHARED = {
+    "tag_size": 2,
+    "on_repeat": "merge",
+    "cases": {
+        0x0310: [
+            {
+                "name": "loramac",
+                "type": "object",
+                "fields": [{"name": "adr", "type": "u8"}, {"name": "dr", "type": "u8"}],
+            }
+        ],
+        0x0311: [
+            {
+                "name": "loramac",
+                "type": "object",
+                "fields": [{"name": "dr", "type": "u8"}],
+            }
+        ],
+    },
+}
 
 
-@pytest.mark.parametrize(
-    "tlv,data",
-    [
-        (EVENT, {"event": [1, 2]}),
-        (
-            {k: v for k, v in LORAMAC.items() if k != "on_repeat"},
-            {"loramac": [{"adr": 1}, {"dr": 5}]},
-        ),
-    ],
-)
-def test_a_collected_array_is_refused_by_name_not_mis_written(tlv, data):
-    """PS-502's one entry per element is not implemented. The reference failed inside
-    int() for a scalar and wrote `03 10 00` for an object - the members read as absent
-    and zero-filled - and the generated codec wrote `3a 02`. Both now refuse it."""
-    result = encode(tlv, data)
-    assert any(COLLECTED in e for e in result.errors), result.errors
+def generated_encode(tlv, data):
     code = TS013Generator(schema(tlv)).generate()
     script = code + "\nprocess.stdout.write(JSON.stringify(encodeDownlink(%s)));" % (
         json.dumps({"data": data})
     )
-    out = json.loads(
-        subprocess.run(
-            ["node"], input=script, capture_output=True, text=True, check=True
-        ).stdout
+    out = subprocess.run(
+        ["node"], input=script, capture_output=True, text=True, check=True
     )
-    assert any(COLLECTED in e for e in out.get("errors", [])), out
+    return json.loads(out.stdout)
+
+
+@pytest.mark.parametrize(
+    "tlv,data,want",
+    [
+        # A collected name is written under the first case declaring it, per element.
+        (EVENT, {"event": [1, 2]}, "3a013a02"),
+        # ...an object's array too: its elements under the first case, whose object
+        # declares `adr` only, so the second element's `dr` has no member to go in.
+        (
+            {k: v for k, v in LORAMAC.items() if k != "on_repeat"},
+            {"loramac": [{"adr": 1}, {"adr": 2}]},
+            "031001031002",
+        ),
+        # A member two cases declare is written once, under the first.
+        (LORAMAC_SHARED, {"loramac": {"adr": 1, "dr": 5}}, "03100105"),
+        # ...even where only that member is supplied: the first case writes it, and its
+        # other member, not supplied, is zero-filled, though 0x0311 declares `dr` alone.
+        # The ruling's consequence, reported to the spec session.
+        (LORAMAC_SHARED, {"loramac": {"dr": 5}}, "03100005"),
+    ],
+)
+def test_written_under_the_first_declaring_case(tlv, data, want):
+    result = encode(tlv, data)
+    got = generated_encode(tlv, data)
+    assert result.errors == []
+    assert bytes(result.payload).hex() == want
+    assert bytes(got["bytes"]).hex() == want
+
+
+def test_a_member_no_case_declares_is_an_error():
+    data = {"loramac": {"adr": 1, "dr": 5, "fw": 3}}
+    message = (
+        "tlv: the merged object 'loramac' is given ['fw'], which no case declares "
+        "(PS-527)"
+    )
+    assert any(message in e for e in encode(LORAMAC_SHARED, data).errors)
+    assert any(message in e for e in generated_encode(LORAMAC_SHARED, data)["errors"])
+
+
+def test_collected_arrays_of_different_lengths_are_an_error():
+    tlv = {"cases": {1: [{"name": "a", "type": "u8"}, {"name": "b", "type": "u8"}]}}
+    message = "cannot be written one entry per element"
+    assert any(message in e for e in encode(tlv, {"a": [1, 2], "b": [3]}).errors)
+    assert any(
+        message in e for e in generated_encode(tlv, {"a": [1, 2], "b": [3]})["errors"]
+    )
+    # Equal lengths pair element by element.
+    assert (
+        bytes(encode(tlv, {"a": [1, 2], "b": [3, 4]}).payload).hex() == "010103010204"
+    )
+
+
+PLACEMENT = "has no effect there: it belongs on a tlv, a field of a tlv case, or a"
+
+
+@pytest.mark.parametrize(
+    "fields,name",
+    [
+        ([{"name": "a", "type": "u8", "on_repeat": "last"}], "a"),
+        (
+            [
+                {
+                    "tlv": {
+                        "cases": {
+                            1: [
+                                {
+                                    "name": "o",
+                                    "type": "object",
+                                    "fields": [
+                                        {"name": "m", "type": "u8", "on_repeat": "last"}
+                                    ],
+                                }
+                            ]
+                        }
+                    }
+                }
+            ],
+            "m",
+        ),
+        (
+            [
+                {
+                    "name": "o",
+                    "type": "object",
+                    "fields": [{"name": "m", "type": "u8", "on_repeat": "collect"}],
+                }
+            ],
+            "m",
+        ),
+    ],
+)
+def test_on_repeat_where_it_means_nothing_is_rejected(fields, name):
+    doc = {"name": "t", "version": 1, "fields": fields}
+    message = f"`on_repeat` on '{name}' {PLACEMENT} merged object's member (PS-525)"
+    assert message in SchemaInterpreter(doc).decode(b"\x01\x05").errors
+    assert message in validate_schema_structure(doc)
+    with pytest.raises(ValueError, match="has no effect there"):
+        TS013Generator(doc)
+
+
+def test_last_on_a_merged_member_is_accepted():
+    tlv = {
+        "on_repeat": "merge",
+        "cases": {
+            1: [
+                {
+                    "name": "o",
+                    "type": "object",
+                    "fields": [{"name": "m", "type": "u8", "on_repeat": "last"}],
+                }
+            ]
+        },
+    }
+    assert validate_schema_structure(schema(tlv)) == []
+    assert decode(tlv, "01050107").data == {"o": {"m": 7}}
+
+
+def test_on_repeat_in_a_definition_is_held_to_the_rule_where_spliced():
+    """A definition is checked where `$ref` splices it, not where it is written."""
+    doc = {
+        "name": "t",
+        "version": 1,
+        "definitions": {
+            "d": {"fields": [{"name": "e", "type": "u8", "on_repeat": "last"}]}
+        },
+        "fields": [{"tlv": {"cases": {1: [{"$ref": "#/definitions/d"}]}}}],
+    }
+    assert SchemaInterpreter(doc).decode(bytes.fromhex("01050107")).data == {"e": 7}
+    doc["fields"] = [{"$ref": "#/definitions/d"}]
+    assert any(PLACEMENT in e for e in SchemaInterpreter(doc).decode(b"\x01").errors)
