@@ -9,6 +9,8 @@ package schema
 import (
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 )
 
 // parseRecords reads a `records` entry: a list of field lists. A malformed entry is
@@ -187,6 +189,14 @@ func checkRecordsRules(raw map[string]any) error {
 				if err := walk(f["trailer"], false); err != nil {
 					return err
 				}
+				if clash := recordsClash(f["fields"]); len(clash) > 0 {
+					name, ok := f["name"].(string)
+					if !ok {
+						name = "<unnamed>"
+					}
+					return fmt.Errorf("Repeat '%s': ['%s'] is reported both by a record and by the element outside `records` (PS-541)",
+						name, strings.Join(clash, "', '"))
+				}
 				continue
 			}
 			if match := asStringMap(f["match"]); match != nil && f["type"] == nil {
@@ -245,15 +255,100 @@ func checkRecordsRules(raw map[string]any) error {
 	return checkSetConditions(raw)
 }
 
-// checkSetConditions is condition_errors: over every guard condition and present_if.
-func checkSetConditions(node any) error {
-	check := func(cond map[string]any) error {
-		if cond == nil {
-			return nil
+// levelNames is level_names: the names a field list reports at its own level - its
+// named fields and those of the constructs merging into it (match and tlv cases and
+// default, flagged groups, byte_group members). An object or repeat gives its own name;
+// internal and name_from fields, and `records` bodies, give none.
+func levelNames(fields any, found map[string]bool) {
+	list, _ := fields.([]any)
+	for _, item := range list {
+		f := asStringMap(item)
+		if f == nil {
+			continue
 		}
-		_, hasIn := cond["in"]
-		_, hasNotIn := cond["not_in"]
-		if !hasIn && !hasNotIn {
+		if _, ok := f["records"]; ok && f["type"] == nil {
+			continue
+		}
+		if t, ok := f["type"]; ok && t != nil && t != "" {
+			name, _ := f["name"].(string)
+			_, templated := f["name_from"]
+			if name != "" && !strings.HasPrefix(name, "_") && (!templated || f["name_from"] == nil || f["name_from"] == "") {
+				found[name] = true
+			}
+			continue
+		}
+		for _, key := range []string{"match", "tlv"} {
+			if spec := asStringMap(f[key]); spec != nil {
+				cases := asStringMap(spec["cases"])
+				for _, k := range sortedKeys(cases) {
+					levelNames(cases[k], found)
+				}
+				levelNames(spec["default"], found)
+			}
+		}
+		if flagged := asStringMap(f["flagged"]); flagged != nil {
+			groups, _ := flagged["groups"].([]any)
+			for _, g := range groups {
+				if gm := asStringMap(g); gm != nil {
+					levelNames(gm["fields"], found)
+				}
+			}
+		}
+		switch group := f["byte_group"].(type) {
+		case []any:
+			levelNames(group, found)
+		case map[string]any, map[any]any:
+			levelNames(asStringMap(group)["fields"], found)
+		}
+	}
+}
+
+// recordsClash is records_clash: the names a record shares with a field the element
+// reports outside `records`, sorted (PS-541, CR-2026-124).
+func recordsClash(fields any) []string {
+	outside := map[string]bool{}
+	levelNames(fields, outside)
+	inside := map[string]bool{}
+	var collect func(items any)
+	collect = func(items any) {
+		list, _ := items.([]any)
+		for _, item := range list {
+			f := asStringMap(item)
+			if f == nil {
+				continue
+			}
+			if bodies, ok := f["records"]; ok && f["type"] == nil {
+				listed, _ := bodies.([]any)
+				for _, body := range listed {
+					levelNames(body, inside)
+				}
+			}
+			if match := asStringMap(f["match"]); match != nil && f["type"] == nil {
+				cases := asStringMap(match["cases"])
+				for _, k := range sortedKeys(cases) {
+					collect(cases[k])
+				}
+				collect(match["default"])
+			}
+		}
+	}
+	collect(fields)
+	var clash []string
+	for name := range inside {
+		if outside[name] {
+			clash = append(clash, name)
+		}
+	}
+	sort.Strings(clash)
+	return clash
+}
+
+// checkSetConditions is condition_errors: PS-126, exactly one comparison operator in
+// every guard condition and present_if; PS-543, `in` and `not_in` take a list of
+// numbers. The wording is the spec prototype's.
+func checkSetConditions(node any) error {
+	check := func(cond map[string]any, where string) error {
+		if cond == nil {
 			return nil
 		}
 		ops := 0
@@ -263,7 +358,7 @@ func checkSetConditions(node any) error {
 			}
 		}
 		if ops != 1 {
-			return errors.New("a condition with `in` or `not_in` has no other comparison operator (PS-126, PS-543)")
+			return fmt.Errorf("%s has %d comparison operators; a condition has exactly one (PS-126)", where, ops)
 		}
 		for _, op := range []string{"in", "not_in"} {
 			value, present := cond[op]
@@ -274,26 +369,30 @@ func checkSetConditions(node any) error {
 			if ok {
 				for _, item := range list {
 					switch item.(type) {
-					case int, int64, float64:
+					case int, int64, uint64, float64:
 					default:
 						ok = false
 					}
 				}
 			}
 			if !ok {
-				return fmt.Errorf("a condition's `%s` is a list of numbers (PS-543)", op)
+				return fmt.Errorf("`%s` in %s is a list of numbers (PS-543)", op, where)
 			}
 		}
 		return nil
 	}
 	if m := asStringMap(node); m != nil {
-		if err := check(asStringMap(m["present_if"])); err != nil {
+		name := "?"
+		if n, ok := m["name"]; ok {
+			name = fmt.Sprint(n)
+		}
+		if err := check(asStringMap(m["present_if"]), "the present_if of '"+name+"'"); err != nil {
 			return err
 		}
 		if guard := asStringMap(m["guard"]); guard != nil {
 			when, _ := guard["when"].([]any)
 			for _, cond := range when {
-				if err := check(asStringMap(cond)); err != nil {
+				if err := check(asStringMap(cond), "a guard condition of '"+name+"'"); err != nil {
 					return err
 				}
 			}

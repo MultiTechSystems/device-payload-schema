@@ -1320,6 +1320,63 @@ def records_reachable(fields):
     return False
 
 
+def level_names(fields):
+    """The names a field list reports at its own level: its named fields, and those of
+    the constructs that merge into it (match cases and default, tlv cases, flagged groups,
+    byte_group members). An object or repeat contributes its own name, not its members'.
+    Internal and `name_from` fields report under no fixed name, and a `records` entry's
+    bodies are records of their own (PS-541)."""
+    found = set()
+    for item in fields if isinstance(fields, list) else []:
+        if not isinstance(item, dict):
+            continue
+        if 'records' in item and not item.get('type'):
+            continue
+        if item.get('type'):
+            name = item.get('name')
+            if (isinstance(name, str) and not name.startswith('_')
+                    and not item.get('name_from')):
+                found.add(name)
+            continue
+        for key in ('match', 'tlv'):
+            spec = item.get(key)
+            if isinstance(spec, dict):
+                cases = spec.get('cases') if isinstance(spec.get('cases'), dict) else {}
+                for body in list(cases.values()) + [spec.get('default')]:
+                    found |= level_names(body)
+        flagged = item.get('flagged')
+        if isinstance(flagged, dict):
+            for group in flagged.get('groups') or []:
+                if isinstance(group, dict):
+                    found |= level_names(group.get('fields'))
+        group = item.get('byte_group')
+        found |= level_names(group.get('fields') if isinstance(group, dict) else group)
+    return found
+
+
+def records_clash(fields):
+    """PS-541 (CR-2026-124): the names a record shares with a field the element reports
+    outside `records`, sorted. A schema with any is invalid."""
+    outside = level_names(fields)
+    inside = set()
+
+    def collect(items):
+        for item in items if isinstance(items, list) else []:
+            if not isinstance(item, dict):
+                continue
+            if 'records' in item and not item.get('type'):
+                for body in item['records'] if isinstance(item['records'], list) else []:
+                    inside.update(level_names(body))
+            match = item.get('match')
+            if isinstance(match, dict) and not item.get('type'):
+                cases = match.get('cases') if isinstance(match.get('cases'), dict) else {}
+                for body in list(cases.values()) + [match.get('default')]:
+                    collect(body)
+
+    collect(fields)
+    return sorted(inside & outside)
+
+
 def records_errors(schema):
     """PS-541: a `records` entry is a non-empty list of field lists, in a repeat's
     element or a match case within it, and never reached from an `element` (PS-528).
@@ -1355,6 +1412,11 @@ def records_errors(schema):
                         walk([element], False)
                 walk(item.get('fields'), True)
                 walk(item.get('trailer'), False)
+                clash = records_clash(item.get('fields'))
+                if clash:
+                    label = item.get('name', '<unnamed>')
+                    errors.append(f"Repeat '{label}': {clash} is reported both by a "
+                                  f"record and by the element outside `records` (PS-541)")
                 continue
             match = item.get('match')
             if isinstance(match, dict) and not item.get('type'):
@@ -1385,30 +1447,33 @@ def records_errors(schema):
 
 
 def condition_errors(schema):
-    """PS-543: a condition's `in` or `not_in` is a list of numbers, and it is the
-    condition's one operator (PS-126). Over every guard condition and `present_if`."""
+    """PS-126: every guard condition and `present_if` has exactly one comparison
+    operator. PS-543: `in` and `not_in` take a list of numbers, never a boolean. The
+    wording is the spec prototype's, and Go, Java, C# and the TS013 generator give it."""
     errors = []
 
-    def check(cond):
-        if not isinstance(cond, dict) or not any(op in cond for op in SET_OPS):
+    def check(cond, where):
+        if not isinstance(cond, dict):
             return
-        if sum(op in cond for op in CONDITION_OPS) != 1:
-            errors.append("a condition with `in` or `not_in` has no other comparison "
-                          "operator (PS-126, PS-543)")
+        used = sum(op in cond for op in CONDITION_OPS)
+        if used != 1:
+            errors.append(f"{where} has {used} comparison operators; a condition has "
+                          f"exactly one (PS-126)")
         for op in SET_OPS:
             values = cond.get(op)
             if op in cond and not (isinstance(values, list) and all(
                     isinstance(v, (int, float)) and not isinstance(v, bool)
                     for v in values)):
-                errors.append(f"a condition's `{op}` is a list of numbers (PS-543)")
+                errors.append(f"`{op}` in {where} is a list of numbers (PS-543)")
 
     def walk(node):
         if isinstance(node, dict):
-            check(node.get('present_if'))
+            name = node.get('name', '?')
+            check(node.get('present_if'), f"the present_if of '{name}'")
             guard = node.get('guard')
             if isinstance(guard, dict) and isinstance(guard.get('when'), list):
                 for cond in guard['when']:
-                    check(cond)
+                    check(cond, f"a guard condition of '{name}'")
             for key, value in node.items():
                 if key != 'test_vectors':
                     walk(value)

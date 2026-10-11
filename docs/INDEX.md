@@ -42,7 +42,7 @@ Generated inventory of this repository: what lives where, what each document cov
 | [`LANGUAGE-ANALYSIS.md`](LANGUAGE-ANALYSIS.md) | This document explains the design decisions behind the Payload Schema language. | 390 |
 | [`OUTPUT-FORMATS.md`](OUTPUT-FORMATS.md) | The Payload Schema decoder can output data in multiple formats for different platforms and... | 602 |
 | [`SCHEMA-DEVELOPMENT-GUIDE.md`](SCHEMA-DEVELOPMENT-GUIDE.md) | Best practices for creating complete, validated payload schemas. | 215 |
-| [`SCHEMA-LANGUAGE-REFERENCE.md`](SCHEMA-LANGUAGE-REFERENCE.md) | Complete reference for the LoRa Alliance Payload Schema specification (v0.5.0). | 1668 |
+| [`SCHEMA-LANGUAGE-REFERENCE.md`](SCHEMA-LANGUAGE-REFERENCE.md) | Complete reference for the LoRa Alliance Payload Schema specification (v0.5.0). | 1672 |
 | [`SESSION-NOTES-2026-02-25.md`](SESSION-NOTES-2026-02-25.md) | The prototype tests were using a custom REQ-xxx-yyy numbering scheme that was inconsistent with the... | 78 |
 | [`SPEC-IMPLEMENTATION-STATUS.md`](SPEC-IMPLEMENTATION-STATUS.md) | Feature support matrix across the reference implementations. | 353 |
 | [`TTN-CODEC-CONVERSION-GUIDE.md`](TTN-CODEC-CONVERSION-GUIDE.md) | Complete guide for AI-assisted conversion of The Things Network device repository codecs to Payload... | 575 |
@@ -129,7 +129,7 @@ Mean quality score 75.3% (PLATINUM 37, GOLD 39, SILVER 185, BRONZE 30, REJECTED 
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
-| _language-conformance | 103 | 194 | SILVER 75, BRONZE 19, REJECTED 9 |
+| _language-conformance | 103 | 196 | SILVER 75, BRONZE 19, REJECTED 9 |
 | milesight | 84 | 1427 | PLATINUM 21, GOLD 33, SILVER 27, REJECTED 3 |
 | decentlab | 58 | 204 | PLATINUM 13, GOLD 6, SILVER 27, BRONZE 8, REJECTED 4 |
 | _library-composed | 49 | 57 | SILVER 48, BRONZE 1 |
@@ -176,7 +176,7 @@ Mean quality score 75.3% (PLATINUM 37, GOLD 39, SILVER 185, BRONZE 30, REJECTED 
 | `_language-conformance/flagged-group-field-list` | 8 | 2 | fields | 42% | REJECTED |
 | `_language-conformance/float-endian` | 4 | 1 | fields | 71% | SILVER |
 | `_language-conformance/guard-else-as-declared` | 3 | 4 | fields | 75% | SILVER |
-| `_language-conformance/guard-set` | 2 | 2 | fields | 71% | SILVER |
+| `_language-conformance/guard-set` | 4 | 4 | fields | 73% | SILVER |
 | `_language-conformance/internal-discriminator` | 3 | 2 | fields | 57% | REJECTED |
 | `_language-conformance/internal-field-value` | 2 | 1 | fields | 59% | REJECTED |
 | `_language-conformance/leftover-bytes` | 1 | 2 | fields | 71% | SILVER |
