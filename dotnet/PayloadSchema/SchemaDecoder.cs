@@ -853,6 +853,10 @@ public static class SchemaDecoder
         // Checked before the lookup, which would read NaN as some index.
         if (value is double nd && (double.IsNaN(nd) || double.IsInfinity(nd)))
             return Omitted;
+        // A negative zero is reported as 0 (PS-566), whichever float type, modifier or
+        // arithmetic made it: -0 + 0 is 0.
+        if (value is double nz && nz == 0)
+            value = 0.0;
 
         // PS-475: valid_range compares the value after the arithmetic and before the
         // lookup. A looked-up field is compared on its number, so it is stashed for the

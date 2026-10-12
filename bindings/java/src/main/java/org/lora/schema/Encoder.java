@@ -2780,6 +2780,7 @@ final class Encoder {
                 throw new SchemaException.EncodeException("field '" + field.getName()
                         + "': expected a number, got " + describeValue(value));
             }
+            raw = raw + 0.0;   // PS-566: -0.0 + 0.0 is 0.0, so every float type writes the zero word
             boolean useLittle = "little".equalsIgnoreCase(
                     field.getEffectiveEndian(schema.getEndian()));
             return switch (type) {

@@ -4,9 +4,10 @@
 # lower 16 bits are zero. `le` is little-endian as Netvox r718e sends it, `be` is the
 # document's big-endian. Every finite value here is exact in bf16 and round-trips: the
 # encoder rounds the binary64 value to the nearest bf16, a tie to the even fraction. The
-# last three vectors are infinities and NaN, which decode as absent (PS-282) and so cannot
-# round-trip. They sit beside the finite ones so that a mutation of the field is
-# distinguishable by some vector.
+# negative_zero (word 0x8000, reported as 0 by PS-566) and the last three vectors, infinities
+# and NaN, which decode as absent (PS-282), cannot round-trip: the zero re-encodes as 0000.
+# They sit beside the finite ones so that a mutation of the field is distinguishable by some
+# vector.
 name: probe_bf16
 endian: big
 fields:
@@ -35,6 +36,13 @@ test_vectors:
   source: spec-example
   payload: "803F 0000"
   expected: {le: 1.0, be: 0}
+# PS-566 (CR-2026-154): the sign-bit word is a negative zero and is reported as 0, in either
+# byte order. Encoding the 0 (or an input of -0.0) writes the positive-zero word, so this vector
+# does not round-trip.
+- name: negative_zero
+  source: spec-example
+  payload: "0080 8000"
+  expected: {le: 0, be: 0}
 - name: smallest_subnormal
   source: spec-example
   payload: "0100 8001"

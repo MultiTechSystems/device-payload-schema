@@ -84,6 +84,13 @@ The `inherent` reasons, each of which is a decision recorded elsewhere:
                     a null from a lookup miss, an uncomputable value or a second sentinel
                     are not in the output.
 
+  negative-zero     A floating-point field decoded a sign-bit zero word as 0 (PS-566,
+                    CR-2026-154), and an encoder writes the positive-zero word for a zero of
+                    either sign, so the sign bit is not in the output. It covers f16, bf16,
+                    f32, f64, f32le16, f32be16le and the minifloats. Judged from the decoded
+                    value, not the payload: a float field of a vector that does not
+                    re-encode and reports 0.
+
 One reason is *not* inherent and is reported separately, because it is a gap rather than a
 loss:
 
@@ -127,7 +134,12 @@ INHERENT = (
     "ambiguous-case",
     "null-element",
     "shared-label",
+    "negative-zero",
 )
+
+#: The floating-point types PS-566 covers.
+FLOAT_TYPES = ("f16", "bf16", "f32", "f64", "f32le16", "f32be16le",
+               "uflt16", "sflt16", "sflt24")
 
 #: Recoverable in principle, so counted apart from the inherent set.
 FIXABLE = ("templated-name", "separate-tlv")
@@ -237,6 +249,19 @@ def absent_fields(schema, data, port=None):
     return [n for n in names if n not in data]
 
 
+def zero_floats(schema, data, port=None):
+    """Top-level floating-point fields of the decoded entry that report 0 (PS-566)."""
+    fields = schema.get("fields") or []
+    ports = schema.get("ports") or {}
+    if ports:
+        entry = ports.get(port, ports.get(str(port), ports.get("default")))
+        fields = (entry or {}).get("fields") or [] if isinstance(entry, dict) else []
+    return [f["name"] for f in fields
+            if isinstance(f, dict) and f.get("type") in FLOAT_TYPES and f.get("name")
+            and isinstance(data.get(f["name"]), (int, float))
+            and not isinstance(data.get(f["name"]), bool) and data[f["name"]] == 0]
+
+
 def has_null_element(node):
     """A null inside an array: an `element` repeat's omitted value (PS-528)."""
     if isinstance(node, dict):
@@ -263,6 +288,8 @@ def classify(decoded, traits, schema=None, port=None):
     # out had no value, and its bytes are not in the output to write back.
     if schema is not None and absent_fields(schema, decoded.data, port):
         return "absent-value"
+    if schema is not None and zero_floats(schema, decoded.data, port):
+        return "negative-zero"                                           # PS-566
     return None
 
 

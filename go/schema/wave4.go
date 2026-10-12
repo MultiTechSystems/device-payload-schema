@@ -52,7 +52,7 @@ func writeWordOrdered(t FieldType, value float64) []byte {
 	layout := wordOrdered[t]
 	var word uint32
 	if layout[1] == "f" {
-		word = math.Float32bits(float32(value))
+		word = math.Float32bits(float32(positiveZero(value))) // PS-566
 	} else {
 		word = uint32(int64(math.RoundToEven(value)))
 	}

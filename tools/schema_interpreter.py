@@ -514,11 +514,21 @@ def check_fits(raw, low, high, name, given, bit_range=None):
     return raw
 
 
+def positive_zero(value):
+    """A float to write: a zero of either sign is the positive zero (PS-566).
+
+    `-0.0 + 0.0` is `0.0` in IEEE 754, so this turns a negative zero - an input's, a decoded
+    one's, or one the field's own arithmetic produced - into the positive-zero word, and
+    changes no other value.
+    """
+    return float(value) + 0.0
+
+
 def write_word_ordered(field_type, value):
     """The inverse of read_word_ordered."""
     layout, kind = WORD_ORDERED_TYPES[field_type]
     if kind == 'f':
-        word = int.from_bytes(struct.pack('>f', float(value)), 'big')
+        word = int.from_bytes(struct.pack('>f', positive_zero(value)), 'big')
     else:
         word = int(value)
         if word < 0:
@@ -8430,18 +8440,18 @@ class SchemaInterpreter:
 
         if field_type == 'f16':
             fmt = '<e' if self.endian == Endian.LITTLE else '>e'
-            return struct.pack(fmt, float(value))
+            return struct.pack(fmt, positive_zero(value))                    # PS-566
         
         if field_type == 'bf16':
-            return self._write_int(encode_bf16(value, field_def.get('name')), 2, False)
+            return self._write_int(encode_bf16(positive_zero(value), field_def.get('name')), 2, False)
 
         if field_type == 'f32':
             fmt = '<f' if self.endian == Endian.LITTLE else '>f'
-            return struct.pack(fmt, float(value))
+            return struct.pack(fmt, positive_zero(value))                    # PS-566
         
         if field_type == 'f64':
             fmt = '<d' if self.endian == Endian.LITTLE else '>d'
-            return struct.pack(fmt, float(value))
+            return struct.pack(fmt, positive_zero(value))                    # PS-566
         
         if field_type == 'bool':
             return bytes([1 if value else 0])

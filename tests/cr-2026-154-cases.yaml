@@ -1,0 +1,180 @@
+# CR-2026-154 (PS-566): negative zero. For every floating-point type - f16, bf16, f32, f64, the
+# word-ordered f32le16 and f32be16le, and the minifloats - a decoder reports a negative zero as
+# 0, and an encoder writes the positive-zero word for an input of -0.0, for a decoded -0 and
+# for a -0 that its own arithmetic produces (`mult: -1` applied to 0).
+#
+# One case list, read by the reference and the generated codec (tests/test_cr_2026_154_cases.py),
+# Go (go/schema/cr154_test.go), Java (CR2026154Test.java) and C# (CR2026_154Tests.cs). The C
+# interpreter cannot read YAML; src/selftest_schema.c holds the f32 and f64 pins by hand.
+#
+# `encode_cases` give `schema` (YAML text), `input` (JSON text) and the `payload` (hex) written.
+# `decode_cases` give `schema`, the `payload` (hex) and `reencode`, the hex that encoding the
+# decoded value writes. Every decode case reports x as 0 with a positive sign.
+#
+# JSON writes the input's negative zero as -0.0, never -0, which a YAML reader takes for an
+# integer.
+
+encode_cases:
+
+- name: f16_input_negative_zero
+  schema: "name: t\nfields:\n  - {name: x, type: f16}\n"
+  input: '{"x": -0.0}'
+  payload: "0000"
+
+- name: bf16_input_negative_zero
+  schema: "name: t\nfields:\n  - {name: x, type: bf16}\n"
+  input: '{"x": -0.0}'
+  payload: "0000"
+
+- name: f32_input_negative_zero
+  schema: "name: t\nfields:\n  - {name: x, type: f32}\n"
+  input: '{"x": -0.0}'
+  payload: "00000000"
+
+- name: f64_input_negative_zero
+  schema: "name: t\nfields:\n  - {name: x, type: f64}\n"
+  input: '{"x": -0.0}'
+  payload: "0000000000000000"
+
+- name: f32le16_input_negative_zero
+  schema: "name: t\nfields:\n  - {name: x, type: f32le16}\n"
+  input: '{"x": -0.0}'
+  payload: "00000000"
+
+- name: f32be16le_input_negative_zero
+  schema: "name: t\nfields:\n  - {name: x, type: f32be16le}\n"
+  input: '{"x": -0.0}'
+  payload: "00000000"
+
+- name: sflt16_input_negative_zero
+  schema: "name: t\nfields:\n  - {name: x, type: sflt16}\n"
+  input: '{"x": -0.0}'
+  payload: "0000"
+
+- name: sflt24_input_negative_zero
+  schema: "name: t\nfields:\n  - {name: x, type: sflt24}\n"
+  input: '{"x": -0.0}'
+  payload: "000000"
+
+- name: f16_little_input_negative_zero
+  schema: "name: t\nendian: little\nfields:\n  - {name: x, type: f16}\n"
+  input: '{"x": -0.0}'
+  payload: "0000"
+
+- name: f32_little_input_negative_zero
+  schema: "name: t\nendian: little\nfields:\n  - {name: x, type: f32}\n"
+  input: '{"x": -0.0}'
+  payload: "00000000"
+
+- name: f64_little_input_negative_zero
+  schema: "name: t\nendian: little\nfields:\n  - {name: x, type: f64}\n"
+  input: '{"x": -0.0}'
+  payload: "0000000000000000"
+
+- name: f16_zero_made_negative_by_arithmetic
+  schema: "name: t\nfields:\n  - {name: x, type: f16, mult: -1}\n"
+  input: '{"x": 0}'
+  payload: "0000"
+
+- name: bf16_zero_made_negative_by_arithmetic
+  schema: "name: t\nfields:\n  - {name: x, type: bf16, mult: -1}\n"
+  input: '{"x": 0}'
+  payload: "0000"
+
+- name: f32_zero_made_negative_by_arithmetic
+  schema: "name: t\nfields:\n  - {name: x, type: f32, mult: -1}\n"
+  input: '{"x": 0}'
+  payload: "00000000"
+
+- name: f64_zero_made_negative_by_arithmetic
+  schema: "name: t\nfields:\n  - {name: x, type: f64, mult: -1}\n"
+  input: '{"x": 0}'
+  payload: "0000000000000000"
+
+- name: f32le16_zero_made_negative_by_arithmetic
+  schema: "name: t\nfields:\n  - {name: x, type: f32le16, mult: -1}\n"
+  input: '{"x": 0}'
+  payload: "00000000"
+
+- name: f32_div_made_negative_zero
+  schema: "name: t\nfields:\n  - {name: x, type: f32, div: -4}\n"
+  input: '{"x": 0.0}'
+  payload: "00000000"
+
+- name: f32_a_negative_value_keeps_its_sign
+  schema: "name: t\nfields:\n  - {name: x, type: f32}\n"
+  input: '{"x": -0.5}'
+  payload: "bf000000"
+
+- name: f16_a_negative_value_keeps_its_sign
+  schema: "name: t\nfields:\n  - {name: x, type: f16}\n"
+  input: '{"x": -0.5}'
+  payload: "b800"
+
+
+decode_cases:
+
+- name: f16_negative_zero_word
+  schema: "name: t\nfields:\n  - {name: x, type: f16}\n"
+  payload: "8000"
+  reencode: "0000"
+
+- name: bf16_negative_zero_word
+  schema: "name: t\nfields:\n  - {name: x, type: bf16}\n"
+  payload: "8000"
+  reencode: "0000"
+
+- name: f32_negative_zero_word
+  schema: "name: t\nfields:\n  - {name: x, type: f32}\n"
+  payload: "80000000"
+  reencode: "00000000"
+
+- name: f64_negative_zero_word
+  schema: "name: t\nfields:\n  - {name: x, type: f64}\n"
+  payload: "8000000000000000"
+  reencode: "0000000000000000"
+
+- name: f32le16_negative_zero_word
+  schema: "name: t\nfields:\n  - {name: x, type: f32le16}\n"
+  payload: "00008000"
+  reencode: "00000000"
+
+- name: f32be16le_negative_zero_word
+  schema: "name: t\nfields:\n  - {name: x, type: f32be16le}\n"
+  payload: "00800000"
+  reencode: "00000000"
+
+- name: sflt16_negative_zero_word
+  schema: "name: t\nfields:\n  - {name: x, type: sflt16}\n"
+  payload: "8000"
+  reencode: "0000"
+
+- name: sflt24_negative_zero_word
+  schema: "name: t\nfields:\n  - {name: x, type: sflt24}\n"
+  payload: "800000"
+  reencode: "000000"
+
+- name: f16_little_negative_zero_word
+  schema: "name: t\nendian: little\nfields:\n  - {name: x, type: f16}\n"
+  payload: "0080"
+  reencode: "0000"
+
+- name: f32_little_negative_zero_word
+  schema: "name: t\nendian: little\nfields:\n  - {name: x, type: f32}\n"
+  payload: "00000080"
+  reencode: "00000000"
+
+- name: f64_little_negative_zero_word
+  schema: "name: t\nendian: little\nfields:\n  - {name: x, type: f64}\n"
+  payload: "0000000000000080"
+  reencode: "0000000000000000"
+
+- name: f32_zero_made_negative_by_arithmetic
+  schema: "name: t\nfields:\n  - {name: x, type: f32, mult: -1}\n"
+  payload: "00000000"
+  reencode: "00000000"
+
+- name: u8_zero_made_negative_by_arithmetic
+  schema: "name: t\nfields:\n  - {name: x, type: u8, mult: -1}\n"
+  payload: "00"
+  reencode: "00"
