@@ -287,10 +287,18 @@ typedef struct {
     bool nameless;
 } decode_result_t;
 
-/* Variable storage for match conditions */
+/* Variable storage for match conditions.
+ *
+ * What a variable holds is PS-523's binding (CR-2026-109, CR-2026-132): the field's value
+ * after its modifiers and before its lookup - so a text label binds the number under it,
+ * and an enum its code. That value may have a fraction (`div: 2` on a raw 3 binds 1.5),
+ * which an integer cannot hold, so `number` carries it and `integral` says whether
+ * `value` is the same number exactly. */
 typedef struct {
     char name[SCHEMA_MAX_NAME_LEN];
-    int64_t value;
+    int64_t value;      /* the binding, where `integral` */
+    double number;      /* the binding, always */
+    bool integral;
 } variable_t;
 
 typedef struct {
@@ -579,18 +587,55 @@ static inline field_type_t parse_type_string(const char* type_str,
  * Variable Context Management
  * ============================================ */
 
+/* The slot holding `name`, made where it is new; NULL where the table is full. */
+static inline variable_t* var_slot(var_context_t* ctx, const char* name) {
+    for (int i = 0; i < ctx->count; i++) {
+        if (strcmp(ctx->vars[i].name, name) == 0) return &ctx->vars[i];
+    }
+    if (ctx->count >= SCHEMA_MAX_FIELDS) return NULL;
+    variable_t* v = &ctx->vars[ctx->count++];
+    memset(v, 0, sizeof(*v));
+    strncpy(v->name, name, SCHEMA_MAX_NAME_LEN - 1);
+    return v;
+}
+
 static inline void var_set(var_context_t* ctx, const char* name, int64_t value) {
+    variable_t* v = var_slot(ctx, name);
+    if (!v) return;
+    v->value = value;
+    v->number = (double)value;
+    v->integral = true;
+}
+
+/* Bind a number that may have a fraction (PS-523). An integral one inside int64 is held
+ * exactly in `value` as well, so a `match` and a `flagged` mask read it as before. */
+static inline void var_set_number(var_context_t* ctx, const char* name, double number) {
+    variable_t* v = var_slot(ctx, name);
+    if (!v) return;
+    v->number = number;
+    v->integral = number >= -9223372036854775808.0 && number < 9223372036854775808.0
+                  && (double)(int64_t)number == number;
+    v->value = v->integral ? (int64_t)number : 0;
+}
+
+/* Leave `name` unbound: a field a step before its lookup omits binds nothing (PS-523),
+ * and a binding left from an earlier entry - a tlv repeats its cases - must not stand in
+ * for it. */
+static inline void var_unset(var_context_t* ctx, const char* name) {
     for (int i = 0; i < ctx->count; i++) {
         if (strcmp(ctx->vars[i].name, name) == 0) {
-            ctx->vars[i].value = value;
+            ctx->vars[i] = ctx->vars[--ctx->count];
             return;
         }
     }
-    if (ctx->count < SCHEMA_MAX_FIELDS) {
-        strncpy(ctx->vars[ctx->count].name, name, SCHEMA_MAX_NAME_LEN - 1);
-        ctx->vars[ctx->count].value = value;
-        ctx->count++;
+}
+
+/* The binding of `name`, or NULL where it is unbound. */
+static inline const variable_t* var_find(const var_context_t* ctx, const char* name) {
+    for (int i = 0; i < ctx->count; i++) {
+        if (strcmp(ctx->vars[i].name, name) == 0) return &ctx->vars[i];
     }
+    return NULL;
 }
 
 /* Whether a variable was ever set. `var_get` returns 0 for a miss, which for a `flagged`
@@ -772,19 +817,39 @@ static inline bool finish_numeric(
     const field_def_t* field,
     double* value,
     decoded_field_t* out,
-    int* rc
+    int* rc,
+    var_context_t* vars,
+    const int64_t* exact
 ) {
     *rc = SCHEMA_OK;
     if (field->has_mult) *value *= field->mult;
     if (field->has_div) {
         if (field->div == 0) {
-            /* A zero divisor omits the field (PS-100). */
+            /* A zero divisor omits the field (PS-100), and a step before the lookup
+             * that omits the field leaves its reference unbound (PS-523). */
             out->valid = false;
+            if (vars && field->var_name[0]) var_unset(vars, field->var_name);
             return true;
         }
         *value /= field->div;
     }
     if (field->has_add) *value += field->add;
+
+    /* PS-523 (CR-2026-109, CR-2026-132): a reference binds the value here, after the
+     * modifiers and before the lookup - so a text label binds the number under it, an
+     * enum its code, and a mapping with no entry (PS-269) omits the field below while
+     * the reference stays bound. The raw value used to be bound before any of this, so
+     * `div: 10` on a variable bound ten times the value the field reported. `exact` is
+     * the integer read, where there is one, so an unmodified s64 binds without passing
+     * through a double. A lookup that reports a number binds that number instead; this
+     * interpreter holds every label as text (PS-106, a known C gap), so it has none. */
+    if (vars && field->var_name[0]) {
+        if (exact && !field->has_mult && !field->has_div && !field->has_add) {
+            var_set(vars, field->var_name, *exact);
+        } else {
+            var_set_number(vars, field->var_name, *value);
+        }
+    }
 
     if (field->lookup_count == 0) return false;
 
@@ -904,19 +969,25 @@ static inline int decode_field(
             out->value.u64 = endian == ENDIAN_BIG ?
                 read_u64_be(buf + *pos) : read_u64_le(buf + *pos);
             *pos += 8;
-            if (field->var_name[0]) var_set(vars, field->var_name, (int64_t)out->value.u64);
-            if (field_reports_as_integer(field) && field->lookup_count == 0) {
-                /* PS-294: the exact value is already in value.u64. It used to be
-                 * overwritten with (double)value.u64 four lines further on, which is how
-                 * a u64 of 2^64-1 came back as 18446744073709551616. */
-                out->valid = true;
-                return SCHEMA_OK;
-            }
-            /* Carrying a modifier makes the field a `number` (PS-279). */
-            final_value = (double)out->value.u64;
             {
+                /* Bound exactly where int64 holds it; past 2^63 through a double. */
+                const int64_t as_int = (int64_t)out->value.u64;
+                const int64_t* exact = out->value.u64 <= (uint64_t)INT64_MAX ? &as_int : NULL;
+                if (field_reports_as_integer(field) && field->lookup_count == 0) {
+                    /* PS-294: the exact value is already in value.u64. It used to be
+                     * overwritten with (double)value.u64 four lines further on, which is
+                     * how a u64 of 2^64-1 came back as 18446744073709551616. */
+                    if (field->var_name[0]) {
+                        if (exact) var_set(vars, field->var_name, as_int);
+                        else var_set_number(vars, field->var_name, (double)out->value.u64);
+                    }
+                    out->valid = true;
+                    return SCHEMA_OK;
+                }
+                /* Carrying a modifier makes the field a `number` (PS-279). */
+                final_value = (double)out->value.u64;
                 int rc;
-                if (finish_numeric(field, &final_value, out, &rc)) return rc;
+                if (finish_numeric(field, &final_value, out, &rc, vars, exact)) return rc;
             }
             out->value.f64 = final_value;
             out->type = FIELD_TYPE_F64;
@@ -954,8 +1025,10 @@ static inline int decode_field(
                 read_f64_be(buf + *pos) : read_f64_le(buf + *pos);
             *pos += 8;
         finish_float: {
+            /* A float, udec or sdec binds like any field (PS-523); these returned before
+             * the variable was ever set, so a reference to one was unbound. */
             int rc;
-            if (finish_numeric(field, &final_value, out, &rc)) return rc;
+            if (finish_numeric(field, &final_value, out, &rc, vars, NULL)) return rc;
             out->value.f64 = final_value;
             out->valid = true;
             return SCHEMA_OK;
@@ -1107,13 +1180,12 @@ static inline int decode_field(
              * and an integer field carrying the same table and modifiers agree - the two
              * sites used to be separate copies and disagreed twice. A sequence index out
              * of bounds is an error (PS-105); a mapping gap omits the field rather than
-             * reporting "unknown(N)" (PS-269). The variable is recorded either way, so
-             * $references keep working. */
-            if (field->var_name[0]) var_set(vars, field->var_name, raw_value);
+             * reporting "unknown(N)" (PS-269). The variable is bound to the code either
+             * way, by finish_numeric, so $references keep working (PS-523). */
             if (field->lookup_count > 0) {
                 int rc;
                 final_value = (double)raw_value;
-                finish_numeric(field, &final_value, out, &rc);
+                finish_numeric(field, &final_value, out, &rc, vars, &raw_value);
                 return rc;
             }
             break;
@@ -1144,17 +1216,13 @@ static inline int decode_field(
             return SCHEMA_ERR_TYPE;
     }
     
-    /* Store raw value for variable */
-    if (field->var_name[0]) {
-        var_set(vars, field->var_name, raw_value);
-    }
-    
-    /* The modifiers, then the lookup on the modified value (PS-443). A zero divisor
-     * omits the field (PS-100); see finish_numeric for the lookup's two misses. */
+    /* The modifiers, the variable's binding, then the lookup on the modified value
+     * (PS-443, PS-523). A zero divisor omits the field (PS-100); see finish_numeric for
+     * the lookup's two misses. */
     final_value = (double)raw_value;
     {
         int rc;
-        if (finish_numeric(field, &final_value, out, &rc)) return rc;
+        if (finish_numeric(field, &final_value, out, &rc, vars, &raw_value)) return rc;
     }
     if (field_reports_as_integer(field)) {
         /* PS-293: an integer-typed field is delivered through the integer member, so the
@@ -1590,7 +1658,16 @@ static inline int schema_decode_direction(
                          "flagged field reference not found: %s", flags_name);
                 return SCHEMA_ERR_MATCH;
             }
-            const int64_t flags = var_get(&vars, flags_name);
+            const variable_t* mask = var_find(&vars, flags_name);
+            if (!mask->integral) {
+                /* A mask bound to a fraction (PS-523: a scaled field binds its scaled
+                 * value) has no bits to test. */
+                result->error_code = SCHEMA_ERR_MATCH;
+                snprintf(result->error_msg, sizeof(result->error_msg),
+                         "flagged field %s is not an integer", flags_name);
+                return SCHEMA_ERR_MATCH;
+            }
+            const int64_t flags = mask->value;
 
             for (int c = 0; c < field->case_count; c++) {
                 const case_def_t* group = &field->cases[c];
@@ -1761,7 +1838,11 @@ static inline int schema_decode_direction(
             /* Get match variable value */
             const char* var_name = field->match_var;
             if (var_name[0] == '$') var_name++;
-            int64_t match_val = var_get(&vars, var_name);
+            /* The value PS-523 binds. One with a fraction equals no integer key, so only
+             * a default case can take it (PS-524); it used to be truncated to a key. */
+            const variable_t* bound = var_find(&vars, var_name);
+            const bool integral = bound == NULL || bound->integral;
+            int64_t match_val = bound ? bound->value : 0;
             
             /* Find matching case */
             for (int c = 0; c < field->case_count; c++) {
@@ -1770,6 +1851,8 @@ static inline int schema_decode_direction(
                 
                 if (cs->is_default) {
                     matched = true;
+                } else if (!integral) {
+                    matched = false;
                 } else if (cs->match_value == (int)match_val) {
                     matched = true;
                 } else if (cs->range_min != cs->range_max) {
