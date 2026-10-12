@@ -8,7 +8,7 @@ corpus vectors. So nothing measured it, and every gap in it was invisible: it ha
 type for `tlv`, `flagged` or `repeat`, which between them appear in about 60% of the corpus,
 and that was recorded in AGENTS.md as an assertion rather than a measurement.
 
-There is no YAML reader in C (`bindings/c/schema_ffi.c`'s `schema_create_yaml()` is a
+There is no YAML reader in C (`bindings/c/schema_ffi.c`'s `schema_ffi_create_yaml()` is a
 declared stub) and the header parses no binary format - a schema is built through the
 struct API, `field_u8("x")` and `schema_add_field()`. So this generates C that builds each
 expressible schema through that API, compiles it once, runs it, and compares what it printed
@@ -24,14 +24,16 @@ against the vectors' `expected` blocks with the same `values_match` the other ru
 `schema_load_binary`, instead of through the struct API (CR-2026-142). On top of the
 vectors' `expected` blocks it then requires the decoded keys to be exactly the keys the
 reference interpreter reports - with names, the schema's own names and no other; without
-them, each value under its field's index and never under any name (PS-555).
+them, each value under its field's index and never under any name (PS-555). Without them
+it also re-encodes each decode from inputs keyed by field index, as an end device packing
+its own uplinks would (CR-2026-146), and counts the payloads that come back.
 
 **A skipped schema is not a passing one.** The summary separates the two deliberately: the
 count that matters is how many vectors the C interpreter *decodes correctly*, against how
 many the corpus holds. Everything else is a reason it could not be asked.
 
 The expressible subset is what the struct API can build today: plain integers and floats,
-`bool`, a `u8[a:b]` bit range, `skip`, `ascii`/`hex`/`bytes`, `enum`, a `lookup` table, and
+`bool`, a `uN[a:b]` or `sN[a:b]` bit range, `skip`, `ascii`/`hex`/`bytes`, `enum`, a `lookup` table, and
 the `mult`/`div`/`add` modifiers. A construct outside it is named in the skip reasons rather
 than approximated - an approximated schema would report a pass for something the interpreter
 cannot actually do.
@@ -85,10 +87,12 @@ UNREACHABLE_KEYS = {
     # a field type for both now. What remains unreachable about either is size, not shape -
     # see tlv_source() and flagged_source().
     "match": "no inline match support in this harness",
-    # A C gap, not a harness one: FIELD_TYPE_BYTE_GROUP is an enum value with no decode
-    # path in the interpreter, so there is nothing to build (CR-2026-131 widened it in
-    # the other five; C has no group to widen).
-    "byte_group": "the interpreter has no byte_group decode path",
+    # The interpreter decodes a byte_group since the C-interpreter wave (CR-2026-131);
+    # schema_source() builds one at top level. One inside a tlv case or a flagged group
+    # would need its members placed after the case body, which this harness does not
+    # do - a harness limit, so said.
+    "byte_group": "a byte_group nested in a case or group body is not built by this "
+                  "harness (the interpreter decodes one)",
     "object": "no nested object support in this harness",
     "name_from": "no name template in C (fixed-size name buffers)",
     # These say "the interpreter has none" rather than "not built by the struct API",
@@ -128,29 +132,9 @@ UNREACHABLE_KEYS = {
     "separator": "the interpreter has no bytes separator (PS-391)",
 }
 
-BIT_RANGE = re.compile(r"^u(\d+)\[(\d+):(\d+)\]$")
-
-#: CR-2026-114 (la-payload-schema main c932961). The interpreter holds `ascii` text as a
-#: C string, so it stops at the first 0x00 - "AB\0C" is "AB", where PS-534 keeps the NUL
-#: and drops only trailing ones - and copies a byte above 0x7F through as itself rather
-#: than as the ISO 8859-1 character PS-538 requires. Both are interpreter gaps, recorded
-#: in AGENTS.md like the boolean literal; a schema whose vectors expect either is not
-#: attempted, rather than counted as a C failure the harness knows in advance.
-TEXT_GAP = ("ascii text with an interior 0x00 or a byte above 0x7F: the interpreter holds "
-            "text as a C string (PS-534, PS-538, a known C gap)")
-
-
-def expects_text_c_cannot_hold(schema, vectors):
-    """True where a vector expects an ascii value C cannot report (PS-534, PS-538)."""
-    names = {f.get("name") for f in schema.get("fields") or []
-             if isinstance(f, dict) and f.get("type") == "ascii"}
-    for vector in vectors:
-        for key, value in (vector.get("expected") or {}).items():
-            if key in names and isinstance(value, str) and (
-                    "\x00" in value.rstrip("\x00") or any(ord(ch) > 0x7F for ch in value)):
-                return True
-    return False
-
+#: `uN[a:b]` or `sN[a:b]`: the base's sign, its width in bits, and the range (CR-2026-136).
+#: This matched `uN` only and built every range on a one-byte base, whatever N said.
+BIT_RANGE = re.compile(r"^([us])(8|16|24|32|64)\[(\d+):(\d+)\]$")
 
 def c_string(text):
     return '"' + str(text).replace("\\", "\\\\").replace('"', '\\"') + '"'
@@ -188,10 +172,14 @@ def field_source(field, schema_endian):
 
     match = BIT_RANGE.match(ftype)
     if match:
-        start, end = int(match.group(2)), int(match.group(3))
-        consume = "true" if int(field.get("consume", 0) or 0) >= 1 else "false"
-        lines.append(f"    f = field_bits({c_string(name)}, {start}, "
-                     f"{end - start + 1}, {consume});")
+        signed = "true" if match.group(1) == "s" else "false"
+        base = int(match.group(2)) // 8
+        start, end = int(match.group(3)), int(match.group(4))
+        consume = field.get("consume", 0) or 0
+        if not isinstance(consume, int) or not 0 <= consume <= 255:
+            return None, "consume is not a byte count"
+        lines.append(f"    f = field_bit_range({c_string(name)}, {base}, {signed}, "
+                     f"{start}, {end - start + 1}, {consume}, {endian});")
     elif ftype == "bool":
         bit = int(field.get("bit", 0) or 0)
         consume = "true" if int(field.get("consume", 1) or 0) >= 1 else "false"
@@ -439,6 +427,31 @@ def schema_source(index, schema):
             top_level.append(("flagged", flags_field, len(deferred)))
             deferred.append([(bit, members) for bit, members in groups])
             continue
+        if "byte_group" in field and not field.get("type"):
+            group = field["byte_group"]
+            members = group.get("fields") if isinstance(group, dict) else group
+            if not isinstance(members, list) or not members:
+                return None, "a byte_group has no members"
+            # The array form takes `size` from beside it (CR-2026-019).
+            size = (group.get("size", 0) if isinstance(group, dict)
+                    else field.get("size", 0)) or 0
+            if not isinstance(size, int) or not 0 <= size <= 8:
+                return None, "a byte_group size is not 0 to 8 bytes"
+            g_endian = group.get("endian") if isinstance(group, dict) else None
+            built = []
+            for member in members:
+                if not isinstance(member, dict):
+                    return None, "a byte_group member is not a mapping"
+                lines, reason = field_source(member, schema.get("endian"))
+                if lines is None:
+                    return None, reason
+                built.append(lines)
+            ctor = (f"field_byte_group({size}, "
+                    f"{ {'little': 'ENDIAN_LITTLE', 'big': 'ENDIAN_BIG'}.get(g_endian, 'ENDIAN_DEFAULT') }"
+                    ", {start}, {count})")
+            top_level.append(("group", ctor, len(deferred)))
+            deferred.append([(None, built)])
+            continue
         lines, reason = field_source(field, schema.get("endian"))
         if lines is None:
             return None, reason
@@ -481,6 +494,11 @@ def schema_source(index, schema):
                 body.append(f'    strncpy(f.var_name, "{name}", SCHEMA_MAX_NAME_LEN - 1);')
                 body.append(add)
             continue
+        if kind == "group":
+            _, start, count = case_calls[group_index][0]
+            body.append(f"    f = {payload.format(start=start, count=count)};")
+            body.append("    schema_add_field(s, &f);")
+            continue
         if kind == "flagged":
             body.append(f"    f = field_flagged({c_string(payload)});")
             for bit, start, count in case_calls[group_index]:
@@ -515,6 +533,46 @@ PROGRAM_HEAD = '''/* Generated by tools/c-corpus-harness.py - do not edit, and d
 /* Set by a blob builder (--from-blob) whose blob schema_load_binary refuses. */
 static int load_failed;
 static char load_error[256];
+/* --from-blob nameless: re-encode each decode from index-keyed inputs (PS-555,
+ * CR-2026-146) and say whether the payload comes back. */
+static int round_trip_by_index;
+
+static void round_trip(const schema_t* s, const decode_result_t* r,
+                       const uint8_t* payload, int len) {
+    encode_inputs_t in;
+    encode_result_t out;
+    encode_inputs_init(&in);
+    for (int i = 0; i < r->field_count; i++) {
+        const decoded_field_t* d = &r->fields[i];
+        const field_def_t* f = &s->fields[d->field_index];
+        if (f->lookup_count > 0) {
+            /* This encoder takes a code, not a label; the decode reported the label. */
+            printf("R\\tlabel\\n");
+            return;
+        }
+        switch (d->type) {
+            case FIELD_TYPE_F16: case FIELD_TYPE_F32: case FIELD_TYPE_F64:
+                encode_inputs_add_double_at(&in, d->field_index, d->value.f64); break;
+            case FIELD_TYPE_BOOL:
+                encode_inputs_add_int_at(&in, d->field_index, d->value.b ? 1 : 0); break;
+            case FIELD_TYPE_ASCII: case FIELD_TYPE_HEX: case FIELD_TYPE_BASE64:
+            case FIELD_TYPE_BYTES: case FIELD_TYPE_ENUM:
+                printf("R\\tunsupported\\n");
+                return;
+            default:
+                encode_inputs_add_int_at(&in, d->field_index, d->value.i64); break;
+        }
+    }
+    int rc = schema_encode(s, &in, &out);
+    if (rc != SCHEMA_OK) { printf("R\\terror\\t%s\\n", out.error_msg); return; }
+    if (out.len == len && memcmp(out.data, payload, (size_t)len) == 0) {
+        printf("R\\tok\\n");
+        return;
+    }
+    printf("R\\tdiffer\\t");
+    for (int b = 0; b < out.len; b++) printf("%02x", out.data[b]);
+    printf("\\n");
+}
 
 static void emit(const char* schema, const char* vector,
                  const uint8_t* payload, int len,
@@ -534,12 +592,7 @@ static void emit(const char* schema, const char* vector,
         printf("E\\t%s\\n", r.error_msg);
         return;
     }
-    /* PS-472. The interpreter has no warning list; it reports the leftover bytes as two
-     * numbers, and this renders them as the warning the other five would give, so a
-     * vector's `expected_warnings` is checked here too. */
-    if (r.bytes_unread > 0)
-        printf("W\\t%d byte(s) after the last field left undecoded, from offset %d "
-               "(PS-472)\\n", r.bytes_unread, r.bytes_consumed);
+    if (round_trip_by_index) round_trip(&s, &r, payload, len);
     for (int i = 0; i < r.field_count; i++) {
         const decoded_field_t* d = &r.fields[i];
         if (!d->valid) continue;
@@ -577,7 +630,20 @@ static void emit(const char* schema, const char* vector,
                 printf("F\\t%s\\t%.10g\\n", key, d->value.f64); break;
             case FIELD_TYPE_BOOL:
                 printf("B\\t%s\\t%s\\n", key, d->value.b ? "true" : "false"); break;
-            case FIELD_TYPE_ASCII: case FIELD_TYPE_HEX: case FIELD_TYPE_BASE64:
+            case FIELD_TYPE_ASCII:
+                /* CR-2026-114: `text_len` bytes, a 0x00 among them kept (PS-534), each
+                 * the ISO 8859-1 character of the same number (PS-538) - printed as hex
+                 * so neither survives only by luck, and read back as Latin-1. The PS-073
+                 * warning is a flag here, rendered as the text the other five give. */
+                printf("T\\t%s\\t", key);
+                for (int b = 0; b < d->text_len; b++)
+                    printf("%02x", (unsigned char)d->value.str[b]);
+                printf("\\n");
+                if (d->non_ascii)
+                    printf("W\\tField '%s': a byte above 0x7F in an ascii value "
+                           "(PS-073, PS-538)\\n", d->name);
+                break;
+            case FIELD_TYPE_HEX: case FIELD_TYPE_BASE64:
             case FIELD_TYPE_ENUM:
                 printf("S\\t%s\\t%s\\n", key, d->value.str); break;
             case FIELD_TYPE_BYTES:
@@ -596,6 +662,13 @@ static void emit(const char* schema, const char* vector,
                 break;
         }
     }
+    /* PS-472. The interpreter has no warning list; it reports the leftover bytes as two
+     * numbers, and this renders them as the warning the other five would give, so a
+     * vector's `expected_warnings` is checked here too. Last, where the others report
+     * it: after every field's own warning. */
+    if (r.bytes_unread > 0)
+        printf("W\\t%d byte(s) after the last field left undecoded, from offset %d "
+               "(PS-472)\\n", r.bytes_unread, r.bytes_consumed);
 }
 
 '''
@@ -655,6 +728,19 @@ def reference_keys(schema, vector):
     return {k for k in result.data if not k.startswith("_")}
 
 
+def reference_round_trips(schema, vector):
+    """Whether the reference interpreter's encode(decode(payload)) gives the payload."""
+    from schema_interpreter import SchemaInterpreter
+
+    payload = bytes.fromhex(str(vector["payload"]).replace(" ", ""))
+    interpreter = SchemaInterpreter(schema)
+    decoded = interpreter.decode(payload)
+    if not decoded.success:
+        return False
+    encoded = interpreter.encode(decoded.data)
+    return bool(encoded.success) and bytes(encoded.payload) == payload
+
+
 def blob_keys_problem(schema, fields, vector, nameless):
     """Why the keys C decoded from a blob are not the schema's, or None (PS-555).
 
@@ -684,11 +770,13 @@ def blob_keys_problem(schema, fields, vector, nameless):
     return None, fields
 
 
-def build_program(entries):
+def build_program(entries, round_trip=False):
     parts = [PROGRAM_HEAD]
     for index, (_, _, source, _) in entries:
         parts.append("\n".join(source) + "\n\n")
     parts.append("int main(void) {\n")
+    if round_trip:
+        parts.append("    round_trip_by_index = 1;\n")
     for index, (schema_name, vectors, _, _) in entries:
         for vector in vectors:
             payload = bytes.fromhex(str(vector["payload"]).replace(" ", ""))
@@ -701,12 +789,21 @@ def build_program(entries):
     return "".join(parts)
 
 
+#: (schema, vector) -> the round trip's verdict, ["ok"] or ["differ", hex] and so on.
+ROUND_TRIPS = {}
+
+
 def parse_output(text):
-    """The generated program's output, as {(schema, vector): (rc, {name: value}, [warning])}."""
+    """The generated program's output, as {(schema, vector): (rc, {name: value}, [warning])}.
+
+    A round trip by index (--from-blob nameless) is collected into ROUND_TRIPS."""
     results = {}
     current = None
     for line in text.splitlines():
         parts = line.split("\t")
+        if parts[0] == "R" and current is not None:
+            ROUND_TRIPS[current] = parts[1:]
+            continue
         if parts[0] == "V" and len(parts) >= 5:
             current = (parts[1], parts[2])
             results[current] = (int(parts[3]), {}, [])
@@ -722,6 +819,8 @@ def parse_output(text):
             results[current][1][parts[1]] = parts[2] == "true"
         elif parts[0] == "S":
             results[current][1][parts[1]] = parts[2]
+        elif parts[0] == "T":
+            results[current][1][parts[1]] = bytes.fromhex(parts[2]).decode("latin-1")
     return results
 
 
@@ -758,12 +857,6 @@ def run():
         if not vectors:
             continue
         vector_total += len(vectors)
-        if expects_text_c_cannot_hold(schema, vectors):
-            # Asked of the interpreter, not of this harness: it would build the schema and
-            # report something else.
-            skips[TEXT_GAP] += 1
-            skipped_vectors += len(vectors)
-            continue
         if args.from_blob:
             import schema_binary
 
@@ -798,7 +891,7 @@ def run():
         entries.append((len(entries), (path.name, vectors, source, schema)))
 
     entries = [(i, payload) for i, payload in enumerate(p for _, p in entries)]
-    program = build_program(entries)
+    program = build_program(entries, round_trip=args.from_blob == "nameless")
 
     with tempfile.TemporaryDirectory() as tmp:
         csrc = pathlib.Path(tmp) / "harness.c"
@@ -870,6 +963,25 @@ def run():
           + ("the binary form cannot carry" if args.from_blob
              else "the struct API cannot build"))
     print(f"  {vector_total:>5} vectors in the corpus altogether")
+    if ROUND_TRIPS:
+        # A payload the reference cannot rebuild either - bytes after the last field
+        # (PS-472), non-zero `skip` padding - is information the decode does not carry,
+        # not an encoder defect; tools/encode-round-trip.py calls it lossy too.
+        by_key = {(name, v.get("name", "?")): (schema, v)
+                  for _, (name, vs, _, schema) in entries for v in vs}
+        for key, verdict in ROUND_TRIPS.items():
+            if verdict[0] == "differ" and not reference_round_trips(*by_key[key]):
+                ROUND_TRIPS[key] = ["lossy"]
+        verdicts = collections.Counter(v[0] for v in ROUND_TRIPS.values())
+        print(f"  {verdicts['ok']:>5} of {len(ROUND_TRIPS)} re-encode to their payload from "
+              "index-keyed inputs (PS-555, CR-2026-146)")
+        for verdict, count in sorted(verdicts.items()):
+            if verdict != "ok":
+                print(f"  {count:>5} {verdict}" + {
+                    "label": " - a lookup label; this encoder takes the code",
+                    "unsupported": " - a text or bytes value; no index-keyed input for it",
+                    "lossy": " - the reference does not rebuild the payload either",
+                }.get(verdict, ""))
     print()
     print("  Why a schema was not attempted:")
     for reason, count in skips.most_common():
@@ -879,6 +991,10 @@ def run():
         print()
         for (schema_name, vector), detail in failures:
             print(f"  {schema_name}::{vector}: {detail}")
+    if args.failures:
+        for (schema_name, vector), verdict in ROUND_TRIPS.items():
+            if verdict[0] in ("differ", "error"):
+                print(f"  round trip {schema_name}::{vector}: {' '.join(verdict)}")
     if unreportable and args.failures:
         print()
         print("  Warnings the C interpreter cannot give:")

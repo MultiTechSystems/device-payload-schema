@@ -1081,6 +1081,531 @@ static void test_a_covered_peek_is_derived(void) {
     }
 }
 
+/* PS-555 (CR-2026-146): "an encoder working from such a form takes each value by the
+ * same index". The nameless blob above - u16, skip 1, u8 - encoded from values keyed by
+ * field index, as its decode reports them; a named schema keeps name keying, and the two
+ * are not mixed. */
+static void test_a_nameless_schema_encodes_by_index(void) {
+    uint8_t blob[5 + 12];
+    memcpy(blob, named_blob, sizeof(blob));
+    blob[4] = 3;                                  /* no name table */
+    schema_t s;
+    decode_result_t r;
+    encode_inputs_t in;
+    encode_result_t out;
+    TCHECK(schema_load_binary(&s, blob, sizeof(blob)) == SCHEMA_OK && s.nameless);
+
+    encode_inputs_init(&in);
+    TCHECK(encode_inputs_add_int_at(&in, 0, 0x0102));
+    TCHECK(encode_inputs_add_double_at(&in, 2, 7.0));
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_OK);
+    TCHECK(out.len == 4 && out.data[0] == 0x01 && out.data[1] == 0x02
+           && out.data[2] == 0x00 && out.data[3] == 0x07);
+
+    /* Decode, then encode the values by the indexes they were reported under. */
+    TCHECK(schema_decode(&s, named_payload, sizeof(named_payload), &r) == SCHEMA_OK);
+    encode_inputs_init(&in);
+    for (int i = 0; i < r.field_count; i++)
+        encode_inputs_add_int_at(&in, r.fields[i].field_index, r.fields[i].value.i64);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_OK);
+    TCHECK(out.len == 4 && memcmp(out.data, "\x01\x02\x00\x07", 4) == 0);
+
+    /* A missing index, and a value that does not fit, are named by their index. */
+    encode_inputs_init(&in);
+    encode_inputs_add_int_at(&in, 0, 1);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_PARSE && out.len == 0);
+    TCHECK(strcmp(out.error_msg, "Missing required field: #2") == 0);
+    encode_inputs_add_int_at(&in, 2, 256);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_OVERFLOW);
+    TCHECK(strcmp(out.error_msg, "Field '#2': 256 encodes as 256, outside 0 to 255 "
+                                 "(PS-168)") == 0);
+
+    /* A name-keyed input for a nameless schema is refused, not ignored. */
+    encode_inputs_init(&in);
+    encode_inputs_add_int_at(&in, 0, 1);
+    encode_inputs_add_int_at(&in, 2, 1);
+    encode_inputs_add_int(&in, "battery", 7);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_PARSE);
+    TCHECK(strcmp(out.error_msg, "input 'battery' is keyed by name, and a schema without "
+                                 "names takes each value by its field index (PS-555)") == 0);
+
+    /* And the other way round: the named blob takes names. */
+    schema_t named;
+    TCHECK(schema_load_binary(&named, named_blob, sizeof(named_blob)) == SCHEMA_OK);
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "soil_temperature", 1);
+    encode_inputs_add_int_at(&in, 2, 7);
+    TCHECK(schema_encode(&named, &in, &out) == SCHEMA_ERR_PARSE);
+    TCHECK(strcmp(out.error_msg, "input '#2' is keyed by field index, and a schema with "
+                                 "names takes each value by name (PS-555)") == 0);
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "soil_temperature", 0x0102);
+    encode_inputs_add_int(&in, "battery", 7);
+    TCHECK(schema_encode(&named, &in, &out) == SCHEMA_OK);
+    TCHECK(out.len == 4 && memcmp(out.data, "\x01\x02\x00\x07", 4) == 0);
+
+    TCHECK(!encode_inputs_add_int_at(&in, SCHEMA_MAX_FIELDS, 1));
+    TCHECK(!encode_inputs_add_int_at(&in, -1, 1));
+}
+
+/* PS-523 (CR-2026-109, CR-2026-132): a reference binds the value after the modifiers
+ * and before the lookup. A `flagged` mask is a reference, so it shows what was bound:
+ * bit 0 adds `a`, bit 1 adds `b` - mask-reference-binding.yaml's layout. */
+static int decode_masked(field_def_t mask, const uint8_t* p, size_t len, decode_result_t* r) {
+    schema_t s;
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_set_var(&mask, "mask");
+    schema_add_field(&s, &mask);
+    field_def_t fl = field_flagged("$mask");
+    field_add_flagged_group(&fl, 0, 2, 1);
+    field_add_flagged_group(&fl, 1, 3, 1);
+    schema_add_field(&s, &fl);
+    field_def_t a = field_u8("a");
+    field_def_t b = field_u8("b");
+    schema_place_field(&s, 2, &a);
+    schema_place_field(&s, 3, &b);
+    return schema_decode(&s, p, len, r);
+}
+
+static void test_a_text_label_binds_its_number(void) {
+    decode_result_t r;
+    field_def_t m = field_u8("mask");
+    field_add_lookup(&m, 2, "two");
+    const uint8_t p[] = {0x02, 0x07};
+    TCHECK(decode_masked(m, p, sizeof(p), &r) == SCHEMA_OK);
+    TCHECK(strcmp(result_get_string(&r, "mask"), "two") == 0);
+    TCHECK(result_get_field(&r, "a") == NULL);
+    TCHECK(result_get_int(&r, "b", -1) == 7);
+
+    /* A mapping with no entry omits the field and leaves the reference bound. */
+    const uint8_t q[] = {0x03, 0x07, 0x08};
+    TCHECK(decode_masked(m, q, sizeof(q), &r) == SCHEMA_OK);
+    TCHECK(result_get_field(&r, "mask") == NULL);
+    TCHECK(result_get_int(&r, "a", -1) == 7 && result_get_int(&r, "b", -1) == 8);
+}
+
+static void test_an_enum_binds_its_code(void) {
+    decode_result_t r;
+    field_def_t m = field_enum("mask", 1);
+    field_add_lookup(&m, 3, "both");
+    const uint8_t p[] = {0x03, 0x07, 0x08};
+    TCHECK(decode_masked(m, p, sizeof(p), &r) == SCHEMA_OK);
+    TCHECK(strcmp(result_get_string(&r, "mask"), "both") == 0);
+    TCHECK(result_get_int(&r, "a", -1) == 7 && result_get_int(&r, "b", -1) == 8);
+}
+
+static void test_a_reference_binds_the_modified_value(void) {
+    decode_result_t r;
+    field_def_t m = field_u8("mask");
+    field_set_div(&m, 2);
+    /* Raw 4 reports 2 and binds 2 - bit 1. Binding the raw 4 selected no group. */
+    const uint8_t p[] = {0x04, 0x07};
+    TCHECK(decode_masked(m, p, sizeof(p), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 2 && result_get_int(&r, "b", -1) == 7);
+
+    /* Raw 3 binds 1.5, which has no bits. */
+    const uint8_t q[] = {0x03, 0x07};
+    TCHECK(decode_masked(m, q, sizeof(q), &r) == SCHEMA_ERR_MATCH);
+    TCHECK(strcmp(r.error_msg, "flagged field mask is not an integer") == 0);
+
+    /* A zero divisor omits the field and leaves the reference unbound. */
+    field_def_t z = field_u8("mask");
+    field_set_div(&z, 0);
+    TCHECK(decode_masked(z, p, sizeof(p), &r) == SCHEMA_ERR_MATCH);
+    TCHECK(strcmp(r.error_msg, "flagged field reference not found: mask") == 0);
+
+    /* A float binds too; it returned before the variable was set. */
+    field_def_t f = field_f32("mask", ENDIAN_BIG);
+    const uint8_t fl[] = {0x40, 0x00, 0x00, 0x00, 0x07};   /* 2.0f */
+    TCHECK(decode_masked(f, fl, sizeof(fl), &r) == SCHEMA_OK);
+    TCHECK(result_get_int(&r, "b", -1) == 7);
+}
+
+/* CR-2026-114 (PS-534, PS-538): ascii is ISO 8859-1, and only trailing 0x00 is
+ * padding. The payloads are ascii-latin1.yaml's. */
+static int decode_label(const uint8_t* payload, size_t len, decode_result_t* r) {
+    schema_t s;
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t f = field_ascii("label", 6);
+    schema_add_field(&s, &f);
+    return schema_decode(&s, payload, len, r);
+}
+
+static void test_ascii_keeps_an_interior_nul(void) {
+    decode_result_t r;
+    const uint8_t p[] = {0x41, 0x42, 0x00, 0x43, 0x00, 0x00};
+    TCHECK(decode_label(p, sizeof(p), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 1 && r.fields[0].text_len == 4);
+    TCHECK(memcmp(r.fields[0].value.str, "AB\0C", 4) == 0);
+    TCHECK(!r.fields[0].non_ascii);
+
+    const uint8_t zeros[] = {0, 0, 0, 0, 0, 0};
+    TCHECK(decode_label(zeros, sizeof(zeros), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 1 && r.fields[0].text_len == 0 && r.fields[0].value.str[0] == 0);
+    TCHECK(r.bytes_consumed == 6);
+
+    /* A space is text, not padding. */
+    const uint8_t space[] = {0x48, 0x43, 0x20, 0x00, 0x00, 0x00};
+    TCHECK(decode_label(space, sizeof(space), &r) == SCHEMA_OK);
+    TCHECK(r.fields[0].text_len == 3 && strcmp(r.fields[0].value.str, "HC ") == 0);
+}
+
+static void test_ascii_reports_a_high_byte_as_itself(void) {
+    decode_result_t r;
+    const uint8_t p[] = {0x80, 0xA0, 0xFF, 0x41, 0x00, 0x00};
+    TCHECK(decode_label(p, sizeof(p), &r) == SCHEMA_OK);
+    TCHECK(r.fields[0].text_len == 4);
+    TCHECK(memcmp(r.fields[0].value.str, "\x80\xA0\xFF" "A", 4) == 0);
+    TCHECK(r.fields[0].non_ascii);
+}
+
+static void test_ascii_is_never_truncated(void) {
+    schema_t s;
+    decode_result_t r;
+    uint8_t p[40];
+    memset(&s, 0, sizeof(s));
+    field_def_t f = field_ascii("serial", 40);
+    schema_add_field(&s, &f);
+    memset(p, 0, sizeof(p));
+    memset(p, 'x', 31);
+    TCHECK(schema_decode(&s, p, sizeof(p), &r) == SCHEMA_OK);   /* 31 fit */
+    TCHECK(r.fields[0].text_len == 31);
+    p[31] = 'y';
+    TCHECK(schema_decode(&s, p, sizeof(p), &r) == SCHEMA_ERR_UNSUPPORTED);
+    TCHECK(r.field_count == 0);
+    TCHECK(strcmp(r.error_msg, "Field 'serial': an ascii value longer than the 31 bytes "
+                               "this interpreter holds, not truncated (PS-538)") == 0);
+}
+
+/* PS-537: padded with 0x00, written byte for byte, and longer than `length` rejected. */
+static int encode_label(const uint8_t* text, size_t len, encode_result_t* out) {
+    schema_t s;
+    encode_inputs_t inputs;
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t f = field_ascii("label", 6);
+    field_def_t g = field_u8("n");
+    schema_add_field(&s, &f);
+    schema_add_field(&s, &g);
+    encode_inputs_init(&inputs);
+    TCHECK(encode_inputs_add_text(&inputs, "label", text, len));
+    encode_inputs_add_int(&inputs, "n", 7);
+    return schema_encode(&s, &inputs, out);
+}
+
+static void test_ascii_encodes_padded(void) {
+    encode_result_t out;
+    TCHECK(encode_label((const uint8_t*)"AB\0C", 4, &out) == SCHEMA_OK);
+    TCHECK(out.len == 7);
+    TCHECK(memcmp(out.data, "\x41\x42\x00\x43\x00\x00\x07", 7) == 0);
+    TCHECK(!out.non_ascii);
+
+    TCHECK(encode_label((const uint8_t*)"A\xE9", 2, &out) == SCHEMA_OK);
+    TCHECK(memcmp(out.data, "\x41\xE9\x00\x00\x00\x00\x07", 7) == 0);
+    TCHECK(out.non_ascii);
+
+    TCHECK(encode_label((const uint8_t*)"ABCDEFG", 7, &out) == SCHEMA_ERR_OVERFLOW);
+    TCHECK(out.len == 0);
+    TCHECK(strcmp(out.error_msg, "Field 'label': an ascii value of 7 bytes is longer than "
+                                 "its length of 6 (PS-537)") == 0);
+
+    /* A decoded value re-encodes to its own bytes. */
+    decode_result_t r;
+    const uint8_t p[] = {0x80, 0xA0, 0xFF, 0x41, 0x00, 0x00};
+    TCHECK(decode_label(p, sizeof(p), &r) == SCHEMA_OK);
+    TCHECK(encode_label((const uint8_t*)r.fields[0].value.str, r.fields[0].text_len,
+                        &out) == SCHEMA_OK);
+    TCHECK(memcmp(out.data, p, sizeof(p)) == 0);
+}
+
+static void test_ascii_and_numbers_are_not_mixed(void) {
+    schema_t s;
+    encode_inputs_t inputs;
+    encode_result_t out;
+    memset(&s, 0, sizeof(s));
+    field_def_t f = field_ascii("label", 2);
+    schema_add_field(&s, &f);
+    encode_inputs_init(&inputs);
+    encode_inputs_add_int(&inputs, "label", 5);
+    TCHECK(schema_encode(&s, &inputs, &out) == SCHEMA_ERR_TYPE);
+    TCHECK(strcmp(out.error_msg, "Field 'label': an ascii value is text, and a number "
+                                 "was given") == 0);
+
+    memset(&s, 0, sizeof(s));
+    field_def_t n = field_u8("n");
+    schema_add_field(&s, &n);
+    encode_inputs_init(&inputs);
+    TCHECK(encode_inputs_add_string(&inputs, "n", "5"));
+    TCHECK(schema_encode(&s, &inputs, &out) == SCHEMA_ERR_TYPE);
+    TCHECK(strcmp(out.error_msg, "Field 'n': text was given for a u8 field") == 0);
+
+    /* Text the input cannot hold is refused, not truncated. */
+    char longer[40];
+    memset(longer, 'x', sizeof(longer) - 1);
+    longer[sizeof(longer) - 1] = 0;
+    TCHECK(!encode_inputs_add_string(&inputs, "label", longer));
+}
+
+/* CR-2026-131 (PS-070, PS-364, PS-397), CR-2026-137 (PS-535): a byte_group is one value
+ * of its widest member's base, in its own byte order; members name bits of it. Layouts
+ * are byte-group-width.yaml's, byte-group-bool.yaml's and tlv-nameless-case.yaml's. */
+static void build_group(schema_t* s, uint8_t size, endian_t e, field_def_t* m, int n,
+                        bool trailer) {
+    memset(s, 0, sizeof(*s));
+    s->endian = ENDIAN_BIG;
+    field_def_t g = field_byte_group(size, e, 4, n);
+    schema_add_field(s, &g);
+    if (trailer) {
+        field_def_t t = field_u8("after");
+        schema_add_field(s, &t);
+    }
+    for (int i = 0; i < n; i++) schema_place_field(s, 4 + i, &m[i]);
+}
+
+static void test_a_byte_group_reads_one_value(void) {
+    schema_t s;
+    decode_result_t r;
+    {   /* No size: as wide as u16; little-endian, so s8 is the first byte. */
+        field_def_t m[] = { field_s8("signed_low"),
+                            field_bit_range("mid", 2, false, 8, 4, 0, ENDIAN_DEFAULT) };
+        build_group(&s, 0, ENDIAN_LITTLE, m, 2, true);
+        const uint8_t p[] = {0xFE, 0x03, 0x44};
+        TCHECK(schema_decode(&s, p, sizeof(p), &r) == SCHEMA_OK);
+        TCHECK(r.field_count == 3 && r.bytes_consumed == 3);
+        TCHECK(result_get_int(&r, "signed_low", 0) == -2);
+        TCHECK(result_get_int(&r, "mid", 0) == 3);
+        TCHECK(result_get_int(&r, "after", 0) == 0x44);
+    }
+    {   /* size: 3 widens a u16 group; u32 members in a four-byte little-endian one. */
+        field_def_t m[] = { field_bit_range("lo", 2, false, 0, 8, 0, ENDIAN_DEFAULT),
+                            field_bit_range("hi", 2, false, 8, 8, 0, ENDIAN_DEFAULT) };
+        build_group(&s, 3, ENDIAN_LITTLE, m, 2, true);
+        const uint8_t p[] = {0x34, 0x12, 0x00, 0x33};
+        TCHECK(schema_decode(&s, p, sizeof(p), &r) == SCHEMA_OK);
+        TCHECK(result_get_int(&r, "lo", 0) == 0x34 && result_get_int(&r, "hi", 0) == 0x12);
+        TCHECK(result_get_int(&r, "after", 0) == 0x33);
+    }
+    {   /* bools and a range in one byte. */
+        field_def_t m[] = { field_bool("flag_a", 0, false),
+                            field_bit_range("level", 1, false, 1, 3, 0, ENDIAN_DEFAULT),
+                            field_bool("flag_b", 7, false) };
+        build_group(&s, 1, ENDIAN_DEFAULT, m, 3, true);
+        const uint8_t p[] = {0x83, 0x2A};
+        TCHECK(schema_decode(&s, p, sizeof(p), &r) == SCHEMA_OK);
+        TCHECK(result_get_field(&r, "flag_a")->value.b);
+        TCHECK(result_get_field(&r, "flag_b")->value.b);
+        TCHECK(result_get_int(&r, "level", 0) == 1 && result_get_int(&r, "after", 0) == 42);
+    }
+}
+
+static void test_a_byte_group_is_checked(void) {
+    schema_t s;
+    decode_result_t r;
+    field_def_t m[] = { field_bit_range("a", 2, false, 0, 4, 0, ENDIAN_DEFAULT),
+                        field_bit_range("_b", 2, false, 4, 4, 0, ENDIAN_DEFAULT) };
+    build_group(&s, 0, ENDIAN_DEFAULT, m, 2, false);
+    const uint8_t one[] = {0x34};
+    TCHECK(schema_decode(&s, one, sizeof(one), &r) == SCHEMA_ERR_BUFFER);
+    TCHECK(strcmp(r.error_msg, "Field byte_group of 'a', '_b': Buffer underflow at peek "
+                               "offset 0 (PS-535)") == 0);
+    /* The internal member decodes and is not reported. */
+    const uint8_t two[] = {0x00, 0x21};
+    TCHECK(schema_decode(&s, two, sizeof(two), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 1 && result_get_int(&r, "a", 0) == 1);
+
+    build_group(&s, 1, ENDIAN_DEFAULT, m, 2, false);
+    TCHECK(schema_decode(&s, two, sizeof(two), &r) == SCHEMA_ERR_TYPE);
+    TCHECK(strcmp(r.error_msg, "byte_group declares size 1, narrower than its widest "
+                               "member's 2 bytes (PS-070)") == 0);
+
+    field_def_t o[] = { field_bit_range("a", 1, false, 0, 4, 0, ENDIAN_DEFAULT),
+                        field_bit_range("b", 1, false, 3, 3, 0, ENDIAN_DEFAULT) };
+    build_group(&s, 0, ENDIAN_DEFAULT, o, 2, false);
+    TCHECK(schema_decode(&s, two, sizeof(two), &r) == SCHEMA_ERR_TYPE);
+    TCHECK(strcmp(r.error_msg, "byte_group members 'a' and 'b' overlap (PS-397)") == 0);
+
+    field_def_t b[] = { field_bool("a", 9, false) };
+    build_group(&s, 2, ENDIAN_DEFAULT, b, 1, false);
+    TCHECK(schema_decode(&s, two, sizeof(two), &r) == SCHEMA_ERR_TYPE);
+    TCHECK(strcmp(r.error_msg, "byte_group member 'a' is a bool at bit 9; a bool member "
+                               "is one bit of a u8, 0 to 7 (PS-070)") == 0);
+}
+
+static void test_a_byte_group_in_a_tlv_case(void) {
+    schema_t s;
+    decode_result_t r;
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t t = field_tlv(1, 1);
+    field_add_tlv_case(&t, 0x20, 2, 1);
+    schema_add_field(&s, &t);
+    field_def_t g = field_byte_group(1, ENDIAN_DEFAULT, 3, 2);
+    field_def_t c = field_bit_range("charger_status", 1, false, 0, 2, 0, ENDIAN_DEFAULT);
+    field_def_t d = field_bit_range("device_status", 1, false, 4, 4, 0, ENDIAN_DEFAULT);
+    schema_place_field(&s, 2, &g);
+    schema_place_field(&s, 3, &c);
+    schema_place_field(&s, 4, &d);
+    const uint8_t p[] = {0x20, 0x01, 0x51};
+    TCHECK(schema_decode(&s, p, sizeof(p), &r) == SCHEMA_OK);
+    TCHECK(result_get_int(&r, "charger_status", -1) == 1);
+    TCHECK(result_get_int(&r, "device_status", -1) == 5);
+}
+
+static void test_a_byte_group_encodes_as_decoded(void) {
+    schema_t s;
+    encode_inputs_t in;
+    encode_result_t out;
+    field_def_t m[] = { field_s8("signed_low"),
+                        field_bit_range("mid", 2, false, 8, 4, 0, ENDIAN_DEFAULT) };
+    build_group(&s, 0, ENDIAN_LITTLE, m, 2, true);
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "signed_low", -2);
+    encode_inputs_add_int(&in, "mid", 3);
+    encode_inputs_add_int(&in, "after", 0x44);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_OK);
+    TCHECK(out.len == 3 && out.data[0] == 0xFE && out.data[1] == 0x03 && out.data[2] == 0x44);
+
+    /* A member's value is checked as the member it is (PS-168). */
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "signed_low", -200);
+    encode_inputs_add_int(&in, "mid", 3);
+    encode_inputs_add_int(&in, "after", 1);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_OVERFLOW && out.len == 0);
+    TCHECK(strcmp(out.error_msg, "Field 'signed_low': -200 encodes as -200, outside -128 "
+                                 "to 127 (PS-168)") == 0);
+
+    /* A member left out is missing; an internal one is PS-434's. */
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "signed_low", 1);
+    encode_inputs_add_int(&in, "after", 1);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_PARSE);
+    TCHECK(strcmp(out.error_msg, "Missing required field: mid") == 0);
+    field_def_t i[] = { field_bit_range("a", 2, false, 0, 4, 0, ENDIAN_DEFAULT),
+                        field_bit_range("_b", 2, false, 4, 4, 0, ENDIAN_DEFAULT) };
+    build_group(&s, 0, ENDIAN_DEFAULT, i, 2, false);
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "a", 1);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_PARSE);
+    TCHECK(strcmp(out.error_msg, "internal field '_b' reads payload bytes and declares no "
+                                 "value, and the input does not supply it (PS-434)") == 0);
+
+    /* Bools at their bits, uncovered bits zero (PS-397). */
+    field_def_t b[] = { field_bool("flag_a", 0, false),
+                        field_bit_range("level", 1, false, 1, 3, 0, ENDIAN_DEFAULT),
+                        field_bool("flag_b", 7, false) };
+    build_group(&s, 1, ENDIAN_DEFAULT, b, 3, true);
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "flag_a", 1);
+    encode_inputs_add_int(&in, "level", 1);
+    encode_inputs_add_int(&in, "flag_b", 1);
+    encode_inputs_add_int(&in, "after", 42);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_OK);
+    TCHECK(out.len == 2 && out.data[0] == 0x83 && out.data[1] == 0x2A);
+}
+
+/* CR-2026-136 (PS-059, PS-352, PS-353, PS-365): a bit range's base is N/8 bytes in the
+ * field's byte order, an `sN` range sign-extends from its width, and encoding writes the
+ * base back in the same order. The layout and payload are bit-range-order.yaml's,
+ * without its byte_group. */
+static void build_wide_ranges(schema_t* s) {
+    memset(s, 0, sizeof(*s));
+    s->endian = ENDIAN_BIG;
+    field_def_t f[] = {
+        field_bit_range("low12", 2, false, 0, 12, 0, ENDIAN_LITTLE),
+        field_bit_range("top4", 2, true, 12, 4, 2, ENDIAN_LITTLE),
+        field_bit_range("nibble", 1, true, 0, 4, 1, ENDIAN_DEFAULT),
+        field_bit_range("middle", 2, false, 4, 8, 2, ENDIAN_DEFAULT),
+    };
+    for (int i = 0; i < 4; i++) schema_add_field(s, &f[i]);
+}
+
+static void test_a_wide_bit_range_reads_its_base(void) {
+    schema_t s;
+    decode_result_t r;
+    const uint8_t p[] = {0x34, 0xF2, 0x0F, 0x02, 0x30};
+    build_wide_ranges(&s);
+    TCHECK(schema_decode(&s, p, sizeof(p), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 4 && r.bytes_consumed == 5);
+    TCHECK(result_get_int(&r, "low12", 0) == 564);
+    TCHECK(result_get_int(&r, "top4", 0) == -1);
+    TCHECK(result_get_int(&r, "nibble", 0) == -1);
+    TCHECK(result_get_int(&r, "middle", 0) == 35);
+    TCHECK(result_get_field(&r, "low12")->type == FIELD_TYPE_BITS);   /* an integer */
+
+    /* wide-bit-range.yaml: a 64-bit base, signed and unsigned. */
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t lw = field_bit_range("low_word", 8, true, 0, 32, 0, ENDIAN_DEFAULT);
+    field_def_t hw = field_bit_range("high_word", 8, false, 32, 32, 8, ENDIAN_DEFAULT);
+    schema_add_field(&s, &lw);
+    schema_add_field(&s, &hw);
+    const uint8_t q[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xF6};
+    TCHECK(schema_decode(&s, q, sizeof(q), &r) == SCHEMA_OK);
+    TCHECK(result_get_int(&r, "low_word", 0) == -10);
+    TCHECK(result_get_int(&r, "high_word", 0) == 4294967295LL);
+    TCHECK(r.bytes_consumed == 8);
+}
+
+static void test_a_wide_bit_range_short_read_is_named(void) {
+    schema_t s;
+    decode_result_t r;
+    const uint8_t one[] = {0x34};
+    build_wide_ranges(&s);
+    TCHECK(schema_decode(&s, one, sizeof(one), &r) == SCHEMA_ERR_BUFFER);
+    TCHECK(strcmp(r.error_msg, "Field 'low12': Buffer underflow at peek offset 0 (PS-535)") == 0);
+
+    /* The base is there; the bytes `consume` steps over are not. */
+    memset(&s, 0, sizeof(s));
+    field_def_t f = field_bit_range("x", 1, false, 0, 4, 2, ENDIAN_DEFAULT);
+    schema_add_field(&s, &f);
+    TCHECK(schema_decode(&s, one, sizeof(one), &r) == SCHEMA_ERR_BUFFER);
+    TCHECK(strcmp(r.error_msg, "Field 'x': Buffer underflow: need 2 bytes at offset 0, "
+                               "but only 1 remaining (PS-535)") == 0);
+}
+
+static void test_a_wide_bit_range_encodes_as_decoded(void) {
+    schema_t s;
+    encode_inputs_t in;
+    encode_result_t out;
+    const uint8_t p[] = {0x34, 0xF2, 0x0F, 0x02, 0x30};
+    build_wide_ranges(&s);
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "low12", 564);
+    encode_inputs_add_int(&in, "top4", -1);
+    encode_inputs_add_int(&in, "nibble", -1);
+    encode_inputs_add_int(&in, "middle", 35);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_OK);
+    TCHECK(out.len == 5 && memcmp(out.data, p, sizeof(p)) == 0);
+
+    /* PS-064: an sN range holds -2^(w-1) to 2^(w-1)-1, and names its base. */
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "low12", 564);
+    encode_inputs_add_int(&in, "top4", 8);
+    encode_inputs_add_int(&in, "nibble", -1);
+    encode_inputs_add_int(&in, "middle", 35);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_OVERFLOW && out.len == 0);
+    TCHECK(strcmp(out.error_msg, "Field 'top4': 8 encodes as 8, outside -8 to 7 for "
+                                 "s16[12:15] (PS-168)") == 0);
+
+    /* PS-551 over two bytes: the peeked low12 is derived from the u16 written after it. */
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t pk = field_bit_range("low12", 2, false, 0, 12, 0, ENDIAN_LITTLE);
+    field_def_t wd = field_u16("word", ENDIAN_LITTLE);
+    schema_add_field(&s, &pk);
+    schema_add_field(&s, &wd);
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "word", 0xF234);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_OK);
+    TCHECK(out.len == 2 && out.data[0] == 0x34 && out.data[1] == 0xF2);
+    encode_inputs_add_int(&in, "low12", 0x235);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_PARSE);
+    TCHECK(strcmp(out.error_msg, "Field 'low12' is given 565, but the fields that share "
+                                 "its bits write 564 (PS-551)") == 0);
+}
+
 /*
  * Main test entry point
  */
@@ -1129,6 +1654,22 @@ void selftest_schema(void) {
     test_bit_ranges_are_laid_out_as_decoded();
     test_a_missing_input_is_named();
     test_a_covered_peek_is_derived();
+    test_a_nameless_schema_encodes_by_index();
+    test_a_text_label_binds_its_number();
+    test_an_enum_binds_its_code();
+    test_a_reference_binds_the_modified_value();
+    test_ascii_keeps_an_interior_nul();
+    test_ascii_reports_a_high_byte_as_itself();
+    test_ascii_is_never_truncated();
+    test_ascii_encodes_padded();
+    test_ascii_and_numbers_are_not_mixed();
+    test_a_byte_group_reads_one_value();
+    test_a_byte_group_is_checked();
+    test_a_byte_group_in_a_tlv_case();
+    test_a_byte_group_encodes_as_decoded();
+    test_a_wide_bit_range_reads_its_base();
+    test_a_wide_bit_range_short_read_is_named();
+    test_a_wide_bit_range_encodes_as_decoded();
 
     LOG(LOG_INFO, MOD, "Schema interpreter self-tests complete");
 }
