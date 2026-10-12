@@ -4880,6 +4880,29 @@ func encodeMatch(field Field, siblings []Field, data map[string]any, ctx *Encode
 			}
 		}
 	}
+	if chosen == nil && discriminator == nil && field.Length > 0 {
+		// CR-2026-151 (PS-551): where neither the input nor one of this match's own
+		// cases fixes the discriminator, a nested match reading it, with exactly one
+		// case the input fills, does.
+		value, body, key, found, err := nestedDiscriminator(field, data, matchLabel(field))
+		if err != nil {
+			return err
+		}
+		if found {
+			discriminator, chosen, chosenKey = int(value), body, key
+			if chosen == nil {
+				chosen = []Field{}
+			}
+			if field.Var != "" {
+				withVar := make(map[string]any, len(data)+1)
+				for k, v := range data {
+					withVar[k] = v
+				}
+				withVar[field.Var] = int(value)
+				data = withVar
+			}
+		}
+	}
 	if chosen == nil {
 		if discriminator == nil {
 			// Nothing in the input belongs to any case: the default, as the reference
@@ -4911,6 +4934,9 @@ func encodeMatch(field Field, siblings []Field, data map[string]any, ctx *Encode
 			// fields the input gives. This wrote nothing and reported nothing.
 			label := field.Name
 			if label == "" {
+				label = field.Var
+			}
+			if label == "" {
 				label = strings.TrimPrefix(field.On, "$")
 			}
 			if label == "" {
@@ -4924,12 +4950,19 @@ func encodeMatch(field Field, siblings []Field, data map[string]any, ctx *Encode
 		value := int64(0)
 		if intVal, ok := toInt(discriminator); ok {
 			value = int64(intVal)
-		} else if chosenKey == "" {
+		} else if chosenKey == "" || chosenKey == "default" {
+			// A `default` branch stands for every unlisted value, so it names none to
+			// write: the discriminator is missing, as the reference says.
 			return missingFieldError(matchLabel(field))
 		} else if v, err := parseIntAny(chosenKey); err == nil {
 			value = v
 		} else {
 			return fmt.Errorf("match case %q names no single discriminator value", chosenKey)
+		}
+		// PS-168: a discriminator, given or derived, fits the bytes it is written in.
+		if err := integerFitError(float64(value), field.Length*8, false, matchLabel(field),
+			discriminator); err != nil {
+			return err
 		}
 		ctx.Write(encodeUint(uint64(value), field.Length, ctx.Endian))
 	}
@@ -5540,6 +5573,10 @@ func encodeFieldList(fields []Field, data map[string]any, ctx *EncodeContext) er
 func matchLabel(field Field) string {
 	if field.Name != "" {
 		return field.Name
+	}
+	// CR-2026-151: a discriminator with no `name` is named by its `var`, not as "match".
+	if field.Var != "" {
+		return field.Var
 	}
 	return "match"
 }

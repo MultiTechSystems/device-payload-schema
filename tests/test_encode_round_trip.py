@@ -124,11 +124,12 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # number for an object one.
 # +12: the four tlv encode-gap fixtures (tlv-object-with-inner-branch,
 # tlv-case-of-one-inline-branch, tlv-float-reading, tlv-scaled-wide-reading), all tlv.
+# +3: match-discriminator-from-inner-case (CR-2026-151), all match.
 # +11, no silent empty encode (PS-442): the fixtures length-selects-layout (4) and
 # literal-selects-branch (2), match, and tag-entry-constants (4), tlv, and
 # tlv-case-field-list's literal_only, tlv - an entry reporting only a constant, which
 # encoded to no bytes with no error.
-FLOOR_TOTAL = 2126
+FLOOR_TOTAL = 2129
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -141,9 +142,10 @@ FLOOR_BY_SHAPE = {
     "plain fixed": 148,  # +1: CR-2026-135 (see FLOOR_TOTAL); +4: ascii-latin1 (CR-2026-114)
     # +1: CR-2026-132 enum port; +5: lookup-reference-binding (CR-2026-109);
     # +4: match-u32-inline-discriminator; +2: CR-2026-134; +1: both together (see
-    # FLOOR_TOTAL); +5: match-fractional-discriminator; +6: no silent empty (see
+    # FLOOR_TOTAL); +5: match-fractional-discriminator; +3:
+    # match-discriminator-from-inner-case (CR-2026-151); +6: no silent empty (see
     # FLOOR_TOTAL)
-    "match": 153,
+    "match": 156,
     "byte_group": 28,  # +3: byte-group-width (CR-2026-131)
     # 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now
     # carry only the definitions they reach, so one no longer has a `repeat` in an

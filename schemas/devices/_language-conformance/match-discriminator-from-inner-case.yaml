@@ -1,0 +1,46 @@
+# A message-kind byte that the output never reports, read by an inner branch on the same
+# kind, in the shape of Netvox r718n3. 01 1e 0a28 decodes to {volt: 3, temp: 26}: the kind
+# is bound only as a variable, and no outer case is filled - kind 1 takes the fallback
+# branch. The inner branch's one filled case, 1 (temp), fixes the kind to 1, and 1 selects
+# the fallback that holds it, so the encoder writes 01 again (CR-2026-151, PS-551). It used
+# to refuse the input with "Missing required field: match".
+name: probe_match_discriminator_from_inner_case
+endian: big
+fields:
+  - match:
+      length: 1
+      var: report_type
+      cases:
+        0:
+          - {name: version, type: u8}
+      default:
+        - {name: volt, type: u8, div: 10}
+        - match:
+            field: $report_type
+            default: skip
+            cases:
+              1:
+                - {name: temp, type: s16, div: 100}
+              2:
+                - {name: hum, type: u8}
+test_vectors:
+  - name: kind_one_from_the_inner_case
+    payload: "011e0a28"
+    source: generated
+    expected:
+      volt: 3
+      temp: 26
+    expected_warnings: []
+  - name: kind_two_from_the_inner_case
+    payload: "021e32"
+    source: generated
+    expected:
+      volt: 3
+      hum: 50
+    expected_warnings: []
+  - name: kind_zero_from_its_own_case
+    payload: "0011"
+    source: generated
+    expected:
+      version: 17
+    expected_warnings: []

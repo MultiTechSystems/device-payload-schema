@@ -232,10 +232,10 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 2126 |
-| Go | `go/schema/corpus_conformance_test.go` | 2719 | 2144 (plain API 2116) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2719 | 2127 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2719 | 2126 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2129 |
+| Go | `go/schema/corpus_conformance_test.go` | 2722 | 2147 (plain API 2119) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2722 | 2130 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2722 | 2129 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 569 of 569 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -816,10 +816,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2126 |
-| Go | `go/schema/corpus_encode_test.go` | 2144 (plain 2116) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2126 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2127 |
+| Python | `tests/test_encode_round_trip.py` | 2129 |
+| Go | `go/schema/corpus_encode_test.go` | 2147 (plain 2119) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2129 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2130 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 - **A name may be an object under one tag and a scalar under another, and a tlv encoder
@@ -885,12 +885,54 @@ same values); `..._0006160405fc` is a separate gap.
   wilsen 11, elv 2, sparkfun 2. Left, each a different shape:
   - wt303/wt304's alarm channels (84): an object whose only members are computed from an
     internal `_t` the encoder cannot derive (PS-434);
-  - netvox's 153 "Missing required field: match": a nameless top-level inline match whose
-    taken branch is its `default`, the discriminator unreported, so no value to write; the
-    nested `match: {field: $report_type}` in the default fixes it, but PS-551 derives a
-    discriminator only from a case the input fills. Not this shape of gap;
+  - netvox's "Missing required field: match": a nameless top-level inline match whose
+    taken branch is its `default`, the discriminator unreported. Where a nested match in
+    the default reads it, CR-2026-151 now derives it (next entry); where none does, nothing
+    in the input fixes it;
   - 207 vectors encoded to an empty payload with no error, under `internal-field`,
     `pattern-tag` or `undecoded-bytes`. Closed by "No silent empty encode" below.
+
+- **CR-2026-151 (PS-551), applied on spec main for 0.5.5: a nested match fixes the
+  discriminator it reads.** An inline match (`length:`) whose discriminator the input
+  neither gives nor fixes through one of its own cases takes it from a nested match that
+  reads it (`field: $report_type`), where the input fills exactly one of that match's
+  cases, the case's key is a single value, and the value selects, in the enclosing match,
+  the branch holding the nested match. The derived value goes through PS-557 and PS-168
+  like a supplied one, and the nested match sees it as the variable. Otherwise the input
+  is rejected naming the discriminator - its `name`, else its `var` - as `Missing required
+  field: report_type`, where it said `match`. Python `_nested_discriminator`, runtime
+  `encNestedDiscriminator`, Go `nestedDiscriminator` (`cr151.go`), Java and C#
+  `nestedDiscriminator`/`NestedDiscriminator`. C writes no match, so it does not apply.
+  - **Two readings of the CR text, flagged to the spec session:**
+    - *"Fills a case"* is read as: the input gives every one of the case's fields, and
+      nothing any other case of that nested match declares beyond them. Netvox r718n3's
+      case 3 holds the fields of its cases 1 and 2 together, so an input with all of them
+      is case 3's; read as "any field given", every r718n3 status vector is ambiguous.
+    - *"Every enclosing match"* is read as every match between that reads the same
+      discriminator; a match between that reads another is not consulted.
+  - **Measured before, the example `{volt: 3, temp: 26}`:** Python and the runtime refused
+    it (`Missing required field: match`); Go refused it (`match case "default" names no
+    single discriminator value`); **Java and C# returned an empty payload with no error**,
+    taking an unnamed inline match with no discriminator for the non-advancing peek before
+    looking at its `default`. All five now write `011e0a28`. Java and C# take the `default`
+    beside the cases as the reference does, and a `default` branch with no discriminator
+    to write is the PS-551 error, where Java and C# wrote 0; Go said "match case
+    "default" names no single discriminator value" there and now gives the same error.
+    No corpus vector changed but the new fixture's (encoded bytes and errors compared in
+    Python; Java and C# failing sets unchanged).
+  - **Cases:** `tests/cr-2026-151-cases.yaml` (all five): the CR's example, a range key, two
+    filled cases, a value selecting another branch, the named-discriminator error, a
+    derived value past its byte (PS-168), and a case holding two others' fields. Fixture
+    `match-discriminator-from-inner-case.yaml`: decode 2709 -> 2712 in Go, Java and C#;
+    re-encode +3 everywhere (Python and Java 2115 -> 2118, C# 2116 -> 2119, Go 2133 ->
+    2136, plain 2106 -> 2109), all `match`.
+  - **Registry (Python, read only):** the CR expected the 153 Netvox vectors; measured,
+    5267 -> 5274 round trips (+7, r718nl3; none lost). Of Netvox's 359 vectors failing
+    `Missing required field: match`, 34 now derive the discriminator - 7 round-trip, 21
+    (r718n3) then stop at its internal `_low_battery` (PS-434), 6 drop a trailing reserved
+    byte - and 325 now say `Missing required field: report_type`: in those schemas no
+    nested match reads the discriminator (rb02b's reads `$device_type`), so its `default`
+    stands for every non-zero report type and nothing in the input fixes it.
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
 from `tools/schema_interpreter.py`. Read that one first when changing any of them.
@@ -1008,9 +1050,22 @@ default before recovery by fields. The reference recovers by fields first.
 
 Fixtures: `length-selects-layout` (4 vectors), `literal-selects-branch` (2) and
 `tag-entry-constants` (4). With `tlv-case-field-list`'s `literal_only`, all 11 round-trip
-in all five and failed before. Decode floors 2709 -> 2719 in Go, Java and C#.
-Re-encode: +11 (Python and Java 2115 -> 2126, C# 2116 -> 2127, Go 2133 -> 2144), `match`
-+6, `tlv` +5. Go plain is +10 (2106 -> 2116): `both_entries` is laid out non-ascending.
+in all five and failed before. On top of CR-2026-151: decode floors 2712 -> 2722 in Go,
+Java and C#; re-encode +11 (Python and Java 2118 -> 2129, C# 2119 -> 2130, Go 2136 ->
+2147), `match` +6, `tlv` +5. Go plain is +10 (2109 -> 2119): `both_entries` is laid out
+non-ascending.
+
+**With CR-2026-151 (nested-match derivation).** An inline match's case is settled in this
+order, in all five: the discriminator the input gives (or a peek); a case chosen by score
+(`_best_case`) or, for `remaining`, the case matching 0 bytes; only then CR-2026-151's
+`_nested_discriminator`, which therefore runs exactly where the input neither gives the
+discriminator nor fixes it through one of the match's own cases; then the `default`. A
+score-chosen case wins over a nested derivation: in `an_outer_case_still_its_own`
+(`{version: 17}`) case 0 scores and is written as `0011`, and the nested match is never
+consulted. Where both rejections could apply - an inline match with no discriminator
+and nothing to derive - CR-2026-151's is taken, being the more specific: it names the
+discriminator (`Missing required field: report_type`, its `name`, else its `var`), and
+this note's fall-through says `match` only where the match has neither.
 Cases: `tests/silent-empty-cases.yaml` (14), read by the reference and the runtime
 (`test_silent_empty_cases.py`), Go (`silent_empty_test.go`, both APIs), Java
 (`SilentEmptyTest`) and C# (`SilentEmptyTests`).

@@ -1381,20 +1381,40 @@ public static class SchemaEncoder
                     && (BodyScore(DefaultBody(match), data) ?? 0) == 0)
                     matched = match.Cases.FirstOrDefault(c => !IsDefaultCase(c)
                         && CaseMatches(0L, c.CaseValue));
-                matched ??= match.Cases.FirstOrDefault(IsDefaultCase);
-                if (matched == null && match.MatchDefault is List<SchemaField> declaredBody)
-                    fallbackFields = declaredBody;
             }
+            var label = !string.IsNullOrEmpty(match.Name) ? match.Name!
+                : !string.IsNullOrEmpty(match.Var) ? match.Var! : "match";
+            if (matched == null && fallbackFields == null && discriminator == null && match.Length > 0)
+            {
+                // CR-2026-151 (PS-551): where neither the input nor one of this match's own
+                // cases fixes the discriminator, a nested match reading it, with exactly one
+                // case the input fills, does.
+                var nested = NestedDiscriminator(match, data, label);
+                if (nested != null)
+                {
+                    discriminator = (double)nested.Value.value;
+                    matched = nested.Value.matched;
+                    fallbackFields = nested.Value.fallback;
+                    if (!string.IsNullOrEmpty(match.Var))
+                        data = new Dictionary<string, object?>(data) { [match.Var!] = (long)nested.Value.value };
+                }
+            }
+            if (fallbackFields == null)
+                matched ??= match.Cases.FirstOrDefault(IsDefaultCase);
+            if (matched == null && fallbackFields == null
+                && match.MatchDefault is List<SchemaField> declaredFallback)
+                // The `default:` beside `cases`, taken as the reference takes it where
+                // nothing in the input belongs to a case; its discriminator is then missing.
+                fallbackFields = declaredFallback;
             if (matched == null && fallbackFields == null)
             {
                 var mode = match.MatchDefault as string ?? "error";
                 if (match.Length > 0 && discriminator == null)
-                    // PS-551: an inline discriminator the input neither gives nor fixes
-                    // through a case's fields, nor a bit range before it peeked. This
+                    // PS-551, PS-442: an inline discriminator the input neither gives nor
+                    // fixes through a case's fields, nor a bit range before it peeked. This
                     // returned no bytes at all where the match was nameless or its default
-                    // `skip`, dropping the bytes the decoder reads (PS-442).
-                    throw new InvalidOperationException(MissingFieldMessage(
-                        string.IsNullOrEmpty(match.Name) ? "match" : match.Name));
+                    // `skip`. Named by the discriminator, its `var` where it has no `name`.
+                    throw new InvalidOperationException(MissingFieldMessage(label));
                 if (mode == "skip")
                     // The discriminator, if the match reads one, and nothing for the case.
                     fallbackFields = new List<SchemaField>();
@@ -1406,7 +1426,7 @@ public static class SchemaEncoder
                     // PS-442, PS-551: no discriminator given or derivable, and no case
                     // whose fields the input gives. This wrote nothing and reported nothing.
                     throw new InvalidOperationException(MissingFieldMessage(
-                        !string.IsNullOrEmpty(match.Name) ? match.Name
+                        label != "match" ? label
                         : !string.IsNullOrEmpty(match.On) ? match.On.TrimStart('$') : "match"));
             }
 
@@ -1416,8 +1436,13 @@ public static class SchemaEncoder
                 if (match.Length > 0)
                 {
                     var (ok, numeric) = Helpers.ToFloat64(discriminator);
-                    var value = ok ? (long)Math.Round(numeric, MidpointRounding.ToEven) : 0L;
-                    fallbackOut.AddRange(Helpers.EncodeUint((ulong)value, match.Length, _endian));
+                    // A `default` stands for every unlisted value, so it names none to
+                    // write; a zero was written here (PS-551).
+                    if (!ok) throw new InvalidOperationException(MissingFieldMessage(label));
+                    var rounded = Math.Round(numeric, MidpointRounding.ToEven);
+                    var (dlow, dhigh) = IntegerBounds(match.Length * 8, false);
+                    CheckFits(rounded, dlow, dhigh, label, discriminator);                 // PS-168
+                    fallbackOut.AddRange(Helpers.EncodeUint((ulong)(long)rounded, match.Length, _endian));
                 }
                 var fallbackBody = EncodeFieldList(fallbackFields, data);
                 int fallbackPending = CarriedBy(fallbackBody);
@@ -1445,14 +1470,15 @@ public static class SchemaEncoder
                     if (IsDefaultCase(matched!))
                         // PS-551: the default case names no value to write for the
                         // discriminator the input left out.
-                        throw new InvalidOperationException(MissingFieldMessage(
-                            string.IsNullOrEmpty(match.Name) ? "match" : match.Name));
+                        throw new InvalidOperationException(MissingFieldMessage(label));
                     var fromKey = ExactCaseValue(matched!.CaseValue);
                     if (fromKey == null)
                         throw new InvalidOperationException(
                             $"match case {matched!.CaseValue} names no single discriminator value");
                     value = fromKey.Value;
                 }
+                var (wlow, whigh) = IntegerBounds(match.Length * 8, false);
+                CheckFits(value, wlow, whigh, label, discriminator ?? value);              // PS-168
                 output.AddRange(WriteUint(value, match.Length, _endian));
             }
             var body = EncodeFieldList(matched!.Fields, data);
@@ -1470,6 +1496,81 @@ public static class SchemaEncoder
             // The map form of `cases:` records a `default:` key as the literal string
             // rather than setting the flag, so both spellings are checked here.
             => c.IsDefault || (c.CaseValue as string) == "default";
+
+        /// <summary>
+        /// CR-2026-151 (PS-551), applied on spec main for 0.5.5: the value a nested
+        /// match fixes for this match's discriminator, with the outer case it selects (or the
+        /// `default` fields beside the cases), or null where no nested match reading it has
+        /// a case the input fills. The input fixes it where it fills exactly one such case,
+        /// whose key is a single value selecting, in this match and in every match between
+        /// that reads it, the branch holding the nested match; otherwise it is rejected,
+        /// naming the discriminator. Mirrors the reference's _nested_discriminator.
+        /// </summary>
+        static (long value, MatchCase? matched, List<SchemaField>? fallback)? NestedDiscriminator(
+            SchemaField match, Dictionary<string, object?> data, string label)
+        {
+            var names = new HashSet<string>();
+            if (!string.IsNullOrEmpty(match.Var)) names.Add(match.Var!);
+            if (!string.IsNullOrEmpty(match.Name)) names.Add(match.Name!);
+            if (names.Count == 0) return null;
+            List<string> NamesOf(List<SchemaField> fields) =>
+                fields.Where(f => PayloadName(f) != null).Select(f => f.Name!).ToList();
+            // A case is filled where the input gives every one of its fields and nothing any
+            // other case of its match declares beyond them (Netvox r718n3's case 3 holds
+            // the fields of cases 1 and 2 together).
+            bool Filled(List<string> own, HashSet<string> given) =>
+                own.Count > 0 && own.All(data.ContainsKey) && given.All(own.Contains);
+            // A step is the match and the branch taken: a case, or null for the default beside.
+            var filled = new List<(List<(SchemaField m, MatchCase? branch)> path, MatchCase c)>();
+            void Walk(List<SchemaField>? fields, List<(SchemaField m, MatchCase? branch)> path)
+            {
+                if (fields == null) return;
+                foreach (var f in fields)
+                {
+                    var inner = f.MatchInline;
+                    if (inner == null) continue;
+                    var on = (inner.On ?? "").TrimStart('$');
+                    bool reads = on.Length > 0 && names.Contains(on);
+                    var given = reads
+                        ? inner.Cases.Where(c => !IsDefaultCase(c)).SelectMany(c => NamesOf(c.Fields))
+                            .Where(data.ContainsKey).ToHashSet()
+                        : new HashSet<string>();
+                    foreach (var c in inner.Cases)
+                    {
+                        var next = path;
+                        if (reads)
+                        {
+                            if (!IsDefaultCase(c) && Filled(NamesOf(c.Fields), given)) filled.Add((path, c));
+                            next = new List<(SchemaField, MatchCase?)>(path) { (inner, c) };
+                        }
+                        Walk(c.Fields, next);
+                    }
+                    if (inner.MatchDefault is List<SchemaField> fb)
+                        Walk(fb, reads ? new List<(SchemaField, MatchCase?)>(path) { (inner, null) } : path);
+                }
+            }
+            foreach (var c in match.Cases)
+                Walk(c.Fields, new List<(SchemaField, MatchCase?)> { (match, c) });
+            if (match.MatchDefault is List<SchemaField> outerDefault)
+                Walk(outerDefault, new List<(SchemaField, MatchCase?)> { (match, null) });
+            if (filled.Count == 0) return null;
+            if (filled.Count != 1) throw new InvalidOperationException(MissingFieldMessage(label));
+            var (steps, filledCase) = filled[0];
+            var value = ExactCaseValue(filledCase.CaseValue);
+            if (value == null) throw new InvalidOperationException(MissingFieldMessage(label));
+            foreach (var (m, branch) in steps)
+            {
+                MatchCase? selected = m.Cases.FirstOrDefault(c => !IsDefaultCase(c)
+                    && CaseMatches((double)value.Value, c.CaseValue));
+                if (selected == null && branch != null && IsDefaultCase(branch)) selected = branch;
+                if (!ReferenceEquals(selected, branch))
+                    throw new InvalidOperationException(MissingFieldMessage(label));
+            }
+            var outer = steps[0].branch;
+            return outer != null
+                ? (value.Value, outer, null)
+                : (value.Value, null, (List<SchemaField>)match.MatchDefault!);
+        }
 
         /// <summary>A discriminator as Python's str() writes it: an integral number as an integer.</summary>
         static string DiscriminatorText(object discriminator)
