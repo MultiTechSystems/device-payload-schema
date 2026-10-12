@@ -544,7 +544,7 @@ public class Schema {
             }
             if (t.isInteger() || t.isFloat() || t == FieldType.UDEC || t == FieldType.SDEC) {
                 total += t == FieldType.UDEC || t == FieldType.SDEC ? 1
-                        : t.isFloat() ? (t == FieldType.F16 ? 2 : t == FieldType.F32 ? 4 : 8)
+                        : t.isFloat() ? (t == FieldType.F16 || t == FieldType.BF16 ? 2 : t == FieldType.F32 ? 4 : 8)
                         : t.defaultLength();
                 continue;
             }
@@ -1781,6 +1781,13 @@ public class Schema {
                 value = ctx.decodeUnsigned(data, "big");
             }
             
+            case BF16 -> {
+                // CR-2026-149 (PS-558): the upper half of a binary32, a word in the field's
+                // effective byte order.
+                byte[] data = ctx.read(2);
+                value = Bf16.decode(ctx.decodeUnsigned(data, fieldEndian));
+            }
+
             case F16, F32, F64, FLOAT16, FLOAT32, FLOAT64 -> {
                 int size = switch (field.getType()) {
                     case F16, FLOAT16 -> 2;

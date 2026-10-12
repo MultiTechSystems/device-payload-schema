@@ -1,0 +1,69 @@
+# CR-2026-151 (PS-551), applied on spec main for 0.5.5: a nested match that reads
+# a discriminator fixes it, where the input fills exactly one of its cases, that case's key
+# is a single value, and the value selects, in the enclosing match, the branch holding the
+# nested match. The derived value is checked like a supplied one (PS-557, PS-168). Where
+# several values fit, or the value selects another branch, the input is rejected naming
+# the discriminator - its `var` where it has no `name` - not "match".
+#
+# A case is filled where the input gives every one of its fields and nothing any other case
+# of the nested match declares beyond them: Netvox r718n3's case 3 holds the fields of its
+# cases 1 and 2 together, and an input with all of them is case 3's, not ambiguous.
+#
+# The example is the CR's (Netvox r718n3's shape): {volt: 3, temp: 26} encodes to 011e0a28.
+# One case list, read by the reference and the generated codec's runtime encoder
+# (tests/test_cr_2026_151_cases.py), Go (go/schema/cr151_test.go), Java (CR2026151Test.java)
+# and C# (CR2026_151Tests.cs). Same layout as tests/cr-2026-135-cases.yaml. The spec
+# prototype encodes no match, so the texts are PS-551's ("Missing required field: {name}")
+# and PS-168's.
+
+cases:
+
+- name: the_example
+  schema: "name: t\nendian: big\nfields:\n  - match:\n      length: 1\n      var: report_type\n      cases:\n        0: [{name: version, type: u8}]\n      default:\n        - {name: volt, type: u8, div: 10}\n        - match:\n            field: $report_type\n            default: skip\n            cases:\n              1: [{name: temp, type: s16, div: 100}]\n"
+  input: '{"volt": 3, "temp": 26}'
+  payload: "011e0a28"
+
+- name: an_outer_case_still_its_own
+  schema: "name: t\nendian: big\nfields:\n  - match:\n      length: 1\n      var: report_type\n      cases:\n        0: [{name: version, type: u8}]\n      default:\n        - {name: volt, type: u8, div: 10}\n        - match:\n            field: $report_type\n            default: skip\n            cases:\n              1: [{name: temp, type: s16, div: 100}]\n"
+  input: '{"version": 17}'
+  payload: "0011"
+
+- name: the_other_nested_case
+  schema: "name: t\nendian: big\nfields:\n  - match:\n      length: 1\n      var: report_type\n      cases:\n        0: [{name: version, type: u8}]\n      default:\n        - {name: volt, type: u8, div: 10}\n        - match:\n            field: $report_type\n            default: skip\n            cases:\n              1: [{name: temp, type: s16, div: 100}]\n              2: [{name: hum, type: u8}]\n"
+  input: '{"volt": 3, "hum": 50}'
+  payload: "021e32"
+
+- name: a_range_key_fixes_no_one_value
+  schema: "name: t\nendian: big\nfields:\n  - match:\n      length: 1\n      var: report_type\n      cases:\n        0: [{name: version, type: u8}]\n      default:\n        - {name: volt, type: u8, div: 10}\n        - match:\n            field: $report_type\n            default: skip\n            cases:\n              1..2: [{name: temp, type: s16, div: 100}]\n"
+  input: '{"volt": 3, "temp": 26}'
+  error: "Missing required field: report_type"
+
+- name: two_filled_cases
+  schema: "name: t\nendian: big\nfields:\n  - match:\n      length: 1\n      var: report_type\n      cases:\n        0: [{name: version, type: u8}]\n      default:\n        - {name: volt, type: u8, div: 10}\n        - match:\n            field: $report_type\n            default: skip\n            cases:\n              1: [{name: temp, type: s16, div: 100}]\n              2: [{name: hum, type: u8}]\n"
+  input: '{"volt": 3, "temp": 26, "hum": 50}'
+  error: "Missing required field: report_type"
+
+- name: a_value_selecting_another_branch
+  schema: "name: t\nendian: big\nfields:\n  - match:\n      length: 1\n      var: report_type\n      cases:\n        0: [{name: version, type: u8}]\n      default:\n        - {name: volt, type: u8, div: 10}\n        - match:\n            field: $report_type\n            default: skip\n            cases:\n              0: [{name: temp, type: s16, div: 100}]\n"
+  input: '{"volt": 3, "temp": 26}'
+  error: "Missing required field: report_type"
+
+- name: nothing_fixes_it_and_the_discriminator_is_named
+  schema: "name: t\nendian: big\nfields:\n  - match:\n      length: 1\n      var: report_type\n      cases:\n        0: [{name: version, type: u8}]\n      default:\n        - {name: volt, type: u8, div: 10}\n        - match:\n            field: $report_type\n            default: skip\n            cases:\n              1: [{name: temp, type: s16, div: 100}]\n"
+  input: '{"volt": 3}'
+  error: "Missing required field: report_type"
+
+- name: a_derived_value_past_its_bytes
+  schema: "name: t\nendian: big\nfields:\n  - match:\n      length: 1\n      var: report_type\n      cases:\n        0: [{name: version, type: u8}]\n      default:\n        - {name: volt, type: u8, div: 10}\n        - match:\n            field: $report_type\n            default: skip\n            cases:\n              300: [{name: temp, type: s16, div: 100}]\n"
+  input: '{"volt": 3, "temp": 26}'
+  error: "Field 'report_type': 300 encodes as 300, outside 0 to 255 (PS-168)"
+
+- name: a_case_holding_two_others_fields
+  schema: "name: t\nendian: big\nfields:\n  - match:\n      length: 1\n      var: report_type\n      cases:\n        0: [{name: version, type: u8}]\n      default:\n        - {name: volt, type: u8, div: 10}\n        - match:\n            field: $report_type\n            default: skip\n            cases:\n              1: [{name: a, type: u8}]\n              2: [{name: b, type: u8}]\n              3: [{name: a, type: u8}, {name: b, type: u8}]\n"
+  input: '{"volt": 3, "a": 1, "b": 2}'
+  payload: "031e0102"
+
+- name: one_of_the_cases_it_overlaps
+  schema: "name: t\nendian: big\nfields:\n  - match:\n      length: 1\n      var: report_type\n      cases:\n        0: [{name: version, type: u8}]\n      default:\n        - {name: volt, type: u8, div: 10}\n        - match:\n            field: $report_type\n            default: skip\n            cases:\n              1: [{name: a, type: u8}]\n              2: [{name: b, type: u8}]\n              3: [{name: a, type: u8}, {name: b, type: u8}]\n"
+  input: '{"volt": 3, "a": 1}'
+  payload: "011e01"

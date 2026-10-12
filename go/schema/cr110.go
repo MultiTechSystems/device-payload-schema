@@ -446,8 +446,16 @@ func caseClaims(fields []Field, optional bool, out []caseClaim) []caseClaim {
 			out = append(out, matchClaims(*f.MatchInline)...)
 			continue
 		}
-		if f.Name == "" || strings.HasPrefix(f.Name, "_") ||
-			f.Type == TypeNumber || f.Type == "number" {
+		if f.Name == "" || strings.HasPrefix(f.Name, "_") {
+			continue
+		}
+		if isLiteralField(f) || isComputedField(f) {
+			// A literal or computed field writes no bytes, but only this case reports it,
+			// so it claims its name, never required: a literal where the input gives its
+			// value (a literal-only entry), a computed field so that the case is chosen
+			// and what it is computed from is asked for (PS-434). Neither claimed anything,
+			// so an entry reporting only these was never written (no-silent-empty).
+			out = append(out, caseClaim{f, true})
 			continue
 		}
 		// PS-551 (CR-2026-141): a peek the case's next field writes over is derived where
@@ -539,6 +547,12 @@ func caseTakes(f Field, value any) (bool, bool) {
 		}
 		whole := math.Floor(n / 10)
 		stored = whole + (n-whole*10)*0.1
+	} else if t == "bf16" {
+		word, err := encodeBF16(raw, f.Name) // through the type's storage is PS-559's rounding
+		if err != nil {
+			return false, false
+		}
+		stored = decodeBF16(word)
 	} else if t == "uflt16" || t == "sflt16" || t == "sflt24" {
 		word, err := encodeMinifloat(FieldType(t), raw)
 		if err != nil {
@@ -653,8 +667,14 @@ func matchClaims(m Field) []caseClaim {
 	}
 	for _, body := range bodies {
 		for _, c := range caseClaims(body, true, nil) {
-			if !seen[c.field.Name] {
-				seen[c.field.Name] = true
+			// Branches report one name as different literals: each is a claim, since the
+			// input's value says which branch it came from.
+			key := c.field.Name
+			if isLiteralField(c.field) {
+				key = c.field.Name + "\x00" + pyRepr(c.field.Value)
+			}
+			if !seen[key] {
+				seen[key] = true
 				out = append(out, caseClaim{c.field, true})
 			}
 		}

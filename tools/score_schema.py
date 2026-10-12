@@ -1195,7 +1195,7 @@ def check_semantic_annotations(schema: Dict[str, Any]) -> Tuple[Dict[str, Any], 
 #: Byte width of each wire type, used to judge what "maximum" means for a schema.
 _WIRE_WIDTHS = {
     'u8': 1, 's8': 1, 'bool': 1,
-    'u16': 2, 's16': 2, 'f16': 2,
+    'u16': 2, 's16': 2, 'f16': 2, 'bf16': 2,
     'u24': 3, 's24': 3,
     'u32': 4, 's32': 4, 'f32': 4,
     'u64': 8, 's64': 8, 'f64': 8,

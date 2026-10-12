@@ -1,0 +1,86 @@
+# No silent empty encode (PS-442, PS-551): an encoder never returns success having
+# written nothing for a construct whose decode reads bytes, nor an empty payload where
+# the input gives a value only payload bytes can carry. Where the input fixes the bytes
+# they are written; where it does not, the encode fails, naming what is missing.
+#
+# One case list, read by the reference and the generated codec's runtime encoder
+# (tests/test_silent_empty_cases.py), Go (go/schema/silent_empty_test.go), Java
+# (SilentEmptyTest.java) and C# (SilentEmptyTests.cs). Same layout as
+# tests/cr-2026-148-cases.yaml: a `payload` is the bytes expected, "" for none, and an
+# `error` is the part of the message every encoder writes alike.
+
+cases:
+
+# --- Encodable: the input fixes the bytes ------------------------------------------
+
+- name: length_selected_layout_with_its_body_one_level_down
+  schema: "name: t\nendian: big\nfields:\n  - {name: battery, type: u8}\n  - match:\n      remaining: true\n      cases:\n        0: []\n        3:\n          - {name: _kind, type: u8}\n          - match:\n              field: $_kind\n              cases:\n                1:\n                  - {name: level, type: u16}\n                2:\n                  - {name: volts, type: u8, div: 10}\n"
+  input: '{"battery": 33, "level": 258}'
+  payload: "21010102"
+
+- name: length_selected_layout_given_nothing_reads_nothing
+  schema: "name: t\nendian: big\nfields:\n  - {name: battery, type: u8}\n  - match:\n      remaining: true\n      cases:\n        0..1: []\n        2:\n          - {name: extra, type: u16}\n"
+  input: '{"battery": 33}'
+  payload: "21"
+
+- name: a_constant_selects_the_body
+  schema: "name: t\nendian: big\nfields:\n  - {name: _type, type: u8}\n  - match:\n      field: $_type\n      cases:\n        1:\n          - {name: kind, type: string, value: comfort}\n          - {name: reading, type: u16}\n        2:\n          - {name: kind, type: string, value: counter}\n          - {name: reading, type: u16}\n"
+  input: '{"kind": "counter", "reading": 100}'
+  payload: "020064"
+
+- name: an_entry_reporting_only_a_constant
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        9:\n          - {name: request, type: number, value: 1}\n"
+  input: '{"request": 1}'
+  payload: "09"
+
+- name: an_entry_chosen_by_its_constant_one_level_down
+  schema: "name: t\nendian: big\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        7:\n          - {name: _state, type: u8}\n          - match:\n              field: $_state\n              cases:\n                2:\n                  - {name: pc, type: string, value: ok}\n                3:\n                  - {name: pc, type: string, value: alarm}\n                  - {name: diff, type: u16}\n"
+  input: '{"pc": "alarm", "diff": 5}'
+  payload: "07030005"
+
+- name: a_default_reporting_only_a_constant_reads_nothing
+  schema: "name: t\nendian: big\nfields:\n  - match:\n      remaining: true\n      cases:\n        2:\n          - {name: _w, type: u16}\n          - {name: distance, type: number, ref: $_w}\n      default:\n        - {name: distance, type: string, value: none}\n"
+  input: '{"distance": "none"}'
+  payload: ""
+
+- name: a_skip_default_given_nothing_reads_nothing
+  schema: "name: t\nendian: big\nfields:\n  - match:\n      remaining: true\n      default: skip\n      cases:\n        2:\n          - {name: a, type: u16}\n"
+  input: '{}'
+  payload: ""
+
+# --- Not encodable: the input does not fix the bytes -------------------------------
+
+- name: length_selected_layout_given_no_case
+  schema: "name: t\nendian: big\nfields:\n  - match:\n      remaining: true\n      cases:\n        2:\n          - {name: a, type: u16}\n"
+  input: '{}'
+  error: "Missing required field: match"
+
+- name: length_selected_layout_reporting_only_computed_values
+  schema: "name: t\nendian: big\nfields:\n  - match:\n      remaining: true\n      cases:\n        2:\n          - {name: _raw, type: u16}\n          - {name: v, type: number, ref: $_raw, div: 10}\n"
+  input: '{"v": 5}'
+  error: "Missing required field: match"
+
+- name: an_unnamed_inline_discriminator_given_nothing
+  schema: "name: t\nendian: big\nfields:\n  - match:\n      length: 1\n      default: skip\n      cases:\n        1:\n          - {name: a, type: u8}\n"
+  input: '{}'
+  error: "Missing required field: match"
+
+- name: a_discriminator_matching_no_case
+  schema: "name: t\nendian: big\nfields:\n  - {name: k, type: u8}\n  - match:\n      field: $k\n      cases:\n        1:\n          - {name: a, type: u8}\n"
+  input: '{"k": 9}'
+  error: "No matching case for value 9"
+
+- name: an_entry_computed_from_an_internal_value
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        3:\n          - {name: _raw, type: u8}\n          - {name: raw_plus_one, type: number, ref: $_raw, add: 1}\n"
+  input: '{"raw_plus_one": 10}'
+  error: "reads payload bytes and declares no value"
+
+- name: an_entry_constant_given_another_value
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        9:\n          - {name: request, type: number, value: 1}\n"
+  input: '{"request": 2}'
+  error: "tlv: no case takes the value of 'request'"
+
+- name: a_key_built_from_the_tag
+  schema: "name: t\nfields:\n  - tlv:\n      tag_fields:\n        - {name: channel, type: u8, var: ch}\n        - {name: kind, type: u8}\n      tag_key: [channel, kind]\n      cases:\n        \"[*, 0]\":\n          - {name: digital_in, type: u8, name_from: \"digital_in_${ch}\"}\n"
+  input: '{"digital_in_3": 1}'
+  error: "tlv: no case takes the value of 'digital_in_3'"
