@@ -201,9 +201,11 @@ def main():
     decoder = BinarySchemaDecoder()
     
     def binary_schema_decode():
-        schema = decoder.decode(binary_schema)
-        interp = SchemaInterpreter(schema)
-        return interp.decode(TEST_PAYLOAD)
+        # binary_schema.py's form carries no field names, so interpreting the decoded
+        # schema would report invented keys (PS-555). This times parsing the blob, then
+        # the interpreter on the YAML schema it stands for.
+        decoder.decode(binary_schema)
+        return interpreter.decode(TEST_PAYLOAD)
     
     results.append(benchmark(
         "Binary Schema (w/ parse)",

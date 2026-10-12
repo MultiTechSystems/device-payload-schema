@@ -389,8 +389,9 @@ if __name__ == '__main__':
     print(f"Has embedded schema: {parsed.has_embedded_schema}")
     if parsed.schema:
         print(f"Schema fields: {len(parsed.schema.get('fields', []))}")
-        for f in parsed.schema['fields']:
-            print(f"  - {f['name']}: {f['type']}")
+        # The embedded binary schema carries no names (PS-555): fields by position.
+        for i, f in enumerate(parsed.schema['fields']):
+            print(f"  [{i}] {f['type']}")
     
     # Show capacity table
     print("\n--- QR Code Capacity ---")
