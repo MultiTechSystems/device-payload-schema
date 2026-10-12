@@ -8,7 +8,7 @@ corpus vectors. So nothing measured it, and every gap in it was invisible: it ha
 type for `tlv`, `flagged` or `repeat`, which between them appear in about 60% of the corpus,
 and that was recorded in AGENTS.md as an assertion rather than a measurement.
 
-There is no YAML reader in C (`bindings/c/schema_ffi.c`'s `schema_create_yaml()` is a
+There is no YAML reader in C (`bindings/c/schema_ffi.c`'s `schema_ffi_create_yaml()` is a
 declared stub) and the header parses no binary format - a schema is built through the
 struct API, `field_u8("x")` and `schema_add_field()`. So this generates C that builds each
 expressible schema through that API, compiles it once, runs it, and compares what it printed

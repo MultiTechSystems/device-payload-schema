@@ -267,7 +267,7 @@ typedef struct {
     int bytes_unread;
     /* The schema carried no names (schema_t.nameless). Every value is then reachable
      * by result_get_index() and none by name, and a writer of the decoded object - such
-     * as bindings/c's result_to_json() - must refuse (PS-555). */
+     * as bindings/c's schema_ffi_result_to_json() - must refuse (PS-555). */
     bool nameless;
 } decode_result_t;
 

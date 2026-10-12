@@ -494,8 +494,14 @@ success:
 3. **The TS013 envelope** `{data, warnings, errors}`.
 
 **There is no YAML->JSON C interpreter yet, and the JSON writer that exists is
-unsafe.** `bindings/c/schema_ffi.c` has `schema_create_yaml()`, but its body is
-`(void)yaml_str; return NULL;` — a declared stub. `result_to_json()` is real, and it
+unsafe.** `bindings/c/schema_ffi.c` has `schema_ffi_create_yaml()`, but its body is
+`(void)yaml_str; return NULL;` — a declared stub. The FFI did not compile for a time
+(its `schema_decode` collided with the interpreter header's, and it called a
+`schema_decode_payload` that never existed); every export now carries a `schema_ffi_`
+prefix (`schema_ffi_decode`, `schema_ffi_result_get_field_int`, ...) and its macros
+`SCHEMA_FFI_*`, the Python/Go/Node consumers follow, and `make test-c` builds it with
+`-Wall -Wextra -Werror` and decodes a payload through it (`src/test_ffi.c`).
+`schema_ffi_result_to_json()` is real, and it
 formats floats with `%g`, which silently destroys precision: 115020.68221552655 prints
 as `115021`, 22.028848392450755 as `22.0288`, and the identifier 20228605 as
 `2.02286e+07`. Do not build on it. Matching JavaScript needs the shortest
@@ -2065,7 +2071,7 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   0 only for a skip; `skip` moved to type code 0x7, so it has a record at all. Without the
   table (`--no-names`, `encode_schema(names=False)`) the C loader sets `schema_t.nameless`,
   every name stays empty, values are reached with `result_get_index()` by schema index,
-  and `result_to_json()` refuses. `SCHEMA_MAX_NAME_LEN` (32, so 31 bytes) is a load error
+  and `schema_ffi_result_to_json()` refuses. `SCHEMA_MAX_NAME_LEN` (32, so 31 bytes) is a load error
   naming the field, never a truncation; the encoder refuses the same, and a count over
   127. `schema_load_binary_msg()` gives the reason for any refusal. `make test-c`'s
   harness runs either form with `--from-blob names|nameless` and requires the reference's
