@@ -202,6 +202,9 @@ static void test_encoding_is_checked_too(void) {
 
     TCHECK(schema_encode_direction(&s, &inputs, SCHEMA_DIR_UPLINK, &out) == SCHEMA_ERR_DIRECTION);
     TCHECK(out.len == 0);
+    /* The refusal says why, in the text the decode path and the other languages give. */
+    TCHECK(strcmp(out.error_msg,
+                  "schema 'cfg' is declared direction:downlink; message direction is uplink") == 0);
     TCHECK(schema_encode_direction(&s, &inputs, SCHEMA_DIR_DOWNLINK, &out) == SCHEMA_OK);
     TCHECK(out.len == 2);
 }

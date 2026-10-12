@@ -4687,8 +4687,26 @@ function writeS(buf, pos, size, value, endian) {
             lines.append('}')
 
         else:
-            # No ports — single decode/encode
+            # No ports - single decode/encode. A schema-level `direction` is enforced here
+            # as the `ports` branch enforces an entry's (PS-288, PS-292); the message is
+            # the reference interpreter's. No declaration accepts both (PS-287).
+            declared_dir = self.schema.get('direction')
+
+            def guard(direction, encode=False):
+                if declared_dir is None or declared_dir in ('both', direction):
+                    return
+                message = json.dumps(
+                    f"schema '{self.schema.get('name')}' is declared "
+                    f"direction:{declared_dir}; message direction is {direction}")
+                if encode:
+                    lines.append(f'  if (true) {{ return {{ bytes: [], fPort: input.fPort || 1, '
+                                 f'warnings: [], errors: [{message}] }}; }}')
+                else:
+                    lines.append(f'  if (true) {{ return {{ data: {{}}, warnings: [], '
+                                 f'errors: [{message}] }}; }}')
+
             lines.append('function decodeUplink(input) {')
+            guard('uplink')
             lines.append('  try {')
             lines.append(f'    var r = decodePayload(input.bytes, "{self.endian}");')
             lines.append('    return { data: omitAbsent(r.data), warnings: r.warnings || [], errors: [] };')
@@ -4701,6 +4719,7 @@ function writeS(buf, pos, size, value, endian) {
             if self.has_commands:
                 # Use command decoding for downlinks
                 lines.append('function decodeDownlink(input) {')
+                guard('downlink')
                 lines.append('  try {')
                 lines.append(f'    var r = decodeCommand(input.bytes, "{self.endian}");')
                 lines.append('    return { data: omitAbsent(r.data), warnings: r.warnings || [], errors: [] };')
@@ -4711,6 +4730,7 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append('')
 
                 lines.append('function encodeDownlink(input) {')
+                guard('downlink', encode=True)
                 lines.append('  try {')
                 lines.append('    var cmdName = input.data._command;')
                 lines.append('    if (!cmdName) {')
@@ -4726,6 +4746,7 @@ function writeS(buf, pos, size, value, endian) {
                 # No ports and no command table: the schema's own fields are the payload,
                 # in both directions.
                 lines.append('function decodeDownlink(input) {')
+                guard('downlink')
                 lines.append('  try {')
                 lines.append(f'    var endian = "{self.endian}";')
                 lines.append('    var r = decodePayload(input.bytes, endian);')
@@ -4737,6 +4758,7 @@ function writeS(buf, pos, size, value, endian) {
                 lines.append('')
 
                 lines.append('function encodeDownlink(input) {')
+                guard('downlink', encode=True)
                 lines.append('  try {')
                 lines.append(f'    var r = encodePayload(input.data, "{self.endian}");')
                 lines.append('    return { bytes: r.bytes, fPort: input.fPort || 1, warnings: r.warnings, errors: [] };')
