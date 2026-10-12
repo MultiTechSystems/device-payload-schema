@@ -1,0 +1,86 @@
+# CR-2026-149 (PS-558, PS-559): `bf16`, the upper half of a binary32. An encoder rounds the
+# binary64 value to the nearest bf16, a tie to the even fraction, once (never through a
+# binary32), and rejects a finite value past the largest bf16 as PS-168 requires.
+#
+# One case list, read by the reference and the generated codec's runtime encoder
+# (tests/test_cr_2026_149_cases.py), Go (go/schema/cr149_test.go), Java (CR2026149Test.java)
+# and C# (CR2026_149Tests.cs). NaN and the infinities cannot be written in a JSON input; the
+# per-language tests hold them. The last case is not about bf16: the spec prototype's encode
+# ignored a document-level `endian`, so it is held in all five here.
+#
+# Each case gives `schema` (YAML text), `input` (JSON text) and either `payload` (hex) or
+# `error` (text one of the errors contains; no payload is returned).
+
+cases:
+
+
+# Netvox r718e AccelerationX: B3 40 little-endian is 0x40B3, 5.59375.
+- name: netvox_r718e_word
+  schema: "name: t\nendian: little\nfields:\n  - {name: x, type: bf16}\n"
+  input: '{"x": 5.59375}'
+  payload: "b340"
+
+- name: negative
+  schema: "name: t\nfields:\n  - {name: x, type: bf16}\n"
+  input: '{"x": -5.59375}'
+  payload: "c0b3"
+
+# 1 + 2^-8 lies halfway between 3f80 and 3f81; the even fraction is 3f80.
+- name: tie_down_to_even_fraction
+  schema: "name: t\nfields:\n  - {name: x, type: bf16}\n"
+  input: '{"x": 1.00390625}'
+  payload: "3f80"
+
+# 1 + 3*2^-8 lies halfway between 3f81 and 3f82; the even fraction is 3f82.
+- name: tie_up_to_even_fraction
+  schema: "name: t\nfields:\n  - {name: x, type: bf16}\n"
+  input: '{"x": 1.01171875}'
+  payload: "3f82"
+
+# 1 + 2^-8 + 2^-40. Through a binary32 it would round to the tie and then to 3f80; from binary64 it is nearer 3f81.
+- name: just_above_a_tie_is_not_double_rounded
+  schema: "name: t\nfields:\n  - {name: x, type: bf16}\n"
+  input: '{"x": 1.0039062500009095}'
+  payload: "3f81"
+
+- name: smallest_subnormal
+  schema: "name: t\nfields:\n  - {name: x, type: bf16}\n"
+  input: '{"x": 9.183549615799121e-41}'
+  payload: "0001"
+
+- name: negative_smallest_subnormal
+  schema: "name: t\nfields:\n  - {name: x, type: bf16}\n"
+  input: '{"x": -9.183549615799121e-41}'
+  payload: "8001"
+
+- name: largest_finite
+  schema: "name: t\nfields:\n  - {name: x, type: bf16}\n"
+  input: '{"x": 3.3895313892515355e+38}'
+  payload: "7f7f"
+
+- name: below_the_overflow_tie
+  schema: "name: t\nfields:\n  - {name: x, type: bf16}\n"
+  input: '{"x": 3.396177529230448e+38}'
+  payload: "7f7f"
+
+# Halfway between the largest finite bf16 and 2^128: the tie goes to the even fraction, which is 2^128, so it is rejected.
+- name: overflow_tie_rounds_past_the_largest
+  schema: "name: t\nfields:\n  - {name: x, type: bf16}\n"
+  input: '{"x": 3.39617752923046e+38}'
+  error: "Field 'x': 3.39617752923046e+38 is outside the range of bf16, -3.3895313892515355e+38 to 3.3895313892515355e+38 (PS-168)"
+
+- name: overflow_rejected
+  schema: "name: t\nfields:\n  - {name: x, type: bf16}\n"
+  input: '{"x": 3.4e+38}'
+  error: "Field 'x': 3.4e+38 is outside the range of bf16, -3.3895313892515355e+38 to 3.3895313892515355e+38 (PS-168)"
+
+- name: negative_overflow_rejected
+  schema: "name: t\nfields:\n  - {name: x, type: bf16}\n"
+  input: '{"x": -3.4e+38}'
+  error: "Field 'x': -3.4e+38 is outside the range of bf16, -3.3895313892515355e+38 to 3.3895313892515355e+38 (PS-168)"
+
+# A document-level endian applies to every field without its own, on encode as on decode.
+- name: document_endian_on_encode
+  schema: "name: t\nendian: little\nfields:\n  - {name: a, type: u16}\n  - {name: b, type: u16, endian: big}\n  - {name: c, type: f32}\n"
+  input: '{"a": 1, "b": 2, "c": 1.0}'
+  payload: "010000020000803f"

@@ -737,7 +737,7 @@ final class Wave6a {
     static {
         String[][] sizes = {
             {"1", "u8", "uint8", "s8", "i8", "int8", "udec", "sdec"},
-            {"2", "u16", "uint16", "s16", "i16", "int16", "f16", "uflt16", "sflt16"},
+            {"2", "u16", "uint16", "s16", "i16", "int16", "f16", "bf16", "uflt16", "sflt16"},
             {"3", "u24", "uint24", "s24", "i24", "int24", "sflt24"},
             {"4", "u32", "uint32", "s32", "i32", "int32", "u32le16", "s32le16", "f32le16",
                 "u32be16le", "s32be16le", "f32be16le", "f32"},

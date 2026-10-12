@@ -143,7 +143,7 @@ def yaml_type_to_json_schema(field_type: str, field_def: Dict[str, Any]) -> Dict
         return {"type": "integer"}
     
     # Float types - after modifiers, output is always number
-    if base_type in ('f16', 'f32', 'f64', 'float16', 'float32', 'float64'):
+    if base_type in ('f16', 'bf16', 'f32', 'f64', 'float16', 'float32', 'float64'):
         return {"type": "number"}
     
     # Bool type
@@ -161,6 +161,8 @@ def yaml_type_to_json_schema(field_type: str, field_def: Dict[str, Any]) -> Dict
     # opt-out and keeps a plain string.
     if base_type == 'hex':
         return {"type": "string", "pattern": "^[0-9a-f]*$"}
+    if base_type == 'ascii' and field_def.get('numeral'):
+        return {"type": "integer"}                                   # PS-560
     if base_type in ('ascii', 'string', 'base64', 'hex:upper'):
         return {"type": "string"}
     

@@ -605,6 +605,41 @@ def encode_minifloat(field_type, value):
     return sign | f
 
 
+#: The largest finite bf16, 0x7F7F: (2 - 2**-7) * 2**127 (CR-2026-149).
+BF16_MAX = (2 - 2.0 ** -7) * 2.0 ** 127
+
+
+def decode_bf16(word):
+    """PS-558: the binary32 whose upper half is the word and whose lower half is zero."""
+    return struct.unpack('>f', (word << 16).to_bytes(4, 'big'))[0]
+
+
+def encode_bf16(value, name=None):
+    """PS-559: the nearest bf16 to the binary64 value, a tie to the even fraction, rounded
+    once (never through a binary32); a finite value beyond the largest bf16 is a PS-168
+    error, in the spec prototype's text. NaN and the infinities are their words."""
+    value = float(value)
+    if math.isnan(value):
+        return 0x7FC0
+    sign = 0x8000 if math.copysign(1.0, value) < 0 else 0
+    magnitude = abs(value)
+    if math.isinf(magnitude):
+        return sign | 0x7F80
+    mantissa, exponent = math.frexp(magnitude)       # magnitude = mantissa * 2**exponent
+    if magnitude == 0 or exponent - 1 < -126:
+        word = round(magnitude * 2.0 ** 133)         # subnormal: fraction * 2**-133
+    else:
+        fraction = round(mantissa * 256)             # 128..256, the leading bit included
+        if fraction == 256:
+            fraction, exponent = 128, exponent + 1
+        word = (exponent + 126) << 7 | (fraction - 128)
+    if word >= 0x7F80:
+        raise ValueError(
+            f"Field '{name}': {format_lookup_value(value)} is outside the range of bf16, "
+            f"{format_lookup_value(-BF16_MAX)} to {format_lookup_value(BF16_MAX)} (PS-168)")
+    return sign | word
+
+
 #: The largest finite magnitude each binary float type holds (CR-2026-148, PS-168): a
 #: value past it is no value the field can write. f64 holds any finite value.
 FLOAT_TYPE_MAX = {'f16': 65504.0, 'f32': 3.4028234663852886e38,
@@ -760,7 +795,7 @@ _FIXED_TYPE_SIZES = {
     'u8': 1, 'u16': 2, 'u24': 3, 'u32': 4, 'u64': 8,
     's8': 1, 's16': 2, 's24': 3, 's32': 4, 's64': 8,
     'u32le16': 4, 's32le16': 4, 'f32le16': 4,
-    'u32be16le': 4, 's32be16le': 4, 'f32be16le': 4, 'f16': 2,
+    'u32be16le': 4, 's32be16le': 4, 'f32be16le': 4, 'f16': 2, 'bf16': 2,
     'uflt16': 2, 'sflt16': 2, 'sflt24': 3, 'f32': 4, 'f64': 8, 'udec': 1, 'sdec': 1,
 }
 
@@ -1918,6 +1953,31 @@ def decode_ascii(name: Any, raw: bytes, warnings: List[str]) -> str:
     return raw.decode('latin-1').rstrip('\x00')
 
 
+#: PS-560: the whole text of a `numeral` field, by base.
+NUMERAL_PATTERNS = {'decimal': re.compile(r'[+-]?[0-9]+'), 'hex': re.compile(r'[0-9A-Fa-f]+')}
+
+
+def decode_numeral(name: Any, text: str, numeral: str) -> int:
+    """PS-560: the whole text is a numeral of the declared base, or an error naming the
+    field; never a prefix, as JavaScript's parseInt would take."""
+    if not NUMERAL_PATTERNS[numeral].fullmatch(text):
+        raise FieldError(f"Field '{name}': '{text}' is not a {numeral} numeral (PS-560)")
+    return int(text, 10 if numeral == 'decimal' else 16)
+
+
+def encode_numeral(name: Any, value: Any, length: Optional[int], numeral: str) -> str:
+    """PS-561: digits in the declared base, uppercase hex, `0`-filled to `length` after any
+    sign; a negative hex value, or one that does not fit, is a PS-168 error."""
+    n = round_to_integer(value)                                        # PS-552
+    digits = format(abs(n), 'd' if numeral == 'decimal' else 'X')
+    sign = '-' if n < 0 else ''
+    width = len(sign) + len(digits) if length is None else length
+    if (n < 0 and numeral == 'hex') or len(sign) + len(digits) > width:
+        raise FieldError(f"Field '{name}': {format_lookup_value(value)} does not fit "
+                         f"{length if length is not None else len(digits)} {numeral} digits (PS-168)")
+    return sign + digits.rjust(width - len(sign), '0')
+
+
 def encode_ascii(name: Any, value: Any, length: Optional[int],
                  warnings: List[str]) -> bytes:
     """PS-537: a character above U+00FF, or a value longer than a fixed `length`, is
@@ -2710,6 +2770,28 @@ def field_name_errors(schema):
     return errors
 
 
+def numeral_errors(node, _top=True):
+    """PS-560: `numeral` is `decimal` or `hex`, and only on an `ascii` field. Walked over the
+    whole schema, in the spec prototype's text."""
+    errors = []
+    if isinstance(node, list):
+        for item in node:
+            errors.extend(numeral_errors(item, False))
+    elif isinstance(node, dict):
+        if 'numeral' in node and 'type' in node:
+            if str(node.get('type')).lower() != 'ascii':
+                errors.append(f"Field '{node.get('name')}': numeral is defined only on an "
+                              f"ascii field, not on {node.get('type')} (PS-560)")
+            elif node['numeral'] not in NUMERAL_PATTERNS:
+                errors.append(f"Field '{node.get('name')}': numeral must be decimal or hex, "
+                              f"not {node['numeral']!r} (PS-560)")
+        for key, value in node.items():
+            if _top and key == 'test_vectors':
+                continue
+            errors.extend(numeral_errors(value, False))
+    return errors
+
+
 def schema_iterator_errors(schema):
     """iterator_errors over the top-level and port field lists, and every tlv's reserve.
 
@@ -2717,6 +2799,7 @@ def schema_iterator_errors(schema):
     the validator and the TS013 generator - already calls this one.
     """
     errors = field_name_errors(schema)
+    errors.extend(numeral_errors(schema))                            # PS-560
     errors.extend(iterator_errors(schema.get('fields')))
     errors.extend(ipso_instance_errors(schema))                      # PS-548
     for port, entry in (schema.get('ports') or {}).items():
@@ -4162,6 +4245,10 @@ class SchemaInterpreter:
             # IEEE 754 half-precision (2 bytes)
             return self._read_float16(buf, pos)
         
+        if field_type == 'bf16':
+            word, new_pos = self._read_int(buf, pos, 2, False)       # PS-558
+            return decode_bf16(word), new_pos
+
         if field_type == 'f32':
             return self._read_float(buf, pos, 4)
         
@@ -4214,6 +4301,8 @@ class SchemaInterpreter:
                 raise BufferUnderflow.need(length, pos, len(buf))
             value = decode_ascii(field_def.get('name'), buf[pos:pos + length],
                                  self._nested_warnings)
+            if field_def.get('numeral'):
+                value = decode_numeral(field_def.get('name'), value, field_def['numeral'])
             return value, pos + length
         
         # `hex:upper` is a `bytes` format (PS-079), not a type (CR-2026-037), so it
@@ -7959,6 +8048,13 @@ class SchemaInterpreter:
             stored = round_to_integer(raw)
             if not low <= stored <= high:
                 return False, False
+        elif field_type == 'bf16':
+            # CR-2026-149: through the type's storage is through PS-559's rounding; a
+            # value that rounds past the largest bf16 does not fit.
+            try:
+                stored = decode_bf16(encode_bf16(raw))
+            except ValueError:
+                return False, False
         elif field_type in FLOAT_TYPE_MAX:
             if abs(raw) > FLOAT_TYPE_MAX[field_type]:
                 return False, False
@@ -8234,7 +8330,7 @@ class SchemaInterpreter:
         
         # Float types should preserve fractional values
         field_type = field_def.get('type', 'u8')
-        if field_type in ('f16', 'f32', 'f64', 'udec', 'sdec', 'f32le16', 'f32be16le',
+        if field_type in ('f16', 'bf16', 'f32', 'f64', 'udec', 'sdec', 'f32le16', 'f32be16le',
                           'uflt16', 'sflt16', 'sflt24'):
             return float(value)
         
@@ -8336,6 +8432,9 @@ class SchemaInterpreter:
             fmt = '<e' if self.endian == Endian.LITTLE else '>e'
             return struct.pack(fmt, float(value))
         
+        if field_type == 'bf16':
+            return self._write_int(encode_bf16(value, field_def.get('name')), 2, False)
+
         if field_type == 'f32':
             fmt = '<f' if self.endian == Endian.LITTLE else '>f'
             return struct.pack(fmt, float(value))
@@ -8394,6 +8493,9 @@ class SchemaInterpreter:
             fixed = field_def.get('length')
             if not isinstance(fixed, int) or isinstance(fixed, bool) or fixed < 0:
                 fixed = None
+            if field_def.get('numeral') and field_type == 'ascii':
+                value = encode_numeral(field_def.get('name'), value, fixed,
+                                       field_def['numeral'])
             return encode_ascii(field_def.get('name'), value, fixed,
                                 self._encode_warnings)
         

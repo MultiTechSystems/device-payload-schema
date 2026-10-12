@@ -39,7 +39,7 @@ var canonicalTypes = map[string]bool{
 	"u32le16": true, "s32le16": true, "f32le16": true,
 	"u32be16le": true, "s32be16le": true, "f32be16le": true,
 	"uflt16": true, "sflt16": true, "sflt24": true,
-	"f16": true, "f32": true, "f64": true,
+	"f16": true, "bf16": true, "f32": true, "f64": true,
 	"udec": true, "sdec": true,
 	"bool": true, "boolean": true, "bytes": true, "string": true, "ascii": true,
 	"hex": true, "base64": true,
@@ -306,6 +306,10 @@ func checkFieldRules(field map[string]any, at string) error {
 		if typ, _ := field["type"].(string); !unsignedTypes[typ] {
 			return fmt.Errorf("%s: encoding applies only to an unsigned integer type uN, not %v (PS-422)", at, field["type"])
 		}
+	}
+	// PS-560 (CR-2026-150): numeral is decimal or hex, on an ascii field only.
+	if err := checkNumeral(field); err != nil {
+		return err
 	}
 	// PS-510 (CR-2026-102): ipso and senml are mappings.
 	if err := checkAnnotations(field); err != nil {

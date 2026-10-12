@@ -118,6 +118,8 @@ type Field struct {
 	Type        FieldType      `json:"type" yaml:"type"`
 	// Encoding is a named code on an unsigned integer (PS-422): sign_magnitude, bcd, gray.
 	Encoding string `json:"encoding,omitempty" yaml:"encoding,omitempty"`
+	// Numeral is `decimal` or `hex` on an ascii field reported as an integer (PS-560).
+	Numeral string `json:"numeral,omitempty" yaml:"numeral,omitempty"`
 	// GroupEndian is a byte_group's own byte order (PS-364), empty for the context's.
 	GroupEndian string `json:"-" yaml:"-"`
 	// IntegerResult marks a computed field written `type: integer` (PS-283); its Type
@@ -524,7 +526,7 @@ func inferLengthFromType(t FieldType) int {
 		return 4
 	case TypeU64, TypeS64, TypeI64, TypeF64:
 		return 8
-	case TypeF16, TypeUFlt16, TypeSFlt16:
+	case TypeF16, TypeBF16, TypeUFlt16, TypeSFlt16:
 		return 2
 	case TypeSFlt24:
 		return 3
@@ -1185,6 +1187,9 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	}
 	if encoding, ok := fm["encoding"].(string); ok {
 		f.Encoding = encoding
+	}
+	if numeral, ok := fm["numeral"].(string); ok {
+		f.Numeral = numeral
 	}
 	if typ, ok := fm["type"].(string); ok {
 		f.Type = canonicalFieldType(typ)
@@ -2412,7 +2417,7 @@ func decodeFlagged(fd *FlaggedDef, ctx *DecodeContext) (map[string]any, error) {
 }
 
 // bitRangePattern matches a bit-range type such as u8[0:0] or u16[4:11].
-var bitRangePattern = regexp.MustCompile(`^([us](?:8|16|24|32|64))\[(\d+):(\d+)\]$`)
+var bitRangePattern = regexp.MustCompile(`^([us](?:8|16|24|32|40|48|56|64))\[(\d+):(\d+)\]$`)
 
 // decodeBitRange extracts a contiguous bit range from an unsigned base value.
 //
@@ -2515,6 +2520,15 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 			return nil, err
 		}
 		value = readWordOrdered(field.Type, data)
+
+	case TypeBF16:
+		// CR-2026-149 (PS-558): the upper half of a binary32, a word in the field's
+		// effective byte order.
+		data, err := ctx.Read(2)
+		if err != nil {
+			return nil, err
+		}
+		value = decodeBF16(decodeUint(data, endian))
 
 	case TypeUFlt16, TypeSFlt16, TypeSFlt24:
 		// The MCCI minifloats (CR-2026-063): a word in the field's effective byte order.
@@ -2639,6 +2653,13 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 			return nil, err
 		}
 		value = decodeASCII(field.Name, data, ctx) // PS-534, PS-538
+		if field.Numeral != "" {
+			n, err := decodeNumeral(field.Name, value.(string), field.Numeral) // PS-560
+			if err != nil {
+				return nil, err
+			}
+			value = n
+		}
 
 	case TypeEnum, TypeEnumLower:
 		// Enum: read base type and map to string
@@ -5849,6 +5870,17 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 		}
 		ctx.Write(writeWordOrdered(field.Type, numVal))
 
+	case TypeBF16:
+		numVal, ok := toFloat64(value)
+		if !ok {
+			return notANumber(field, value)
+		}
+		word, err := encodeBF16(numVal, field.Name) // PS-559
+		if err != nil {
+			return err
+		}
+		ctx.Write(encodeUint(word, 2, endian))
+
 	case TypeUFlt16, TypeSFlt16, TypeSFlt24:
 		numVal, ok := toFloat64(value)
 		if !ok {
@@ -5976,6 +6008,15 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 				fixed = field.Length
 			}
 			strVal, ok := value.(string)
+			if field.Numeral != "" {
+				if numVal, isNum := toFloat64(value); isNum {
+					text, err := encodeNumeral(field.Name, numVal, fixed, field.Numeral) // PS-561
+					if err != nil {
+						return err
+					}
+					strVal, ok = text, true
+				}
+			}
 			if !ok {
 				strVal = fmt.Sprintf("%v", value)
 			}

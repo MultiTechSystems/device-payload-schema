@@ -523,6 +523,14 @@ public static class SchemaDecoder
                 break;
             }
 
+            case FieldType.BF16:
+            {
+                // CR-2026-149 (PS-558): the upper half of a binary32, a word in the field's
+                // effective byte order.
+                value = Bf16.Decode(Helpers.DecodeUint(ctx.Read(2), endian));
+                break;
+            }
+
             case FieldType.F16:
             case FieldType.F32:
             case FieldType.F64:
@@ -596,6 +604,8 @@ public static class SchemaDecoder
             {
                 var data = ctx.Read(length);
                 value = Helpers.DecodeAscii(field.Name, data, ctx.Warnings);
+                if (field.Numeral != null)
+                    value = Numeral.Decode(field.Name, (string)value, field.Numeral);   // PS-560
                 break;
             }
 
@@ -1012,7 +1022,7 @@ public static class SchemaDecoder
                     continue;
                 case FieldType.U8 or FieldType.U16 or FieldType.U24 or FieldType.U32 or FieldType.U64
                     or FieldType.S8 or FieldType.S16 or FieldType.S24 or FieldType.S32 or FieldType.S64
-                    or FieldType.U32LE16 or FieldType.S32LE16 or FieldType.F16 or FieldType.F32 or FieldType.F64:
+                    or FieldType.U32LE16 or FieldType.S32LE16 or FieldType.F16 or FieldType.BF16 or FieldType.F32 or FieldType.F64:
                     total += Helpers.InferLengthFromType(f.Type);
                     continue;
                 default:

@@ -33,6 +33,10 @@ public class Field {
     private String encoding;
     public String getEncoding() { return encoding; }
     public void setEncoding(String encoding) { this.encoding = encoding; }
+    /** {@code decimal} or {@code hex} on an ascii field reported as an integer (PS-560). */
+    private String numeral;
+    public String getNumeral() { return numeral; }
+    public void setNumeral(String numeral) { this.numeral = numeral; }
     private String endian;
     private Double add;
     private Double mult;

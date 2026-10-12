@@ -54,6 +54,9 @@ public class EncodeResult
 /// </remarks>
 public static class SchemaEncoder
 {
+    /// <summary>A number as JavaScript writes it, for the messages of the helpers beside this class.</summary>
+    internal static string JsNumber(object? value) => Encoding.JsNumber(value);
+
     public static EncodeResult Encode(PayloadSchemaDefinition schema,
         Dictionary<string, object?> data, IReadOnlyList<string>? order = null)
         => new Encoding(schema, schema.Fields, order).Run(data);
@@ -1839,7 +1842,7 @@ public static class SchemaEncoder
         };
 
         /// <summary>Whether a type's encoded value carries a fraction (FRACTIONAL_TYPES).</summary>
-        static bool IsFractionalType(FieldType t) => t is FieldType.F16 or FieldType.F32
+        static bool IsFractionalType(FieldType t) => t is FieldType.F16 or FieldType.BF16 or FieldType.F32
             or FieldType.F64 or FieldType.UDec or FieldType.SDec or FieldType.F32LE16
             or FieldType.F32BE16LE or FieldType.UFlt16 or FieldType.SFlt16 or FieldType.SFlt24;
 
@@ -1949,6 +1952,11 @@ public static class SchemaEncoder
             {
                 stored = Math.Round(raw, MidpointRounding.ToEven);
                 if (!FitsBits(stored, ib.bits, ib.signed)) return (false, false);
+            }
+            else if (f.Type == FieldType.BF16)
+            {
+                try { stored = Bf16.Decode(Bf16.Encode(raw, f.Name)); }       // PS-559's rounding
+                catch (InvalidOperationException) { return (false, false); }
             }
             else if (FloatMax(f.Type) is { } max)
             {
@@ -2431,7 +2439,7 @@ public static class SchemaEncoder
             double result = ReverseCanonicalModifiers(
                 ReverseTransformStages(numeric, field.Transform), field);
 
-            if (field.Type is FieldType.F16 or FieldType.F32 or FieldType.F64
+            if (field.Type is FieldType.F16 or FieldType.BF16 or FieldType.F32 or FieldType.F64
                 or FieldType.UDec or FieldType.SDec or FieldType.F32LE16 or FieldType.F32BE16LE
                 or FieldType.UFlt16 or FieldType.SFlt16 or FieldType.SFlt24)
                 return result;
@@ -2611,7 +2619,7 @@ public static class SchemaEncoder
 
         /// <summary>A number as JavaScript's String(number) writes it: no `.0` on an
         /// integral value, else the shortest round-tripping digits.</summary>
-        static string JsNumber(object? value)
+        internal static string JsNumber(object? value)
         {
             var inv = System.Globalization.CultureInfo.InvariantCulture;
             switch (value)
@@ -2626,7 +2634,15 @@ public static class SchemaEncoder
                 return Math.Abs(d) < 9e15
                     ? ((long)d).ToString(inv)
                     : ((decimal)d).ToString(inv);
-            return d.ToString("R", inv);
+            var digits = d.ToString("R", inv);
+            int e = digits.IndexOf('E');
+            if (e < 0) return digits;
+            // JavaScript writes 1e-6 and above in fixed notation and the rest as 3.4e+38,
+            // 1e-7; .NET writes 3.4E+38 and 1E-05.
+            if (Math.Abs(d) >= 1e-6 && Math.Abs(d) < 1e21)
+                return decimal.Parse(digits, System.Globalization.NumberStyles.Float, inv).ToString(inv);
+            int exponent = int.Parse(digits.Substring(e + 1), inv);
+            return digits.Substring(0, e) + "e" + (exponent < 0 ? "-" : "+") + Math.Abs(exponent);
         }
 
         // --- one field's bytes -------------------------------------------------------
@@ -2740,6 +2756,12 @@ public static class SchemaEncoder
                         field.Name, Given(field, value));                              // PS-168
                     return Helpers.EncodeSint(raw, size, endian);
                 }
+                case FieldType.BF16:
+                {
+                    var (ok, numeric) = Helpers.ToFloat64(value);
+                    if (!ok) throw NotANumber(field, value);
+                    return Helpers.EncodeUint(Bf16.Encode(numeric, field.Name), 2, endian);   // PS-559
+                }
                 case FieldType.F16:
                 {
                     var (ok, numeric) = Helpers.ToFloat64(value);
@@ -2790,6 +2812,16 @@ public static class SchemaEncoder
                 case FieldType.String or FieldType.Boolean when field.Value != null:
                     // A literal came from no bytes, so it writes none.
                     return Array.Empty<byte>();
+                case FieldType.Ascii when field.Numeral != null && Helpers.ToFloat64(value).Item1:
+                {
+                    // PS-561: digits in the declared base, rounded as PS-552 requires.
+                    var text = Numeral.Encode(field.Name, Helpers.ToFloat64(value).Item2,
+                        field.Length > 0 && field.LengthRef == null ? field.Length : null,
+                        field.Numeral);
+                    return Helpers.EncodeAscii(field.Name, text,
+                        field.Length > 0 && field.LengthRef == null ? field.Length : null,
+                        _result.Warnings);
+                }
                 case FieldType.Ascii or FieldType.String:
                     // PS-537. A fixed `length` pads and bounds the value; `remaining` or a
                     // reference has no fixed count, so the value supplies it.

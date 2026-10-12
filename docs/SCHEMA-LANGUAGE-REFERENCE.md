@@ -70,6 +70,18 @@ setting describes. The type names the order, and a field's `endian:` does not ch
 | Type | Bytes | Description |
 |------|-------|-------------|
 | `f16`, `f32`, `f64` | 2,4,8 | IEEE 754 float |
+| `bf16` | 2 | The upper 16 bits of an IEEE 754 binary32 (1 sign, 8 exponent, 7 fraction bits), read in the field's effective byte order (PS-558) |
+
+A `bf16` word is the binary32 whose low 16 bits are zero; an infinity or NaN is absent
+(PS-282). An encoder rounds the binary64 value once to the nearest `bf16`, a tie to the even
+fraction, never through a binary32, and rejects a finite value past 3.3895313892515355e38 as
+PS-168 requires (PS-559). Netvox r718e sends it little-endian:
+
+```yaml
+- name: acceleration_x
+  type: bf16
+  endian: little
+```
 
 ### Compact Floats (MCCI)
 
@@ -100,6 +112,21 @@ the range is an error (PS-420).
 | `hex` | Lowercase hex string (requires `length:`) |
 | `bytes` | Raw bytes, reported as declared by `format:` (requires `length:`, PS-456) |
 | `base64` | Base64 encoded output (requires `length:`) |
+
+An `ascii` field that declares `numeral: decimal` or `numeral: hex` reports its digit text
+as the integer it spells (PS-560), so modifiers, lookups and references apply to it as to
+any integer. The text, after the trailing 0x00 padding is removed, must be wholly a numeral:
+`decimal` is an optional `+` or `-` and one or more of `0`-`9`, `hex` is one or more hex
+digits with no sign and no `0x`. Anything else (empty text, whitespace, a digit outside the
+base) is an error naming the field, never a prefix read as JavaScript's `parseInt` would.
+An encoder writes the integer in digits of the base, uppercase hex, `0`-filled to `length`
+after any sign, and rejects a negative `hex` value or one that does not fit (PS-561, PS-168).
+`numeral` on any other type, or with another value, is rejected at load.
+
+```yaml
+- {name: major, type: ascii, length: 4, numeral: hex}       # "001A" -> 26
+- {name: rssi,  type: ascii, length: 4, numeral: decimal}   # "-065" -> -65
+```
 
 A `bytes` field reports a **lowercase** hex string by default (PS-281). Its `format:` is
 one of `hex`, `hex:upper`, `base64` or `array` (PS-079), and a `separator:` goes between
@@ -1702,7 +1729,7 @@ test_vectors:
 ## Quick Reference Card
 
 ```
-TYPES:        u8 u16 u24 u32 u64 | s8 s16 s24 s32 s64 | f16 f32 f64 | bool
+TYPES:        u8 u16 u24 u32 u64 | s8 s16 s24 s32 s64 | f16 bf16 f32 f64 | bool
               ascii hex bytes base64 | number integer string | skip enum
               udec sdec | bitfield_string | object
               aliases: uint8..uint64, int8..int64, i8..i64 (nothing else; case-sensitive)

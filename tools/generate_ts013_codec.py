@@ -132,7 +132,7 @@ function encReverseCanonical(v, f) {                  // reverse_canonical_modif
   return v;
 }
 
-var ENC_FLOAT_TYPES = ["f16", "f32", "f64", "udec", "sdec", "f32le16", "f32be16le",
+var ENC_FLOAT_TYPES = ["f16", "bf16", "f32", "f64", "udec", "sdec", "f32le16", "f32be16le",
                        "uflt16", "sflt16", "sflt24"];
 
 /* PS-168, PS-552: the value as the input gave it, for a rejection to name (_given_value). */
@@ -248,6 +248,49 @@ function encHalf(v) {
   }
   if (h >= 0x7C00) encFail("float too large to pack with e format");
   return sign | h;
+}
+
+/* bfloat16 from a double (encode_bf16, PS-559): rounded once from the binary64 value, a tie to
+ * the even fraction, never through a binary32; a finite value past the largest bf16 is a
+ * PS-168 error naming the field. */
+var ENC_BF16_MAX = (2 - Math.pow(2, -7)) * Math.pow(2, 127);
+function encBf16(v, f) {
+  if (isNaN(v)) return 0x7FC0;
+  var sign = (v < 0 || (v === 0 && 1 / v < 0)) ? 0x8000 : 0;
+  var a = Math.abs(v);
+  if (a === Infinity) return sign | 0x7F80;
+  var word, e = 0, m;
+  if (a !== 0) {
+    e = Math.floor(Math.log2(a));
+    if (Math.pow(2, e) > a) e -= 1;
+    if (Math.pow(2, e + 1) <= a) e += 1;
+  }
+  if (a === 0 || e < -126) {
+    word = encRint(a * Math.pow(2, 133));             // subnormal: fraction * 2**-133
+  } else {
+    m = encRint(a / Math.pow(2, e) * 128);            // 128..256, the leading bit included
+    if (m === 256) { m = 128; e += 1; }
+    word = ((e + 127) * 128) + (m - 128);
+  }
+  if (word >= 0x7F80) {
+    encFail("Field '" + f.name + "': " + String(v) + " is outside the range of bf16, " +
+            String(-ENC_BF16_MAX) + " to " + String(ENC_BF16_MAX) + " (PS-168)");
+  }
+  return sign | word;
+}
+
+/* encode_numeral (PS-561): digits in the declared base, uppercase hex, 0-filled to the length
+ * after any sign; a negative hex value, or one that does not fit, is a PS-168 error. */
+function encNumeral(f, value, fixed) {
+  var n = encRint(Number(value));
+  var digits = f.numeral === "hex" ? Math.abs(n).toString(16).toUpperCase() : String(Math.abs(n));
+  var sign = n < 0 ? "-" : "";
+  var width = fixed !== null ? fixed : sign.length + digits.length;
+  if ((n < 0 && f.numeral === "hex") || sign.length + digits.length > width) {
+    encFail("Field '" + f.name + "': " + String(value) + " does not fit " + (fixed !== null ? fixed : digits.length) + " " + f.numeral + " digits (PS-168)");
+  }
+  while (sign.length + digits.length < width) digits = "0" + digits;
+  return sign + digits;
 }
 
 function encWriteFloat(out, value, type, endian) {
@@ -411,6 +454,7 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
     out.push(((whole & 0x0F) << 4) | (n - whole * 10));
     return;
   }
+  if (type === "bf16") { encWriteInt(out, encBf16(Number(value), f), 2, false, endian); return; }
   if (type === "f16" || type === "f32" || type === "f64") { encWriteFloat(out, value, type, endian); return; }
   if (type === "bool") { out.push(value ? 1 : 0); return; }
   if (type === "skip") {
@@ -432,8 +476,9 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
   }
   if (encIsLiteral(f)) return;                       // PS-359: a literal writes nothing
   if (type === "string" || type === "ascii") {        // encode_ascii (PS-537)
-    var text = String(value), u = [], high = false;
     var fixed = typeof f.length === "number" && f.length >= 0 ? f.length : null;
+    if (f.numeral && type === "ascii") value = encNumeral(f, value, fixed);   // encode_numeral (PS-561)
+    var text = String(value), u = [], high = false;
     for (var c = 0; c < text.length; c++) {
       var code = text.charCodeAt(c);
       if (code > 0xFF) {
@@ -1351,6 +1396,8 @@ function encCaseTakes(f, value) {
       b = encBounds(bits, info[1]);
       if (stored < b[0] || stored > b[1]) return [false, false];
     }
+  } else if (t === "bf16") {                         // through PS-559's rounding
+    try { stored = decodeBf16(encBf16(raw, f)); } catch (e) { return [false, false]; }
   } else if (has_(ENC_FLOAT_MAX, t)) {
     if (Math.abs(raw) > ENC_FLOAT_MAX[t]) return [false, false];
     stored = t === "f64" ? raw : t === "f16" ? encF16Round(raw) : Math.fround(raw);
@@ -2182,12 +2229,27 @@ NUMERIC_TYPE_SIZES = {
     'u32le16': 4, 's32le16': 4, 'f32le16': 4,
     'u32be16le': 4, 's32be16le': 4, 'f32be16le': 4,
     'u64': 8, 'uint64': 8, 's64': 8, 'i64': 8, 'int64': 8,
-    'f16': 2, 'f32': 4, 'f64': 8,
+    'f16': 2, 'bf16': 2, 'f32': 4, 'f64': 8,
 }
 
 
 def type_size(t: str) -> Optional[int]:
     return NUMERIC_TYPE_SIZES.get(str(t))
+
+
+def slice_base_size(base_type: str) -> Optional[int]:
+    """Bytes in the base of a bit range (PS-059): any uN or sN of a whole number of
+    bytes, 8 to 64 bits. `u40`, `u48` and `u56` are bases only - no plain field has
+    those types - so type_size, which knows the plain ones, answered None for them and the
+    generator emitted a comment where the field's read should have been, leaving the
+    name unbound for a match after it."""
+    size = type_size(base_type)
+    if size is not None:
+        return size
+    m = re.match(r'^[us](\d+)$', base_type)
+    if m and int(m.group(1)) % 8 == 0 and 8 <= int(m.group(1)) <= 64:
+        return int(m.group(1)) // 8
+    return None
 
 
 def parse_bit_slice_type(t: str) -> Optional[Tuple[str, int, int]]:
@@ -2233,7 +2295,7 @@ def is_signed(t: str) -> bool:
 def is_float(t: str) -> bool:
     # Exactly the three float spellings: a prefix test admitted `float` and `float16`,
     # which are not types (CR-2026-037), and read them as four bytes.
-    return str(t) in ('f16', 'f32', 'f64')
+    return str(t) in ('f16', 'bf16', 'f32', 'f64')
 
 
 def field_endian_override(t: str, field: Optional[Dict[str, Any]] = None) -> Optional[str]:
@@ -3094,6 +3156,12 @@ function decodeEncoding(v, enc, size) {
 /* The MCCI minifloats (PS-417 to PS-419). Decoded by their formulas, never as IEEE half
  * precision (PS-421); an sflt24 with exponent 127 has no value and is left undefined, which
  * the output pass drops (PS-282). */
+function decodeBf16(word) {
+  var dv = new DataView(new ArrayBuffer(4));
+  dv.setUint16(0, word, false);
+  return dv.getFloat32(0, false);
+}
+
 function decodeMinifloat(type, w) {
   var sign, e, f, v;
   if (type === 'uflt16') {
@@ -3124,6 +3192,14 @@ function readF16(buf, pos, endian) {
   if (exp === 0) return sign * Math.pow(2, -14) * (frac / 1024);
   if (exp === 31) return frac ? NaN : sign * Infinity;
   return sign * Math.pow(2, exp - 15) * (1 + frac / 1024);
+}
+
+/* bfloat16 (PS-558): the word is the upper half of a binary32 whose lower half is zero. */
+function readBf16(buf, pos, endian) {
+  var w = readU(buf, pos, 2, endian);
+  var dv = new DataView(new ArrayBuffer(4));
+  dv.setUint16(0, w, false);
+  return dv.getFloat32(0, false);
 }
 
 function readF32(buf, pos, endian) {
@@ -3963,10 +4039,10 @@ function writeS(buf, pos, size, value, endian) {
         bit_slice = parse_bit_slice_type(ftype)
         if bit_slice is not None:
             base_type, bit_start, bit_width = bit_slice
-            base_size = type_size(base_type)
+            base_size = slice_base_size(base_type)
             if base_size is None:
-                lines.append(f'{i}  // TODO: unsupported base type for {ftype}')
-                return lines
+                raise ValueError(f"Field '{name}': {ftype} has no base of a whole number of "
+                                 f"bytes, 8 to 64 bits (PS-059)")
 
             eo = field_endian_override(base_type, field)
             endian_arg = f'"{eo}"' if eo else 'endian'
@@ -4104,6 +4180,24 @@ function writeS(buf, pos, size, value, endian) {
                 warning = json.dumps(ASCII_HIGH_BYTE_WARNING.format(field.get('name')))
                 lines.append(f'{i}  if (/[\\u0080-\\u00ff]/.test({js_name})) wn.push({warning});')
                 lines.append(f'{i}  {js_name} = {js_name}.replace(/\\u0000+$/, "");')
+                if field.get('numeral'):
+                    # PS-560: the whole text is a numeral of the declared base, or an error
+                    # naming the field; parseInt alone would take a prefix.
+                    base = field['numeral']
+                    pattern = '/^[+-]?[0-9]+$/' if base == 'decimal' else '/^[0-9A-Fa-f]+$/'
+                    lines.append(f'{i}  if (!{pattern}.test({js_name})) throw new Error("Field \'" + '
+                                 f'{json.dumps(str(field.get("name")))} + "\': \'" + {js_name} + "\' is not a '
+                                 f'{base} numeral (PS-560)");')
+                    lines.append(f'{i}  {js_name} = parseInt({js_name}, {10 if base == "decimal" else 16});')
+                    val_expr = self._apply_modifiers_expr(js_name, field)
+                    lines.append(f'{i}  var {js_name}_out = {val_expr};')
+                    lines.extend(f'{i}  {s}' for s in self._bind_js(field, js_name, f'{js_name}_out', False))
+                    if not name.startswith('_'):
+                        guards, target = name_from_to_js(field, js_name)
+                        for guard in guards:
+                            lines.append(f'{i}  {guard}')
+                        lines.append(f'{i}  {target} = {js_name}_out;')
+                    return lines
             elif ftype == 'bytes' and field.get('format', 'hex') in ('base64', 'array'):
                 # PS-079: the declared format. Ignored before, so every bytes field was
                 # rendered as lowercase hex whatever the schema asked for.
@@ -4142,7 +4236,9 @@ function writeS(buf, pos, size, value, endian) {
             sz = type_size(ftype) or 4
             eo = field_endian_override(ftype, field)
             endian_arg = f'"{eo}"' if eo else 'endian'
-            if sz == 2:
+            if ftype == 'bf16':
+                lines.append(f'{i}  var {js_name} = readBf16(buf, pos, {endian_arg});')
+            elif sz == 2:
                 lines.append(f'{i}  var {js_name} = readF16(buf, pos, {endian_arg});')
             elif sz == 4:
                 lines.append(f'{i}  var {js_name} = readF32(buf, pos, {endian_arg});')
@@ -4471,7 +4567,7 @@ function writeS(buf, pos, size, value, endian) {
                 # the count is the low nibble of the next byte - took two bytes and
                 # every record after it read from the wrong offset.
                 base_type, bit_start, bit_width = tf_slice
-                base_size = type_size(base_type) or 1
+                base_size = slice_base_size(base_type) or 1
                 if base_size >= 7:
                     lines.append(f'{i}    var {tfname} = bitRange(orderedBytes(buf, pos, '
                                  f'{base_size}, endian), {bit_start}, {bit_width}, '

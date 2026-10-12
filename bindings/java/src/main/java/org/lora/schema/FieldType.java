@@ -13,6 +13,8 @@ public enum FieldType {
     I8, I16, I24, I32, I64, S8, S16, S24, S32, S64,
     // Floating point
     F16, F32, F64,
+    /** The upper half of a binary32 (PS-558, CR-2026-149). */
+    BF16,
     // Boolean and bits
     BOOL, BITS,
     // String types
@@ -79,6 +81,7 @@ public enum FieldType {
             case "s32", "i32", "int32" -> I32;
             case "s64", "i64", "int64" -> I64;
             case "f16" -> F16;
+            case "bf16" -> BF16;
             case "f32" -> F32;
             case "f64" -> F64;
             case "udec" -> UDEC;
@@ -106,7 +109,7 @@ public enum FieldType {
     public int defaultLength() {
         return switch (this) {
             case U8, I8, S8, BOOL, BYTE -> 1;
-            case U16, I16, S16, F16 -> 2;
+            case U16, I16, S16, F16, BF16 -> 2;
             case U24, I24, S24 -> 3;
             case U32, I32, S32, F32, UINT, SINT, BINT, U32LE16, S32LE16,
                  F32LE16, U32BE16LE, S32BE16LE, F32BE16LE -> 4;
@@ -132,7 +135,7 @@ public enum FieldType {
 
     public boolean isFloat() {
         return switch (this) {
-            case F16, F32, F64, FLOAT16, FLOAT32, FLOAT64 -> true;
+            case F16, BF16, F32, F64, FLOAT16, FLOAT32, FLOAT64 -> true;
             default -> false;
         };
     }

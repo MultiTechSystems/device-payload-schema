@@ -18,6 +18,8 @@ public enum FieldType
     UFlt16, SFlt16, SFlt24,
     S8, S16, S24, S32, S64,
     F16, F32, F64,
+    /// <summary>The upper half of a binary32 (PS-558, CR-2026-149).</summary>
+    BF16,
     // Nibble-decimal (PS-329)
     UDec, SDec,
     Base64,
@@ -128,6 +130,8 @@ public class SchemaField
     public string? GroupEndian { get; set; }
     /// <summary>A named code on an unsigned integer (PS-422).</summary>
     public string? Encoding { get; set; }
+    /// <summary>`decimal` or `hex` on an ascii field reported as an integer (PS-560).</summary>
+    public string? Numeral { get; set; }
     /// <summary>A computed field written `type: integer` (PS-283); its Type is Number.</summary>
     public bool IntegerResult { get; set; }
     public string RawType { get; set; } = "";
