@@ -1566,7 +1566,9 @@ static inline int schema_decode_byte_group(
             if (rc != SCHEMA_OK) return schema_field_failed(result, rc, m, *pos, len);
         }
         out->field_index = idx;
-        if (out->valid && m->name[0] && m->name[0] != '_') result->field_count++;
+        if (out->valid && (m->name[0] ? m->name[0] != '_' : schema->nameless)) {
+            result->field_count++;
+        }
     }
     *pos += (size_t)width;
     return SCHEMA_OK;
@@ -2041,13 +2043,15 @@ static inline bool encode_inputs_add_double_at(encode_inputs_t* inputs, int inde
  * Returns false, adding nothing, where the inputs are full or the text is longer than
  * SCHEMA_MAX_NAME_LEN - 1 bytes; nothing is truncated. The encode then reports the field
  * as missing (PS-551). */
-static inline bool encode_inputs_add_text(encode_inputs_t* inputs, const char* name,
-                                          const uint8_t* text, size_t len) {
+static inline bool encode_inputs_add_text_keyed(encode_inputs_t* inputs, const char* name,
+                                                int index, const uint8_t* text, size_t len) {
     if (inputs->count >= SCHEMA_MAX_FIELDS) return false;
     if (len > SCHEMA_MAX_NAME_LEN - 1 || (len && !text)) return false;
+    if (!name && (index < 0 || index >= SCHEMA_MAX_FIELDS)) return false;
     encode_input_t* in = &inputs->inputs[inputs->count];
     memset(in, 0, sizeof(*in));
-    strncpy(in->name, name, SCHEMA_MAX_NAME_LEN - 1);
+    if (name) strncpy(in->name, name, SCHEMA_MAX_NAME_LEN - 1);
+    else { snprintf(in->name, sizeof(in->name), "#%d", index); in->by_index = true; }
     if (len) memcpy(in->value.str, text, len);
     in->value.str[len] = '\0';
     in->is_text = true;
@@ -2056,10 +2060,30 @@ static inline bool encode_inputs_add_text(encode_inputs_t* inputs, const char* n
     return true;
 }
 
+static inline bool encode_inputs_add_text(encode_inputs_t* inputs, const char* name,
+                                          const uint8_t* text, size_t len) {
+    return encode_inputs_add_text_keyed(inputs, name, 0, text, len);
+}
+
+/* The same text, keyed by field index for a schema without names (PS-555, CR-2026-146),
+ * numbered as encode_inputs_add_int_at is. It joins the mixed-keying rejection: given to
+ * a named schema it is refused by schema_encode. */
+static inline bool encode_inputs_add_text_at(encode_inputs_t* inputs, int index,
+                                             const uint8_t* text, size_t len) {
+    return encode_inputs_add_text_keyed(inputs, NULL, index, text, len);
+}
+
 /* encode_inputs_add_text for a NUL-terminated string. */
 static inline bool encode_inputs_add_string(encode_inputs_t* inputs, const char* name,
                                             const char* text) {
     return encode_inputs_add_text(inputs, name, (const uint8_t*)text, text ? strlen(text) : 0);
+}
+
+/* encode_inputs_add_text_at for a NUL-terminated string. */
+static inline bool encode_inputs_add_string_at(encode_inputs_t* inputs, int index,
+                                               const char* text) {
+    return encode_inputs_add_text_at(inputs, index, (const uint8_t*)text,
+                                     text ? strlen(text) : 0);
 }
 
 /* Find input value by name */
@@ -2427,7 +2451,15 @@ static inline int schema_encode_byte_group(
     uint64_t value = 0;
 
     for (int k = 0; k < group->nested_count; k++) {
-        const field_def_t* m = &schema->fields[group->nested_start + k];
+        /* A member of a group in a schema without names is keyed "#<n>", n its position in
+         * the schema's field array, nested_start + k: the index decode reports it under
+         * (field_index), numbered as every other field is (PS-555). */
+        field_def_t keyed_member = schema->fields[group->nested_start + k];
+        if (schema->nameless) {
+            snprintf(keyed_member.name, sizeof(keyed_member.name), "#%d",
+                     group->nested_start + k);
+        }
+        const field_def_t* m = &keyed_member;
         const encode_input_t* input = find_input(inputs, m->name);
         if (!input) {
             if (err && err_len) {

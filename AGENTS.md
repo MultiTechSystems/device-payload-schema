@@ -2785,6 +2785,10 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
     non-zero skip padding), 2 carry a lookup label (C's encoder takes the code) and 2 a
     `bytes` value (no index-keyed input for one). `sizeof(schema_t)` and
     `sizeof(encode_inputs_t)` unchanged (52536, 2312).
+    `encode_inputs_add_text_at` / `_add_string_at` key an `ascii` value the same way, and a
+    byte_group's members are keyed `#<n>`, n their position in the field array
+    (`nested_start + k`, the `field_index` decode reports them under); decode now reports a
+    nameless schema's members, which it dropped. Both join the mixed-keying refusal.
 
   **A `flagged` construct's mask field must declare `var_name`.** This interpreter records a
   value in its variable table only where a field declares one, while a YAML `flagged` names a

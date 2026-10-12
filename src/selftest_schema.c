@@ -1606,6 +1606,129 @@ static void test_a_wide_bit_range_encodes_as_decoded(void) {
                                  "its bits write 564 (PS-551)") == 0);
 }
 
+/* PS-555 (CR-2026-146) beyond the integer fields: a schema without names takes an `ascii`
+ * value and a byte_group's members by field index too. A member's index is its position in
+ * the schema's field array, nested_start + k, which is also the index decode reports it
+ * under (field_index). The schemas are built with names and then stripped, as a binary
+ * schema loaded without its name table is. */
+static void strip_names(schema_t* s) {
+    for (int i = 0; i < s->field_count; i++) s->fields[i].name[0] = '\0';
+    s->nameless = true;
+}
+
+static void test_a_nameless_schema_encodes_text_and_group_members_by_index(void) {
+    encode_inputs_t in;
+    encode_result_t out;
+    decode_result_t r;
+    {   /* ascii by index: [label (ascii 6), n (u8)], then decoded and re-encoded. */
+        schema_t s;
+        memset(&s, 0, sizeof(s));
+        s.endian = ENDIAN_BIG;
+        field_def_t f = field_ascii("label", 6);
+        field_def_t g = field_u8("n");
+        schema_add_field(&s, &f);
+        schema_add_field(&s, &g);
+        strip_names(&s);
+        encode_inputs_init(&in);
+        TCHECK(encode_inputs_add_text_at(&in, 0, (const uint8_t*)"AB\0C", 4));
+        TCHECK(encode_inputs_add_int_at(&in, 1, 7));
+        TCHECK(schema_encode(&s, &in, &out) == SCHEMA_OK);
+        TCHECK(out.len == 7 && memcmp(out.data, "\x41\x42\x00\x43\x00\x00\x07", 7) == 0);
+        TCHECK(schema_decode(&s, out.data, out.len, &r) == SCHEMA_OK);
+        TCHECK(r.field_count == 2 && r.fields[0].field_index == 0 && r.fields[0].text_len == 4);
+        encode_inputs_init(&in);
+        TCHECK(encode_inputs_add_text_at(&in, r.fields[0].field_index,
+                                         (const uint8_t*)r.fields[0].value.str,
+                                         r.fields[0].text_len));
+        TCHECK(encode_inputs_add_string_at(&in, 0, "hi"));   /* first one found wins */
+        TCHECK(encode_inputs_add_int_at(&in, 1, 7));
+        encode_result_t again;
+        TCHECK(schema_encode(&s, &in, &again) == SCHEMA_OK);
+        TCHECK(again.len == out.len && memcmp(again.data, out.data, out.len) == 0);
+
+        /* Not mixed: a name-keyed text input is refused for a nameless schema. */
+        encode_inputs_init(&in);
+        TCHECK(encode_inputs_add_string(&in, "label", "AB"));
+        TCHECK(encode_inputs_add_int_at(&in, 1, 7));
+        TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_PARSE);
+        TCHECK(strcmp(out.error_msg, "input 'label' is keyed by name, and a schema without "
+                                     "names takes each value by its field index (PS-555)") == 0);
+        /* Missing is named by its index. */
+        encode_inputs_init(&in);
+        TCHECK(encode_inputs_add_int_at(&in, 1, 7));
+        TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_PARSE);
+        TCHECK(strcmp(out.error_msg, "Missing required field: #0") == 0);
+        /* And an index-keyed text input is refused by a schema with names. */
+        schema_t named = s;
+        strncpy(named.fields[0].name, "label", SCHEMA_MAX_NAME_LEN - 1);
+        strncpy(named.fields[1].name, "n", SCHEMA_MAX_NAME_LEN - 1);
+        named.nameless = false;
+        encode_inputs_init(&in);
+        TCHECK(encode_inputs_add_string_at(&in, 0, "AB"));
+        encode_inputs_add_int(&in, "n", 7);
+        TCHECK(schema_encode(&named, &in, &out) == SCHEMA_ERR_PARSE);
+        TCHECK(strcmp(out.error_msg, "input '#0' is keyed by field index, and a schema with "
+                                     "names takes each value by name (PS-555)") == 0);
+        TCHECK(!encode_inputs_add_text_at(&in, -1, (const uint8_t*)"A", 1));
+        TCHECK(!encode_inputs_add_text_at(&in, SCHEMA_MAX_FIELDS, (const uint8_t*)"A", 1));
+    }
+    {   /* byte_group members: fields are [group (0), after (1), signed_low (4), mid (5)];
+         * the members sit above field_count, at nested_start + k. */
+        schema_t s;
+        field_def_t m[] = { field_s8("signed_low"),
+                            field_bit_range("mid", 2, false, 8, 4, 0, ENDIAN_DEFAULT) };
+        build_group(&s, 0, ENDIAN_LITTLE, m, 2, true);
+        for (int i = 0; i < SCHEMA_MAX_FIELDS; i++) s.fields[i].name[0] = '\0';
+        s.nameless = true;
+        encode_inputs_init(&in);
+        TCHECK(encode_inputs_add_int_at(&in, 4, -2));
+        TCHECK(encode_inputs_add_int_at(&in, 5, 3));
+        TCHECK(encode_inputs_add_int_at(&in, 1, 0x44));
+        TCHECK(schema_encode(&s, &in, &out) == SCHEMA_OK);
+        TCHECK(out.len == 3 && out.data[0] == 0xFE && out.data[1] == 0x03 && out.data[2] == 0x44);
+        /* Decoded, each member is reported under the index it is encoded by. */
+        TCHECK(schema_decode(&s, out.data, out.len, &r) == SCHEMA_OK);
+        TCHECK(r.field_count == 3);
+        encode_inputs_init(&in);
+        for (int i = 0; i < r.field_count; i++) {
+            TCHECK(encode_inputs_add_int_at(&in, r.fields[i].field_index, r.fields[i].value.i64));
+        }
+        encode_result_t again;
+        TCHECK(schema_encode(&s, &in, &again) == SCHEMA_OK);
+        TCHECK(again.len == out.len && memcmp(again.data, out.data, out.len) == 0);
+
+        /* A member left out is named by its index. */
+        encode_inputs_init(&in);
+        encode_inputs_add_int_at(&in, 4, -2);
+        encode_inputs_add_int_at(&in, 1, 0x44);
+        TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_PARSE);
+        TCHECK(strcmp(out.error_msg, "Missing required field: #5") == 0);
+        /* A name-keyed member is refused, not ignored. */
+        encode_inputs_init(&in);
+        encode_inputs_add_int_at(&in, 5, 3);
+        encode_inputs_add_int_at(&in, 1, 0x44);
+        encode_inputs_add_int(&in, "signed_low", -2);
+        TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_PARSE);
+        TCHECK(strcmp(out.error_msg, "input 'signed_low' is keyed by name, and a schema "
+                                     "without names takes each value by its field index "
+                                     "(PS-555)") == 0);
+    }
+    {   /* A schema with names is unchanged: members by name, an index-keyed one refused. */
+        schema_t s;
+        field_def_t m[] = { field_s8("signed_low"),
+                            field_bit_range("mid", 2, false, 8, 4, 0, ENDIAN_DEFAULT) };
+        build_group(&s, 0, ENDIAN_LITTLE, m, 2, true);
+        encode_inputs_init(&in);
+        encode_inputs_add_int_at(&in, 4, -2);
+        encode_inputs_add_int(&in, "mid", 3);
+        encode_inputs_add_int(&in, "after", 0x44);
+        TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_PARSE);
+        TCHECK(strcmp(out.error_msg, "input '#4' is keyed by field index, and a schema with "
+                                     "names takes each value by name (PS-555)") == 0);
+    }
+}
+
+
 /*
  * Main test entry point
  */
@@ -1667,6 +1790,7 @@ void selftest_schema(void) {
     test_a_byte_group_is_checked();
     test_a_byte_group_in_a_tlv_case();
     test_a_byte_group_encodes_as_decoded();
+    test_a_nameless_schema_encodes_text_and_group_members_by_index();
     test_a_wide_bit_range_reads_its_base();
     test_a_wide_bit_range_short_read_is_named();
     test_a_wide_bit_range_encodes_as_decoded();
