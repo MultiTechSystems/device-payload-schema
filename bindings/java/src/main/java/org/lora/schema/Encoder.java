@@ -2685,6 +2685,13 @@ final class Encoder {
             return new byte[0];
         }
         if (type == FieldType.ASCII || type == FieldType.STRING) {
+            if (field.getNumeral() != null && type == FieldType.ASCII && asDouble(value) != null) {
+                // PS-561: digits in the declared base, rounded as PS-552 requires.
+                Object declared = field.getRaw() != null ? field.getRaw().get("length") : null;
+                Integer fixed = declared instanceof Integer n && n >= 0 ? n : null;
+                return encodeAscii(field, Numeral.encode(field.getName(),
+                        (long) Math.rint(asDouble(value)), fixed, field.getNumeral()));
+            }
             return encodeAscii(field, String.valueOf(value));
         }
 

@@ -1876,6 +1876,31 @@ def decode_ascii(name: Any, raw: bytes, warnings: List[str]) -> str:
     return raw.decode('latin-1').rstrip('\x00')
 
 
+#: PS-560: the whole text of a `numeral` field, by base.
+NUMERAL_PATTERNS = {'decimal': re.compile(r'[+-]?[0-9]+'), 'hex': re.compile(r'[0-9A-Fa-f]+')}
+
+
+def decode_numeral(name: Any, text: str, numeral: str) -> int:
+    """PS-560: the whole text is a numeral of the declared base, or an error naming the
+    field; never a prefix, as JavaScript's parseInt would take."""
+    if not NUMERAL_PATTERNS[numeral].fullmatch(text):
+        raise FieldError(f"Field '{name}': '{text}' is not a {numeral} numeral (PS-560)")
+    return int(text, 10 if numeral == 'decimal' else 16)
+
+
+def encode_numeral(name: Any, value: Any, length: Optional[int], numeral: str) -> str:
+    """PS-561: digits in the declared base, uppercase hex, `0`-filled to `length` after any
+    sign; a negative hex value, or one that does not fit, is a PS-168 error."""
+    n = round_to_integer(value)                                        # PS-552
+    digits = format(abs(n), 'd' if numeral == 'decimal' else 'X')
+    sign = '-' if n < 0 else ''
+    width = len(sign) + len(digits) if length is None else length
+    if (n < 0 and numeral == 'hex') or len(sign) + len(digits) > width:
+        raise FieldError(f"Field '{name}': {format_lookup_value(value)} does not fit "
+                         f"{length if length is not None else len(digits)} {numeral} digits (PS-168)")
+    return sign + digits.rjust(width - len(sign), '0')
+
+
 def encode_ascii(name: Any, value: Any, length: Optional[int],
                  warnings: List[str]) -> bytes:
     """PS-537: a character above U+00FF, or a value longer than a fixed `length`, is
@@ -2668,6 +2693,28 @@ def field_name_errors(schema):
     return errors
 
 
+def numeral_errors(node, _top=True):
+    """PS-560: `numeral` is `decimal` or `hex`, and only on an `ascii` field. Walked over the
+    whole schema, in the spec prototype's text."""
+    errors = []
+    if isinstance(node, list):
+        for item in node:
+            errors.extend(numeral_errors(item, False))
+    elif isinstance(node, dict):
+        if 'numeral' in node and 'type' in node:
+            if str(node.get('type')).lower() != 'ascii':
+                errors.append(f"Field '{node.get('name')}': numeral is defined only on an "
+                              f"ascii field, not on {node.get('type')} (PS-560)")
+            elif node['numeral'] not in NUMERAL_PATTERNS:
+                errors.append(f"Field '{node.get('name')}': numeral must be decimal or hex, "
+                              f"not {node['numeral']!r} (PS-560)")
+        for key, value in node.items():
+            if _top and key == 'test_vectors':
+                continue
+            errors.extend(numeral_errors(value, False))
+    return errors
+
+
 def schema_iterator_errors(schema):
     """iterator_errors over the top-level and port field lists, and every tlv's reserve.
 
@@ -2675,6 +2722,7 @@ def schema_iterator_errors(schema):
     the validator and the TS013 generator - already calls this one.
     """
     errors = field_name_errors(schema)
+    errors.extend(numeral_errors(schema))                            # PS-560
     errors.extend(iterator_errors(schema.get('fields')))
     errors.extend(ipso_instance_errors(schema))                      # PS-548
     for port, entry in (schema.get('ports') or {}).items():
@@ -4173,6 +4221,8 @@ class SchemaInterpreter:
                 raise BufferUnderflow.need(length, pos, len(buf))
             value = decode_ascii(field_def.get('name'), buf[pos:pos + length],
                                  self._nested_warnings)
+            if field_def.get('numeral'):
+                value = decode_numeral(field_def.get('name'), value, field_def['numeral'])
             return value, pos + length
         
         # `hex:upper` is a `bytes` format (PS-079), not a type (CR-2026-037), so it
@@ -8334,6 +8384,9 @@ class SchemaInterpreter:
             fixed = field_def.get('length')
             if not isinstance(fixed, int) or isinstance(fixed, bool) or fixed < 0:
                 fixed = None
+            if field_def.get('numeral') and field_type == 'ascii':
+                value = encode_numeral(field_def.get('name'), value, fixed,
+                                       field_def['numeral'])
             return encode_ascii(field_def.get('name'), value, fixed,
                                 self._encode_warnings)
         

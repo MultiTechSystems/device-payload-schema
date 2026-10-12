@@ -130,6 +130,8 @@ public class SchemaField
     public string? GroupEndian { get; set; }
     /// <summary>A named code on an unsigned integer (PS-422).</summary>
     public string? Encoding { get; set; }
+    /// <summary>`decimal` or `hex` on an ascii field reported as an integer (PS-560).</summary>
+    public string? Numeral { get; set; }
     /// <summary>A computed field written `type: integer` (PS-283); its Type is Number.</summary>
     public bool IntegerResult { get; set; }
     public string RawType { get; set; } = "";

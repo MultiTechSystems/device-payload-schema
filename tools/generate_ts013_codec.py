@@ -279,6 +279,20 @@ function encBf16(v, f) {
   return sign | word;
 }
 
+/* encode_numeral (PS-561): digits in the declared base, uppercase hex, 0-filled to the length
+ * after any sign; a negative hex value, or one that does not fit, is a PS-168 error. */
+function encNumeral(f, value, fixed) {
+  var n = encRint(Number(value));
+  var digits = f.numeral === "hex" ? Math.abs(n).toString(16).toUpperCase() : String(Math.abs(n));
+  var sign = n < 0 ? "-" : "";
+  var width = fixed !== null ? fixed : sign.length + digits.length;
+  if ((n < 0 && f.numeral === "hex") || sign.length + digits.length > width) {
+    encFail("Field '" + f.name + "': " + String(value) + " does not fit " + (fixed !== null ? fixed : digits.length) + " " + f.numeral + " digits (PS-168)");
+  }
+  while (sign.length + digits.length < width) digits = "0" + digits;
+  return sign + digits;
+}
+
 function encWriteFloat(out, value, type, endian) {
   var v = Number(value);
   var size = type === "f16" ? 2 : type === "f32" ? 4 : 8;
@@ -462,8 +476,9 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
   }
   if (encIsLiteral(f)) return;                       // PS-359: a literal writes nothing
   if (type === "string" || type === "ascii") {        // encode_ascii (PS-537)
-    var text = String(value), u = [], high = false;
     var fixed = typeof f.length === "number" && f.length >= 0 ? f.length : null;
+    if (f.numeral && type === "ascii") value = encNumeral(f, value, fixed);   // encode_numeral (PS-561)
+    var text = String(value), u = [], high = false;
     for (var c = 0; c < text.length; c++) {
       var code = text.charCodeAt(c);
       if (code > 0xFF) {
@@ -4086,6 +4101,24 @@ function writeS(buf, pos, size, value, endian) {
                 warning = json.dumps(ASCII_HIGH_BYTE_WARNING.format(field.get('name')))
                 lines.append(f'{i}  if (/[\\u0080-\\u00ff]/.test({js_name})) wn.push({warning});')
                 lines.append(f'{i}  {js_name} = {js_name}.replace(/\\u0000+$/, "");')
+                if field.get('numeral'):
+                    # PS-560: the whole text is a numeral of the declared base, or an error
+                    # naming the field; parseInt alone would take a prefix.
+                    base = field['numeral']
+                    pattern = '/^[+-]?[0-9]+$/' if base == 'decimal' else '/^[0-9A-Fa-f]+$/'
+                    lines.append(f'{i}  if (!{pattern}.test({js_name})) throw new Error("Field \'" + '
+                                 f'{json.dumps(str(field.get("name")))} + "\': \'" + {js_name} + "\' is not a '
+                                 f'{base} numeral (PS-560)");')
+                    lines.append(f'{i}  {js_name} = parseInt({js_name}, {10 if base == "decimal" else 16});')
+                    val_expr = self._apply_modifiers_expr(js_name, field)
+                    lines.append(f'{i}  var {js_name}_out = {val_expr};')
+                    lines.extend(f'{i}  {s}' for s in self._bind_js(field, js_name, f'{js_name}_out', False))
+                    if not name.startswith('_'):
+                        guards, target = name_from_to_js(field, js_name)
+                        for guard in guards:
+                            lines.append(f'{i}  {guard}')
+                        lines.append(f'{i}  {target} = {js_name}_out;')
+                    return lines
             elif ftype == 'bytes' and field.get('format', 'hex') in ('base64', 'array'):
                 # PS-079: the declared format. Ignored before, so every bytes field was
                 # rendered as lowercase hex whatever the schema asked for.

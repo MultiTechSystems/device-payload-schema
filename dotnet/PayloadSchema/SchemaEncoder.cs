@@ -2694,6 +2694,16 @@ public static class SchemaEncoder
                 case FieldType.String or FieldType.Boolean when field.Value != null:
                     // A literal came from no bytes, so it writes none.
                     return Array.Empty<byte>();
+                case FieldType.Ascii when field.Numeral != null && Helpers.ToFloat64(value).Item1:
+                {
+                    // PS-561: digits in the declared base, rounded as PS-552 requires.
+                    var text = Numeral.Encode(field.Name, Helpers.ToFloat64(value).Item2,
+                        field.Length > 0 && field.LengthRef == null ? field.Length : null,
+                        field.Numeral);
+                    return Helpers.EncodeAscii(field.Name, text,
+                        field.Length > 0 && field.LengthRef == null ? field.Length : null,
+                        _result.Warnings);
+                }
                 case FieldType.Ascii or FieldType.String:
                     // PS-537. A fixed `length` pads and bounds the value; `remaining` or a
                     // reference has no fixed count, so the value supplies it.

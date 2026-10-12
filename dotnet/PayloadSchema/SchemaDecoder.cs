@@ -604,6 +604,8 @@ public static class SchemaDecoder
             {
                 var data = ctx.Read(length);
                 value = Helpers.DecodeAscii(field.Name, data, ctx.Warnings);
+                if (field.Numeral != null)
+                    value = Numeral.Decode(field.Name, (string)value, field.Numeral);   // PS-560
                 break;
             }
 

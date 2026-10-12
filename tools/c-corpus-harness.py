@@ -114,6 +114,7 @@ UNREACHABLE_KEYS = {
     "guard": "the interpreter has no guard",
     "parts": "the interpreter has no bitfield_string/version_string",
     "encoding": "the interpreter has no sign_magnitude/bcd/gray encodings",
+    "numeral": "the interpreter holds ascii text, not the integer it spells (PS-560)",
     "var": "variables are only read by match, which this harness skips",
     # AGENTS.md records this one: a `default` on a lookup or enum is Python, Go, Java and
     # C# only, because the struct has no slot for it. Building such a field without its

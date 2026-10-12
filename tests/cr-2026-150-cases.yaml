@@ -1,0 +1,148 @@
+# CR-2026-150 (PS-560, PS-561): an `ascii` field with `numeral: decimal|hex` reports its digit
+# text as an integer, strictly, and writes it back canonically.
+#
+# Two lists, both read by the reference and the generated codec
+# (tests/test_cr_2026_150_cases.py), Go (go/schema/cr150_test.go), Java (CR2026150Test.java)
+# and C# (CR2026_150Tests.cs). C cannot hold the field (PS-446).
+#
+#   decode: `schema` (YAML text), `payload` (hex) and either `expected` (the field's value)
+#           or `error` (text one of the errors contains; no data is reported).
+#   cases:  `schema`, `input` (JSON text) and either `payload` (hex) or `error`, as the
+#           CR-2026-135 and CR-2026-149 lists.
+#
+# The errors are the spec prototype's text. Text is shown in single quotes after PS-534's
+# removal of trailing 0x00 bytes.
+
+decode:
+
+- name: hex_zero_filled
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, numeral: hex}\n"
+  payload: "30303141"
+  expected: 26
+
+- name: hex_lowercase_nul_padded
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, numeral: hex}\n"
+  payload: "31610000"
+  expected: 26
+
+- name: decimal_negative
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, numeral: decimal}\n"
+  payload: "2d303635"
+  expected: -65
+
+- name: decimal_plus_sign_nul_padded
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, numeral: decimal}\n"
+  payload: "2b363500"
+  expected: 65
+
+- name: decimal_modifier_applies_to_the_number
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, numeral: decimal, mult: 0.5}\n"
+  payload: "30303432"
+  expected: 21
+
+- name: decimal_leading_space_rejected
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, numeral: decimal}\n"
+  payload: "20303635"
+  error: "Field 'v': ' 065' is not a decimal numeral (PS-560)"
+
+- name: decimal_interior_space_rejected
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, numeral: decimal}\n"
+  payload: "36203500"
+  error: "Field 'v': '6 5' is not a decimal numeral (PS-560)"
+
+- name: decimal_all_nul_rejected
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, numeral: decimal}\n"
+  payload: "00000000"
+  error: "Field 'v': '' is not a decimal numeral (PS-560)"
+
+- name: hex_prefix_rejected
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, numeral: hex}\n"
+  payload: "30783141"
+  error: "Field 'v': '0x1A' is not a hex numeral (PS-560)"
+
+- name: hex_digit_outside_the_base_rejected
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, numeral: hex}\n"
+  payload: "31324734"
+  error: "Field 'v': '12G4' is not a hex numeral (PS-560)"
+
+- name: hex_sign_rejected
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, numeral: hex}\n"
+  payload: "2d303031"
+  error: "Field 'v': '-001' is not a hex numeral (PS-560)"
+
+- name: decimal_sign_alone_rejected
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, numeral: decimal}\n"
+  payload: "2b000000"
+  error: "Field 'v': '+' is not a decimal numeral (PS-560)"
+
+cases:
+
+- name: hex_canonical
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, numeral: hex}\n"
+  input: '{"v": 26}'
+  payload: "30303141"
+
+- name: decimal_negative
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, numeral: decimal}\n"
+  input: '{"v": -65}'
+  payload: "2d303635"
+
+- name: decimal_positive
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, numeral: decimal}\n"
+  input: '{"v": 65}'
+  payload: "30303635"
+
+- name: hex_uppercase
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, numeral: hex}\n"
+  input: '{"v": 43981}'
+  payload: "41424344"
+
+- name: decimal_modifier_inverted
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, numeral: decimal, mult: 0.5}\n"
+  input: '{"v": 21}'
+  payload: "30303432"
+
+- name: decimal_rounds_a_tie_to_even
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, numeral: decimal}\n"
+  input: '{"v": 2.5}'
+  payload: "30303032"
+
+- name: hex_overflow_rejected
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, numeral: hex}\n"
+  input: '{"v": 65536}'
+  error: "Field 'v': 65536 does not fit 4 hex digits (PS-168)"
+
+- name: hex_negative_rejected
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, numeral: hex}\n"
+  input: '{"v": -1}'
+  error: "Field 'v': -1 does not fit 4 hex digits (PS-168)"
+
+- name: decimal_overflow_rejected
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, numeral: decimal}\n"
+  input: '{"v": -1000}'
+  error: "Field 'v': -1000 does not fit 4 decimal digits (PS-168)"
+
+- name: decimal_sign_counts_against_the_length
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, numeral: decimal}\n"
+  input: '{"v": 10000}'
+  error: "Field 'v': 10000 does not fit 4 decimal digits (PS-168)"
+
+# A schema that misplaces or misspells `numeral` is rejected when it is loaded, naming the
+# field (PS-560).
+load:
+
+- name: numeral_on_an_integer
+  schema: "name: t\nfields:\n  - {name: v, type: u8, numeral: hex}\n"
+  error: "Field 'v': numeral is defined only on an ascii field, not on u8 (PS-560)"
+
+- name: numeral_on_a_hex_field
+  schema: "name: t\nfields:\n  - {name: v, type: hex, length: 2, numeral: decimal}\n"
+  error: "Field 'v': numeral is defined only on an ascii field, not on hex (PS-560)"
+
+- name: numeral_with_another_value
+  schema: "name: t\nfields:\n  - {name: v, type: ascii, length: 4, numeral: octal}\n"
+  error: "Field 'v': numeral must be decimal or hex, not 'octal' (PS-560)"
+
+- name: numeral_in_a_tlv_case
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        1:\n          - {name: v, type: u16, numeral: hex}\n"
+  error: "Field 'v': numeral is defined only on an ascii field, not on u16 (PS-560)"
