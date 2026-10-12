@@ -123,14 +123,14 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Device schemas
 
-350 schemas under `schemas/devices/`.
-Mean quality score 82.0% (PLATINUM 43, GOLD 50, SILVER 236, BRONZE 6, REJECTED 15). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+352 schemas under `schemas/devices/`.
+Mean quality score 82.0% (PLATINUM 43, GOLD 50, SILVER 238, BRONZE 6, REJECTED 15). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
-| _language-conformance | 138 | 299 | GOLD 1, SILVER 133, BRONZE 4 |
+| _language-conformance | 140 | 304 | GOLD 1, SILVER 135, BRONZE 4 |
 | milesight | 84 | 1427 | PLATINUM 30, GOLD 35, SILVER 16, REJECTED 3 |
 | decentlab | 58 | 204 | PLATINUM 10, GOLD 11, SILVER 32, BRONZE 1, REJECTED 4 |
 | _library-composed | 49 | 57 | SILVER 49 |
@@ -290,6 +290,8 @@ Mean quality score 82.0% (PLATINUM 43, GOLD 50, SILVER 236, BRONZE 6, REJECTED 1
 | `_language-conformance/value-absent` | 4 | 2 | fields | 79% | SILVER |
 | `_language-conformance/wide-bit-range` | 3 | 2 | fields | 81% | SILVER |
 | `_language-conformance/wide-group` | 2 | 2 | fields | 81% | SILVER |
+| `_language-conformance/wide-peek-selector-u64` | 6 | 2 | fields | 83% | SILVER |
+| `_language-conformance/wide-peek-selector` | 9 | 3 | fields | 85% | SILVER |
 | `_language-conformance/word-ordered` | 4 | 1 | fields | 83% | SILVER |
 | `_language-conformance/zero-length` | 3 | 1 | fields | 79% | SILVER |
 | `_library-composed/alarm_config__set_delta_threshold` | 4 | 2 | fields | 81% | SILVER |

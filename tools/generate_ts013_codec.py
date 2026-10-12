@@ -2143,6 +2143,21 @@ def type_size(t: str) -> Optional[int]:
     return NUMERIC_TYPE_SIZES.get(str(t))
 
 
+def slice_base_size(base_type: str) -> Optional[int]:
+    """Bytes in the base of a bit range (PS-059): any uN or sN of a whole number of
+    bytes, 8 to 64 bits. `u40`, `u48` and `u56` are bases only - no plain field has
+    those types - so type_size, which knows the plain ones, answered None for them and the
+    generator emitted a comment where the field's read should have been, leaving the
+    name unbound for a match after it."""
+    size = type_size(base_type)
+    if size is not None:
+        return size
+    m = re.match(r'^[us](\d+)$', base_type)
+    if m and int(m.group(1)) % 8 == 0 and 8 <= int(m.group(1)) <= 64:
+        return int(m.group(1)) // 8
+    return None
+
+
 def parse_bit_slice_type(t: str) -> Optional[Tuple[str, int, int]]:
     """Parse bit-slice type syntax.
 
@@ -3930,10 +3945,10 @@ function writeS(buf, pos, size, value, endian) {
         bit_slice = parse_bit_slice_type(ftype)
         if bit_slice is not None:
             base_type, bit_start, bit_width = bit_slice
-            base_size = type_size(base_type)
+            base_size = slice_base_size(base_type)
             if base_size is None:
-                lines.append(f'{i}  // TODO: unsupported base type for {ftype}')
-                return lines
+                raise ValueError(f"Field '{name}': {ftype} has no base of a whole number of "
+                                 f"bytes, 8 to 64 bits (PS-059)")
 
             eo = field_endian_override(base_type, field)
             endian_arg = f'"{eo}"' if eo else 'endian'
@@ -4440,7 +4455,7 @@ function writeS(buf, pos, size, value, endian) {
                 # the count is the low nibble of the next byte - took two bytes and
                 # every record after it read from the wrong offset.
                 base_type, bit_start, bit_width = tf_slice
-                base_size = type_size(base_type) or 1
+                base_size = slice_base_size(base_type) or 1
                 if base_size >= 7:
                     lines.append(f'{i}    var {tfname} = bitRange(orderedBytes(buf, pos, '
                                  f'{base_size}, endian), {bit_start}, {bit_width}, '

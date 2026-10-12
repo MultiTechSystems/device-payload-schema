@@ -232,11 +232,11 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 2129 |
-| Go | `go/schema/corpus_conformance_test.go` | 2722 | 2147 (plain API 2119) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2722 | 2130 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2722 | 2129 |
-| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 569 of 569 attempted | n/a |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2133 |
+| Go | `go/schema/corpus_conformance_test.go` | 2727 | 2151 (plain API 2123) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2727 | 2134 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2727 | 2133 |
+| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 575 of 575 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
 its own implementation's actual; trust it over this table.
@@ -816,10 +816,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2129 |
-| Go | `go/schema/corpus_encode_test.go` | 2147 (plain 2119) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2129 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2130 |
+| Python | `tests/test_encode_round_trip.py` | 2133 |
+| Go | `go/schema/corpus_encode_test.go` | 2151 (plain 2123) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2133 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2134 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 - **A name may be an object under one tag and a scalar under another, and a tlv encoder
@@ -933,6 +933,22 @@ same values); `..._0006160405fc` is a separate gap.
     byte - and 325 now say `Missing required field: report_type`: in those schemas no
     nested match reads the discriminator (rb02b's reads `$device_type`), so its `default`
     stands for every non-zero report type and nothing in the input fixes it.
+
+**A bit range's base may be any whole number of bytes from 1 to 8, and a wide non-consuming one
+binds its name as a selector** (`u40`, `u48`, `u56` as well as the plain widths): a byte several
+positions ahead is the last byte of a base that wide, so `u56[2:6]` at offset 0 reads bits 2-6 of
+byte 6 without moving, and a `match` after it dispatches on the name. The registry's dragino
+lse01-121 and lsn50v2-d20-d22-d23 use it. Measured on `wide-peek-selector.yaml` (a signed `s40`
+range too) and `wide-peek-selector-u64.yaml`: Python, Java and C# decoded both; **Go refused the
+schema** (`unknown type: u40[0:1]`, its `bitRangePattern` listed 8/16/24/32/64 only); **the TS013
+generator emitted a TODO comment for the read** - `type_size`, which knows plain types, returned
+None for `u40`/`u48`/`u56` - so `$layout` was never bound and the codec threw `Match field
+$layout has no value`. A u64 base worked. Go's pattern and the generator's new `slice_base_size`
+fix both, and the generator now raises for a base it cannot size rather than emit a comment.
+The peeks are named, not `_`-prefixed, on purpose: an internal one writes payload bytes and
+declares no value, a PS-434 error on encode, whereas a named peek is derived from the field that
+writes its bits (PS-551, CR-2026-141). Floors: decode +5 in Go, Java and C#; re-encode +4 and `match`
++4 everywhere (the skipped-four vector cannot round-trip).
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
 from `tools/schema_interpreter.py`. Read that one first when changing any of them.
@@ -2935,7 +2951,7 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   (CR-2026-032).** `make test-c` builds the three previously-orphaned C test files and runs
   `tools/c-corpus-harness.py`, which generates C that builds each expressible corpus schema
   through the struct API, compiles it, and compares the decode against the vectors.
-  **569 of 569 attempted vectors pass** (2026-10-13) since CR-2026-033 added `tlv` and CR-2026-034
+  **575 of 575 attempted vectors pass** (2026-10-13) since CR-2026-033 added `tlv` and CR-2026-034
   `flagged` (it was 50 of 50 before either). 751 of 1239 are still in schemas the struct API
   cannot build - 26 use a `transform` chain, 24 a `bitfield_string`, 15 more cases than
   `SCHEMA_MAX_CASES` allows, 3 `repeat`, 3 a `u32le16` **the interpreter has and the harness

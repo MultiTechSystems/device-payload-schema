@@ -1,0 +1,40 @@
+# The widest base: eight bytes from the current position, the selector in the last one.
+# Only the low three bits of that byte are taken, so the reported value is always exact.
+# Nothing is consumed by the read: the cases then decode the same eight-byte region.
+name: probe_wide_peek_selector_u64
+endian: big
+fields:
+- name: kind
+  type: "u64[0:2]"
+- match:
+    field: $kind
+    cases:
+      5:
+      - name: id
+        type: u32
+      - name: ext
+        type: u24
+      default:
+      - name: high
+        type: u32
+      - name: low
+        type: u24
+- name: kind_byte
+  type: u8
+test_vectors:
+- name: selected_five
+  source: spec-example
+  payload: "01020304 050607 05"
+  expected:
+    kind: 5
+    id: 16909060
+    ext: 329223
+    kind_byte: 5
+- name: any_other
+  source: spec-example
+  payload: "00000000 000001 02"
+  expected:
+    kind: 2
+    high: 0
+    low: 1
+    kind_byte: 2
