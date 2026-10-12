@@ -620,9 +620,8 @@ function encBitRun(fr, run, data, ctx) {              // _encode_bitfield_run
   var endian = ctx.endian;
   for (var j = 0; j < run.length; j++) if (run[j].endian) { endian = run[j].endian; break; }
   for (var i = 0; i < run.length; i++) {
-    var f = run[i], name = f.name || "", v;
-    if (!name) v = f["default"] === undefined ? 0 : f["default"];
-    else if ("value" in f || name.charAt(0) === "_") v = encInternalValue(f, data);
+    var f = run[i], name = f.name || "", v;   // a nameless range is refused at load (PS-553)
+    if ("value" in f || name.charAt(0) === "_") v = encInternalValue(f, data);
     else if (!encHas(data, name)) encFail(encMissing(name));   // PS-551
     else v = data[name];
     v = encReverseModifiers(v, f);
@@ -1357,7 +1356,6 @@ function encList(out, fields, data, ctx, top) {
     if ("flagged" in f && !f.type) { return encFlagged(out, f.flagged, data, ctx); }
     if (type === "repeat") { encRepeat(out, f, data, ctx, fields); return; }
     if (type === "object") {
-      if (!name) return encList(out, f.fields || [], data, ctx);
       // Read back from the key a `name_from` object was reported under (CR-2026-030).
       var objKey = encResolveName(f, name, data);
       if (objKey === null) objKey = name;
@@ -1374,9 +1372,9 @@ function encList(out, fields, data, ctx, top) {
     if (encIsLiteral(f)) return;
     if ("value" in f) { encField(out, f, f.value, ctx); return; }
     var value;
-    if (!name) {
-      value = f["default"] === undefined ? 0 : f["default"];   // padding, as a skip is
-    } else if (name.charAt(0) === "_") {
+    // A nameless field other than a skip is refused at load (PS-553); it was written
+    // here as zero padding.
+    if (name.charAt(0) === "_") {
       value = encInternalValue(f, data);
     } else {
       var key = encResolveName(f, name, data);

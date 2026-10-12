@@ -134,6 +134,9 @@ public static partial class SchemaParser
         CheckOnRepeat(root);    // PS-525, PS-526 (CR-2026-110)
         CheckWave6b(root);    // PS-404, PS-433
         CheckReferences(root);    // PS-539 (CR-2026-117)
+        // CR-2026-138: every field but a skip has a name (PS-553). Checked after the rules
+        // above, as the spec prototype does, so a construct's own error keeps its text.
+        CheckFieldNames(root);
         schema.RepeatOnlyNames = RepeatOnlyNames(root);
         // PS-491 (CR-2026-096): one reported name's declarations in one field list agree
         // on unit, senml and ipso, or `_meta` could not describe the name.

@@ -963,6 +963,11 @@ func ParseSchema(data string) (*Schema, error) {
 	if err := checkOnRepeat(raw, order); err != nil {
 		return nil, err
 	}
+	// CR-2026-138: every field but a skip has a name (PS-553). Checked after the rules
+	// above, as the spec prototype does, so a construct's own error keeps its text.
+	if err := checkFieldNames(raw); err != nil {
+		return nil, err
+	}
 
 	schema := &Schema{repeatOnly: repeatOnlyNames(raw), keyOrder: order}
 	schema.rawName = raw["name"]
@@ -5068,7 +5073,7 @@ func encodeBitfieldRun(run []Field, data map[string]any, ctx *EncodeContext) err
 				return err
 			}
 			value = v
-		} else if gf.Name != "" {
+		} else { // a nameless range is refused at load (PS-553); it was written as zero bits
 			v, ok := data[gf.Name]
 			if !ok || v == nil {
 				// PS-551. A range was written as zero bits, which read back as a value.
@@ -5313,22 +5318,11 @@ func encodeFieldList(fields []Field, data map[string]any, ctx *EncodeContext) er
 		// PS-434 narrows that for an internal field: it writes its `value` (handled
 		// above), else the input's value under its name, else it is an error naming the
 		// field. Writing zero read back as a value the device never sent wherever the
-		// field was not padding. Unnamed padding still writes zeros.
-		if field.Name == "" {
-			if field.Type == TypeObject || field.Type == TypeObjectLower {
-				// A nameless object's members sit in the enclosing data.
-				if err := encodeFields(field.Fields, data, ctx); err != nil {
-					return err
-				}
-				continue
-			}
-			// Nothing can be supplied for a field with no name; it is padding, as a
-			// skip is.
-			if err := encodeField(field, 0, ctx); err != nil {
-				return err
-			}
-			continue
-		}
+		// field was not padding.
+		//
+		// A nameless field other than a skip is refused at load (PS-553, CR-2026-138).
+		// It was written here as zero padding, and a nameless object's members were read
+		// from the enclosing data; neither can be reached now.
 		if strings.HasPrefix(field.Name, "_") {
 			value, err := internalEncodeValue(field, data)
 			if err != nil {

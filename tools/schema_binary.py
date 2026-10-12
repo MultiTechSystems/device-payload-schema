@@ -411,6 +411,11 @@ def schema_errors(schema: Dict) -> List[str]:
     # every path, the binary blob the C interpreter loads included.
     from schema_interpreter import expand_refs, reference_errors
     errors.extend(reference_errors(expand_refs(schema)[0]))     # after splicing (CR-2026-127)
+    # PS-553 (CR-2026-138): a nameless field other than a skip is refused. Since PS-555
+    # (CR-2026-142) the binary form carries the schema's names, and its name table gives a
+    # length of 0 to a skip alone; the YAML is checked here, before conversion.
+    from schema_interpreter import field_name_errors
+    errors.extend(field_name_errors(schema))
     if schema.get('ports'):
         errors.append("`ports` - the C interpreter has no port selection; refused "
                       "rather than dropped (PS-446)")

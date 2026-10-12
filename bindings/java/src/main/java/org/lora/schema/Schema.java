@@ -113,6 +113,9 @@ public class Schema {
         OnRepeat.checkPlacement(raw);
         // CR-2026-117: every `$` reference names something the schema declares (PS-539).
         References.check(raw);
+        // CR-2026-138: every field but a skip has a name (PS-553). Checked after the rules
+        // above, as the spec prototype does, so a construct's own error keeps its text.
+        FieldNames.check(raw);
         Schema schema = new Schema();
         schema.repeatOnlyNames = Wave6a.repeatOnlyNames(raw);
         schema.metaName = raw.get("name");
