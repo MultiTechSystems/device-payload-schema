@@ -547,6 +547,12 @@ func caseTakes(f Field, value any) (bool, bool) {
 		}
 		whole := math.Floor(n / 10)
 		stored = whole + (n-whole*10)*0.1
+	} else if t == "bf16" {
+		word, err := encodeBF16(raw, f.Name) // through the type's storage is PS-559's rounding
+		if err != nil {
+			return false, false
+		}
+		stored = decodeBF16(word)
 	} else if t == "uflt16" || t == "sflt16" || t == "sflt24" {
 		word, err := encodeMinifloat(FieldType(t), raw)
 		if err != nil {

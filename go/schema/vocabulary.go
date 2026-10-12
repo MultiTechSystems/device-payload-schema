@@ -39,7 +39,7 @@ var canonicalTypes = map[string]bool{
 	"u32le16": true, "s32le16": true, "f32le16": true,
 	"u32be16le": true, "s32be16le": true, "f32be16le": true,
 	"uflt16": true, "sflt16": true, "sflt24": true,
-	"f16": true, "f32": true, "f64": true,
+	"f16": true, "bf16": true, "f32": true, "f64": true,
 	"udec": true, "sdec": true,
 	"bool": true, "boolean": true, "bytes": true, "string": true, "ascii": true,
 	"hex": true, "base64": true,

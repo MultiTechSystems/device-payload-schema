@@ -164,7 +164,7 @@ def constructs_used(schema: dict) -> set:
                         found.add("word_ordered")
                     elif base in INTEGER_TYPES:
                         found.add("integer")
-                    elif base in ("f16", "f32", "f64", "number"):
+                    elif base in ("f16", "bf16", "f32", "f64", "number"):
                         found.add("float")
                     elif base in ("bool", "enum", "string", "ascii", "hex", "bytes",
                                   "bitfield_string", "object", "repeat", "array", "skip"):

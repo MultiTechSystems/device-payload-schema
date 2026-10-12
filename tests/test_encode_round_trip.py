@@ -124,12 +124,13 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # number for an object one.
 # +12: the four tlv encode-gap fixtures (tlv-object-with-inner-branch,
 # tlv-case-of-one-inline-branch, tlv-float-reading, tlv-scaled-wide-reading), all tlv.
+# +6: bf16 (CR-2026-149), all plain fixed; its three infinity and NaN vectors re-encode nothing (an absent field).
 # +3: match-discriminator-from-inner-case (CR-2026-151), all match.
 # +11, no silent empty encode (PS-442): the fixtures length-selects-layout (4) and
 # literal-selects-branch (2), match, and tag-entry-constants (4), tlv, and
 # tlv-case-field-list's literal_only, tlv - an entry reporting only a constant, which
 # encoded to no bytes with no error.
-FLOOR_TOTAL = 2129
+FLOOR_TOTAL = 2135
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -139,7 +140,7 @@ FLOOR_BY_SHAPE = {
     # for an internal field with no value. It now reports such a field instead.
     "tlv": 1574,  # +5: no silent empty (see FLOOR_TOTAL); +12: the tlv encode-gap fixtures; +2: tlv-name-object-and-scalar; -4: PS-169 (see FLOOR_TOTAL); +16: CR-2026-141 (see FLOOR_TOTAL); -26: CR-2026-136 with CR-2026-134 (see FLOOR_TOTAL); +264: CR-2026-136 (see FLOOR_TOTAL); +2: CR-2026-128; +3: CR-2026-125 fixtures; +1: tlv-repeat-merge (CR-2026-110)
     "flagged": 198,  # +1: CR-2026-134; +4: mask-reference-binding (see FLOOR_TOTAL)
-    "plain fixed": 148,  # +1: CR-2026-135 (see FLOOR_TOTAL); +4: ascii-latin1 (CR-2026-114)
+    "plain fixed": 154,  # +6: bf16 (CR-2026-149); +1: CR-2026-135 (see FLOOR_TOTAL); +4: ascii-latin1 (CR-2026-114)
     # +1: CR-2026-132 enum port; +5: lookup-reference-binding (CR-2026-109);
     # +4: match-u32-inline-discriminator; +2: CR-2026-134; +1: both together (see
     # FLOOR_TOTAL); +5: match-fractional-discriminator; +3:

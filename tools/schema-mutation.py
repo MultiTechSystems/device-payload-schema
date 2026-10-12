@@ -151,7 +151,7 @@ MAX_RELABELS = 8
 
 _INT_RE = re.compile(r"^(u|s|i|uint|int)(8|16|24|32|64)$")
 _BITS_RE = re.compile(r"^u(\d+)\[(\d+):(\d+)\]$")
-_FLOAT_SIZES = {"f16": 2, "f32": 4, "float": 4, "f64": 8, "double": 8}
+_FLOAT_SIZES = {"f16": 2, "bf16": 2, "f32": 4, "float": 4, "f64": 8, "double": 8}
 _WORD_ORDERED = {"u32le16": "s32le16", "s32le16": "u32le16"}
 
 

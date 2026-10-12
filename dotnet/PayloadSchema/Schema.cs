@@ -18,6 +18,8 @@ public enum FieldType
     UFlt16, SFlt16, SFlt24,
     S8, S16, S24, S32, S64,
     F16, F32, F64,
+    /// <summary>The upper half of a binary32 (PS-558, CR-2026-149).</summary>
+    BF16,
     // Nibble-decimal (PS-329)
     UDec, SDec,
     Base64,
