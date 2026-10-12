@@ -2589,6 +2589,25 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   distinction is load-bearing: `no constructor for type 'u32le16'` used to read as a C gap
   when C decodes it perfectly well.
 
+  **The C-interpreter wave (2026-10-11)** closed these, one PR each; the figures are the
+  harness's at each step (struct API / `--from-blob names` / `--from-blob nameless`):
+  - **Index-keyed encode (CR-2026-146, PS-555 amended)**: "an encoder working from such
+    a form takes each value by the same index". A nameless schema (`schema_t.nameless`,
+    a v3 blob without its name table) decoded by index but could not be encoded, its
+    inputs being keyed by name. `encode_inputs_add_int_at(inputs, index, v)` and
+    `_add_double_at` key a value by field index (stored under the key `#<index>`, with
+    `by_index`); `schema_encode` looks a nameless schema's fields up by that key, so a
+    message names the field `#3` ("Missing required field: #3", "Field '#2': 256 encodes
+    as 256, ..."). **The two kinds are not mixed, a decision the CR leaves to the
+    implementation**: a name-keyed input for a nameless schema, or an index-keyed one for
+    a named schema, is `SCHEMA_ERR_PARSE` naming the input, rather than being ignored and
+    the field reported missing. Decode counts unchanged (554 / 64 / 64); the harness's
+    `--from-blob nameless` run now also re-encodes every decode from index-keyed inputs:
+    **58 of 64 come back byte for byte**, 2 are lossy in the reference too (leftover bytes,
+    non-zero skip padding), 2 carry a lookup label (C's encoder takes the code) and 2 a
+    `bytes` value (no index-keyed input for one). `sizeof(schema_t)` and
+    `sizeof(encode_inputs_t)` unchanged (52536, 2312).
+
   **A `flagged` construct's mask field must declare `var_name`.** This interpreter records a
   value in its variable table only where a field declares one, while a YAML `flagged` names a
   field - so the harness patches it in. `var_has()` exists so a missing reference is
