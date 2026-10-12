@@ -1372,6 +1372,7 @@ public static class SchemaEncoder
                     foreach (var group in f.Flagged.Groups) sink.AddRange(CaseClaims(group.Fields, true));
                     continue;
                 }
+                if (f.MatchInline != null) { sink.AddRange(MatchClaims(f.MatchInline)); continue; }
                 if (PayloadName(f) == null) continue;
                 // PS-551 (CR-2026-141): a peek the case's next field writes over is derived
                 // where the input omits it, so the case does not need it given.
@@ -1381,10 +1382,57 @@ public static class SchemaEncoder
         }
 
         /// <summary>
+        /// The reference's _match_claims: a match claims its name and every branch's
+        /// fields, each optional, since which branch supplies a name depends on the data;
+        /// each name once. Not descending into it, a tlv case whose only content is a
+        /// nameless match claimed nothing and was never written - the encode returned an
+        /// empty payload with no error - and an object holding one refused every value.
+        /// </summary>
+        static List<(SchemaField field, bool optional)> MatchClaims(SchemaField match)
+        {
+            var sink = new List<(SchemaField, bool)>();
+            var seen = new HashSet<string>();
+            var name = PayloadName(match);
+            if (name != null)
+            {
+                var type = match.Length switch
+                {
+                    2 => FieldType.U16, 3 => FieldType.U24, 4 => FieldType.U32,
+                    8 => FieldType.U64, _ => FieldType.U8,
+                };
+                sink.Add((new SchemaField { Name = name, Type = type, RawType = type.ToString().ToLowerInvariant() }, true));
+                seen.Add(name);
+            }
+            var bodies = match.Cases.Select(c => c.Fields).ToList();
+            if (match.MatchDefault is List<SchemaField> fallback) bodies.Add(fallback);
+            foreach (var body in bodies)
+                foreach (var (f, _) in CaseClaims(body, true))
+                    if (f.Name != null && seen.Add(f.Name)) sink.Add((f, true));
+            return sink;
+        }
+
+        /// <summary>Whether a type's encoded value carries a fraction (FRACTIONAL_TYPES).</summary>
+        static bool IsFractionalType(FieldType t) => t is FieldType.F16 or FieldType.F32
+            or FieldType.F64 or FieldType.UDec or FieldType.SDec or FieldType.F32LE16
+            or FieldType.F32BE16LE or FieldType.UFlt16 or FieldType.SFlt16 or FieldType.SFlt24;
+
+        /// <summary>
+        /// The reference's reverses_to_integer, a proto rule the specification does not
+        /// state: round half to even, as PS-552 rounds what is written, and accept the value
+        /// within 1e-9 x max(1, |n|) of that integer n. An absolute 1e-9 refused 0xfffffe
+        /// through div: 100, which reverses to 16777214.000000002.
+        /// </summary>
+        internal static bool ReversesToInteger(double raw)
+        {
+            double n = Math.Round(raw, MidpointRounding.ToEven);
+            return Math.Abs(raw - n) <= 1e-9 * Math.Max(1.0, Math.Abs(n));
+        }
+
+        /// <summary>
         /// Whether a case's field takes a value (PS-527): an object element supplies exactly
         /// the members it declares, and a field takes no value it cannot write.
         /// </summary>
-        bool Fits(SchemaField f, object? value, Dictionary<string, string> modes)
+        bool Fits(SchemaField f, object? value, Dictionary<string, string> modes, bool exactOnly)
         {
             var name = PayloadName(f)!;
             if (f.Type == FieldType.Object && value is Dictionary<string, object?> whole
@@ -1401,8 +1449,8 @@ public static class SchemaEncoder
             if (isMap && f.Type != FieldType.Object && f.Type != FieldType.Repeat) return false;
             if (f.Type == FieldType.Object && !isMap
                 && !(modes.TryGetValue(name, out var mode) && mode == "merge")) return false;
-            return CaseFidelity(new List<SchemaField> { f },
-                new Dictionary<string, object?> { [name] = value }).lossless;
+            var (fits, exact) = CaseTakes(f, value);
+            return fits && (exact || !exactOnly);
         }
 
         static List<SchemaField> ClaimableFields(List<SchemaField> caseFields)
@@ -1433,41 +1481,113 @@ public static class SchemaEncoder
             }
         }
 
-        (int matches, bool lossless) CaseFidelity(List<SchemaField> caseFields,
-            Dictionary<string, object?> data)
+        /// <summary>
+        /// The reference's _case_takes (CR-2026-148, PS-527 amended): whether a tlv case's
+        /// field can take a value, and whether it reproduces it exactly. Fits: the value
+        /// with the field's arithmetic undone (and, for an integer type or bit range,
+        /// rounded per PS-552) lies within the type's range (PS-168); a float takes any
+        /// finite value no larger than its largest. Exact: the arithmetic re-applied to the
+        /// raw value written, through the type's storage, gives the value under binary64
+        /// equality. No tolerance anywhere; the test this replaces asked for an integer
+        /// within an absolute 1e-9, which refused every float field and 0xfffffe through
+        /// div: 100.
+        /// </summary>
+        static (bool fits, bool exact) CaseTakes(SchemaField f, object? value)
         {
-            int matches = 0;
-            bool lossless = true;
-            foreach (var f in ClaimableFields(caseFields))
+            var reversed = ReverseLookup(value, f.Lookup);
+            if (reversed is bool) return (true, true);
+            var (ok, given) = Helpers.ToFloat64(reversed);
+            if (!ok) return (true, true);
+            double raw;
+            try
             {
-                var name = PayloadName(f);
-                if (name == null || !data.TryGetValue(name, out var reported)) continue;
-                matches++;
-                var (ok, numeric) = Helpers.ToFloat64(ReverseLookup(reported, f.Lookup));
-                if (!ok) continue;
-                double value;
-                try
-                {
-                    value = ReverseCanonicalModifiers(
-                        ReverseTransformStages(numeric, f.Transform), f);
-                }
-                catch (InvalidOperationException)
-                {
-                    lossless = false;
-                    continue;
-                }
-                if (Math.Abs(value - Math.Round(value, MidpointRounding.ToEven)) > 1e-9)
-                    lossless = false;
-                var bounds = IntegerRange(f.Type);
-                if (bounds != null)
-                {
-                    double rounded = Math.Round(value, MidpointRounding.ToEven);
-                    if (rounded < bounds.Value.low || rounded > bounds.Value.high)
-                        // It does not fit the field, so this case cannot have written it.
-                        lossless = false;
-                }
+                raw = ReverseCanonicalModifiers(ReverseTransformStages(given, f.Transform), f);
             }
-            return (matches, lossless);
+            catch (InvalidOperationException)
+            {
+                return (false, false);
+            }
+            if (double.IsNaN(raw) || double.IsInfinity(raw)) return (false, false);
+            double stored;
+            var range = Helpers.ParseBitRange(f.RawType);
+            if (range != null)
+            {
+                stored = Math.Round(raw, MidpointRounding.ToEven);
+                if (!FitsBits(stored, range.Value.end - range.Value.start + 1,
+                        f.RawType.StartsWith("s"))) return (false, false);
+            }
+            else if (IntegerBits(f.Type) is { } ib)
+            {
+                stored = Math.Round(raw, MidpointRounding.ToEven);
+                if (!FitsBits(stored, ib.bits, ib.signed)) return (false, false);
+            }
+            else if (FloatMax(f.Type) is { } max)
+            {
+                if (Math.Abs(raw) > max) return (false, false);
+                stored = f.Type switch
+                {
+                    FieldType.F64 => raw,
+                    FieldType.F16 => F16Round(raw),
+                    _ => (double)(float)raw,
+                };
+            }
+            else if (f.Type is FieldType.UDec or FieldType.SDec)
+            {
+                double n = Math.Round(raw * 10, MidpointRounding.ToEven);           // PS-556
+                bool sdec = f.Type == FieldType.SDec;
+                if (n < (sdec ? -80 : 0) || n > (sdec ? 79 : 159)) return (false, false);
+                double whole = Math.Floor(n / 10);
+                stored = whole + (n - whole * 10) * 0.1;
+            }
+            else if (f.Type is FieldType.UFlt16 or FieldType.SFlt16 or FieldType.SFlt24)
+            {
+                double? v;
+                try { v = Wave4.DecodeMinifloat(f.Type, Wave4.EncodeMinifloat(f.Type, raw)); }
+                catch (Exception) { return (false, false); }
+                if (v == null) return (false, false);
+                stored = v.Value;
+            }
+            else
+            {
+                return (true, true);
+            }
+            return (true, SchemaDecoder.ApplyModifiers(stored, f) == given);
+        }
+
+        /// <summary>The largest finite magnitude of a binary float type (CR-2026-148).</summary>
+        static double? FloatMax(FieldType t) => t switch
+        {
+            FieldType.F16 => 65504.0,
+            FieldType.F32 or FieldType.F32LE16 or FieldType.F32BE16LE => float.MaxValue,
+            FieldType.F64 => double.PositiveInfinity,
+            _ => null,
+        };
+
+        /// <summary>An integer type's width and sign, word-ordered and 64-bit included.</summary>
+        static (int bits, bool signed)? IntegerBits(FieldType t) => t switch
+        {
+            FieldType.U8 => (8, false), FieldType.U16 => (16, false), FieldType.U24 => (24, false),
+            FieldType.U32 or FieldType.U32LE16 or FieldType.U32BE16LE => (32, false),
+            FieldType.U64 => (64, false),
+            FieldType.S8 => (8, true), FieldType.S16 => (16, true), FieldType.S24 => (24, true),
+            FieldType.S32 or FieldType.S32LE16 or FieldType.S32BE16LE => (32, true),
+            FieldType.S64 => (64, true),
+            _ => null,
+        };
+
+        static bool FitsBits(double v, int bits, bool signed) => signed
+            ? v >= -Math.ScaleB(1.0, bits - 1) && v < Math.ScaleB(1.0, bits - 1)
+            : v >= 0 && v < Math.ScaleB(1.0, bits);
+
+        /// <summary>A value rounded to the nearest IEEE half, a tie to even, from binary64.</summary>
+        internal static double F16Round(double x)
+        {
+            if (x == 0 || double.IsInfinity(x) || double.IsNaN(x)) return x;
+            double a = Math.Abs(x);
+            int e = Math.Max(Math.ILogB(a), -14);
+            double q = Math.ScaleB(1.0, e - 10);
+            double r = Math.Round(a / q, MidpointRounding.ToEven) * q;
+            return x < 0 ? -r : r;
         }
 
         /// <summary>
@@ -1554,74 +1674,79 @@ public static class SchemaEncoder
 
             var written = new List<(string key, List<SchemaField> fields, Dictionary<string, object?> data,
                 int position, int seq)>();
-            bool progress = true;
-            while (progress)
+            // CR-2026-148 (PS-527 amended): a first sweep places only values a case reproduces
+            // exactly, a second the rest; the ranking applies within each.
+            foreach (var exactOnly in new[] { true, false })
             {
-                progress = false;
-                foreach (var e in entries)
+                bool progress = true;
+                while (progress)
                 {
-                    while (true)
+                    progress = false;
+                    foreach (var e in entries)
                     {
-                        var values = new Dictionary<string, object?>();
-                        int taken = 0;
-                        bool complete = true;
-                        foreach (var f in e.required)
+                        while (true)
                         {
-                            var n = PayloadName(f)!;
-                            if (ModeOf(n) == "merge")
+                            var values = new Dictionary<string, object?>();
+                            int taken = 0;
+                            bool complete = true;
+                            foreach (var f in e.required)
                             {
-                                if (!pending.ContainsKey(n) || data[n] is not Dictionary<string, object?> whole)
+                                var n = PayloadName(f)!;
+                                if (ModeOf(n) == "merge")
+                                {
+                                    if (!pending.ContainsKey(n) || data[n] is not Dictionary<string, object?> whole)
+                                    {
+                                        complete = false;
+                                        break;
+                                    }
+                                    var sub = new Dictionary<string, object?>();
+                                    bool fresh = false;
+                                    foreach (var m in f.Fields)
+                                    {
+                                        if (string.IsNullOrEmpty(m.Name)) continue;
+                                        if (!whole.TryGetValue(m.Name, out var mv)) { complete = false; break; }
+                                        sub[m.Name] = mv;
+                                        fresh |= pending[n].Contains(m.Name);
+                                    }
+                                    if (!complete) break;
+                                    values[n] = sub;
+                                    if (fresh) taken++;
+                                    continue;
+                                }
+                                if (!queues.TryGetValue(n, out var q) || q.Count == 0 || !Fits(f, q.Peek(), modes, exactOnly))
                                 {
                                     complete = false;
                                     break;
                                 }
-                                var sub = new Dictionary<string, object?>();
-                                bool fresh = false;
-                                foreach (var m in f.Fields)
-                                {
-                                    if (string.IsNullOrEmpty(m.Name)) continue;
-                                    if (!whole.TryGetValue(m.Name, out var mv)) { complete = false; break; }
-                                    sub[m.Name] = mv;
-                                    fresh |= pending[n].Contains(m.Name);
-                                }
-                                if (!complete) break;
-                                values[n] = sub;
-                                if (fresh) taken++;
-                                continue;
-                            }
-                            if (!queues.TryGetValue(n, out var q) || q.Count == 0 || !Fits(f, q.Peek(), modes))
-                            {
-                                complete = false;
-                                break;
-                            }
-                            values[n] = q.Peek();
-                            taken++;
-                        }
-                        if (!complete) break;
-                        foreach (var f in e.optional)
-                        {
-                            var n = PayloadName(f)!;
-                            if (queues.TryGetValue(n, out var q) && q.Count > 0 && Fits(f, q.Peek(), modes))
-                            {
                                 values[n] = q.Peek();
                                 taken++;
                             }
+                            if (!complete) break;
+                            foreach (var f in e.optional)
+                            {
+                                var n = PayloadName(f)!;
+                                if (queues.TryGetValue(n, out var q) && q.Count > 0 && Fits(f, q.Peek(), modes, exactOnly))
+                                {
+                                    values[n] = q.Peek();
+                                    taken++;
+                                }
+                            }
+                            if (taken == 0) break;
+                            var entryData = new Dictionary<string, object?>(data);
+                            int position = int.MaxValue;
+                            foreach (var (n, v) in values)
+                            {
+                                entryData[n] = v;
+                                int index = order.ToList().IndexOf(n);
+                                position = Math.Min(position, index < 0 ? int.MaxValue : index);
+                                if (ModeOf(n) == "merge")
+                                    pending[n].ExceptWith(((Dictionary<string, object?>)v!).Keys);
+                                else
+                                    queues[n].Dequeue();
+                            }
+                            written.Add((e.key, e.fields, entryData, position, written.Count));
+                            progress = true;
                         }
-                        if (taken == 0) break;
-                        var entryData = new Dictionary<string, object?>(data);
-                        int position = int.MaxValue;
-                        foreach (var (n, v) in values)
-                        {
-                            entryData[n] = v;
-                            int index = order.ToList().IndexOf(n);
-                            position = Math.Min(position, index < 0 ? int.MaxValue : index);
-                            if (ModeOf(n) == "merge")
-                                pending[n].ExceptWith(((Dictionary<string, object?>)v!).Keys);
-                            else
-                                queues[n].Dequeue();
-                        }
-                        written.Add((e.key, e.fields, entryData, position, written.Count));
-                        progress = true;
                     }
                 }
             }

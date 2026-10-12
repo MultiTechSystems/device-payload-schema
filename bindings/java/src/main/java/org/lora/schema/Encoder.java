@@ -6,6 +6,7 @@ package org.lora.schema;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -1385,37 +1386,93 @@ final class Encoder {
         return out;
     }
 
-    private Fidelity caseFidelity(List<Field> caseFields, Map<String, Object> data) {
-        int matches = 0;
-        boolean lossless = true;
-        for (Field f : claimableFields(caseFields)) {
-            String name = payloadName(f);
-            if (name == null || !data.containsKey(name)) continue;
-            matches++;
-            Object raw = reverseLookup(data.get(name), f.getLookup());
-            Double numeric = asDouble(raw);
-            if (numeric == null) continue;
-            double value;
-            try {
-                value = reverseCanonicalModifiers(
-                        reverseTransformStages(numeric, f.getTransform()), f);
-            } catch (RuntimeException e) {
-                lossless = false;
-                continue;
-            }
-            if (Math.abs(value - Math.rint(value)) > 1e-9) {
-                lossless = false;
-            }
-            double[] bounds = integerRange(f.getType());
-            if (bounds != null && (Math.rint(value) < bounds[0] || Math.rint(value) > bounds[1])) {
-                // It does not fit the field, so this case cannot have written it.
-                lossless = false;
-            }
+    /**
+     * The reference's {@code _case_takes} (CR-2026-148, PS-527 amended): whether a tlv
+     * case's field can take a value, and whether it reproduces it exactly, as
+     * {fits, exact}. Fits: the value with the field's arithmetic undone (and, for an
+     * integer type or bit range, rounded per PS-552) lies within the type's range
+     * (PS-168); a float takes any finite value no larger than its largest. Exact: the
+     * arithmetic re-applied to the raw value written, through the type's storage, gives
+     * the value under binary64 equality. No tolerance anywhere; the test this replaces
+     * asked for an integer within an absolute 1e-9, which refused every float field and
+     * 0xfffffe through {@code div: 100}.
+     */
+    static boolean[] caseTakes(Field f, Object value) {
+        Object reversed = reverseLookup(value, f.getLookup());
+        if (reversed instanceof Boolean || !(reversed instanceof Number number)) {
+            return new boolean[] {true, true};
         }
-        return new Fidelity(matches, lossless);
+        double given = number.doubleValue();
+        double raw;
+        try {
+            raw = reverseCanonicalModifiers(reverseTransformStages(given, f.getTransform()), f);
+        } catch (RuntimeException e) {
+            return new boolean[] {false, false};
+        }
+        if (Double.isNaN(raw) || Double.isInfinite(raw)) return new boolean[] {false, false};
+        FieldType t = f.getType();
+        double stored;
+        if (t == FieldType.BITS) {
+            stored = Math.rint(raw);
+            if (!fitsBits(stored, f.getBits(), f.isSignedBits())) return new boolean[] {false, false};
+        } else if (t != null && t.isInteger()) {
+            stored = Math.rint(raw);
+            if (!fitsBits(stored, t.defaultLength() * 8, t.isSigned())) {
+                return new boolean[] {false, false};
+            }
+        } else if (t != null && floatMax(t) != null) {
+            if (Math.abs(raw) > floatMax(t)) return new boolean[] {false, false};
+            stored = switch (t) {
+                case F64, FLOAT64 -> raw;
+                case F16, FLOAT16 -> f16Round(raw);
+                default -> (double) (float) raw;
+            };
+        } else if (t == FieldType.UDEC || t == FieldType.SDEC) {
+            double n = Math.rint(raw * 10);                                      // PS-556
+            double low = t == FieldType.SDEC ? -80 : 0, high = t == FieldType.SDEC ? 79 : 159;
+            if (n < low || n > high) return new boolean[] {false, false};
+            double whole = Math.floor(n / 10);
+            stored = whole + (n - whole * 10) * 0.1;
+        } else if (t == FieldType.UFLT16 || t == FieldType.SFLT16 || t == FieldType.SFLT24) {
+            Double v;
+            try {
+                v = Wave4.decodeMinifloat(t, Wave4.encodeMinifloat(t, raw));
+            } catch (RuntimeException e) {
+                return new boolean[] {false, false};
+            }
+            if (v == null) return new boolean[] {false, false};
+            stored = v;
+        } else {
+            return new boolean[] {true, true};
+        }
+        return new boolean[] {true, Schema.applyArithmetic(stored, f) == given};
     }
 
-    private record Fidelity(int matches, boolean lossless) {}
+    /** The largest finite magnitude of a binary float type, or null (CR-2026-148). */
+    private static Double floatMax(FieldType t) {
+        return switch (t) {
+            case F16, FLOAT16 -> 65504.0;
+            case F32, FLOAT32, F32LE16, F32BE16LE -> (double) Float.MAX_VALUE;
+            case F64, FLOAT64 -> Double.POSITIVE_INFINITY;
+            default -> null;
+        };
+    }
+
+    /** Whether an integer value lies within {@code bits} bits, signed or not. */
+    private static boolean fitsBits(double v, int bits, boolean signed) {
+        if (signed) return v >= -Math.scalb(1.0, bits - 1) && v < Math.scalb(1.0, bits - 1);
+        return v >= 0 && v < Math.scalb(1.0, bits);
+    }
+
+    /** A value rounded to the nearest IEEE half, a tie to even, straight from binary64. */
+    static double f16Round(double x) {
+        if (x == 0 || Double.isInfinite(x) || Double.isNaN(x)) return x;
+        double a = Math.abs(x);
+        int e = Math.max(Math.getExponent(a), -14);
+        double q = Math.scalb(1.0, e - 10);
+        double r = Math.rint(a / q) * q;
+        return x < 0 ? -r : r;
+    }
 
     /** A claimable field of a tlv case, and whether the case may be written without it. */
     private record Claim(Field field, boolean optional) {}
@@ -1438,11 +1495,73 @@ final class Encoder {
                 }
                 continue;
             }
+            if (f.getMatchInline() != null) {
+                matchClaims(f.getMatchInline(), out);
+                continue;
+            }
             if (payloadName(f) == null) continue;
             // PS-551 (CR-2026-141): a peek the case's next field writes over is derived
             // where the input omits it, so the case does not need it given.
             out.add(new Claim(f, optional || f.isOptional() || covered.contains(f)));
         }
+    }
+
+    /**
+     * The reference's {@code _match_claims}: a match claims its {@code name} and every
+     * branch's fields, each optional, since which branch supplies a name depends on the
+     * data; each name once. Not descending into it, a tlv case whose only content is a
+     * nameless match claimed nothing and was never written - the encode returned an empty
+     * payload with no error - and an object holding one refused every value.
+     */
+    @SuppressWarnings("unchecked")
+    private static void matchClaims(Field match, List<Claim> out) {
+        Set<String> seen = new HashSet<>();
+        String name = payloadName(match);
+        if (name != null) {
+            Field claim = new Field();
+            claim.setName(name);
+            claim.setType(switch (match.getLength()) {
+                case 2 -> FieldType.U16;
+                case 3 -> FieldType.U24;
+                case 4 -> FieldType.U32;
+                case 8 -> FieldType.U64;
+                default -> FieldType.U8;
+            });
+            out.add(new Claim(claim, true));
+            seen.add(name);
+        }
+        List<List<Field>> bodies = new ArrayList<>();
+        if (match.getCases() != null) {
+            for (Field.Case c : match.getCases()) bodies.add(c.getFields());
+        }
+        if (match.getMatchDefault() instanceof List<?> fallback) bodies.add((List<Field>) fallback);
+        for (List<Field> body : bodies) {
+            List<Claim> inner = new ArrayList<>();
+            collectClaims(body, true, inner);
+            for (Claim c : inner) {
+                if (seen.add(c.field().getName())) out.add(new Claim(c.field(), true));
+            }
+        }
+    }
+
+    /** Whether a type's encoded value carries a fraction (the reference's FRACTIONAL_TYPES). */
+    private static boolean isFractionalType(FieldType t) {
+        if (t == null) return false;
+        return t.isFloat() || switch (t) {
+            case UDEC, SDEC, F32LE16, F32BE16LE, UFLT16, SFLT16, SFLT24 -> true;
+            default -> false;
+        };
+    }
+
+    /**
+     * The reference's {@code reverses_to_integer}, a proto rule the specification does not
+     * state: round half to even, as PS-552 rounds what is written, and accept the value
+     * within 1e-9 x max(1, |n|) of that integer n. An absolute 1e-9 refused 0xfffffe through
+     * {@code div: 100}, which reverses to 16777214.000000002.
+     */
+    static boolean reversesToInteger(double raw) {
+        double n = Math.rint(raw);
+        return Math.abs(raw - n) <= 1e-9 * Math.max(1.0, Math.abs(n));
     }
 
     /**
@@ -1556,68 +1675,72 @@ final class Encoder {
         }
 
         List<Written> written = new ArrayList<>();
-        boolean progress = true;
-        while (progress) {
-            progress = false;
-            for (TlvEntry e : entries) {
-                while (true) {
-                    Map<String, Object> values = new LinkedHashMap<>();
-                    int taken = 0;
-                    boolean complete = true;
-                    for (Field f : e.required()) {
-                        String n = payloadName(f);
-                        if ("merge".equals(modes.mode(n))) {
-                            if (!pending.containsKey(n) || !(data.get(n) instanceof Map<?, ?> object)) {
-                                complete = false;
-                                break;
-                            }
-                            Map<String, Object> sub = new LinkedHashMap<>();
-                            boolean fresh = false;
-                            for (Field m : f.getFields() == null ? List.<Field>of() : f.getFields()) {
-                                if (m.getName() == null || m.getName().isEmpty()) continue;
-                                if (!object.containsKey(m.getName())) {
+        // CR-2026-148 (PS-527 amended): a first sweep places only values a case reproduces
+        // exactly, a second the rest; the ranking applies within each.
+        for (boolean exactOnly : new boolean[] {true, false}) {
+            boolean progress = true;
+            while (progress) {
+                progress = false;
+                for (TlvEntry e : entries) {
+                    while (true) {
+                        Map<String, Object> values = new LinkedHashMap<>();
+                        int taken = 0;
+                        boolean complete = true;
+                        for (Field f : e.required()) {
+                            String n = payloadName(f);
+                            if ("merge".equals(modes.mode(n))) {
+                                if (!pending.containsKey(n) || !(data.get(n) instanceof Map<?, ?> object)) {
                                     complete = false;
                                     break;
                                 }
-                                sub.put(m.getName(), object.get(m.getName()));
-                                fresh |= pending.get(n).contains(m.getName());
+                                Map<String, Object> sub = new LinkedHashMap<>();
+                                boolean fresh = false;
+                                for (Field m : f.getFields() == null ? List.<Field>of() : f.getFields()) {
+                                    if (m.getName() == null || m.getName().isEmpty()) continue;
+                                    if (!object.containsKey(m.getName())) {
+                                        complete = false;
+                                        break;
+                                    }
+                                    sub.put(m.getName(), object.get(m.getName()));
+                                    fresh |= pending.get(n).contains(m.getName());
+                                }
+                                if (!complete) break;
+                                values.put(n, sub);
+                                if (fresh) taken++;
+                                continue;
                             }
-                            if (!complete) break;
-                            values.put(n, sub);
-                            if (fresh) taken++;
-                            continue;
-                        }
-                        java.util.ArrayDeque<Object> q = queues.get(n);
-                        if (q == null || q.isEmpty() || !fits(f, q.peekFirst(), modes)) {
-                            complete = false;
-                            break;
-                        }
-                        values.put(n, q.peekFirst());
-                        taken++;
-                    }
-                    if (!complete) break;
-                    for (Field f : e.optional()) {
-                        java.util.ArrayDeque<Object> q = queues.get(payloadName(f));
-                        if (q != null && !q.isEmpty() && fits(f, q.peekFirst(), modes)) {
-                            values.put(payloadName(f), q.peekFirst());
+                            java.util.ArrayDeque<Object> q = queues.get(n);
+                            if (q == null || q.isEmpty() || !fits(f, q.peekFirst(), modes, exactOnly)) {
+                                complete = false;
+                                break;
+                            }
+                            values.put(n, q.peekFirst());
                             taken++;
                         }
-                    }
-                    if (taken == 0) break;
-                    Map<String, Object> entryData = new LinkedHashMap<>(data);
-                    int position = Integer.MAX_VALUE;
-                    for (Map.Entry<String, Object> v : values.entrySet()) {
-                        String n = v.getKey();
-                        entryData.put(n, v.getValue());
-                        position = Math.min(position, order.indexOf(n));
-                        if ("merge".equals(modes.mode(n))) {
-                            pending.get(n).removeAll(((Map<?, ?>) v.getValue()).keySet());
-                        } else {
-                            queues.get(n).pollFirst();
+                        if (!complete) break;
+                        for (Field f : e.optional()) {
+                            java.util.ArrayDeque<Object> q = queues.get(payloadName(f));
+                            if (q != null && !q.isEmpty() && fits(f, q.peekFirst(), modes, exactOnly)) {
+                                values.put(payloadName(f), q.peekFirst());
+                                taken++;
+                            }
                         }
+                        if (taken == 0) break;
+                        Map<String, Object> entryData = new LinkedHashMap<>(data);
+                        int position = Integer.MAX_VALUE;
+                        for (Map.Entry<String, Object> v : values.entrySet()) {
+                            String n = v.getKey();
+                            entryData.put(n, v.getValue());
+                            position = Math.min(position, order.indexOf(n));
+                            if ("merge".equals(modes.mode(n))) {
+                                pending.get(n).removeAll(((Map<?, ?>) v.getValue()).keySet());
+                            } else {
+                                queues.get(n).pollFirst();
+                            }
+                        }
+                        written.add(new Written(e.key(), e.fields(), entryData, position, written.size()));
+                        progress = true;
                     }
-                    written.add(new Written(e.key(), e.fields(), entryData, position, written.size()));
-                    progress = true;
                 }
             }
         }
@@ -1657,7 +1780,7 @@ final class Encoder {
      * Whether a case's field takes a value (PS-527): an object element supplies exactly
      * the members it declares, and a field takes no value it cannot write.
      */
-    private boolean fits(Field f, Object value, OnRepeat.Modes modes) {
+    private boolean fits(Field f, Object value, OnRepeat.Modes modes, boolean exactOnly) {
         if (f.getType() == FieldType.OBJECT && value instanceof Map<?, ?> object
                 && !"merge".equals(modes.mode(payloadName(f)))) {
             List<Claim> claims = new ArrayList<>();
@@ -1678,9 +1801,8 @@ final class Encoder {
         if (isMap && f.getType() != FieldType.OBJECT && f.getType() != FieldType.REPEAT) return false;
         if (f.getType() == FieldType.OBJECT && !isMap
                 && !"merge".equals(modes.mode(payloadName(f)))) return false;
-        Map<String, Object> one = new LinkedHashMap<>();
-        one.put(payloadName(f), value);
-        return caseFidelity(List.of(f), one).lossless();
+        boolean[] took = caseTakes(f, value);
+        return took[0] && (took[1] || !exactOnly);
     }
 
     /**

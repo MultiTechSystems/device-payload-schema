@@ -1,0 +1,35 @@
+# A wide integer under a large divisor in a tlv case. 0xfffffe through `div: 100` is
+# 167772.14, and reversed is 16777214.000000002 - binary64 noise far below a unit. Choosing
+# a case accepted only a reversal within an absolute 1e-9 of an integer, so it refused
+# this one and the entry could not be encoded (elv). The test is now relative: within
+# 1e-9 x max(1, |n|) of n, the integer it rounds to half to even.
+name: probe_tlv_scaled_wide_reading
+endian: big
+fields:
+  - tlv:
+      tag_size: 1
+      cases:
+        1:
+          - {name: brightness, type: u24, div: 100}
+        2:
+          - {name: uv_index, type: u32, div: 1000000}
+test_vectors:
+  - name: three_bytes_by_a_hundred
+    payload: "01fffffe"
+    source: generated
+    expected:
+      brightness: 167772.14
+    expected_warnings: []
+  - name: four_bytes_by_a_million
+    payload: "02ffffffff"
+    source: generated
+    expected:
+      uv_index: 4294.967295
+    expected_warnings: []
+  - name: both
+    payload: "01fffffe02ffffffff"
+    source: generated
+    expected:
+      brightness: 167772.14
+      uv_index: 4294.967295
+    expected_warnings: []

@@ -3251,7 +3251,7 @@ public class Schema {
      * run in the canonical order mult, div, add, whatever order the keys were written
      * in (PS-101); the stages run in list order.
      */
-    private static double applyArithmetic(double value, Field field) {
+    static double applyArithmetic(double value, Field field) {
         if (field.getMult() != null) value *= field.getMult();
         if (field.getDiv() != null) {
             // A zero divisor omits the field (PS-100): NaN, which the post-read step
