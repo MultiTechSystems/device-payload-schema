@@ -4851,7 +4851,7 @@ func encodeMatch(field Field, siblings []Field, data map[string]any, ctx *Encode
 		if best <= 0 {
 			chosen, chosenKey = nil, ""
 			if discriminator == nil && field.Length > 0 {
-				// CR-2026-151 (PS-551 editorial): a nested match reading this
+				// CR-2026-151 (PS-551): a nested match reading this
 				// discriminator, with exactly one case the input fills, fixes it.
 				value, body, key, found, err := nestedDiscriminator(field, data, matchLabel(field))
 				if err != nil {

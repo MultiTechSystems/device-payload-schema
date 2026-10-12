@@ -1216,7 +1216,7 @@ final class Encoder {
                 : match.getVar() != null && !match.getVar().isEmpty() ? match.getVar() : "match";
         if (matched == null && fallbackFields == null && discriminator == null
                 && match.getLength() > 0) {
-            // CR-2026-151 (PS-551 editorial): a nested match reading this discriminator,
+            // CR-2026-151 (PS-551): a nested match reading this discriminator,
             // with exactly one case the input fills, fixes it.
             Object[] nested = nestedDiscriminator(match, data, label);
             if (nested != null) {
@@ -1309,7 +1309,7 @@ final class Encoder {
     }
 
     /**
-     * CR-2026-151 (PS-551 editorial, on spec main, not yet applied): the value a nested
+     * CR-2026-151 (PS-551), applied on spec main for 0.5.5: the value a nested
      * match fixes for this match's discriminator, as {value, the outer case or null, the
      * `default` fields}, or null where no nested match reading it has a case the input
      * fills. The input fixes it where it fills exactly one such case, whose key is a single

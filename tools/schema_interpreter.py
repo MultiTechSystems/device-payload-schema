@@ -7122,7 +7122,7 @@ class SchemaInterpreter:
 
         label = match_name or match_def.get('var') or 'match'
         if matched_fields is None and discriminator is None and length is not None:
-            # CR-2026-151 (PS-551 editorial): a nested match reading this discriminator,
+            # CR-2026-151 (PS-551): a nested match reading this discriminator,
             # with exactly one case the input fills, fixes it (Netvox r718n3's
             # report_type, which only its `default` branch's nested match reads).
             nested = self._nested_discriminator(match_def, data, label)
@@ -7173,7 +7173,7 @@ class SchemaInterpreter:
         return prefixed_frame(bytes(out), body)
 
     def _nested_discriminator(self, match_def, data, label):
-        """CR-2026-151 (PS-551 editorial): the value a nested match fixes for this
+        """CR-2026-151 (PS-551): the value a nested match fixes for this
         match's discriminator, as (value, case key or None for `default`, branch
         fields), or None
         where no nested match reading it has a case the input fills.

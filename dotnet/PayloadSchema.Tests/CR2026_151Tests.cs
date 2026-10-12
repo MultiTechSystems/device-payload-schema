@@ -5,7 +5,7 @@ using YamlDotNet.RepresentationModel;
 namespace PayloadSchema.Tests;
 
 /// <summary>
-/// CR-2026-151 (PS-551 editorial, on spec main, not yet applied): a nested match that
+/// CR-2026-151 (PS-551), applied on spec main for 0.5.5: a nested match that
 /// reads a discriminator fixes it where the input fills one single-value case of it that
 /// selects its branch. The cases are shared with the reference, the generated
 /// codec, Go and Java in tests/cr-2026-151-cases.yaml.

@@ -894,7 +894,7 @@ same values); `..._0006160405fc` is a separate gap.
     whose case bodies name their fields inside another construct, so no case is found and
     a `default: error` match writes nothing.
 
-- **CR-2026-151 (PS-551 editorial, on spec main, not yet applied): a nested match fixes the
+- **CR-2026-151 (PS-551), applied on spec main for 0.5.5: a nested match fixes the
   discriminator it reads.** An inline match (`length:`) whose discriminator the input
   neither gives nor fixes through one of its own cases takes it from a nested match that
   reads it (`field: $report_type`), where the input fills exactly one of that match's

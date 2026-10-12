@@ -1191,7 +1191,7 @@ public static class SchemaEncoder
                 : !string.IsNullOrEmpty(match.Var) ? match.Var! : "match";
             if (matched == null && fallbackFields == null && discriminator == null && match.Length > 0)
             {
-                // CR-2026-151 (PS-551 editorial): a nested match reading this
+                // CR-2026-151 (PS-551): a nested match reading this
                 // discriminator, with exactly one case the input fills, fixes it.
                 var nested = NestedDiscriminator(match, data, label);
                 if (nested != null)
@@ -1299,7 +1299,7 @@ public static class SchemaEncoder
 
         /// <summary>The case whose fields the data carries most of, or null.</summary>
         /// <summary>
-        /// CR-2026-151 (PS-551 editorial, on spec main, not yet applied): the value a nested
+        /// CR-2026-151 (PS-551), applied on spec main for 0.5.5: the value a nested
         /// match fixes for this match's discriminator, with the outer case it selects (or the
         /// `default` fields beside the cases), or null where no nested match reading it has
         /// a case the input fills. The input fixes it where it fills exactly one such case,

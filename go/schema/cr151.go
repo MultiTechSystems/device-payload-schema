@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// CR-2026-151 (PS-551 editorial, on spec main, not yet applied): a nested match that reads
+// CR-2026-151 (PS-551), applied on spec main for 0.5.5: a nested match that reads
 // a discriminator fixes it, where the input fills exactly one of its cases, that case's key
 // is a single value, and the value selects, in the enclosing match and in every match
 // between that reads the same discriminator, the branch holding the nested match. Mirrors
