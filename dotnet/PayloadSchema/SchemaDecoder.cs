@@ -395,7 +395,11 @@ public static class SchemaDecoder
 
     static Dictionary<string, object?> DecodeFlagged(FlaggedDef fd, DecodeContext ctx)
     {
-        if (!ctx.Variables.TryGetValue(fd.Field, out var flagsVal))
+        // The mask is a reference like any other, so it reads the PS-523 binding that
+        // DecodeContext.Bind made: the number under a text or boolean label, a numeric
+        // label itself, an enum's code. Written `$mask` it found nothing.
+        var maskName = (fd.Field ?? "").TrimStart('$');
+        if (!ctx.Variables.TryGetValue(maskName, out var flagsVal))
             throw new InvalidOperationException($"Flagged field reference not found: {fd.Field}");
 
         var (_, flags) = Helpers.ToInt(flagsVal);

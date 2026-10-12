@@ -336,6 +336,9 @@ func internalEncodeValue(field Field, data map[string]any) (any, error) {
 	if v, ok := data[field.Name]; ok {
 		return v, nil
 	}
+	if d, has := fieldDefault(field); has {
+		return d, nil // PS-554
+	}
 	return nil, fmt.Errorf("internal field '%s' reads payload bytes and declares no value, and the input does not supply it (PS-434)",
 		field.Name)
 }

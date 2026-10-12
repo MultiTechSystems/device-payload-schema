@@ -204,7 +204,8 @@ C_UNSUPPORTED_KEYS = {
     "encoding": "the C interpreter has no sign_magnitude/bcd/gray encodings",
     "sentinel": "the C interpreter has no sentinel (PS-427)",
     "out_of_range": "the C interpreter has no out_of_range: omit (PS-428)",
-    "default": "the C interpreter has no enum/lookup default",
+    "default": ("the C interpreter has no enum default, and no field default to write "
+                "where the input omits the field (PS-554)"),
     "var": "this format has no variable names",
     "optional": "the C interpreter has no optional fields (PS-402)",
     # Constructs with no record in this format. A field carrying one and no `type` was
@@ -312,7 +313,6 @@ def field_errors(field: Dict, schema_endian: str = 'big') -> List[str]:
 
     if 'match' in field and not field.get('type'):
         refuse("`match`", "this format has no inline match record")
-
     ftype = str(field.get('type', ''))
     if not field.get('type'):
         if not errors:
@@ -411,6 +411,11 @@ def schema_errors(schema: Dict) -> List[str]:
     # every path, the binary blob the C interpreter loads included.
     from schema_interpreter import expand_refs, reference_errors
     errors.extend(reference_errors(expand_refs(schema)[0]))     # after splicing (CR-2026-127)
+    # PS-553 (CR-2026-138): a nameless field other than a skip is refused. Since PS-555
+    # (CR-2026-142) the binary form carries the schema's names, and its name table gives a
+    # length of 0 to a skip alone; the YAML is checked here, before conversion.
+    from schema_interpreter import field_name_errors
+    errors.extend(field_name_errors(schema))
     if schema.get('ports'):
         errors.append("`ports` - the C interpreter has no port selection; refused "
                       "rather than dropped (PS-446)")

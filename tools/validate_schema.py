@@ -770,7 +770,8 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
                 errors.append(f"{path}[{i}].flagged: missing required 'field' (name of flags variable)")
             else:
                 ref = flagged['field']
-                if ref not in known_field_names:
+                # `$flags` names the same field as `flags`, as the decoders read it.
+                if str(ref).lstrip('$') not in known_field_names:
                     errors.append(f"{path}[{i}].flagged: references unknown field '{ref}' "
                                   f"(must be declared before the flagged: construct)")
             if 'groups' not in flagged:

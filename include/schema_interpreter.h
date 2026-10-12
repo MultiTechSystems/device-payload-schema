@@ -1859,10 +1859,22 @@ static inline int schema_encode_direction(
 
     size_t pos = 0;
     size_t filled = 0;      /* bytes a non-consuming bit range or bool has filled */
-    
+    /* CR-2026-141 (PS-551): per byte, the bits some field wrote; and each bit range or
+     * bool placed, with the value it was given or -1 where it was absent and derived. A
+     * bit range or bool that does not consume shares its byte with the fields after it,
+     * which fix its value: absent, it writes no bits and is missing only where a bit is
+     * left unwritten; supplied, it must read back from the finished frame. */
+    uint8_t covered[SCHEMA_MAX_PAYLOAD];
+    uint8_t scratch[SCHEMA_MAX_PAYLOAD];
+    struct { size_t pos; uint8_t mask; uint8_t start; int16_t raw; const char* name; }
+        peeks[SCHEMA_MAX_FIELDS];
+    int peek_count = 0;
+    memset(covered, 0, sizeof(covered));
+    memset(scratch, 0, sizeof(scratch));
+
     for (int i = 0; i < schema->field_count; i++) {
         const field_def_t* field = &schema->fields[i];
-        
+
         /* Skip internal/match fields for now. A skip is padding, not an internal value:
          * field_skip() names it `_skip`, so this used to drop it and every field after a
          * skip was written that many bytes early. */
@@ -1870,8 +1882,23 @@ static inline int schema_encode_direction(
             field->type == FIELD_TYPE_MATCH) {
             continue;
         }
-        
+        bool bitlike = field->type == FIELD_TYPE_BITS || field->type == FIELD_TYPE_BOOL;
+        uint8_t mask = field->type == FIELD_TYPE_BOOL
+            ? (uint8_t)(1u << field->bit_start)
+            : (uint8_t)(((1u << field->bit_width) - 1u) << field->bit_start);
+
         if (field->type != FIELD_TYPE_SKIP && !find_input(inputs, field->name)) {
+            if (bitlike && !field->consume && pos < SCHEMA_MAX_PAYLOAD) {
+                /* PS-551 (CR-2026-141): derived from the fields that write its bits. */
+                peeks[peek_count].pos = pos;
+                peeks[peek_count].mask = mask;
+                peeks[peek_count].start = field->bit_start;
+                peeks[peek_count].raw = -1;
+                peeks[peek_count].name = field->name;
+                peek_count++;
+                if (pos + 1 > filled) filled = pos + 1;
+                continue;
+            }
             /* PS-551: rejected, naming the field, and no payload. encode_field reported
              * the code alone; nothing said which field was missing. */
             snprintf(result->error_msg, sizeof(result->error_msg),
@@ -1879,21 +1906,76 @@ static inline int schema_encode_direction(
             result->error_code = SCHEMA_ERR_PARSE;
             return SCHEMA_ERR_PARSE;
         }
-        int rc = encode_field(field, inputs, result->data, &pos, schema->endian,
+        /* Encoded alone, so its own bits can be told from those already placed. */
+        size_t at = pos;
+        int rc = encode_field(field, inputs, scratch, &pos, schema->endian,
                               result->error_msg, sizeof(result->error_msg));
+        size_t end = bitlike && pos == at ? at + 1 : pos;
+        if (rc == SCHEMA_OK && end > SCHEMA_MAX_PAYLOAD) rc = SCHEMA_ERR_BUFFER;
+        /* A skip is padding: its zeros fix no peek's bits and contradict none. */
+        bool padding = field->type == FIELD_TYPE_SKIP;
+        if (rc == SCHEMA_OK && !bitlike && !padding) {
+            for (size_t b = at; b < end; b++) {
+                if (!(result->data[b] & (uint8_t)~scratch[b])) continue;
+                /* PS-551: it would OR over a peek's different bits, changing both. */
+                snprintf(result->error_msg, sizeof(result->error_msg),
+                         "A field writes bits a peek before it set otherwise (PS-551)");
+                for (int k = 0; k < peek_count; k++) {
+                    if (peeks[k].raw < 0 || peeks[k].pos < at || peeks[k].pos >= end) continue;
+                    int found = (scratch[peeks[k].pos] & peeks[k].mask) >> peeks[k].start;
+                    if (found == peeks[k].raw) continue;
+                    snprintf(result->error_msg, sizeof(result->error_msg),
+                             "Field '%s' is given %d, but the fields that share its bits "
+                             "write %d (PS-551)", peeks[k].name, peeks[k].raw, found);
+                    break;
+                }
+                rc = SCHEMA_ERR_PARSE;
+                break;
+            }
+        }
         if (rc != SCHEMA_OK) {
             result->error_code = rc;
             memset(result->data, 0, sizeof(result->data));   /* no partial payload */
             return rc;
         }
+        if (bitlike) {
+            peeks[peek_count].pos = at;
+            peeks[peek_count].mask = mask;
+            peeks[peek_count].start = field->bit_start;
+            peeks[peek_count].raw = (int16_t)((scratch[at] & mask) >> field->bit_start);
+            peeks[peek_count].name = field->name;
+            peek_count++;
+            covered[at] |= mask;
+        }
+        for (size_t b = at; b < end; b++) {
+            result->data[b] |= scratch[b];
+            if (!bitlike && !padding) covered[b] = 0xFF;
+            scratch[b] = 0;
+        }
         /* A bit range or bool that did not consume filled the byte at pos: the next field
          * shares it, and if none does it is still written (CR-2026-136). */
-        if ((field->type == FIELD_TYPE_BITS || field->type == FIELD_TYPE_BOOL)
-            && !field->consume && pos + 1 > filled) {
+        if (bitlike && !field->consume && pos + 1 > filled) {
             filled = pos + 1;
         }
     }
-    
+
+    for (int k = 0; k < peek_count; k++) {
+        int found = (result->data[peeks[k].pos] & peeks[k].mask) >> peeks[k].start;
+        if (peeks[k].raw < 0 && (covered[peeks[k].pos] & peeks[k].mask) != peeks[k].mask) {
+            snprintf(result->error_msg, sizeof(result->error_msg),
+                     "Missing required field: %s", peeks[k].name);
+        } else if (peeks[k].raw >= 0 && found != peeks[k].raw) {
+            snprintf(result->error_msg, sizeof(result->error_msg),
+                     "Field '%s' is given %d, but the fields that share its bits write %d "
+                     "(PS-551)", peeks[k].name, peeks[k].raw, found);
+        } else {
+            continue;
+        }
+        result->error_code = SCHEMA_ERR_PARSE;
+        memset(result->data, 0, sizeof(result->data));
+        return SCHEMA_ERR_PARSE;
+    }
+
     result->len = (int)(pos > filled ? pos : filled);
     return SCHEMA_OK;
 }

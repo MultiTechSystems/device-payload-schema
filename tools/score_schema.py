@@ -43,7 +43,7 @@ import yaml
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -55,6 +55,11 @@ from validate_schema import (validate_schema, ValidationResult, values_match,
 #: Shared with validate_schema.values_match so the two tools cannot disagree
 #: about whether a vector passes.
 CONFORMANCE_TOLERANCE = 0.001
+
+#: Share of the semantic points (IPSO + SenML + semantic) a schema earns when it
+#: has fields but none that IL-204 places from its name: half, by decision on
+#: PR #123. See calculate_score.
+NO_DETECTABLE_SEMANTIC_CREDIT = 0.5
 
 #: Tier thresholds from the specification, Section 10 (Conformance).
 TIER_THRESHOLDS = (
@@ -647,91 +652,16 @@ def analyze_branch_coverage(schema: Dict[str, Any]) -> Tuple[float, List[str]]:
     return coverage, uncovered
 
 
-STANDARD_SENSOR_IPSO = {
-    # Temperature & Environment
-    'temperature': 3303,
-    'humidity': 3304,
-    'pressure': 3323,
-    'barometer': 3315,
-    'altitude': 3321,
-    'depth': 3319,
-    
-    # Light
-    'illuminance': 3301,
-    'light': 3301,
-    'lux': 3301,
-    
-    # Electrical
-    'voltage': 3316,
-    'battery': 3316,
-    'current': 3317,
-    'power': 3328,
-    'energy': 3331,
-    'frequency': 3318,
-    'powerfactor': 3329,
-    
-    # Distance & Position
-    'distance': 3330,
-    'level': 3319,
-    
-    # Gas & Air Quality
-    'co2': 3325,
-    'concentration': 3325,
-    'conductivity': 3327,
-    'acidity': 3326,
-    'ph': 3326,
-    'loudness': 3324,
-    'sound': 3324,
-    'noise': 3324,
-    
-    # Location
-    'gps': 3336,
-    'location': 3336,
-    'latitude': 3336,
-    'longitude': 3336,
-    
-    # Motion sensors
-    'accelerometer': 3313,
-    'acceleration': 3313,
-    'gyroscope': 3334,
-    'gyro': 3334,
-    'magnetometer': 3314,
-    'compass': 3332,
-    'direction': 3332,
-    'heading': 3332,
-    
-    # Control & Actuators
-    'setpoint': 3308,
-    'target': 3308,
-    'valve': 3337,
-    'positioner': 3337,
-    'valveposition': 3337,
-    'openness': 3337,
-    'dimmer': 3343,
-    'actuator': 3306,
-    
-    # Presence & Input
-    'presence': 3302,
-    'motion': 3302,
-    'occupancy': 3302,
-    'pir': 3302,
-    'button': 3347,
-    'switch': 3342,
-    
-    # Other
-    'load': 3322,
-    'weight': 3322,
-    'percentage': 3320,
-    'digital': 3200,
-    'analog': 3202,
-    'generic': 3300,
-}
-
+#: The SenML unit a reading of each kind is expected in. The scan looks up only
+#: the IL-204 quantities (IL204_QUANTITY_PATHS); the other entries serve callers
+#: of check_annotation_correctness checking a field they have classified.
 SENML_UNITS = {
     # Temperature & Environment
     'temperature': 'Cel',
     'humidity': '%RH',
     'pressure': 'Pa',
+    'moisture': '%',
+    'precipitation': 'm',
     'barometer': 'Pa',
     'altitude': 'm',
     'depth': 'm',
@@ -858,50 +788,165 @@ def _name_tokens(field_name: str) -> List[str]:
     return [t for t in re.split(r'[^A-Za-z0-9]+', spaced.lower()) if t]
 
 
-def candidate_sensors(field: Dict[str, Any]) -> List[Tuple[str, int]]:
-    """Every sensor type a field's name could plausibly denote, most specific first.
+# --- Which fields are sensor readings: IL-204 ---------------------------------
+#
+# The Integration Layer's TTN guide (docs/guides/protocol-mappings/ttn-normalized.md
+# in la-integration-layer, CRT-2026-036) fixes how a field is classified, by the
+# first of these that applies [IL-204]:
+#
+#   1. `field_map` -- an integrator's per-deployment table. A schema has none of its
+#      own, so this step never applies here.
+#   2. A qualifier word: a threshold, setpoint, statistic, delta or raw value is not
+#      the reading it qualifies. Unplaced.
+#   3. The field name: a name naming a TTN quantity is placed on that quantity's
+#      path, the medium word in it deciding the category. A medium with no path for
+#      the quantity leaves the field unplaced.
+#   4. The IPSO object, for a name that names no quantity.
+#
+# The scorer expects an annotation only where steps 2 and 3 place a field from its
+# name. Step 4 places a field by its own annotation, so it is evidence of nothing
+# and is never a mismatch. A unit never classifies (IL-203), and a generic IPSO
+# object selects no category by itself (IL-199). The word lists below are the
+# guide's, which it calls normative and best-effort.
 
-    A name can legitimately match more than one keyword: 'targetTemperature' is
-    both a target (Set Point, 3308) and a temperature (3303), and only the author
-    knows which the field is. Detection proposes; the annotation disambiguates.
+#: IL-204 qualifier words. A name containing one is not a reading.
+IL204_QUALIFIER_WORDS = frozenset({
+    'threshold', 'setpoint', 'target', 'min', 'max', 'minimum', 'maximum',
+    'avg', 'average', 'mean', 'median', 'percentile', 'change', 'delta', 'raw',
+    'limit', 'alarm', 'offset',
+})
+
+#: IL-204 quantity words, and the TTN path each takes with no medium word in the
+#: name. The guide sends temperature, humidity and pressure under `air`; moisture
+#: and precipitation each have one path.
+IL204_QUANTITY_PATHS = {
+    'temperature': 'air.temperature',
+    'humidity': 'air.relativeHumidity',
+    'pressure': 'air.pressure',
+    'precipitation': 'rain.cumulative',
+    'moisture': 'soil.moisture',
+}
+
+#: IL-204 medium words with a TTN path, and the path each gives a quantity. A
+#: quantity missing here has no path in that medium (`water_pressure`).
+IL204_MEDIUM_PATHS = {
+    'soil': {'temperature': 'soil.temperature', 'moisture': 'soil.moisture'},
+    'water': {'temperature': 'water.temperature'},
+}
+
+#: IL-204 medium or context words with no TTN path. Such a field is still a
+#: reading of its quantity, so an annotation naming it is right; IL-204 simply
+#: cannot place it.
+IL204_UNPLACED_MEDIUM_WORDS = frozenset({
+    'leaf', 'dew', 'surface', 'internal', 'board', 'pcb', 'electronics', 'head',
+    'barometer',
+})
+
+#: IPSO objects that say what kind of value a field is, not which quantity
+#: (IL-199, and 3332 Direction in the TTN guide). One never selects a category on
+#: its own, so it is never a mismatch with a specific name.
+GENERIC_IPSO_OBJECTS = frozenset({3300, 3320, 3325, 3332})
+
+#: For each quantity: the IPSO object to suggest, and every object consistent
+#: with it. Moisture and precipitation have no specific IPSO object, so a generic
+#: one is what they take. 3304 is accepted for moisture because the IL prototype
+#: places 3304 in a `soil` name on soil.moisture.
+IL204_QUANTITY_IPSO = {
+    'temperature': (3303, frozenset({3303})),
+    'humidity': (3304, frozenset({3304})),
+    'pressure': (3323, frozenset({3323, 3315})),
+    'moisture': (3320, frozenset({3320, 3304})),
+    'precipitation': (3300, frozenset({3300})),
+}
+
+#: `sensor:` values by which a field declares it is not a reading.
+_SENSOR_OPT_OUT = frozenset({'none', 'false', 'no'})
+
+
+class Il204Placement(NamedTuple):
+    """Where IL-204 puts a field, and which step decided it.
+
+    `step` is one of:
+      'qualifier' -- step 2: a qualifier word; not a reading.
+      'name'      -- step 3: placed on `path` from the name.
+      'medium'    -- step 3: a reading of `quantity` whose medium has no path.
+      'declared'  -- the field's `sensor: none` says it is not a reading.
+      'none'      -- the name names no quantity; only the IPSO object (step 4)
+                     could place it, and the scorer takes no evidence from that.
     """
-    declared = field.get('sensor')
-    if declared is not None:
-        key = str(declared).strip().lower()
-        if key in ('none', 'false', 'no'):
-            return []
-        if key in STANDARD_SENSOR_IPSO:
-            return [(key, STANDARD_SENSOR_IPSO[key])]
-        return []
 
-    tokens = set(_name_tokens(field.get('name', '')))
-    if not tokens:
-        return []
-    matches = []
-    # Longest keyword first so 'valveposition' outranks 'valve'.
-    for keyword in sorted(STANDARD_SENSOR_IPSO, key=len, reverse=True):
-        keyword_tokens = _name_tokens(keyword)
-        if keyword_tokens and tokens.issuperset(keyword_tokens):
-            matches.append((keyword, STANDARD_SENSOR_IPSO[keyword]))
-    return matches
+    step: str
+    quantity: Optional[str] = None
+    path: Optional[str] = None
+    word: Optional[str] = None
+
+    @property
+    def detectable(self) -> bool:
+        """True where IL-204 places the field from its name."""
+        return self.path is not None
+
+
+def il204_words(field_name: str) -> List[str]:
+    """A name's words: split on `_` and at camelCase boundaries, lowercased.
+
+    Whole words, never substrings: 'photosynthetically_active_radiation' does not
+    contain the word 'ph'. Digits stay with their word, so `temperature1` is one
+    word and names no quantity -- the guide splits on `_` and camelCase only.
+    """
+    return _name_tokens(field_name)
+
+
+def classify_il204(field: Dict[str, Any]) -> Il204Placement:
+    """Place a field by IL-204's steps 2 and 3 (step 1 is `field_map`, which a
+    schema does not carry).
+
+    A field may state its quantity with `sensor:`, a scorer hint that IL-204
+    does not know. `sensor: none` says the field is not a reading -- the escape
+    for a status or mode byte whose name holds a quantity word, as `field_map` is
+    for an integrator. `sensor: <quantity>` stands for a quantity word the name
+    lacks, the medium still read from the name. Any other value is ignored, so
+    `moisture_at_level_3` declaring `sensor: percentage` is still placed by its
+    name. The qualifier step comes first, as in IL-204.
+    """
+    words = il204_words(str(field.get('name', '')))
+    qualifier = next((w for w in words if w in IL204_QUALIFIER_WORDS), None)
+    if qualifier is not None:
+        return Il204Placement('qualifier', word=qualifier)
+
+    declared = str(field.get('sensor', '')).strip().lower()
+    if declared in _SENSOR_OPT_OUT:
+        return Il204Placement('declared', word=declared)
+    if declared in IL204_QUANTITY_PATHS:
+        quantity = declared  # type: Optional[str]
+    else:
+        quantity = next((w for w in words if w in IL204_QUANTITY_PATHS), None)
+        if quantity is None:
+            return Il204Placement('none')
+
+    medium = next(
+        (w for w in words
+         if w in IL204_MEDIUM_PATHS or w in IL204_UNPLACED_MEDIUM_WORDS),
+        None,
+    )
+    if medium is None:
+        return Il204Placement('name', quantity, IL204_QUANTITY_PATHS[quantity])
+    path = IL204_MEDIUM_PATHS.get(medium, {}).get(quantity)
+    if path is None:
+        return Il204Placement('medium', quantity, word=medium)
+    return Il204Placement('name', quantity, path, word=medium)
 
 
 def detect_sensor(field: Dict[str, Any]) -> Optional[Tuple[str, int]]:
-    """Return the most likely (keyword, ipso_object) for a field, or None.
+    """The (quantity, suggested IPSO object) IL-204 places a field as, or None.
 
-    When the field already carries an `ipso:` annotation naming one of the
-    plausible readings, that reading is used, so a correct annotation is never
-    reported as a mismatch just because another keyword also matched the name.
+    None for a field IL-204 does not place from its name: a qualifier, a medium
+    with no TTN path, or a name naming no TTN quantity. Neither a unit (IL-203)
+    nor a word such as `battery` selects an object.
     """
-    matches = candidate_sensors(field)
-    if not matches:
+    placement = classify_il204(field)
+    if not placement.detectable:
         return None
-    annotated = _ipso_object_of(field.get('ipso')) if 'ipso' in field else None
-    if annotated is not None:
-        for keyword, ipso_object in matches:
-            if ipso_object == annotated:
-                return keyword, ipso_object
-    return matches[0]
+    return placement.quantity, IL204_QUANTITY_IPSO[placement.quantity][0]
 
 
 def _ipso_object_of(annotation: Any) -> Optional[int]:
@@ -933,29 +978,40 @@ def check_annotation_correctness(
 
     Presence alone used to earn the points, so `ipso: {object: 9999}` or a
     temperature object on a pH field scored the same as a correct mapping.
-    Returns (ipso_ok, senml_ok, problems).
+    `keyword` is the quantity the field was placed as; any object in
+    IL204_QUANTITY_IPSO for it is right, as is `ipso_object`. A generic object
+    (IL-199) is never reported as a mismatch, and earns credit only where it is
+    what the quantity takes. Returns (ipso_ok, senml_ok, problems).
     """
     problems = []
     name = field.get('name', '?')
+
+    accepted = {ipso_object}
+    if keyword in IL204_QUANTITY_IPSO:
+        accepted |= IL204_QUANTITY_IPSO[keyword][1]
 
     ipso_ok = False
     if 'ipso' in field:
         found = _ipso_object_of(field['ipso'])
         if found is None:
             problems.append("%s: ipso annotation has no usable object id" % name)
-        elif found != ipso_object:
+        elif found in accepted:
+            ipso_ok = True
+        elif found not in GENERIC_IPSO_OBJECTS:
             problems.append(
                 "%s: ipso object %s does not match %s (%d) for this sensor type"
                 % (name, found, keyword, ipso_object)
             )
-        else:
-            ipso_ok = True
 
     senml_ok = False
     expected_unit = SENML_UNITS.get(keyword)
     if 'senml' in field:
         unit = _senml_unit_of(field['senml'])
         declared = field.get('unit')
+        if unit is None and declared is not None:
+            # A senml annotation naming only the record takes the field's own
+            # unit (PS-478), so that is the unit to check.
+            unit = str(declared)
         if unit is None:
             problems.append("%s: senml annotation has no unit" % name)
         elif expected_unit and unit not in SENML_UNIT_EQUIVALENTS.get(
@@ -1025,6 +1081,23 @@ def check_semantic_annotations(schema: Dict[str, Any]) -> Tuple[Dict[str, Any], 
                         scan_fields(case_def, prefix)
                 continue
 
+            # Handle a field-level `match:` block (CR-2026-018's spelling). Its
+            # case bodies report their fields at the level of the match itself,
+            # so they keep the enclosing prefix. Without this, every field in a
+            # message-type switch was invisible here: laq4's temperature and
+            # humidity were never seen.
+            if isinstance(field.get('match'), dict):
+                match_def = field['match']
+                bodies = list((match_def.get('cases') or {}).values())
+                if isinstance(match_def.get('default'), (list, dict)):
+                    bodies.append(match_def['default'])
+                for case_def in bodies:
+                    if isinstance(case_def, dict) and 'fields' in case_def:
+                        scan_fields(case_def['fields'], prefix)
+                    elif isinstance(case_def, list):
+                        scan_fields(case_def, prefix)
+                continue
+
             # Handle nested structures
             if field_type in ('object', 'match'):
                 if 'fields' in field:
@@ -1049,9 +1122,11 @@ def check_semantic_annotations(schema: Dict[str, Any]) -> Tuple[Dict[str, Any], 
 
             detected_sensor = detect_sensor(field)
             if detected_sensor is None:
-                # Not a standard sensor reading. Annotations here are fine but
-                # earn no credit: counting them let a schema reach full semantic
-                # marks by annotating fields the formats do not model.
+                # IL-204 does not place this field from its name: a qualifier, a
+                # medium with no TTN path, or no TTN quantity. Its annotations are
+                # neither expected nor checked, and earn no credit: counting them
+                # let a schema reach full semantic marks by annotating fields the
+                # formats do not model.
                 continue
 
             keyword, ipso_object = detected_sensor
@@ -1067,6 +1142,12 @@ def check_semantic_annotations(schema: Dict[str, Any]) -> Tuple[Dict[str, Any], 
             elif 'ipso' not in field:
                 results['ipso_missing'].append(
                     f"{full_name}: add ipso: {{object: {ipso_object}}}"
+                )
+            elif _ipso_object_of(field['ipso']) in GENERIC_IPSO_OBJECTS:
+                results['ipso_missing'].append(
+                    f"{full_name}: generic ipso object "
+                    f"{_ipso_object_of(field['ipso'])} names no quantity (IL-199); "
+                    f"{keyword} is {ipso_object}"
                 )
 
             expected_unit = SENML_UNITS.get(keyword)
@@ -1405,17 +1486,15 @@ def calculate_score(
         semantic_ratio = min(1.0, semantic_mapped / detectable)
         score += int(weights['semantic_coverage'] * semantic_ratio)
     elif total_fields > 0:
-        # Has fields but no standard sensors - partial credit based on any annotations
-        ipso_mapped = semantic.get('ipso_mapped', 0)
-        senml_mapped = semantic.get('senml_mapped', 0)
-        semantic_mapped = semantic.get('semantic_mapped', 0)
-        
-        if ipso_mapped > 0:
-            score += weights['ipso_coverage']
-        if senml_mapped > 0:
-            score += weights['senml_coverage']
-        if semantic_mapped > 0:
-            score += weights['semantic_coverage']
+        # No field IL-204 places from its name, so there is nothing the semantic
+        # checks can verify. Half credit, by Jason Reiss's decision when the
+        # IL-204 rule landed (PR #123): no points left a battery-only schema
+        # 20 short of Platinum for having no TTN quantity, and full points
+        # lifted 257 registry schemas to Platinum without checking anything.
+        score += int(
+            (weights['ipso_coverage'] + weights['senml_coverage']
+             + weights['semantic_coverage']) * NO_DETECTABLE_SEMANTIC_CREDIT
+        )
     else:
         # No fields at all - award full semantic points (edge case)
         score += weights['ipso_coverage'] + weights['senml_coverage'] + weights['semantic_coverage']

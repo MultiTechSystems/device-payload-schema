@@ -820,7 +820,7 @@ class _ReachInterpreter(SchemaInterpreter):
             isinstance(field_def, dict)
             and MARK in field_def
             and "guard" in field_def
-            and id(field_def) not in self._guard_else
+            and field_def not in self._guard_else
         ):
             self._reached.add(field_def[MARK] + (PIPELINE,))
         return value
