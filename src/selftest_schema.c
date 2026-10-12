@@ -884,6 +884,33 @@ static void test_a_value_that_does_not_fit_is_named(void) {
     TCHECK(encodes_to(field_bits("x", 4, 4, true), 2.5, (const uint8_t[]){0x20}, 1));
 }
 
+/* PS-168 for udec/sdec (PS-330): the figures of tests/cr-2026-135-cases.yaml. Both
+ * clamped silently: udec 123.5 wrote 0x95. */
+static field_def_t field_nibble(const char* name, field_type_t type) {
+    field_def_t f = field_u8(name);
+    f.type = type;
+    return f;
+}
+
+static void test_a_nibble_decimal_that_does_not_fit_is_named(void) {
+    field_def_t udec = field_nibble("v", FIELD_TYPE_UDEC);
+    field_def_t sdec = field_nibble("v", FIELD_TYPE_SDEC);
+    TCHECK(encodes_to(udec, 15.9, (const uint8_t[]){0xF9}, 1));
+    TCHECK(encodes_to(udec, 2.5, (const uint8_t[]){0x25}, 1));
+    TCHECK(encodes_to(sdec, -0.5, (const uint8_t[]){0xF5}, 1));
+    TCHECK(encodes_to(sdec, -8, (const uint8_t[]){0x80}, 1));
+    TCHECK(rejects(udec, false, 0, 123.5,
+                   "Field 'v': 123.5 encodes as 123.5, outside 0 to 15.9 (PS-168)"));
+    TCHECK(rejects(udec, false, 0, 15.96,
+                   "Field 'v': 15.96 encodes as 16, outside 0 to 15.9 (PS-168)"));
+    TCHECK(rejects(udec, true, -1, 0,
+                   "Field 'v': -1 encodes as -1, outside 0 to 15.9 (PS-168)"));
+    TCHECK(rejects(sdec, false, 0, 99.9,
+                   "Field 'v': 99.9 encodes as 99.9, outside -8 to 7.9 (PS-168)"));
+    TCHECK(rejects(sdec, false, 0, -8.5,
+                   "Field 'v': -8.5 encodes as -8.5, outside -8 to 7.9 (PS-168)"));
+}
+
 /* CR-2026-136 (PS-064, PS-062): bit ranges and bools are written as a decoder reads
  * them - a non-consuming one shares its byte with the next field - and a value the range
  * cannot hold is rejected rather than masked into its neighbour. */
@@ -1203,6 +1230,107 @@ static void test_a_byte_group_encodes_as_decoded(void) {
     TCHECK(out.len == 2 && out.data[0] == 0x83 && out.data[1] == 0x2A);
 }
 
+/* CR-2026-136 (PS-059, PS-352, PS-353, PS-365): a bit range's base is N/8 bytes in the
+ * field's byte order, an `sN` range sign-extends from its width, and encoding writes the
+ * base back in the same order. The layout and payload are bit-range-order.yaml's,
+ * without its byte_group. */
+static void build_wide_ranges(schema_t* s) {
+    memset(s, 0, sizeof(*s));
+    s->endian = ENDIAN_BIG;
+    field_def_t f[] = {
+        field_bit_range("low12", 2, false, 0, 12, 0, ENDIAN_LITTLE),
+        field_bit_range("top4", 2, true, 12, 4, 2, ENDIAN_LITTLE),
+        field_bit_range("nibble", 1, true, 0, 4, 1, ENDIAN_DEFAULT),
+        field_bit_range("middle", 2, false, 4, 8, 2, ENDIAN_DEFAULT),
+    };
+    for (int i = 0; i < 4; i++) schema_add_field(s, &f[i]);
+}
+
+static void test_a_wide_bit_range_reads_its_base(void) {
+    schema_t s;
+    decode_result_t r;
+    const uint8_t p[] = {0x34, 0xF2, 0x0F, 0x02, 0x30};
+    build_wide_ranges(&s);
+    TCHECK(schema_decode(&s, p, sizeof(p), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 4 && r.bytes_consumed == 5);
+    TCHECK(result_get_int(&r, "low12", 0) == 564);
+    TCHECK(result_get_int(&r, "top4", 0) == -1);
+    TCHECK(result_get_int(&r, "nibble", 0) == -1);
+    TCHECK(result_get_int(&r, "middle", 0) == 35);
+    TCHECK(result_get_field(&r, "low12")->type == FIELD_TYPE_BITS);   /* an integer */
+
+    /* wide-bit-range.yaml: a 64-bit base, signed and unsigned. */
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t lw = field_bit_range("low_word", 8, true, 0, 32, 0, ENDIAN_DEFAULT);
+    field_def_t hw = field_bit_range("high_word", 8, false, 32, 32, 8, ENDIAN_DEFAULT);
+    schema_add_field(&s, &lw);
+    schema_add_field(&s, &hw);
+    const uint8_t q[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xF6};
+    TCHECK(schema_decode(&s, q, sizeof(q), &r) == SCHEMA_OK);
+    TCHECK(result_get_int(&r, "low_word", 0) == -10);
+    TCHECK(result_get_int(&r, "high_word", 0) == 4294967295LL);
+    TCHECK(r.bytes_consumed == 8);
+}
+
+static void test_a_wide_bit_range_short_read_is_named(void) {
+    schema_t s;
+    decode_result_t r;
+    const uint8_t one[] = {0x34};
+    build_wide_ranges(&s);
+    TCHECK(schema_decode(&s, one, sizeof(one), &r) == SCHEMA_ERR_BUFFER);
+    TCHECK(strcmp(r.error_msg, "Field 'low12': Buffer underflow at peek offset 0 (PS-535)") == 0);
+
+    /* The base is there; the bytes `consume` steps over are not. */
+    memset(&s, 0, sizeof(s));
+    field_def_t f = field_bit_range("x", 1, false, 0, 4, 2, ENDIAN_DEFAULT);
+    schema_add_field(&s, &f);
+    TCHECK(schema_decode(&s, one, sizeof(one), &r) == SCHEMA_ERR_BUFFER);
+    TCHECK(strcmp(r.error_msg, "Field 'x': Buffer underflow: need 2 bytes at offset 0, "
+                               "but only 1 remaining (PS-535)") == 0);
+}
+
+static void test_a_wide_bit_range_encodes_as_decoded(void) {
+    schema_t s;
+    encode_inputs_t in;
+    encode_result_t out;
+    const uint8_t p[] = {0x34, 0xF2, 0x0F, 0x02, 0x30};
+    build_wide_ranges(&s);
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "low12", 564);
+    encode_inputs_add_int(&in, "top4", -1);
+    encode_inputs_add_int(&in, "nibble", -1);
+    encode_inputs_add_int(&in, "middle", 35);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_OK);
+    TCHECK(out.len == 5 && memcmp(out.data, p, sizeof(p)) == 0);
+
+    /* PS-064: an sN range holds -2^(w-1) to 2^(w-1)-1, and names its base. */
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "low12", 564);
+    encode_inputs_add_int(&in, "top4", 8);
+    encode_inputs_add_int(&in, "nibble", -1);
+    encode_inputs_add_int(&in, "middle", 35);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_OVERFLOW && out.len == 0);
+    TCHECK(strcmp(out.error_msg, "Field 'top4': 8 encodes as 8, outside -8 to 7 for "
+                                 "s16[12:15] (PS-168)") == 0);
+
+    /* PS-551 over two bytes: the peeked low12 is derived from the u16 written after it. */
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t pk = field_bit_range("low12", 2, false, 0, 12, 0, ENDIAN_LITTLE);
+    field_def_t wd = field_u16("word", ENDIAN_LITTLE);
+    schema_add_field(&s, &pk);
+    schema_add_field(&s, &wd);
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "word", 0xF234);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_OK);
+    TCHECK(out.len == 2 && out.data[0] == 0x34 && out.data[1] == 0xF2);
+    encode_inputs_add_int(&in, "low12", 0x235);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_PARSE);
+    TCHECK(strcmp(out.error_msg, "Field 'low12' is given 565, but the fields that share "
+                                 "its bits write 564 (PS-551)") == 0);
+}
+
 /*
  * Main test entry point
  */
@@ -1247,6 +1375,7 @@ void selftest_schema(void) {
     test_an_unknown_tag_is_left_over_from_the_tag();
     test_an_encoder_rounds_ties_to_even();
     test_a_value_that_does_not_fit_is_named();
+    test_a_nibble_decimal_that_does_not_fit_is_named();
     test_bit_ranges_are_laid_out_as_decoded();
     test_a_missing_input_is_named();
     test_a_covered_peek_is_derived();
@@ -1254,6 +1383,9 @@ void selftest_schema(void) {
     test_a_byte_group_is_checked();
     test_a_byte_group_in_a_tlv_case();
     test_a_byte_group_encodes_as_decoded();
+    test_a_wide_bit_range_reads_its_base();
+    test_a_wide_bit_range_short_read_is_named();
+    test_a_wide_bit_range_encodes_as_decoded();
 
     LOG(LOG_INFO, MOD, "Schema interpreter self-tests complete");
 }

@@ -231,3 +231,65 @@ cases:
   schema: "name: t\nfields:\n  - {name: a, type: u8}\n  - {name: b, type: \"u8[0:3]\"}\n"
   input: '{"a": 1, "b": 2}'
   payload: "0102"
+
+# --- An enum's code and a nibble-decimal are checked the same way ---------------------
+#
+# The enum's own name, where Python named its synthetic base field ('None'). A nibble
+# decimal (PS-330) writes a whole part and tenths, so it "encodes as" the value rounded to
+# tenths, and its range is what one byte holds with tenths 0 to 9: 0 to 15.9 for udec,
+# -8 to 7.9 for sdec. All five said "does not fit udec" in words of their own.
+
+- name: enum_code_outside_its_base
+  schema: "name: t\nfields:\n  - {name: e, type: enum, base: u8, values: {1: a, 2: b}}\n"
+  input: '{"e": 300}'
+  error: "Field 'e': 300 encodes as 300, outside 0 to 255 (PS-168)"
+
+- name: enum_code_outside_a_u16_base
+  schema: "name: t\nfields:\n  - {name: e, type: enum, base: u16, values: {1: a}}\n"
+  input: '{"e": 70000}'
+  error: "Field 'e': 70000 encodes as 70000, outside 0 to 65535 (PS-168)"
+
+- name: enum_code_inside_its_base
+  schema: "name: t\nfields:\n  - {name: e, type: enum, base: u8, values: {1: a, 2: b}}\n"
+  input: '{"e": 200}'
+  payload: "c8"
+
+- name: udec_in_range
+  schema: "name: t\nfields:\n  - {name: v, type: udec}\n"
+  input: '{"v": 15.9}'
+  payload: "f9"
+
+- name: udec_above_its_range
+  schema: "name: t\nfields:\n  - {name: v, type: udec}\n"
+  input: '{"v": 123.5}'
+  error: "Field 'v': 123.5 encodes as 123.5, outside 0 to 15.9 (PS-168)"
+
+- name: udec_rounds_up_out_of_its_range
+  schema: "name: t\nfields:\n  - {name: v, type: udec}\n"
+  input: '{"v": 15.96}'
+  error: "Field 'v': 15.96 encodes as 16, outside 0 to 15.9 (PS-168)"
+
+- name: udec_below_its_range
+  schema: "name: t\nfields:\n  - {name: v, type: udec}\n"
+  input: '{"v": -1}'
+  error: "Field 'v': -1 encodes as -1, outside 0 to 15.9 (PS-168)"
+
+- name: sdec_in_range
+  schema: "name: t\nfields:\n  - {name: v, type: sdec}\n"
+  input: '{"v": -0.5}'
+  payload: "f5"
+
+- name: sdec_at_its_floor
+  schema: "name: t\nfields:\n  - {name: v, type: sdec}\n"
+  input: '{"v": -8}'
+  payload: "80"
+
+- name: sdec_above_its_range
+  schema: "name: t\nfields:\n  - {name: v, type: sdec}\n"
+  input: '{"v": 99.9}'
+  error: "Field 'v': 99.9 encodes as 99.9, outside -8 to 7.9 (PS-168)"
+
+- name: sdec_below_its_range
+  schema: "name: t\nfields:\n  - {name: v, type: sdec}\n"
+  input: '{"v": -8.5}'
+  error: "Field 'v': -8.5 encodes as -8.5, outside -8 to 7.9 (PS-168)"

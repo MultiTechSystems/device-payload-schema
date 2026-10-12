@@ -369,6 +369,24 @@ def integer_bounds(size_bytes=None, signed=False, bits=None):
     return 0, (1 << bits) - 1
 
 
+def check_nibble_decimal(tenths, signed, name, given):
+    """PS-168 for `udec`/`sdec` (PS-330): one byte holds a whole part in a nibble and
+    tenths 0 to 9, so 0 to 15.9, or -8 to 7.9 signed. `tenths` is the value as encoded,
+    in tenths; the message gives it rounded to tenths, in the form check_fits uses. Both
+    types said "does not fit udec", in words of their own in every implementation."""
+    low, high = (-80, 79) if signed else (0, 159)
+    if not low <= tenths <= high:
+        sign = '-' if tenths < 0 else ''
+        whole, part = divmod(abs(tenths), 10)
+        encoded = f"{sign}{whole}" + (f".{part}" if part else '')
+        shown = (format_lookup_value(given)
+                 if isinstance(given, (int, float)) and not isinstance(given, bool)
+                 else str(given))
+        raise ValueError(f"Field '{name}': {shown} encodes as {encoded}, outside "
+                         f"{'-8' if signed else '0'} to {'7.9' if signed else '15.9'} "
+                         f"(PS-168)")
+
+
 def round_to_integer(value):
     """PS-552: the nearest integer to the binary64 value, a tie to even. Python's round()
     on a float is exactly that; an int is already one."""
@@ -1571,16 +1589,18 @@ def reverse_enum(value, field_def):
     (CR-2026-132: a reference to an enum binds its code)."""
     values = field_def.get('values') or {}
     if isinstance(values, dict):
-        for key, entry in values.items():
-            if enum_label(entry) == value:
-                try:
-                    return int(key, 0) if isinstance(key, str) else int(key)
-                except ValueError:
-                    return value
+        codes = [lookup_key_code(key) for key, entry in values.items()
+                 if enum_label(entry) == value]
     elif isinstance(values, list):
-        labels = [enum_label(entry) for entry in values]
-        if value in labels:
-            return labels.index(value)
+        codes = [i for i, entry in enumerate(values) if enum_label(entry) == value]
+    else:
+        codes = []
+    if None in codes:
+        return value
+    if len(codes) > 1:
+        raise shared_label_error(field_def.get('name', '?'), value, codes)  # PS-169
+    if codes:
+        return codes[0]
     if isinstance(value, str) and value.startswith('unknown(') and value.endswith(')'):
         try:
             return int(value[8:-1])
@@ -2729,25 +2749,60 @@ def same_label(label, value):
     return isinstance(label, bool) == isinstance(value, bool) and label == value
 
 
-def reverse_lookup(value, lookup):
+def label_text(label) -> str:
+    """A label as a PS-169 or PS-067 message writes it: text in single quotes, a boolean
+    as JSON writes it, a number as JavaScript's String(number) does (format_lookup_value),
+    so every implementation's text compares equal."""
+    if isinstance(label, bool):
+        return 'true' if label else 'false'
+    if isinstance(label, (int, float)):
+        return format_lookup_value(label)
+    return f"'{label}'"
+
+
+def shared_label_error(name, label, codes) -> ValueError:
+    """PS-169 (CR-2026-146, 0.5.5): a label several codes share names no one code, so
+    encoding it would be a guess. The codes are listed ascending."""
+    listed = ', '.join(str(code) for code in sorted(codes))
+    return ValueError(f"Field '{name}': the label {label_text(label)} is shared by codes "
+                      f"[{listed}], so it cannot be encoded (PS-169)")
+
+
+def lookup_key_code(key):
+    """A mapping key as the integer code it stands for, or None where it is not one."""
+    if isinstance(key, bool):
+        return None
+    if isinstance(key, int):
+        return key
+    try:
+        return int(str(key), 0)
+    except ValueError:
+        return None
+
+
+def reverse_lookup(value, lookup, name=None):
     """Map a label back to its integer for encoding.
 
     A string that is no label but matches the mapping's `${value}` default yields the
     value written into it (PS-409); the caller rejects any other string. Labels are
     compared with `same_label` (PS-513), so a boolean is never found as a number. A
     boolean with no key of its own is returned unchanged, and the caller rejects it.
+
+    A label two or more codes share is rejected, naming the field `name` and the codes
+    (PS-169, CR-2026-146); it used to encode as whichever code came first. With no `name`
+    - a caller only ranking candidate cases - the smallest code is returned instead.
     """
     if not lookup:
         return value
     if isinstance(lookup, dict):
-        for key, label in lookup.items():
-            if key == 'default':
-                continue
-            if same_label(label, value):
-                try:
-                    return int(key)
-                except (TypeError, ValueError):
-                    return value
+        codes = [lookup_key_code(key) for key, label in lookup.items()
+                 if key != 'default' and same_label(label, value)]
+        if codes:
+            if None in codes:
+                return value
+            if len(codes) > 1 and name is not None:
+                raise shared_label_error(name, value, codes)
+            return min(codes)
         template = lookup_template(lookup)
         if template is not None and isinstance(value, str):
             recovered = match_lookup_template(template, value)
@@ -2755,9 +2810,11 @@ def reverse_lookup(value, lookup):
                 return recovered
         return value
     if isinstance(lookup, (list, tuple)):
-        for index, label in enumerate(lookup):
-            if same_label(label, value):
-                return index
+        codes = [index for index, label in enumerate(lookup) if same_label(label, value)]
+        if len(codes) > 1 and name is not None:
+            raise shared_label_error(name, value, codes)
+        if codes:
+            return codes[0]
     return value
 
 #: Order in which the bare `mult`, `div` and `add` modifiers are applied,
@@ -6958,7 +7015,7 @@ class SchemaInterpreter:
             value = data[source['name']]
         lookup = source.get('lookup') if source else None
         if lookup is not None and isinstance(value, (str, bool)):
-            return reverse_lookup(value, lookup)
+            return reverse_lookup(value, lookup, source.get('name'))       # PS-169
         if source and source.get('type') == 'enum' and isinstance(value, str):
             return reverse_enum(value, source)      # its code (CR-2026-132)
         return value
@@ -7589,7 +7646,8 @@ class SchemaInterpreter:
         # 'Class A'". 69 corpus vectors failed to encode on exactly that.
         # The value as given, for a PS-168 rejection to name (PS-552).
         self._encode_given = (field_def, value)     # held, compared by identity
-        value = reverse_lookup(value, field_def.get('lookup'))
+        value = reverse_lookup(value, field_def.get('lookup'),
+                               field_def.get('name', '?'))                 # PS-169
 
         if isinstance(value, bool) and field_def.get('lookup'):
             # PS-513: a boolean matches only a boolean label, and none carries this one
@@ -7729,11 +7787,8 @@ class SchemaInterpreter:
             tenths = int(round((float(value) - whole) * 10))
             if tenths == 10:
                 whole, tenths = whole + 1, 0
-            low, high = (-8, 7) if field_type == 'sdec' else (0, 15)
-            if not low <= whole <= high:
-                raise ValueError(
-                    f"Field '{field_def.get('name', '?')}': {value} does not fit {field_type}"
-                )
+            check_nibble_decimal(whole * 10 + tenths, field_type == 'sdec',
+                                 field_def.get('name', '?'), given)       # PS-168
             return bytes([((whole & 0x0F) << 4) | tenths])
 
         if field_type == 'f16':
@@ -7819,41 +7874,40 @@ class SchemaInterpreter:
         raise ValueError(f"Cannot encode type: {field_type}")
     
     def _encode_enum(self, field_def: Dict[str, Any], value: Any) -> bytes:
-        """Encode enum field: map string value back to integer."""
+        """An enum's name back to its code, or a code as given (PS-067).
+
+        A name several codes share is rejected (PS-169), and so is one with no code, the
+        `default` label among them (PS-068, PS-554). A code is rounded (PS-552) and must
+        fit the base, the error naming the enum (PS-168): the base was encoded as a
+        field of its own with no name, so the message said 'None'. `unknown(N)`, the
+        label PS-269 withdrew, is no longer read back.
+        """
+        name = field_def.get('name', '?')
         base_type = field_def.get('base', 'u8')
         values = field_def.get('values', {})
-        
-        # Find the integer value for the string
-        int_value = None
-        
-        if isinstance(values, dict):
-            # Reverse lookup: string -> int
-            for k, v in values.items():
-                if enum_label(v) == value:
-                    int_value = int(k) if isinstance(k, str) else k
-                    break
-        elif isinstance(values, list):
-            # Find index of value
-            labels = [enum_label(v) for v in values]
-            if value in labels:
-                int_value = labels.index(value)
-        
-        if int_value is None:
-            # Try parsing as integer (e.g., "unknown(5)")
-            if isinstance(value, str) and value.startswith('unknown('):
-                try:
-                    int_value = int(value[8:-1])
-                except ValueError:
-                    raise ValueError(f"Cannot encode unknown enum value: {value}")
-            elif isinstance(value, int):
-                int_value = value
+        if isinstance(value, str):
+            if isinstance(values, dict):
+                codes = [lookup_key_code(k) for k, v in values.items()
+                         if enum_label(v) == value]
             else:
-                raise ValueError(f"Enum value not found: {value}")
-        
-        # Encode as base type
-        base_field = {'type': base_type}
-        return self._encode_field(base_field, int_value)
-    
+                codes = [i for i, v in enumerate(values or []) if enum_label(v) == value]
+            codes = [c for c in codes if c is not None]
+            if not codes:
+                raise ValueError(f"Field '{name}': {label_text(value)} is not a name of "
+                                 f"the enum (PS-067)")
+            if len(codes) > 1:
+                raise shared_label_error(name, value, codes)               # PS-169
+            int_value = codes[0]
+        elif isinstance(value, (int, float)) and not isinstance(value, bool):
+            int_value = round_to_integer(value)                           # PS-552
+        else:
+            raise ValueError(f"Field '{name}': {label_text(value)} is not a name or code "
+                             f"of the enum (PS-067)")
+        size, signed = INTEGER_TYPE_INFO.get(base_type, (1, False))
+        low, high = integer_bounds(size, signed)
+        check_fits(int_value, low, high, name, self._given_value(field_def, value))
+        return self._write_int(int_value, size, signed)
+
     def encode_command(self, command_name: str, data: Dict[str, Any] = None) -> EncodeResult:
         """
         Encode a downlink command by name.

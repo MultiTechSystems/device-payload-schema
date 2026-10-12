@@ -333,7 +333,7 @@ row was wrong by the time the corpus reached 1237.
 Asked for TLV in C. The scope was wrong, and the investigation is why: **nothing measured
 that interpreter at all.** Its four dedicated test files were in no build target,
 `src/selftest_schema.c` exercises hand-built schemas rather than corpus vectors, and
-`grep corpus src/*.c` returned nothing. There is no YAML reader (`schema_create_yaml()` is a
+`grep corpus src/*.c` returned nothing. There is no YAML reader (`schema_ffi_create_yaml()` is a
 declared stub) and the header parses no binary format - a schema is built through the struct
 API. Adding a large construct there would have produced a feature verifiable only against
 tests I also wrote.

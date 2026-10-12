@@ -55,13 +55,28 @@ function encRint(v) {
   return r;
 }
 
+function encLabelText(label) {                       // label_text
+  if (typeof label === "string") return "'" + label + "'";
+  return String(label);
+}
+
+function encShared(name, label, codes) {              // shared_label_error (PS-169)
+  var sorted = codes.slice().sort(function (a, b) { return a - b; });
+  encFail("Field '" + name + "': the label " + encLabelText(label) + " is shared by codes [" +
+          sorted.join(", ") + "], so it cannot be encoded (PS-169)");
+}
+
 function encReverseLookup(v, lookup, name) {          // reverse_lookup
   // PS-513 (same_label): === never matches true to 1 or "true" to true. Only a string
   // was looked up, so a boolean passed through and wrote its own 0 or 1.
+  // PS-169 (CR-2026-146): a label two or more codes share is rejected, naming `name`;
+  // with no name - a caller ranking candidate cases - the smallest code is taken.
   if (!lookup || v === null || v === undefined) return v;
+  var codes = [], c;
   if (Array.isArray(lookup)) {
-    var at = lookup.indexOf(v);
-    return at >= 0 ? at : v;
+    for (c = 0; c < lookup.length; c++) if (lookup[c] === v) codes.push(c);
+    if (codes.length > 1 && name !== undefined) encShared(name, v, codes);
+    return codes.length ? codes[0] : v;
   }
   var template = null;
   for (var k in lookup) {
@@ -72,8 +87,13 @@ function encReverseLookup(v, lookup, name) {          // reverse_lookup
     }
     if (lookup[k] === v) {
       var n = Number(k);
-      return isFinite(n) && String(k).trim() !== "" ? n : v;
+      if (!(isFinite(n) && String(k).trim() !== "")) return v;
+      codes.push(n);
     }
+  }
+  if (codes.length) {
+    if (codes.length > 1 && name !== undefined) encShared(name, v, codes);
+    return Math.min.apply(null, codes);
   }
   if (template !== null && typeof v === "string") {
     var cut = template.indexOf("${value}");
@@ -319,6 +339,16 @@ function encBase64(text) {
   return out;
 }
 
+/* PS-168 for udec/sdec (check_nibble_decimal): 0 to 15.9, or -8 to 7.9, in tenths. */
+function encNibbleFits(tenths, signed, f, given) {
+  var lo = signed ? -80 : 0, hi = signed ? 79 : 159;
+  if (tenths >= lo && tenths <= hi) return;
+  var abs = Math.abs(tenths);
+  var shown = (tenths < 0 ? "-" : "") + Math.floor(abs / 10) + (abs % 10 ? "." + (abs % 10) : "");
+  encFail("Field '" + (f.name || "?") + "': " + String(given) + " encodes as " + shown +
+          ", outside " + (signed ? "-8" : "0") + " to " + (signed ? "7.9" : "15.9") + " (PS-168)");
+}
+
 function encEnumLabel(entry) {
   return entry !== null && typeof entry === "object" && "name" in entry ? entry.name : entry;
 }
@@ -377,8 +407,7 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
     var whole = Math.floor(Number(value));
     var tenths = encRint((Number(value) - whole) * 10);
     if (tenths === 10) { whole += 1; tenths = 0; }
-    var lo = type === "sdec" ? -8 : 0, hi = type === "sdec" ? 7 : 15;
-    if (whole < lo || whole > hi) encFail("Field '" + (f.name || "?") + "': " + value + " does not fit " + type);
+    encNibbleFits(whole * 10 + tenths, type === "sdec", f, encGiven(f, value));   // PS-168
     out.push(((whole & 0x0F) << 4) | tenths);
     return;
   }
@@ -430,22 +459,21 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
     if (f.length) encPad(out, d, f.length); else encPad(out, d, d.length);
     return;
   }
-  if (type === "enum") {
-    var values = f.values || {}, iv2 = null, k;
-    if (Array.isArray(values)) {
-      var labels = values.map(encEnumLabel);
-      if (labels.indexOf(value) >= 0) iv2 = labels.indexOf(value);
-    } else {
-      for (k in values) {
-        if (Object.prototype.hasOwnProperty.call(values, k) && encEnumLabel(values[k]) === value) { iv2 = Number(k); break; }
-      }
-    }
-    if (iv2 === null) {
-      if (typeof value === "string" && value.indexOf("unknown(") === 0) iv2 = parseInt(value.slice(8, -1), 10);
-      else if (typeof value === "number" && value % 1 === 0) iv2 = value;
-      else encFail("Enum value not found: " + value);
-    }
-    encFieldInner(out, { type: f.base || "u8" }, iv2, endian, ctx);
+  if (type === "enum") {                             // _encode_enum
+    // A name back to its code, a code as given (PS-067); a name several codes share is
+    // rejected (PS-169), and so is one with no code, the `default` label among them.
+    var iv2;
+    if (typeof value === "string") {
+      var codes = encEnumCodes(f, value);
+      if (!codes.length) encFail("Field '" + f.name + "': " + encLabelText(value) + " is not a name of the enum (PS-067)");
+      if (codes.length > 1) encShared(f.name, value, codes);
+      iv2 = codes[0];
+    } else if (encIsNumber(value)) iv2 = encRint(value);              // PS-552
+    else encFail("Field '" + f.name + "': " + encLabelText(value) + " is not a name or code of the enum (PS-067)");
+    var base = String(f.base || "u8"), bt = ENC_TYPES[base] || [1, false];
+    // PS-168, naming the enum: its base was written as a nameless field.
+    encFits(iv2, bt[0] * 8, bt[1], f, encGiven(f, value));
+    encWriteInt(out, iv2, bt[0], bt[1], endian);
     return;
   }
   encFail("Cannot encode type: " + type);
@@ -513,19 +541,25 @@ function encNamed(name) {                             // _field_named
            : (ENC_NAMED[name] || null);
 }
 
-function encReverseEnum(value, f) {                   // reverse_enum
-  var values = f.values || {}, k;
+function encEnumCodes(f, value) {                     // the codes an enum names `value`
+  var values = f.values || {}, codes = [], k;
   if (Array.isArray(values)) {
-    var labels = values.map(encEnumLabel);
-    if (labels.indexOf(value) >= 0) return labels.indexOf(value);
+    for (k = 0; k < values.length; k++) if (encEnumLabel(values[k]) === value) codes.push(k);
   } else {
     for (k in values) {
       if (Object.prototype.hasOwnProperty.call(values, k) && encEnumLabel(values[k]) === value) {
         var n = Number(k);
-        return isFinite(n) ? n : value;
+        if (isFinite(n)) codes.push(n);
       }
     }
   }
+  return codes.sort(function (a, b) { return a - b; });
+}
+
+function encReverseEnum(value, f) {                   // reverse_enum
+  var codes = encEnumCodes(f, value);
+  if (codes.length > 1) encShared(f.name, value, codes);           // PS-169
+  if (codes.length) return codes[0];
   if (typeof value === "string" && value.indexOf("unknown(") === 0 && value.slice(-1) === ")") {
     var u = parseInt(value.slice(8, -1), 10);
     if (isFinite(u)) return u;
@@ -544,7 +578,7 @@ function encReference(ref, data) {                    // _encode_reference
     value = data[src.name];
   }
   if (src && src.lookup !== null && src.lookup !== undefined &&
-      (typeof value === "string" || typeof value === "boolean")) return encReverseLookup(value, src.lookup);
+      (typeof value === "string" || typeof value === "boolean")) return encReverseLookup(value, src.lookup, src.name);
   // CR-2026-132: an enum bound its code.
   if (src && src.type === "enum" && typeof value === "string") return encReverseEnum(value, src);
   return value;
