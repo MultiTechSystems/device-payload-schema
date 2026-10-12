@@ -1,0 +1,45 @@
+# An object in a tlv case whose members are chosen by a byte it reads (an inline branch on
+# a one-byte discriminator), as Milesight wt303's "clear plan" channel is. It decodes to
+# {clear_plan: {plan_2: "yes"}}, and encoding has to accept that object as the case's
+# value: the encoders counted only the object's directly named members, found none, and
+# refused it with "no case takes the value of 'clear_plan' ... in full", though the same
+# object outside a tlv encoded. The branch's members are what the object can hold.
+name: probe_tlv_object_with_inner_branch
+endian: little
+fields:
+  - tlv:
+      tag_size: 1
+      cases:
+        1:
+          - {name: level, type: u8}
+        95:
+          - name: clear_plan
+            type: object
+            fields:
+              - match:
+                  length: 1
+                  cases:
+                    0:
+                      - {name: plan_1, type: string, value: "yes"}
+                    1:
+                      - {name: plan_2, type: string, value: "yes"}
+test_vectors:
+  - name: first_branch
+    payload: "5f00"
+    source: generated
+    expected:
+      clear_plan: {plan_1: "yes"}
+    expected_warnings: []
+  - name: second_branch
+    payload: "5f01"
+    source: generated
+    expected:
+      clear_plan: {plan_2: "yes"}
+    expected_warnings: []
+  - name: beside_a_plain_entry
+    payload: "01075f01"
+    source: generated
+    expected:
+      level: 7
+      clear_plan: {plan_2: "yes"}
+    expected_warnings: []

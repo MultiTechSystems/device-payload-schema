@@ -1,0 +1,41 @@
+# A tlv case whose whole content is an unnamed inline branch on a one-byte discriminator,
+# as thermokon's plan channels are. 5f01 decodes to {plan_2: "yes"}. Every encoder looked
+# only for the case's own named fields, found none, never wrote the entry, and returned
+# an empty payload with no error. The branch's members are what the case can hold, and
+# the discriminator is derived from the branch the input gives (PS-551).
+name: probe_tlv_case_of_one_inline_branch
+endian: little
+fields:
+  - tlv:
+      tag_size: 1
+      cases:
+        1:
+          - {name: level, type: u8}
+        95:
+          - match:
+              length: 1
+              cases:
+                0:
+                  - {name: plan_1, type: string, value: "yes"}
+                1:
+                  - {name: plan_2, type: string, value: "yes"}
+test_vectors:
+  - name: first_branch
+    payload: "5f00"
+    source: generated
+    expected:
+      plan_1: "yes"
+    expected_warnings: []
+  - name: second_branch
+    payload: "5f01"
+    source: generated
+    expected:
+      plan_2: "yes"
+    expected_warnings: []
+  - name: after_a_plain_entry
+    payload: "01075f00"
+    source: generated
+    expected:
+      level: 7
+      plan_1: "yes"
+    expected_warnings: []

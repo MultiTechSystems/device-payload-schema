@@ -1138,7 +1138,7 @@ public static class SchemaDecoder
             && string.IsNullOrEmpty(field.Formula);
     }
 
-    static double ApplyModifiers(double numVal, SchemaField field)
+    internal static double ApplyModifiers(double numVal, SchemaField field)
     {
         if (field.Mult.HasValue) numVal *= field.Mult.Value;
         if (field.Div.HasValue)

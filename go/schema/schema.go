@@ -4308,12 +4308,6 @@ func reverseArithmetic(num float64, field Field) (float64, error) {
 	return reverseCanonicalModifiers(num, field), nil
 }
 
-// caseFidelity reports how well a candidate TLV case explains the data: how many of its
-// fields are present, and whether each could have produced the value it claims. am308
-// defines `tvoc` under [8, 125] with div: 100 and under [8, 230] raw; 43.69 came from
-// 4369 through the divide exactly, and 4369 raw cannot have come from the divide case
-// because 436900 does not fit a u16.
-
 // caseMatchesValue reports whether a discriminator selects this case: a single value, a
 // list of values, or an "a..b" range, the same spellings decodeMatch accepts.
 func caseMatchesValue(value int, c Case) bool {
@@ -4395,32 +4389,6 @@ func claimableFields(fields []Field, out []Field) []Field {
 		out = append(out, f)
 	}
 	return out
-}
-
-func caseFidelity(caseFields []Field, data map[string]any) (int, bool) {
-	matches, lossless := 0, true
-	for _, f := range claimableFields(caseFields, nil) {
-		value, ok := data[f.Name]
-		if !ok {
-			continue
-		}
-		matches++
-		raw, invertible := rawForField(f, value)
-		if !invertible {
-			lossless = false
-			continue
-		}
-		if math.Abs(raw-math.Round(raw)) > 1e-9 {
-			lossless = false
-		}
-		if lo, hi, known := integerRange(f.Type); known {
-			r := int64(math.Round(raw))
-			if r < lo || r > hi {
-				lossless = false
-			}
-		}
-	}
-	return matches, lossless
 }
 
 // encodeTLVTag rebuilds a tag from the case key that matched it while decoding. The
@@ -4585,6 +4553,9 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 			}
 		}
 	}
+	// CR-2026-148 (PS-527 amended): a first sweep places only values a case reproduces
+	// exactly, a second the rest; the ranking applies within each.
+	exactOnly := true
 	fits := func(f Field, value any) bool {
 		if obj, ok := value.(map[string]any); ok && (f.Type == TypeObject || f.Type == "object") &&
 			repeat.mode(f.Name) != "merge" {
@@ -4613,7 +4584,8 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 		if isObject && !isMap && repeat.mode(f.Name) != "merge" {
 			return false
 		}
-		return fieldTakes(f, value)
+		fit, exact := caseTakes(f, value)
+		return fit && (exact || !exactOnly)
 	}
 
 	type written struct {
@@ -4624,85 +4596,88 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 		pos    int
 	}
 	out := []written{}
-	for progress := true; progress; {
-		progress = false
-		for _, e := range entries {
-			for {
-				values := map[string]any{}
-				taken, complete := 0, true
-				for _, f := range e.required {
-					if repeat.mode(f.Name) == "merge" {
-						obj, _ := data[f.Name].(map[string]any)
-						if pending[f.Name] == nil || obj == nil {
-							complete = false
-							break
-						}
-						sub, fresh := map[string]any{}, false
-						for _, m := range f.Fields {
-							if m.Name == "" {
-								continue
-							}
-							v, ok := obj[m.Name]
-							if !ok {
+	for _, phase := range []bool{true, false} {
+		exactOnly = phase
+		for progress := true; progress; {
+			progress = false
+			for _, e := range entries {
+				for {
+					values := map[string]any{}
+					taken, complete := 0, true
+					for _, f := range e.required {
+						if repeat.mode(f.Name) == "merge" {
+							obj, _ := data[f.Name].(map[string]any)
+							if pending[f.Name] == nil || obj == nil {
 								complete = false
 								break
 							}
-							sub[m.Name] = v
-							fresh = fresh || pending[f.Name][m.Name]
+							sub, fresh := map[string]any{}, false
+							for _, m := range f.Fields {
+								if m.Name == "" {
+									continue
+								}
+								v, ok := obj[m.Name]
+								if !ok {
+									complete = false
+									break
+								}
+								sub[m.Name] = v
+								fresh = fresh || pending[f.Name][m.Name]
+							}
+							if !complete {
+								break
+							}
+							values[f.Name] = sub
+							if fresh {
+								taken++
+							}
+							continue
 						}
-						if !complete {
+						q := queues[f.Name]
+						if len(q) == 0 || !fits(f, q[0]) {
+							complete = false
 							break
 						}
-						values[f.Name] = sub
-						if fresh {
-							taken++
-						}
-						continue
-					}
-					q := queues[f.Name]
-					if len(q) == 0 || !fits(f, q[0]) {
-						complete = false
-						break
-					}
-					values[f.Name] = q[0]
-					taken++
-				}
-				if !complete {
-					break
-				}
-				for _, f := range e.opt {
-					if q := queues[f.Name]; len(q) > 0 && fits(f, q[0]) {
 						values[f.Name] = q[0]
 						taken++
 					}
-				}
-				if taken == 0 {
-					break
-				}
-				entryData := make(map[string]any, len(data))
-				for k, v := range data {
-					entryData[k] = v
-				}
-				for name, v := range values {
-					entryData[name] = v
-					if repeat.mode(name) == "merge" {
-						for m := range v.(map[string]any) {
-							delete(pending[name], m)
-						}
-					} else {
-						queues[name] = queues[name][1:]
+					if !complete {
+						break
 					}
+					for _, f := range e.opt {
+						if q := queues[f.Name]; len(q) > 0 && fits(f, q[0]) {
+							values[f.Name] = q[0]
+							taken++
+						}
+					}
+					if taken == 0 {
+						break
+					}
+					entryData := make(map[string]any, len(data))
+					for k, v := range data {
+						entryData[k] = v
+					}
+					for name, v := range values {
+						entryData[name] = v
+						if repeat.mode(name) == "merge" {
+							for m := range v.(map[string]any) {
+								delete(pending[name], m)
+							}
+						} else {
+							queues[name] = queues[name][1:]
+						}
+					}
+					tag, err := encodeTLVTag(e.key, field, ctx)
+					if err != nil {
+						return err
+					}
+					pos := len(ctx.TLVOrder)
+					if r, ok := recorded[e.key]; ok {
+						pos = r
+					}
+					out = append(out, written{e.key, e.fields, entryData, tag, pos})
+					progress = true
 				}
-				tag, err := encodeTLVTag(e.key, field, ctx)
-				if err != nil {
-					return err
-				}
-				pos := len(ctx.TLVOrder)
-				if r, ok := recorded[e.key]; ok {
-					pos = r
-				}
-				out = append(out, written{e.key, e.fields, entryData, tag, pos})
-				progress = true
 			}
 		}
 	}

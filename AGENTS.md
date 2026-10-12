@@ -232,10 +232,10 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 2103 |
-| Go | `go/schema/corpus_conformance_test.go` | 2697 | 2121 (plain API 2094) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2697 | 2104 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2697 | 2103 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2115 |
+| Go | `go/schema/corpus_conformance_test.go` | 2709 | 2133 (plain API 2106) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2709 | 2116 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2709 | 2115 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 569 of 569 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -816,10 +816,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2103 |
-| Go | `go/schema/corpus_encode_test.go` | 2121 (plain 2094) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2103 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2104 |
+| Python | `tests/test_encode_round_trip.py` | 2115 |
+| Go | `go/schema/corpus_encode_test.go` | 2133 (plain 2106) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2115 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2116 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 - **A name may be an object under one tag and a scalar under another, and a tlv encoder
@@ -837,6 +837,62 @@ floors +2 and re-encode +2 everywhere (Python, Java 2101 -> 2103, C# 2102 -> 210
 2119 -> 2121, plain 2092 -> 2094; `tlv` +2). The registry's strips `vendor_codec_1_0002016402ff3803`
 no longer crashes (it re-encodes to a different, valid layout that decodes back to the
 same values); `..._0006160405fc` is a separate gap.
+
+- **Which tlv case takes a value is CR-2026-148 (PS-527 amended, draft for 0.5.5).** Jason
+  adopted this repository's proposal in full; the rule, as implemented in Python
+  (`_case_takes`), the TS013 runtime (`encCaseTakes`), Go (`caseTakes`), Java and C#
+  (`caseTakes`/`CaseTakes`):
+  - *Fits (required):* undo the field's arithmetic - the lookup reversed, the `transform`
+    stages and mult/div/add inverted - and, for an integer type or bit range, round per
+    PS-552 (half to even on binary64); the raw value must lie within the type's range
+    (PS-168): integers by width and sign, f16 at most 65504, f32 at most 3.4028235e38, f64
+    any finite value; a nibble decimal by PS-556's n; a minifloat by whether it encodes.
+    A value that does not fit is one the case "cannot represent" (am308's `tvoc` of 4369
+    against a `div: 100` u16).
+  - *Exact (a preference, never a rejection):* the forward arithmetic re-applied to that raw
+    value, through the type's storage (cast to f32 or f16 for those), equals the given value
+    under binary64 equality. A decoded value always reproduces exactly, so the case it came
+    from is chosen again; 21.8 typed into an f32 fits but is not exact.
+  - *Ranking:* the encoder sweeps the cases twice, first placing only exact values and then
+    the rest, each sweep in the PS-527 order (widest claim, then declaration order, or Go's
+    `TLVOrder`). No tolerance anywhere. It replaces "the reversed value is an integer within
+    an absolute 1e-9", which refused every float field (wilsen, sparkfun: an f32 of 21.8 was
+    taken by no case) and 0xfffffe through `div: 100` (elv: 16777214.000000002).
+  - Cases: `tests/cr-2026-148-cases.yaml` (all five), including `div: 10` against `div: 100`
+    for one name, where 23.45 goes to the `div: 100` case. Corpus: no device vector's chosen
+    case changed (every vector's encoded bytes and errors compared before and after in
+    Python; Go, Java and C# failing sets unchanged).
+- **A nameless inline match in a tlv case, or in an object there, claims its branches'
+  names.** `_case_claims` and its ports skipped a nameless field, and a `- match:` construct
+  is one, so:
+  - a case whose only content is such a match (thermokon's plans) claimed nothing, was
+    never written, and **the encode returned an empty payload with no error** - in all five;
+  - an object whose members come from such a match (Milesight wt303/wt304 `clear_plan`) was
+    refused by every case: "no case takes the value of 'clear_plan' ... in full".
+  `_match_claims` (Python), `encMatchClaims`, `matchClaims` (Go, Java), `MatchClaims` (C#):
+  the match's `name` and every branch's fields (a `default` list included), each optional
+  and each name once; the match's discriminator is then derived from the branch the input
+  gives (PS-551). One side effect: `tag-component-reference-binding.yaml`'s two vectors,
+  whose wildcard-tag case never encodes, used to encode to an empty payload with no error
+  and now fail by name ("no case takes the value of 'hit'").
+- **Fixtures:** `tlv-object-with-inner-branch`, `tlv-case-of-one-inline-branch`,
+  `tlv-float-reading`, `tlv-scaled-wide-reading`, three vectors each; every one failed to
+  re-encode in all five before (the inline-branch case as an empty payload). Decode floors
+  2697 -> 2709 in Go, Java and C#; re-encode +12 everywhere (Python and Java 2103 -> 2115,
+  C# 2104 -> 2116, Go 2121 -> 2133, plain 2094 -> 2106), all `tlv`. C encodes no tlv.
+- **Registry (Python, read only), 5049 -> 5267 round trips, +218, none lost:** Milesight
+  154 (wt303/wt304 `clear_plan` and kin), aquascope 33, thermokon 16, pepperl-fuchs
+  wilsen 11, elv 2, sparkfun 2. Left, each a different shape:
+  - wt303/wt304's alarm channels (84): an object whose only members are computed from an
+    internal `_t` the encoder cannot derive (PS-434);
+  - netvox's 153 "Missing required field: match": a nameless top-level inline match whose
+    taken branch is its `default`, the discriminator unreported, so no value to write; the
+    nested `match: {field: $report_type}` in the default fixes it, but PS-551 derives a
+    discriminator only from a case the input fills. Not this shape of gap;
+  - 207 vectors still encode to an empty payload with no error, under `internal-field`,
+    `pattern-tag` or `undecoded-bytes` - e.g. imbuildings' `match: {remaining: true}`
+    whose case bodies name their fields inside another construct, so no case is found and
+    a `default: error` match writes nothing.
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
 from `tools/schema_interpreter.py`. Read that one first when changing any of them.

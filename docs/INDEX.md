@@ -123,14 +123,14 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Device schemas
 
-341 schemas under `schemas/devices/`.
-Mean quality score 82.0% (PLATINUM 43, GOLD 49, SILVER 228, BRONZE 6, REJECTED 15). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+345 schemas under `schemas/devices/`.
+Mean quality score 82.0% (PLATINUM 43, GOLD 49, SILVER 232, BRONZE 6, REJECTED 15). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
-| _language-conformance | 129 | 265 | SILVER 125, BRONZE 4 |
+| _language-conformance | 133 | 277 | SILVER 129, BRONZE 4 |
 | milesight | 84 | 1427 | PLATINUM 30, GOLD 35, SILVER 16, REJECTED 3 |
 | decentlab | 58 | 204 | PLATINUM 10, GOLD 11, SILVER 32, BRONZE 1, REJECTED 4 |
 | _library-composed | 49 | 57 | SILVER 49 |
@@ -260,8 +260,11 @@ Mean quality score 82.0% (PLATINUM 43, GOLD 49, SILVER 228, BRONZE 6, REJECTED 1
 | `_language-conformance/tag-component-reference-binding` | 12 | 2 | ports | 77% | SILVER |
 | `_language-conformance/tlv-case-field-list` | 10 | 7 | fields | 88% | SILVER |
 | `_language-conformance/tlv-case-key-patterns` | 6 | 5 | fields | 86% | SILVER |
+| `_language-conformance/tlv-case-of-one-inline-branch` | 3 | 3 | fields | 81% | SILVER |
+| `_language-conformance/tlv-float-reading` | 3 | 3 | fields | 73% | SILVER |
 | `_language-conformance/tlv-name-object-and-scalar` | 7 | 2 | fields | 81% | SILVER |
 | `_language-conformance/tlv-nameless-case` | 2 | 1 | fields | 81% | SILVER |
+| `_language-conformance/tlv-object-with-inner-branch` | 4 | 3 | fields | 81% | SILVER |
 | `_language-conformance/tlv-repeat-collect-first-case` | 2 | 1 | fields | 81% | SILVER |
 | `_language-conformance/tlv-repeat-collect` | 2 | 1 | fields | 81% | SILVER |
 | `_language-conformance/tlv-repeat-last` | 2 | 1 | fields | 81% | SILVER |
@@ -271,6 +274,7 @@ Mean quality score 82.0% (PLATINUM 43, GOLD 49, SILVER 228, BRONZE 6, REJECTED 1
 | `_language-conformance/tlv-repeat-merge` | 5 | 2 | fields | 81% | SILVER |
 | `_language-conformance/tlv-repeat-object-collect` | 4 | 1 | fields | 81% | SILVER |
 | `_language-conformance/tlv-reserve` | 3 | 2 | fields | 81% | SILVER |
+| `_language-conformance/tlv-scaled-wide-reading` | 2 | 3 | fields | 85% | SILVER |
 | `_language-conformance/tlv-tag-bit-range` | 7 | 1 | fields | 81% | SILVER |
 | `_language-conformance/tlv-tag-var-name-from` | 4 | 2 | fields | 73% | SILVER |
 | `_language-conformance/transform-maths` | 6 | 1 | fields | 81% | SILVER |

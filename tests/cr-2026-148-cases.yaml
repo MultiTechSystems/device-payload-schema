@@ -1,0 +1,69 @@
+# CR-2026-148 (PS-527 amended, draft for 0.5.5): which tlv case takes a value.
+#
+# A case's field can take a value when the value, with the field's arithmetic undone (and,
+# for an integer type or bit range, rounded as PS-552 requires), lies within the type's
+# range (PS-168); a float takes any finite value no larger in magnitude than its largest.
+# Among the cases that can take a value, one where every field reproduces the value
+# exactly - the arithmetic re-applied to the raw value written, through the type's
+# storage, gives the input under binary64 equality - is preferred. The PS-527 ranking
+# (widest claim, then declaration order) applies within the exact cases, then within the
+# rest. No tolerance applies to either test.
+#
+# One case list, read by the reference and the generated codec's runtime encoder
+# (tests/test_cr_2026_148_cases.py), Go (go/schema/cr148_test.go), Java (CR2026148Test.java)
+# and C# (CR2026_148Tests.cs). Same layout as tests/cr-2026-135-cases.yaml. An `error` is
+# the part of the message every encoder writes alike; each writes the value in its own
+# language's form after it.
+
+cases:
+
+# --- A float field takes a float ----------------------------------------------------
+
+- name: f32_value_a_decode_gave
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        1:\n          - {name: t, type: f32}\n"
+  input: '{"t": 21.799999237060547}'
+  payload: "0141ae6666"
+
+- name: f32_value_typed_as_a_decimal
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        1:\n          - {name: t, type: f32}\n"
+  input: '{"t": 21.8}'
+  payload: "0141ae6666"
+
+- name: f32_value_past_its_largest
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        1:\n          - {name: t, type: f32}\n"
+  input: '{"t": 1e39}'
+  error: "tlv: no case takes the value of 't'"
+
+# --- A large scaled integer reverses with binary64 noise, and still fits --------------
+
+- name: u24_by_a_hundred
+  schema: "name: t\nendian: big\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        1:\n          - {name: b, type: u24, div: 100}\n"
+  input: '{"b": 167772.14}'
+  payload: "01fffffe"
+
+- name: u32_by_a_million
+  schema: "name: t\nendian: big\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        2:\n          - {name: u, type: u32, div: 1000000}\n"
+  input: '{"u": 4294.967295}'
+  payload: "02ffffffff"
+
+- name: integer_past_its_range_is_refused
+  schema: "name: t\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        1:\n          - {name: x, type: u8, div: 10}\n"
+  input: '{"x": 25.6}'
+  error: "tlv: no case takes the value of 'x'"
+
+# --- An exact case is preferred ------------------------------------------------------
+
+- name: the_case_that_reproduces_the_value
+  schema: "name: t\nendian: big\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        1:\n          - {name: v, type: u16, div: 10}\n        2:\n          - {name: v, type: u16, div: 100}\n"
+  input: '{"v": 23.45}'
+  payload: "020929"
+
+- name: both_exact_so_declaration_order
+  schema: "name: t\nendian: big\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        1:\n          - {name: v, type: u16, div: 10}\n        2:\n          - {name: v, type: u16, div: 100}\n"
+  input: '{"v": 23.4}'
+  payload: "0100ea"
+
+- name: neither_exact_so_declaration_order
+  schema: "name: t\nendian: big\nfields:\n  - tlv:\n      tag_size: 1\n      cases:\n        1:\n          - {name: v, type: u16, div: 10}\n        2:\n          - {name: v, type: u16, div: 100}\n"
+  input: '{"v": 23.456}'
+  payload: "0100eb"

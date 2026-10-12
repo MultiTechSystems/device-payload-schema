@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -441,6 +442,10 @@ func caseClaims(fields []Field, optional bool, out []caseClaim) []caseClaim {
 			}
 			continue
 		}
+		if f.MatchInline != nil {
+			out = append(out, matchClaims(*f.MatchInline)...)
+			continue
+		}
 		if f.Name == "" || strings.HasPrefix(f.Name, "_") ||
 			f.Type == TypeNumber || f.Type == "number" {
 			continue
@@ -473,33 +478,125 @@ func tlvCaseOrder(field Field, order keyOrder) []string {
 	return append(keys, rest...)
 }
 
-// fieldTakes is whether a case's field can write a value, the reference's _case_fidelity
-// for one field: a label its lookup lacks, a number its arithmetic cannot undo, or one
-// outside its type's range is not taken. A value that is not a number after the lookup -
-// a string, a boolean, a list - is taken, as the reference takes it.
-func fieldTakes(f Field, value any) bool {
+// caseTakes is the reference's _case_takes (CR-2026-148, PS-527 amended): whether a case's
+// field can take a value, and whether it reproduces it exactly. Fits: the value with the
+// field's arithmetic undone (and, for an integer type or bit range, rounded per PS-552)
+// lies within the type's range (PS-168); a float takes any finite value no larger than
+// its largest. Exact: the arithmetic re-applied to the raw value written, through the
+// type's storage, gives the value under binary64 equality. No tolerance anywhere; the
+// test this replaces asked for an integer within an absolute 1e-9, which refused every
+// float field and 0xfffffe through `div: 100`.
+func caseTakes(f Field, value any) (bool, bool) {
 	reversed, err := reverseLookupAnyCode(f, value)
 	if err != nil {
-		return false
+		return false, false
 	}
 	if _, isBool := reversed.(bool); isBool {
-		return true
+		return true, true
 	}
-	num, ok := toFloat64(reversed)
+	given, ok := toFloat64(reversed)
 	if !ok {
-		return true
+		return true, true
 	}
-	raw, err := reverseArithmetic(num, f)
-	if err != nil || math.Abs(raw-math.Round(raw)) > 1e-9 {
-		return false
+	raw, err := reverseArithmetic(given, f)
+	if err != nil || math.IsNaN(raw) || math.IsInf(raw, 0) {
+		return false, false
 	}
-	if lo, hi, known := integerRange(f.Type); known {
-		r := int64(math.Round(raw))
-		if r < lo || r > hi {
-			return false
+	var stored float64
+	t := strings.ToLower(string(f.Type))
+	if m := bitRangePattern.FindStringSubmatch(t); m != nil {
+		start, _ := strconv.Atoi(m[2])
+		end, _ := strconv.Atoi(m[3])
+		stored = math.RoundToEven(raw)
+		if !fitsBits(stored, end-start+1, strings.HasPrefix(t, "s")) {
+			return false, false
 		}
+	} else if bits, signed, isInt := integerTypeBits(t); isInt {
+		stored = math.RoundToEven(raw)
+		if !fitsBits(stored, bits, signed) {
+			return false, false
+		}
+	} else if max, isFloat := floatTypeMax[t]; isFloat {
+		if math.Abs(raw) > max {
+			return false, false
+		}
+		switch t {
+		case "f64", "float64":
+			stored = raw
+		case "f16", "float16":
+			stored = f16Round(raw)
+		default:
+			stored = float64(float32(raw))
+		}
+	} else if t == "udec" || t == "sdec" {
+		n := math.RoundToEven(raw * 10) // PS-556
+		low, high := 0.0, 159.0
+		if t == "sdec" {
+			low, high = -80, 79
+		}
+		if n < low || n > high {
+			return false, false
+		}
+		whole := math.Floor(n / 10)
+		stored = whole + (n-whole*10)*0.1
+	} else if t == "uflt16" || t == "sflt16" || t == "sflt24" {
+		word, err := encodeMinifloat(FieldType(t), raw)
+		if err != nil {
+			return false, false
+		}
+		v, ok := decodeMinifloat(FieldType(t), word)
+		if !ok {
+			return false, false
+		}
+		stored = v
+	} else {
+		return true, true
 	}
-	return true
+	forward := applyTransformStages(applyCanonicalModifiers(stored, f), f.Transform)
+	return true, forward == given
+}
+
+// floatTypeMax is the largest finite magnitude of each binary float type (CR-2026-148).
+var floatTypeMax = map[string]float64{
+	"f16": 65504, "float16": 65504,
+	"f32": math.MaxFloat32, "float32": math.MaxFloat32,
+	"f32le16": math.MaxFloat32, "f32be16le": math.MaxFloat32,
+	"f64": math.Inf(1), "float64": math.Inf(1),
+}
+
+// integerTypeBits is an integer type's width and sign, word-ordered and 64-bit included.
+func integerTypeBits(t string) (int, bool, bool) {
+	switch t {
+	case "u8", "uint8", "byte":
+		return 8, false, true
+	case "u16", "uint16":
+		return 16, false, true
+	case "u24", "uint24":
+		return 24, false, true
+	case "u32", "uint32", "u32le16", "u32be16le":
+		return 32, false, true
+	case "u64", "uint64":
+		return 64, false, true
+	case "s8", "i8", "int8":
+		return 8, true, true
+	case "s16", "i16", "int16":
+		return 16, true, true
+	case "s24", "i24", "int24":
+		return 24, true, true
+	case "s32", "i32", "int32", "s32le16", "s32be16le":
+		return 32, true, true
+	case "s64", "i64", "int64":
+		return 64, true, true
+	}
+	return 0, false, false
+}
+
+// fitsBits is whether an integer value lies within `bits` bits, signed or not.
+func fitsBits(v float64, bits int, signed bool) bool {
+	if signed {
+		return v >= -math.Ldexp(1, bits-1) && v < math.Ldexp(1, bits-1)
+	}
+	return v >= 0 && v < math.Ldexp(1, bits)
 }
 
 // claimWidth is how many fields a case's claims count for when ranking cases (PS-527 as
@@ -517,4 +614,70 @@ func claimWidth(fields []Field) int {
 		n++
 	}
 	return n
+}
+
+// matchClaims is the reference's _match_claims: a nameless inline match claims its `name`
+// and every branch's fields, each optional, since which branch supplies a name depends on
+// the data; each name once. Not descending into it, a tlv case whose only content is a
+// match claimed nothing and was never written - the encode returned an empty payload
+// with no error - and an object holding one refused every value.
+func matchClaims(m Field) []caseClaim {
+	var out []caseClaim
+	seen := map[string]bool{}
+	if m.Name != "" {
+		claim := Field{Name: m.Name}
+		switch m.Length {
+		case 0, 1:
+			claim.Type = TypeU8
+		case 2:
+			claim.Type = TypeU16
+		case 3:
+			claim.Type = "u24"
+		case 4:
+			claim.Type = TypeU32
+		case 8:
+			claim.Type = "u64"
+		}
+		out = append(out, caseClaim{claim, true})
+		seen[m.Name] = true
+	}
+	var bodies [][]Field
+	for _, c := range m.Cases {
+		bodies = append(bodies, c.Fields)
+	}
+	switch fallback := m.MatchDefault.(type) {
+	case []any:
+		bodies = append(bodies, parseFieldsRaw(fallback))
+	case []Field:
+		bodies = append(bodies, fallback)
+	}
+	for _, body := range bodies {
+		for _, c := range caseClaims(body, true, nil) {
+			if !seen[c.field.Name] {
+				seen[c.field.Name] = true
+				out = append(out, caseClaim{c.field, true})
+			}
+		}
+	}
+	return out
+}
+
+// f16Round is a value rounded to the nearest IEEE half, a tie to even, straight from
+// binary64 (the reference's struct 'e'), for the exactness test.
+func f16Round(x float64) float64 {
+	if x == 0 || math.IsInf(x, 0) || math.IsNaN(x) {
+		return x
+	}
+	a := math.Abs(x)
+	_, exp := math.Frexp(a) // a = m * 2^exp, 0.5 <= m < 1
+	e := exp - 1
+	if e < -14 {
+		e = -14
+	}
+	q := math.Ldexp(1, e-10)
+	r := math.RoundToEven(a/q) * q
+	if x < 0 {
+		return -r
+	}
+	return r
 }

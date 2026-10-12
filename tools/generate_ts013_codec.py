@@ -1052,32 +1052,92 @@ function encClaimable(fields) {                       // _claimable_fields
   return out;
 }
 
-function encCaseFidelity(fields, data) {              // _case_fidelity
-  var matches = 0, lossless = true;
-  encClaimable(fields).forEach(function (f) {
-    if (!Object.prototype.hasOwnProperty.call(data, f.name)) return;
-    matches++;
-    var raw = encReverseLookup(data[f.name], f.lookup);
-    if (encIsNumber(raw)) {
-      try {
-        raw = encReverseStages(raw, f.transform);
-        raw = encReverseCanonical(raw, f);
-      } catch (e) { lossless = false; return; }
-      if (Math.abs(raw - encRint(raw)) > 1e-9) lossless = false;
-      var info = ENC_TYPES[String(f.type || "u8")];
-      if (info && !ENC_WORD_ORDERED[String(f.type)]) {
-        var bits = info[0] * 8, r = encRint(raw);
-        var lo = info[1] ? -Math.pow(2, bits - 1) : 0;
-        var hi = info[1] ? Math.pow(2, bits - 1) - 1 : Math.pow(2, bits) - 1;
-        if (r < lo || r > hi) lossless = false;
-      } else if (info) {
-        var r2 = encRint(raw);
-        if (r2 < (info[1] ? -2147483648 : 0) || r2 > (info[1] ? 2147483647 : 4294967295)) lossless = false;
-      }
-    }
-  });
-  return [matches, lossless];
+// FLOAT_TYPE_MAX: the largest finite magnitude of each binary float type (CR-2026-148).
+var ENC_FLOAT_MAX = { f16: 65504, f32: 3.4028234663852886e38, f32le16: 3.4028234663852886e38,
+                      f32be16le: 3.4028234663852886e38, f64: Infinity };
+
+// An f16 value rounded to the nearest representable half, a tie to even (struct 'e').
+function encF16Round(x) {
+  if (x === 0 || !isFinite(x)) return x;
+  var a = Math.abs(x), e = Math.max(Math.floor(Math.log(a) / Math.LN2), -14);
+  if (Math.pow(2, e) > a) e -= 1;
+  if (Math.pow(2, e + 1) <= a) e += 1;
+  e = Math.max(e, -14);
+  var q = Math.pow(2, e - 10), r = encRint(a / q) * q;
+  return x < 0 ? -r : r;
 }
+
+// The field's forward arithmetic, as a decoder applies it (apply_canonical_modifiers, then
+// _apply_transform); NaN where it has no value.
+function encForward(v, f) {
+  if (f.mult !== undefined && f.mult !== null) v = v * f.mult;
+  if (f.div !== undefined && f.div !== null) { if (Number(f.div) === 0) return NaN; v = v / f.div; }
+  if (f.add !== undefined && f.add !== null) v = v + f.add;
+  (f.transform || []).forEach(function (st) {
+    if (st === null || typeof st !== "object" || !isFinite(v)) return;
+    if (st.sqrt) v = Math.sqrt(Math.max(0, v));
+    else if (st.abs) v = Math.abs(v);
+    else if ("pow" in st) v = Math.pow(v, Number(st.pow));
+    else if ("floor" in st) v = Math.max(v, Number(st.floor));
+    else if ("ceiling" in st) v = Math.min(v, Number(st.ceiling));
+    else if ("clamp" in st) v = Math.max(Number(st.clamp[0]), Math.min(Number(st.clamp[1]), v));
+    else if (st.log10) v = v > 0 ? Math.log(v) / Math.LN10 : NaN;
+    else if (st.log) v = v > 0 ? Math.log(v) : NaN;
+    else if ("mult" in st || "div" in st || "add" in st) {
+      if ("mult" in st) v = v * Number(st.mult);
+      if ("div" in st) { if (Number(st.div) === 0) { v = NaN; return; } v = v / Number(st.div); }
+      if ("add" in st) v = v + Number(st.add);
+    } else if (st.op === "round") v = roundDecimal(v, st.decimals || 0, st.ties === "away");
+  });
+  return v;
+}
+
+// _case_takes (CR-2026-148, PS-527 amended): [fits, exact]. Fits: the value with the
+// field's arithmetic undone (and, for an integer type or bit range, rounded per PS-552)
+// lies within the type's range (PS-168); a float takes any finite value no larger than
+// its largest. Exact: the arithmetic re-applied to the raw value written, through the
+// type's storage, gives the value under binary64 equality. No tolerance anywhere.
+function encCaseTakes(f, value) {
+  var g = encReverseLookup(value, f.lookup);
+  if (typeof g !== "number" || typeof g === "boolean") return [true, true];
+  var raw;
+  try {
+    raw = encReverseCanonical(encReverseStages(g, f.transform), f);
+  } catch (e) { return [false, false]; }
+  if (typeof raw !== "number" || !isFinite(raw)) return [false, false];
+  var t = String(f.type || "u8"), stored, b;
+  if (/\[/.test(t)) {
+    var bt = encBitType(t);
+    stored = encRint(raw);
+    b = encBounds(bt[2], t.charAt(0) === "s");
+    if (stored < b[0] || stored > b[1]) return [false, false];
+  } else if (ENC_TYPES[t]) {
+    var info = ENC_TYPES[t], bits = info[0] * 8;
+    stored = encRint(raw);
+    if (bits > 48) {
+      if (stored < (info[1] ? -Math.pow(2, bits - 1) : 0) || stored >= Math.pow(2, info[1] ? bits - 1 : bits)) return [false, false];
+    } else {
+      b = encBounds(bits, info[1]);
+      if (stored < b[0] || stored > b[1]) return [false, false];
+    }
+  } else if (has_(ENC_FLOAT_MAX, t)) {
+    if (Math.abs(raw) > ENC_FLOAT_MAX[t]) return [false, false];
+    stored = t === "f64" ? raw : t === "f16" ? encF16Round(raw) : Math.fround(raw);
+  } else if (t === "udec" || t === "sdec") {
+    var n = encRint(raw * 10);                       // PS-556
+    if (n < (t === "sdec" ? -80 : 0) || n > (t === "sdec" ? 79 : 159)) return [false, false];
+    var whole = Math.floor(n / 10);
+    stored = whole + (n - whole * 10) * 0.1;
+  } else if (t === "uflt16" || t === "sflt16" || t === "sflt24") {
+    try { stored = decodeMinifloat(t, encMinifloat(t, raw)); } catch (e) { return [false, false]; }
+    if (typeof stored !== "number") return [false, false];
+  } else {
+    return [true, true];
+  }
+  return [true, encForward(stored, f) === g];
+}
+
+function has_(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
 
 function encTlvTag(out, key, tlv, ctx) {              // _encode_tlv_tag
   if (tlv.tag_fields && tlv.tag_key) {
@@ -1133,9 +1193,32 @@ function encCaseClaims(fields, optional) {             // _case_claims
       (f.flagged.groups || []).forEach(function (grp) { out = out.concat(encCaseClaims(grp.fields || [], true)); });
       return;
     }
+    if ("match" in f && !f.type) { out = out.concat(encMatchClaims(f.match)); return; }
     if (!f.name || String(f.name).charAt(0) === "_" || ENC_COMPUTED.indexOf(f.type) >= 0) return;
     // PS-551 (CR-2026-141): a peek the fields after it fix need not be given.
     out.push([f, !!optional || f.optional === true || covered.indexOf(f) >= 0]);
+  });
+  return out;
+}
+
+// _match_claims: a nameless inline match claims its `name` and every branch's fields,
+// each optional, each name once.
+function encMatchClaims(m) {
+  if (!m || typeof m !== "object") return [];
+  var out = [], seen = {};
+  if (m.name) {
+    var w = parseInt(m.length || 1, 10);
+    out.push([[1, 2, 3, 4, 8].indexOf(w) >= 0 ? { name: m.name, type: "u" + 8 * w } : { name: m.name }, true]);
+    seen[m.name] = true;
+  }
+  var bodies = Object.keys(m.cases || {}).map(function (k) { return m.cases[k]; });
+  if (Array.isArray(m["default"])) bodies.push(m["default"]);
+  bodies.forEach(function (b) {
+    if (b && !Array.isArray(b) && typeof b === "object") b = b.fields;
+    if (!Array.isArray(b)) return;
+    encCaseClaims(b, true).forEach(function (c) {
+      if (!seen[c[0].name]) { seen[c[0].name] = true; out.push([c[0], true]); }
+    });
   });
   return out;
 }
@@ -1189,7 +1272,7 @@ function encTlv(out, f, data, ctx) {                  // _encode_tlv
     if (v !== null && typeof v === "object" && !Array.isArray(v)) pending[n] = Object.keys(v);
   });
   function membersOf(c) { return (c.fields || []).filter(function (m) { return m && m.name; }).map(function (m) { return m.name; }); }
-  function fits(c, v) {
+  function fits(c, v) {                              // fits, exact_only (CR-2026-148)
     if (c.type === "object" && v !== null && typeof v === "object" && !Array.isArray(v) && modes[c.name] !== "merge") {
       var claims = encCaseClaims(c.fields || []), every = {}, ok = true;
       claims.forEach(function (x) { every[x[0].name] = true; if (!x[1] && !has.call(v, x[0].name)) ok = false; });
@@ -1201,10 +1284,15 @@ function encTlv(out, f, data, ctx) {                  // _encode_tlv
     var isMap = v !== null && typeof v === "object" && !Array.isArray(v);
     if (isMap && c.type && c.type !== "object" && c.type !== "repeat") return false;
     if (c.type === "object" && !isMap && modes[c.name] !== "merge") return false;
-    var one = {}; one[c.name] = v;
-    return encCaseFidelity([c], one)[1];
+    var took = encCaseTakes(c, v);
+    return took[0] && (took[1] || !exactOnly);
   }
-  var written = [], progress = true;
+  // CR-2026-148: a first sweep places only values a case reproduces exactly, a second
+  // the rest; the PS-527 ranking applies within each.
+  var written = [], progress, exactOnly;
+  [true, false].forEach(function (phase) {
+  exactOnly = phase;
+  progress = true;
   while (progress) {
     progress = false;
     entries.forEach(function (e) {
@@ -1244,6 +1332,7 @@ function encTlv(out, f, data, ctx) {                  // _encode_tlv
       }
     });
   }
+  });
   Object.keys(queues).forEach(function (n) {
     if (queues[n].length) encFail("tlv: no case takes the value of '" + n + "' " + JSON.stringify(queues[n][0]) + " in full (PS-502, PS-527)");
   });

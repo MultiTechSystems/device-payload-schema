@@ -1,0 +1,36 @@
+# A floating-point reading in a tlv case. 41ae6666 is the f32 nearest 21.8,
+# 21.799999237060547. Choosing a case asked whether the value reversed to an integer,
+# which no binary32 reading of 21.8 does, so every case was refused and the entry could
+# not be encoded (wilsen, sparkfun). Only a field that writes an integer is asked that.
+name: probe_tlv_float_reading
+endian: big
+fields:
+  - tlv:
+      tag_size: 1
+      cases:
+        1:
+          - {name: temperature, type: f32}
+        2:
+          - {name: pressure, type: f64}
+        3:
+          - {name: latitude, type: s32, div: 1000000}
+test_vectors:
+  - name: binary32
+    payload: "0141ae6666"
+    source: generated
+    expected:
+      temperature: 21.799999237060547
+    expected_warnings: []
+  - name: binary64
+    payload: "02408f6a8f5c28f5c3"
+    source: generated
+    expected:
+      pressure: 1005.32
+    expected_warnings: []
+  - name: beside_a_scaled_integer
+    payload: "0141ae666603ff000000"
+    source: generated
+    expected:
+      temperature: 21.799999237060547
+      latitude: -16.777216
+    expected_warnings: []

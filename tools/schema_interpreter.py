@@ -528,6 +528,13 @@ def encode_minifloat(field_type, value):
     return sign | f
 
 
+#: The largest finite magnitude each binary float type holds (CR-2026-148, PS-168): a
+#: value past it is no value the field can write. f64 holds any finite value.
+FLOAT_TYPE_MAX = {'f16': 65504.0, 'f32': 3.4028234663852886e38,
+                  'f32le16': 3.4028234663852886e38, 'f32be16le': 3.4028234663852886e38,
+                  'f64': float('inf')}
+
+
 def integer_range(field_type: str):
     """Inclusive (low, high) a field of this type can hold, or None if not an integer."""
     info = INTEGER_TYPE_INFO.get(str(field_type))
@@ -7471,6 +7478,9 @@ class SchemaInterpreter:
                 for group in (f['flagged'].get('groups') or []):
                     out.extend(self._case_claims(group.get('fields') or [], True))
                 continue
+            if 'match' in f and not f.get('type'):
+                out.extend(self._match_claims(f['match']))
+                continue
             name = f.get('name')
             if not name or str(name).startswith('_') or f.get('type') in COMPUTED_TYPES:
                 continue
@@ -7480,38 +7490,106 @@ class SchemaInterpreter:
                         or any(f is c for c in covered)))
         return out
 
-    def _case_fidelity(self, case_fields: List[Dict[str, Any]], data: Dict[str, Any]):
-        """How well a candidate case explains the data: (matches, lossless).
-
-        Two cases can define the same field name under different tags - am308 has `tvoc`
-        under both [8, 125] (``div: 100``) and [8, 230] (raw). Only one of them can have
-        produced the value, and the arithmetic says which: 43.69 came from 4369 through
-        `div: 100` exactly, while the raw case would need it rounded to 44. A candidate
-        that cannot reproduce the value it claims did not write those bytes.
-        """
-        matches, lossless = 0, True
-        for f in self._claimable_fields(case_fields):
-            name = f.get('name')
-            if name not in data:
+    def _match_claims(self, match_def):
+        """The claims a nameless inline match makes for the case or object holding it:
+        its `name`, and every branch's fields, each optional, since which branch
+        supplies a name depends on the data. Each name once. Not descending into it, a
+        tlv case whose only content is a match claimed nothing, was never written, and
+        the encode returned an empty payload with no error; an object holding one
+        refused every value, since its members were none of the names it declared."""
+        if not isinstance(match_def, dict):
+            return []
+        out, seen = [], set()
+        if match_def.get('name'):
+            width = int(match_def.get('length') or 1)
+            out.append(({'name': match_def['name'], 'type': f'u{8 * min(width, 8)}'}
+                        if width in (1, 2, 3, 4, 8) else {'name': match_def['name']},
+                        True))
+            seen.add(match_def['name'])
+        bodies = list((match_def.get('cases') or {}).values())
+        if isinstance(match_def.get('default'), list):
+            bodies.append(match_def['default'])
+        for body in bodies:
+            if isinstance(body, dict):
+                body = body.get('fields')
+            if not isinstance(body, list):
                 continue
-            matches += 1
-            raw = reverse_lookup(data[name], f.get('lookup'))
-            if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-                try:
-                    raw = reverse_transform_stages(raw, f.get('transform'))
-                    raw = reverse_canonical_modifiers(raw, f)
-                except Exception:
-                    lossless = False
-                    continue
-                if isinstance(raw, float) and abs(raw - round(raw)) > 1e-9:
-                    lossless = False
-                bounds = integer_range(f.get('type', 'u8'))
-                if bounds is not None and not (bounds[0] <= round(raw) <= bounds[1]):
-                    # It does not fit the field, so this case cannot have written it:
-                    # am308's `tvoc` of 4369 needs 436900 through the `div: 100` case,
-                    # which a u16 cannot hold. That raised "int too big to convert".
-                    lossless = False
-        return matches, lossless
+            for f, _ in self._case_claims(body, True):
+                if f['name'] not in seen:
+                    seen.add(f['name'])
+                    out.append((f, True))
+        return out
+
+    def _case_takes(self, field_def: Dict[str, Any], value: Any) -> Tuple[bool, bool]:
+        """Whether a tlv case's field can take a value, and whether it reproduces it
+        exactly: (fits, exact). CR-2026-148 amends PS-527 to say so:
+
+        - Fits: the value, with the field's arithmetic undone (the lookup reversed,
+          the `transform` stages and mult/div/add inverted) and, for an integer type or
+          a bit range, rounded as PS-552 requires, lies within the type's range
+          (PS-168). A float takes any finite value no larger than its largest (65504
+          for f16, about 3.4028235e38 for f32). am308's `tvoc` of 4369 needs 436900
+          through one case's `div: 100`, which its u16 cannot hold, so that case does
+          not fit.
+        - Exact: the field's arithmetic re-applied to the raw value written, through
+          the type's storage, gives the value under binary64 equality. A decoded value
+          always reproduces exactly in the case it came from, so this re-selects that
+          case where another can also take the value; 21.8 typed into an f32 still fits.
+
+        No tolerance applies to either test. The test this replaces asked that the value
+        reverse to an integer within an absolute 1e-9, which refused every float field
+        (an f32 of 21.8) and 0xfffffe through `div: 100` (16777214.000000002).
+        """
+        given = reverse_lookup(value, field_def.get('lookup'))
+        if not isinstance(given, (int, float)) or isinstance(given, bool):
+            return True, True
+        try:
+            raw = reverse_transform_stages(given, field_def.get('transform'))
+            raw = reverse_canonical_modifiers(raw, field_def)
+        except Exception:
+            return False, False
+        if not isinstance(raw, (int, float)) or raw != raw or raw in (float('inf'),
+                                                                        float('-inf')):
+            return False, False
+        field_type = str(field_def.get('type', 'u8'))
+        if '[' in field_type:
+            _, _, width = self._parse_bitfield_type(field_type)
+            low, high = integer_bounds(signed=field_type.startswith('s'), bits=width)
+            stored = round_to_integer(raw)
+            if not low <= stored <= high:
+                return False, False
+        elif field_type in INTEGER_TYPE_INFO:
+            low, high = integer_range(field_type)
+            stored = round_to_integer(raw)
+            if not low <= stored <= high:
+                return False, False
+        elif field_type in FLOAT_TYPE_MAX:
+            if abs(raw) > FLOAT_TYPE_MAX[field_type]:
+                return False, False
+            code = {'f16': 'e', 'f64': 'd'}.get(field_type, 'f')
+            try:
+                stored = struct.unpack(code, struct.pack(code, float(raw)))[0]
+            except (OverflowError, struct.error):
+                return False, False
+        elif field_type in ('udec', 'sdec'):
+            n = round_to_integer(float(raw) * 10)                         # PS-556
+            low, high = (-80, 79) if field_type == 'sdec' else (0, 159)
+            if not low <= n <= high:
+                return False, False
+            stored = (n // 10) + (n % 10) * 0.1
+        elif field_type in MINIFLOAT_SIZES:
+            try:
+                stored = decode_minifloat(field_type, encode_minifloat(field_type, raw))
+            except (ValueError, OverflowError):
+                return False, False
+            if stored is None:
+                return False, False
+        else:
+            return True, True
+        forward = apply_canonical_modifiers(stored, field_def)
+        if field_def.get('transform') and forward is not OMITTED:
+            forward = self._apply_transform(forward, field_def['transform'])
+        return True, forward is not OMITTED and forward == given
 
     def _encode_tlv(self, field_def: Dict[str, Any], data: Dict[str, Any]) -> bytes:
         """Rebuild a TLV payload from decoded output.
@@ -7584,10 +7662,10 @@ class SchemaInterpreter:
             return {m['name'] for m in f.get('fields') or []
                     if isinstance(m, dict) and m.get('name')}
 
-        def fits(f, value):
+        def fits(f, value, exact_only):
             # An object element supplies exactly the members its case declares, and a
-            # case takes no value it cannot write: am308's `tvoc` of 4369 needs 436900
-            # through one case's `div: 100`, which its u16 cannot hold.
+            # case takes no value it cannot write (CR-2026-148, _case_takes); in the
+            # first sweep, only a value it reproduces exactly.
             if f.get('type') == 'object' and isinstance(value, dict) \
                     and modes.get(f['name']) != 'merge':
                 claims = self._case_claims(f.get('fields') or [])
@@ -7603,49 +7681,55 @@ class SchemaInterpreter:
             if f.get('type') == 'object' and not isinstance(value, dict) \
                     and modes.get(f['name']) != 'merge':
                 return False
-            return self._case_fidelity([f], {f['name']: value})[1]
+            fit, exact = self._case_takes(f, value)
+            return fit and (exact or not exact_only)
 
+        # CR-2026-148 (PS-527 amended): among the cases that can take a value, one where
+        # every field reproduces it exactly is preferred, so a first sweep places only
+        # exact values and a second the rest; the PS-527 ranking (widest claim, then
+        # declaration order) applies within each.
         written = []  # (case key, fields, data for the entry)
-        progress = True
-        while progress:
-            progress = False
-            for case_key, case_fields, required, optional in entries:
-                while True:
-                    values, taken, complete = {}, [], True
-                    for f in required:
-                        n = f['name']
-                        if modes.get(n) == 'merge':
-                            members = members_of(f)
-                            if n not in pending or not members <= set(data[n]):
-                                complete = False
-                                break
-                            values[n] = {m: data[n][m] for m in members}
-                            if members & pending[n]:
+        for exact_only in (True, False):
+            progress = True
+            while progress:
+                progress = False
+                for case_key, case_fields, required, optional in entries:
+                    while True:
+                        values, taken, complete = {}, [], True
+                        for f in required:
+                            n = f['name']
+                            if modes.get(n) == 'merge':
+                                members = members_of(f)
+                                if n not in pending or not members <= set(data[n]):
+                                    complete = False
+                                    break
+                                values[n] = {m: data[n][m] for m in members}
+                                if members & pending[n]:
+                                    taken.append(n)
+                            else:
+                                queue = queues.get(n)
+                                if not queue or not fits(f, queue[0], exact_only):
+                                    complete = False
+                                    break
+                                values[n] = queue[0]
                                 taken.append(n)
-                        else:
-                            queue = queues.get(n)
-                            if not queue or not fits(f, queue[0]):
-                                complete = False
-                                break
-                            values[n] = queue[0]
-                            taken.append(n)
-                    if not complete:
-                        break
-                    for f in optional:
-                        queue = queues.get(f['name'])
-                        if queue and fits(f, queue[0]):
-                            values[f['name']] = queue[0]
-                            taken.append(f['name'])
-                    if not taken:
-                        break
-                    for n in values:
-                        if modes.get(n) == 'merge':
-                            pending[n] -= set(values[n])
-                        else:
-                            queues[n].pop(0)
-                    written.append((case_key, case_fields, dict(data, **values),
-                                    min(order.index(n) for n in values)))
-                    progress = True
+                        if not complete:
+                            break
+                        for f in optional:
+                            queue = queues.get(f['name'])
+                            if queue and fits(f, queue[0], exact_only):
+                                values[f['name']] = queue[0]
+                                taken.append(f['name'])
+                        if not taken:
+                            break
+                        for n in values:
+                            if modes.get(n) == 'merge':
+                                pending[n] -= set(values[n])
+                            else:
+                                queues[n].pop(0)
+                        written.append((case_key, case_fields, dict(data, **values),
+                                        min(order.index(n) for n in values)))
+                        progress = True
         for n, queue in queues.items():
             if queue:
                 raise ValueError(f"tlv: no case takes the value of '{n}' {queue[0]!r} in "
