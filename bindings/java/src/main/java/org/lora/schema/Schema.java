@@ -2153,7 +2153,7 @@ public class Schema {
             discriminator = val;
             // A computed discriminator may carry a fraction, which equals no integer key:
             // asLong truncated it, so 2.5 selected case 2 (PS-484's reading, applied to
-            // case keys). Only an inclusive range can hold it (PS-152).
+            // case keys). Only an inclusive range can hold it (PS-398).
             if (val instanceof Number number && !(val instanceof Boolean)
                     && number.doubleValue() != Math.rint(number.doubleValue())
                     && !Double.isInfinite(number.doubleValue())) {
@@ -2239,7 +2239,7 @@ public class Schema {
     /**
      * Whether a discriminator with a fraction lies in a case key. It equals no integer, so
      * no single key and no member of a list matches it; only an inclusive range does
-     * (PS-152), as the reference and the spec prototype read {@code lo..hi}.
+     * (PS-398), as the reference and the spec prototype read {@code lo..hi}.
      */
     static boolean fractionInRange(double value, Object caseVal) {
         if (caseVal instanceof String text) {

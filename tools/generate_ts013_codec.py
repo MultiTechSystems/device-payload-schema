@@ -404,11 +404,11 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
     return;
   }
   if (type === "udec" || type === "sdec") {
-    var whole = Math.floor(Number(value));
-    var tenths = encRint((Number(value) - whole) * 10);
-    if (tenths === 10) { whole += 1; tenths = 0; }
-    encNibbleFits(whole * 10 + tenths, type === "sdec", f, encGiven(f, value));   // PS-168
-    out.push(((whole & 0x0F) << 4) | tenths);
+    // PS-556: n is the value times 10, rounded half to even; n div 10 and n mod 10, floored.
+    var n = encRint(Number(value) * 10);
+    encNibbleFits(n, type === "sdec", f, encGiven(f, value));   // PS-168
+    var whole = Math.floor(n / 10);
+    out.push(((whole & 0x0F) << 4) | (n - whole * 10));
     return;
   }
   if (type === "f16" || type === "f32" || type === "f64") { encWriteFloat(out, value, type, endian); return; }
@@ -879,6 +879,11 @@ function encMatch(out, f, data, ctx, peeked) {        // _encode_match
     }
   }
   var key = null, body = null;
+  if (length !== undefined && length !== null && typeof disc === "number" && isFinite(disc) &&
+      !Number.isInteger(disc)) {                      // check_written_discriminator (PS-557)
+    encFail("Field " + (m.name ? "'" + m.name + "'" : "an unnamed match") + ": the discriminator " +
+            String(disc) + " is not an integer, so it cannot be written (PS-557)");
+  }
   if (disc !== null && disc !== undefined) {
     for (var k in cases) {
       if (k === "default") continue;

@@ -387,6 +387,27 @@ def check_nibble_decimal(tenths, signed, name, given):
                          f"(PS-168)")
 
 
+def written_discriminator_error(value, name):
+    """PS-557 (CR-2026-147): the message for a fractional value given for a discriminator
+    an encoder writes, or None where the value is no fraction. The match is named as
+    PS-535 names it."""
+    if isinstance(value, bool) or not isinstance(value, float):
+        return None
+    if value != value or value in (float('inf'), float('-inf')) or value.is_integer():
+        return None
+    label = f"'{name}'" if name else 'an unnamed match'
+    return (f"Field {label}: the discriminator {format_lookup_value(value)} is not an "
+            f"integer, so it cannot be written (PS-557)")
+
+
+def check_written_discriminator(value, name):
+    """PS-557: a written discriminator is read back as an integer, so a fraction is
+    rejected rather than rounded or truncated. `int()` truncated 2.5 to 2."""
+    message = written_discriminator_error(value, name)
+    if message:
+        raise ValueError(message)
+
+
 def round_to_integer(value):
     """PS-552: the nearest integer to the binary64 value, a tie to even. Python's round()
     on a float is exactly that; an int is already one."""
@@ -7077,6 +7098,9 @@ class SchemaInterpreter:
             # and device bytes, dnt's first command).
             discriminator = int.from_bytes(bytes(peeked[:int(length)]), byteorder)
 
+        if length is not None:
+            check_written_discriminator(discriminator, match_name)        # PS-557
+
         matched_key, matched_fields = None, None
         if discriminator is not None:
             for case_key, case_fields in cases.items():
@@ -7780,16 +7804,14 @@ class SchemaInterpreter:
                                    MINIFLOAT_SIZES[field_type], False)
 
         if field_type in ('udec', 'sdec'):
-            # The inverse of PS-330: the whole part in the upper nibble (two's
-            # complement for sdec), tenths in the lower. Flooring keeps the tenths
-            # non-negative, which is how the decode reads them: -1.5 is -2 + 0.5.
-            whole = math.floor(float(value))
-            tenths = int(round((float(value) - whole) * 10))
-            if tenths == 10:
-                whole, tenths = whole + 1, 0
-            check_nibble_decimal(whole * 10 + tenths, field_type == 'sdec',
+            # PS-556 (CR-2026-147): n is the value times 10, rounded as PS-552 requires
+            # (half to even, on the binary64 product); the upper nibble is n // 10 (floored,
+            # so -0.5 is -1 and 5 tenths) and the lower n % 10, never above 9. Splitting the
+            # whole part off first and rounding the fraction gave 3.45 as 0x35, not 0x34.
+            n = round_to_integer(float(value) * 10)
+            check_nibble_decimal(n, field_type == 'sdec',
                                  field_def.get('name', '?'), given)       # PS-168
-            return bytes([((whole & 0x0F) << 4) | tenths])
+            return bytes([((n // 10) & 0x0F) << 4 | (n % 10)])
 
         if field_type == 'f16':
             fmt = '<e' if self.endian == Endian.LITTLE else '>e'

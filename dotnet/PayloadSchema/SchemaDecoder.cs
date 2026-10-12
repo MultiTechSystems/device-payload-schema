@@ -1325,7 +1325,7 @@ public static class SchemaDecoder
             discriminator = val;
             // A computed discriminator may carry a fraction, which equals no integer key:
             // ToLong truncated it, so 2.5 selected case 2 (PS-484's reading, applied to
-            // case keys). Only an inclusive range can hold it (PS-152).
+            // case keys). Only an inclusive range can hold it (PS-398).
             if (Helpers.ToFloat64(val) is (true, var number) && number != Math.Truncate(number))
             {
                 foreach (var c in field.Cases)
@@ -1394,7 +1394,7 @@ public static class SchemaDecoder
     /// <summary>
     /// Whether a discriminator with a fraction lies in a case key. It equals no integer,
     /// so no single key and no member of a list matches it; only an inclusive range does
-    /// (PS-152), as the reference and the spec prototype read <c>lo..hi</c>.
+    /// (PS-398), as the reference and the spec prototype read <c>lo..hi</c>.
     /// </summary>
     internal static bool FractionInRange(double value, object caseVal)
     {

@@ -899,6 +899,14 @@ static void test_a_nibble_decimal_that_does_not_fit_is_named(void) {
     TCHECK(encodes_to(udec, 2.5, (const uint8_t[]){0x25}, 1));
     TCHECK(encodes_to(sdec, -0.5, (const uint8_t[]){0xF5}, 1));
     TCHECK(encodes_to(sdec, -8, (const uint8_t[]){0x80}, 1));
+    /* PS-556 (CR-2026-147): n = value x 10 rounded half to even, n div/mod 10 floored. */
+    TCHECK(encodes_to(udec, 0.15, (const uint8_t[]){0x02}, 1));
+    TCHECK(encodes_to(udec, 3.45, (const uint8_t[]){0x34}, 1));
+    TCHECK(encodes_to(sdec, -3.45, (const uint8_t[]){0xC6}, 1));
+    TCHECK(rejects(udec, true, 16, 0,
+                   "Field 'v': 16 encodes as 16, outside 0 to 15.9 (PS-168)"));
+    TCHECK(rejects(sdec, false, 0, -8.1,
+                   "Field 'v': -8.1 encodes as -8.1, outside -8 to 7.9 (PS-168)"));
     TCHECK(rejects(udec, false, 0, 123.5,
                    "Field 'v': 123.5 encodes as 123.5, outside 0 to 15.9 (PS-168)"));
     TCHECK(rejects(udec, false, 0, 15.96,
