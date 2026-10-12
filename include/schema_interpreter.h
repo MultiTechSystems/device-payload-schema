@@ -2361,6 +2361,9 @@ static inline int encode_field(
             float fval = (float)raw_val;
             uint32_t bits;
             memcpy(&bits, &fval, sizeof(bits));
+            /* CR-2026-157 (PS-566): the word is tested, not the input - -1e-50 rounds to the
+             * sign word, which is written as the zero word. */
+            if (bits == 0x80000000u) bits = 0;
             write_int(buf, pos, bits, 4, endian);
             break;
         }

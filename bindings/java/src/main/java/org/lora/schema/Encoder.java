@@ -2784,11 +2784,11 @@ final class Encoder {
             boolean useLittle = "little".equalsIgnoreCase(
                     field.getEffectiveEndian(schema.getEndian()));
             return switch (type) {
-                case F16, FLOAT16 -> writeInt(floatToHalfBits(raw), 2, false, useLittle);
+                case F16, FLOAT16 -> writeInt(zeroWord(floatToHalfBits(raw), 0x8000L), 2, false, useLittle);
                 case BF16 -> writeInt(Bf16.encode(raw, field.getName()), 2, false, useLittle);   // PS-559
                 case F64, FLOAT64 -> writeInt(Double.doubleToLongBits(raw), 8, false, useLittle);
-                default -> writeInt(Float.floatToIntBits((float) (double) raw) & 0xFFFFFFFFL,
-                        4, false, useLittle);
+                default -> writeInt(zeroWord(Float.floatToIntBits((float) (double) raw) & 0xFFFFFFFFL,
+                        0x80000000L), 4, false, useLittle);
             };
         }
 
@@ -3136,6 +3136,11 @@ final class Encoder {
         String mantissa = text.substring(0, e), exponent = text.substring(e + 1);
         if (mantissa.endsWith(".0")) mantissa = mantissa.substring(0, mantissa.length() - 2);
         return mantissa + "e" + (exponent.startsWith("-") ? "" : "+") + exponent;
+    }
+
+    /** PS-566, CR-2026-157: the sign-only word a negative value rounds to is the zero word. */
+    static long zeroWord(long word, long signOnly) {
+        return word == signOnly ? 0 : word;
     }
 
     private static byte[] writeInt(long value, int size, boolean signed, boolean little) {

@@ -53,6 +53,9 @@ func writeWordOrdered(t FieldType, value float64) []byte {
 	var word uint32
 	if layout[1] == "f" {
 		word = math.Float32bits(float32(positiveZero(value))) // PS-566
+		if word == 0x80000000 {                               // CR-2026-157: -1e-50 rounds to -0
+			word = 0
+		}
 	} else {
 		word = uint32(int64(math.RoundToEven(value)))
 	}
@@ -117,6 +120,15 @@ func roundHalfEvenRat(r *big.Rat) int64 {
 // encodeMinifloat is the word for a value: the smallest exponent whose fraction fits,
 // ties to even, and an error outside the type's range (PS-420).
 func encodeMinifloat(t FieldType, value float64) (uint64, error) {
+	word, err := minifloatWord(t, value)
+	// PS-566, CR-2026-157: a negative value the type rounds to zero is the zero word.
+	if err == nil && ((t == TypeSFlt16 && word == 0x8000) || (t == TypeSFlt24 && word == 0x800000)) {
+		word = 0
+	}
+	return word, err
+}
+
+func minifloatWord(t FieldType, value float64) (uint64, error) {
 	exact := new(big.Rat)
 	exact.SetFloat64(value)
 	negative := exact.Sign() < 0

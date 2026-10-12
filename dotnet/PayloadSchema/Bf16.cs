@@ -45,6 +45,6 @@ internal static class Bf16
             throw new InvalidOperationException(
                 $"Field '{name}': {SchemaEncoder.JsNumber(value)} is outside the range of bf16, "
                 + $"{SchemaEncoder.JsNumber(-Max)} to {SchemaEncoder.JsNumber(Max)} (PS-168)");
-        return sign | word;
+        return word == 0 ? 0 : sign | word;   // CR-2026-157: a negative value rounding to zero is 0
     }
 }

@@ -37,7 +37,8 @@ final class Wave4 {
 
     static byte[] writeWordOrdered(FieldType t, double value) {
         long word = (t == FieldType.F32LE16 || t == FieldType.F32BE16LE)
-                ? Float.floatToIntBits((float) (value + 0.0)) & 0xFFFFFFFFL   // PS-566
+                ? Encoder.zeroWord(Float.floatToIntBits((float) (value + 0.0)) & 0xFFFFFFFFL,
+                        0x80000000L)   // PS-566, CR-2026-157
                 : Math.round(Math.rint(value)) & 0xFFFFFFFFL;
         int high = (int) (word >>> 16), low = (int) (word & 0xFFFF);
         if (le16(t)) {
@@ -78,6 +79,13 @@ final class Wave4 {
 
     /** PS-420: the smallest exponent whose fraction fits, ties to even; out of range is an error. */
     static long encodeMinifloat(FieldType t, double value) {
+        long word = minifloatWord(t, value);
+        // PS-566, CR-2026-157: a negative value the type rounds to zero is the zero word.
+        return (t == FieldType.SFLT16 && word == 0x8000) || (t == FieldType.SFLT24 && word == 0x800000)
+                ? 0 : word;
+    }
+
+    private static long minifloatWord(FieldType t, double value) {
         BigDecimal exact = new BigDecimal(value);
         boolean negative = exact.signum() < 0;
         BigDecimal magnitude = exact.abs();

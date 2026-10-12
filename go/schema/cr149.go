@@ -52,6 +52,9 @@ func encodeBF16(value float64, name string) (uint64, error) {
 		return 0, fmt.Errorf("Field '%s': %s is outside the range of bf16, %s to %s (PS-168)",
 			name, givenText(value), givenText(-bf16Max), givenText(bf16Max))
 	}
+	if word == 0 {
+		return 0, nil // CR-2026-157: a negative value that rounds to zero is the zero word
+	}
 	return sign | word, nil
 }
 

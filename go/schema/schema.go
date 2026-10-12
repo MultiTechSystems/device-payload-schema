@@ -6219,6 +6219,14 @@ func encodeSint(val int64, length int, endian string) []byte {
 
 // float16Bits converts to IEEE 754 binary16, rounding to nearest with ties to even.
 func float16Bits(v float64) uint16 {
+	// PS-566, CR-2026-157: the word is tested, not the input - -1e-50 rounds to the sign word.
+	if w := float16Word(v); w != 0x8000 {
+		return w
+	}
+	return 0
+}
+
+func float16Word(v float64) uint16 {
 	v = positiveZero(v) // PS-566
 	f := math.Float32bits(float32(v))
 	sign := uint16((f >> 16) & 0x8000)
@@ -6260,6 +6268,9 @@ func encodeFloat32(val float32, endian string) []byte {
 	val = float32(positiveZero(float64(val))) // PS-566
 	buf := make([]byte, 4)
 	bits := math.Float32bits(val)
+	if bits == 0x80000000 { // CR-2026-157: a negative value that rounds to zero
+		bits = 0
+	}
 	if endian == "little" {
 		binary.LittleEndian.PutUint32(buf, bits)
 	} else {

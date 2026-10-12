@@ -111,6 +111,58 @@ encode_cases:
   input: '{"x": -0.5}'
   payload: "b800"
 
+# CR-2026-157 (PS-566 editorial): the zero word is written wherever the ENCODED result is a zero,
+# so a negative value that the type's rounding turns into zero (-1e-50) is the zero word too. The
+# writers test the rounded word, not the input. A negative value that rounds to a subnormal is
+# not zero and keeps its sign (-2^-24 is `8001` in f16). f64 never rounds -1e-50 to zero.
+#
+# JSON writes -2^-24 as -5.960464477539063e-08, the shortest form that reads back exactly.
+
+- name: f16_rounds_to_zero
+  schema: "name: t\nfields:\n  - {name: x, type: f16}\n"
+  input: '{"x": -1e-50}'
+  payload: "0000"
+
+- name: bf16_rounds_to_zero
+  schema: "name: t\nfields:\n  - {name: x, type: bf16}\n"
+  input: '{"x": -1e-50}'
+  payload: "0000"
+
+- name: f32_rounds_to_zero
+  schema: "name: t\nfields:\n  - {name: x, type: f32}\n"
+  input: '{"x": -1e-50}'
+  payload: "00000000"
+
+- name: f32_little_rounds_to_zero
+  schema: "name: t\nendian: little\nfields:\n  - {name: x, type: f32}\n"
+  input: '{"x": -1e-50}'
+  payload: "00000000"
+
+- name: f32le16_rounds_to_zero
+  schema: "name: t\nfields:\n  - {name: x, type: f32le16}\n"
+  input: '{"x": -1e-50}'
+  payload: "00000000"
+
+- name: f32be16le_rounds_to_zero
+  schema: "name: t\nfields:\n  - {name: x, type: f32be16le}\n"
+  input: '{"x": -1e-50}'
+  payload: "00000000"
+
+- name: sflt16_rounds_to_zero
+  schema: "name: t\nfields:\n  - {name: x, type: sflt16}\n"
+  input: '{"x": -1e-50}'
+  payload: "0000"
+
+- name: sflt24_rounds_to_zero
+  schema: "name: t\nfields:\n  - {name: x, type: sflt24}\n"
+  input: '{"x": -1e-50}'
+  payload: "000000"
+
+- name: f16_smallest_subnormal_keeps_its_sign
+  schema: "name: t\nfields:\n  - {name: x, type: f16}\n"
+  input: '{"x": -5.960464477539063e-08}'
+  payload: "8001"
+
 
 decode_cases:
 

@@ -2823,6 +2823,22 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     2743: the two fixture vectors and bf16's); re-encode +1 everywhere (Python 2143 -> 2144,
     Java 2143 -> 2144, C# 2144 -> 2145, Go 2161 -> 2162, plain 2133 -> 2134), `plain fixed` +1.
     C: 575 of 575, unchanged.
+  - **CR-2026-157 (PS-566 editorial, for 0.5.5): the encoded word is tested, not the input.**
+    A negative value the type's rounding turns into zero (-1e-50 as `f16`, `bf16`, `f32`,
+    `f32le16`, `f32be16le`, `sflt16`, `sflt24`) rounds to the sign word, and every writer wrote it
+    (`8000`, `80000000`, `800000`). Each float writer now writes the zero word when the finished
+    word is the type's negative-zero pattern: Python `pack_float` (f16/f32/f64 and word-ordered)
+    and a wrapper over `encode_minifloat` (the old `encode_minifloat` is `_minifloat_word`), plus
+    `encode_bf16`; the runtime's `encWriteFloat`, `encBf16`, minifloat call and `writeWordOrdered`;
+    Go `float16Bits`, `encodeFloat32`, `writeWordOrdered`, `encodeBF16`, `encodeMinifloat`;
+    Java `Encoder.zeroWord` at the f16/f32 writes, `Bf16.encode`, `Wave4`; C# `EncodeFloat16/32`,
+    `Bf16.Encode`, `Wave4`; C `encode_field`'s f32 (C has no f16, bf16 or minifloat encode).
+    **#146's `+ 0.0` normalisation is kept**: it still handles -0.0 before the rounding and
+    costs nothing, and the word test adds the rounded case. A subnormal is not zero and is not
+    clamped: -2^-24 stays `8001` in f16 (`f16_smallest_subnormal_keeps_its_sign`; C pins
+    -2^-149 as `80000001`). f64 never rounds -1e-50 to zero. Cases: the CR-2026-157 section of
+    `tests/cr-2026-154-cases.yaml`, read by the same five runners, and C's selftest. No corpus
+    vector can say "input -1e-50" (a vector decodes a payload), so no fixture or floor moved.
 
 - **Per-definition tables are held by identity, never by address alone** (found auditing
   for the spec prototype's `id()`-keyed SIBLINGS defect, CR-2026-141). Python's decode

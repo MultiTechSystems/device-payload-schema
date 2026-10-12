@@ -276,7 +276,7 @@ function encBf16(v, f) {
     encFail("Field '" + f.name + "': " + String(v) + " is outside the range of bf16, " +
             String(-ENC_BF16_MAX) + " to " + String(ENC_BF16_MAX) + " (PS-168)");
   }
-  return sign | word;
+  return word ? sign | word : 0;                       // PS-566, CR-2026-157: a negative value rounding to zero is 0
 }
 
 /* encode_numeral (PS-561): digits in the declared base, uppercase hex, 0-filled to the length
@@ -298,8 +298,9 @@ function encWriteFloat(out, value, type, endian) {
   var size = type === "f16" ? 2 : type === "f32" ? 4 : 8;
   var dv = new DataView(new ArrayBuffer(size));
   if (type === "f16") dv.setUint16(0, encHalf(v), false);
-  else if (type === "f32") dv.setFloat32(0, v, false);
+  else if (type === "f32") { dv.setFloat32(0, v, false); if (dv.getUint32(0, false) === 0x80000000) dv.setUint32(0, 0, false); }  // PS-566, CR-2026-157: the word is tested, not the input
   else dv.setFloat64(0, v, false);
+  if (type === "f16" && dv.getUint16(0, false) === 0x8000) dv.setUint16(0, 0, false);
   var bytes = [];
   for (var i = 0; i < size; i++) bytes.push(dv.getUint8(i));
   if (endian === "little") bytes.reverse();
@@ -443,7 +444,9 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
     return;
   }
   if (type === "uflt16" || type === "sflt16" || type === "sflt24") {
-    encWriteInt(out, encMinifloat(type, value), type === "sflt24" ? 3 : 2, false, endian);
+    var mw = encMinifloat(type, value);
+    if ((type === "sflt16" && mw === 0x8000) || (type === "sflt24" && mw === 0x800000)) mw = 0;   // PS-566, CR-2026-157
+    encWriteInt(out, mw, type === "sflt24" ? 3 : 2, false, endian);
     return;
   }
   if (type === "udec" || type === "sdec") {
@@ -3257,6 +3260,7 @@ function writeWordOrdered(buf, pos, value, layout, kind) {
     var dv = new DataView(new ArrayBuffer(4));
     dv.setFloat32(0, value + 0, false);                // PS-566: a negative zero is written as zero
     word = dv.getUint32(0, false);
+    if (word === 0x80000000) word = 0;                 // CR-2026-157: -1e-50 rounds to -0
   } else {
     word = Math.round(value);
     if (word < 0) word += 4294967296;
