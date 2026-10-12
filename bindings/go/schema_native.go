@@ -42,21 +42,21 @@ import (
 type FieldType int
 
 const (
-	FieldTypeInt    FieldType = C.FIELD_VAL_INT
-	FieldTypeFloat  FieldType = C.FIELD_VAL_FLOAT
-	FieldTypeString FieldType = C.FIELD_VAL_STRING
-	FieldTypeBool   FieldType = C.FIELD_VAL_BOOL
-	FieldTypeBytes  FieldType = C.FIELD_VAL_BYTES
+	FieldTypeInt    FieldType = C.SCHEMA_FFI_VAL_INT
+	FieldTypeFloat  FieldType = C.SCHEMA_FFI_VAL_FLOAT
+	FieldTypeString FieldType = C.SCHEMA_FFI_VAL_STRING
+	FieldTypeBool   FieldType = C.SCHEMA_FFI_VAL_BOOL
+	FieldTypeBytes  FieldType = C.SCHEMA_FFI_VAL_BYTES
 )
 
 // Error codes from the C library.
 const (
-	ErrOK       = C.SCHEMA_OK
-	ErrInvalid  = C.SCHEMA_ERR_INVALID
-	ErrParse    = C.SCHEMA_ERR_PARSE
-	ErrDecode   = C.SCHEMA_ERR_DECODE
-	ErrMemory   = C.SCHEMA_ERR_MEMORY
-	ErrOverflow = C.SCHEMA_ERR_OVERFLOW
+	ErrOK       = C.SCHEMA_FFI_OK
+	ErrInvalid  = C.SCHEMA_FFI_ERR_INVALID
+	ErrParse    = C.SCHEMA_FFI_ERR_PARSE
+	ErrDecode   = C.SCHEMA_FFI_ERR_DECODE
+	ErrMemory   = C.SCHEMA_FFI_ERR_MEMORY
+	ErrOverflow = C.SCHEMA_FFI_ERR_OVERFLOW
 )
 
 // SchemaError represents an error from schema operations.
@@ -81,7 +81,7 @@ func FromBinary(data []byte) (*Schema, error) {
 	}
 
 	ptr := (*C.uint8_t)(unsafe.Pointer(&data[0]))
-	handle := C.schema_create_binary(ptr, C.size_t(len(data)))
+	handle := C.schema_ffi_create_binary(ptr, C.size_t(len(data)))
 	if handle == nil {
 		return nil, &SchemaError{Code: ErrParse, Message: "failed to parse binary schema"}
 	}
@@ -95,7 +95,7 @@ func FromBinary(data []byte) (*Schema, error) {
 // but can be called explicitly for deterministic cleanup.
 func (s *Schema) Free() {
 	if s.handle != nil {
-		C.schema_free(s.handle)
+		C.schema_ffi_free(s.handle)
 		s.handle = nil
 	}
 }
@@ -105,7 +105,7 @@ func (s *Schema) Name() string {
 	if s.handle == nil {
 		return ""
 	}
-	return C.GoString(C.schema_get_name(s.handle))
+	return C.GoString(C.schema_ffi_get_name(s.handle))
 }
 
 // FieldCount returns the number of fields in the schema.
@@ -113,7 +113,7 @@ func (s *Schema) FieldCount() int {
 	if s.handle == nil {
 		return 0
 	}
-	return int(C.schema_get_field_count(s.handle))
+	return int(C.schema_ffi_get_field_count(s.handle))
 }
 
 // Decode decodes a payload using the schema.
@@ -126,39 +126,39 @@ func (s *Schema) Decode(payload []byte) (map[string]interface{}, error) {
 	}
 
 	ptr := (*C.uint8_t)(unsafe.Pointer(&payload[0]))
-	result := C.schema_decode(s.handle, ptr, C.size_t(len(payload)))
+	result := C.schema_ffi_decode(s.handle, ptr, C.size_t(len(payload)))
 	if result == nil {
 		return nil, &SchemaError{Code: ErrDecode, Message: "decode returned null"}
 	}
-	defer C.result_free(result)
+	defer C.schema_ffi_result_free(result)
 
-	errCode := int(C.result_get_error(result))
+	errCode := int(C.schema_ffi_result_get_error(result))
 	if errCode != 0 {
-		errMsg := C.GoString(C.result_get_error_msg(result))
+		errMsg := C.GoString(C.schema_ffi_result_get_error_msg(result))
 		return nil, &SchemaError{Code: errCode, Message: errMsg}
 	}
 
-	fieldCount := int(C.result_get_field_count(result))
+	fieldCount := int(C.schema_ffi_result_get_field_count(result))
 	output := make(map[string]interface{}, fieldCount)
 
 	for i := 0; i < fieldCount; i++ {
-		name := C.GoString(C.result_get_field_name(result, C.int(i)))
+		name := C.GoString(C.schema_ffi_result_get_field_name(result, C.int(i)))
 		if name == "" {
 			continue
 		}
 
-		fieldType := FieldType(C.result_get_field_type(result, C.int(i)))
+		fieldType := FieldType(C.schema_ffi_result_get_field_type(result, C.int(i)))
 		switch fieldType {
 		case FieldTypeInt:
-			output[name] = int64(C.result_get_field_int(result, C.int(i)))
+			output[name] = int64(C.schema_ffi_result_get_field_int(result, C.int(i)))
 		case FieldTypeFloat:
-			output[name] = float64(C.result_get_field_float(result, C.int(i)))
+			output[name] = float64(C.schema_ffi_result_get_field_float(result, C.int(i)))
 		case FieldTypeString:
-			output[name] = C.GoString(C.result_get_field_string(result, C.int(i)))
+			output[name] = C.GoString(C.schema_ffi_result_get_field_string(result, C.int(i)))
 		case FieldTypeBool:
-			output[name] = C.result_get_field_bool(result, C.int(i)) != 0
+			output[name] = C.schema_ffi_result_get_field_bool(result, C.int(i)) != 0
 		default:
-			output[name] = int64(C.result_get_field_int(result, C.int(i)))
+			output[name] = int64(C.schema_ffi_result_get_field_int(result, C.int(i)))
 		}
 	}
 
@@ -176,28 +176,28 @@ func (s *Schema) DecodeJSON(payload []byte) (string, error) {
 	}
 
 	ptr := (*C.uint8_t)(unsafe.Pointer(&payload[0]))
-	result := C.schema_decode(s.handle, ptr, C.size_t(len(payload)))
+	result := C.schema_ffi_decode(s.handle, ptr, C.size_t(len(payload)))
 	if result == nil {
 		return "", &SchemaError{Code: ErrDecode, Message: "decode returned null"}
 	}
-	defer C.result_free(result)
+	defer C.schema_ffi_result_free(result)
 
-	errCode := int(C.result_get_error(result))
+	errCode := int(C.schema_ffi_result_get_error(result))
 	if errCode != 0 {
-		errMsg := C.GoString(C.result_get_error_msg(result))
+		errMsg := C.GoString(C.schema_ffi_result_get_error_msg(result))
 		return "", &SchemaError{Code: errCode, Message: errMsg}
 	}
 
-	jsonPtr := C.result_to_json(result)
+	jsonPtr := C.schema_ffi_result_to_json(result)
 	if jsonPtr == nil {
 		return "", &SchemaError{Code: ErrDecode, Message: "JSON conversion failed"}
 	}
-	defer C.schema_free_string(jsonPtr)
+	defer C.schema_ffi_free_string(jsonPtr)
 
 	return C.GoString(jsonPtr), nil
 }
 
 // Version returns the native library version string.
 func Version() string {
-	return C.GoString(C.schema_version())
+	return C.GoString(C.schema_ffi_version())
 }

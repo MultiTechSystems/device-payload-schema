@@ -272,7 +272,7 @@ typedef struct {
     int bytes_unread;
     /* The schema carried no names (schema_t.nameless). Every value is then reachable
      * by result_get_index() and none by name, and a writer of the decoded object - such
-     * as bindings/c's result_to_json() - must refuse (PS-555). */
+     * as bindings/c's schema_ffi_result_to_json() - must refuse (PS-555). */
     bool nameless;
 } decode_result_t;
 
@@ -1729,6 +1729,51 @@ static inline int schema_check_fits(double rounded, double lo, double hi,
     return SCHEMA_ERR_OVERFLOW;
 }
 
+/* PS-168 for udec/sdec (PS-330), in the reference's check_nibble_decimal text: "Field
+ * 'v': 123.5 encodes as 123.5, outside 0 to 15.9 (PS-168)", the value encoded given to one
+ * decimal. Writes the byte where it fits. No libm: the floor is taken by hand. */
+static inline int schema_encode_nibble_decimal(double v, bool is_signed,
+                                               const field_def_t* field,
+                                               const encode_input_t* input, uint8_t* out,
+                                               char* err, size_t err_len) {
+    long long lo = is_signed ? -80 : 0, hi = is_signed ? 79 : 159;
+    long long tenths_total;
+    if (v > -1e15 && v < 1e15) {
+        double whole = (double)(int64_t)v;
+        if (whole > v) whole -= 1.0;
+        double tenths = schema_round_half_even((v - whole) * 10.0);
+        if (tenths == 10.0) { whole += 1.0; tenths = 0.0; }
+        tenths_total = (long long)whole * 10 + (long long)tenths;
+    } else {
+        tenths_total = v < 0 ? lo - 1 : hi + 1;
+    }
+    if (tenths_total >= lo && tenths_total <= hi) {
+        long long whole = tenths_total >= 0 ? tenths_total / 10 : -((-tenths_total + 9) / 10);
+        long long part = tenths_total - whole * 10;
+        *out |= (uint8_t)(((whole & 0x0F) << 4) | (part & 0x0F));   /* ORed: see write_int */
+        return SCHEMA_OK;
+    }
+    if (err && err_len) {
+        char given[40], encoded[48];
+        schema_format_number(given, sizeof(given),
+                             input && !input->is_int ? input->value.f64 : 0.0,
+                             input && input->is_int, input ? input->value.i64 : 0);
+        if (v > -1e15 && v < 1e15) {
+            long long a = tenths_total < 0 ? -tenths_total : tenths_total;
+            if (a % 10)
+                snprintf(encoded, sizeof(encoded), "%s%lld.%lld", tenths_total < 0 ? "-" : "",
+                         a / 10, a % 10);
+            else
+                snprintf(encoded, sizeof(encoded), "%s%lld", tenths_total < 0 ? "-" : "", a / 10);
+        } else {
+            snprintf(encoded, sizeof(encoded), "%s", given);
+        }
+        snprintf(err, err_len, "Field '%s': %s encodes as %s, outside %s to %s (PS-168)",
+                 field->name, given, encoded, is_signed ? "-8" : "0", is_signed ? "7.9" : "15.9");
+    }
+    return SCHEMA_ERR_OVERFLOW;
+}
+
 /* Encode single field */
 static inline int encode_field(
     const field_def_t* field,
@@ -1880,36 +1925,20 @@ static inline int encode_field(
             break;
         }
             
-        case FIELD_TYPE_UDEC: {
-            /* Encode nibble-decimal: value 3.7 -> 0x37 */
-            int whole = (int)raw_val;
-            int frac = (int)((raw_val - whole) * 10 + 0.5);
-            if (whole > 9) whole = 9;
-            if (whole < 0) whole = 0;
-            if (frac > 9) frac = 9;
-            buf[*pos] = (uint8_t)((whole << 4) | (frac & 0x0F));
-            (*pos)++;
-            break;
-        }
-        
+        case FIELD_TYPE_UDEC:
         case FIELD_TYPE_SDEC: {
-            /* Encode signed nibble-decimal */
-            int whole = (int)raw_val;
-            double frac_part = raw_val - whole;
-            if (raw_val < 0 && frac_part != 0) {
-                whole--;  /* Handle negative fractional */
-                frac_part = raw_val - whole;
-            }
-            int frac = (int)(frac_part * 10 + 0.5);
-            if (whole < -8) whole = -8;
-            if (whole > 7) whole = 7;
-            if (frac > 9) frac = 9;
-            uint8_t whole_nibble = (uint8_t)(whole & 0x0F);
-            buf[*pos] = (whole_nibble << 4) | (frac & 0x0F);
+            /* The inverse of PS-330, as the reference writes it: the whole part floored, so
+             * the tenths stay non-negative (-1.5 is -2 + 0.5), the tenths rounded half to
+             * even. PS-168: one byte holds 0 to 15.9, or -8 to 7.9 signed. Both clamped
+             * silently - udec 123.5 wrote 0x95, and udec 10 wrote 9.0. */
+            bool is_signed = field->type == FIELD_TYPE_SDEC;
+            int rc = schema_encode_nibble_decimal(raw_val, is_signed, field, input,
+                                                  buf + *pos, err, err_len);
+            if (rc != SCHEMA_OK) return rc;
             (*pos)++;
             break;
         }
-            
+
         default:
             return SCHEMA_ERR_UNSUPPORTED;
     }

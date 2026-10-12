@@ -624,12 +624,9 @@ public static class SchemaEncoder
         static double BitfieldLabelValue(object? value, SchemaField member)
         {
             var label = value?.ToString() ?? "";
-            if (member.Values != null)
-            {
-                foreach (var kv in member.Values)
-                    if (kv.Value == label)
-                        return kv.Key;
-            }
+            var codes = EnumCodes(member, label);
+            if (codes.Count > 1) throw SharedLabel(member.Name, value, codes);   // PS-169
+            if (codes.Count == 1) return codes[0];
             throw new InvalidOperationException($"bit range '{member.Name}': '{label}' "
                 + "is not one of its declared values");
         }
@@ -1297,10 +1294,18 @@ public static class SchemaEncoder
             var (ok, numeric) = Helpers.ToFloat64(discriminator);
             if (!ok)
                 return string.Equals(discriminator?.ToString(), caseValue.ToString());
-            long value = (long)Math.Round(numeric, MidpointRounding.ToEven);
+            // A fraction selects no case it would round to: 2.5 chose case 2 here, where
+            // every decoder reads it as matching no single key (SchemaDecoder.DecodeMatch).
+            if (numeric != Math.Truncate(numeric))
+                return SchemaDecoder.FractionInRange(numeric, caseValue);
+            long value = (long)numeric;
 
             if (caseValue is string text && Helpers.ParseListCaseKey(text) is { } listed)
                 return listed.Contains(value);
+            if (caseValue is string spelled && spelled.Contains(".."))
+                // An inclusive range (PS-152), as the decoder reads it; it fell through to
+                // ParseIntAny and matched nothing.
+                return SchemaDecoder.FractionInRange(value, caseValue);
             if (caseValue is List<object?> list)
                 return list.Any(item =>
                 {
@@ -1706,7 +1711,7 @@ public static class SchemaEncoder
                 return ReverseEnum(name, source);
             if (source?.Lookup is not { Count: > 0 } || DecodeContext.IsNumericLabel(reported))
                 return reported;
-            var reversed = ReverseLookup(reported, source.Lookup);
+            var reversed = ReverseLookup(reported, source.Lookup, source.Name);   // PS-169
             if (reversed is string text && Wave5.Template(source) is { } template
                 && Wave5.MatchTemplate(template, text) is { } recovered)
                 return recovered;
@@ -1716,9 +1721,9 @@ public static class SchemaEncoder
         /// <summary>The code an enum reported <paramref name="name"/> for, else the name.</summary>
         static object? ReverseEnum(string name, SchemaField field)
         {
-            if (field.Values != null)
-                foreach (var kv in field.Values)
-                    if (kv.Value == name) return (double)kv.Key;
+            var codes = EnumCodes(field, name);
+            if (codes.Count > 1) throw SharedLabel(field.Name, name, codes);   // PS-169
+            if (codes.Count == 1) return (double)codes[0];
             if (field.EnumDefault == name) return name;
             if (name.StartsWith("unknown(") && name.EndsWith(")")
                 && int.TryParse(name[8..^1], out var n))
@@ -1800,7 +1805,7 @@ public static class SchemaEncoder
             // The value as given, for a PS-168 rejection to name (PS-552).
             _givenField = field;
             _givenValue = value;
-            var reversed = ReverseLookup(value, field.Lookup);
+            var reversed = ReverseLookup(value, field.Lookup, field.Name ?? "?");   // PS-169
 
             if (reversed is bool unmatched && field.Lookup is { Count: > 0 })
                 // PS-513: a boolean matches only a boolean label, and none has this one
@@ -1849,13 +1854,51 @@ public static class SchemaEncoder
         /// was looked up, so a boolean passed through and was written as its own 0 or 1 -
         /// `false` through `[true, false]` wrote index 0 (CR-2026-104).
         /// </remarks>
-        static object? ReverseLookup(object? value, Dictionary<int, object>? lookup)
+        static object? ReverseLookup(object? value, Dictionary<int, object>? lookup,
+            string? name = null)
         {
             if (lookup == null || lookup.Count == 0) return value;
-            foreach (var (key, entry) in lookup)
-                if (Helpers.SameLabel(entry, value))
-                    return (double)key;
-            return value;
+            // PS-169 (CR-2026-146): a label two or more codes share names no one code, so it
+            // is rejected, naming the field. It wrote the first found. With no name - a
+            // caller only ranking candidate cases - the smallest code is taken.
+            var codes = lookup.Where(kv => Helpers.SameLabel(kv.Value, value))
+                .Select(kv => kv.Key).OrderBy(k => k).ToList();
+            if (codes.Count == 0) return value;
+            if (codes.Count > 1 && name != null) throw SharedLabel(name, value, codes);
+            return (double)codes[0];
+        }
+
+        /// <summary>The PS-169 rejection, in the spec prototype's words; codes ascending.</summary>
+        static InvalidOperationException SharedLabel(string? name, object? label,
+            IEnumerable<int> codes) =>
+            new($"Field '{name}': the label {LabelText(label)} is shared by codes "
+                + $"[{string.Join(", ", codes.OrderBy(c => c))}], so it cannot be encoded (PS-169)");
+
+        /// <summary>
+        /// A label as the PS-169 and PS-067 messages write it: text in single quotes, a
+        /// boolean as JSON writes it, a number as JavaScript's String(number) does.
+        /// </summary>
+        static string LabelText(object? label) => label switch
+        {
+            string text => $"'{text}'",
+            bool flag => flag ? "true" : "false",
+            _ => JsNumber(label),
+        };
+
+        /// <summary>
+        /// PS-168 for udec/sdec (PS-330): one byte holds a whole part in a nibble and tenths
+        /// 0 to 9, so 0 to 15.9, or -8 to 7.9 signed. <paramref name="tenths"/> is the value
+        /// as encoded, in tenths. Both said "does not fit udec", in words of their own.
+        /// </summary>
+        static void CheckNibbleDecimal(long tenths, bool signed, string? name, object? given)
+        {
+            long low = signed ? -80 : 0, high = signed ? 79 : 159;
+            if (tenths >= low && tenths <= high) return;
+            long abs = Math.Abs(tenths);
+            var encoded = (tenths < 0 ? "-" : "") + (abs / 10) + (abs % 10 != 0 ? "." + (abs % 10) : "");
+            throw new InvalidOperationException(
+                $"Field '{name}': {JsNumber(given)} encodes as {encoded}, outside "
+                + $"{(signed ? "-8" : "0")} to {(signed ? "7.9" : "15.9")} (PS-168)");
         }
 
         /// <summary>
@@ -2117,10 +2160,8 @@ public static class SchemaEncoder
                     long whole = (long)Math.Floor(numeric);
                     long tenths = (long)Math.Round((numeric - whole) * 10, MidpointRounding.ToEven);
                     if (tenths == 10) { whole += 1; tenths = 0; }
-                    var (low, high) = field.Type == FieldType.SDec ? (-8L, 7L) : (0L, 15L);
-                    if (whole < low || whole > high)
-                        throw new InvalidOperationException(
-                            $"field '{field.Name}': {numeric} does not fit {field.RawType}");
+                    CheckNibbleDecimal(whole * 10 + tenths, field.Type == FieldType.SDec,
+                        field.Name, Given(field, value));                                 // PS-168
                     return new[] { (byte)(((whole & 0x0F) << 4) | tenths) };
                 }
                 case FieldType.Base64:
@@ -2151,25 +2192,46 @@ public static class SchemaEncoder
 
         byte[] EncodeEnum(SchemaField field, object? value, string endian)
         {
-            int size = field.Base switch
+            var bases = field.Base ?? "u8";
+            int size = bases switch
             {
                 "u16" or "s16" => 2,
                 "u24" or "s24" => 3,
                 "u32" or "s32" => 4,
                 _ => 1
             };
-            if (field.Values != null)
-                foreach (var (key, label) in field.Values)
-                    if (label == value as string)
-                        return WriteUint(key, size, endian);
-            var (ok, numeric) = Helpers.ToFloat64(value);
-            if (!ok)
-                // The label came from `default`, which stands for every unmapped value
-                // (PS-068), so there is no original to recover.
-                throw new InvalidOperationException($"enum field '{field.Name}': '{value}' is "
-                    + "not one of its declared values");
-            return WriteUint((long)Math.Round(numeric, MidpointRounding.ToEven), size, endian);
+            bool signed = bases.StartsWith("s");
+            double raw;
+            if (value is string name)
+            {
+                // A name back to its code (PS-067). One several codes share names none of
+                // them (PS-169); one with no code, the `default` label among them, cannot be
+                // recovered (PS-068, PS-554).
+                var codes = EnumCodes(field, name);
+                if (codes.Count == 0)
+                    throw new InvalidOperationException(
+                        $"Field '{field.Name}': {LabelText(name)} is not a name of the enum (PS-067)");
+                if (codes.Count > 1) throw SharedLabel(field.Name, name, codes);
+                raw = codes[0];
+            }
+            else if (value is not bool && Helpers.ToFloat64(value) is (true, var numeric))
+                raw = Math.Round(numeric, MidpointRounding.ToEven);                    // PS-552
+            else
+                throw new InvalidOperationException(
+                    $"Field '{field.Name}': {LabelText(value)} is not a name or code of the enum (PS-067)");
+            // PS-168, naming the enum: a code past its base was "300 does not fit 1
+            // unsigned bytes", with no field.
+            var (low, high) = IntegerBounds(size * 8, signed);
+            CheckFits(raw, low, high, field.Name, Given(field, value));
+            long code = (long)raw;
+            return WriteUint(code < 0 ? code + (1L << (size * 8)) : code, size, endian);
         }
+
+        /// <summary>Every code an enum gives <paramref name="name"/> as its name, ascending.</summary>
+        static List<int> EnumCodes(SchemaField field, string name) =>
+            field.Values == null ? new List<int>()
+                : field.Values.Where(kv => kv.Value == name).Select(kv => kv.Key)
+                    .OrderBy(k => k).ToList();
 
         /// <summary>
         /// Parse a bitfield_string back into its packed integer.

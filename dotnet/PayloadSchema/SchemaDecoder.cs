@@ -1323,6 +1323,16 @@ public static class SchemaDecoder
             var (ok, lv) = Helpers.ToLong(val);
             matchValue = ok ? lv : null;
             discriminator = val;
+            // A computed discriminator may carry a fraction, which equals no integer key:
+            // ToLong truncated it, so 2.5 selected case 2 (PS-484's reading, applied to
+            // case keys). Only an inclusive range can hold it (PS-152).
+            if (Helpers.ToFloat64(val) is (true, var number) && number != Math.Truncate(number))
+            {
+                foreach (var c in field.Cases)
+                    if (!c.IsDefault && c.CaseValue != null && FractionInRange(number, c.CaseValue))
+                        return MergeMatch(inline, DecodeFields(c.Fields, ctx, null));
+                matchValue = null;
+            }
         }
         else
         {
@@ -1381,6 +1391,33 @@ public static class SchemaDecoder
     /// compared, so a range key matched nothing at all and the construct decoded silently
     /// empty (CR-2026-020).
     /// </summary>
+    /// <summary>
+    /// Whether a discriminator with a fraction lies in a case key. It equals no integer,
+    /// so no single key and no member of a list matches it; only an inclusive range does
+    /// (PS-152), as the reference and the spec prototype read <c>lo..hi</c>.
+    /// </summary>
+    internal static bool FractionInRange(double value, object caseVal)
+    {
+        switch (caseVal)
+        {
+            case string text when Helpers.ParseListCaseKey(text) is not null:
+                return false;
+            case string text:
+                var separator = text.IndexOf("..", StringComparison.Ordinal);
+                return separator > 0
+                       && long.TryParse(text[..separator].Trim(), out var lo)
+                       && long.TryParse(text[(separator + 2)..].Trim(), out var hi)
+                       && value >= lo && value <= hi;
+            case Dictionary<string, object?> rangeMap:
+                var low = rangeMap.TryGetValue("min", out var minNode)
+                    && Helpers.ToFloat64(minNode) is (true, var lowKey) ? lowKey : double.NegativeInfinity;
+                var high = rangeMap.TryGetValue("max", out var maxNode)
+                    && Helpers.ToFloat64(maxNode) is (true, var highKey) ? highKey : double.PositiveInfinity;
+                return value >= low && value <= high;
+        }
+        return false;
+    }
+
     static bool MatchesCase(long matchValue, object caseVal)
     {
         switch (caseVal)

@@ -2151,6 +2151,20 @@ public class Schema {
             }
             matchValue = asLong(val);
             discriminator = val;
+            // A computed discriminator may carry a fraction, which equals no integer key:
+            // asLong truncated it, so 2.5 selected case 2 (PS-484's reading, applied to
+            // case keys). Only an inclusive range can hold it (PS-152).
+            if (val instanceof Number number && !(val instanceof Boolean)
+                    && number.doubleValue() != Math.rint(number.doubleValue())
+                    && !Double.isInfinite(number.doubleValue())) {
+                for (Field.Case c : field.getCases()) {
+                    if (!c.isDefault() && c.getCaseValue() != null
+                            && fractionInRange(number.doubleValue(), c.getCaseValue())) {
+                        return mergeMatch(inline, decodeFields(c.getFields(), ctx));
+                    }
+                }
+                matchValue = null;
+            }
         } else {
             int length = field.getLength() > 0 ? field.getLength() : 1;
             byte[] data;
@@ -2220,6 +2234,31 @@ public class Schema {
      */
     private long rangeBound(String text) {
         return Long.parseLong(text.trim());
+    }
+
+    /**
+     * Whether a discriminator with a fraction lies in a case key. It equals no integer, so
+     * no single key and no member of a list matches it; only an inclusive range does
+     * (PS-152), as the reference and the spec prototype read {@code lo..hi}.
+     */
+    static boolean fractionInRange(double value, Object caseVal) {
+        if (caseVal instanceof String text) {
+            if (parseListCaseKey(text) != null) return false;
+            int separator = text.indexOf("..");
+            if (separator <= 0) return false;
+            try {
+                return value >= Long.parseLong(text.substring(0, separator).trim())
+                        && value <= Long.parseLong(text.substring(separator + 2).trim());
+            } catch (NumberFormatException ignored) {
+                return false;
+            }
+        }
+        if (caseVal instanceof Map<?, ?> rangeMap) {
+            Object min = rangeMap.get("min"), max = rangeMap.get("max");
+            return (!(min instanceof Number lo) || value >= lo.doubleValue())
+                    && (!(max instanceof Number hi) || value <= hi.doubleValue());
+        }
+        return false;
     }
 
     private boolean matchesCase(long matchValue, Object caseVal) {

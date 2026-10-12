@@ -116,7 +116,7 @@ Napi::Value SchemaWrapper::Decode(const Napi::CallbackInfo& info) {
     size_t payload_len = buffer.Length();
 
     decode_result_t result;
-    int ret = schema_decode_payload(&schema_, payload, payload_len, &result);
+    int ret = schema_decode(&schema_, payload, payload_len, &result);
 
     if (ret != 0) {
         std::string msg = "Decode error: ";
@@ -196,7 +196,7 @@ Napi::Value SchemaWrapper::DecodeJSON(const Napi::CallbackInfo& info) {
     size_t payload_len = buffer.Length();
 
     decode_result_t result;
-    int ret = schema_decode_payload(&schema_, payload, payload_len, &result);
+    int ret = schema_decode(&schema_, payload, payload_len, &result);
 
     if (ret != 0) {
         std::string msg = "Decode error: ";

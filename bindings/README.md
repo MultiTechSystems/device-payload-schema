@@ -284,23 +284,23 @@ Key principle: **Parse before swap** - failures leave old schema active.
 
 ```c
 // Create schema from binary data
-schema_t_ffi schema_create_binary(const uint8_t* data, size_t len);
+schema_t_ffi schema_ffi_create_binary(const uint8_t* data, size_t len);
 
 // Free schema
-void schema_free(schema_t_ffi schema);
+void schema_ffi_free(schema_t_ffi schema);
 
 // Decode payload
-result_t_ffi schema_decode(schema_t_ffi schema, const uint8_t* payload, size_t len);
+result_t_ffi schema_ffi_decode(schema_t_ffi schema, const uint8_t* payload, size_t len);
 
 // Get decoded field values
-int result_get_field_count(result_t_ffi result);
-const char* result_get_field_name(result_t_ffi result, int index);
-int64_t result_get_field_int(result_t_ffi result, int index);
-double result_get_field_float(result_t_ffi result, int index);
+int schema_ffi_result_get_field_count(result_t_ffi result);
+const char* schema_ffi_result_get_field_name(result_t_ffi result, int index);
+int64_t schema_ffi_result_get_field_int(result_t_ffi result, int index);
+double schema_ffi_result_get_field_float(result_t_ffi result, int index);
 
 // Convert result to JSON
-char* result_to_json(result_t_ffi result);
-void schema_free_string(char* str);
+char* schema_ffi_result_to_json(result_t_ffi result);
+void schema_ffi_free_string(char* str);
 ```
 
 ### Python API
@@ -427,5 +427,5 @@ CGO_ENABLED=1 go build
 Ensure you're using the correct library version. Check with:
 
 ```bash
-nm -D libschema.so | grep schema_version
+nm -D libschema.so | grep schema_ffi_version
 ```
