@@ -202,6 +202,11 @@ test-c: $(VENV)/bin/activate
 		$(BUILD_DIR)/bin/$$t > /dev/null || { echo "FAILED: $$t"; exit 1; }; \
 	done
 	@echo "C interpreter tests pass."
+	@echo "  cc  bindings/c/schema_ffi.c + src/test_ffi.c"
+	@$(CC) -std=c11 -Wall -Wextra -Werror -Iinclude -Ibindings/c -o $(BUILD_DIR)/bin/test_ffi \
+		bindings/c/schema_ffi.c src/test_ffi.c -lm
+	@$(BUILD_DIR)/bin/test_ffi > /dev/null || { echo "FAILED: test_ffi"; exit 1; }
+	@echo "C FFI wrapper builds and decodes."
 	$(PYTHON) tools/c-corpus-harness.py
 	$(PYTHON) tools/c-corpus-harness.py --from-blob names
 	$(PYTHON) tools/c-corpus-harness.py --from-blob nameless

@@ -7,8 +7,8 @@
 # Round-trips: the encoder writes U+0080..U+00FF as the byte of the same number and pads
 # with 0x00 (PS-537), so each payload below re-encodes to itself.
 #
-# The C interpreter holds text as a C string, so it stops at the first 0x00 and reports
-# a high byte as itself; both are recorded C gaps, and its harness skips this file.
+# The C interpreter reports the length beside the text, so the interior 0x00 is kept, and
+# flags a high byte for the warning; its harness reads this file.
 name: probe_ascii_latin1
 endian: big
 fields:

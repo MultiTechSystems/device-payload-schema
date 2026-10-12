@@ -220,8 +220,8 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2690 payload vectors in `schemas/devices/` (measured 2026-10-11 with
-`tools/check-floors.py`, after the CR-2026-118 and CR-2026-124 fixtures, CR-2026-117's
+The 2695 payload vectors in `schemas/devices/` (measured 2026-10-11 with
+`tools/check-floors.py`, after match-fractional-discriminator, the CR-2026-118 and CR-2026-124 fixtures, CR-2026-117's
 guard-absent-operand, the `match-u32-*` and names-mangling-alike fixtures, CR-2026-127's
 guard-boolean-operand, the CR-2026-121 and CR-2026-123 fixtures, CR-2026-110's,
 CR-2026-125's and CR-2026-128's tlv-repeat-* fixtures, the mutation-gate vector in
@@ -232,11 +232,11 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 2084 |
-| Go | `go/schema/corpus_conformance_test.go` | 2690 | 2101 (plain API 2076) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2690 | 2085 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2690 | 2084 |
-| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 554 of 554 attempted | n/a |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2101 |
+| Go | `go/schema/corpus_conformance_test.go` | 2695 | 2119 (plain API 2092) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2695 | 2102 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2695 | 2101 |
+| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 569 of 569 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
 its own implementation's actual; trust it over this table.
@@ -449,8 +449,8 @@ rather than the comments, which claim more than the code does (`definitions`, `$
   `bytes`, `string`/`ascii`, `hex`, `base64`, `udec`/`sdec`, `enum`, `match`,
   `skip`, the bracket bitfield range, `lookup`, `var`/`$var`, `consume`,
   per-field `endian`, and the three bare modifiers.
-- **Lacks**: `object` and `byte_group` (both are `field_type_t` values, and `object`
-  is even parsed from its name, but neither has a decode path), `compute`, `polynomial`, `guard`, `ref`, `formula`, the whole
+- **Lacks**: `object` (a `field_type_t` value, even parsed from its name, with no
+  decode path; `byte_group` had none either until the C-interpreter wave), `compute`, `polynomial`, `guard`, `ref`, `formula`, the whole
   `transform` array (so no `round`, `sqrt`, `log`, `pow`, and no multi-stage),
   `name_from`, `tlv`, `flagged`, `repeat`/`until`/`count`/`byte_length`,
   `bitfield_string`, `number`, `version_string`, `definitions`/`$ref`, `ports`,
@@ -494,8 +494,14 @@ success:
 3. **The TS013 envelope** `{data, warnings, errors}`.
 
 **There is no YAML->JSON C interpreter yet, and the JSON writer that exists is
-unsafe.** `bindings/c/schema_ffi.c` has `schema_create_yaml()`, but its body is
-`(void)yaml_str; return NULL;` — a declared stub. `result_to_json()` is real, and it
+unsafe.** `bindings/c/schema_ffi.c` has `schema_ffi_create_yaml()`, but its body is
+`(void)yaml_str; return NULL;` — a declared stub. The FFI did not compile for a time
+(its `schema_decode` collided with the interpreter header's, and it called a
+`schema_decode_payload` that never existed); every export now carries a `schema_ffi_`
+prefix (`schema_ffi_decode`, `schema_ffi_result_get_field_int`, ...) and its macros
+`SCHEMA_FFI_*`, the Python/Go/Node consumers follow, and `make test-c` builds it with
+`-Wall -Wextra -Werror` and decodes a payload through it (`src/test_ffi.c`).
+`schema_ffi_result_to_json()` is real, and it
 formats floats with `%g`, which silently destroys precision: 115020.68221552655 prints
 as `115021`, 22.028848392450755 as `22.0288`, and the identifier 20228605 as
 `2.02286e+07`. Do not build on it. Matching JavaScript needs the shortest
@@ -810,10 +816,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2084 |
-| Go | `go/schema/corpus_encode_test.go` | 2101 (plain 2076) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2084 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2085 |
+| Python | `tests/test_encode_round_trip.py` | 2101 |
+| Go | `go/schema/corpus_encode_test.go` | 2119 (plain 2092) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2101 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2102 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -1994,9 +2000,9 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     base reaches past the end, which is what all five named until this change, with the
     need form where only the group's `size` did not fit. One helper per language:
     `byte_group_label` (Python; the TS013 generator calls it), Go `byteGroupLabel`, Java
-    `BufferUnderflow.byteGroupLabel`, C# `BufferUnderflowException.ByteGroupLabel`. C has
-    no byte_group decode path (`FIELD_TYPE_BYTE_GROUP` is an enum value only), so there is
-    nothing to name there.
+    `BufferUnderflow.byteGroupLabel`, C# `BufferUnderflowException.ByteGroupLabel`, and C's
+    `byte_group_underflow` since its byte_group decode path landed in the C-interpreter
+    wave.
   - Unchanged, as PS-535 excepts them: `remaining`, PS-403's optional message, PS-477/486
     for a tlv entry, and PS-343's ragged tail for an `until: end` element.
   - Found on the way: Go's `bool` discarded its `consume` read's error, and Python and the
@@ -2028,10 +2034,10 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     `encodeASCII` (Go, `cr114_115.go`), Java `Encoder.encodeAscii` and the ascii case of
     `Schema.decodeFieldBody`, C# `Helpers.DecodeAscii`/`EncodeAscii`, TS013 `encField` in
     `ENCODER_RUNTIME_JS`.
-  - **C holds text as a C string**, so it stops at the first 0x00 and reports a high byte as
-    itself, and it cannot encode `ascii` at all: PS-534, PS-538 and PS-537 are C gaps. The
-    harness skips a schema whose vectors expect such text as an interpreter gap
-    (`expects_text_c_cannot_hold`), which today is `ascii-latin1.yaml` alone.
+  - **C has it too, since the C-interpreter wave** (see "The C interpreter is measured
+    now" under Current gaps): `decoded_field_t.text_len` carries the length, so an interior
+    0x00 is kept, and `non_ascii` is the PS-073 warning as a flag. The harness no longer
+    skips `ascii-latin1.yaml`; it passes all four vectors, warnings included.
   - No corpus vector relied on U+FFFD, `?`, raw bytes or truncation: every implementation's
     counts rose by exactly the new fixture's four vectors. Fixture: `ascii-latin1.yaml`
     (high bytes, interior 0x00, all 0x00, each round-tripping).
@@ -2052,7 +2058,8 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   runtime. **Overlap is now counted in the group's assembled value** (PS-364) in all four;
   it was counted most-significant-first within each member's own base, which disagreed with
   every decoder for members of different widths, and C# skipped signed ranges entirely. C
-  has no byte_group decode path, so this is a C gap like the construct itself. **No corpus,
+  checks the same, in `byte_group_width`, since its byte_group path landed in the
+  C-interpreter wave. **No corpus,
   library, example or registry schema is rejected or changes decode** (registry yabby-edge
   was rewritten as one 8-byte group, 69e1023). Fixture: `byte-group-width.yaml`.
 - **CR-2026-142 (PS-555): the binary schema form carries its names.** `schema_load_binary`
@@ -2065,7 +2072,7 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   0 only for a skip; `skip` moved to type code 0x7, so it has a record at all. Without the
   table (`--no-names`, `encode_schema(names=False)`) the C loader sets `schema_t.nameless`,
   every name stays empty, values are reached with `result_get_index()` by schema index,
-  and `result_to_json()` refuses. `SCHEMA_MAX_NAME_LEN` (32, so 31 bytes) is a load error
+  and `schema_ffi_result_to_json()` refuses. `SCHEMA_MAX_NAME_LEN` (32, so 31 bytes) is a load error
   naming the field, never a truncation; the encoder refuses the same, and a count over
   127. `schema_load_binary_msg()` gives the reason for any refusal. `make test-c`'s
   harness runs either form with `--from-blob names|nameless` and requires the reference's
@@ -2379,6 +2386,57 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   `IdentityHashMap`s and C#'s `ReferenceEqualityComparer` tables hold their keys and were
   never affected. `tests/test_identity_tables.py` reproduces each Python leak.
 
+- **CR-2026-146 (PS-169 amended, la-payload-schema main, merge 65701a0, for 0.5.5): a label
+  several codes share cannot be encoded.** Decoding is unaffected. An encoder given a label
+  that two or more codes of a lookup (mapping or sequence) or an enum share rejects it:
+  `Field '{name}': the label {label} is shared by codes [{a}, {b}], so it cannot be encoded
+  (PS-169)`, codes ascending, a text label in single quotes, a boolean `true`/`false`, a
+  number as JavaScript's String(number). A code given as a number still encodes. Every
+  encoder wrote a guess - Python, Java, C# and the runtime the first code declared, Go the
+  smallest. A caller that only ranks candidate cases (`_case_fidelity`, Go
+  `reverseLookupAnyCode`/`rawForField`, Java and C# `ReverseLookup` without a name) takes
+  the smallest code instead of rejecting; the field's own encoding rejects. The validator
+  warns of a shared label on any field that is not computed (`shared_labels`), which in
+  the corpus is vobo alone (104 warnings, through its YAML anchors). C's encoder takes
+  native values only, so neither applies to it. `encode-round-trip.py` files the
+  rejection as `shared-label`, read per vector from the encoder's error. Shared cases:
+  `tests/cr-2026-146-cases.yaml`, read by `test_cr_2026_146_shared_labels.py` (reference
+  and runtime), Go `cr146_test.go`, Java `CR2026146Test`, C# `CR2026_146Tests`.
+  - **An enum encodes a name as its code and a code as given** (PS-067); a name with no
+    code, the `default` label among them, is `Field '{name}': '{label}' is not a name of
+    the enum (PS-067)`, the prototype's text. Measured before: Python named the base
+    field `'None'` in its PS-168 text and still read `unknown(N)`; **Go wrote a code past
+    the base wrapped and silently (300 as `2c`) and wrote every non-`u8` base as one
+    byte** (`length` is 1 for an enum - 70000 under `u16` came out `70`); Java and C#
+    said `300 does not fit 1 unsigned bytes`, naming no field. All five now give PS-168's
+    text naming the enum and write the base's width; Go's decode shares `enumBaseWidth`,
+    which adds `u24`/`s24`.
+  - **Corpus:** -4 deliberately, all `tlv`: vobo `mutant_p32_01`, `mutant_p112_01`
+    (`AnalogSensor36` is codes 36, 100, 164, 228), `two_analog_xp_all` and
+    `two_analog_xx_ain3` (`%` is 57 and 170) round-tripped only because the first code
+    found was the one in the payload. The ten `mutant_p*_03..07` already failed and now
+    fail with the PS-169 text. Identical sets in Python and Go (diffed).
+- **PS-168 for `udec`/`sdec`, and a fractional match discriminator.**
+  - `udec`/`sdec` now reject in PS-168's form, `Field 'v': 123.5 encodes as 123.5,
+    outside 0 to 15.9 (PS-168)`, the encoded value given to tenths and the range what one
+    byte holds with tenths 0 to 9: 0 to 15.9, or -8 to 7.9 (`check_nibble_decimal`).
+    Python, Go, Java, C# and the runtime said `does not fit udec` in four spellings; **C
+    clamped silently** - udec 123.5 wrote `0x95`, and any udec of 10 or more wrote 9.x.
+    Java rounded the tenths half up; all round half to even now. Cases in
+    `tests/cr-2026-135-cases.yaml`, and C's `test_a_nibble_decimal_that_does_not_fit_is_named`.
+  - A discriminator with a fraction (one taken from a field whose arithmetic leaves one)
+    matches no single key and no list member; an inclusive range `lo..hi` still holds it,
+    as the reference and the spec prototype read PS-152. **Go, Java and C# decoded 2.5 as
+    case 2** (`toInt`, `asLong`, `ToLong` truncate), and on encode Go truncated while Java
+    and C# rounded half to even, so a schema whose `default` should apply wrote case 2's
+    fields. Java and C#'s encoders also never matched an integral discriminator against a
+    `lo..hi` key; they do now. Python and the runtime compared by value already.
+    `_language-conformance/match-fractional-discriminator.yaml` (5 vectors) holds all five
+    to it; decode floors 2690 -> 2695, `match` +5 everywhere.
+  - **Floors:** Python and Java 2100 -> 2101 (`match` 142 -> 147, `tlv` 1559 -> 1555), C#
+    2101 -> 2102 (`tlv` 1560 -> 1556), Go ordered 2118 -> 2119 (`tlv` 1577 -> 1573), plain
+    2091 -> 2092; decode 2690 -> 2695 in Go, Java and C#.
+
 ## Converting a vendor codec
 
 The converters in `tools/` (`convert_decentlab.py`, `convert_milesight.py`) do the
@@ -2581,13 +2639,79 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   (CR-2026-032).** `make test-c` builds the three previously-orphaned C test files and runs
   `tools/c-corpus-harness.py`, which generates C that builds each expressible corpus schema
   through the struct API, compiles it, and compares the decode against the vectors.
-  **550 of 550 attempted vectors pass** (2026-10-10) since CR-2026-033 added `tlv` and CR-2026-034
+  **569 of 569 attempted vectors pass** (2026-10-13) since CR-2026-033 added `tlv` and CR-2026-034
   `flagged` (it was 50 of 50 before either). 751 of 1239 are still in schemas the struct API
   cannot build - 26 use a `transform` chain, 24 a `bitfield_string`, 15 more cases than
   `SCHEMA_MAX_CASES` allows, 3 `repeat`, 3 a `u32le16` **the interpreter has and the harness
   has no constructor for**. The report names which side each limit is on, and that
   distinction is load-bearing: `no constructor for type 'u32le16'` used to read as a C gap
   when C decodes it perfectly well.
+
+  **The C-interpreter wave (2026-10-11)** closed these, one PR each; the figures are the
+  harness's at each step (struct API / `--from-blob names` / `--from-blob nameless`):
+  - **Multi-byte and signed bit ranges (CR-2026-136; PS-059, PS-352, PS-353, PS-365)**:
+    554 -> 556 attempted, all passing (`wide-bit-range.yaml`); blob 64/64 unchanged. A
+    range was read from one byte, unsigned, whatever its type said, and the harness built
+    every `uN[...]` that way too. Now `field_def_t.size` is the base's bytes (0 is 1), read
+    in the field's effective byte order; `bit_signed` (in what was padding, so
+    `sizeof(field_def_t)` is unchanged) sign-extends from the range's width; and
+    `consume` is a byte count (`consume: 2` advances two), which it already was in the
+    YAML. `field_bit_range(name, base_bytes, signed, start, width, consume, endian)`
+    builds one; `field_bits` keeps its one-byte meaning. A bit range now reports through
+    the integer member (it was tagged `FIELD_TYPE_F64` though nothing scaled it). Encode
+    ORs the range into its base in the same byte order, checks an `sN` range against
+    -2^(w-1)..2^(w-1)-1 and names `s16[12:15]` in the PS-168 text, and the PS-551 peek
+    bookkeeping in `schema_encode` holds a mask in the base's bit space, so a peek spans
+    its base's bytes. A short base is PS-535's peek message, a short `consume` its need
+    message, as the reference words them. A full `u64[0:63]` past 2^63 is
+    `SCHEMA_ERR_UNSUPPORTED` (no int64 holds it). **The binary form refuses both**: its
+    bitfield record carries a start and a width, its base is one unsigned byte, and its
+    consume marker is one byte, so `tools/schema_binary.py` now names a wide or signed base
+    and a `consume` above 1 rather than writing something that decodes differently; the
+    loader sets a bitfield's `size` to its one-byte base (the record's size nibble is the
+    width). `bit-range-order.yaml` still waits on `byte_group`.
+
+  **The C-interpreter wave (2026-10-11)** closed these, one PR each; the figures are the
+  harness's at each step (struct API / `--from-blob names` / `--from-blob nameless`):
+  - **`byte_group` (CR-2026-131, CR-2026-137; PS-063, PS-070, PS-364, PS-365, PS-397,
+    PS-535)**: 556 -> 565 attempted, all passing (`wide-group`, `byte-group-width`,
+    `byte-group-bool`, `bit-range-order`); blob 64/64 unchanged. `FIELD_TYPE_BYTE_GROUP`
+    was an enum value with no decode or encode path. Built with
+    `field_byte_group(size, endian, member_start, member_count)`, its members placed above
+    `field_count` (`nested_start`/`nested_count`, which nothing used). The group is one
+    value of `size` bytes, or its widest member's base where 0, assembled in its own byte
+    order; each member - a bit range of any base, a whole integer, a `bool` at bit 0-7 -
+    is decoded as a bit range of that value through `decode_field`, so its sign,
+    modifiers, lookup and variable apply as any field's. Load-time rules are checked at
+    decode and encode, with the reference's text: a `size` narrower than a member, a `bool`
+    past bit 7, an overlap (PS-397), and PS-535's "byte_group of 'a', 'b'" for a short
+    read. Encode checks each member as the member it is (PS-168 names `s8`, not the
+    group), ORs it into the group's value, writes the value once, zero where no member
+    names bits; a member left out is "Missing required field", an internal one PS-434's
+    error. The top-level loop, a tlv case and a flagged group all dispatch it; the harness
+    builds a top-level group only (two schemas with one nested in a case body are a harness
+    limit, said so). This branch carries the multi-byte/signed bit range header change
+    verbatim, since members use its base helpers. **The binary form has no byte_group
+    record** and still refuses one. `sizeof(schema_t)` unchanged at 52536.
+
+  **The C-interpreter wave (2026-10-11)** closed these, one PR each; the figures are the
+  harness's at each step (struct API / `--from-blob names` / `--from-blob nameless`):
+  - **`ascii` (CR-2026-114, PS-534, PS-537, PS-538)**: 554 -> 558 attempted, all passing;
+    blob 64/64 unchanged. Decode keeps an interior 0x00 (`decoded_field_t.text_len`; the
+    C string in `value.str` stops early, the value does not), reports each byte as itself -
+    ISO 8859-1, so a JSON writer maps 0x80-0xFF to U+0080-U+00FF - and raises
+    `decoded_field_t.non_ascii` for PS-073's warning, which the harness renders. A value
+    longer than 31 bytes after its padding is `SCHEMA_ERR_UNSUPPORTED` naming the field,
+    never truncated as it was. Encode, which had no `ascii` case at all, takes text through
+    `encode_inputs_add_text(inputs, name, bytes, len)` (or `_add_string`): Latin-1 bytes,
+    the form decode reports, so a decoded value re-encodes to its bytes. It pads with 0x00,
+    rejects a value longer than `length` with PS-537's message, and sets
+    `encode_result_t.non_ascii` for its warning. A character above U+00FF cannot be put
+    in that input, so PS-537's rejection of one belongs to whatever converts Unicode text
+    to it (a gateway's JSON reader). Text for a numeric field, and a number for an `ascii`
+    one, are `SCHEMA_ERR_TYPE`. **The binary form still refuses `ascii`**: its type code
+    `bytes` is shared with `hex` and `bytes`, every code 0-7 is taken, and a new one would
+    be a format version - not invented here.
 
   **The C-interpreter wave (2026-10-11)** closed these, one PR each; the figures are the
   harness's at each step (struct API / `--from-blob names` / `--from-blob nameless`):

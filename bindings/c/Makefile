@@ -58,7 +58,7 @@ all: linux macos
 # Quick test
 test: $(LIBNAME)
 	@echo "Testing library load..."
-	@python3 -c "import ctypes; lib = ctypes.CDLL('./$(LIBNAME)'); print('Version:', lib.schema_version().decode())"
+	@python3 -c "import ctypes; lib = ctypes.CDLL('./$(LIBNAME)'); print('Version:', lib.schema_ffi_version().decode())"
 	@echo "Test passed!"
 
 # Install to system (Linux)
