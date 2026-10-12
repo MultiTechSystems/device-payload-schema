@@ -7120,6 +7120,17 @@ class SchemaInterpreter:
         if matched_fields is None:
             matched_key, matched_fields = self._case_fields_present(cases, data)
 
+        label = match_name or match_def.get('var') or 'match'
+        if matched_fields is None and discriminator is None and length is not None:
+            # CR-2026-151 (PS-551 editorial): a nested match reading this discriminator,
+            # with exactly one case the input fills, fixes it (Netvox r718n3's
+            # report_type, which only its `default` branch's nested match reads).
+            nested = self._nested_discriminator(match_def, data, label)
+            if nested is not None:
+                discriminator, matched_key, matched_fields = nested
+                if match_def.get('var'):
+                    data = dict(data, **{match_def['var']: discriminator})
+
         if matched_fields is None:
             if isinstance(default, list):
                 matched_fields = default
@@ -7136,8 +7147,9 @@ class SchemaInterpreter:
             elif length is not None and discriminator is None:
                 # PS-551: an inline discriminator the input neither gives nor fixes
                 # through a case's fields. This returned no bytes at all, dropping the
-                # discriminator's own (PS-442).
-                raise ValueError(missing_field_message(match_name or 'match'))
+                # discriminator's own (PS-442). Named by the discriminator, its `var`
+                # where it has no `name` (CR-2026-151), not as "match".
+                raise ValueError(missing_field_message(label))
             else:
                 # 'skip': the discriminator, and nothing for the case.
                 matched_fields = []
@@ -7147,14 +7159,97 @@ class SchemaInterpreter:
             value = discriminator
             if value is None:
                 if matched_key is None:
-                    raise ValueError(missing_field_message(match_name or 'match'))
+                    raise ValueError(missing_field_message(label))
                 value = self._exact_case_value(matched_key)
                 if value is None:
                     raise ValueError(
                         f"match case {matched_key!r} names no single discriminator value")
+            # PS-168: a discriminator, given or derived, fits the bytes it is written
+            # in.
+            low, high = integer_bounds(int(length), False)
+            check_fits(round_to_integer(value), low, high, label, value)
             out.extend(int(value).to_bytes(int(length), byteorder))
         body = self._encode_field_list(matched_fields, data)
         return prefixed_frame(bytes(out), body)
+
+    def _nested_discriminator(self, match_def, data, label):
+        """CR-2026-151 (PS-551 editorial): the value a nested match fixes for this
+        match's discriminator, as (value, case key or None for `default`, branch
+        fields), or None
+        where no nested match reading it has a case the input fills.
+
+        The input fixes the discriminator where it fills exactly one case among the
+        nested matches that read it, that case's key is a single value, and the value
+        selects, in this match and in every match between, the branch holding the nested
+        match. Where the input fills a case of such a match but any of that fails -
+        several filled cases, a list or range key, a value selecting another branch -
+        the input is rejected, naming the discriminator.
+        """
+        names = {match_def.get('var'), match_def.get('name')} - {None}
+        if not names:
+            return None
+        cases = match_def.get('cases', {}) or {}
+        branches = [(k, v) for k, v in cases.items()
+                    if k != 'default' and isinstance(v, list)]
+        fallback = match_def.get('default')
+        if not isinstance(fallback, list) and isinstance(cases.get('default'), list):
+            fallback = cases['default']
+        if isinstance(fallback, list):
+            branches.append(('default', fallback))
+
+        def names_of(fields):
+            return {f['name'] for f in fields
+                    if isinstance(f, dict) and f.get('name')
+                    and not str(f['name']).startswith('_')
+                    and f.get('type') not in COMPUTED_TYPES}
+
+        filled = []      # (path of (match, branch key) reading it, filled case key)
+
+        def walk(fields, path):
+            for f in fields or []:
+                if not isinstance(f, dict) or not isinstance(f.get('match'), dict) \
+                        or f.get('type'):
+                    continue
+                inner = f['match']
+                reads = str(inner.get('field') or '').lstrip('$') in names
+                inner_cases = inner.get('cases', {}) or {}
+                bodies = [(k, v) for k, v in inner_cases.items()
+                          if k != 'default' and isinstance(v, list)]
+                if isinstance(inner.get('default'), list):
+                    bodies.append(('default', inner['default']))
+                # A case is filled where the input gives every one of its fields and
+                # nothing any other case of this match declares beyond them: Netvox
+                # r718n3's case 3 holds the fields of cases 1 and 2 together.
+                declared = [names_of(b) for k, b in bodies if k != 'default']
+                given = set().union(*declared) & set(data) if reads else set()
+                for key, body in bodies:
+                    own = names_of(body)
+                    if reads and key != 'default' and own and own <= set(data) \
+                            and given <= own:
+                        filled.append((path, key))
+                    walk(body, path + ([(inner, key)] if reads else []))
+
+        for key, body in branches:
+            walk(body, [(match_def, key)])
+        if not filled:
+            return None
+        if len(filled) != 1:
+            raise ValueError(missing_field_message(label))
+        path, case_key = filled[0]
+        value = self._exact_case_value(case_key)
+        if value is None:
+            raise ValueError(missing_field_message(label))
+        for enclosing, branch_key in path:
+            selected = 'default'
+            for key, body in (enclosing.get('cases', {}) or {}).items():
+                if key != 'default' and self._match_case_pattern(value, key):
+                    selected = key
+                    break
+            if selected != branch_key:
+                raise ValueError(missing_field_message(label))
+        outer_key = path[0][1]
+        body = dict(branches)[outer_key]
+        return value, (None if outer_key == 'default' else outer_key), body
 
     def _encode_tlv_tag(self, case_key: Any, tlv_def: Dict[str, Any]) -> bytes:
         """Rebuild a TLV tag from the case key that matched it while decoding.

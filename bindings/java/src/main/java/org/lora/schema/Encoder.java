@@ -1212,6 +1212,30 @@ final class Encoder {
             // be recovered from which of its fields the data carries.
             matched = casePresent(cases, data);
         }
+        String label = name != null && !name.isEmpty() ? name
+                : match.getVar() != null && !match.getVar().isEmpty() ? match.getVar() : "match";
+        if (matched == null && fallbackFields == null && discriminator == null
+                && match.getLength() > 0) {
+            // CR-2026-151 (PS-551 editorial): a nested match reading this discriminator,
+            // with exactly one case the input fills, fixes it.
+            Object[] nested = nestedDiscriminator(match, data, label);
+            if (nested != null) {
+                discriminator = nested[0];
+                if (nested[1] instanceof Field.Case c) matched = c;
+                else fallbackFields = (List<Field>) nested[2];
+                if (match.getVar() != null && !match.getVar().isEmpty()) {
+                    Map<String, Object> withVar = new LinkedHashMap<>(data);
+                    withVar.put(match.getVar(), discriminator);
+                    data = withVar;
+                }
+            }
+        }
+        if (matched == null && fallbackFields == null && discriminator == null
+                && match.getMatchDefault() instanceof List<?> declared) {
+            // The `default:` beside `cases`, taken as the reference takes it where nothing
+            // in the input belongs to a case; its discriminator is then missing, below.
+            fallbackFields = (List<Field>) declared;
+        }
         if (matched == null && fallbackFields == null) {
             for (Field.Case c : cases) {
                 if (c.isDefault()) {
@@ -1234,7 +1258,7 @@ final class Encoder {
                 // PS-551: an inline discriminator the input neither gives nor fixes through
                 // a case's fields. This returned no bytes at all, dropping the
                 // discriminator's own (PS-442).
-                throw new MissingFieldException(name != null ? name : "match");
+                throw new MissingFieldException(label);
             }
             // 'skip': the discriminator, and nothing for the case.
             fallbackFields = List.of();
@@ -1243,8 +1267,12 @@ final class Encoder {
             ByteBuf fallbackOut = new ByteBuf();
             if (match.getLength() > 0) {
                 Long value = asLong(discriminator);
-                fallbackOut.write(writeInt(value == null ? 0 : value,
-                        match.getLength(), false));
+                // A `default` stands for every unlisted value, so it names none to write;
+                // a zero was written here (PS-551).
+                if (value == null) throw new MissingFieldException(label);
+                long[] db = integerBounds(match.getLength() * 8, false);
+                checkFits(value, db[0], db[1], label, discriminator);              // PS-168
+                fallbackOut.write(writeInt(value, match.getLength(), false));
             }
             byte[] body = encodeFieldList(fallbackFields, data);
             Integer tail = carriedTail.remove(body);
@@ -1258,7 +1286,7 @@ final class Encoder {
             Long value = asLong(discriminator);
             if (value == null) {
                 if (matched.isDefault()) {
-                    throw new MissingFieldException(name != null ? name : "match");
+                    throw new MissingFieldException(label);
                 }
                 Object key = matched.getCaseValue();
                 Long fromKey = key == null ? null : parseIntAny(String.valueOf(key));
@@ -1268,6 +1296,8 @@ final class Encoder {
                 }
                 value = fromKey;
             }
+            long[] db = integerBounds(match.getLength() * 8, false);
+            checkFits(value, db[0], db[1], label, discriminator == null ? value : discriminator);
             out.write(writeInt(value, match.getLength(), false));
         }
         byte[] body = encodeFieldList(matched.getFields(), data);
@@ -1276,6 +1306,119 @@ final class Encoder {
         out.write(body);
         // The body's unconsumed tail stays pending in the enclosing list (CR-2026-136).
         return carrying(prefixed(prefix, body, out.toArray()), tail == null ? 0 : tail);
+    }
+
+    /**
+     * CR-2026-151 (PS-551 editorial, on spec main, not yet applied): the value a nested
+     * match fixes for this match's discriminator, as {value, the outer case or null, the
+     * `default` fields}, or null where no nested match reading it has a case the input
+     * fills. The input fixes it where it fills exactly one such case, whose key is a single
+     * value selecting, in this match and in every match between that reads it, the branch
+     * holding the nested match; otherwise it is rejected, naming the discriminator. Mirrors
+     * the reference's {@code _nested_discriminator}.
+     */
+    @SuppressWarnings("unchecked")
+    private static Object[] nestedDiscriminator(Field match, Map<String, Object> data, String label) {
+        Set<String> names = new HashSet<>();
+        if (match.getVar() != null && !match.getVar().isEmpty()) names.add(match.getVar());
+        if (match.getName() != null && !match.getName().isEmpty()) names.add(match.getName());
+        if (names.isEmpty()) return null;
+        // A step is {the match, the branch taken: a Case, or null for the default beside}.
+        List<Object[]> filled = new ArrayList<>();   // {path, filled case}
+        List<Object[]> start = new ArrayList<>();
+        java.util.function.BiConsumer<List<Field>, List<Object[]>>[] walk = new java.util.function.BiConsumer[1];
+        walk[0] = (fields, path) -> {
+            if (fields == null) return;
+            for (Field f : fields) {
+                Field inner = f.getMatchInline();
+                if (inner == null) continue;
+                String on = inner.getOn() == null ? "" : inner.getOn().replaceFirst("^\\$+", "");
+                boolean reads = !on.isEmpty() && names.contains(on);
+                Set<String> given = new HashSet<>();
+                if (reads && inner.getCases() != null) {
+                    for (Field.Case c : inner.getCases()) {
+                        if (c.isDefault()) continue;
+                        for (String n : namesOf(c.getFields())) if (data.containsKey(n)) given.add(n);
+                    }
+                }
+                if (inner.getCases() != null) {
+                    for (Field.Case c : inner.getCases()) {
+                        List<Object[]> next = path;
+                        if (reads) {
+                            if (!c.isDefault() && caseFilled(namesOf(c.getFields()), given, data)) {
+                                filled.add(new Object[] {path, c});
+                            }
+                            next = new ArrayList<>(path);
+                            next.add(new Object[] {inner, c});
+                        }
+                        walk[0].accept(c.getFields(), next);
+                    }
+                }
+                if (inner.getMatchDefault() instanceof List<?> fb) {
+                    List<Object[]> next = path;
+                    if (reads) {
+                        next = new ArrayList<>(path);
+                        next.add(new Object[] {inner, null});
+                    }
+                    walk[0].accept((List<Field>) fb, next);
+                }
+            }
+        };
+        if (match.getCases() != null) {
+            for (Field.Case c : match.getCases()) {
+                List<Object[]> path = new ArrayList<>();
+                path.add(new Object[] {match, c});
+                walk[0].accept(c.getFields(), path);
+            }
+        }
+        if (match.getMatchDefault() instanceof List<?> fb) {
+            List<Object[]> path = new ArrayList<>();
+            path.add(new Object[] {match, null});
+            walk[0].accept((List<Field>) fb, path);
+        }
+        if (filled.isEmpty()) return null;
+        if (filled.size() != 1) throw new MissingFieldException(label);
+        List<Object[]> path = (List<Object[]>) filled.get(0)[0];
+        Field.Case filledCase = (Field.Case) filled.get(0)[1];
+        Long value = exactCaseValue(filledCase.getCaseValue());
+        if (value == null) throw new MissingFieldException(label);
+        for (Object[] step : path) {
+            Field enclosing = (Field) step[0];
+            Field.Case selected = null;
+            if (enclosing.getCases() != null) {
+                for (Field.Case c : enclosing.getCases()) {
+                    if (!c.isDefault() && caseMatches(value, c.getCaseValue())) {
+                        selected = c;
+                        break;
+                    }
+                }
+                if (selected == null && step[1] != null && ((Field.Case) step[1]).isDefault()) {
+                    selected = (Field.Case) step[1];      // an in-cases default
+                }
+            }
+            if (selected != step[1]) throw new MissingFieldException(label);
+        }
+        Object outer = path.get(0)[1];
+        if (outer instanceof Field.Case c) return new Object[] {value, c, null};
+        return new Object[] {value, null, match.getMatchDefault()};
+    }
+
+    private static List<String> namesOf(List<Field> fields) {
+        List<String> out = new ArrayList<>();
+        if (fields == null) return out;
+        for (Field f : fields) if (payloadName(f) != null) out.add(f.getName());
+        return out;
+    }
+
+    /**
+     * A case is filled where the input gives every one of its fields and nothing any other
+     * case of its match declares beyond them (Netvox r718n3's case 3 holds the fields of
+     * cases 1 and 2 together).
+     */
+    private static boolean caseFilled(List<String> own, Set<String> given, Map<String, Object> data) {
+        if (own.isEmpty()) return false;
+        for (String n : own) if (!data.containsKey(n)) return false;
+        return own.containsAll(given);
     }
 
     /** The case whose fields the data carries most of, or null. */
