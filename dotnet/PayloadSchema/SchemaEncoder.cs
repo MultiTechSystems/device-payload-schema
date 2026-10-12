@@ -1395,6 +1395,12 @@ public static class SchemaEncoder
                 return claims.All(c => c.optional || whole.ContainsKey(c.field.Name))
                     && whole.Keys.All(every.Contains);
             }
+            // A mapping is no value for a scalar field, nor a non-mapping for an object: one
+            // name may be an object under one tag and a number under another.
+            bool isMap = value is Dictionary<string, object?>;
+            if (isMap && f.Type != FieldType.Object && f.Type != FieldType.Repeat) return false;
+            if (f.Type == FieldType.Object && !isMap
+                && !(modes.TryGetValue(name, out var mode) && mode == "merge")) return false;
             return CaseFidelity(new List<SchemaField> { f },
                 new Dictionary<string, object?> { [name] = value }).lossless;
         }

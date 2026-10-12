@@ -232,10 +232,10 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 2101 |
-| Go | `go/schema/corpus_conformance_test.go` | 2695 | 2119 (plain API 2092) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2695 | 2102 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2695 | 2101 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2103 |
+| Go | `go/schema/corpus_conformance_test.go` | 2697 | 2121 (plain API 2094) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2697 | 2104 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2697 | 2103 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 569 of 569 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -816,11 +816,27 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2101 |
-| Go | `go/schema/corpus_encode_test.go` | 2119 (plain 2092) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2101 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2102 |
+| Python | `tests/test_encode_round_trip.py` | 2103 |
+| Go | `go/schema/corpus_encode_test.go` | 2121 (plain 2094) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2103 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2104 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
+
+- **A name may be an object under one tag and a scalar under another, and a tlv encoder
+must not offer one's value to the other.** sensative/strips reports `temperature` as
+`{value: ...}` from tag 2 and as a plain `s16` from tag 80. `fits` accepted any value for
+a scalar field, because `_case_fidelity` checks only numbers, so a mapping reached
+`round_to_integer` and the encode failed `Error encoding tlv: float() argument must be a
+string or a real number, not 'dict'` (and a number offered to an object case wrote
+`Missing required field`). A mapping now fits only an `object` or `repeat` field and an
+object takes only a mapping (unless merged), in Python, the TS013 runtime, Go, Java and
+C#; Go and the runtime already refused it by accident or crashed differently (runtime:
+`cannot encode {"value":5} as an integer`; Java and C# round-tripped one of the two
+fixture vectors only). C has no object. Fixture `tlv-name-object-and-scalar.yaml`: decode
+floors +2 and re-encode +2 everywhere (Python, Java 2101 -> 2103, C# 2102 -> 2104, Go
+2119 -> 2121, plain 2092 -> 2094; `tlv` +2). The registry's strips `vendor_codec_1_0002016402ff3803`
+no longer crashes (it re-encodes to a different, valid layout that decodes back to the
+same values); `..._0006160405fc` is a separate gap.
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
 from `tools/schema_interpreter.py`. Read that one first when changing any of them.

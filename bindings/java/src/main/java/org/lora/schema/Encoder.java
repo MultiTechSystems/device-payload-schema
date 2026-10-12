@@ -1672,6 +1672,12 @@ final class Encoder {
             }
             return true;
         }
+        // A mapping is no value for a scalar field, nor a non-mapping for an object: one name
+        // may be an object under one tag and a number under another (sensative/strips).
+        boolean isMap = value instanceof Map<?, ?>;
+        if (isMap && f.getType() != FieldType.OBJECT && f.getType() != FieldType.REPEAT) return false;
+        if (f.getType() == FieldType.OBJECT && !isMap
+                && !"merge".equals(modes.mode(payloadName(f)))) return false;
         Map<String, Object> one = new LinkedHashMap<>();
         one.put(payloadName(f), value);
         return caseFidelity(List.of(f), one).lossless();
