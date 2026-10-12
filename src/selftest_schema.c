@@ -1046,6 +1046,80 @@ static void test_a_covered_peek_is_derived(void) {
     }
 }
 
+/* PS-523 (CR-2026-109, CR-2026-132): a reference binds the value after the modifiers
+ * and before the lookup. A `flagged` mask is a reference, so it shows what was bound:
+ * bit 0 adds `a`, bit 1 adds `b` - mask-reference-binding.yaml's layout. */
+static int decode_masked(field_def_t mask, const uint8_t* p, size_t len, decode_result_t* r) {
+    schema_t s;
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_set_var(&mask, "mask");
+    schema_add_field(&s, &mask);
+    field_def_t fl = field_flagged("$mask");
+    field_add_flagged_group(&fl, 0, 2, 1);
+    field_add_flagged_group(&fl, 1, 3, 1);
+    schema_add_field(&s, &fl);
+    field_def_t a = field_u8("a");
+    field_def_t b = field_u8("b");
+    schema_place_field(&s, 2, &a);
+    schema_place_field(&s, 3, &b);
+    return schema_decode(&s, p, len, r);
+}
+
+static void test_a_text_label_binds_its_number(void) {
+    decode_result_t r;
+    field_def_t m = field_u8("mask");
+    field_add_lookup(&m, 2, "two");
+    const uint8_t p[] = {0x02, 0x07};
+    TCHECK(decode_masked(m, p, sizeof(p), &r) == SCHEMA_OK);
+    TCHECK(strcmp(result_get_string(&r, "mask"), "two") == 0);
+    TCHECK(result_get_field(&r, "a") == NULL);
+    TCHECK(result_get_int(&r, "b", -1) == 7);
+
+    /* A mapping with no entry omits the field and leaves the reference bound. */
+    const uint8_t q[] = {0x03, 0x07, 0x08};
+    TCHECK(decode_masked(m, q, sizeof(q), &r) == SCHEMA_OK);
+    TCHECK(result_get_field(&r, "mask") == NULL);
+    TCHECK(result_get_int(&r, "a", -1) == 7 && result_get_int(&r, "b", -1) == 8);
+}
+
+static void test_an_enum_binds_its_code(void) {
+    decode_result_t r;
+    field_def_t m = field_enum("mask", 1);
+    field_add_lookup(&m, 3, "both");
+    const uint8_t p[] = {0x03, 0x07, 0x08};
+    TCHECK(decode_masked(m, p, sizeof(p), &r) == SCHEMA_OK);
+    TCHECK(strcmp(result_get_string(&r, "mask"), "both") == 0);
+    TCHECK(result_get_int(&r, "a", -1) == 7 && result_get_int(&r, "b", -1) == 8);
+}
+
+static void test_a_reference_binds_the_modified_value(void) {
+    decode_result_t r;
+    field_def_t m = field_u8("mask");
+    field_set_div(&m, 2);
+    /* Raw 4 reports 2 and binds 2 - bit 1. Binding the raw 4 selected no group. */
+    const uint8_t p[] = {0x04, 0x07};
+    TCHECK(decode_masked(m, p, sizeof(p), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 2 && result_get_int(&r, "b", -1) == 7);
+
+    /* Raw 3 binds 1.5, which has no bits. */
+    const uint8_t q[] = {0x03, 0x07};
+    TCHECK(decode_masked(m, q, sizeof(q), &r) == SCHEMA_ERR_MATCH);
+    TCHECK(strcmp(r.error_msg, "flagged field mask is not an integer") == 0);
+
+    /* A zero divisor omits the field and leaves the reference unbound. */
+    field_def_t z = field_u8("mask");
+    field_set_div(&z, 0);
+    TCHECK(decode_masked(z, p, sizeof(p), &r) == SCHEMA_ERR_MATCH);
+    TCHECK(strcmp(r.error_msg, "flagged field reference not found: mask") == 0);
+
+    /* A float binds too; it returned before the variable was set. */
+    field_def_t f = field_f32("mask", ENDIAN_BIG);
+    const uint8_t fl[] = {0x40, 0x00, 0x00, 0x00, 0x07};   /* 2.0f */
+    TCHECK(decode_masked(f, fl, sizeof(fl), &r) == SCHEMA_OK);
+    TCHECK(result_get_int(&r, "b", -1) == 7);
+}
+
 /*
  * Main test entry point
  */
@@ -1093,6 +1167,9 @@ void selftest_schema(void) {
     test_bit_ranges_are_laid_out_as_decoded();
     test_a_missing_input_is_named();
     test_a_covered_peek_is_derived();
+    test_a_text_label_binds_its_number();
+    test_an_enum_binds_its_code();
+    test_a_reference_binds_the_modified_value();
 
     LOG(LOG_INFO, MOD, "Schema interpreter self-tests complete");
 }

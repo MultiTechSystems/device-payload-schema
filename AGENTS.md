@@ -2589,6 +2589,29 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   distinction is load-bearing: `no constructor for type 'u32le16'` used to read as a C gap
   when C decodes it perfectly well.
 
+  **The C-interpreter wave (2026-10-11)** closed these, one PR each; the figures are the
+  harness's at each step (struct API / `--from-blob names` / `--from-blob nameless`):
+  - **PS-523 binding (CR-2026-109, CR-2026-132)**: a `var_name` binds the value after
+    `mult`/`div`/`add` and before the lookup, in `finish_numeric`, the one place both
+    happen. Measured before: a text label and an enum already bound the number - C bound
+    the raw read, which is the same thing until a modifier is present - but a scaled field
+    bound its raw value (`div: 2` on raw 4 bound 4, not 2), a zero divisor (PS-100) left
+    the raw value bound where PS-523 leaves the reference unbound, and an `f16`/`f32`/
+    `f64`/`udec`/`sdec` never bound at all. `variable_t` now carries the binding as a
+    `double` beside the exact `int64_t`, with `integral`; a `match` compares only an
+    integral binding with its keys (a fraction reaches the default case alone, PS-524) and
+    a `flagged` mask with a fraction is `SCHEMA_ERR_MATCH`. A lookup reporting a number
+    binds that number under PS-523; C holds every label as text (PS-106, a known C gap),
+    so it has none to bind. **The harness count does not move** (554/64/64 before and
+    after): the corpus asks PS-523 of an implementation only through
+    `lookup-reference-binding.yaml`, `mask-reference-binding.yaml` and
+    `tag-component-reference-binding.yaml`, all port-based, and through inline `match`,
+    which the harness does not build - and C's `match` has no builder, decodes its case
+    bodies as counted fields (so the top-level loop walks them again), treats a zeroed
+    `match_list` as matching 0, and skips an unmatched value where the default
+    `default: error` (Match Default Handling) makes it an error. That construct is the next C item, not a harness tweak. Selftests cover the
+    four rules through a `flagged` mask.
+
   **A `flagged` construct's mask field must declare `var_name`.** This interpreter records a
   value in its variable table only where a field declares one, while a YAML `flagged` names a
   field - so the harness patches it in. `var_has()` exists so a missing reference is
