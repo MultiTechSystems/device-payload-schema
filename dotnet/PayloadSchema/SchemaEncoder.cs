@@ -132,7 +132,19 @@ public static class SchemaEncoder
             // Bit ranges sharing a byte are packed together rather than a byte apiece
             // (CR-2026-024), so the whole list is walked at once: a run cannot be found
             // by looking at one field in isolation.
-            output.AddRange(EncodeWithBitfieldRuns(_fields, data, topLevel: true));
+            var frame = EncodeWithBitfieldRuns(_fields, data, topLevel: true);
+            output.AddRange(frame);
+            if (_result.Errors.Count == 0)
+            {
+                try
+                {
+                    FrameMeta.Check(frame, MetaOf(frame));             // PS-551 (CR-2026-141)
+                }
+                catch (InvalidOperationException e)
+                {
+                    _result.Errors.Add(e.Message);
+                }
+            }
 
             // A rejected input produces no payload: the bytes written before the error are
             // a frame short of the rest, as Go has always returned nothing.
@@ -191,8 +203,6 @@ public static class SchemaEncoder
                     // enclosing data, where they are not, and every member encoded as zero.
                     // A `name_from` object was reported under its templated key, so that
                     // is the key to read it back from (CR-2026-030).
-                    if (string.IsNullOrEmpty(field.Name))
-                        return EncodeFieldList(field.Fields, data);
                     var objectKey = ResolveEncodeName(field, data) ?? field.Name;
                     if (!data.TryGetValue(objectKey, out var nested)
                         || nested is not Dictionary<string, object?> members)
@@ -205,8 +215,17 @@ public static class SchemaEncoder
                     // Derived from other fields: no bytes of its own.
                     return Array.Empty<byte>();
                 case FieldType.Skip:
-                    // `remaining` gives no count to pad on encode (PS-014).
-                    return new byte[field.Length > 0 ? field.Length : 0];
+                {
+                    // `remaining` gives no count to pad on encode (PS-014). CR-2026-141: padding
+                    // carries no value, so its zeros cover no peek's bits and contradict none -
+                    // a decoder skips them, whatever the peek before set there.
+                    int n = field.Length > 0 ? field.Length : 0;
+                    var pad = new byte[n];
+                    _frameBytes = pad;
+                    _framePending = 0;
+                    _frameMeta = new FrameMeta(new byte[n], new List<Peek>());
+                    return pad;
+                }
             }
 
             // PS-359: a literal writes no bytes and its key is not required of the input.
@@ -217,12 +236,10 @@ public static class SchemaEncoder
             if (field.Value != null)
                 return EncodeField(field, field.Value);
 
+            // A nameless field other than a skip is refused at load (PS-553, CR-2026-138);
+            // it was written here as zero padding.
             object? value;
-            if (string.IsNullOrEmpty(field.Name))
-                // Nothing can be supplied for a field with no name; it is padding, as a
-                // skip is.
-                value = 0.0;
-            else if (field.Name.StartsWith("_"))
+            if ((field.Name ?? "").StartsWith("_"))
                 // PS-434: an internal field that reads bytes writes its value (handled
                 // above), else the input's, else it is an error naming the field. This
                 // wrote 0, which reads back as a value the device never sent.
@@ -244,6 +261,13 @@ public static class SchemaEncoder
                     // A reading the decode omitted as "no reading" (PS-427) goes back as
                     // the sentinel it was, not as zero.
                     return EncodeSentinel(field);
+                else if (field.Type == FieldType.Bool && frame != null && field.Consume == 0)
+                {
+                    // PS-551 (CR-2026-141): an absent bool that does not consume is fixed
+                    // by the fields that write its bit, so it is derived and writes none.
+                    frame.PlaceBits(1, false, field.Bit, 0UL, 0, 1, field.Name, derived: true);
+                    return Array.Empty<byte>();
+                }
                 else
                     // PS-551: rejected, naming the field. This warned "Missing field" at
                     // the top level, said nothing anywhere else, and wrote a zero, which
@@ -261,7 +285,7 @@ public static class SchemaEncoder
                 // whole byte of 0 or 1.
                 bool set = reversedValue is bool b ? b
                     : Helpers.ToFloat64(reversedValue) is (true, not 0);
-                frame.PlaceBits(1, false, field.Bit, set ? 1UL : 0UL, field.Consume);
+                frame.PlaceBits(1, false, field.Bit, set ? 1UL : 0UL, field.Consume, 1, field.Name);
                 return Array.Empty<byte>();
             }
             return EncodeField(field, reversedValue);
@@ -455,7 +479,7 @@ public static class SchemaEncoder
                     try
                     {
                         var bytes = EncodeOne(field, data, fields, output);
-                        output.Extend(bytes, CarriedBy(bytes));
+                        output.Extend(bytes, CarriedBy(bytes), MetaOf(bytes));
                     }
                     catch (Exception e)
                     {
@@ -473,6 +497,7 @@ public static class SchemaEncoder
             var frameBytes = output.Frame();
             _frameBytes = frameBytes;
             _framePending = output.PendingCount;
+            _frameMeta = output.Meta();
             return frameBytes;
         }
 
@@ -484,6 +509,51 @@ public static class SchemaEncoder
         int _framePending;
 
         int CarriedBy(byte[] bytes) => ReferenceEquals(bytes, _frameBytes) ? _framePending : 0;
+
+        // CR-2026-141 (PS-551): the last field list's covered bits and peeks, carried the
+        // same way; bytes built any other way were written whole by their fields.
+        FrameMeta? _frameMeta;
+
+        FrameMeta? MetaOf(byte[] bytes) => ReferenceEquals(bytes, _frameBytes) ? _frameMeta : null;
+
+        static bool HasBitMarker(SchemaField f)
+            => f.RawType.IndexOfAny(new[] { '[', ':', '<' }) >= 0;
+
+        /// <summary>A named bit range or bool that does not consume (PS-060, PS-066). The
+        /// reference's is_peek_field.</summary>
+        static bool IsPeekField(SchemaField f)
+            => !string.IsNullOrEmpty(f.Name) && f.Consume == 0
+               && (f.Type == FieldType.Bool
+                   || (f.ByteGroup.Count == 0 && f.Type != FieldType.BitfieldString && HasBitMarker(f)));
+
+        /// <summary>
+        /// The peeks in a field list a whole field after them writes over - read from the
+        /// schema, so a tlv case can be chosen without them (PS-551, CR-2026-141). Counted only
+        /// where the next field that reads bytes is a plain whole field: a range that
+        /// consumes, a skip or a construct ends the span first, and its bits may be left
+        /// unwritten (wt303's status nibble beside a mode nibble). The reference's
+        /// covered_peeks.
+        /// </summary>
+        static HashSet<SchemaField> CoveredPeeks(List<SchemaField> fields)
+        {
+            var output = new HashSet<SchemaField>(ReferenceEqualityComparer.Instance);
+            var pending = new List<SchemaField>();
+            foreach (var f in fields)
+            {
+                if (IsPeekField(f)) { pending.Add(f); continue; }
+                if (f.Type == FieldType.Number
+                    || (f.Type is FieldType.String or FieldType.Boolean && f.Value != null))
+                    continue;
+                bool construct = f.MatchInline != null || f.TLVInline != null || f.ByteGroup.Count > 0
+                    || f.Flagged != null || f.Ref2 != null
+                    || f.Type is FieldType.TLV or FieldType.Match;
+                if (!construct && !HasBitMarker(f)
+                    && f.Type is not (FieldType.Skip or FieldType.Object or FieldType.Repeat or FieldType.Bool))
+                    output.UnionWith(pending);
+                pending.Clear();
+            }
+            return output;
+        }
 
         /// <summary>
         /// Place one run of bit ranges into the byte or bytes they share. Each range is ORed
@@ -501,11 +571,25 @@ public static class SchemaEncoder
             bool little = runEndian == "little";
             // Every range is resolved and checked before any is placed, so a rejected value
             // leaves nothing of its run pending in the frame.
-            var placements = new List<(int baseSize, int start, ulong bits, int consume)>();
+            var placements = new List<(int baseSize, int start, ulong bits, int consume, int width,
+                string? name, bool derived)>();
             foreach (var member in run)
             {
-                object? value = string.IsNullOrEmpty(member.Name) ? 0.0
-                    : member.Value != null || member.Name.StartsWith("_")
+                if (!string.IsNullOrEmpty(member.Name) && member.Value == null
+                    && !member.Name.StartsWith("_") && member.Consume == 0
+                    && !(data.TryGetValue(member.Name, out var given0) && given0 != null)
+                    && !HasFieldDefault(member))                            // PS-554 first
+                {
+                    // PS-551 (CR-2026-141): a range that does not consume is fixed by the
+                    // fields that write its bits, so it is derived and writes none; the
+                    // frame's check rejects it as missing where a bit is left unwritten.
+                    var derivedRange = Helpers.ParseBitRange(member.RawType)!.Value;
+                    placements.Add((Math.Max(1, member.BitBaseBytes), derivedRange.start, 0UL, 0,
+                        derivedRange.end - derivedRange.start + 1, member.Name, true));
+                    continue;
+                }
+                // A nameless range is refused at load (PS-553); it was written as zero bits.
+                object? value = member.Value != null || (member.Name ?? "").StartsWith("_")
                         ? InternalEncodeValue(member, data)                    // PS-360, PS-434
                     : data.TryGetValue(member.Name, out var v) && v != null ? v
                     : HasFieldDefault(member) ? FieldDefault(member)            // PS-554
@@ -530,10 +614,10 @@ public static class SchemaEncoder
                 long raw = CheckBitRange(member, RoundToInteger(numeric), bitLen, given);
                 ulong mask = bitLen >= 64 ? ulong.MaxValue : (1UL << bitLen) - 1;
                 placements.Add((Math.Max(1, member.BitBaseBytes), bitRange.start,
-                    (ulong)raw & mask, member.Consume));
+                    (ulong)raw & mask, member.Consume, bitLen, member.Name, false));
             }
-            foreach (var (baseSize, start, bits, consume) in placements)
-                output.PlaceBits(baseSize, little, start, bits, consume);
+            foreach (var (baseSize, start, bits, consume, width, name, derived) in placements)
+                output.PlaceBits(baseSize, little, start, bits, consume, width, name, derived);
         }
 
         /// <summary>The number a bit range's enum label stands for.</summary>
@@ -905,7 +989,11 @@ public static class SchemaEncoder
                     + $"bytes for a byte_length of {byteLength} (PS-551)");
             // PS-385: the elements, then the trailer, whose values sit beside the repeat.
             if (field.Trailer is { Count: > 0 })
-                output.AddRange(EncodeFieldList(field.Trailer, data));
+            {
+                var trailer = EncodeFieldList(field.Trailer, data);
+                FrameMeta.Check(trailer, MetaOf(trailer));                      // PS-551
+                output.AddRange(trailer);
+            }
             return output.ToArray();
         }
 
@@ -1001,7 +1089,9 @@ public static class SchemaEncoder
                     // while each was decoded, so a name_from template resolves the same way.
                     asMap = new Dictionary<string, object?>(asMap) { [field.Index!] = position + field.IndexBase };
                 }
-                output.AddRange(EncodeFieldList(field.Fields, asMap));
+                var element = EncodeFieldList(field.Fields, asMap);
+                FrameMeta.Check(element, MetaOf(element));   // PS-551: an element closes with it
+                output.AddRange(element);
                 position++;
             }
             return output.ToArray();
@@ -1133,10 +1223,13 @@ public static class SchemaEncoder
                 }
                 var fallbackBody = EncodeFieldList(fallbackFields, data);
                 int fallbackPending = CarriedBy(fallbackBody);
+                var fallbackMeta = FrameMeta.Prefixed(fallbackOut.Count, MetaOf(fallbackBody),
+                    fallbackBody.Length);
                 fallbackOut.AddRange(fallbackBody);
                 var fallbackBytes = fallbackOut.ToArray();
                 _frameBytes = fallbackBytes;
                 _framePending = fallbackPending;
+                _frameMeta = fallbackMeta;
                 return fallbackBytes;
             }
 
@@ -1166,10 +1259,12 @@ public static class SchemaEncoder
             }
             var body = EncodeFieldList(matched!.Fields, data);
             int bodyPending = CarriedBy(body);
+            var bodyMeta = FrameMeta.Prefixed(output.Count, MetaOf(body), body.Length);
             output.AddRange(body);
             var matchBytes = output.ToArray();
             _frameBytes = matchBytes;
             _framePending = bodyPending;
+            _frameMeta = bodyMeta;
             return matchBytes;
         }
 
@@ -1261,6 +1356,7 @@ public static class SchemaEncoder
         {
             var sink = new List<(SchemaField, bool)>();
             if (fields == null) return sink;
+            var covered = CoveredPeeks(fields);
             foreach (var f in fields)
             {
                 if (f.ByteGroup.Count > 0) { sink.AddRange(CaseClaims(f.ByteGroup, optional)); continue; }
@@ -1270,7 +1366,9 @@ public static class SchemaEncoder
                     continue;
                 }
                 if (PayloadName(f) == null) continue;
-                sink.Add((f, optional || f.Optional));
+                // PS-551 (CR-2026-141): a peek the case's next field writes over is derived
+                // where the input omits it, so the case does not need it given.
+                sink.Add((f, optional || f.Optional || covered.Contains(f)));
             }
             return sink;
         }
@@ -1530,6 +1628,7 @@ public static class SchemaEncoder
             {
                 var tag = EncodeTLVTag(w.key, tlv);
                 var value = EncodeFieldList(w.fields, w.data);
+                FrameMeta.Check(value, MetaOf(value));   // PS-551: a tlv value is measured whole
                 output.AddRange(tag);
                 if (lengthSize > 0)
                     output.AddRange(WriteUint(value.Length, lengthSize, _endian));
@@ -2261,6 +2360,25 @@ internal sealed class FrameBuffer
 {
     readonly List<byte> _buf = new();
     readonly List<byte> _pending = new();
+    // CR-2026-141 (PS-551): per position in this list's frame, the bits some field wrote,
+    // and each bit range or bool placed, for the check where the frame closes.
+    readonly List<byte> _covered = new();
+    readonly List<Peek> _peeks = new();
+
+    void Cover(int position, byte[] mask)
+    {
+        while (_covered.Count < position + mask.Length) _covered.Add(0);
+        for (int i = 0; i < mask.Length; i++) _covered[position + i] |= mask[i];
+    }
+
+    /// <summary>The metadata of the frame <see cref="Frame"/> returns.</summary>
+    public FrameMeta Meta()
+    {
+        int size = _buf.Count + _pending.Count;
+        var covered = new byte[size];
+        for (int i = 0; i < size && i < _covered.Count; i++) covered[i] = _covered[i];
+        return new FrameMeta(covered, new List<Peek>(_peeks));
+    }
 
     public IReadOnlyList<byte> Pending => _pending;
 
@@ -2272,10 +2390,27 @@ internal sealed class FrameBuffer
     /// by nothing in it - they stay pending here, ORed with any older pending beyond them,
     /// so the field after the construct shares them, as a decoder reads it. The reference's
     /// FrameBuffer.extend and its Frame.pending.</summary>
-    public void Extend(byte[] data, int carried = 0)
+    public void Extend(byte[] data, int carried = 0, FrameMeta? meta = null)
     {
         carried = Math.Min(Math.Max(carried, 0), data.Length);
+        int offset = _buf.Count;
         int shared = Math.Min(_pending.Count, data.Length);
+        for (int i = 0; i < shared; i++)
+        {
+            // PS-551 (CR-2026-141): a field would OR over a peek's different bits.
+            if ((_pending[i] & ~data[i] & FrameMeta.CoveredAt(meta, i)) != 0)
+            {
+                var frame = new byte[_buf.Count + data.Length];
+                _buf.CopyTo(frame, 0);
+                data.CopyTo(frame, _buf.Count);
+                throw new InvalidOperationException(FrameMeta.Disagreement(_peeks, frame));
+            }
+        }
+        var mask = new byte[data.Length];
+        for (int i = 0; i < data.Length; i++) mask[i] = FrameMeta.CoveredAt(meta, i);
+        Cover(offset, mask);
+        if (meta != null)
+            foreach (var peek in meta.Peeks) _peeks.Add(peek with { Position = peek.Position + offset });
         var merged = new byte[data.Length];
         for (int i = 0; i < data.Length; i++)
             merged[i] = i < shared ? (byte)(data[i] | _pending[i]) : data[i];
@@ -2300,8 +2435,17 @@ internal sealed class FrameBuffer
 
     /// <summary>OR <paramref name="bits"/> at <paramref name="start"/> into the pending base,
     /// then move <paramref name="consume"/> bytes to the output (PS-016).</summary>
-    public void PlaceBits(int baseSize, bool little, int start, ulong bits, int consume)
+    public void PlaceBits(int baseSize, bool little, int start, ulong bits, int consume,
+        int width = 0, string? name = null, bool derived = false)
     {
+        if (width > 0 && !string.IsNullOrEmpty(name))
+        {
+            // CR-2026-141 (PS-551): recorded for the check where the frame closes. A derived
+            // range - absent, and not consuming - writes no bits: the fields that write them
+            // fix its value. A nameless range is padding, and is not checked.
+            _peeks.Add(new Peek(_buf.Count, baseSize, little, start, width, derived ? null : bits, name!));
+            if (!derived) Cover(_buf.Count, FrameMeta.MaskBytes(baseSize, little, start, width));
+        }
         while (_pending.Count < baseSize) _pending.Add(0);
         ulong shifted = start >= 64 ? 0 : bits << start;
         for (int i = 0; i < baseSize && i < 8; i++)
@@ -2326,5 +2470,119 @@ internal sealed class FrameBuffer
         _buf.CopyTo(all, 0);
         _pending.CopyTo(all, _buf.Count);
         return all;
+    }
+}
+
+/// <summary>A bit range or bool placed in a frame (CR-2026-141): its base's position and
+/// size, byte order, low bit and width, the unsigned bits given (null where derived), and
+/// its name.</summary>
+internal sealed record Peek(int Position, int Size, bool Little, int Start, int Width,
+    ulong? Raw, string Name);
+
+/// <summary>
+/// A frame's PS-551 metadata (CR-2026-141): per byte, the bits some field wrote, and each
+/// bit range or bool placed. The reference's Frame.covered and Frame.peeks; bytes a whole
+/// field wrote carry none, and are written in full.
+/// </summary>
+internal sealed class FrameMeta
+{
+    public byte[] Covered { get; }
+    public List<Peek> Peeks { get; }
+
+    public FrameMeta(byte[] covered, List<Peek> peeks)
+    {
+        Covered = covered;
+        Peeks = peeks;
+    }
+
+    public static byte CoveredAt(FrameMeta? meta, int i)
+        => meta == null ? (byte)0xFF : i < meta.Covered.Length ? meta.Covered[i] : (byte)0;
+
+    /// <summary>`prefix` written whole, then a body with this metadata.</summary>
+    public static FrameMeta? Prefixed(int prefix, FrameMeta? body, int bodyLength)
+    {
+        if (body == null) return null;
+        var covered = new byte[prefix + bodyLength];
+        for (int i = 0; i < prefix; i++) covered[i] = 0xFF;
+        for (int i = 0; i < bodyLength; i++) covered[prefix + i] = CoveredAt(body, i);
+        return new FrameMeta(covered,
+            body.Peeks.Select(p => p with { Position = p.Position + prefix }).ToList());
+    }
+
+    static System.Numerics.BigInteger Read(byte[] frame, int position, int size, bool little)
+    {
+        System.Numerics.BigInteger v = 0;
+        for (int i = 0; i < size; i++)
+        {
+            int at = little ? position + size - 1 - i : position + i;
+            v = (v << 8) | (at < frame.Length ? frame[at] : 0);
+        }
+        return v;
+    }
+
+    static System.Numerics.BigInteger Mask(int start, int width)
+        => ((System.Numerics.BigInteger.One << width) - 1) << start;
+
+    public static byte[] MaskBytes(int size, bool little, int start, int width)
+    {
+        var m = Mask(start, width);
+        var bytes = new byte[size];
+        for (int i = 0; i < size; i++)
+        {
+            int significance = little ? i : size - 1 - i;
+            bytes[i] = (byte)((m >> (8 * significance)) & 0xFF);
+        }
+        return bytes;
+    }
+
+    /// <summary>The reference's peek_disagreement.</summary>
+    public static string Disagreement(IEnumerable<Peek> peeks, byte[] frame)
+    {
+        foreach (var p in peeks)
+        {
+            if (p.Raw == null || p.Position + p.Size > frame.Length) continue;
+            var found = Read(frame, p.Position, p.Size, p.Little) & Mask(p.Start, p.Width);
+            if (found != (new System.Numerics.BigInteger(p.Raw.Value) << p.Start))
+                return $"Field '{p.Name}' is given {p.Raw.Value}, but the fields that share its "
+                    + $"bits write {found >> p.Start} (PS-551)";
+        }
+        return "A field writes bits a peek before it set otherwise (PS-551)";
+    }
+
+    /// <summary>
+    /// The reference's check_peeks, where a frame closes: every bit range and bool reads
+    /// back what it was given, and a derived one has every bit written by another field,
+    /// or it is missing.
+    /// </summary>
+    public static void Check(byte[] frame, FrameMeta? meta)
+    {
+        if (meta == null) return;
+        foreach (var p in meta.Peeks)
+        {
+            var mask = Mask(p.Start, p.Width);
+            if (p.Raw == null)
+            {
+                System.Numerics.BigInteger have = 0;
+                for (int i = 0; i < p.Size; i++)
+                {
+                    int at = p.Little ? p.Position + p.Size - 1 - i : p.Position + i;
+                    have = (have << 8) | (at < meta.Covered.Length ? meta.Covered[at] : 0);
+                }
+                if ((have & mask) != mask)
+                    throw new InvalidOperationException($"Missing required field: {p.Name}");
+                continue;
+            }
+            var found = Read(frame, p.Position, p.Size, p.Little) & mask;
+            if (found != (new System.Numerics.BigInteger(p.Raw.Value) << p.Start))
+            {
+                var padded = frame;
+                if (p.Position + p.Size > frame.Length)
+                {
+                    padded = new byte[p.Position + p.Size];
+                    frame.CopyTo(padded, 0);
+                }
+                throw new InvalidOperationException(Disagreement(new[] { p }, padded));
+            }
+        }
     }
 }

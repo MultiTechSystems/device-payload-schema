@@ -627,11 +627,19 @@ function encBitRun(fr, run, data, ctx) {              // _encode_bitfield_run
   var endian = ctx.endian;
   for (var j = 0; j < run.length; j++) if (run[j].endian) { endian = run[j].endian; break; }
   for (var i = 0; i < run.length; i++) {
-    var f = run[i], name = f.name || "", v;
-    if (!name) v = f["default"] === undefined ? 0 : f["default"];
-    else if ("value" in f || name.charAt(0) === "_") v = encInternalValue(f, data);
+    var f = run[i], name = f.name || "", v;   // a nameless range is refused at load (PS-553)
+    if ("value" in f || name.charAt(0) === "_") v = encInternalValue(f, data);
     else if (!encHas(data, name) && encHasDefault(f)) v = f["default"];   // PS-554
-    else if (!encHas(data, name)) encFail(encMissing(name));   // PS-551
+    else if (!encHas(data, name)) {
+      if (!(parseInt(f.consume || 0, 10) || 0)) {
+        // PS-551 (CR-2026-141): a range that does not consume is fixed by the fields that
+        // write its bits, so it is derived and writes none (FrameBuffer.place_bits).
+        var dt = encBitType(f.type);
+        encPlaceBits(fr, Math.max(1, dt[0]), endian, dt[1], dt[2], 0, 0, name, true);
+        continue;
+      }
+      encFail(encMissing(name));   // PS-551
+    }
     else v = data[name];
     v = encReverseModifiers(v, f);
     if (typeof v === "string") v = encLabelValue(v, f);
@@ -641,7 +649,7 @@ function encBitRun(fr, run, data, ctx) {              // _encode_bitfield_run
     var bt = encBitType(f.type);
     // PS-064 before PS-062: rejected, never masked into a neighbour's bits.
     encFits(v, bt[2], String(f.type).charAt(0) === "s", f, encGiven(f, v), f.type);
-    encPlaceBits(fr, Math.max(1, bt[0]), endian, bt[1], bt[2], v, parseInt(f.consume || 0, 10) || 0);
+    encPlaceBits(fr, Math.max(1, bt[0]), endian, bt[1], bt[2], v, parseInt(f.consume || 0, 10) || 0, name);
   }
 }
 
@@ -929,7 +937,10 @@ function encRepeatElements(out, f, data, records, count, ctx) {   // _encode_rep
     var rec = records[i];
     if (rec === null || typeof rec !== "object" || Array.isArray(rec)) encFail("repeat field " + JSON.stringify(name) + ": expected each record to be a mapping");
     if (f.index) { var copy = {}; for (var k in rec) copy[k] = rec[k]; copy[f.index] = i + (f.index_base || 0); rec = copy; }
-    encList(out, rf, rec, ctx);
+    var element = [];
+    encList(element, rf, rec, ctx);
+    encCheckPeeks(element);           // PS-551: an element's bytes close with it
+    for (var eb = 0; eb < element.length; eb++) out.push(element[eb]);
   }
 }
 
@@ -945,7 +956,12 @@ function encRepeat(out, f, data, ctx, siblings) {     // _encode_repeat
   var bl = encRepeatSize(f, "byte_length", data, siblings);
   if (bl !== null && body.length !== bl) encFail("Repeat '" + name + "' encodes to " + body.length + " bytes for a byte_length of " + bl + " (PS-551)");
   for (var i = 0; i < body.length; i++) out.push(body[i]);
-  if (f.trailer) encList(out, f.trailer, data, ctx);
+  if (f.trailer) {
+    var trailer = [];
+    encList(trailer, f.trailer, data, ctx);
+    encCheckPeeks(trailer);                              // PS-551
+    for (var tb = 0; tb < trailer.length; tb++) out.push(trailer[tb]);
+  }
 }
 
 function encSiblings(f) {                             // sibling_references
@@ -1045,8 +1061,28 @@ function encTlvTag(out, key, tlv, ctx) {              // _encode_tlv_tag
   encWriteInt(out, encParseInt0(key), tlv.tag_size === undefined ? 1 : tlv.tag_size, false, ctx.endian);
 }
 
+function encIsPeekField(f) {                         // is_peek_field
+  if (!f || typeof f !== "object" || !f.name || (parseInt(f.consume || 0, 10) || 0)) return false;
+  return f.type === "bool" || encIsBareBitfield(f);
+}
+
+/* The peeks a plain whole field after them writes over (covered_peeks). */
+function encCoveredPeeks(fields) {
+  var out = [], pending = [];
+  (fields || []).forEach(function (f) {
+    if (!f || typeof f !== "object") return;
+    if (encIsPeekField(f)) { pending.push(f); return; }
+    if (ENC_COMPUTED.indexOf(f.type) >= 0 || encIsLiteral(f)) return;
+    var construct = ["match", "tlv", "byte_group", "flagged", "$ref"].some(function (k) { return k in f; });
+    var bits = typeof f.type === "string" && /[\[:<]/.test(f.type);
+    if (!construct && !bits && ["skip", "object", "repeat", "bool"].indexOf(f.type) < 0) out = out.concat(pending);
+    pending = [];
+  });
+  return out;
+}
+
 function encCaseClaims(fields, optional) {             // _case_claims
-  var out = [];
+  var out = [], covered = encCoveredPeeks(fields);
   (fields || []).forEach(function (f) {
     if (!f || typeof f !== "object") return;
     if ("byte_group" in f && !f.type) {
@@ -1059,7 +1095,8 @@ function encCaseClaims(fields, optional) {             // _case_claims
       return;
     }
     if (!f.name || String(f.name).charAt(0) === "_" || ENC_COMPUTED.indexOf(f.type) >= 0) return;
-    out.push([f, !!optional || f.optional === true]);
+    // PS-551 (CR-2026-141): a peek the fields after it fix need not be given.
+    out.push([f, !!optional || f.optional === true || covered.indexOf(f) >= 0]);
   });
   return out;
 }
@@ -1175,6 +1212,7 @@ function encTlv(out, f, data, ctx) {                  // _encode_tlv
     encTlvTag(out, w.key, tlv, ctx);
     var value = [];
     encList(value, w.body, w.data, ctx);
+    encCheckPeeks(value);              // PS-551: a tlv value is measured whole
     if (lsize > 0) encWriteInt(out, value.length, lsize, false, ctx.endian);
     for (var i = 0; i < value.length; i++) out.push(value[i]);
   });
@@ -1203,7 +1241,13 @@ function encHas(data, name) {
 
 /* CR-2026-136 (FrameBuffer): OR `bytes` into what is pending, then write them. */
 function encEmit(fr, bytes, carried) {
-  var shared = Math.min(fr.pend.length, bytes.length);
+  var shared = Math.min(fr.pend.length, bytes.length), offset = fr.out.length;
+  for (var s = 0; s < shared; s++) {
+    // PS-551 (CR-2026-141): a field would OR over a peek's different bits.
+    if (fr.pend[s] & ~bytes[s] & encCov(bytes, s)) encFail(encPeekDisagreement(fr.pk, fr.out.concat(bytes)));
+  }
+  for (var c = 0; c < bytes.length; c++) encCover(fr, offset + c, encCov(bytes, c));
+  (bytes.pk || []).forEach(function (pk) { fr.pk.push(encShifted(pk, offset)); });
   var merged = [];
   for (var i = 0; i < bytes.length; i++) merged.push(i < shared ? (bytes[i] | fr.pend[i]) : bytes[i]);
   fr.pend.splice(0, shared);
@@ -1221,7 +1265,18 @@ function encEmit(fr, bytes, carried) {
 
 /* OR `value`, `width` bits at `start`, into the pending base of `base` bytes, then
  * consume as declared (FrameBuffer.place_bits). */
-function encPlaceBits(fr, base, endian, start, width, value, consume) {
+function encPlaceBits(fr, base, endian, start, width, value, consume, name, derived) {
+  if (name) {
+    // CR-2026-141 (PS-551): recorded for the check where the frame closes. A derived range
+    // writes no bits: the fields that write them fix its value.
+    var span = Math.pow(2, width);
+    fr.pk.push({ p: fr.out.length, size: base, endian: endian, start: start, width: width,
+                 raw: derived ? null : ((value % span) + span) % span, name: name });
+    if (!derived) {
+      var mask = encPeekBytes(span - 1, start, width, base, endian);
+      for (var m = 0; m < base; m++) encCover(fr, fr.out.length + m, mask[m]);
+    }
+  }
   var bits = [];
   encPacked(bits, encPlace({}, value, start, width), base, endian);
   while (fr.pend.length < base) fr.pend.push(0);
@@ -1231,6 +1286,63 @@ function encPlaceBits(fr, base, endian, start, width, value, consume) {
     for (var c = 0; c < consume; c++) fr.out.push(fr.pend[c]);
     fr.pend.splice(0, consume);
   }
+}
+
+/* CR-2026-141 (PS-551). An array's positions carry the bits some field wrote, in `unc`
+ * where not all of them (Frame.covered), and `pk` lists each bit range or bool placed:
+ * {p, size, endian, start, width, raw (null where derived), name} (Frame.peeks). */
+function encCov(arr, i) { return arr.unc && arr.unc[i] !== undefined ? arr.unc[i] : 255; }
+
+function encCover(fr, at, mask) { fr.cov[at] = (fr.cov[at] || 0) | mask; }
+
+function encShifted(pk, by) {
+  return { p: pk.p + by, size: pk.size, endian: pk.endian, start: pk.start, width: pk.width, raw: pk.raw, name: pk.name };
+}
+
+function encPeekBytes(value, start, width, size, endian) {
+  var b = [];
+  encPacked(b, encPlace({}, value, start, width), size, endian);
+  return b;
+}
+
+/* The range's unsigned bits as `frame` holds them; past its end, null, or zeros if `pad`. */
+function encPeekFound(frame, pk, pad) {
+  if (pk.p + pk.size > frame.length && !pad) return null;
+  var bytes = [];
+  for (var i = 0; i < pk.size; i++) bytes.push(pk.p + i < frame.length ? frame[pk.p + i] : 0);
+  if (pk.endian === "little") bytes.reverse();
+  var v = 0;
+  for (var b = pk.start + pk.width - 1; b >= pk.start; b--) {
+    v = v * 2 + ((bytes[pk.size - 1 - Math.floor(b / 8)] >> (b % 8)) & 1);
+  }
+  return v;
+}
+
+function encPeekDisagreement(peeks, frame) {          // peek_disagreement
+  for (var i = 0; i < peeks.length; i++) {
+    var pk = peeks[i];
+    if (pk.raw === null) continue;
+    var found = encPeekFound(frame, pk, false);
+    if (found !== null && found !== pk.raw) {
+      return "Field '" + pk.name + "' is given " + pk.raw + ", but the fields that share its bits write " + found + " (PS-551)";
+    }
+  }
+  return "A field writes bits a peek before it set otherwise (PS-551)";
+}
+
+function encCheckPeeks(arr) {                         // check_peeks
+  (arr.pk || []).forEach(function (pk) {
+    if (pk.raw === null) {
+      var mask = encPeekBytes(Math.pow(2, pk.width) - 1, pk.start, pk.width, pk.size, pk.endian);
+      for (var i = 0; i < pk.size; i++) {
+        var have = pk.p + i < arr.length ? encCov(arr, pk.p + i) : 0;
+        if ((have & mask[i]) !== mask[i]) encFail(encMissing(pk.name));
+      }
+      return;
+    }
+    var found = encPeekFound(arr, pk, true);
+    if (found !== pk.raw) encFail(encPeekDisagreement([pk], arr));
+  });
 }
 
 /* PS-551: what the input omits but the rest of it fixes (_derive_inputs and helpers). */
@@ -1342,15 +1454,24 @@ function encList(out, fields, data, ctx, top) {
   data = encDerive(fields, data, ctx);
   // CR-2026-136: a frame laid out as a decoder reads it (FrameBuffer). A bit range or
   // bool that does not consume leaves its bytes pending, and the next field's are ORed in.
-  var fr = { out: [], pend: [] };
+  var fr = { out: [], pend: [], cov: {}, pk: [] };
   encRuns(fields).forEach(function (item) {
     if (item.bits) { encBitRun(fr, item.bits, data, ctx); return; }
     var tmp = [];
     var carried = encOne(item, tmp);
     encEmit(fr, tmp, typeof carried === "number" ? carried : 0);
   });
+  var base = out.length, total = fr.out.length + fr.pend.length;
   for (var fo = 0; fo < fr.out.length; fo++) out.push(fr.out[fo]);
   for (var fp = 0; fp < fr.pend.length; fp++) out.push(fr.pend[fp]);
+  for (var at = 0; at < total; at++) {
+    var cm = fr.cov[at] || 0;
+    if (cm !== 255) { out.unc = out.unc || {}; out.unc[base + at] = cm; }
+  }
+  if (fr.pk.length) {
+    out.pk = out.pk || [];
+    fr.pk.forEach(function (pk) { out.pk.push(encShifted(pk, base)); });
+  }
   return fr.pend.length;     // the bytes at the end still pending (Frame.pending)
 
   function encOne(item, out) {
@@ -1366,7 +1487,6 @@ function encList(out, fields, data, ctx, top) {
     if ("flagged" in f && !f.type) { return encFlagged(out, f.flagged, data, ctx); }
     if (type === "repeat") { encRepeat(out, f, data, ctx, fields); return; }
     if (type === "object") {
-      if (!name) return encList(out, f.fields || [], data, ctx);
       // Read back from the key a `name_from` object was reported under (CR-2026-030).
       var objKey = encResolveName(f, name, data);
       if (objKey === null) objKey = name;
@@ -1377,15 +1497,16 @@ function encList(out, fields, data, ctx, top) {
     if (ENC_COMPUTED.indexOf(type) >= 0) return;
     if (type === "skip") {
       var n = typeof f.length === "string" ? 0 : Math.max(0, parseInt(f.length === undefined ? 1 : f.length, 10));
-      for (var i = 0; i < n; i++) out.push(0);
+      // CR-2026-141 (padding): a skip's zeros fix no peek's bits and contradict none.
+      for (var i = 0; i < n; i++) { out.unc = out.unc || {}; out.unc[out.length] = 0; out.push(0); }
       return;
     }
     if (encIsLiteral(f)) return;
     if ("value" in f) { encField(out, f, f.value, ctx); return; }
     var value;
-    if (!name) {
-      value = f["default"] === undefined ? 0 : f["default"];   // padding, as a skip is
-    } else if (name.charAt(0) === "_") {
+    // A nameless field other than a skip is refused at load (PS-553); it was written
+    // here as zero padding.
+    if (name.charAt(0) === "_") {
       value = encInternalValue(f, data);
     } else {
       var key = encResolveName(f, name, data);
@@ -1398,6 +1519,11 @@ function encList(out, fields, data, ctx, top) {
       } else {
         if (!encHas(data, key)) {
           if (f.sentinel) { encField(out, encRawBits(f), f.sentinel[0], ctx); return; }
+          if (type === "bool" && !(parseInt(f.consume || 0, 10) || 0)) {
+            // PS-551 (CR-2026-141): derived from the fields that write its bit.
+            encPlaceBits(fr, 1, "big", Number(f.bit || 0), 1, 0, 0, name, true);
+            return;
+          }
           encFail(encMissing(key));              // PS-551: this wrote a zero
         }
         value = data[key];
@@ -1406,7 +1532,7 @@ function encList(out, fields, data, ctx, top) {
     if (type === "bitfield_string") { encBitfieldString(out, f, value, ctx); return; }
     if (type === "bool") {                       // its bit of the byte it peeks
       encPlaceBits(fr, 1, "big", Number(f.bit || 0), 1, value ? 1 : 0,
-                   parseInt(f.consume || 0, 10) || 0);
+                   parseInt(f.consume || 0, 10) || 0, name);
       return;
     }
     encField(out, f, encReverseModifiers(value, f), ctx);
@@ -1418,7 +1544,8 @@ function encodeRoot(fields, data, endian) {
   var ctx = { endian: endian, w: [], wa: [] }, out = [];
   ENC_SCOPE = fields;
   encList(out, fields, data || {}, ctx, true);
-  return { bytes: out, warnings: ctx.w.concat(ctx.wa) };
+  encCheckPeeks(out);                                    // PS-551 (CR-2026-141)
+  return { bytes: Array.prototype.slice.call(out), warnings: ctx.w.concat(ctx.wa) };
 }
 '''
 
@@ -3017,10 +3144,17 @@ function writeS(buf, pos, size, value, endian) {
         if 'flagged' in field:
             fg = field['flagged']
             flag_field = fg['field']
+            # The mask is a reference like any other, so it reads the PS-523 binding in
+            # `vars` (refValue): the number under a text or boolean label, a numeric label
+            # itself, an enum's code. Written `$mask` it read `vars._mask`, which is never
+            # bound, so every group was skipped with no error.
+            mask_js = to_js_name(str(flag_field).lstrip('$'))
             lines.append(f'{i}  // flagged on {flag_field}')
+            lines.append(f'{i}  if (vars.{mask_js} === undefined) throw new Error('
+                         f'{json.dumps("Flagged field reference not found: " + str(flag_field))});')
             for group in fg.get('groups', []):
                 bit = group['bit']
-                lines.append(f'{i}  if (vars.{to_js_name(flag_field)} & (1 << {bit})) {{')
+                lines.append(f'{i}  if (vars.{mask_js} & (1 << {bit})) {{')
                 self.indent += 1
                 for gf in group.get('fields', []):
                     lines.extend(self._gen_decode_field(gf))
@@ -3302,7 +3436,7 @@ function writeS(buf, pos, size, value, endian) {
             # used to decode into the enclosing `d` and be lifted out and deleted, which
             # deleted an enclosing field of the same name: a top-level `value` vanished
             # beside an object with a `value` member.
-            outer = f'{obj_name}_outer{id(field) % 100000}'
+            outer = f'{obj_name}_outer{self._next_uid()}'   # id() varied per run
             lines.append(f'{i}  var {outer} = d; d = {{}};')
             # The members are a field list (PS-347, PS-441), so a nameless construct -
             # a `match` or a group of bit ranges - is a member like any other. Members

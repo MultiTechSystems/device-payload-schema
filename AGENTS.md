@@ -220,7 +220,7 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2684 payload vectors in `schemas/devices/` (measured 2026-10-11 with
+The 2690 payload vectors in `schemas/devices/` (measured 2026-10-11 with
 `tools/check-floors.py`, after the CR-2026-118 and CR-2026-124 fixtures, CR-2026-117's
 guard-absent-operand, the `match-u32-*` and names-mangling-alike fixtures, CR-2026-127's
 guard-boolean-operand, the CR-2026-121 and CR-2026-123 fixtures, CR-2026-110's,
@@ -232,10 +232,10 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 2080 |
-| Go | `go/schema/corpus_conformance_test.go` | 2686 | 2097 (plain API 2072) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2686 | 2081 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2686 | 2080 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2084 |
+| Go | `go/schema/corpus_conformance_test.go` | 2690 | 2101 (plain API 2076) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2690 | 2085 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2690 | 2084 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 554 of 554 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -810,10 +810,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2080 |
-| Go | `go/schema/corpus_encode_test.go` | 2097 (plain 2072) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2080 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2081 |
+| Python | `tests/test_encode_round_trip.py` | 2084 |
+| Go | `go/schema/corpus_encode_test.go` | 2101 (plain 2076) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2084 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2085 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -2055,10 +2055,53 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   has no byte_group decode path, so this is a C gap like the construct itself. **No corpus,
   library, example or registry schema is rejected or changes decode** (registry yabby-edge
   was rewritten as one 8-byte group, 69e1023). Fixture: `byte-group-width.yaml`.
+- **CR-2026-142 (PS-555): the binary schema form carries its names.** `schema_load_binary`
+  used to name each field from its IPSO object (`ipso_to_name`: 3303 was "temperature",
+  anything unlisted `field_xxxx`), so a schema reported different keys from its blob than
+  from its YAML. Format version 3 (`tools/schema_binary.py`, the header's "Binary Schema
+  Loading" block): byte 2 is the *format* version and anything else is refused (1 held
+  the schema's own `version`; 2 is `binary_schema_v2.py`'s unrelated layout under the same
+  magic); count bit 7 announces a name table of one length byte plus UTF-8 per record,
+  0 only for a skip; `skip` moved to type code 0x7, so it has a record at all. Without the
+  table (`--no-names`, `encode_schema(names=False)`) the C loader sets `schema_t.nameless`,
+  every name stays empty, values are reached with `result_get_index()` by schema index,
+  and `result_to_json()` refuses. `SCHEMA_MAX_NAME_LEN` (32, so 31 bytes) is a load error
+  naming the field, never a truncation; the encoder refuses the same, and a count over
+  127. `schema_load_binary_msg()` gives the reason for any refusal. `make test-c`'s
+  harness runs either form with `--from-blob names|nameless` and requires the reference's
+  keys exactly. `schema_interpreter.hpp` and `binary_schema_loader.py` lost their own IPSO
+  name tables the same way; `binary_schema.py` and `binary_schema_v2.py` feed no C reader
+  and were left as they were.
 - Generators other than TS013 (`generate_js_decoder.py`, `generate_firmware_codec.py`,
   `binary_schema.py`, `schema_binary.py`) still carry pre-0.5.2 spellings such as
   `float`/`double`; they are not conformance paths and were not brought along.
 
+- **CR-2026-138 (PS-553): a field has a name; padding is a skip.** A schema with a
+  nameless field other than a `skip` is refused at load, in the spec prototype's text:
+  `Schema 't': field 1, a u8, has no name; a field that reads or reports a value is named,
+  and padding is a `skip` (PS-553)` - the position is 1-based within its list, the type
+  is as written (`a field` where there is none), and an object's or repeat's members add
+  `, in 'o'`; a port adds `, port N`. Exempt: constructs (`match` - the older `type: match`
+  spelling too - `byte_group`, `flagged`, `tlv`, `records`), a byte_group member (reserved
+  bits), a repeat's `element`, and the withdrawn `object:` key, which PS-466 names.
+  - **Where:** Python `field_name_errors`, run by `schema_iterator_errors`, so the
+    interpreter, the validator and the TS013 generator all refuse it; Go `cr138.go`,
+    Java `FieldNames`, C# `FieldNames.cs`, each over the raw document after its `$ref`s
+    are spliced. Go and Java visit ports and case keys in sorted order, Python and C# in
+    source order; that only changes which error comes first when there are several.
+  - **What it replaced, measured before:** Python decoded such a field under the key
+    `unknown`, Go, Java, C# and the generated codec read its bytes
+    and dropped them, every encoder wrote it as zero padding, and C's struct API decoded
+    it as the others did and refused to encode it (`Missing required field: ` with an
+    empty name). No decoder failed to read it, so nothing shifted. The `unknown` key
+    and every zero-padding branch are gone, Python's nameless byte_group member with
+    them: it too was reported as `unknown`.
+  - **C:** the binary format carries no names - each field is a 2-byte IPSO object id
+    and `schema_load_binary` invents its name with `ipso_to_name` - so C cannot check
+    this. `tools/schema_binary.py` refuses the YAML before conversion. A recorded C gap.
+  - Counted before: 0 such fields in the corpus, the library, the examples and the
+    private registry, so no floor moves. Cases: `tests/cr-2026-138-cases.yaml`, read by
+    all four.
 - **CR-2026-139 (PS-554, PS-551 amended): a field's `default` is written where the input
   omits it.** A declared `default` is a defined absence. It is in the field's reported
   form (after modifiers, `transform` and lookup) and is encoded exactly as that value
@@ -2095,7 +2138,7 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     trailer). Python, Java and C# returned the bytes written before an error; every encoder
     now returns none, as Go always did. Not required: an optional field (PS-405), a field declaring `default` (PS-554, CR-2026-139, next entry above), a literal
     (PS-359), a field with `value` (PS-360), an internal field (PS-434, which keeps its own
-    message), a skip, a nameless field (padding, as a skip is), and an absent value with a
+    message), a skip, a nameless field (padding, as a skip is - since CR-2026-138 a schema with one is refused at load), and an absent value with a
     `sentinel` (written as the sentinel, PS-427).
   - **Derived** where the input omits it, by `_derive_inputs` and its port in each language
     (Go `cr134.go`, Java/C# `deriveInputs`/`DeriveInputs`, runtime `encDerive`), run on every
@@ -2129,8 +2172,19 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     both groups given wrote `01 01 02`. The cases are in `tests/cr-2026-134-cases.yaml`. The
     two together re-encode `lookup-reference-binding`'s `an_unnamed_enum_code_is_omitted_but_bound`,
     which neither did alone: the code reports no name, so the discriminator is derived.
-    Decoding a flagged block whose mask is an enum or looked-up field still fails with
-    `Flagged field reference not found`, on master too; not fixed here.
+    Decoding a flagged block whose mask is an enum or looked-up field failed with
+    `Flagged field reference not found` - fixed since, and the lookup was not the cause
+    (next entry).
+  - **A flagged mask written `$mask` was never resolved.** Every decoder looked the
+    `field:` text up as written, while names bind bare, so `field: $m` failed in Python,
+    Go, Java and C# for any mask - plain, looked-up or enum - and the generated codec read
+    `vars._m`, never bound, skipped every group and reported success. The corpus spells
+    all 75 masks bare, which is why nothing saw it; the spec prototype strips the `$`, and
+    every encoder already did. All five now strip it and read the PS-523 binding, so a
+    text label's mask is its number, an enum's its code and a numeric label itself; the
+    generated codec throws the same error where the mask is unbound. C stripped it
+    already. Fixture: `mask-reference-binding.yaml` (decode floors +4 in Go, Java and C#,
+    re-encode and `flagged` +4 everywhere).
   - **Also fixed on the way:** Python and the runtime refused a `flagged` block inside a
     match, tlv or repeat ("declares no type"), and every encoder passed over a construct
     nested in a flagged group as nameless, dropping its values silently
@@ -2252,7 +2306,78 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     after it (`_is_peek`). Go also loses gs301 `h2s_v12_u16_word`, which only its ordered
     API had recovered. Floors: Python and Java 2106 -> 2080 (`tlv` 1569 -> 1543), C# 2107 ->
     2081 (`tlv` 1570 -> 1544), Go 2124 -> 2097 (`tlv` 1587 -> 1560, plain 2097 -> 2072). The
-    combination re-encodes nothing that neither side did alone.
+    combination re-encodes nothing that neither side did alone. **CR-2026-141 reversed the
+    "not derivable" half of this** (next item).
+
+- **CR-2026-141 (PS-551 editorial): a peek whose bits other fields write is derived.** The
+  spec now names a second derivable case beside a repeat's count: a bit range or `bool`
+  that does not consume (PS-060, PS-066), whose bits the fields after it write. All five
+  encoders, the TS013 runtime and C:
+  - **Absent and covered:** derived, and writes no bits. Milesight's status `u16[0:15]`
+    over its reading, absent wherever the lookup misses (PS-269), encodes as the reading:
+    `{reading: 300}` is `012c` and decodes back to `{reading: 300}`.
+  - **Absent and not covered:** `Missing required field: {name}`, where any of its bits
+    is written by no other field (`[u8[0:3] a, u8[4:7] b consume 1]` given only `b`).
+  - **Supplied and disagreeing:** `Field '{name}' is given {raw}, but the fields that
+    share its bits write {found} (PS-551)`, `raw` and `found` the range's unsigned bits.
+    Checked against the finished frame, and before the OR where a whole field would write
+    over a peek's different bits; where no named peek explains the OR, `A field writes
+    bits a peek before it set otherwise (PS-551)`. The OR used to change both values.
+  - **How:** each frame carries, per byte, the bits some field wrote and every named bit
+    range or bool placed (Python `Frame.covered`/`Frame.peeks`, `FrameBuffer.cover`,
+    `check_peeks`; runtime `unc`/`pk`, `encCheckPeeks`; Go per absolute position in the
+    encode context, with `beginFieldList` setting the enclosing list's bits aside; Java
+    a side table beside `carriedTail`; C# beside `CarriedBy`; C per byte in
+    `schema_encode_direction`, each field encoded into a scratch buffer first). The check
+    runs where a frame closes: top-level encode, each tlv value, each repeat element and
+    trailer. A nameless range is padding and is not checked.
+  - **Two rules this repository adds where the prototype is silent, both raised with the
+    spec session:**
+    - *A skip is padding* (`padding()`): its zeros fix no peek's bits and contradict none.
+      The prototype writes a skip like any field, so it would reject dnt-lw-wsci's status
+      report (a `skip` moves past the `first_command` peek) and registry mutelcor,
+      moko lw001-bg and nexelec sign-codec, which move past peeked bits the same way.
+    - *A tlv case is chosen without its peek only where the case's own next field writes
+      the peek's bits* (`covered_peeks`, read from the schema). Treating every
+      non-consuming range as optional chose registry wt303's case 5 (status nibble beside
+      a mode nibble) for a `mode` that case 0x68 reports alone, and the status was then
+      missing.
+  - **Changed case:** `tests/cr-2026-135-cases.yaml`'s `peeked_range_then_whole_byte`
+    gave `whole: 5` and expected `35`, the OR - which reads back as `whole: 53`. It gives
+    53 now; the old input is a rejection case in `tests/cr-2026-141-cases.yaml`.
+  - **Corpus:** +26 (ct10x 12, ct30x 6, gs301 6, ws515 2; Go ordered also gs301
+    `h2s_v12_u16_word` and `sensor_id_43_bytes`, Go plain 4 of the 6 gs301) and -10: vobo `mutant_p32_03..07` and `mutant_p112_03..07`, whose
+    lookup gives two codes one label (109 and 45 are both `AnalogSensor45`), so the label
+    reverses to 45 and the old OR with the peek's 109 happened to rebuild the byte. All
+    `tlv`. Floors: Python and Java 2080 -> 2096 (`tlv` 1543 -> 1559), C# 2081 -> 2097
+    (`tlv` 1544 -> 1560), Go ordered 2097 -> 2114 (`tlv` 1560 -> 1577), plain 2072 -> 2087. The
+    failing sets of Python, Java and C# are identical (590); Go ordered fails a subset.
+  - **Registry (Python, read only):** 4988 -> 4990 round trips: +8 (em2101 4,
+    iq-opentherm-lrw 4, covered peeks now derived) and -6, each a frame the OR had
+    rebuilt by accident. pm-io-5-sm (4): `valv` and `leak` peek the byte a derived
+    `_flags` mask then writes whole as 0. mutelcor (2): `_di`, a whole-byte peek given its
+    derived flagged mask 15, beside bools the groups place in bits 4-7 of the same byte.
+    Both are schema findings: a mask derived from its groups' declared bits says nothing
+    of the other bits. 172 that already failed fail with different text, mostly a missing
+    peek named now that a derived one is checked.
+  - **Tests:** `tests/cr-2026-141-cases.yaml` (the prototype's four
+    `TestCR2026141CoveredPeek` cases and eleven more) drives
+    `test_cr_2026_141_covered_peek.py` (reference and runtime, decoding back where a case
+    gives `decoded`), Go `cr141_test.go`, Java `CR2026141Test`, C# `CR2026_141Tests`; C has
+    `test_a_covered_peek_is_derived`, in the one-byte ranges its struct API builds.
+
+- **Per-definition tables are held by identity, never by address alone** (found auditing
+  for the spec prototype's `id()`-keyed SIBLINGS defect, CR-2026-141). Python's decode
+  tables `_guard_else`, `_pre_lookup` and `_lookup_numbers` and the PS-168 `_encode_given`
+  were keyed by `id(field_def)`; a repeat's element is a dict built afresh for each decode
+  of the repeat (`repeat_members`), so a later definition at the freed address inherited
+  the entry - a failed guard switched off another field's `valid_range`. They are
+  `IdentityTable`s now, whose entries hold the definition. Go's `keyOrder` was keyed by a
+  map's address and kept on the schema after the raw document was freed; each entry now
+  holds its map. The generated codec named a variable `x_outer{id(field) % 100000}`, so
+  one schema generated different code on each run; it takes `_next_uid()`. Java's
+  `IdentityHashMap`s and C#'s `ReferenceEqualityComparer` tables hold their keys and were
+  never affected. `tests/test_identity_tables.py` reproduces each Python leak.
 
 ## Converting a vendor codec
 
@@ -2599,9 +2724,10 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
 - **Units come from TTN's payload schema, not from guesswork.** `lib/payload.json`
   in the device repository documents each normalized measurement and its unit, and
   the vendor's raw values are already in those units. Note that TTN's normalized
-  `battery` is a *voltage* while the milesight raw field is a percentage 0-100, so
-  those fields declare `sensor: percentage` to stop the scorer detecting them as
-  IPSO 3316 voltage. Quantities whose SenML unit is a different scale (pressure in
+  `battery` is a *voltage* while the milesight raw field is a percentage 0-100.
+  Those fields still declare `sensor: percentage`, which once stopped the scorer
+  detecting them as IPSO 3316 voltage. The scorer now follows IL-204 (below), so the
+  word `battery` asks for no object at all, and the key is inert. Quantities whose SenML unit is a different scale (pressure in
   hPa against SenML's Pa, distance in mm against m) carry a `unit:` but no
   annotation, because a mismatched annotation misdeclares the value.
 - **Flags packed into a byte need `consume: 1` on the last field.** An explicit bit
@@ -2611,9 +2737,24 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   reason. One case remains unsolved: `em320-tilt` packs a flag into bit 0 of bytes
   already consumed by its angle fields, which no current construct expresses.
 - **Milesight units.** None of these schemas declare `unit:`, so they
-  carry no semantic annotations and stop at Silver; the scorer's keyword heuristic
-  would read milesight `battery` as IPSO 3316 voltage when it is a percentage, so
-  units have to be established per device before annotating.
+  carry no semantic annotations; units have to be established per device before
+  annotating.
+- **The scorer's detectable sensor fields are IL-204's.** `tools/score_schema.py`
+  expects an IPSO annotation only where the Integration Layer's TTN classification
+  rule (IL-204, la-integration-layer `docs/guides/protocol-mappings/ttn-normalized.md`)
+  places a field from its name: one of `temperature`, `humidity`, `pressure`,
+  `precipitation` or `moisture`, with no qualifier word (`max`, `threshold`, `target`,
+  `raw`, ...) and no medium that lacks a TTN path (`internal`, `leaf`, `board`, ...).
+  The old name-to-object table, under which `battery`, `voltage`, `current` or
+  `latitude` each demanded an object, is gone. A unit never selects an object (IL-203).
+  A generic object (3300, 3320, 3325, 3332) is never a mismatch (IL-199). A
+  name-silent field's annotation is neither expected nor flagged. See
+  `docs/IPSO-REFERENCE.md`. **A schema with no field IL-204 places gets half the
+  semantic points** (`NO_DETECTABLE_SEMANTIC_CREDIT`, 10 of 20), by decision on
+  PR #123. Giving none dropped 12 Platinum schemas whose only fields were battery,
+  voltage or position to Silver. Giving all 20 lifted 257 registry schemas to
+  Platinum without checking anything. The scan now descends into a field-level
+  `match:` too. Before that, laq4's temperature and humidity were never seen.
 - **The TS013 generator's shared-byte bug is fixed**: bare bit ranges, `consume` and
   `bool` with `bit:` decode correctly in generated JavaScript, and
   `tools/vector-verdicts.py` holds both paths to every corpus vector. What remains is

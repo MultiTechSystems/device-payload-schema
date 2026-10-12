@@ -3,8 +3,8 @@
   "schemas": [
     {
       "schema_path": "schemas/devices/_language-conformance/bitfield-string.yaml",
-      "timestamp": "2026-08-11T08:41:51.000880-05:00",
-      "score": 71.0,
+      "timestamp": "2026-10-11T18:40:58.058279-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -59,8 +59,8 @@
     },
     {
       "schema_path": "schemas/devices/_language-conformance/compute-negative-idiv-mod.yaml",
-      "timestamp": "2026-08-11T08:41:51.020692-05:00",
-      "score": 76.0,
+      "timestamp": "2026-10-11T18:40:58.202012-05:00",
+      "score": 86.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -102,18 +102,24 @@
           "independent_vectors": 0,
           "verification": "self",
           "issues": []
-        }
+        },
+        "tier_capped_by": [
+          "missing edge case vectors (PS-239)",
+          "no independently sourced test vectors (PS-264)"
+        ]
       },
       "recommendations": [
         "No test vector declares an independent source; add `source: vendor-doc|vendor-codec|field-capture` so the score reflects verification rather than self-consistency",
+        "Tier capped: missing edge case vectors (PS-239)",
+        "Tier capped: no independently sourced test vectors (PS-264)",
         "Add test vector for zero values",
         "Add test vector for maximum values"
       ]
     },
     {
       "schema_path": "schemas/devices/_language-conformance/enum-spec-default.yaml",
-      "timestamp": "2026-08-11T08:41:51.041562-05:00",
-      "score": 71.0,
+      "timestamp": "2026-10-11T18:40:58.389078-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -407,8 +413,8 @@
     },
     {
       "schema_path": "schemas/devices/_language-conformance/repeat-count.yaml",
-      "timestamp": "2026-08-11T08:41:51.131721-05:00",
-      "score": 71.0,
+      "timestamp": "2026-10-11T18:40:59.704421-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -526,8 +532,8 @@
     },
     {
       "schema_path": "schemas/devices/_language-conformance/skip-type.yaml",
-      "timestamp": "2026-08-11T08:41:51.173294-05:00",
-      "score": 71.0,
+      "timestamp": "2026-10-11T18:41:00.184664-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -642,8 +648,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/alarm_config__set_delta_threshold.yaml",
-      "timestamp": "2026-08-11T08:41:51.216608-05:00",
-      "score": 71.0,
+      "timestamp": "2026-10-11T18:41:00.817722-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -651,10 +657,12 @@
         "has_test_vectors": true,
         "test_count": 1,
         "vector_issues": [
-          "Only 1 test vectors (recommend at least 3)"
+          "Only 2 test vectors (recommend at least 3)",
+          "Test vector 1: missing 'payload'",
+          "Test vector 1: missing 'expected'"
         ],
         "python_tests_pass": true,
-        "python_passed": 1,
+        "python_passed": 2,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -682,7 +690,8 @@
         },
         "provenance": {
           "counts": {
-            "spec-example": 1
+            "spec-example": 1,
+            "generated": 1
           },
           "independent_vectors": 1,
           "verification": "independent",
@@ -697,8 +706,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/alarm_config__set_temp_alarm.yaml",
-      "timestamp": "2026-08-11T08:41:51.236599-05:00",
-      "score": 71.0,
+      "timestamp": "2026-10-11T18:41:00.841410-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -706,10 +715,12 @@
         "has_test_vectors": true,
         "test_count": 1,
         "vector_issues": [
-          "Only 1 test vectors (recommend at least 3)"
+          "Only 2 test vectors (recommend at least 3)",
+          "Test vector 1: missing 'payload'",
+          "Test vector 1: missing 'expected'"
         ],
         "python_tests_pass": true,
-        "python_passed": 1,
+        "python_passed": 2,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -737,7 +748,8 @@
         },
         "provenance": {
           "counts": {
-            "spec-example": 1
+            "spec-example": 1,
+            "generated": 1
           },
           "independent_vectors": 1,
           "verification": "independent",
@@ -752,8 +764,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/data_logging__clear_log.yaml",
-      "timestamp": "2026-08-11T08:41:51.258091-05:00",
-      "score": 71.0,
+      "timestamp": "2026-10-11T18:41:00.865638-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -761,10 +773,12 @@
         "has_test_vectors": true,
         "test_count": 1,
         "vector_issues": [
-          "Only 1 test vectors (recommend at least 3)"
+          "Only 2 test vectors (recommend at least 3)",
+          "Test vector 1: missing 'payload'",
+          "Test vector 1: missing 'expected'"
         ],
         "python_tests_pass": true,
-        "python_passed": 1,
+        "python_passed": 2,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -792,7 +806,8 @@
         },
         "provenance": {
           "counts": {
-            "spec-example": 1
+            "spec-example": 1,
+            "generated": 1
           },
           "independent_vectors": 1,
           "verification": "independent",
@@ -807,8 +822,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/data_logging__enable_logging.yaml",
-      "timestamp": "2026-08-11T08:41:51.280895-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:00.890274-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -816,10 +831,12 @@
         "has_test_vectors": true,
         "test_count": 1,
         "vector_issues": [
-          "Only 1 test vectors (recommend at least 3)"
+          "Only 2 test vectors (recommend at least 3)",
+          "Test vector 1: missing 'payload'",
+          "Test vector 1: missing 'expected'"
         ],
         "python_tests_pass": true,
-        "python_passed": 1,
+        "python_passed": 2,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -847,7 +864,8 @@
         },
         "provenance": {
           "counts": {
-            "spec-example": 1
+            "spec-example": 1,
+            "generated": 1
           },
           "independent_vectors": 1,
           "verification": "independent",
@@ -861,8 +879,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/data_logging__fetch_all.yaml",
-      "timestamp": "2026-08-11T08:41:51.303444-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:00.913100-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -870,10 +888,12 @@
         "has_test_vectors": true,
         "test_count": 1,
         "vector_issues": [
-          "Only 1 test vectors (recommend at least 3)"
+          "Only 2 test vectors (recommend at least 3)",
+          "Test vector 1: missing 'payload'",
+          "Test vector 1: missing 'expected'"
         ],
         "python_tests_pass": true,
-        "python_passed": 1,
+        "python_passed": 2,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -901,7 +921,8 @@
         },
         "provenance": {
           "counts": {
-            "spec-example": 1
+            "spec-example": 1,
+            "generated": 1
           },
           "independent_vectors": 1,
           "verification": "independent",
@@ -915,8 +936,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/device_management__factory_reset.yaml",
-      "timestamp": "2026-08-11T08:41:51.324433-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:00.937956-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -924,10 +945,12 @@
         "has_test_vectors": true,
         "test_count": 1,
         "vector_issues": [
-          "Only 1 test vectors (recommend at least 3)"
+          "Only 2 test vectors (recommend at least 3)",
+          "Test vector 1: missing 'payload'",
+          "Test vector 1: missing 'expected'"
         ],
         "python_tests_pass": true,
-        "python_passed": 1,
+        "python_passed": 2,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -955,7 +978,8 @@
         },
         "provenance": {
           "counts": {
-            "spec-example": 1
+            "spec-example": 1,
+            "generated": 1
           },
           "independent_vectors": 1,
           "verification": "independent",
@@ -969,8 +993,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/device_management__identify_10sec.yaml",
-      "timestamp": "2026-08-11T08:41:51.346439-05:00",
-      "score": 71.0,
+      "timestamp": "2026-10-11T18:41:00.961813-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -978,10 +1002,12 @@
         "has_test_vectors": true,
         "test_count": 1,
         "vector_issues": [
-          "Only 1 test vectors (recommend at least 3)"
+          "Only 2 test vectors (recommend at least 3)",
+          "Test vector 1: missing 'payload'",
+          "Test vector 1: missing 'expected'"
         ],
         "python_tests_pass": true,
-        "python_passed": 1,
+        "python_passed": 2,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -1009,7 +1035,8 @@
         },
         "provenance": {
           "counts": {
-            "spec-example": 1
+            "spec-example": 1,
+            "generated": 1
           },
           "independent_vectors": 1,
           "verification": "independent",
@@ -1024,8 +1051,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/device_management__reboot_immediate.yaml",
-      "timestamp": "2026-08-11T08:41:51.368909-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:00.987407-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -1033,10 +1060,12 @@
         "has_test_vectors": true,
         "test_count": 1,
         "vector_issues": [
-          "Only 1 test vectors (recommend at least 3)"
+          "Only 2 test vectors (recommend at least 3)",
+          "Test vector 1: missing 'payload'",
+          "Test vector 1: missing 'expected'"
         ],
         "python_tests_pass": true,
-        "python_passed": 1,
+        "python_passed": 2,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -1064,7 +1093,8 @@
         },
         "provenance": {
           "counts": {
-            "spec-example": 1
+            "spec-example": 1,
+            "generated": 1
           },
           "independent_vectors": 1,
           "verification": "independent",
@@ -1078,8 +1108,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/gps_tracker__clear_all_geofences.yaml",
-      "timestamp": "2026-08-11T08:41:51.391448-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:01.009663-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -1132,8 +1162,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/gps_tracker__request_position.yaml",
-      "timestamp": "2026-08-11T08:41:51.413756-05:00",
-      "score": 71.0,
+      "timestamp": "2026-10-11T18:41:01.031276-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -1252,8 +1282,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/lorawan_frames__fctrl_uplink_adr_ack.yaml",
-      "timestamp": "2026-08-11T08:41:51.458278-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:01.076143-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -1365,8 +1395,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/lorawan_frames__mhdr_confirmed_down.yaml",
-      "timestamp": "2026-08-11T08:41:51.508426-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:01.120193-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -1419,8 +1449,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/lorawan_frames__mhdr_unconfirmed_up.yaml",
-      "timestamp": "2026-08-11T08:41:51.533464-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:01.143796-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -1473,8 +1503,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/lorawan_mac_commands__dev_status_ans.yaml",
-      "timestamp": "2026-08-11T08:41:51.558221-05:00",
-      "score": 71.0,
+      "timestamp": "2026-10-11T18:41:01.164909-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -1504,15 +1534,11 @@
         "semantic_annotations": {
           "total_fields": 3,
           "ipso_mapped": 0,
-          "ipso_missing": [
-            "battery: add ipso: {object: 3316}"
-          ],
+          "ipso_missing": [],
           "senml_mapped": 0,
-          "senml_missing": [
-            "battery: add senml: {unit: \"V\"}"
-          ],
+          "senml_missing": [],
           "semantic_mapped": 0,
-          "detectable_sensors": 1,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -1527,17 +1553,13 @@
       "recommendations": [
         "Add more test vectors (recommend at least 3)",
         "Add test vector for zero values",
-        "Add test vector for maximum values",
-        "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 battery: add ipso: {object: 3316}",
-        "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 battery: add senml: {unit: \"V\"}"
+        "Add test vector for maximum values"
       ]
     },
     {
       "schema_path": "schemas/devices/_library-composed/lorawan_mac_commands__device_time_ans.yaml",
-      "timestamp": "2026-08-11T08:41:51.585168-05:00",
-      "score": 71.0,
+      "timestamp": "2026-10-11T18:41:01.187681-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -1592,8 +1614,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/lorawan_mac_commands__link_adr_req_dr5_pwr2.yaml",
-      "timestamp": "2026-08-11T08:41:51.612025-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:01.209963-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -1623,15 +1645,11 @@
         "semantic_annotations": {
           "total_fields": 4,
           "ipso_mapped": 0,
-          "ipso_missing": [
-            "data_rate_tx_power: add ipso: {object: 3328}"
-          ],
+          "ipso_missing": [],
           "senml_mapped": 0,
-          "senml_missing": [
-            "data_rate_tx_power: add senml: {unit: \"W\"}"
-          ],
+          "senml_missing": [],
           "semantic_mapped": 0,
-          "detectable_sensors": 1,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -1645,17 +1663,13 @@
       },
       "recommendations": [
         "Add more test vectors (recommend at least 3)",
-        "Add test vector for zero values",
-        "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 data_rate_tx_power: add ipso: {object: 3328}",
-        "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 data_rate_tx_power: add senml: {unit: \"W\"}"
+        "Add test vector for zero values"
       ]
     },
     {
       "schema_path": "schemas/devices/_library-composed/lorawan_mac_commands__link_check_ans.yaml",
-      "timestamp": "2026-08-11T08:41:51.638900-05:00",
-      "score": 71.0,
+      "timestamp": "2026-10-11T18:41:01.231415-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -1709,8 +1723,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/lorawan_mac_commands__link_check_req.yaml",
-      "timestamp": "2026-08-11T08:41:51.665124-05:00",
-      "score": 71.0,
+      "timestamp": "2026-10-11T18:41:01.255338-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -1764,8 +1778,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/sensor_config__read_all_sensors.yaml",
-      "timestamp": "2026-08-11T08:41:51.693641-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:01.276404-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -1818,8 +1832,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/sensor_config__set_interval_5min.yaml",
-      "timestamp": "2026-08-11T08:41:51.716587-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:01.299247-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -1872,8 +1886,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/sensor_config__set_temp_calibration.yaml",
-      "timestamp": "2026-08-11T08:41:51.740677-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:01.320996-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -1926,8 +1940,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/ts003_clock_sync__app_time_ans_negative_correction.yaml",
-      "timestamp": "2026-08-11T08:41:51.763022-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:01.343220-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -1980,9 +1994,9 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/ts003_clock_sync__app_time_ans_positive_correction.yaml",
-      "timestamp": "2026-08-11T08:41:51.783497-05:00",
-      "score": 69.0,
-      "tier": "BRONZE",
+      "timestamp": "2026-10-11T18:41:01.364796-05:00",
+      "score": 79.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
@@ -2036,8 +2050,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/ts003_clock_sync__app_time_req_with_ans_required.yaml",
-      "timestamp": "2026-08-11T08:41:51.804514-05:00",
-      "score": 71.0,
+      "timestamp": "2026-10-11T18:41:01.389317-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -2092,8 +2106,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/ts003_clock_sync__force_resync.yaml",
-      "timestamp": "2026-08-11T08:41:51.828740-05:00",
-      "score": 71.0,
+      "timestamp": "2026-10-11T18:41:01.410883-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -2147,8 +2161,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/ts003_clock_sync__package_version_req.yaml",
-      "timestamp": "2026-08-11T08:41:51.849667-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:01.432213-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -2201,8 +2215,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/ts003_clock_sync__set_periodicity_daily.yaml",
-      "timestamp": "2026-08-11T08:41:51.869534-05:00",
-      "score": 71.0,
+      "timestamp": "2026-10-11T18:41:01.454059-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -2256,8 +2270,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/ts004_fragmentation__frag_session_delete.yaml",
-      "timestamp": "2026-08-11T08:41:51.889545-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:01.476002-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -2310,8 +2324,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/ts004_fragmentation__frag_session_status_query.yaml",
-      "timestamp": "2026-08-11T08:41:51.911034-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:01.498553-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -2364,8 +2378,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/ts004_fragmentation__package_version_req.yaml",
-      "timestamp": "2026-08-11T08:41:51.934738-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:01.521882-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -2418,8 +2432,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/ts005_multicast__mc_group_delete_0.yaml",
-      "timestamp": "2026-08-11T08:41:51.955547-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:01.543358-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -2472,8 +2486,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/ts005_multicast__mc_group_status_all.yaml",
-      "timestamp": "2026-08-11T08:41:51.977642-05:00",
-      "score": 71.0,
+      "timestamp": "2026-10-11T18:41:01.565952-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -2527,8 +2541,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/ts005_multicast__package_version_req.yaml",
-      "timestamp": "2026-08-11T08:41:52.000635-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:01.587873-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -2581,8 +2595,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/ts006_firmware_mgmt__delete_any_image.yaml",
-      "timestamp": "2026-08-11T08:41:52.025313-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:01.608256-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -2635,8 +2649,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/ts006_firmware_mgmt__dev_version_req.yaml",
-      "timestamp": "2026-08-11T08:41:52.047465-05:00",
-      "score": 71.0,
+      "timestamp": "2026-10-11T18:41:01.630765-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -2690,8 +2704,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/ts006_firmware_mgmt__package_version_req.yaml",
-      "timestamp": "2026-08-11T08:41:52.069934-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:01.652679-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -2744,8 +2758,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/ts006_firmware_mgmt__reboot_cancel.yaml",
-      "timestamp": "2026-08-11T08:41:52.091059-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:01.673183-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -2798,8 +2812,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/ts006_firmware_mgmt__reboot_countdown_5min.yaml",
-      "timestamp": "2026-08-11T08:41:52.113015-05:00",
-      "score": 71.0,
+      "timestamp": "2026-10-11T18:41:01.695083-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -2853,8 +2867,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/ts006_firmware_mgmt__reboot_immediate.yaml",
-      "timestamp": "2026-08-11T08:41:52.135251-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:01.717225-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -2907,8 +2921,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/ts006_firmware_mgmt__upgrade_image_query.yaml",
-      "timestamp": "2026-08-11T08:41:52.157093-05:00",
-      "score": 71.0,
+      "timestamp": "2026-10-11T18:41:01.738119-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -3019,8 +3033,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/ts007_multi_package__package_version_req.yaml",
-      "timestamp": "2026-08-11T08:41:52.197170-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:01.782939-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -3073,8 +3087,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/udp_packet_forwarder__push_ack.yaml",
-      "timestamp": "2026-08-11T08:41:52.215136-05:00",
-      "score": 71.0,
+      "timestamp": "2026-10-11T18:41:01.805138-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -3185,8 +3199,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/utility_meter__reset_all_counters.yaml",
-      "timestamp": "2026-08-11T08:41:52.265448-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:01.852447-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -3239,8 +3253,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/utility_meter__set_ct_100_1.yaml",
-      "timestamp": "2026-08-11T08:41:52.285410-05:00",
-      "score": 71.0,
+      "timestamp": "2026-10-11T18:41:01.877593-05:00",
+      "score": 81.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -3294,8 +3308,8 @@
     },
     {
       "schema_path": "schemas/devices/_library-composed/utility_meter__set_tariff.yaml",
-      "timestamp": "2026-08-11T08:41:52.305022-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:01.900016-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -3396,9 +3410,9 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-alb.yaml",
-      "timestamp": "2026-08-11T08:41:52.352059-05:00",
-      "score": 100.0,
-      "tier": "PLATINUM",
+      "timestamp": "2026-10-11T18:41:01.994405-05:00",
+      "score": 90.0,
+      "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
@@ -3423,12 +3437,12 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 7,
-          "ipso_mapped": 1,
+          "ipso_mapped": 0,
           "ipso_missing": [],
-          "senml_mapped": 1,
+          "senml_mapped": 0,
           "senml_missing": [],
-          "semantic_mapped": 1,
-          "detectable_sensors": 1,
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -3492,17 +3506,17 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-atm41.yaml",
-      "timestamp": "2026-08-11T08:41:52.401500-05:00",
-      "score": 92.0,
+      "timestamp": "2026-10-11T18:41:02.053424-05:00",
+      "score": 86.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 6,
+        "test_count": 7,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 6,
+        "python_passed": 7,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -3519,37 +3533,37 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 21,
-          "ipso_mapped": 6,
+          "ipso_mapped": 2,
           "ipso_missing": [
-            "lightning_average_distance: add ipso: {object: 3330}",
+            "precipitation: add ipso: {object: 3300}",
             "vapor_pressure: add ipso: {object: 3323}",
             "atmospheric_pressure: add ipso: {object: 3323}"
           ],
-          "senml_mapped": 6,
+          "senml_mapped": 2,
           "senml_missing": [
-            "lightning_average_distance: field is in 'km'; SenML wants 'm' -- convert the value or declare the real unit before annotating",
+            "precipitation: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating",
             "vapor_pressure: field is in 'kPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating",
             "atmospheric_pressure: field is in 'kPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
           ],
-          "semantic_mapped": 6,
-          "detectable_sensors": 9,
+          "semantic_mapped": 2,
+          "detectable_sensors": 5,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
-            "vendor-codec": 6
+            "vendor-codec": 7
           },
-          "independent_vectors": 6,
+          "independent_vectors": 7,
           "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
         "Add IPSO object mappings for standard sensors (3 fields)",
-        "  \u2192 lightning_average_distance: add ipso: {object: 3330}",
+        "  \u2192 precipitation: add ipso: {object: 3300}",
         "  \u2192 vapor_pressure: add ipso: {object: 3323}",
         "Add SenML units for standard sensors (3 fields)",
-        "  \u2192 lightning_average_distance: field is in 'km'; SenML wants 'm' -- convert the value or declare the real unit before annotating",
+        "  \u2192 precipitation: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating",
         "  \u2192 vapor_pressure: field is in 'kPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
       ]
     },
@@ -3716,9 +3730,9 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-ctd10.yaml",
-      "timestamp": "2026-08-11T08:41:52.458279-05:00",
-      "score": 89.0,
-      "tier": "GOLD",
+      "timestamp": "2026-10-11T18:41:02.152380-05:00",
+      "score": 100.0,
+      "tier": "PLATINUM",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
@@ -3743,17 +3757,12 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 8,
-          "ipso_mapped": 2,
-          "ipso_missing": [
-            "water_depth: add ipso: {object: 3319}",
-            "electrical_conductivity: add ipso: {object: 3327}"
-          ],
-          "senml_mapped": 2,
-          "senml_missing": [
-            "water_depth: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating"
-          ],
-          "semantic_mapped": 2,
-          "detectable_sensors": 4,
+          "ipso_mapped": 1,
+          "ipso_missing": [],
+          "senml_mapped": 1,
+          "senml_missing": [],
+          "semantic_mapped": 1,
+          "detectable_sensors": 1,
           "annotation_errors": []
         },
         "provenance": {
@@ -3765,13 +3774,7 @@
           "issues": []
         }
       },
-      "recommendations": [
-        "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 water_depth: add ipso: {object: 3319}",
-        "  \u2192 electrical_conductivity: add ipso: {object: 3327}",
-        "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 water_depth: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-cws.yaml",
@@ -4006,9 +4009,9 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-003.yaml",
-      "timestamp": "2026-08-11T08:41:52.492605-05:00",
-      "score": 100.0,
-      "tier": "PLATINUM",
+      "timestamp": "2026-10-11T18:41:02.258671-05:00",
+      "score": 90.0,
+      "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
@@ -4033,12 +4036,12 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 5,
-          "ipso_mapped": 1,
+          "ipso_mapped": 0,
           "ipso_missing": [],
-          "senml_mapped": 1,
+          "senml_mapped": 0,
           "senml_missing": [],
-          "semantic_mapped": 1,
-          "detectable_sensors": 1,
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -4054,8 +4057,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-004-10.yaml",
-      "timestamp": "2026-08-11T08:41:52.513000-05:00",
-      "score": 14.1,
+      "timestamp": "2026-10-11T18:41:02.283167-05:00",
+      "score": 25.9,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -4090,17 +4093,11 @@
         "semantic_annotations": {
           "total_fields": 5,
           "ipso_mapped": 0,
-          "ipso_missing": [
-            "current: add ipso: {object: 3317}",
-            "battery_voltage: add ipso: {object: 3316}"
-          ],
+          "ipso_missing": [],
           "senml_mapped": 0,
-          "senml_missing": [
-            "current: field is in 'mA'; SenML wants 'A' -- convert the value or declare the real unit before annotating",
-            "battery_voltage: add senml: {unit: \"V\"}"
-          ],
+          "senml_missing": [],
           "semantic_mapped": 0,
-          "detectable_sensors": 2,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -4116,13 +4113,7 @@
         "Add test vector for zero values",
         "Add test vector for maximum values",
         "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches",
-        "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 current: add ipso: {object: 3317}",
-        "  \u2192 battery_voltage: add ipso: {object: 3316}",
-        "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 current: field is in 'mA'; SenML wants 'A' -- convert the value or declare the real unit before annotating",
-        "  \u2192 battery_voltage: add senml: {unit: \"V\"}"
+        "Add test vectors covering all switch/flagged branches"
       ]
     },
     {
@@ -4484,17 +4475,17 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dlr2-011.yaml",
-      "timestamp": "2026-08-11T08:41:52.528938-05:00",
-      "score": 100.0,
-      "tier": "PLATINUM",
+      "timestamp": "2026-10-11T18:41:02.410699-05:00",
+      "score": 90.0,
+      "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 6,
+        "test_count": 7,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 6,
+        "python_passed": 7,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -4511,19 +4502,19 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 6,
-          "ipso_mapped": 1,
+          "ipso_mapped": 0,
           "ipso_missing": [],
-          "senml_mapped": 1,
+          "senml_mapped": 0,
           "senml_missing": [],
-          "semantic_mapped": 1,
-          "detectable_sensors": 1,
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
-            "vendor-codec": 6
+            "vendor-codec": 7
           },
-          "independent_vectors": 6,
+          "independent_vectors": 7,
           "verification": "independent",
           "issues": []
         }
@@ -4649,8 +4640,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-dws-232263168-0000302459-1370.yaml",
-      "timestamp": "2026-08-11T08:41:52.575330-05:00",
-      "score": 14.1,
+      "timestamp": "2026-10-11T18:41:02.487046-05:00",
+      "score": 25.9,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -4685,19 +4676,11 @@
         "semantic_annotations": {
           "total_fields": 6,
           "ipso_mapped": 0,
-          "ipso_missing": [
-            "frequency: add ipso: {object: 3318}",
-            "weight: add ipso: {object: 3322}",
-            "battery_voltage: add ipso: {object: 3316}"
-          ],
+          "ipso_missing": [],
           "senml_mapped": 0,
-          "senml_missing": [
-            "frequency: add senml: {unit: \"Hz\"}",
-            "weight: field is in 'g'; SenML wants 'kg' -- convert the value or declare the real unit before annotating",
-            "battery_voltage: add senml: {unit: \"V\"}"
-          ],
+          "senml_missing": [],
           "semantic_mapped": 0,
-          "detectable_sensors": 3,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -4713,19 +4696,13 @@
         "Add test vector for zero values",
         "Add test vector for maximum values",
         "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches",
-        "Add IPSO object mappings for standard sensors (3 fields)",
-        "  \u2192 frequency: add ipso: {object: 3318}",
-        "  \u2192 weight: add ipso: {object: 3322}",
-        "Add SenML units for standard sensors (3 fields)",
-        "  \u2192 frequency: add senml: {unit: \"Hz\"}",
-        "  \u2192 weight: field is in 'g'; SenML wants 'kg' -- convert the value or declare the real unit before annotating"
+        "Add test vectors covering all switch/flagged branches"
       ]
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-gmm.yaml",
-      "timestamp": "2026-08-11T08:41:52.577893-05:00",
-      "score": 92.0,
+      "timestamp": "2026-10-11T18:41:02.490117-05:00",
+      "score": 89.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
@@ -4751,18 +4728,18 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 11,
-          "ipso_mapped": 4,
+          "ipso_mapped": 2,
           "ipso_missing": [
             "atmospheric_pressure: add ipso: {object: 3323}",
             "vapor_pressure_deficit: add ipso: {object: 3323}"
           ],
-          "senml_mapped": 4,
+          "senml_mapped": 2,
           "senml_missing": [
             "atmospheric_pressure: field is in 'kPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating",
             "vapor_pressure_deficit: field is in 'kPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
           ],
-          "semantic_mapped": 4,
-          "detectable_sensors": 6,
+          "semantic_mapped": 2,
+          "detectable_sensors": 4,
           "annotation_errors": []
         },
         "provenance": {
@@ -4872,9 +4849,9 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-ifd.yaml",
-      "timestamp": "2026-08-11T08:41:52.608028-05:00",
-      "score": 100.0,
-      "tier": "PLATINUM",
+      "timestamp": "2026-10-11T18:41:02.557242-05:00",
+      "score": 90.0,
+      "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
@@ -4899,12 +4876,12 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 5,
-          "ipso_mapped": 1,
+          "ipso_mapped": 0,
           "ipso_missing": [],
-          "senml_mapped": 1,
+          "senml_mapped": 0,
           "senml_missing": [],
-          "semantic_mapped": 1,
-          "detectable_sensors": 1,
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -4920,9 +4897,9 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-ilt.yaml",
-      "timestamp": "2026-08-11T08:41:52.629304-05:00",
-      "score": 100.0,
-      "tier": "PLATINUM",
+      "timestamp": "2026-10-11T18:41:02.581715-05:00",
+      "score": 90.0,
+      "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
@@ -4947,12 +4924,12 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 5,
-          "ipso_mapped": 2,
+          "ipso_mapped": 0,
           "ipso_missing": [],
-          "senml_mapped": 2,
+          "senml_mapped": 0,
           "senml_missing": [],
-          "semantic_mapped": 2,
-          "detectable_sensors": 2,
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -4968,9 +4945,9 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-isd.yaml",
-      "timestamp": "2026-08-11T08:41:52.651479-05:00",
-      "score": 100.0,
-      "tier": "PLATINUM",
+      "timestamp": "2026-10-11T18:41:02.608907-05:00",
+      "score": 90.0,
+      "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
@@ -4995,12 +4972,12 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 5,
-          "ipso_mapped": 1,
+          "ipso_mapped": 0,
           "ipso_missing": [],
-          "senml_mapped": 1,
+          "senml_mapped": 0,
           "senml_missing": [],
-          "semantic_mapped": 1,
-          "detectable_sensors": 1,
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -5168,8 +5145,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-kl66-1538372-464859.yaml",
-      "timestamp": "2026-08-11T08:41:52.679242-05:00",
-      "score": 14.1,
+      "timestamp": "2026-10-11T18:41:02.690265-05:00",
+      "score": 25.9,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -5204,19 +5181,11 @@
         "semantic_annotations": {
           "total_fields": 10,
           "ipso_mapped": 0,
-          "ipso_missing": [
-            "frequency: add ipso: {object: 3318}",
-            "weight: add ipso: {object: 3322}",
-            "battery_voltage: add ipso: {object: 3316}"
-          ],
+          "ipso_missing": [],
           "senml_mapped": 0,
-          "senml_missing": [
-            "frequency: add senml: {unit: \"Hz\"}",
-            "weight: field is in 'g'; SenML wants 'kg' -- convert the value or declare the real unit before annotating",
-            "battery_voltage: add senml: {unit: \"V\"}"
-          ],
+          "senml_missing": [],
           "semantic_mapped": 0,
-          "detectable_sensors": 3,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -5232,20 +5201,14 @@
         "Add test vector for zero values",
         "Add test vector for maximum values",
         "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches",
-        "Add IPSO object mappings for standard sensors (3 fields)",
-        "  \u2192 frequency: add ipso: {object: 3318}",
-        "  \u2192 weight: add ipso: {object: 3322}",
-        "Add SenML units for standard sensors (3 fields)",
-        "  \u2192 frequency: add senml: {unit: \"Hz\"}",
-        "  \u2192 weight: field is in 'g'; SenML wants 'kg' -- convert the value or declare the real unit before annotating"
+        "Add test vectors covering all switch/flagged branches"
       ]
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-lid.yaml",
-      "timestamp": "2026-08-11T08:41:52.682604-05:00",
-      "score": 80.0,
-      "tier": "SILVER",
+      "timestamp": "2026-10-11T18:41:02.695291-05:00",
+      "score": 90.0,
+      "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
@@ -5270,32 +5233,12 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 15,
-          "ipso_mapped": 1,
-          "ipso_missing": [
-            "distance_average: add ipso: {object: 3330}",
-            "distance_minimum: add ipso: {object: 3330}",
-            "distance_maximum: add ipso: {object: 3330}",
-            "distance_median: add ipso: {object: 3330}",
-            "distance_10th_percentile: add ipso: {object: 3330}",
-            "distance_25th_percentile: add ipso: {object: 3330}",
-            "distance_75th_percentile: add ipso: {object: 3330}",
-            "distance_90th_percentile: add ipso: {object: 3330}",
-            "distance_most_frequent_value: add ipso: {object: 3330}"
-          ],
-          "senml_mapped": 1,
-          "senml_missing": [
-            "distance_average: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating",
-            "distance_minimum: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating",
-            "distance_maximum: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating",
-            "distance_median: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating",
-            "distance_10th_percentile: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating",
-            "distance_25th_percentile: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating",
-            "distance_75th_percentile: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating",
-            "distance_90th_percentile: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating",
-            "distance_most_frequent_value: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating"
-          ],
-          "semantic_mapped": 1,
-          "detectable_sensors": 10,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -5307,14 +5250,7 @@
           "issues": []
         }
       },
-      "recommendations": [
-        "Add IPSO object mappings for standard sensors (9 fields)",
-        "  \u2192 distance_average: add ipso: {object: 3330}",
-        "  \u2192 distance_minimum: add ipso: {object: 3330}",
-        "Add SenML units for standard sensors (9 fields)",
-        "  \u2192 distance_average: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating",
-        "  \u2192 distance_minimum: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-lp8p.yaml",
@@ -5547,8 +5483,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-mbx.yaml",
-      "timestamp": "2026-08-11T08:41:52.713736-05:00",
-      "score": 89.0,
+      "timestamp": "2026-10-11T18:41:02.799007-05:00",
+      "score": 90.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
@@ -5574,16 +5510,12 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 6,
-          "ipso_mapped": 1,
-          "ipso_missing": [
-            "distance: add ipso: {object: 3330}"
-          ],
-          "senml_mapped": 1,
-          "senml_missing": [
-            "distance: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating"
-          ],
-          "semantic_mapped": 1,
-          "detectable_sensors": 2,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -5595,12 +5527,7 @@
           "issues": []
         }
       },
-      "recommendations": [
-        "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 distance: add ipso: {object: 3330}",
-        "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 distance: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-mes5.yaml",
@@ -5757,8 +5684,8 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-par.yaml",
-      "timestamp": "2026-08-11T08:41:52.809524-05:00",
-      "score": 14.1,
+      "timestamp": "2026-10-11T18:41:02.908080-05:00",
+      "score": 25.9,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -5793,15 +5720,11 @@
         "semantic_annotations": {
           "total_fields": 5,
           "ipso_mapped": 0,
-          "ipso_missing": [
-            "battery_voltage: add ipso: {object: 3316}"
-          ],
+          "ipso_missing": [],
           "senml_mapped": 0,
-          "senml_missing": [
-            "battery_voltage: add senml: {unit: \"V\"}"
-          ],
+          "senml_missing": [],
           "semantic_mapped": 0,
-          "detectable_sensors": 1,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -5817,18 +5740,14 @@
         "Add test vector for zero values",
         "Add test vector for maximum values",
         "Add test vector for negative values",
-        "Add test vectors covering all switch/flagged branches",
-        "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 battery_voltage: add ipso: {object: 3316}",
-        "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 battery_voltage: add senml: {unit: \"V\"}"
+        "Add test vectors covering all switch/flagged branches"
       ]
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pheht.yaml",
-      "timestamp": "2026-08-11T08:41:52.811237-05:00",
-      "score": 89.0,
-      "tier": "GOLD",
+      "timestamp": "2026-10-11T18:41:02.909679-05:00",
+      "score": 100.0,
+      "tier": "PLATINUM",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
@@ -5853,15 +5772,12 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 9,
-          "ipso_mapped": 2,
-          "ipso_missing": [
-            "ph: add ipso: {object: 3326}",
-            "ph_mv: add ipso: {object: 3326}"
-          ],
-          "senml_mapped": 2,
+          "ipso_mapped": 1,
+          "ipso_missing": [],
+          "senml_mapped": 1,
           "senml_missing": [],
-          "semantic_mapped": 2,
-          "detectable_sensors": 4,
+          "semantic_mapped": 1,
+          "detectable_sensors": 1,
           "annotation_errors": []
         },
         "provenance": {
@@ -5873,11 +5789,7 @@
           "issues": []
         }
       },
-      "recommendations": [
-        "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 ph: add ipso: {object: 3326}",
-        "  \u2192 ph_mv: add ipso: {object: 3326}"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-pm.yaml",
@@ -6348,9 +6260,9 @@
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-rad.yaml",
-      "timestamp": "2026-08-11T08:41:52.848528-05:00",
-      "score": 92.0,
-      "tier": "GOLD",
+      "timestamp": "2026-10-11T18:41:03.089539-05:00",
+      "score": 100.0,
+      "tier": "PLATINUM",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
@@ -6375,16 +6287,12 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 8,
-          "ipso_mapped": 2,
-          "ipso_missing": [
-            "distance: add ipso: {object: 3330}"
-          ],
-          "senml_mapped": 2,
-          "senml_missing": [
-            "distance: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating"
-          ],
-          "semantic_mapped": 2,
-          "detectable_sensors": 3,
+          "ipso_mapped": 1,
+          "ipso_missing": [],
+          "senml_mapped": 1,
+          "senml_missing": [],
+          "semantic_mapped": 1,
+          "detectable_sensors": 1,
           "annotation_errors": []
         },
         "provenance": {
@@ -6396,12 +6304,7 @@
           "issues": []
         }
       },
-      "recommendations": [
-        "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 distance: add ipso: {object: 3330}",
-        "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 distance: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/decentlab/dl-rhc.yaml",
@@ -7355,8 +7258,8 @@
     },
     {
       "schema_path": "schemas/devices/digital-matter/oyster.yaml",
-      "timestamp": "2026-08-11T08:41:52.942998-05:00",
-      "score": 100.0,
+      "timestamp": "2026-10-11T18:41:03.456640-05:00",
+      "score": 90.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -7382,12 +7285,12 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 16,
-          "ipso_mapped": 8,
+          "ipso_mapped": 0,
           "ipso_missing": [],
-          "senml_mapped": 8,
+          "senml_mapped": 0,
           "senml_missing": [],
-          "semantic_mapped": 8,
-          "detectable_sensors": 8,
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -7634,8 +7537,8 @@
     },
     {
       "schema_path": "schemas/devices/makerfabs/4-channel-adc.yaml",
-      "timestamp": "2026-08-11T08:41:53.024387-05:00",
-      "score": 16.5,
+      "timestamp": "2026-10-11T18:41:03.846462-05:00",
+      "score": 28.2,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -7671,15 +7574,11 @@
         "semantic_annotations": {
           "total_fields": 8,
           "ipso_mapped": 0,
-          "ipso_missing": [
-            "battery: add ipso: {object: 3316}"
-          ],
+          "ipso_missing": [],
           "senml_mapped": 0,
-          "senml_missing": [
-            "battery: add senml: {unit: \"V\"}"
-          ],
+          "senml_missing": [],
           "semantic_mapped": 0,
-          "detectable_sensors": 1,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -7695,11 +7594,7 @@
         "Add test vector for zero values",
         "Add test vector for maximum values",
         "Add test vector for minimum payload length",
-        "Add test vectors covering all switch/flagged branches",
-        "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 battery: add ipso: {object: 3316}",
-        "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 battery: add senml: {unit: \"V\"}"
+        "Add test vectors covering all switch/flagged branches"
       ]
     },
     {
@@ -7779,8 +7674,8 @@
     },
     {
       "schema_path": "schemas/devices/makerfabs/gps-tracker.yaml",
-      "timestamp": "2026-08-11T08:41:53.026890-05:00",
-      "score": 16.5,
+      "timestamp": "2026-10-11T18:41:03.849483-05:00",
+      "score": 28.2,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -7816,20 +7711,11 @@
         "semantic_annotations": {
           "total_fields": 16,
           "ipso_mapped": 0,
-          "ipso_missing": [
-            "battery: add ipso: {object: 3316}",
-            "gpsStatus: add ipso: {object: 3336}",
-            "latitude: add ipso: {object: 3336}",
-            "longitude: add ipso: {object: 3336}"
-          ],
+          "ipso_missing": [],
           "senml_mapped": 0,
-          "senml_missing": [
-            "battery: add senml: {unit: \"V\"}",
-            "latitude: add senml: {unit: \"lat\"}",
-            "longitude: add senml: {unit: \"lon\"}"
-          ],
+          "senml_missing": [],
           "semantic_mapped": 0,
-          "detectable_sensors": 4,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -7845,13 +7731,7 @@
         "Add test vector for zero values",
         "Add test vector for maximum values",
         "Add test vector for minimum payload length",
-        "Add test vectors covering all switch/flagged branches",
-        "Add IPSO object mappings for standard sensors (4 fields)",
-        "  \u2192 battery: add ipso: {object: 3316}",
-        "  \u2192 gpsStatus: add ipso: {object: 3336}",
-        "Add SenML units for standard sensors (3 fields)",
-        "  \u2192 battery: add senml: {unit: \"V\"}",
-        "  \u2192 latitude: add senml: {unit: \"lat\"}"
+        "Add test vectors covering all switch/flagged branches"
       ]
     },
     {
@@ -8155,8 +8035,8 @@
     },
     {
       "schema_path": "schemas/devices/mclimate/t-valve.yaml",
-      "timestamp": "2026-08-11T08:41:53.033847-05:00",
-      "score": 16.5,
+      "timestamp": "2026-10-11T18:41:03.879971-05:00",
+      "score": 28.2,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -8192,15 +8072,11 @@
         "semantic_annotations": {
           "total_fields": 5,
           "ipso_mapped": 0,
-          "ipso_missing": [
-            "battery: add ipso: {object: 3316}"
-          ],
+          "ipso_missing": [],
           "senml_mapped": 0,
-          "senml_missing": [
-            "battery: add senml: {unit: \"V\"}"
-          ],
+          "senml_missing": [],
           "semantic_mapped": 0,
-          "detectable_sensors": 1,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -8216,17 +8092,13 @@
         "Add test vector for zero values",
         "Add test vector for maximum values",
         "Add test vector for minimum payload length",
-        "Add test vectors covering all switch/flagged branches",
-        "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 battery: add ipso: {object: 3316}",
-        "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 battery: add senml: {unit: \"V\"}"
+        "Add test vectors covering all switch/flagged branches"
       ]
     },
     {
       "schema_path": "schemas/devices/mclimate/vicki.yaml",
-      "timestamp": "2026-10-10T11:36:29.077706-05:00",
-      "score": 98.0,
+      "timestamp": "2026-10-11T18:41:03.882371-05:00",
+      "score": 100.0,
       "tier": "PLATINUM",
       "details": {
         "schema_valid": true,
@@ -8255,14 +8127,12 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 12,
-          "ipso_mapped": 5,
-          "ipso_missing": [
-            "targetTemperature: add ipso: {object: 3303}"
-          ],
-          "senml_mapped": 6,
+          "ipso_mapped": 2,
+          "ipso_missing": [],
+          "senml_mapped": 2,
           "senml_missing": [],
-          "semantic_mapped": 6,
-          "detectable_sensors": 6,
+          "semantic_mapped": 2,
+          "detectable_sensors": 2,
           "annotation_errors": []
         },
         "provenance": {
@@ -8276,15 +8146,12 @@
           "issues": []
         }
       },
-      "recommendations": [
-        "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 targetTemperature: add ipso: {object: 3303}"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/am102.yaml",
-      "timestamp": "2026-10-10T11:36:29.176918-05:00",
-      "score": 97.0,
+      "timestamp": "2026-10-11T18:41:03.928253-05:00",
+      "score": 96.0,
       "tier": "PLATINUM",
       "details": {
         "schema_valid": true,
@@ -8313,15 +8180,15 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 14,
-          "ipso_mapped": 3,
+          "ipso_mapped": 2,
           "ipso_missing": [
             "history.temperature: add ipso: {object: 3303}",
             "history.humidity: add ipso: {object: 3304}"
           ],
-          "senml_mapped": 5,
+          "senml_mapped": 4,
           "senml_missing": [],
-          "semantic_mapped": 5,
-          "detectable_sensors": 5,
+          "semantic_mapped": 4,
+          "detectable_sensors": 4,
           "annotation_errors": []
         },
         "provenance": {
@@ -8343,8 +8210,8 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am102l.yaml",
-      "timestamp": "2026-10-10T11:36:29.261698-05:00",
-      "score": 97.0,
+      "timestamp": "2026-10-11T18:41:03.965413-05:00",
+      "score": 96.0,
       "tier": "PLATINUM",
       "details": {
         "schema_valid": true,
@@ -8370,15 +8237,15 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 14,
-          "ipso_mapped": 3,
+          "ipso_mapped": 2,
           "ipso_missing": [
             "history.temperature: add ipso: {object: 3303}",
             "history.humidity: add ipso: {object: 3304}"
           ],
-          "senml_mapped": 5,
+          "senml_mapped": 4,
           "senml_missing": [],
-          "semantic_mapped": 5,
-          "detectable_sensors": 5,
+          "semantic_mapped": 4,
+          "detectable_sensors": 4,
           "annotation_errors": []
         },
         "provenance": {
@@ -8399,17 +8266,17 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am103.yaml",
-      "timestamp": "2026-08-11T08:41:53.125123-05:00",
-      "score": 94.0,
+      "timestamp": "2026-10-11T18:41:03.998514-05:00",
+      "score": 92.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 19,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 19,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -8426,24 +8293,24 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 10,
-          "ipso_mapped": 4,
+          "ipso_mapped": 2,
           "ipso_missing": [
             "pressure: add ipso: {object: 3323}"
           ],
-          "senml_mapped": 4,
+          "senml_mapped": 2,
           "senml_missing": [
             "pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
           ],
-          "semantic_mapped": 4,
-          "detectable_sensors": 5,
+          "semantic_mapped": 2,
+          "detectable_sensors": 3,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
             "vendor-doc": 1,
-            "vendor-codec": 14
+            "vendor-codec": 18
           },
-          "independent_vectors": 15,
+          "independent_vectors": 19,
           "verification": "independent",
           "issues": []
         }
@@ -8457,17 +8324,17 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am103l.yaml",
-      "timestamp": "2026-08-11T08:41:53.150404-05:00",
-      "score": 94.0,
+      "timestamp": "2026-10-11T18:41:04.029686-05:00",
+      "score": 92.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 19,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 19,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -8484,24 +8351,24 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 10,
-          "ipso_mapped": 4,
+          "ipso_mapped": 2,
           "ipso_missing": [
             "pressure: add ipso: {object: 3323}"
           ],
-          "senml_mapped": 4,
+          "senml_mapped": 2,
           "senml_missing": [
             "pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
           ],
-          "semantic_mapped": 4,
-          "detectable_sensors": 5,
+          "semantic_mapped": 2,
+          "detectable_sensors": 3,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
             "vendor-doc": 1,
-            "vendor-codec": 14
+            "vendor-codec": 18
           },
-          "independent_vectors": 15,
+          "independent_vectors": 19,
           "verification": "independent",
           "issues": []
         }
@@ -8564,8 +8431,8 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am107.yaml",
-      "timestamp": "2026-08-11T08:41:53.199549-05:00",
-      "score": 94.0,
+      "timestamp": "2026-10-11T18:41:04.090640-05:00",
+      "score": 92.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
@@ -8591,16 +8458,16 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 10,
-          "ipso_mapped": 4,
+          "ipso_mapped": 2,
           "ipso_missing": [
             "pressure: add ipso: {object: 3323}"
           ],
-          "senml_mapped": 4,
+          "senml_mapped": 2,
           "senml_missing": [
             "pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
           ],
-          "semantic_mapped": 4,
-          "detectable_sensors": 5,
+          "semantic_mapped": 2,
+          "detectable_sensors": 3,
           "annotation_errors": []
         },
         "provenance": {
@@ -8622,17 +8489,17 @@
     },
     {
       "schema_path": "schemas/devices/milesight/am307.yaml",
-      "timestamp": "2026-08-11T08:41:53.224211-05:00",
-      "score": 91.0,
+      "timestamp": "2026-10-11T18:41:04.120019-05:00",
+      "score": 92.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 19,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 19,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -8649,53 +8516,48 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 13,
-          "ipso_mapped": 4,
+          "ipso_mapped": 2,
           "ipso_missing": [
-            "pir: add ipso: {object: 3302}",
-            "light_level: add ipso: {object: 3301}",
             "pressure: add ipso: {object: 3323}"
           ],
-          "senml_mapped": 4,
+          "senml_mapped": 2,
           "senml_missing": [
-            "light_level: add senml: {unit: \"lx\"}",
             "pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
           ],
-          "semantic_mapped": 4,
-          "detectable_sensors": 7,
+          "semantic_mapped": 2,
+          "detectable_sensors": 3,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
-            "vendor-doc": 2,
-            "vendor-codec": 13
+            "vendor-codec": 18,
+            "vendor-doc": 1
           },
-          "independent_vectors": 15,
+          "independent_vectors": 19,
           "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add IPSO object mappings for standard sensors (3 fields)",
-        "  \u2192 pir: add ipso: {object: 3302}",
-        "  \u2192 light_level: add ipso: {object: 3301}",
-        "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 light_level: add senml: {unit: \"lx\"}",
+        "Add IPSO object mappings for standard sensors (1 fields)",
+        "  \u2192 pressure: add ipso: {object: 3323}",
+        "Add SenML units for standard sensors (1 fields)",
         "  \u2192 pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/am307l.yaml",
-      "timestamp": "2026-08-11T08:41:53.249871-05:00",
-      "score": 91.0,
+      "timestamp": "2026-10-11T18:41:04.153206-05:00",
+      "score": 92.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 19,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 19,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -8712,53 +8574,48 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 13,
-          "ipso_mapped": 4,
+          "ipso_mapped": 2,
           "ipso_missing": [
-            "pir: add ipso: {object: 3302}",
-            "light_level: add ipso: {object: 3301}",
             "pressure: add ipso: {object: 3323}"
           ],
-          "senml_mapped": 4,
+          "senml_mapped": 2,
           "senml_missing": [
-            "light_level: add senml: {unit: \"lx\"}",
             "pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
           ],
-          "semantic_mapped": 4,
-          "detectable_sensors": 7,
+          "semantic_mapped": 2,
+          "detectable_sensors": 3,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
-            "vendor-doc": 2,
-            "vendor-codec": 13
+            "vendor-codec": 18,
+            "vendor-doc": 1
           },
-          "independent_vectors": 15,
+          "independent_vectors": 19,
           "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add IPSO object mappings for standard sensors (3 fields)",
-        "  \u2192 pir: add ipso: {object: 3302}",
-        "  \u2192 light_level: add ipso: {object: 3301}",
-        "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 light_level: add senml: {unit: \"lx\"}",
+        "Add IPSO object mappings for standard sensors (1 fields)",
+        "  \u2192 pressure: add ipso: {object: 3323}",
+        "Add SenML units for standard sensors (1 fields)",
         "  \u2192 pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/am308.yaml",
-      "timestamp": "2026-08-11T08:41:53.275557-05:00",
-      "score": 91.0,
+      "timestamp": "2026-10-11T18:41:04.185743-05:00",
+      "score": 92.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 17,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 17,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -8775,53 +8632,48 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 14,
-          "ipso_mapped": 4,
+          "ipso_mapped": 2,
           "ipso_missing": [
-            "pir: add ipso: {object: 3302}",
-            "light_level: add ipso: {object: 3301}",
             "pressure: add ipso: {object: 3323}"
           ],
-          "senml_mapped": 4,
+          "senml_mapped": 2,
           "senml_missing": [
-            "light_level: add senml: {unit: \"lx\"}",
             "pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
           ],
-          "semantic_mapped": 4,
-          "detectable_sensors": 7,
+          "semantic_mapped": 2,
+          "detectable_sensors": 3,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
-            "vendor-doc": 2,
-            "vendor-codec": 13
+            "vendor-codec": 16,
+            "vendor-doc": 1
           },
-          "independent_vectors": 15,
+          "independent_vectors": 17,
           "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add IPSO object mappings for standard sensors (3 fields)",
-        "  \u2192 pir: add ipso: {object: 3302}",
-        "  \u2192 light_level: add ipso: {object: 3301}",
-        "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 light_level: add senml: {unit: \"lx\"}",
+        "Add IPSO object mappings for standard sensors (1 fields)",
+        "  \u2192 pressure: add ipso: {object: 3323}",
+        "Add SenML units for standard sensors (1 fields)",
         "  \u2192 pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/am308l.yaml",
-      "timestamp": "2026-08-11T08:41:53.302429-05:00",
-      "score": 91.0,
+      "timestamp": "2026-10-11T18:41:04.220721-05:00",
+      "score": 92.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 17,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 17,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -8838,53 +8690,48 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 14,
-          "ipso_mapped": 4,
+          "ipso_mapped": 2,
           "ipso_missing": [
-            "pir: add ipso: {object: 3302}",
-            "light_level: add ipso: {object: 3301}",
             "pressure: add ipso: {object: 3323}"
           ],
-          "senml_mapped": 4,
+          "senml_mapped": 2,
           "senml_missing": [
-            "light_level: add senml: {unit: \"lx\"}",
             "pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
           ],
-          "semantic_mapped": 4,
-          "detectable_sensors": 7,
+          "semantic_mapped": 2,
+          "detectable_sensors": 3,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
-            "vendor-doc": 2,
-            "vendor-codec": 13
+            "vendor-codec": 16,
+            "vendor-doc": 1
           },
-          "independent_vectors": 15,
+          "independent_vectors": 17,
           "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add IPSO object mappings for standard sensors (3 fields)",
-        "  \u2192 pir: add ipso: {object: 3302}",
-        "  \u2192 light_level: add ipso: {object: 3301}",
-        "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 light_level: add senml: {unit: \"lx\"}",
+        "Add IPSO object mappings for standard sensors (1 fields)",
+        "  \u2192 pressure: add ipso: {object: 3323}",
+        "Add SenML units for standard sensors (1 fields)",
         "  \u2192 pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/am319.yaml",
-      "timestamp": "2026-08-11T08:41:53.328471-05:00",
-      "score": 91.0,
+      "timestamp": "2026-10-11T18:41:04.254626-05:00",
+      "score": 92.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 17,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 17,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -8901,53 +8748,48 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 20,
-          "ipso_mapped": 4,
+          "ipso_mapped": 2,
           "ipso_missing": [
-            "pir: add ipso: {object: 3302}",
-            "light_level: add ipso: {object: 3301}",
             "pressure: add ipso: {object: 3323}"
           ],
-          "senml_mapped": 4,
+          "senml_mapped": 2,
           "senml_missing": [
-            "light_level: add senml: {unit: \"lx\"}",
             "pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
           ],
-          "semantic_mapped": 4,
-          "detectable_sensors": 7,
+          "semantic_mapped": 2,
+          "detectable_sensors": 3,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
             "vendor-doc": 1,
-            "vendor-codec": 14
+            "vendor-codec": 16
           },
-          "independent_vectors": 15,
+          "independent_vectors": 17,
           "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add IPSO object mappings for standard sensors (3 fields)",
-        "  \u2192 pir: add ipso: {object: 3302}",
-        "  \u2192 light_level: add ipso: {object: 3301}",
-        "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 light_level: add senml: {unit: \"lx\"}",
+        "Add IPSO object mappings for standard sensors (1 fields)",
+        "  \u2192 pressure: add ipso: {object: 3323}",
+        "Add SenML units for standard sensors (1 fields)",
         "  \u2192 pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/am319l.yaml",
-      "timestamp": "2026-08-11T08:41:53.356365-05:00",
-      "score": 91.0,
+      "timestamp": "2026-10-11T18:41:04.293094-05:00",
+      "score": 92.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 17,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 17,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -8964,53 +8806,48 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 20,
-          "ipso_mapped": 4,
+          "ipso_mapped": 2,
           "ipso_missing": [
-            "pir: add ipso: {object: 3302}",
-            "light_level: add ipso: {object: 3301}",
             "pressure: add ipso: {object: 3323}"
           ],
-          "senml_mapped": 4,
+          "senml_mapped": 2,
           "senml_missing": [
-            "light_level: add senml: {unit: \"lx\"}",
             "pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
           ],
-          "semantic_mapped": 4,
-          "detectable_sensors": 7,
+          "semantic_mapped": 2,
+          "detectable_sensors": 3,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
             "vendor-doc": 1,
-            "vendor-codec": 14
+            "vendor-codec": 16
           },
-          "independent_vectors": 15,
+          "independent_vectors": 17,
           "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add IPSO object mappings for standard sensors (3 fields)",
-        "  \u2192 pir: add ipso: {object: 3302}",
-        "  \u2192 light_level: add ipso: {object: 3301}",
-        "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 light_level: add senml: {unit: \"lx\"}",
+        "Add IPSO object mappings for standard sensors (1 fields)",
+        "  \u2192 pressure: add ipso: {object: 3323}",
+        "Add SenML units for standard sensors (1 fields)",
         "  \u2192 pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/at101-fh.yaml",
-      "timestamp": "2026-08-11T08:41:53.387635-05:00",
-      "score": 91.0,
-      "tier": "GOLD",
+      "timestamp": "2026-10-11T18:41:04.330208-05:00",
+      "score": 100.0,
+      "tier": "PLATINUM",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 21,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 21,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -9027,37 +8864,24 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 29,
-          "ipso_mapped": 3,
-          "ipso_missing": [
-            "history.longitude: add ipso: {object: 3336}",
-            "history.latitude: add ipso: {object: 3336}"
-          ],
-          "senml_mapped": 3,
-          "senml_missing": [
-            "history.longitude: add senml: {unit: \"lon\"}",
-            "history.latitude: add senml: {unit: \"lat\"}"
-          ],
-          "semantic_mapped": 3,
-          "detectable_sensors": 5,
+          "ipso_mapped": 2,
+          "ipso_missing": [],
+          "senml_mapped": 2,
+          "senml_missing": [],
+          "semantic_mapped": 2,
+          "detectable_sensors": 2,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
-            "vendor-codec": 15
+            "vendor-codec": 21
           },
-          "independent_vectors": 15,
+          "independent_vectors": 21,
           "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 history.longitude: add ipso: {object: 3336}",
-        "  \u2192 history.latitude: add ipso: {object: 3336}",
-        "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 history.longitude: add senml: {unit: \"lon\"}",
-        "  \u2192 history.latitude: add senml: {unit: \"lat\"}"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/at101.yaml",
@@ -9717,9 +9541,9 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em300-mld.yaml",
-      "timestamp": "2026-08-11T08:41:53.688048-05:00",
-      "score": 100.0,
-      "tier": "PLATINUM",
+      "timestamp": "2026-10-11T18:41:04.745858-05:00",
+      "score": 90.0,
+      "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
@@ -9744,12 +9568,12 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 2,
-          "ipso_mapped": 1,
+          "ipso_mapped": 0,
           "ipso_missing": [],
-          "senml_mapped": 1,
+          "senml_mapped": 0,
           "senml_missing": [],
-          "semantic_mapped": 1,
-          "detectable_sensors": 1,
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -9913,17 +9737,17 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em310-tilt.yaml",
-      "timestamp": "2026-08-11T08:41:53.781077-05:00",
-      "score": 98.0,
-      "tier": "SILVER",
+      "timestamp": "2026-10-11T18:41:04.855167-05:00",
+      "score": 90.0,
+      "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 24,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 24,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -9934,51 +9758,44 @@
         "edge_cases_covered": [
           "zero",
           "max",
+          "negative",
           "min_payload"
         ],
-        "edge_cases_missing": [
-          "negative values"
-        ],
+        "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 15,
-          "ipso_mapped": 1,
+          "ipso_mapped": 0,
           "ipso_missing": [],
-          "senml_mapped": 1,
+          "senml_mapped": 0,
           "senml_missing": [],
-          "semantic_mapped": 1,
-          "detectable_sensors": 1,
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
-            "vendor-codec": 15
+            "vendor-codec": 24
           },
-          "independent_vectors": 15,
+          "independent_vectors": 24,
           "verification": "independent",
           "issues": []
-        },
-        "tier_capped_by": [
-          "missing edge case vectors (PS-239)"
-        ]
+        }
       },
-      "recommendations": [
-        "Tier capped: missing edge case vectors (PS-239)",
-        "Add test vector for negative values"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/em310-udl.yaml",
-      "timestamp": "2026-08-11T08:41:53.810941-05:00",
-      "score": 89.0,
+      "timestamp": "2026-10-11T18:41:04.893610-05:00",
+      "score": 90.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 20,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 20,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -9995,34 +9812,25 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 11,
-          "ipso_mapped": 1,
-          "ipso_missing": [
-            "distance: add ipso: {object: 3330}"
-          ],
-          "senml_mapped": 1,
-          "senml_missing": [
-            "distance: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating"
-          ],
-          "semantic_mapped": 1,
-          "detectable_sensors": 2,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
             "vendor-doc": 1,
-            "vendor-codec": 14
+            "vendor-codec": 19
           },
-          "independent_vectors": 15,
+          "independent_vectors": 20,
           "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 distance: add ipso: {object: 3330}",
-        "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 distance: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/em320-th.yaml",
@@ -10136,24 +9944,26 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em400-mud.yaml",
-      "timestamp": "2026-08-11T08:41:53.861785-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:04.977408-05:00",
+      "score": 77.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 13,
+        "test_count": 16,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 13,
+        "python_passed": 16,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "fail",
         "js_tests_pass": false,
         "js_errors": [
           "ch131_type103_zero_values: temperature_abnormal=0, expected false",
-          "ch132_type130_zero_values: distance_alarming=0, expected false"
+          "ch132_type130_zero_values: distance_alarming=0, expected false",
+          "temperature_alarm_negative: temperature_abnormal=1, expected true",
+          "distance_alarm_byte_order: distance_alarming=1, expected true"
         ],
         "branch_coverage": 1.0,
         "coverage_issues": [],
@@ -10166,64 +9976,58 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 8,
-          "ipso_mapped": 3,
+          "ipso_mapped": 2,
           "ipso_missing": [
-            "distance: add ipso: {object: 3330}",
-            "temperature_abnormal: add ipso: {object: 3303}",
-            "distance: add ipso: {object: 3330}",
-            "distance_alarming: add ipso: {object: 3330}"
+            "temperature_abnormal: add ipso: {object: 3303}"
           ],
-          "senml_mapped": 3,
+          "senml_mapped": 2,
           "senml_missing": [
-            "distance: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating",
-            "temperature_abnormal: add senml: {unit: \"Cel\"}",
-            "distance: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating",
-            "distance_alarming: add senml: {unit: \"m\"}"
+            "temperature_abnormal: add senml: {unit: \"Cel\"}"
           ],
-          "semantic_mapped": 3,
-          "detectable_sensors": 7,
+          "semantic_mapped": 2,
+          "detectable_sensors": 3,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
             "vendor-doc": 1,
-            "vendor-codec": 12
+            "vendor-codec": 15
           },
-          "independent_vectors": 13,
+          "independent_vectors": 16,
           "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
         "Generated JS codec disagrees with the test vectors",
-        "Add IPSO object mappings for standard sensors (4 fields)",
-        "  \u2192 distance: add ipso: {object: 3330}",
+        "Add IPSO object mappings for standard sensors (1 fields)",
         "  \u2192 temperature_abnormal: add ipso: {object: 3303}",
-        "Add SenML units for standard sensors (4 fields)",
-        "  \u2192 distance: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating",
+        "Add SenML units for standard sensors (1 fields)",
         "  \u2192 temperature_abnormal: add senml: {unit: \"Cel\"}"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/em400-tld.yaml",
-      "timestamp": "2026-08-11T08:41:53.885392-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:05.007295-05:00",
+      "score": 77.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 13,
+        "test_count": 16,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 13,
+        "python_passed": 16,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "fail",
         "js_tests_pass": false,
         "js_errors": [
           "ch131_type103_zero_values: temperature_abnormal=0, expected false",
-          "ch132_type130_zero_values: distance_alarming=0, expected false"
+          "ch132_type130_zero_values: distance_alarming=0, expected false",
+          "temperature_alarm_negative: temperature_abnormal=1, expected true",
+          "distance_alarm_byte_order: distance_alarming=1, expected true"
         ],
         "branch_coverage": 1.0,
         "coverage_issues": [],
@@ -10236,64 +10040,58 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 8,
-          "ipso_mapped": 3,
+          "ipso_mapped": 2,
           "ipso_missing": [
-            "distance: add ipso: {object: 3330}",
-            "temperature_abnormal: add ipso: {object: 3303}",
-            "distance: add ipso: {object: 3330}",
-            "distance_alarming: add ipso: {object: 3330}"
+            "temperature_abnormal: add ipso: {object: 3303}"
           ],
-          "senml_mapped": 3,
+          "senml_mapped": 2,
           "senml_missing": [
-            "distance: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating",
-            "temperature_abnormal: add senml: {unit: \"Cel\"}",
-            "distance: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating",
-            "distance_alarming: add senml: {unit: \"m\"}"
+            "temperature_abnormal: add senml: {unit: \"Cel\"}"
           ],
-          "semantic_mapped": 3,
-          "detectable_sensors": 7,
+          "semantic_mapped": 2,
+          "detectable_sensors": 3,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
             "vendor-doc": 1,
-            "vendor-codec": 12
+            "vendor-codec": 15
           },
-          "independent_vectors": 13,
+          "independent_vectors": 16,
           "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
         "Generated JS codec disagrees with the test vectors",
-        "Add IPSO object mappings for standard sensors (4 fields)",
-        "  \u2192 distance: add ipso: {object: 3330}",
+        "Add IPSO object mappings for standard sensors (1 fields)",
         "  \u2192 temperature_abnormal: add ipso: {object: 3303}",
-        "Add SenML units for standard sensors (4 fields)",
-        "  \u2192 distance: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating",
+        "Add SenML units for standard sensors (1 fields)",
         "  \u2192 temperature_abnormal: add senml: {unit: \"Cel\"}"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/em400-udl.yaml",
-      "timestamp": "2026-08-11T08:41:53.911231-05:00",
-      "score": 73.0,
+      "timestamp": "2026-10-11T18:41:05.038609-05:00",
+      "score": 77.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 13,
+        "test_count": 16,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 13,
+        "python_passed": 16,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "fail",
         "js_tests_pass": false,
         "js_errors": [
           "ch131_type103_zero_values: temperature_abnormal=0, expected false",
-          "ch132_type130_zero_values: distance_alarming=0, expected false"
+          "ch132_type130_zero_values: distance_alarming=0, expected false",
+          "temperature_alarm_negative: temperature_abnormal=1, expected true",
+          "distance_alarm_byte_order: distance_alarming=1, expected true"
         ],
         "branch_coverage": 1.0,
         "coverage_issues": [],
@@ -10306,57 +10104,49 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 8,
-          "ipso_mapped": 3,
+          "ipso_mapped": 2,
           "ipso_missing": [
-            "distance: add ipso: {object: 3330}",
-            "temperature_abnormal: add ipso: {object: 3303}",
-            "distance: add ipso: {object: 3330}",
-            "distance_alarming: add ipso: {object: 3330}"
+            "temperature_abnormal: add ipso: {object: 3303}"
           ],
-          "senml_mapped": 3,
+          "senml_mapped": 2,
           "senml_missing": [
-            "distance: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating",
-            "temperature_abnormal: add senml: {unit: \"Cel\"}",
-            "distance: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating",
-            "distance_alarming: add senml: {unit: \"m\"}"
+            "temperature_abnormal: add senml: {unit: \"Cel\"}"
           ],
-          "semantic_mapped": 3,
-          "detectable_sensors": 7,
+          "semantic_mapped": 2,
+          "detectable_sensors": 3,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
             "vendor-doc": 1,
-            "vendor-codec": 12
+            "vendor-codec": 15
           },
-          "independent_vectors": 13,
+          "independent_vectors": 16,
           "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
         "Generated JS codec disagrees with the test vectors",
-        "Add IPSO object mappings for standard sensors (4 fields)",
-        "  \u2192 distance: add ipso: {object: 3330}",
+        "Add IPSO object mappings for standard sensors (1 fields)",
         "  \u2192 temperature_abnormal: add ipso: {object: 3303}",
-        "Add SenML units for standard sensors (4 fields)",
-        "  \u2192 distance: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating",
+        "Add SenML units for standard sensors (1 fields)",
         "  \u2192 temperature_abnormal: add senml: {unit: \"Cel\"}"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/em410-rdl.yaml",
-      "timestamp": "2026-08-11T08:41:53.934803-05:00",
-      "score": 92.0,
-      "tier": "GOLD",
+      "timestamp": "2026-10-11T18:41:05.070913-05:00",
+      "score": 100.0,
+      "tier": "PLATINUM",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 20,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 20,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -10373,34 +10163,25 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 13,
-          "ipso_mapped": 2,
-          "ipso_missing": [
-            "distance: add ipso: {object: 3330}"
-          ],
-          "senml_mapped": 2,
-          "senml_missing": [
-            "distance: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating"
-          ],
-          "semantic_mapped": 2,
-          "detectable_sensors": 3,
+          "ipso_mapped": 1,
+          "ipso_missing": [],
+          "senml_mapped": 1,
+          "senml_missing": [],
+          "semantic_mapped": 1,
+          "detectable_sensors": 1,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
             "vendor-doc": 1,
-            "vendor-codec": 14
+            "vendor-codec": 19
           },
-          "independent_vectors": 15,
+          "independent_vectors": 20,
           "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 distance: add ipso: {object: 3330}",
-        "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 distance: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/em500-co2.yaml",
@@ -10473,8 +10254,8 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-lgt.yaml",
-      "timestamp": "2026-08-11T08:41:53.964221-05:00",
-      "score": 89.0,
+      "timestamp": "2026-10-11T18:41:05.131493-05:00",
+      "score": 90.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
@@ -10500,16 +10281,12 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 2,
-          "ipso_mapped": 1,
-          "ipso_missing": [
-            "light: add ipso: {object: 3301}"
-          ],
-          "senml_mapped": 1,
-          "senml_missing": [
-            "light: add senml: {unit: \"lx\"}"
-          ],
-          "semantic_mapped": 1,
-          "detectable_sensors": 2,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -10522,18 +10299,13 @@
           "issues": []
         }
       },
-      "recommendations": [
-        "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 light: add ipso: {object: 3301}",
-        "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 light: add senml: {unit: \"lx\"}"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/em500-pp.yaml",
-      "timestamp": "2026-08-11T08:41:53.983299-05:00",
-      "score": 89.0,
-      "tier": "GOLD",
+      "timestamp": "2026-10-11T18:41:05.156801-05:00",
+      "score": 80.0,
+      "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
@@ -10558,16 +10330,16 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 2,
-          "ipso_mapped": 1,
+          "ipso_mapped": 0,
           "ipso_missing": [
             "pressure: add ipso: {object: 3323}"
           ],
-          "senml_mapped": 1,
+          "senml_mapped": 0,
           "senml_missing": [
             "pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
           ],
-          "semantic_mapped": 1,
-          "detectable_sensors": 2,
+          "semantic_mapped": 0,
+          "detectable_sensors": 1,
           "annotation_errors": []
         },
         "provenance": {
@@ -10686,17 +10458,17 @@
     },
     {
       "schema_path": "schemas/devices/milesight/em500-smtc.yaml",
-      "timestamp": "2026-08-11T08:41:54.047094-05:00",
-      "score": 94.0,
-      "tier": "GOLD",
+      "timestamp": "2026-10-11T18:41:05.232958-05:00",
+      "score": 100.0,
+      "tier": "PLATINUM",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 16,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 16,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -10713,35 +10485,30 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 5,
-          "ipso_mapped": 4,
-          "ipso_missing": [
-            "conductivity: add ipso: {object: 3327}"
-          ],
-          "senml_mapped": 4,
+          "ipso_mapped": 3,
+          "ipso_missing": [],
+          "senml_mapped": 3,
           "senml_missing": [],
-          "semantic_mapped": 4,
-          "detectable_sensors": 5,
+          "semantic_mapped": 3,
+          "detectable_sensors": 3,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
             "vendor-doc": 1,
-            "vendor-codec": 14
+            "vendor-codec": 15
           },
-          "independent_vectors": 15,
+          "independent_vectors": 16,
           "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 conductivity: add ipso: {object: 3327}"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/em500-swl.yaml",
-      "timestamp": "2026-08-11T08:41:54.072842-05:00",
-      "score": 89.0,
+      "timestamp": "2026-10-11T18:41:05.261780-05:00",
+      "score": 90.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
@@ -10767,16 +10534,12 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 2,
-          "ipso_mapped": 1,
-          "ipso_missing": [
-            "distance: add ipso: {object: 3330}"
-          ],
-          "senml_mapped": 1,
-          "senml_missing": [
-            "distance: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating"
-          ],
-          "semantic_mapped": 1,
-          "detectable_sensors": 2,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -10789,12 +10552,7 @@
           "issues": []
         }
       },
-      "recommendations": [
-        "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 distance: add ipso: {object: 3330}",
-        "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 distance: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/em500-udl.yaml",
@@ -11097,17 +10855,17 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ts201v2.yaml",
-      "timestamp": "2026-08-11T08:41:54.179425-05:00",
-      "score": 94.0,
+      "timestamp": "2026-10-11T18:41:05.443206-05:00",
+      "score": 92.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 20,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 20,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -11124,30 +10882,32 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 16,
-          "ipso_mapped": 4,
+          "ipso_mapped": 2,
           "ipso_missing": [
-            "temperature_unit: add ipso: {object: 3303}"
+            "temperature_unit: add ipso: {object: 3303}",
+            "event.humidity: add ipso: {object: 3304}"
           ],
-          "senml_mapped": 4,
+          "senml_mapped": 3,
           "senml_missing": [
             "temperature_unit: add senml: {unit: \"Cel\"}"
           ],
-          "semantic_mapped": 4,
-          "detectable_sensors": 5,
+          "semantic_mapped": 3,
+          "detectable_sensors": 4,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
-            "vendor-codec": 15
+            "vendor-codec": 20
           },
-          "independent_vectors": 15,
+          "independent_vectors": 20,
           "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add IPSO object mappings for standard sensors (1 fields)",
+        "Add IPSO object mappings for standard sensors (2 fields)",
         "  \u2192 temperature_unit: add ipso: {object: 3303}",
+        "  \u2192 event.humidity: add ipso: {object: 3304}",
         "Add SenML units for standard sensors (1 fields)",
         "  \u2192 temperature_unit: add senml: {unit: \"Cel\"}"
       ]
@@ -11228,17 +10988,17 @@
     },
     {
       "schema_path": "schemas/devices/milesight/uc100.yaml",
-      "timestamp": "2026-08-11T08:41:54.236706-05:00",
-      "score": 78.0,
+      "timestamp": "2026-10-11T18:41:05.521192-05:00",
+      "score": 88.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 7,
+        "test_count": 11,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 7,
+        "python_passed": 11,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -11257,38 +11017,34 @@
         "semantic_annotations": {
           "total_fields": 5,
           "ipso_mapped": 0,
-          "ipso_missing": [
-            "power: add ipso: {object: 3328}"
-          ],
+          "ipso_missing": [],
           "senml_mapped": 0,
-          "senml_missing": [
-            "power: add senml: {unit: \"W\"}"
-          ],
+          "senml_missing": [],
           "semantic_mapped": 0,
-          "detectable_sensors": 1,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
-            "vendor-codec": 7
+            "vendor-codec": 11
           },
-          "independent_vectors": 7,
+          "independent_vectors": 11,
           "verification": "independent",
           "issues": []
-        }
+        },
+        "tier_capped_by": [
+          "missing edge case vectors (PS-239)"
+        ]
       },
       "recommendations": [
-        "Add test vector for zero values",
-        "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 power: add ipso: {object: 3328}",
-        "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 power: add senml: {unit: \"W\"}"
+        "Tier capped: missing edge case vectors (PS-239)",
+        "Add test vector for zero values"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/uc1114.yaml",
-      "timestamp": "2026-08-11T08:41:54.260087-05:00",
-      "score": 16.5,
+      "timestamp": "2026-10-11T18:41:05.550051-05:00",
+      "score": 28.2,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -11324,14 +11080,11 @@
         "semantic_annotations": {
           "total_fields": 4,
           "ipso_mapped": 0,
-          "ipso_missing": [
-            "digital_input_1: add ipso: {object: 3200}",
-            "digital_input_2: add ipso: {object: 3200}"
-          ],
+          "ipso_missing": [],
           "senml_mapped": 0,
           "senml_missing": [],
           "semantic_mapped": 0,
-          "detectable_sensors": 2,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -11347,16 +11100,13 @@
         "Add test vector for zero values",
         "Add test vector for maximum values",
         "Add test vector for minimum payload length",
-        "Add test vectors covering all switch/flagged branches",
-        "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 digital_input_1: add ipso: {object: 3200}",
-        "  \u2192 digital_input_2: add ipso: {object: 3200}"
+        "Add test vectors covering all switch/flagged branches"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/uc1152.yaml",
-      "timestamp": "2026-08-11T08:41:54.261698-05:00",
-      "score": 16.5,
+      "timestamp": "2026-10-11T18:41:05.551955-05:00",
+      "score": 28.2,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -11392,13 +11142,11 @@
         "semantic_annotations": {
           "total_fields": 2,
           "ipso_mapped": 0,
-          "ipso_missing": [
-            "digital_output: add ipso: {object: 3200}"
-          ],
+          "ipso_missing": [],
           "senml_mapped": 0,
           "senml_missing": [],
           "semantic_mapped": 0,
-          "detectable_sensors": 1,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -11414,24 +11162,22 @@
         "Add test vector for zero values",
         "Add test vector for maximum values",
         "Add test vector for minimum payload length",
-        "Add test vectors covering all switch/flagged branches",
-        "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 digital_output: add ipso: {object: 3200}"
+        "Add test vectors covering all switch/flagged branches"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/uc300.yaml",
-      "timestamp": "2026-08-11T08:41:54.262689-05:00",
-      "score": 80.0,
-      "tier": "SILVER",
+      "timestamp": "2026-10-11T18:41:05.553099-05:00",
+      "score": 90.0,
+      "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 27,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 27,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -11449,52 +11195,37 @@
         "semantic_annotations": {
           "total_fields": 17,
           "ipso_mapped": 0,
-          "ipso_missing": [
-            "digital_input_1: add ipso: {object: 3200}",
-            "digital_input_2: add ipso: {object: 3200}",
-            "digital_input_3: add ipso: {object: 3200}",
-            "digital_input_4: add ipso: {object: 3200}",
-            "digital_output_1: add ipso: {object: 3200}",
-            "digital_output_2: add ipso: {object: 3200}",
-            "analog_input_adc_1: add ipso: {object: 3202}",
-            "analog_input_adc_2: add ipso: {object: 3202}",
-            "analog_input_adv_1: add ipso: {object: 3202}",
-            "analog_input_adv_2: add ipso: {object: 3202}"
-          ],
+          "ipso_missing": [],
           "senml_mapped": 0,
           "senml_missing": [],
           "semantic_mapped": 0,
-          "detectable_sensors": 10,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
-            "vendor-codec": 15
+            "vendor-codec": 27
           },
-          "independent_vectors": 15,
+          "independent_vectors": 27,
           "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add IPSO object mappings for standard sensors (10 fields)",
-        "  \u2192 digital_input_1: add ipso: {object: 3200}",
-        "  \u2192 digital_input_2: add ipso: {object: 3200}"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/uc50x.yaml",
-      "timestamp": "2026-08-11T08:41:54.288812-05:00",
-      "score": 100.0,
-      "tier": "PLATINUM",
+      "timestamp": "2026-10-11T18:41:05.586090-05:00",
+      "score": 90.0,
+      "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 22,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 22,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -11511,19 +11242,19 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 9,
-          "ipso_mapped": 1,
+          "ipso_mapped": 0,
           "ipso_missing": [],
-          "senml_mapped": 1,
+          "senml_mapped": 0,
           "senml_missing": [],
-          "semantic_mapped": 1,
-          "detectable_sensors": 1,
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
-            "vendor-codec": 15
+            "vendor-codec": 22
           },
-          "independent_vectors": 15,
+          "independent_vectors": 22,
           "verification": "independent",
           "issues": []
         }
@@ -11532,17 +11263,17 @@
     },
     {
       "schema_path": "schemas/devices/milesight/uc51x.yaml",
-      "timestamp": "2026-08-11T08:41:54.314327-05:00",
-      "score": 83.0,
+      "timestamp": "2026-10-11T18:41:05.619960-05:00",
+      "score": 80.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 24,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 24,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -11559,48 +11290,42 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 20,
-          "ipso_mapped": 1,
+          "ipso_mapped": 0,
           "ipso_missing": [
-            "valve_1_pulse: add ipso: {object: 3337}",
-            "valve_2_pulse: add ipso: {object: 3337}",
             "pressure: add ipso: {object: 3323}",
-            "pressure_sensor_status: add ipso: {object: 3323}",
             "history.pressure: add ipso: {object: 3323}"
           ],
-          "senml_mapped": 1,
+          "senml_mapped": 0,
           "senml_missing": [
-            "valve_1_pulse: add senml: {unit: \"%\"}",
-            "valve_2_pulse: add senml: {unit: \"%\"}",
             "pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating",
-            "pressure_sensor_status: add senml: {unit: \"Pa\"}",
             "history.pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
           ],
-          "semantic_mapped": 1,
-          "detectable_sensors": 6,
+          "semantic_mapped": 0,
+          "detectable_sensors": 2,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
-            "vendor-codec": 15
+            "vendor-codec": 24
           },
-          "independent_vectors": 15,
+          "independent_vectors": 24,
           "verification": "independent",
           "issues": []
         }
       },
       "recommendations": [
-        "Add IPSO object mappings for standard sensors (5 fields)",
-        "  \u2192 valve_1_pulse: add ipso: {object: 3337}",
-        "  \u2192 valve_2_pulse: add ipso: {object: 3337}",
-        "Add SenML units for standard sensors (5 fields)",
-        "  \u2192 valve_1_pulse: add senml: {unit: \"%\"}",
-        "  \u2192 valve_2_pulse: add senml: {unit: \"%\"}"
+        "Add IPSO object mappings for standard sensors (2 fields)",
+        "  \u2192 pressure: add ipso: {object: 3323}",
+        "  \u2192 history.pressure: add ipso: {object: 3323}",
+        "Add SenML units for standard sensors (2 fields)",
+        "  \u2192 pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating",
+        "  \u2192 history.pressure: field is in 'hPa'; SenML wants 'Pa' -- convert the value or declare the real unit before annotating"
       ]
     },
     {
       "schema_path": "schemas/devices/milesight/vs121.yaml",
-      "timestamp": "2026-08-11T08:41:54.342649-05:00",
-      "score": 16.5,
+      "timestamp": "2026-10-11T18:41:05.658711-05:00",
+      "score": 28.2,
       "tier": "REJECTED",
       "details": {
         "schema_valid": true,
@@ -11661,17 +11386,17 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs135.yaml",
-      "timestamp": "2026-08-11T08:41:54.343794-05:00",
-      "score": 80.0,
-      "tier": "SILVER",
+      "timestamp": "2026-10-11T18:41:05.660028-05:00",
+      "score": 90.0,
+      "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 13,
+        "test_count": 15,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 13,
+        "python_passed": 15,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -11698,9 +11423,9 @@
         },
         "provenance": {
           "counts": {
-            "vendor-codec": 13
+            "vendor-codec": 15
           },
-          "independent_vectors": 13,
+          "independent_vectors": 15,
           "verification": "independent",
           "issues": []
         }
@@ -11764,8 +11489,8 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs330.yaml",
-      "timestamp": "2026-08-11T08:41:54.403033-05:00",
-      "score": 86.0,
+      "timestamp": "2026-10-11T18:41:05.731099-05:00",
+      "score": 90.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
@@ -11791,17 +11516,12 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 4,
-          "ipso_mapped": 1,
-          "ipso_missing": [
-            "distance: add ipso: {object: 3330}",
-            "occupancy: add ipso: {object: 3302}"
-          ],
-          "senml_mapped": 1,
-          "senml_missing": [
-            "distance: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating"
-          ],
-          "semantic_mapped": 1,
-          "detectable_sensors": 3,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -11814,18 +11534,12 @@
           "issues": []
         }
       },
-      "recommendations": [
-        "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 distance: add ipso: {object: 3330}",
-        "  \u2192 occupancy: add ipso: {object: 3302}",
-        "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 distance: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/vs340.yaml",
-      "timestamp": "2026-08-11T08:41:54.425456-05:00",
-      "score": 89.0,
+      "timestamp": "2026-10-11T18:41:05.757370-05:00",
+      "score": 90.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
@@ -11851,14 +11565,12 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 2,
-          "ipso_mapped": 1,
-          "ipso_missing": [
-            "occupancy: add ipso: {object: 3302}"
-          ],
-          "senml_mapped": 1,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
           "senml_missing": [],
-          "semantic_mapped": 1,
-          "detectable_sensors": 2,
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -11871,15 +11583,12 @@
           "issues": []
         }
       },
-      "recommendations": [
-        "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 occupancy: add ipso: {object: 3302}"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/vs341.yaml",
-      "timestamp": "2026-08-11T08:41:54.444900-05:00",
-      "score": 89.0,
+      "timestamp": "2026-10-11T18:41:05.782502-05:00",
+      "score": 90.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
@@ -11905,14 +11614,12 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 2,
-          "ipso_mapped": 1,
-          "ipso_missing": [
-            "occupancy: add ipso: {object: 3302}"
-          ],
-          "senml_mapped": 1,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
           "senml_missing": [],
-          "semantic_mapped": 1,
-          "detectable_sensors": 2,
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -11925,10 +11632,7 @@
           "issues": []
         }
       },
-      "recommendations": [
-        "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 occupancy: add ipso: {object: 3302}"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/vs350.yaml",
@@ -12047,17 +11751,17 @@
     },
     {
       "schema_path": "schemas/devices/milesight/vs360.yaml",
-      "timestamp": "2026-08-11T08:41:54.523404-05:00",
-      "score": 80.0,
-      "tier": "SILVER",
+      "timestamp": "2026-10-11T18:41:05.895565-05:00",
+      "score": 90.0,
+      "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 24,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 24,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -12075,51 +11779,38 @@
         "semantic_annotations": {
           "total_fields": 21,
           "ipso_mapped": 0,
-          "ipso_missing": [
-            "battery_main: add ipso: {object: 3316}",
-            "battery_node: add ipso: {object: 3316}"
-          ],
+          "ipso_missing": [],
           "senml_mapped": 0,
-          "senml_missing": [
-            "battery_main: add senml: {unit: \"V\"}",
-            "battery_node: add senml: {unit: \"V\"}"
-          ],
+          "senml_missing": [],
           "semantic_mapped": 0,
-          "detectable_sensors": 2,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
             "vendor-doc": 1,
-            "vendor-codec": 14
+            "vendor-codec": 23
           },
-          "independent_vectors": 15,
+          "independent_vectors": 24,
           "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 battery_main: add ipso: {object: 3316}",
-        "  \u2192 battery_node: add ipso: {object: 3316}",
-        "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 battery_main: add senml: {unit: \"V\"}",
-        "  \u2192 battery_node: add senml: {unit: \"V\"}"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/vs370.yaml",
-      "timestamp": "2026-09-24T11:07:49.704305-05:00",
-      "score": 89.0,
+      "timestamp": "2026-10-11T18:41:05.931683-05:00",
+      "score": 90.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 20,
+        "test_count": 27,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 20,
+        "python_passed": 27,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -12136,43 +11827,38 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 11,
-          "ipso_mapped": 1,
-          "ipso_missing": [
-            "occupancy: add ipso: {object: 3302}"
-          ],
-          "senml_mapped": 1,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
           "senml_missing": [],
-          "semantic_mapped": 1,
-          "detectable_sensors": 2,
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
-            "vendor-codec": 20
+            "vendor-codec": 27
           },
-          "independent_vectors": 20,
+          "independent_vectors": 27,
           "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 occupancy: add ipso: {object: 3302}"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/vs373.yaml",
-      "timestamp": "2026-08-11T08:41:54.574977-05:00",
-      "score": 80.0,
-      "tier": "SILVER",
+      "timestamp": "2026-10-11T18:41:05.969667-05:00",
+      "score": 90.0,
+      "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 44,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 44,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -12190,32 +11876,23 @@
         "semantic_annotations": {
           "total_fields": 31,
           "ipso_mapped": 0,
-          "ipso_missing": [
-            "region_1_occupancy: add ipso: {object: 3302}",
-            "region_2_occupancy: add ipso: {object: 3302}",
-            "region_3_occupancy: add ipso: {object: 3302}",
-            "region_4_occupancy: add ipso: {object: 3302}"
-          ],
+          "ipso_missing": [],
           "senml_mapped": 0,
           "senml_missing": [],
           "semantic_mapped": 0,
-          "detectable_sensors": 4,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
-            "vendor-codec": 15
+            "vendor-codec": 44
           },
-          "independent_vectors": 15,
+          "independent_vectors": 44,
           "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add IPSO object mappings for standard sensors (4 fields)",
-        "  \u2192 region_1_occupancy: add ipso: {object: 3302}",
-        "  \u2192 region_2_occupancy: add ipso: {object: 3302}"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/ws101.yaml",
@@ -12409,8 +12086,8 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws201.yaml",
-      "timestamp": "2026-08-11T08:41:54.611208-05:00",
-      "score": 89.0,
+      "timestamp": "2026-10-11T18:41:06.088034-05:00",
+      "score": 90.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
@@ -12436,16 +12113,12 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 3,
-          "ipso_mapped": 1,
-          "ipso_missing": [
-            "distance: add ipso: {object: 3330}"
-          ],
-          "senml_mapped": 1,
-          "senml_missing": [
-            "distance: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating"
-          ],
-          "semantic_mapped": 1,
-          "detectable_sensors": 2,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -12458,26 +12131,21 @@
           "issues": []
         }
       },
-      "recommendations": [
-        "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 distance: add ipso: {object: 3330}",
-        "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 distance: field is in 'mm'; SenML wants 'm' -- convert the value or declare the real unit before annotating"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/ws202.yaml",
-      "timestamp": "2026-08-11T08:41:54.631975-05:00",
-      "score": 86.0,
+      "timestamp": "2026-10-11T18:41:06.116060-05:00",
+      "score": 90.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 6,
+        "test_count": 7,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 6,
+        "python_passed": 7,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -12494,50 +12162,39 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 3,
-          "ipso_mapped": 1,
-          "ipso_missing": [
-            "pir: add ipso: {object: 3302}",
-            "light: add ipso: {object: 3301}"
-          ],
-          "senml_mapped": 1,
-          "senml_missing": [
-            "light: add senml: {unit: \"lx\"}"
-          ],
-          "semantic_mapped": 1,
-          "detectable_sensors": 3,
+          "ipso_mapped": 0,
+          "ipso_missing": [],
+          "senml_mapped": 0,
+          "senml_missing": [],
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
             "vendor-doc": 2,
-            "vendor-codec": 4
+            "vendor-codec": 5
           },
-          "independent_vectors": 6,
+          "independent_vectors": 7,
           "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 pir: add ipso: {object: 3302}",
-        "  \u2192 light: add ipso: {object: 3301}",
-        "Add SenML units for standard sensors (1 fields)",
-        "  \u2192 light: add senml: {unit: \"lx\"}"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/ws203.yaml",
-      "timestamp": "2026-08-11T08:41:54.652409-05:00",
-      "score": 94.0,
-      "tier": "GOLD",
+      "timestamp": "2026-10-11T18:41:06.143488-05:00",
+      "score": 100.0,
+      "tier": "PLATINUM",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 12,
+        "test_count": 14,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 12,
+        "python_passed": 14,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -12554,44 +12211,39 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 6,
-          "ipso_mapped": 4,
-          "ipso_missing": [
-            "occupancy: add ipso: {object: 3302}"
-          ],
-          "senml_mapped": 4,
+          "ipso_mapped": 3,
+          "ipso_missing": [],
+          "senml_mapped": 3,
           "senml_missing": [],
-          "semantic_mapped": 4,
-          "detectable_sensors": 5,
+          "semantic_mapped": 3,
+          "detectable_sensors": 3,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
             "vendor-doc": 1,
-            "vendor-codec": 11
+            "vendor-codec": 13
           },
-          "independent_vectors": 12,
+          "independent_vectors": 14,
           "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add IPSO object mappings for standard sensors (1 fields)",
-        "  \u2192 occupancy: add ipso: {object: 3302}"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/ws301.yaml",
-      "timestamp": "2026-08-11T08:41:54.674629-05:00",
-      "score": 100.0,
-      "tier": "PLATINUM",
+      "timestamp": "2026-10-11T18:41:06.172594-05:00",
+      "score": 90.0,
+      "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 6,
+        "test_count": 7,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 6,
+        "python_passed": 7,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -12608,20 +12260,20 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 3,
-          "ipso_mapped": 1,
+          "ipso_mapped": 0,
           "ipso_missing": [],
-          "senml_mapped": 1,
+          "senml_mapped": 0,
           "senml_missing": [],
-          "semantic_mapped": 1,
-          "detectable_sensors": 1,
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
             "vendor-doc": 1,
-            "vendor-codec": 5
+            "vendor-codec": 6
           },
-          "independent_vectors": 6,
+          "independent_vectors": 7,
           "verification": "independent",
           "issues": []
         }
@@ -12704,9 +12356,9 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws303.yaml",
-      "timestamp": "2026-08-11T08:41:54.698074-05:00",
-      "score": 100.0,
-      "tier": "PLATINUM",
+      "timestamp": "2026-10-11T18:41:06.226123-05:00",
+      "score": 90.0,
+      "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
@@ -12731,12 +12383,12 @@
         "edge_cases_missing": [],
         "semantic_annotations": {
           "total_fields": 2,
-          "ipso_mapped": 1,
+          "ipso_mapped": 0,
           "ipso_missing": [],
-          "senml_mapped": 1,
+          "senml_mapped": 0,
           "senml_missing": [],
-          "semantic_mapped": 1,
-          "detectable_sensors": 1,
+          "semantic_mapped": 0,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
@@ -12753,17 +12405,17 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws50x.yaml",
-      "timestamp": "2026-08-11T08:41:54.717841-05:00",
-      "score": 78.0,
+      "timestamp": "2026-10-11T18:41:06.252001-05:00",
+      "score": 88.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 13,
+        "test_count": 25,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 13,
+        "python_passed": 25,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -12782,34 +12434,28 @@
         "semantic_annotations": {
           "total_fields": 15,
           "ipso_mapped": 0,
-          "ipso_missing": [
-            "switch_1: add ipso: {object: 3342}",
-            "switch_1_change: add ipso: {object: 3342}",
-            "switch_2: add ipso: {object: 3342}",
-            "switch_2_change: add ipso: {object: 3342}",
-            "switch_3: add ipso: {object: 3342}",
-            "switch_3_change: add ipso: {object: 3342}"
-          ],
+          "ipso_missing": [],
           "senml_mapped": 0,
           "senml_missing": [],
           "semantic_mapped": 0,
-          "detectable_sensors": 6,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
-            "vendor-codec": 13
+            "vendor-codec": 25
           },
-          "independent_vectors": 13,
+          "independent_vectors": 25,
           "verification": "independent",
           "issues": []
-        }
+        },
+        "tier_capped_by": [
+          "missing edge case vectors (PS-239)"
+        ]
       },
       "recommendations": [
-        "Add test vector for zero values",
-        "Add IPSO object mappings for standard sensors (6 fields)",
-        "  \u2192 switch_1: add ipso: {object: 3342}",
-        "  \u2192 switch_1_change: add ipso: {object: 3342}"
+        "Tier capped: missing edge case vectors (PS-239)",
+        "Add test vector for zero values"
       ]
     },
     {
@@ -12886,17 +12532,17 @@
     },
     {
       "schema_path": "schemas/devices/milesight/ws52x.yaml",
-      "timestamp": "2026-08-11T08:41:54.775458-05:00",
-      "score": 80.0,
-      "tier": "SILVER",
+      "timestamp": "2026-10-11T18:41:06.325724-05:00",
+      "score": 90.0,
+      "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 21,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 21,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -12914,57 +12560,38 @@
         "semantic_annotations": {
           "total_fields": 14,
           "ipso_mapped": 0,
-          "ipso_missing": [
-            "voltage: add ipso: {object: 3316}",
-            "active_power: add ipso: {object: 3328}",
-            "power_factor: add ipso: {object: 3328}",
-            "power_consumption: add ipso: {object: 3328}",
-            "current: add ipso: {object: 3317}"
-          ],
+          "ipso_missing": [],
           "senml_mapped": 0,
-          "senml_missing": [
-            "voltage: add senml: {unit: \"V\"}",
-            "active_power: add senml: {unit: \"W\"}",
-            "power_factor: add senml: {unit: \"W\"}",
-            "power_consumption: add senml: {unit: \"W\"}",
-            "current: add senml: {unit: \"A\"}"
-          ],
+          "senml_missing": [],
           "semantic_mapped": 0,
-          "detectable_sensors": 5,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
             "vendor-doc": 2,
-            "vendor-codec": 13
+            "vendor-codec": 19
           },
-          "independent_vectors": 15,
+          "independent_vectors": 21,
           "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add IPSO object mappings for standard sensors (5 fields)",
-        "  \u2192 voltage: add ipso: {object: 3316}",
-        "  \u2192 active_power: add ipso: {object: 3328}",
-        "Add SenML units for standard sensors (5 fields)",
-        "  \u2192 voltage: add senml: {unit: \"V\"}",
-        "  \u2192 active_power: add senml: {unit: \"W\"}"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/ws558.yaml",
-      "timestamp": "2026-08-11T08:41:54.803398-05:00",
-      "score": 80.0,
-      "tier": "SILVER",
+      "timestamp": "2026-10-11T18:41:06.360703-05:00",
+      "score": 90.0,
+      "tier": "GOLD",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 17,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 17,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -12982,57 +12609,38 @@
         "semantic_annotations": {
           "total_fields": 5,
           "ipso_mapped": 0,
-          "ipso_missing": [
-            "voltage: add ipso: {object: 3316}",
-            "active_power: add ipso: {object: 3328}",
-            "power_factor: add ipso: {object: 3328}",
-            "power_consumption: add ipso: {object: 3328}",
-            "total_current: add ipso: {object: 3317}"
-          ],
+          "ipso_missing": [],
           "senml_mapped": 0,
-          "senml_missing": [
-            "voltage: add senml: {unit: \"V\"}",
-            "active_power: add senml: {unit: \"W\"}",
-            "power_factor: add senml: {unit: \"W\"}",
-            "power_consumption: add senml: {unit: \"W\"}",
-            "total_current: add senml: {unit: \"A\"}"
-          ],
+          "senml_missing": [],
           "semantic_mapped": 0,
-          "detectable_sensors": 5,
+          "detectable_sensors": 0,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
             "vendor-doc": 2,
-            "vendor-codec": 13
+            "vendor-codec": 15
           },
-          "independent_vectors": 15,
+          "independent_vectors": 17,
           "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add IPSO object mappings for standard sensors (5 fields)",
-        "  \u2192 voltage: add ipso: {object: 3316}",
-        "  \u2192 active_power: add ipso: {object: 3328}",
-        "Add SenML units for standard sensors (5 fields)",
-        "  \u2192 voltage: add senml: {unit: \"V\"}",
-        "  \u2192 active_power: add senml: {unit: \"W\"}"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/wt101.yaml",
-      "timestamp": "2026-08-11T08:41:54.826639-05:00",
-      "score": 89.0,
-      "tier": "GOLD",
+      "timestamp": "2026-10-11T18:41:06.387033-05:00",
+      "score": 100.0,
+      "tier": "PLATINUM",
       "details": {
         "schema_valid": true,
         "schema_errors": [],
         "has_test_vectors": true,
-        "test_count": 15,
+        "test_count": 24,
         "vector_issues": [],
         "python_tests_pass": true,
-        "python_passed": 15,
+        "python_passed": 24,
         "python_failed": 0,
         "python_errors": [],
         "js_status": "pass",
@@ -13048,39 +12656,26 @@
         ],
         "edge_cases_missing": [],
         "semantic_annotations": {
-          "total_fields": 20,
-          "ipso_mapped": 2,
-          "ipso_missing": [
-            "target_temperature: add ipso: {object: 3303}",
-            "valve_opening: add ipso: {object: 3337}"
-          ],
-          "senml_mapped": 2,
-          "senml_missing": [
-            "target_temperature: add senml: {unit: \"Cel\"}",
-            "valve_opening: add senml: {unit: \"%\"}"
-          ],
-          "semantic_mapped": 2,
-          "detectable_sensors": 4,
+          "total_fields": 25,
+          "ipso_mapped": 1,
+          "ipso_missing": [],
+          "senml_mapped": 1,
+          "senml_missing": [],
+          "semantic_mapped": 1,
+          "detectable_sensors": 1,
           "annotation_errors": []
         },
         "provenance": {
           "counts": {
             "vendor-doc": 1,
-            "vendor-codec": 14
+            "vendor-codec": 23
           },
-          "independent_vectors": 15,
+          "independent_vectors": 24,
           "verification": "independent",
           "issues": []
         }
       },
-      "recommendations": [
-        "Add IPSO object mappings for standard sensors (2 fields)",
-        "  \u2192 target_temperature: add ipso: {object: 3303}",
-        "  \u2192 valve_opening: add ipso: {object: 3337}",
-        "Add SenML units for standard sensors (2 fields)",
-        "  \u2192 target_temperature: add senml: {unit: \"Cel\"}",
-        "  \u2192 valve_opening: add senml: {unit: \"%\"}"
-      ]
+      "recommendations": []
     },
     {
       "schema_path": "schemas/devices/milesight/wt201v1.yaml",
@@ -13410,8 +13005,8 @@
     },
     {
       "schema_path": "schemas/devices/radio-bridge/rbs30x.yaml",
-      "timestamp": "2026-10-10T22:14:23.522084-05:00",
-      "score": 80.0,
+      "timestamp": "2026-10-11T18:41:06.678718-05:00",
+      "score": 83.0,
       "tier": "SILVER",
       "details": {
         "schema_valid": true,
@@ -13436,13 +13031,24 @@
         ],
         "edge_cases_missing": [],
         "semantic_annotations": {
-          "total_fields": 3,
+          "total_fields": 50,
           "ipso_mapped": 0,
-          "ipso_missing": [],
-          "senml_mapped": 0,
-          "senml_missing": [],
+          "ipso_missing": [
+            "temperature_event: add ipso: {object: 3303}",
+            "temperature: add ipso: {object: 3303}",
+            "humidity_whole: add ipso: {object: 3304}",
+            "humidity_frac: add ipso: {object: 3304}",
+            "temperature: add ipso: {object: 3303}",
+            "thermocouple_temperature: add ipso: {object: 3303}"
+          ],
+          "senml_mapped": 3,
+          "senml_missing": [
+            "temperature_event: add senml: {unit: \"Cel\"}",
+            "humidity_whole: add senml: {unit: \"%RH\"}",
+            "humidity_frac: add senml: {unit: \"%RH\"}"
+          ],
           "semantic_mapped": 0,
-          "detectable_sensors": 0,
+          "detectable_sensors": 6,
           "annotation_errors": []
         },
         "provenance": {
@@ -13455,7 +13061,14 @@
           "issues": []
         }
       },
-      "recommendations": []
+      "recommendations": [
+        "Add IPSO object mappings for standard sensors (6 fields)",
+        "  \u2192 temperature_event: add ipso: {object: 3303}",
+        "  \u2192 temperature: add ipso: {object: 3303}",
+        "Add SenML units for standard sensors (3 fields)",
+        "  \u2192 temperature_event: add senml: {unit: \"Cel\"}",
+        "  \u2192 humidity_whole: add senml: {unit: \"%RH\"}"
+      ]
     },
     {
       "schema_path": "schemas/devices/radionode/rn320bth.yaml",
@@ -13590,8 +13203,8 @@
     },
     {
       "schema_path": "schemas/devices/volley-boast/vobo.yaml",
-      "timestamp": "2026-10-10T22:14:23.612051-05:00",
-      "score": 93.0,
+      "timestamp": "2026-10-11T18:41:06.775442-05:00",
+      "score": 89.0,
       "tier": "GOLD",
       "details": {
         "schema_valid": true,
@@ -13616,26 +13229,17 @@
         ],
         "edge_cases_missing": [],
         "semantic_annotations": {
-          "total_fields": 2496,
-          "ipso_mapped": 53,
-          "ipso_missing": [],
+          "total_fields": 4769,
+          "ipso_mapped": 1,
+          "ipso_missing": [
+            "port70.adcTemperatureTransmitEnable: add ipso: {object: 3303}"
+          ],
           "senml_mapped": 1,
           "senml_missing": [
-            "port1.Battery: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating",
-            "port10.batteryLevelMV: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating",
-            "port20.batteryLevel: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating",
-            "port21.batteryLevel: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating",
-            "port22.batteryLevel: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating",
-            "port23.batteryLevel: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating",
-            "port24.batteryLevel: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating",
-            "port25.batteryLevel: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating",
-            "port26.batteryLevel: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating",
-            "port27.batteryLevel: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating",
-            "port28.batteryLevel: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating",
-            "port29.batteryLevel: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating"
+            "port70.adcTemperatureTransmitEnable: add senml: {unit: \"Cel\"}"
           ],
-          "semantic_mapped": 53,
-          "detectable_sensors": 53,
+          "semantic_mapped": 1,
+          "detectable_sensors": 2,
           "annotation_errors": []
         },
         "provenance": {
@@ -13648,9 +13252,10 @@
         }
       },
       "recommendations": [
-        "Add SenML units for standard sensors (12 fields)",
-        "  \u2192 port1.Battery: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating",
-        "  \u2192 port10.batteryLevelMV: field is in 'mV'; SenML wants 'V' -- convert the value or declare the real unit before annotating"
+        "Add IPSO object mappings for standard sensors (1 fields)",
+        "  \u2192 port70.adcTemperatureTransmitEnable: add ipso: {object: 3303}",
+        "Add SenML units for standard sensors (1 fields)",
+        "  \u2192 port70.adcTemperatureTransmitEnable: add senml: {unit: \"Cel\"}"
       ]
     }
   ]

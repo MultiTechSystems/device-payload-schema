@@ -211,23 +211,23 @@ static void test_direction_survives_the_binary_format(void) {
      * at load time and the check silently did nothing. */
     schema_t s;
     const uint8_t downlink_schema[] = {
-        'P', 'S', 1,
+        'P', 'S', BINARY_FORMAT_VERSION,
         (uint8_t)(SCHEMA_DIR_DOWNLINK << 1),  /* big-endian, declared downlink */
-        0,                                     /* no fields */
+        BINARY_NAMES_FLAG | 0,                 /* no fields, so an empty name table */
     };
     TCHECK(schema_load_binary(&s, downlink_schema, sizeof(downlink_schema)) == SCHEMA_OK);
     TCHECK(s.direction == SCHEMA_DIR_DOWNLINK);
 
-    /* A schema emitted before the bits were defined still reads as "declares nothing". */
-    const uint8_t legacy_schema[] = {'P', 'S', 1, 0x00, 0};
+    /* Flags of zero still read as "declares nothing". */
+    const uint8_t legacy_schema[] = {'P', 'S', BINARY_FORMAT_VERSION, 0x00, BINARY_NAMES_FLAG};
     TCHECK(schema_load_binary(&s, legacy_schema, sizeof(legacy_schema)) == SCHEMA_OK);
     TCHECK(s.direction == SCHEMA_DIR_UNSET);
 
     /* And the endian bit still means what it did. */
     const uint8_t little_uplink[] = {
-        'P', 'S', 1,
+        'P', 'S', BINARY_FORMAT_VERSION,
         (uint8_t)(0x01 | (SCHEMA_DIR_UPLINK << 1)),
-        0,
+        BINARY_NAMES_FLAG,
     };
     TCHECK(schema_load_binary(&s, little_uplink, sizeof(little_uplink)) == SCHEMA_OK);
     TCHECK(s.endian == ENDIAN_LITTLE);
@@ -357,10 +357,11 @@ static void test_the_lookup_follows_the_modifiers(void) {
  * way the schema arrives. */
 static void test_the_lookup_follows_the_modifiers_from_binary(void) {
     static const uint8_t blob[] = {
-        'P', 'S', 0x01, 0x00, 0x01,              /* header: v1, big-endian, 1 field */
-        0x81, 0x00, 0xE7, 0x0C,                  /* u8 + lookup, no scale, id 3303 */
+        'P', 'S', 0x03, 0x00, 0x81,              /* header: v3, big-endian, 1 field, names */
+        0x81, 0x00, 0xE7, 0x0C,                  /* u8 + lookup, no scale, IPSO 3303 */
         0xA0, 0x64, 0x00,                        /* add: 1.00 */
         0x83, 0x00, 0x01, 'a', 0x01, 0x01, 'b', 0x02, 0x01, 'c',
+        0x0B, 't', 'e', 'm', 'p', 'e', 'r', 'a', 't', 'u', 'r', 'e',   /* name table */
     };
     schema_t s;
     decode_result_t r;
@@ -370,7 +371,175 @@ static void test_the_lookup_follows_the_modifiers_from_binary(void) {
     TCHECK(s.fields[0].has_add && s.fields[0].lookup_is_sequence);
     TCHECK(schema_decode(&s, one, sizeof(one), &r) == SCHEMA_OK);
     TCHECK(r.field_count == 1);
+    TCHECK(strcmp(r.fields[0].name, "temperature") == 0);
     TCHECK(strcmp(r.fields[0].value.str, "c") == 0);
+}
+
+/*
+ * CR-2026-142 (PS-555): the binary form carries every field's name, and the loader
+ * reports those names - never one derived from the IPSO object. The loader used to name
+ * a field from its IPSO ID, so 3303 became "temperature" whatever the schema called it.
+ *
+ * Three fields, as tools/schema_binary.py writes them: a u16 named "soil_temperature"
+ * with IPSO 3303, a one-byte skip, and a u8 named "battery" with no IPSO object.
+ */
+static const uint8_t named_blob[] = {
+    'P', 'S', BINARY_FORMAT_VERSION, 0x00, BINARY_NAMES_FLAG | 3,
+    0x02, 0x00, 0xE7, 0x0C,                       /* u16, IPSO 3303 */
+    0x71, 0x00, 0x00, 0x00,                       /* skip 1 */
+    0x01, 0x00, 0x00, 0x00,                       /* u8 */
+    16, 's', 'o', 'i', 'l', '_', 't', 'e', 'm', 'p', 'e', 'r', 'a', 't', 'u', 'r', 'e',
+    0,                                            /* the skip has no name (PS-553) */
+    7, 'b', 'a', 't', 't', 'e', 'r', 'y',
+};
+static const uint8_t named_payload[] = {0x01, 0x02, 0xFF, 0x07};
+
+static void test_binary_names_round_trip(void) {
+    schema_t s;
+    decode_result_t r;
+    char err[160];
+
+    TCHECK(schema_load_binary_msg(&s, named_blob, sizeof(named_blob), err, sizeof(err))
+           == SCHEMA_OK);
+    TCHECK(err[0] == '\0');
+    TCHECK(!s.nameless);
+    TCHECK(s.field_count == 3);
+    TCHECK(strcmp(s.fields[0].name, "soil_temperature") == 0);
+    TCHECK(strcmp(s.fields[2].name, "battery") == 0);
+
+    TCHECK(schema_decode(&s, named_payload, sizeof(named_payload), &r) == SCHEMA_OK);
+    TCHECK(!r.nameless);
+    TCHECK(r.field_count == 2);
+    TCHECK(strcmp(r.fields[0].name, "soil_temperature") == 0);
+    TCHECK(r.fields[0].value.i64 == 0x0102);
+    TCHECK(strcmp(r.fields[1].name, "battery") == 0);
+    TCHECK(r.fields[1].value.i64 == 7);
+    /* The name an IPSO lookup would have made up is nowhere. */
+    TCHECK(result_get_field(&r, "temperature") == NULL);
+    TCHECK(result_get_int(&r, "soil_temperature", -1) == 0x0102);
+    /* And the index route reaches the same values, the skip reporting nothing. */
+    TCHECK(result_get_index(&r, 0) == &r.fields[0]);
+    TCHECK(result_get_index(&r, 1) == NULL);
+    TCHECK(result_get_index(&r, 2) == &r.fields[1]);
+}
+
+static void test_binary_skip_has_an_empty_name(void) {
+    schema_t s;
+
+    TCHECK(schema_load_binary(&s, named_blob, sizeof(named_blob)) == SCHEMA_OK);
+    TCHECK(s.fields[1].type == FIELD_TYPE_SKIP);
+    TCHECK(s.fields[1].size == 1);
+    TCHECK(s.fields[1].name[0] == '\0');
+}
+
+static void test_binary_empty_name_is_only_for_a_skip(void) {
+    /* One u8 whose name-table entry is empty. */
+    static const uint8_t blob[] = {
+        'P', 'S', BINARY_FORMAT_VERSION, 0x00, BINARY_NAMES_FLAG | 1,
+        0x01, 0x00, 0x00, 0x00,
+        0,
+    };
+    schema_t s;
+    char err[160];
+
+    TCHECK(schema_load_binary_msg(&s, blob, sizeof(blob), err, sizeof(err))
+           == SCHEMA_ERR_PARSE);
+    TCHECK(strcmp(err, "field 0 (u8) has an empty name; only a skip has none (PS-553)")
+           == 0);
+    TCHECK(s.field_count == 0);
+}
+
+static void test_binary_over_length_name_is_refused(void) {
+    /* One u8 named with SCHEMA_MAX_NAME_LEN bytes, one more than a name buffer holds
+     * beside its terminator. It is refused, naming the field, not cut short. */
+    uint8_t blob[5 + 4 + 1 + SCHEMA_MAX_NAME_LEN];
+    const uint8_t head[] = {'P', 'S', BINARY_FORMAT_VERSION, 0x00, BINARY_NAMES_FLAG | 1,
+                            0x01, 0x00, 0x00, 0x00, SCHEMA_MAX_NAME_LEN};
+    memcpy(blob, head, sizeof(head));
+    memset(blob + sizeof(head), 'n', SCHEMA_MAX_NAME_LEN);
+    schema_t s;
+    char err[256];
+
+    TCHECK(schema_load_binary_msg(&s, blob, sizeof(blob), err, sizeof(err))
+           == SCHEMA_ERR_PARSE);
+    TCHECK(strcmp(err, "field 0's name is 32 bytes, more than the 31 this interpreter "
+                       "holds (SCHEMA_MAX_NAME_LEN), and a name is never truncated "
+                       "(PS-555): 'nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn'") == 0);
+    TCHECK(s.field_count == 0);
+
+    /* One byte shorter fits exactly. */
+    blob[9] = SCHEMA_MAX_NAME_LEN - 1;
+    TCHECK(schema_load_binary(&s, blob, sizeof(blob) - 1) == SCHEMA_OK);
+    TCHECK(strlen(s.fields[0].name) == SCHEMA_MAX_NAME_LEN - 1);
+}
+
+static void test_binary_truncated_name_table_is_refused(void) {
+    schema_t s;
+    char err[160];
+
+    /* The last name cut by one byte, and the whole table missing. */
+    TCHECK(schema_load_binary_msg(&s, named_blob, sizeof(named_blob) - 1, err, sizeof(err))
+           == SCHEMA_ERR_PARSE);
+    TCHECK(strstr(err, "field 2: its name at offset") != NULL);
+    TCHECK(strstr(err, "runs past the end") != NULL);
+    TCHECK(s.field_count == 0);
+
+    TCHECK(schema_load_binary_msg(&s, named_blob, 17, err, sizeof(err))
+           == SCHEMA_ERR_PARSE);
+    TCHECK(strstr(err, "field 0: its name length") != NULL);
+}
+
+static void test_binary_old_version_is_refused(void) {
+    /* The version-1 layout: no name table, and this loader named the u16 "temperature"
+     * from its IPSO ID. It cannot be decoded under PS-555, so it is not loaded. */
+    static const uint8_t v1[] = {
+        'P', 'S', 0x01, 0x00, 0x01,
+        0x02, 0x00, 0xE7, 0x0C,
+    };
+    schema_t s;
+    char err[160];
+
+    TCHECK(schema_load_binary_msg(&s, v1, sizeof(v1), err, sizeof(err)) == SCHEMA_ERR_PARSE);
+    TCHECK(strcmp(err, "binary schema format version 1 is not supported; this loader "
+                       "reads version 3 (CR-2026-142)") == 0);
+    TCHECK(s.field_count == 0);
+}
+
+static void test_binary_trailing_bytes_are_refused(void) {
+    uint8_t blob[sizeof(named_blob) + 1];
+    memcpy(blob, named_blob, sizeof(named_blob));
+    blob[sizeof(named_blob)] = 0x00;
+    schema_t s;
+    char err[160];
+
+    TCHECK(schema_load_binary_msg(&s, blob, sizeof(blob), err, sizeof(err))
+           == SCHEMA_ERR_PARSE);
+    TCHECK(strstr(err, "1 byte(s) after the last name") != NULL);
+}
+
+static void test_binary_nameless_form_reports_by_index(void) {
+    /* The same records without the name table (count bit 7 clear): a compiled form for
+     * an interpreter that hands back values by index. No field gets a name - not one
+     * made up from its IPSO object, type or position - and nothing finds one by name. */
+    uint8_t blob[5 + 12];
+    memcpy(blob, named_blob, sizeof(blob));
+    blob[4] = 3;
+    schema_t s;
+    decode_result_t r;
+
+    TCHECK(schema_load_binary(&s, blob, sizeof(blob)) == SCHEMA_OK);
+    TCHECK(s.nameless);
+    for (int i = 0; i < s.field_count; i++) TCHECK(s.fields[i].name[0] == '\0');
+
+    TCHECK(schema_decode(&s, named_payload, sizeof(named_payload), &r) == SCHEMA_OK);
+    TCHECK(r.nameless);
+    TCHECK(r.field_count == 2);
+    TCHECK(r.fields[0].name[0] == '\0' && r.fields[1].name[0] == '\0');
+    TCHECK(result_get_index(&r, 0) != NULL && result_get_index(&r, 0)->value.i64 == 0x0102);
+    TCHECK(result_get_index(&r, 1) == NULL);
+    TCHECK(result_get_index(&r, 2) != NULL && result_get_index(&r, 2)->value.i64 == 7);
+    TCHECK(result_get_field(&r, "temperature") == NULL);
+    TCHECK(result_get_field(&r, "") == NULL);
 }
 
 /* A value the modifiers leave with a fraction is no key of a mapping (PS-107), so the
@@ -746,10 +915,11 @@ static void test_bit_ranges_are_laid_out_as_decoded(void) {
         TCHECK(out.len == 2 && out.data[0] == 0x81 && out.data[1] == 0x05);
     }
     {
-        /* A peeked range, then the byte read whole: one byte, not two. */
+        /* A peeked range, then the byte read whole: one byte, not two. The whole byte
+         * agrees with the range, as CR-2026-141 requires (it was 5, ORed into 0x35). */
         field_def_t f[] = { field_bits("hi", 4, 4, false), field_u8("whole") };
         const char* n[] = {"hi", "whole"};
-        const int64_t v[] = {3, 5};
+        const int64_t v[] = {3, 0x35};
         TCHECK(encode_fields(f, 2, n, v, &out) == SCHEMA_OK);
         TCHECK(out.len == 1 && out.data[0] == 0x35);
     }
@@ -797,6 +967,82 @@ static void test_a_missing_input_is_named(void) {
     TCHECK(out.error_msg[0] == 0);
 }
 
+/* Encode `nf` fields from `ni` inputs, which may leave some of them out. */
+static int encode_some(field_def_t* fields, int nf, const char** names, const int64_t* vals,
+                       int ni, encode_result_t* out) {
+    schema_t s;
+    encode_inputs_t inputs;
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    for (int i = 0; i < nf; i++) schema_add_field(&s, &fields[i]);
+    encode_inputs_init(&inputs);
+    for (int i = 0; i < ni; i++) encode_inputs_add_int(&inputs, names[i], vals[i]);
+    return schema_encode(&s, &inputs, out);
+}
+
+static void test_a_covered_peek_is_derived(void) {
+    /* PS-551 (CR-2026-141): a bit range or bool that does not consume is fixed by the
+     * fields that write its bits. Absent, it is derived and writes none; with a bit no
+     * other field writes, it is missing; supplied, it must agree with the frame. The
+     * cases are tests/cr-2026-141-cases.yaml's, in the widths C's ranges have. */
+    encode_result_t out;
+    {   /* Milesight's status peek, a byte wide here: the reading fixes it. */
+        field_def_t f[] = { field_bits("status", 0, 8, false), field_u16("reading", ENDIAN_BIG) };
+        const char* n[] = {"reading"};
+        const int64_t v[] = {300};
+        TCHECK(encode_some(f, 2, n, v, 1, &out) == SCHEMA_OK);
+        TCHECK(out.len == 2 && out.data[0] == 0x01 && out.data[1] == 0x2c);
+    }
+    {
+        field_def_t f[] = { field_bits("status", 0, 8, false), field_u16("reading", ENDIAN_BIG) };
+        const char* n[] = {"status", "reading"};
+        const int64_t agree[] = {255, 65535};
+        TCHECK(encode_some(f, 2, n, agree, 2, &out) == SCHEMA_OK);
+        TCHECK(out.len == 2 && out.data[0] == 0xff && out.data[1] == 0xff);
+        const int64_t disagree[] = {255, 300};
+        TCHECK(encode_some(f, 2, n, disagree, 2, &out) == SCHEMA_ERR_PARSE);
+        TCHECK(out.len == 0);
+        TCHECK(strcmp(out.error_msg, "Field 'status' is given 255, but the fields that share "
+                                     "its bits write 1 (PS-551)") == 0);
+    }
+    {
+        field_def_t f[] = { field_bits("a", 0, 4, false), field_bits("b", 4, 4, true) };
+        const char* n[] = {"b"};
+        const int64_t v[] = {2};
+        TCHECK(encode_some(f, 2, n, v, 1, &out) == SCHEMA_ERR_PARSE);
+        TCHECK(out.len == 0);
+        TCHECK(strcmp(out.error_msg, "Missing required field: a") == 0);
+    }
+    {
+        field_def_t f[] = { field_bool("f", 7, false), field_u8("x") };
+        const char* n[] = {"x"};
+        const int64_t v[] = {128};
+        TCHECK(encode_some(f, 2, n, v, 1, &out) == SCHEMA_OK);
+        TCHECK(out.len == 1 && out.data[0] == 0x80);
+        const char* n2[] = {"f", "x"};
+        const int64_t v2[] = {1, 1};
+        TCHECK(encode_some(f, 2, n2, v2, 2, &out) == SCHEMA_ERR_PARSE);
+        TCHECK(strcmp(out.error_msg, "Field 'f' is given 1, but the fields that share its "
+                                     "bits write 0 (PS-551)") == 0);
+    }
+    {
+        field_def_t f[] = { field_bool("f", 7, false), field_bool("g", 0, true) };
+        const char* n[] = {"g"};
+        const int64_t v[] = {1};
+        TCHECK(encode_some(f, 2, n, v, 1, &out) == SCHEMA_ERR_PARSE);
+        TCHECK(strcmp(out.error_msg, "Missing required field: f") == 0);
+    }
+    {   /* A skip is padding: it keeps the peek's bits, and fixes none of them. */
+        field_def_t f[] = { field_bits("p", 0, 4, false), field_skip(1) };
+        const char* n[] = {"p"};
+        const int64_t v[] = {5};
+        TCHECK(encode_some(f, 2, n, v, 1, &out) == SCHEMA_OK);
+        TCHECK(out.len == 1 && out.data[0] == 0x05);
+        TCHECK(encode_some(f, 2, n, v, 0, &out) == SCHEMA_ERR_PARSE);
+        TCHECK(strcmp(out.error_msg, "Missing required field: p") == 0);
+    }
+}
+
 /*
  * Main test entry point
  */
@@ -819,6 +1065,14 @@ void selftest_schema(void) {
     test_a_u64_is_exact_at_the_top_of_its_range();
     test_the_lookup_follows_the_modifiers();
     test_the_lookup_follows_the_modifiers_from_binary();
+    test_binary_names_round_trip();
+    test_binary_skip_has_an_empty_name();
+    test_binary_empty_name_is_only_for_a_skip();
+    test_binary_over_length_name_is_refused();
+    test_binary_truncated_name_table_is_refused();
+    test_binary_old_version_is_refused();
+    test_binary_trailing_bytes_are_refused();
+    test_binary_nameless_form_reports_by_index();
     test_a_fractional_value_matches_no_key();
     test_an_enum_applies_its_modifiers_first();
     test_a_float_applies_its_modifiers();
@@ -835,6 +1089,7 @@ void selftest_schema(void) {
     test_a_value_that_does_not_fit_is_named();
     test_bit_ranges_are_laid_out_as_decoded();
     test_a_missing_input_is_named();
+    test_a_covered_peek_is_derived();
 
     LOG(LOG_INFO, MOD, "Schema interpreter self-tests complete");
 }

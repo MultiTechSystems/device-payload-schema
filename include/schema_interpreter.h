@@ -8,11 +8,14 @@
  * - Programmatic schema building (field_u8, field_s16, etc.)
  * - Binary schema loading (schema_load_binary)
  *
- * Binary schema format (compact, ~4 bytes/field):
- *   Header: 'P' 'S' version flags field_count
+ * Binary schema format 3 (compact, ~4 bytes/field plus names; see "Binary Schema
+ * Loading" below and tools/schema_binary.py):
+ *   Header: 'P' 'S' 3 flags count
  *     flags bit 0    : 1 = little-endian
  *     flags bits 1-2 : declared direction, 0 unset / 1 uplink / 2 downlink / 3 both
- *   Per field: type_byte mult_exp field_id[2] [options]
+ *     count bit 7    : a name table follows; bits 0-6 the field count
+ *   Per field: type_byte mult_exp ipso_obj[2] [options]
+ *   Name table: per field, length byte + UTF-8 name (PS-555)
  *
  * Usage (programmatic):
  *   schema_t schema;
@@ -35,10 +38,11 @@
 #include <stdbool.h>
 #include <string.h>
 #include <stdlib.h>
-/* schema_load_binary formats a placeholder field name with snprintf. The header used
- * it without declaring it, so it only compiled where the including file happened to
- * have pulled in <stdio.h> already - every existing caller did. */
+/* snprintf and vsnprintf format error messages, schema_load_binary_msg's among them.
+ * The header once used snprintf without declaring it, so it only compiled where the
+ * including file happened to have pulled in <stdio.h> already. */
 #include <stdio.h>
+#include <stdarg.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -202,6 +206,11 @@ typedef struct {
     field_value_t value;
     field_type_t type;
     bool valid;
+    /* The index, in schema->fields, of the field that produced this value. It is how a
+     * value is found where the schema carries no names - a binary schema loaded without
+     * its name table (PS-555, CR-2026-142) - and `name` is then empty, never made up.
+     * See result_get_index(). Last member, so existing initializers leave it zero. */
+    int field_index;
 } decoded_field_t;
 
 /* Which way a message travels, for a schema or a decode call.
@@ -228,6 +237,11 @@ typedef struct {
      * the schema as a whole (PS-291). Last member, so existing initializers leave it
      * SCHEMA_DIR_UNSET. */
     schema_direction_t direction;
+    /* Set by schema_load_binary for a blob with no name table (CR-2026-142). Its fields
+     * have empty names, and a decode reports each value by field index only: PS-555
+     * forbids reporting the decoded object from a form that carries no names, and
+     * forbids deriving a name from the IPSO object, type or position. */
+    bool nameless;
 } schema_t;
 
 typedef struct {
@@ -251,6 +265,10 @@ typedef struct {
      * after an unknown, undelimited tlv tag too, counted from that tag as the other
      * five count them. Last member, so existing initializers leave it zero. */
     int bytes_unread;
+    /* The schema carried no names (schema_t.nameless). Every value is then reachable
+     * by result_get_index() and none by name, and a writer of the decoded object - such
+     * as bindings/c's result_to_json() - must refuse (PS-555). */
+    bool nameless;
 } decode_result_t;
 
 /* Variable storage for match conditions */
@@ -1217,6 +1235,7 @@ static inline int schema_decode_direction(
     decode_result_t* result
 ) {
     memset(result, 0, sizeof(decode_result_t));
+    result->nameless = schema->nameless;
 
     int direction_err = schema_check_direction(schema, direction, result);
     if (direction_err != SCHEMA_OK) {
@@ -1270,6 +1289,7 @@ static inline int schema_decode_direction(
                         return schema_field_failed(result, rc, &schema->fields[field_idx],
                                                    pos, len);
                     }
+                    result->fields[result->field_count].field_index = field_idx;
                     if (result->fields[result->field_count].valid) {
                         result->field_count++;
                     }
@@ -1391,6 +1411,7 @@ static inline int schema_decode_direction(
                         return schema_field_failed(result, rc, &schema->fields[field_idx],
                                                    pos, len);
                     }
+                    result->fields[result->field_count].field_index = field_idx;
                     if (result->fields[result->field_count].valid) {
                         result->field_count++;
                     }
@@ -1443,6 +1464,7 @@ static inline int schema_decode_direction(
                             return schema_field_failed(result, rc,
                                                        &schema->fields[field_idx], pos, len);
                         }
+                        result->fields[result->field_count].field_index = field_idx;
                         if (result->fields[result->field_count].valid) {
                             result->field_count++;
                         }
@@ -1464,8 +1486,14 @@ static inline int schema_decode_direction(
             return schema_field_failed(result, rc, field, pos, len);
         }
         
+        /* A named field is reported unless it is internal. A schema without names (a
+         * binary schema loaded without its name table) reports each value by its
+         * index instead, so every field that reads a value counts; its name stays
+         * empty, never one made up from the IPSO object, type or position (PS-555). */
+        result->fields[result->field_count].field_index = i;
         if (result->fields[result->field_count].valid &&
-            field->name[0] && field->name[0] != '_') {
+            (field->name[0] ? field->name[0] != '_'
+                            : schema->nameless && field->type != FIELD_TYPE_SKIP)) {
             result->field_count++;
         }
     }
@@ -1831,10 +1859,22 @@ static inline int schema_encode_direction(
 
     size_t pos = 0;
     size_t filled = 0;      /* bytes a non-consuming bit range or bool has filled */
-    
+    /* CR-2026-141 (PS-551): per byte, the bits some field wrote; and each bit range or
+     * bool placed, with the value it was given or -1 where it was absent and derived. A
+     * bit range or bool that does not consume shares its byte with the fields after it,
+     * which fix its value: absent, it writes no bits and is missing only where a bit is
+     * left unwritten; supplied, it must read back from the finished frame. */
+    uint8_t covered[SCHEMA_MAX_PAYLOAD];
+    uint8_t scratch[SCHEMA_MAX_PAYLOAD];
+    struct { size_t pos; uint8_t mask; uint8_t start; int16_t raw; const char* name; }
+        peeks[SCHEMA_MAX_FIELDS];
+    int peek_count = 0;
+    memset(covered, 0, sizeof(covered));
+    memset(scratch, 0, sizeof(scratch));
+
     for (int i = 0; i < schema->field_count; i++) {
         const field_def_t* field = &schema->fields[i];
-        
+
         /* Skip internal/match fields for now. A skip is padding, not an internal value:
          * field_skip() names it `_skip`, so this used to drop it and every field after a
          * skip was written that many bytes early. */
@@ -1842,8 +1882,23 @@ static inline int schema_encode_direction(
             field->type == FIELD_TYPE_MATCH) {
             continue;
         }
-        
+        bool bitlike = field->type == FIELD_TYPE_BITS || field->type == FIELD_TYPE_BOOL;
+        uint8_t mask = field->type == FIELD_TYPE_BOOL
+            ? (uint8_t)(1u << field->bit_start)
+            : (uint8_t)(((1u << field->bit_width) - 1u) << field->bit_start);
+
         if (field->type != FIELD_TYPE_SKIP && !find_input(inputs, field->name)) {
+            if (bitlike && !field->consume && pos < SCHEMA_MAX_PAYLOAD) {
+                /* PS-551 (CR-2026-141): derived from the fields that write its bits. */
+                peeks[peek_count].pos = pos;
+                peeks[peek_count].mask = mask;
+                peeks[peek_count].start = field->bit_start;
+                peeks[peek_count].raw = -1;
+                peeks[peek_count].name = field->name;
+                peek_count++;
+                if (pos + 1 > filled) filled = pos + 1;
+                continue;
+            }
             /* PS-551: rejected, naming the field, and no payload. encode_field reported
              * the code alone; nothing said which field was missing. */
             snprintf(result->error_msg, sizeof(result->error_msg),
@@ -1851,21 +1906,76 @@ static inline int schema_encode_direction(
             result->error_code = SCHEMA_ERR_PARSE;
             return SCHEMA_ERR_PARSE;
         }
-        int rc = encode_field(field, inputs, result->data, &pos, schema->endian,
+        /* Encoded alone, so its own bits can be told from those already placed. */
+        size_t at = pos;
+        int rc = encode_field(field, inputs, scratch, &pos, schema->endian,
                               result->error_msg, sizeof(result->error_msg));
+        size_t end = bitlike && pos == at ? at + 1 : pos;
+        if (rc == SCHEMA_OK && end > SCHEMA_MAX_PAYLOAD) rc = SCHEMA_ERR_BUFFER;
+        /* A skip is padding: its zeros fix no peek's bits and contradict none. */
+        bool padding = field->type == FIELD_TYPE_SKIP;
+        if (rc == SCHEMA_OK && !bitlike && !padding) {
+            for (size_t b = at; b < end; b++) {
+                if (!(result->data[b] & (uint8_t)~scratch[b])) continue;
+                /* PS-551: it would OR over a peek's different bits, changing both. */
+                snprintf(result->error_msg, sizeof(result->error_msg),
+                         "A field writes bits a peek before it set otherwise (PS-551)");
+                for (int k = 0; k < peek_count; k++) {
+                    if (peeks[k].raw < 0 || peeks[k].pos < at || peeks[k].pos >= end) continue;
+                    int found = (scratch[peeks[k].pos] & peeks[k].mask) >> peeks[k].start;
+                    if (found == peeks[k].raw) continue;
+                    snprintf(result->error_msg, sizeof(result->error_msg),
+                             "Field '%s' is given %d, but the fields that share its bits "
+                             "write %d (PS-551)", peeks[k].name, peeks[k].raw, found);
+                    break;
+                }
+                rc = SCHEMA_ERR_PARSE;
+                break;
+            }
+        }
         if (rc != SCHEMA_OK) {
             result->error_code = rc;
             memset(result->data, 0, sizeof(result->data));   /* no partial payload */
             return rc;
         }
+        if (bitlike) {
+            peeks[peek_count].pos = at;
+            peeks[peek_count].mask = mask;
+            peeks[peek_count].start = field->bit_start;
+            peeks[peek_count].raw = (int16_t)((scratch[at] & mask) >> field->bit_start);
+            peeks[peek_count].name = field->name;
+            peek_count++;
+            covered[at] |= mask;
+        }
+        for (size_t b = at; b < end; b++) {
+            result->data[b] |= scratch[b];
+            if (!bitlike && !padding) covered[b] = 0xFF;
+            scratch[b] = 0;
+        }
         /* A bit range or bool that did not consume filled the byte at pos: the next field
          * shares it, and if none does it is still written (CR-2026-136). */
-        if ((field->type == FIELD_TYPE_BITS || field->type == FIELD_TYPE_BOOL)
-            && !field->consume && pos + 1 > filled) {
+        if (bitlike && !field->consume && pos + 1 > filled) {
             filled = pos + 1;
         }
     }
-    
+
+    for (int k = 0; k < peek_count; k++) {
+        int found = (result->data[peeks[k].pos] & peeks[k].mask) >> peeks[k].start;
+        if (peeks[k].raw < 0 && (covered[peeks[k].pos] & peeks[k].mask) != peeks[k].mask) {
+            snprintf(result->error_msg, sizeof(result->error_msg),
+                     "Missing required field: %s", peeks[k].name);
+        } else if (peeks[k].raw >= 0 && found != peeks[k].raw) {
+            snprintf(result->error_msg, sizeof(result->error_msg),
+                     "Field '%s' is given %d, but the fields that share its bits write %d "
+                     "(PS-551)", peeks[k].name, peeks[k].raw, found);
+        } else {
+            continue;
+        }
+        result->error_code = SCHEMA_ERR_PARSE;
+        memset(result->data, 0, sizeof(result->data));
+        return SCHEMA_ERR_PARSE;
+    }
+
     result->len = (int)(pos > filled ? pos : filled);
     return SCHEMA_OK;
 }
@@ -2083,8 +2193,27 @@ static inline const decoded_field_t* result_get_field(
     const decode_result_t* result, 
     const char* name
 ) {
+    /* No value is found by a name the schema did not carry: an empty name matches
+     * nothing, and a schema without names has none to match (PS-555). */
+    if (!name || !name[0] || result->nameless) return NULL;
     for (int i = 0; i < result->field_count; i++) {
         if (strcmp(result->fields[i].name, name) == 0) {
+            return &result->fields[i];
+        }
+    }
+    return NULL;
+}
+
+/* The value the schema's field `index` produced, in schema order, or NULL where that
+ * field reported nothing (an internal or skipped field, an omitted value). This is the
+ * only way to reach a value decoded with a schema that carries no names (CR-2026-142),
+ * and works for a named one too. */
+static inline const decoded_field_t* result_get_index(
+    const decode_result_t* result,
+    int index
+) {
+    for (int i = 0; i < result->field_count; i++) {
+        if (result->fields[i].field_index == index) {
             return &result->fields[i];
         }
     }
@@ -2121,18 +2250,36 @@ static inline const char* result_get_string(
  * Binary Schema Loading
  * ============================================
  *
- * Binary format (compact, ~4 bytes/field):
- *   Header (5 bytes): 'P' 'S' version flags field_count
- *   Per field:
- *     type_byte: [TTTT SSSS] type(4) size(4)
- *     mult_exp:  signed exponent, mult = 10^exp
- *     field_id:  2 bytes little-endian (IPSO or hash)
+ * The form tools/schema_binary.py writes, format version 3 (CR-2026-142):
+ *
+ *   Header (5 bytes): 'P' 'S' format_version flags count
+ *     format_version : 3. Any other is refused: version 1 put the schema's own
+ *                      `version` here and carried no names, and 2 is
+ *                      tools/binary_schema_v2.py's different layout under the same magic.
+ *     flags bit 0    : 1 = little-endian
+ *     flags bits 1-2 : declared direction, 0 unset / 1 uplink / 2 downlink / 3 both
+ *     count bit 7    : a name table follows the field records
+ *     count bits 0-6 : field count
+ *   Per field record:
+ *     type_byte: bit 7 lookup follows; bits 4-6 type; bits 0-3 size
+ *     mult_exp:  signed exponent, mult = 10^exp, or 0x81/0x82/0x84 for 1/2, 1/4, 1/16
+ *     ipso_obj:  2 bytes little-endian, the field's IPSO object or 0. An annotation:
+ *                no name is ever derived from it (PS-555).
  *     [options]: bitfield info, add value, lookup table
+ *   Name table, where count bit 7 is set - one entry per record, in field order:
+ *     length (1 byte), then that many bytes of UTF-8. 0 only for a skip.
+ *
+ * Without the name table the fields keep empty names, schema_t.nameless is set, and a
+ * decode reports each value by field index (result_get_index) - never under a name
+ * made up from the IPSO object, type or position, which this loader used to do.
  *
  * Type codes:
  *   0x0 = uint, 0x1 = sint, 0x2 = float, 0x3 = bytes,
- *   0x4 = bool, 0x5 = enum, 0x6 = bitfield, 0x7 = match
+ *   0x4 = bool, 0x5 = enum, 0x6 = bitfield, 0x7 = skip
  */
+
+#define BINARY_FORMAT_VERSION 3
+#define BINARY_NAMES_FLAG     0x80
 
 #define BINARY_TYPE_UINT     0x0
 #define BINARY_TYPE_SINT     0x1
@@ -2141,10 +2288,11 @@ static inline const char* result_get_string(
 #define BINARY_TYPE_BOOL     0x4
 #define BINARY_TYPE_ENUM     0x5
 #define BINARY_TYPE_BITFIELD 0x6
-#define BINARY_TYPE_MATCH    0x7
-#define BINARY_TYPE_SKIP     0x8
+/* 0x8 until format version 3, where the lookup flag in bit 7 shadowed it. 0x7 was a
+ * `match` record that this loader never parsed and the writer refused. */
+#define BINARY_TYPE_SKIP     0x7
 
-/* Convert type code + size to field_type_t */
+/* Convert type code + size to field_type_t; FIELD_TYPE_UNKNOWN for no type. */
 static inline field_type_t binary_type_to_field_type(uint8_t type_code, uint8_t size) {
     switch (type_code) {
         case BINARY_TYPE_UINT:
@@ -2168,33 +2316,36 @@ static inline field_type_t binary_type_to_field_type(uint8_t type_code, uint8_t 
         case BINARY_TYPE_FLOAT:
             if (size == 2) return FIELD_TYPE_F16;
             if (size == 4) return FIELD_TYPE_F32;
-            return FIELD_TYPE_F64;
+            if (size == 8) return FIELD_TYPE_F64;
+            break;
         case BINARY_TYPE_BOOL:
             return FIELD_TYPE_BOOL;
+        case BINARY_TYPE_ENUM:
+            /* One byte, its table carried as a lookup. */
+            if (size == 1) return FIELD_TYPE_U8;
+            break;
         case BINARY_TYPE_BITFIELD:
             return FIELD_TYPE_BITS;
         case BINARY_TYPE_SKIP:
             return FIELD_TYPE_SKIP;
         case BINARY_TYPE_BYTES:
             return FIELD_TYPE_BYTES;
-        case BINARY_TYPE_MATCH:
-            return FIELD_TYPE_MATCH;
     }
-    return FIELD_TYPE_U8;
+    return FIELD_TYPE_UNKNOWN;
 }
 
 /* Convert exponent byte to multiplier */
 static inline double binary_exp_to_mult(uint8_t exp) {
     if (exp == 0) return 1.0;
-    
+
     /* Special cases for 0.5-based */
     if (exp == 0x81) return 0.5;
     if (exp == 0x82) return 0.25;
     if (exp == 0x84) return 0.0625;
-    
+
     /* Signed exponent for power of 10 */
     int8_t signed_exp = (exp > 127) ? (int8_t)(exp - 256) : (int8_t)exp;
-    
+
     double mult = 1.0;
     if (signed_exp > 0) {
         for (int i = 0; i < signed_exp; i++) mult *= 10.0;
@@ -2204,77 +2355,108 @@ static inline double binary_exp_to_mult(uint8_t exp) {
     return mult;
 }
 
-/* IPSO object ID to name (common ones) */
-static inline const char* ipso_to_name(uint16_t id, char* buf) {
-    switch (id) {
-        case 3303: return "temperature";
-        case 3304: return "humidity";
-        case 3315: return "pressure";
-        case 3316: return "voltage";
-        case 3317: return "current";
-        case 3328: return "power";
-        case 3330: return "distance";
-        case 3301: return "illuminance";
-        default:
-            snprintf(buf, SCHEMA_MAX_NAME_LEN, "field_%04x", id);
-            return buf;
+/* Write a load error's text where the caller gave room for one; returns `rc`. */
+static inline int binary_load_error(char* err, size_t err_len, int rc, const char* fmt, ...) {
+    if (err && err_len) {
+        va_list ap;
+        va_start(ap, fmt);
+        vsnprintf(err, err_len, fmt, ap);
+        va_end(ap);
     }
+    return rc;
 }
 
-/* Load schema from binary format */
-static inline int schema_load_binary(
+/* Load a schema from the binary form, writing the reason for a refusal to `err` (which
+ * may be NULL). Every refusal is SCHEMA_ERR_PARSE and leaves no usable schema:
+ *   - a format version other than BINARY_FORMAT_VERSION;
+ *   - a record, lookup table or name that runs past the end of the blob, or bytes left
+ *     after the last name (or record, without names);
+ *   - more fields than SCHEMA_MAX_FIELDS or lookup entries than SCHEMA_MAX_LOOKUP;
+ *   - a type and size naming no type;
+ *   - an empty name on anything but a skip (PS-553), a name holding a NUL byte, or a
+ *     name or label longer than SCHEMA_MAX_NAME_LEN - 1 bytes. Nothing is truncated:
+ *     a cut name would report a key the schema does not have (PS-555). */
+static inline int schema_load_binary_msg(
     schema_t* schema,
     const uint8_t* data,
-    size_t len
+    size_t len,
+    char* err,
+    size_t err_len
 ) {
-    if (len < 5) return SCHEMA_ERR_PARSE;
-    if (data[0] != 'P' || data[1] != 'S') return SCHEMA_ERR_PARSE;
-    
+    if (err && err_len) err[0] = '\0';
+    if (!schema) return binary_load_error(err, err_len, SCHEMA_ERR_PARSE, "no schema");
     schema_init(schema);
-    schema->version = data[2];
+    if (!data || len < 5) {
+        return binary_load_error(err, err_len, SCHEMA_ERR_PARSE,
+                                 "binary schema too short: %u byte(s)", (unsigned)len);
+    }
+    if (data[0] != 'P' || data[1] != 'S') {
+        return binary_load_error(err, err_len, SCHEMA_ERR_PARSE, "not a binary schema");
+    }
+    if (data[2] != BINARY_FORMAT_VERSION) {
+        return binary_load_error(err, err_len, SCHEMA_ERR_PARSE,
+                                 "binary schema format version %u is not supported; this "
+                                 "loader reads version %d (CR-2026-142)",
+                                 (unsigned)data[2], BINARY_FORMAT_VERSION);
+    }
+
     schema->endian = (data[3] & 0x01) ? ENDIAN_LITTLE : ENDIAN_BIG;
     /* Bits 1-2 carry the schema's declared direction. Without this a binary-loaded
      * schema lost its declaration at load time and the check silently did nothing -
      * the same failure mode CR-2026-009 found when the binary format flattened a
-     * sequence lookup into a mapping. Zero means unset, so schemas emitted before this
-     * bit was defined keep reading as "declares nothing". */
+     * sequence lookup into a mapping. Zero means unset. */
     schema->direction = (schema_direction_t)((data[3] >> 1) & 0x03);
-    
-    uint8_t field_count = data[4];
+
+    const bool has_names = (data[4] & BINARY_NAMES_FLAG) != 0;
+    const int field_count = data[4] & 0x7F;
+    if (field_count > SCHEMA_MAX_FIELDS) {
+        schema_init(schema);
+        return binary_load_error(err, err_len, SCHEMA_ERR_PARSE,
+                                 "%d fields; this interpreter holds %d (SCHEMA_MAX_FIELDS)",
+                                 field_count, SCHEMA_MAX_FIELDS);
+    }
     size_t offset = 5;
-    char name_buf[SCHEMA_MAX_NAME_LEN];
-    
-    for (int i = 0; i < field_count && offset < len; i++) {
-        field_def_t f = {0};
-        
-        uint8_t type_byte = data[offset++];
+
+#define BINARY_NEED(n, what)                                                          \
+    do {                                                                              \
+        if (offset + (size_t)(n) > len) {                                             \
+            schema_init(schema);                                                      \
+            return binary_load_error(err, err_len, SCHEMA_ERR_PARSE,                  \
+                                     "field %d: %s at offset %u runs past the end "   \
+                                     "of the %u-byte blob", i, (what),                \
+                                     (unsigned)offset, (unsigned)len);                \
+        }                                                                             \
+    } while (0)
+
+    for (int i = 0; i < field_count; i++) {
+        field_def_t f;
+        memset(&f, 0, sizeof(f));
+
+        BINARY_NEED(4, "its record");
+        uint8_t type_byte = data[offset];
         bool has_lookup = (type_byte & 0x80) != 0;
         uint8_t type_code = (type_byte >> 4) & 0x07;
         uint8_t size = type_byte & 0x0F;
-        
+
         f.type = binary_type_to_field_type(type_code, size);
+        if (f.type == FIELD_TYPE_UNKNOWN) {
+            schema_init(schema);
+            return binary_load_error(err, err_len, SCHEMA_ERR_PARSE,
+                                     "field %d: type code %u with size %u names no type",
+                                     i, (unsigned)type_code, (unsigned)size);
+        }
         f.size = size;
-        
-        /* Multiplier exponent */
-        if (offset >= len) break;
-        uint8_t mult_exp = data[offset++];
-        double mult = binary_exp_to_mult(mult_exp);
+
+        double mult = binary_exp_to_mult(data[offset + 1]);
         if (mult != 1.0) {
             f.mult = mult;
             f.has_mult = true;
         }
-        
-        /* Field ID (2 bytes LE) */
-        if (offset + 1 >= len) break;
-        uint16_t field_id = data[offset] | (data[offset + 1] << 8);
-        offset += 2;
-        
-        /* Name from IPSO or generate */
-        const char* name = ipso_to_name(field_id, name_buf);
-        strncpy(f.name, name, SCHEMA_MAX_NAME_LEN - 1);
-        
-        /* Bitfield extra info */
-        if (type_code == BINARY_TYPE_BITFIELD && offset < len) {
+        /* data[offset + 2..3] is the IPSO object: carried, never turned into a name. */
+        offset += 4;
+
+        if (type_code == BINARY_TYPE_BITFIELD) {
+            BINARY_NEED(1, "its bit range");
             uint8_t bf_byte = data[offset++];
             f.bit_start = (bf_byte >> 4) & 0x0F;
             f.bit_width = bf_byte & 0x0F;
@@ -2283,45 +2465,110 @@ static inline int schema_load_binary(
                 offset++;
             }
         }
-        
+
         /* Add marker (0xA0) */
         if (offset < len && data[offset] == 0xA0) {
-            offset++;
-            if (offset + 1 < len) {
-                int16_t add_val = (int16_t)(data[offset] | (data[offset + 1] << 8));
-                f.add = add_val / 100.0;
-                f.has_add = true;
-                offset += 2;
-            }
+            BINARY_NEED(3, "its add");
+            int16_t add_val = (int16_t)(data[offset + 1] | (data[offset + 2] << 8));
+            f.add = add_val / 100.0;
+            f.has_add = true;
+            offset += 3;
         }
-        
-        /* Lookup table */
-        if (has_lookup && offset < len) {
+
+        if (has_lookup) {
             /* The count byte's high bit marks a table that came from a sequence, so
-             * PS-105 can be told from PS-269 after both forms are stored keyed. The
-             * count itself is bounded by SCHEMA_MAX_LOOKUP, well under 0x7F. */
+             * PS-105 can be told from PS-269 after both forms are stored keyed. */
+            BINARY_NEED(1, "its lookup count");
             uint8_t lookup_header = data[offset++];
-            uint8_t lookup_count = lookup_header & 0x7F;
+            int lookup_count = lookup_header & 0x7F;
             f.lookup_is_sequence = (lookup_header & 0x80) != 0;
-            for (int j = 0; j < lookup_count && j < SCHEMA_MAX_LOOKUP && offset < len; j++) {
-                uint8_t key = data[offset++];
-                if (offset >= len) break;
-                uint8_t str_len = data[offset++];
-                if (offset + str_len > len) break;
-                
+            if (lookup_count > SCHEMA_MAX_LOOKUP) {
+                schema_init(schema);
+                return binary_load_error(err, err_len, SCHEMA_ERR_PARSE,
+                                         "field %d: %d lookup entries; this interpreter "
+                                         "holds %d (SCHEMA_MAX_LOOKUP)",
+                                         i, lookup_count, SCHEMA_MAX_LOOKUP);
+            }
+            for (int j = 0; j < lookup_count; j++) {
+                BINARY_NEED(2, "a lookup entry");
+                uint8_t key = data[offset];
+                uint8_t str_len = data[offset + 1];
+                offset += 2;
+                BINARY_NEED(str_len, "a lookup label");
+                if (str_len > SCHEMA_MAX_NAME_LEN - 1) {
+                    schema_init(schema);
+                    return binary_load_error(err, err_len, SCHEMA_ERR_PARSE,
+                                             "field %d: a %u-byte lookup label; this "
+                                             "interpreter holds %d",
+                                             i, (unsigned)str_len, SCHEMA_MAX_NAME_LEN - 1);
+                }
                 f.lookup[f.lookup_count].key = key;
-                size_t copy_len = (str_len < SCHEMA_MAX_NAME_LEN - 1) ? str_len : SCHEMA_MAX_NAME_LEN - 1;
-                memcpy(f.lookup[f.lookup_count].value, &data[offset], copy_len);
-                f.lookup[f.lookup_count].value[copy_len] = '\0';
+                memcpy(f.lookup[f.lookup_count].value, &data[offset], str_len);
+                f.lookup[f.lookup_count].value[str_len] = '\0';
                 f.lookup_count++;
                 offset += str_len;
             }
         }
-        
-        schema_add_field(schema, &f);
+
+        schema->fields[schema->field_count++] = f;
     }
-    
+
+    if (has_names) {
+        for (int i = 0; i < field_count; i++) {
+            field_def_t* f = &schema->fields[i];
+            BINARY_NEED(1, "its name length");
+            uint8_t name_len = data[offset++];
+            BINARY_NEED(name_len, "its name");
+            if (name_len == 0 && f->type != FIELD_TYPE_SKIP) {
+                schema_init(schema);
+                return binary_load_error(err, err_len, SCHEMA_ERR_PARSE,
+                                         "field %d (%s) has an empty name; only a skip "
+                                         "has none (PS-553)",
+                                         i, schema_type_label(f->type));
+            }
+            if (name_len > SCHEMA_MAX_NAME_LEN - 1) {
+                schema_init(schema);
+                return binary_load_error(err, err_len, SCHEMA_ERR_PARSE,
+                                         "field %d's name is %u bytes, more than the "
+                                         "%d this interpreter holds "
+                                         "(SCHEMA_MAX_NAME_LEN), and a name is never "
+                                         "truncated (PS-555): '%.*s'",
+                                         i, (unsigned)name_len, SCHEMA_MAX_NAME_LEN - 1,
+                                         (int)name_len, (const char*)&data[offset]);
+            }
+            if (memchr(&data[offset], 0, name_len) != NULL) {
+                schema_init(schema);
+                return binary_load_error(err, err_len, SCHEMA_ERR_PARSE,
+                                         "field %d's name holds a NUL byte, which a C "
+                                         "string cannot carry", i);
+            }
+            memcpy(f->name, &data[offset], name_len);
+            f->name[name_len] = '\0';
+            offset += name_len;
+        }
+    } else {
+        schema->nameless = true;
+    }
+#undef BINARY_NEED
+
+    if (offset != len) {
+        unsigned extra = (unsigned)(len - offset);
+        unsigned at = (unsigned)offset;
+        schema_init(schema);
+        return binary_load_error(err, err_len, SCHEMA_ERR_PARSE,
+                                 "%u byte(s) after the last %s, from offset %u",
+                                 extra, has_names ? "name" : "field record", at);
+    }
     return SCHEMA_OK;
+}
+
+/* Load schema from binary format; schema_load_binary_msg says why one is refused. */
+static inline int schema_load_binary(
+    schema_t* schema,
+    const uint8_t* data,
+    size_t len
+) {
+    return schema_load_binary_msg(schema, data, len, NULL, 0);
 }
 
 #ifdef __cplusplus

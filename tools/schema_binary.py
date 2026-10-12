@@ -2,29 +2,40 @@
 """
 schema_binary.py - Compact Binary Schema Encoder/Decoder
 
-Creates the binary schema format defined in Payload Schema Section 17 (OTA Transfer).
+Writes and reads the binary schema form that include/schema_interpreter.h's
+schema_load_binary() loads, described in the specification's companion document
+docs/features/OTA-SCHEMA-TRANSFER.md ("Binary Schema Encoding").
 
-Binary format (per field, 4 bytes minimum):
-┌─────────┬──────────┬───────────┬───────────┐
-│ Type    │ Mult Exp │ Field ID  │ [Options] │
-│ 1 byte  │ 1 byte   │ 2 bytes   │ variable  │
-└─────────┴──────────┴───────────┴───────────┘
+Layout, format version 3 (CR-2026-142, PS-555):
 
-Type byte: [TTTT SSSS]
-  TTTT = Type (4 bits): 0=uint, 1=sint, 2=float, 3=bytes, 4=bool, 5=enum, 6=bitfield
-  SSSS = Size (4 bits): byte count or bit count for bitfields
+  Header (5 bytes):
+    'P' 'S'        magic
+    0x03           format version. A reader refuses any other: version 1 put the
+                   schema's own `version` here and carried no names, and 2 is
+                   binary_schema_v2.py's different layout under the same magic.
+    flags          bit 0 little-endian; bits 1-2 declared direction
+    count          bit 7: a name table follows the records; bits 0-6: field count (<= 127)
+
+  Field records, one per field (4 bytes minimum):
+  +---------+----------+-----------+-----------+
+  | Type    | Mult Exp | IPSO obj  | [Options] |
+  | 1 byte  | 1 byte   | 2 bytes   | variable  |
+  +---------+----------+-----------+-----------+
+    Type byte: bit 7 lookup table follows; bits 4-6 type; bits 0-3 size
+      0=uint 1=sint 2=float 3=bytes 4=bool 5=enum 6=bitfield 7=skip
+    IPSO obj: the field's `ipso.object`, little-endian, 0 where none is declared. It is an
+      annotation only: no reader derives a name from it (PS-555).
+
+  Name table (where count bit 7 is set), one entry per record, in field order:
+    1 length byte, then that many bytes of UTF-8. Length 0 only for a `skip`.
+
+A form without the name table is for an interpreter that hands back values by field
+index; nothing decoding from it may report the decoded object (PS-555).
 
 Usage:
-  # Encode schema to binary
-  python schema_binary.py encode schema.yaml -o schema.bin
-  
-  # Decode binary to YAML
+  python schema_binary.py encode schema.yaml -o schema.bin [--no-names]
   python schema_binary.py decode schema.bin -o schema.yaml
-  
-  # Show binary hex dump with annotations
   python schema_binary.py dump schema.bin
-  
-  # Get info/stats
   python schema_binary.py info schema.yaml
 """
 
@@ -41,7 +52,7 @@ try:
 except ImportError:
     HAS_YAML = False
 
-# Type codes (4 bits)
+# Type codes (bits 4-6 of the type byte; bit 7 is the lookup flag)
 TYPE_UINT = 0x0
 TYPE_SINT = 0x1
 TYPE_FLOAT = 0x2
@@ -49,32 +60,20 @@ TYPE_BYTES = 0x3
 TYPE_BOOL = 0x4
 TYPE_ENUM = 0x5
 TYPE_BITFIELD = 0x6
-TYPE_MATCH = 0x7
-TYPE_SKIP = 0x8
-TYPE_LOOKUP = 0x9  # Field has lookup table following
+# Format version 3 moved `skip` from 0x8, which the lookup flag shadowed, to 0x7, which
+# held a `match` record no reader parsed and every writer refused (PS-446).
+TYPE_SKIP = 0x7
 
-# IPSO Smart Object IDs (common ones)
-IPSO_IDS = {
-    'temperature': 3303,
-    'humidity': 3304,
-    'pressure': 3315,
-    'voltage': 3316,
-    'current': 3317,
-    'power': 3328,
-    'energy': 3331,
-    'distance': 3330,
-    'illuminance': 3301,
-    'presence': 3302,
-    'accel_x': 3313,
-    'accel_y': 3314,
-    'accel_z': 3315,
-    'latitude': 3336,
-    'longitude': 3337,
-    'altitude': 3338,
-}
+#: The binary format version this module writes and the only one it reads.
+FORMAT_VERSION = 3
+#: Bit 7 of the count byte: a name table follows the field records (PS-555).
+NAMES_FLAG = 0x80
+#: Bits 0-6 of the count byte hold the field count.
+MAX_FORMAT_FIELDS = 0x7F
 
-# Reverse lookup
-IPSO_NAMES = {v: k for k, v in IPSO_IDS.items()}
+
+class BinarySchemaFormatError(ValueError):
+    """A blob that is not a well-formed binary schema of FORMAT_VERSION."""
 
 
 def parse_type(type_str: str) -> Tuple[int, int, Optional[Tuple[int, int]]]:
@@ -109,8 +108,6 @@ def parse_type(type_str: str) -> Tuple[int, int, Optional[Tuple[int, int]]]:
         'string': (TYPE_BYTES, 0),
         'ascii': (TYPE_BYTES, 0),
         'hex': (TYPE_BYTES, 0),
-        'match': (TYPE_MATCH, 0),
-        'object': (TYPE_MATCH, 0),  # Nested
         'enum': (TYPE_ENUM, 1),
     }
     
@@ -155,11 +152,13 @@ def exp_to_mult(exp: int) -> float:
     if exp == 0:
         return 1.0
     
-    # Handle special flag for non-power-of-10
-    if exp & 0x80:
-        scale = exp & 0x7F
-        return 1.0 / (2 ** scale)
-    
+    # The binary scales the C loader knows (binary_exp_to_mult). Every other byte with
+    # the high bit set is a negative power of ten: reading all of them as 1/2^n turned
+    # 0xFE (0.01) into 2^-126.
+    for factor, code in C_BINARY_SCALES.items():
+        if exp == code:
+            return factor
+
     # Signed byte
     if exp > 127:
         exp = exp - 256
@@ -168,27 +167,27 @@ def exp_to_mult(exp: int) -> float:
 
 
 def get_field_id(field: Dict) -> int:
-    """Get numeric field ID from field definition."""
-    # Check for explicit IPSO mapping
-    if 'semantic' in field:
-        sem = field['semantic']
-        if isinstance(sem, dict) and 'ipso' in sem:
-            return sem['ipso']
-    
-    # Check name against known IPSO
-    name = field.get('name', '').lower()
-    if name in IPSO_IDS:
-        return IPSO_IDS[name]
-    
-    # Generate hash-based ID for unknown fields
-    name_bytes = field.get('name', '').encode('utf-8')
-    return (hash(name_bytes) & 0xFFFF) | 0x8000  # Set high bit for custom
+    """The field's IPSO object for the record's ID bytes, else 0.
+
+    An annotation carried along, never a source of the field's name (PS-555). This used
+    to guess an object from the name and otherwise hash the name with Python's hash(),
+    which is salted per process, so the same schema compiled to different bytes on every
+    run.
+    """
+    ipso = field.get('ipso')
+    if isinstance(ipso, dict) and isinstance(ipso.get('object'), int):
+        return ipso['object'] & 0xFFFF
+    sem = field.get('semantic')
+    if isinstance(sem, dict) and isinstance(sem.get('ipso'), int):
+        return sem['ipso'] & 0xFFFF
+    return 0
 
 
 #: Limits of the reader, include/schema_interpreter.h's schema_load_binary(), which is
 #: what this format feeds. A table or schema past them is cut there without a word.
 C_MAX_FIELDS = 32        # SCHEMA_MAX_FIELDS
 C_MAX_LOOKUP = 16        # SCHEMA_MAX_LOOKUP
+C_MAX_NAME_BYTES = 31    # SCHEMA_MAX_NAME_LEN - 1: the C loader refuses a longer name
 MAX_LABEL_BYTES = 15     # this format's own cap on a lookup label
 
 #: Field keys that change a decoded value and that neither this format nor the C
@@ -237,12 +236,12 @@ C_UNSUPPORTED_KEYS = {
 #: raw bytes; `u64`/`s64` and every type not listed fell through to `u8`.
 C_REPRESENTABLE_TYPES = {
     "u8", "u16", "u24", "u32", "s8", "s16", "s24", "s32",
-    "f16", "f32", "f64", "bool", "bytes", "enum",
+    "f16", "f32", "f64", "bool", "bytes", "enum", "skip",
 }
-# `skip` is not among them. TYPE_SKIP is 0x8, and the C loader reads the type code
-# as three bits because the type byte's high bit is the lookup flag: a skip of 2 went
-# out as 0x82 and came back as a u16 carrying a lookup table, which it then tried to
-# read from the following field's bytes. skip-type.yaml decoded `b` as 65535 that way.
+# `skip` was refused before format version 3: TYPE_SKIP was 0x8, and the C loader reads
+# the type code as three bits because the type byte's high bit is the lookup flag, so a
+# skip of 2 went out as 0x82 and came back as a u16 carrying a lookup table. Version 3
+# gives it 0x7 (CR-2026-142), so a skip, whose name-table entry is empty, has a record.
 
 #: Non-decimal scale factors the C loader decodes (binary_exp_to_mult).
 C_BINARY_SCALES = {0.5: 0x81, 0.25: 0x82, 0.0625: 0x84}
@@ -292,6 +291,25 @@ def field_errors(field: Dict, schema_endian: str = 'big') -> List[str]:
     for key, why in C_UNSUPPORTED_KEYS.items():
         if key in field:
             refuse(f"`{key}`", why)
+
+    # PS-555: the name table carries every name unchanged, in one length byte, and the C
+    # loader holds C_MAX_NAME_BYTES of one. A skip has none (PS-553).
+    raw_name = field.get('name')
+    if raw_name is None or raw_name == '':
+        if field.get('type') != 'skip':
+            errors.append("a field with no `name` - every field but a skip has one "
+                          "(PS-553), and the name table carries it (PS-555)")
+    elif not isinstance(raw_name, str):
+        refuse(f"`name: {raw_name!r}`", "a name is text")
+    else:
+        width = len(raw_name.encode('utf-8'))
+        if width > 255:
+            refuse(f"a {width}-byte name", "the name table's length is one byte",
+                   "PS-555")
+        elif width > C_MAX_NAME_BYTES:
+            refuse(f"a {width}-byte name",
+                   f"the C interpreter holds {C_MAX_NAME_BYTES} bytes of a name "
+                   "(SCHEMA_MAX_NAME_LEN), and a name is never truncated", "PS-555")
 
     if 'match' in field and not field.get('type'):
         refuse("`match`", "this format has no inline match record")
@@ -393,10 +411,18 @@ def schema_errors(schema: Dict) -> List[str]:
     # every path, the binary blob the C interpreter loads included.
     from schema_interpreter import expand_refs, reference_errors
     errors.extend(reference_errors(expand_refs(schema)[0]))     # after splicing (CR-2026-127)
+    # PS-553 (CR-2026-138): a nameless field other than a skip is refused. Since PS-555
+    # (CR-2026-142) the binary form carries the schema's names, and its name table gives a
+    # length of 0 to a skip alone; the YAML is checked here, before conversion.
+    from schema_interpreter import field_name_errors
+    errors.extend(field_name_errors(schema))
     if schema.get('ports'):
         errors.append("`ports` - the C interpreter has no port selection; refused "
                       "rather than dropped (PS-446)")
     fields = schema.get('fields', [])
+    if len(fields) > MAX_FORMAT_FIELDS:
+        errors.append(f"{len(fields)} fields - the binary format's field count is seven "
+                      f"bits, at most {MAX_FORMAT_FIELDS} (CR-2026-142)")
     if len(fields) > C_MAX_FIELDS:
         errors.append(f"{len(fields)} fields - the C interpreter keeps {C_MAX_FIELDS}")
     previous = None
@@ -509,9 +535,13 @@ def encode_field(field: Dict) -> bytes:
     return bytes(result)
 
 
-def encode_schema(schema: Dict) -> bytes:
+def encode_schema(schema: Dict, names: bool = True) -> bytes:
     """Encode full schema to binary, for include/schema_interpreter.h's
     schema_load_binary().
+
+    `names` writes the name table (CR-2026-142, PS-555), which every reader that reports
+    the decoded object needs. Leave it out only for an interpreter that hands values back
+    by field index: the C loader then reports no name at all, never one made up.
 
     Raises UnrepresentableSchemaError, naming every field and property, where the schema
     declares something the format or the C interpreter cannot carry. This used to emit a
@@ -521,17 +551,29 @@ def encode_schema(schema: Dict) -> bytes:
     makes that a rejection.
     """
     errors = schema_errors(schema)
+    fields = schema.get('fields', [])
+    if (names and not errors and fields and _is_bit_range(fields[-1])
+            and not fields[-1].get('consume')
+            and len((fields[0].get('name') or '').encode('utf-8')) == 1):
+        # The same ambiguity schema_errors() refuses between records: the first name's
+        # length byte 0x01 would be read as the last bit range's consume marker.
+        errors.append(
+            f"field {fields[-1].get('name', '?')!r}: a bit range that does not consume, "
+            f"last, before a one-byte first name {fields[0].get('name')!r} - its length "
+            "byte 0x01 is this format's consume marker; refused rather than misread "
+            "(PS-446)")
     if errors:
         raise UnrepresentableSchemaError(
             f"schema {schema.get('name', '?')!r} cannot be carried by the binary "
             f"schema format to the C interpreter:\n  " + "\n  ".join(errors))
     result = bytearray()
-    
+
     # Header
     result.append(0x50)  # Magic: 'P' for Payload Schema
     result.append(0x53)  # Magic: 'S'
-    result.append(schema.get('version', 1))
-    
+    # The format's version, not the schema's own `version`, which version 1 put here.
+    result.append(FORMAT_VERSION)
+
     # Flags
     flags = 0
     if schema.get('endian', 'big') == 'little':
@@ -542,271 +584,211 @@ def encode_schema(schema: Dict) -> bytes:
     # format flattened a sequence lookup into a mapping.
     flags |= {None: 0, 'uplink': 1, 'downlink': 2, 'both': 3}[schema.get('direction')] << 1
     result.append(flags)
-    
-    # Field count
+
+    # Field count, bits 0-6; bit 7 announces the name table.
     fields = schema.get('fields', [])
-    result.append(len(fields))
-    
-    # Encode each field
+    result.append(len(fields) | (NAMES_FLAG if names else 0))
+
     for field in fields:
-        field_type = field.get('type', '')
-        
-        # Handle match/nested
-        if field_type == 'match':
-            result.append((TYPE_MATCH << 4) | 0)
-            # Variable name
-            var_name = field.get('on', field.get('true', '')).lstrip('$')
-            var_bytes = var_name.encode('utf-8')[:15]
-            result.append(len(var_bytes))
-            result.extend(var_bytes)
-            
-            # Cases
-            cases = field.get('cases', [])
-            result.append(len(cases))
-            for case in cases:
-                if 'default' in case:
-                    result.append(0xFF)  # Default marker
-                else:
-                    case_val = case.get('case', 0)
-                    result.append(case_val & 0xFF)
-                
-                # Case fields
-                case_fields = case.get('fields', [])
-                result.append(len(case_fields))
-                for cf in case_fields:
-                    result.extend(encode_field(cf))
-        else:
-            result.extend(encode_field(field))
-    
+        result.extend(encode_field(field))
+
+    if names:
+        for field in fields:
+            name = (field.get('name') or '').encode('utf-8')
+            result.append(len(name))
+            result.extend(name)
+
     return bytes(result)
 
 
+def _need(data: bytes, offset: int, count: int, what: str) -> None:
+    if offset + count > len(data):
+        raise BinarySchemaFormatError(
+            f"{what} at offset {offset} needs {count} byte(s), {len(data) - offset} "
+            "remain")
+
+
+_TYPE_NAMES = {
+    TYPE_UINT: {1: 'u8', 2: 'u16', 3: 'u24', 4: 'u32'},
+    TYPE_SINT: {1: 's8', 2: 's16', 3: 's24', 4: 's32'},
+    TYPE_FLOAT: {2: 'f16', 4: 'f32', 8: 'f64'},
+    TYPE_BOOL: {1: 'bool'},
+    TYPE_ENUM: {1: 'enum'},
+}
+
+
 def decode_field(data: bytes, offset: int) -> Tuple[Dict, int]:
-    """Decode a single field from binary. Returns (field_dict, new_offset)."""
+    """Decode one field record. Returns (field_dict, new_offset); the name comes from
+    the name table, never from the record (PS-555)."""
     field = {}
-    
+    where = f"field record at offset {offset}"
+
+    _need(data, offset, 4, where)
     type_byte = data[offset]
     has_lookup = bool(type_byte & 0x80)
     type_code = (type_byte >> 4) & 0x07
     size = type_byte & 0x0F
-    offset += 1
-    
-    # Multiplier
-    mult_exp = data[offset]
-    mult = exp_to_mult(mult_exp)
-    offset += 1
-    
-    # Field ID
-    field_id = struct.unpack_from('<H', data, offset)[0]
-    offset += 2
-    
-    # Determine type string
-    type_names = {
-        TYPE_UINT: {1: 'u8', 2: 'u16', 3: 'u24', 4: 'u32'},
-        TYPE_SINT: {1: 's8', 2: 's16', 3: 's24', 4: 's32'},
-        TYPE_FLOAT: {2: 'f16', 4: 'f32', 8: 'f64'},
-        TYPE_BOOL: {1: 'bool'},
-        TYPE_SKIP: {0: 'skip'},
-        TYPE_BYTES: {0: 'bytes'},
-        TYPE_ENUM: {1: 'enum'},
-    }
-    
+    mult = exp_to_mult(data[offset + 1])
+    field_id = struct.unpack_from('<H', data, offset + 2)[0]
+    offset += 4
+
     if type_code == TYPE_BITFIELD:
-        # Read bitfield info
+        _need(data, offset, 1, where)
         bf_byte = data[offset]
         start = (bf_byte >> 4) & 0x0F
         width = bf_byte & 0x0F
         offset += 1
         field['type'] = f'u8[{start}:{start + width - 1}]'
-        
-        # Check consume
         if offset < len(data) and data[offset] == 0x01:
             field['consume'] = 1
             offset += 1
+    elif type_code == TYPE_SKIP:
+        field['type'] = 'skip'
+        field['length'] = size
+    elif type_code == TYPE_BYTES:
+        field['type'] = 'bytes'
+        field['length'] = size
     else:
-        type_map = type_names.get(type_code, {})
-        field['type'] = type_map.get(size, 'u8')
-    
-    # Name from IPSO or generate
-    if field_id in IPSO_NAMES:
-        field['name'] = IPSO_NAMES[field_id]
-    elif field_id & 0x8000:
-        field['name'] = f'field_{field_id & 0x7FFF:04x}'
-    else:
-        field['name'] = f'ipso_{field_id}'
-    
-    # Multiplier
+        type_name = _TYPE_NAMES.get(type_code, {}).get(size)
+        if type_name is None:
+            raise BinarySchemaFormatError(
+                f"{where}: type {type_code} with size {size} names no type")
+        field['type'] = type_name
+
+    if field_id:
+        field['ipso'] = {'object': field_id}
     if mult != 1.0:
         field['mult'] = mult
-    
-    # Check for add marker
+
     if offset < len(data) and data[offset] == 0xA0:
-        offset += 1
-        add_val = struct.unpack_from('<h', data, offset)[0] / 100.0
-        field['add'] = add_val
-        offset += 2
-    
-    # Lookup table
+        _need(data, offset, 3, where)
+        field['add'] = struct.unpack_from('<h', data, offset + 1)[0] / 100.0
+        offset += 3
+
     if has_lookup:
-        lookup_count = data[offset]
+        _need(data, offset, 1, where)
+        header = data[offset]
         offset += 1
         lookup = {}
-        for _ in range(lookup_count):
-            key = data[offset]
-            offset += 1
-            str_len = data[offset]
-            offset += 1
-            value = data[offset:offset + str_len].decode('utf-8')
+        for _ in range(header & 0x7F):
+            _need(data, offset, 2, where)
+            key, str_len = data[offset], data[offset + 1]
+            offset += 2
+            _need(data, offset, str_len, where)
+            lookup[key] = data[offset:offset + str_len].decode('utf-8')
             offset += str_len
-            lookup[key] = value
-        field['lookup'] = lookup
-    
+        if header & 0x80:
+            field['lookup'] = [lookup[k] for k in sorted(lookup)]
+        else:
+            field['lookup'] = lookup
+
     return field, offset
 
 
 def decode_schema(data: bytes) -> Dict:
-    """Decode binary schema to dict."""
+    """Decode a binary schema of FORMAT_VERSION to a schema dict.
+
+    With a name table every field carries its name, unchanged (PS-555). Without one the
+    fields carry none, and the dict is a description of the records rather than a schema
+    that could report a decoded object; `names` is False there. A blob of another version,
+    one that ends inside a record or a name, or one with bytes after the last name is a
+    BinarySchemaFormatError.
+    """
     if len(data) < 5:
-        raise ValueError("Binary too short")
-    
+        raise BinarySchemaFormatError("Binary too short")
     if data[0:2] != b'PS':
-        raise ValueError("Invalid magic bytes")
-    
+        raise BinarySchemaFormatError("Invalid magic bytes")
+    if data[2] != FORMAT_VERSION:
+        raise BinarySchemaFormatError(
+            f"binary schema format version {data[2]} is not supported; this reader "
+            f"reads version {FORMAT_VERSION} (CR-2026-142)")
+
+    has_names = bool(data[4] & NAMES_FLAG)
     schema = {
-        'version': data[2],
         'endian': 'little' if data[3] & 0x01 else 'big',
-        'fields': []
+        'names': has_names,
+        'fields': [],
     }
-    
-    field_count = data[4]
+    direction = (data[3] >> 1) & 0x03
+    if direction:
+        schema['direction'] = {1: 'uplink', 2: 'downlink', 3: 'both'}[direction]
+
     offset = 5
-    
-    for _ in range(field_count):
-        if offset >= len(data):
-            break
-        
-        type_peek = data[offset]
-        type_code = (type_peek >> 4) & 0x0F
-        
-        if type_code == TYPE_MATCH:
-            # Match field
+    for _ in range(data[4] & 0x7F):
+        field, offset = decode_field(data, offset)
+        schema['fields'].append(field)
+
+    if has_names:
+        for index, field in enumerate(schema['fields']):
+            _need(data, offset, 1, f"name table entry {index}")
+            length = data[offset]
             offset += 1
-            var_len = data[offset]
-            offset += 1
-            var_name = data[offset:offset + var_len].decode('utf-8')
-            offset += var_len
-            
-            match_field = {
-                'type': 'match',
-                'on': f'${var_name}',
-                'cases': []
-            }
-            
-            case_count = data[offset]
-            offset += 1
-            
-            for _ in range(case_count):
-                case_val = data[offset]
-                offset += 1
-                
-                case_obj = {}
-                if case_val == 0xFF:
-                    case_obj['default'] = 'skip'
-                else:
-                    case_obj['case'] = case_val
-                
-                case_field_count = data[offset]
-                offset += 1
-                case_obj['fields'] = []
-                
-                for _ in range(case_field_count):
-                    cf, offset = decode_field(data, offset)
-                    case_obj['fields'].append(cf)
-                
-                match_field['cases'].append(case_obj)
-            
-            schema['fields'].append(match_field)
-        else:
-            field, offset = decode_field(data, offset)
-            schema['fields'].append(field)
-    
+            _need(data, offset, length, f"name of field {index}")
+            name = data[offset:offset + length].decode('utf-8')
+            offset += length
+            if not name and field['type'] != 'skip':
+                raise BinarySchemaFormatError(
+                    f"field {index} ({field['type']}) has an empty name; only a skip "
+                    "has none (PS-553)")
+            # Rebuilt so the name leads, as a schema writes it.
+            named = {'name': name} if name else {}
+            named.update(field)
+            schema['fields'][index] = named
+
+    if offset != len(data):
+        raise BinarySchemaFormatError(
+            f"{len(data) - offset} byte(s) after the last "
+            f"{'name' if has_names else 'field record'}, from offset {offset}")
     return schema
 
 
 def dump_binary(data: bytes) -> str:
-    """Create annotated hex dump."""
-    lines = []
-    lines.append(f"Binary Schema: {len(data)} bytes")
-    lines.append("-" * 60)
-    
+    """Create an annotated hex dump."""
+    lines = [f"Binary Schema: {len(data)} bytes", "-" * 60]
     if len(data) < 5:
         lines.append("ERROR: Too short")
         return '\n'.join(lines)
-    
+
     lines.append(f"00-01: {data[0]:02X} {data[1]:02X}  Magic: 'PS'")
-    lines.append(f"02:    {data[2]:02X}        Version: {data[2]}")
-    lines.append(f"03:    {data[3]:02X}        Flags: {'little-endian' if data[3] & 1 else 'big-endian'}")
-    lines.append(f"04:    {data[4]:02X}        Field count: {data[4]}")
-    
+    lines.append(f"02:    {data[2]:02X}        Format version: {data[2]}")
+    flags = data[3]
+    lines.append(f"03:    {flags:02X}        Flags: "
+                 f"{'little-endian' if flags & 1 else 'big-endian'}")
+    has_names = bool(data[4] & NAMES_FLAG)
+    lines.append(f"04:    {data[4]:02X}        Field count: {data[4] & 0x7F}, name table: "
+                 f"{'yes' if has_names else 'no (values by index only)'}")
+    try:
+        schema = decode_schema(data)
+    except (BinarySchemaFormatError, UnicodeDecodeError) as exc:
+        lines.append(f"ERROR: {exc}")
+        return '\n'.join(lines)
+
     offset = 5
-    field_num = 0
-    
-    while offset < len(data):
+    records = []
+    for index in range(data[4] & 0x7F):
+        _, end = decode_field(data, offset)
+        records.append((offset, end))
+        offset = end
+    kinds = ['uint', 'sint', 'float', 'bytes', 'bool', 'enum', 'bits', 'skip']
+    for index, ((start, end), field) in enumerate(zip(records, schema['fields'])):
+        type_byte = data[start]
+        name = field.get('name')
+        label = repr(name) if name else ('(no name)' if has_names else f'#{index}')
         lines.append("")
-        type_byte = data[offset]
-        type_code = (type_byte >> 4) & 0x07
-        size = type_byte & 0x0F
-        has_lookup = bool(type_byte & 0x80)
-        
-        type_names = ['uint', 'sint', 'float', 'bytes', 'bool', 'enum', 'bits', 'match', 'skip', 'lookup']
-        type_name = type_names[type_code] if type_code < len(type_names) else 'unknown'
-        
-        lines.append(f"Field {field_num}:")
-        lines.append(f"  {offset:02X}: {type_byte:02X}  Type: {type_name}, size: {size}, lookup: {has_lookup}")
-        offset += 1
-        
-        if offset >= len(data):
-            break
-        
-        if type_code == TYPE_MATCH:
-            var_len = data[offset]
-            offset += 1
-            var_name = data[offset:offset + var_len].decode('utf-8', errors='replace')
-            offset += var_len
-            lines.append(f"       Match on: ${var_name}")
-            # Skip case details for dump
-            break
-        
-        mult_exp = data[offset]
-        mult = exp_to_mult(mult_exp)
-        lines.append(f"  {offset:02X}: {mult_exp:02X}  Mult exp: {mult_exp} -> {mult}")
-        offset += 1
-        
-        if offset + 1 >= len(data):
-            break
-        
-        field_id = struct.unpack_from('<H', data, offset)[0]
-        name = IPSO_NAMES.get(field_id, f'custom_{field_id:04X}')
-        lines.append(f"  {offset:02X}: {data[offset]:02X} {data[offset+1]:02X}  Field ID: {field_id} ({name})")
-        offset += 2
-        
-        field_num += 1
-        
-        # Skip detailed parsing for dump
-        if has_lookup and offset < len(data):
-            lookup_count = data[offset]
-            lines.append(f"  {offset:02X}: {lookup_count:02X}  Lookup entries: {lookup_count}")
-            offset += 1
-            # Skip lookup data
-            for _ in range(lookup_count):
-                if offset >= len(data):
-                    break
-                offset += 1  # key
-                if offset >= len(data):
-                    break
-                str_len = data[offset]
-                offset += 1 + str_len
-    
+        lines.append(f"Field {index}: {label}  {field['type']}")
+        lines.append(f"  {start:02X}: {data[start:end].hex(' ').upper()}")
+        lines.append(f"      type {kinds[(type_byte >> 4) & 7]}, size {type_byte & 0x0F}, "
+                     f"lookup {'yes' if type_byte & 0x80 else 'no'}, "
+                     f"mult {exp_to_mult(data[start + 1])}, "
+                     f"IPSO object {struct.unpack_from('<H', data, start + 2)[0]}")
+    if has_names:
+        lines.append("")
+        lines.append(f"Name table at {offset:02X}:")
+        for index, field in enumerate(schema['fields']):
+            length = data[offset]
+            lines.append(f"  {offset:02X}: {data[offset:offset + 1 + length].hex(' ').upper()}"
+                         f"  {index}: {field.get('name', '')!r}")
+            offset += 1 + length
     return '\n'.join(lines)
 
 
@@ -819,6 +801,9 @@ def main():
     enc.add_argument('input', type=Path, help='Input YAML file')
     enc.add_argument('-o', '--output', type=Path, help='Output binary file')
     enc.add_argument('--base64', action='store_true', help='Output as base64')
+    enc.add_argument('--no-names', action='store_true',
+                     help='leave out the name table, for an interpreter that hands '
+                          'back values by field index (PS-555)')
     
     # Decode
     dec = subparsers.add_parser('decode', help='Decode binary to YAML')
@@ -842,7 +827,7 @@ def main():
     if args.command == 'encode':
         schema = yaml.safe_load(args.input.read_text())
         try:
-            binary = encode_schema(schema)
+            binary = encode_schema(schema, names=not args.no_names)
         except UnrepresentableSchemaError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             sys.exit(1)
@@ -863,7 +848,11 @@ def main():
     
     elif args.command == 'decode':
         binary = args.input.read_bytes()
-        schema = decode_schema(binary)
+        try:
+            schema = decode_schema(binary)
+        except BinarySchemaFormatError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(1)
         
         output = yaml.dump(schema, default_flow_style=False, sort_keys=False)
         
@@ -879,18 +868,30 @@ def main():
     
     elif args.command == 'info':
         schema = yaml.safe_load(args.input.read_text())
-        binary = encode_schema(schema)
-        
+        try:
+            binary = encode_schema(schema)
+        except UnrepresentableSchemaError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(1)
+        nameless = encode_schema(schema, names=False)
+
         yaml_size = args.input.stat().st_size
         bin_size = len(binary)
-        
+        names = [f.get('name') or '' for f in schema.get('fields', [])]
+
         print(f"Schema: {schema.get('name', 'unnamed')}")
-        print(f"Fields: {len(schema.get('fields', []))}")
+        print(f"Fields: {len(names)}")
+        for index, name in enumerate(names):
+            print(f"  {index:3d}  {name!r}" if name else f"  {index:3d}  (skip, no name)")
         print(f"YAML size: {yaml_size} bytes")
-        print(f"Binary size: {bin_size} bytes")
+        print(f"Binary size: {bin_size} bytes with names "
+              f"({bin_size - len(nameless)} in the name table), "
+              f"{len(nameless)} without")
         print(f"Compression: {yaml_size / bin_size:.1f}x")
-        print(f"LoRaWAN packets (DR0, 51 bytes): {(bin_size + 50) // 51}")
-        print(f"LoRaWAN packets (DR3, 115 bytes): {(bin_size + 114) // 115}")
+        print(f"LoRaWAN packets (DR0, 51 bytes): {(bin_size + 50) // 51} "
+              f"({(len(nameless) + 50) // 51} without names)")
+        print(f"LoRaWAN packets (DR3, 115 bytes): {(bin_size + 114) // 115} "
+              f"({(len(nameless) + 114) // 115} without names)")
         print(f"QR code friendly: {'Yes' if bin_size < 100 else 'No (consider compression)'}")
 
 
