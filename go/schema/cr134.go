@@ -164,32 +164,15 @@ func exactCaseValue(c Case) (int64, bool) {
 }
 
 // soleCaseGiven is the discriminator of the one match case whose fields the input
-// gives; false where none is, two explain it equally well, or the case stands for more
-// than one value.
-func soleCaseGiven(cases []Case, data map[string]any) (int64, bool) {
-	var best *Case
-	bestHits, tied := 0, false
-	for i := range cases {
-		c := cases[i]
-		if c.Default {
-			continue
-		}
-		hits := 0
-		for _, f := range claimableFields(c.Fields, nil) {
-			if _, ok := data[f.Name]; ok {
-				hits++
-			}
-		}
-		if hits > bestHits {
-			best, bestHits, tied = &cases[i], hits, false
-		} else if hits > 0 && hits == bestHits {
-			tied = true
-		}
-	}
-	if best == nil || tied {
+// gives; false where none is, two explain it equally well, the default explains it as
+// well, or the case stands for more than one value. Scored by bodyScore, so the fields
+// of a match nested in a case count, and a literal the input contradicts rules it out.
+func soleCaseGiven(m Field, data map[string]any) (int64, bool) {
+	best, tied, ok := bestCase(m, data)
+	if !ok || tied {
 		return 0, false
 	}
-	return exactCaseValue(*best)
+	return exactCaseValue(best)
 }
 
 // flaggedGroupGiven reports whether the input gives any of a flagged group's values,
@@ -253,7 +236,7 @@ func deriveInputs(fields []Field, data map[string]any, ctx *EncodeContext) (map[
 			if !ok || !absent(source.Name) {
 				continue
 			}
-			if key, ok := soleCaseGiven(f.MatchInline.Cases, data); ok {
+			if key, ok := soleCaseGiven(*f.MatchInline, data); ok {
 				set(source.Name, float64(key))
 			}
 		case f.Flagged != nil:

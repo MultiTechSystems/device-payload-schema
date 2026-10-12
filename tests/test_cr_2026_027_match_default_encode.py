@@ -140,9 +140,11 @@ class TestEveryEncoderReadsTheDefaultKey:
         assert re.search(r"discriminator != nil|discriminator != null", text), name
 
     def test_the_claimable_heuristic_is_still_there(self):
-        """It is what an inline match with no reported discriminator relies on."""
-        assert "casePresent" in ENCODERS["Encoder.java"].read_text()
-        assert "CasePresent" in ENCODERS["SchemaEncoder.cs"].read_text()
+        """It is what an inline match with no reported discriminator relies on. Since no
+        silent empty encode it scores a case through every construct in it, under the
+        reference's name `_best_case` (casePresent/CasePresent before)."""
+        assert "bestCase(" in ENCODERS["Encoder.java"].read_text()
+        assert "BestCase(" in ENCODERS["SchemaEncoder.cs"].read_text()
 
 
 class TestJavaParsesTheDefaultOnce:
