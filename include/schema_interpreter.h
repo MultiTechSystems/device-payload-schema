@@ -2520,6 +2520,103 @@ static inline int schema_encode(
     return schema_encode_direction(schema, inputs, SCHEMA_DIR_UNSET, result);
 }
 
+/* Encode a match (PS-442, PS-551): the case its discriminator selects. The
+ * discriminator is the input to the field the match's variable names, which the loop
+ * writes on its own; absent, the match cannot be written, and a value no case lists,
+ * with no default case, is the error a decoder gives it. A body placed above
+ * field_count is written here; a counted body is written by the loop, and the counted
+ * bodies of the other cases are marked in `passed` for it to pass over. */
+static inline int schema_encode_match_case(
+    const schema_t* schema,
+    const field_def_t* match,
+    int index,
+    const encode_inputs_t* inputs,
+    uint8_t* buf,
+    size_t* pos,
+    bool* passed,
+    char* err,
+    size_t err_len
+) {
+    const char* var = match->match_var[0] == '$' ? match->match_var + 1 : match->match_var;
+    char key[SCHEMA_MAX_NAME_LEN];
+    snprintf(key, sizeof(key), "%s", var);
+    for (int d = 0; d < schema->field_count; d++) {
+        const field_def_t* src = &schema->fields[d];
+        if (src->type == FIELD_TYPE_MATCH) continue;
+        if (strcmp(src->var_name, var) == 0 || strcmp(src->name, var) == 0) {
+            if (schema->nameless) snprintf(key, sizeof(key), "#%d", d);
+            else snprintf(key, sizeof(key), "%s", src->name);
+            break;
+        }
+    }
+    const encode_input_t* disc = find_input(inputs, key);
+    if (!disc || disc->is_text) {
+        snprintf(err, err_len, "Missing required field: %s", key);
+        return SCHEMA_ERR_PARSE;
+    }
+    int64_t value = disc->is_int ? disc->value.i64 : (int64_t)disc->value.f64;
+    bool integral = disc->is_int || (double)value == disc->value.f64;
+    int taken = -1;
+    for (int c = 0; c < match->case_count && taken < 0; c++) {
+        const case_def_t* cs = &match->cases[c];
+        if (cs->is_default) { taken = c; break; }
+        if (!integral) continue;
+        if (cs->match_value == (int)value) { taken = c; break; }
+        if (cs->range_min != cs->range_max) {
+            if (value >= cs->range_min && value <= cs->range_max) taken = c;
+            continue;
+        }
+        for (int j = 0; j < 8 && cs->match_list[j] != -1; j++) {
+            if (cs->match_list[j] == (int)value) { taken = c; break; }
+        }
+    }
+    if (taken < 0) {
+        if (integral) snprintf(err, err_len, "No matching case for value %lld", (long long)value);
+        else snprintf(err, err_len, "No matching case for value %g", disc->value.f64);
+        return SCHEMA_ERR_MATCH;
+    }
+    for (int c = 0; c < match->case_count; c++) {
+        const case_def_t* cs = &match->cases[c];
+        for (int k = 0; k < cs->field_count; k++) {
+            int at = cs->field_start + k;
+            if (at < 0 || at >= SCHEMA_MAX_FIELDS) continue;
+            if (c != taken && at > index && at < schema->field_count) passed[at] = true;
+        }
+    }
+    const case_def_t* cs = &match->cases[taken];
+    for (int k = 0; k < cs->field_count; k++) {
+        int at = cs->field_start + k;
+        if (at < schema->field_count || at >= SCHEMA_MAX_FIELDS) continue;   /* the loop's */
+        field_def_t member = schema->fields[at];
+        if (schema->nameless) snprintf(member.name, sizeof(member.name), "#%d", at);
+        if (member.type == FIELD_TYPE_SKIP) {
+            if (*pos + member.size > SCHEMA_MAX_PAYLOAD) return SCHEMA_ERR_BUFFER;
+            *pos += member.size;
+            continue;
+        }
+        if (member.type == FIELD_TYPE_BITS || member.type == FIELD_TYPE_BOOL
+            || member.type == FIELD_TYPE_MATCH || member.type == FIELD_TYPE_BYTE_GROUP
+            || member.type == FIELD_TYPE_TLV || member.type == FIELD_TYPE_FLAGGED) {
+            snprintf(err, err_len, "Field '%s': a case body field of this kind cannot be "
+                     "encoded by this interpreter (PS-442)", member.name);
+            return SCHEMA_ERR_UNSUPPORTED;
+        }
+        if (!find_input(inputs, member.name)) {
+            if (member.name[0] == '_') {
+                snprintf(err, err_len, "internal field '%s' reads payload bytes and "
+                         "declares no value, and the input does not supply it (PS-434)",
+                         member.name);
+            } else {
+                snprintf(err, err_len, "Missing required field: %s", member.name);
+            }
+            return SCHEMA_ERR_PARSE;
+        }
+        int rc = encode_field(&member, inputs, buf, pos, schema->endian, err, err_len);
+        if (rc != SCHEMA_OK) return rc;
+    }
+    return SCHEMA_OK;
+}
+
 static inline int schema_encode_direction(
     const schema_t* schema,
     const encode_inputs_t* inputs,
@@ -2574,6 +2671,8 @@ static inline int schema_encode_direction(
      * field: #3") rather than by an empty name. */
     char index_keys[SCHEMA_MAX_FIELDS][12];
     field_def_t keyed;
+    bool case_passed[SCHEMA_MAX_FIELDS];
+    memset(case_passed, 0, sizeof(case_passed));
 
     for (int i = 0; i < schema->field_count; i++) {
         const field_def_t* field = &schema->fields[i];
@@ -2587,11 +2686,22 @@ static inline int schema_encode_direction(
         const char* key = schema->nameless && field->type != FIELD_TYPE_SKIP
                           ? index_keys[i] : schema->fields[i].name;
 
-        /* Skip internal/match fields for now. A skip is padding, not an internal value:
-         * field_skip() names it `_skip`, so this used to drop it and every field after a
-         * skip was written that many bytes early. */
-        if ((field->name[0] == '_' && field->type != FIELD_TYPE_SKIP) ||
-            field->type == FIELD_TYPE_MATCH) {
+        if (case_passed[i]) continue;      /* the counted body of a case not taken */
+        if (field->type == FIELD_TYPE_MATCH) {
+            /* PS-442, PS-551: a match was passed over here, and so was every internal
+             * field, so the bytes a decoder reads for them were never written and nothing
+             * said so. The discriminator is the input to the field its variable names;
+             * the case it selects is written - a body placed above field_count here, a
+             * counted one by this loop - and every other case's counted body is passed
+             * over. */
+            int rc = schema_encode_match_case(schema, field, i, inputs, result->data, &pos,
+                                              case_passed, result->error_msg,
+                                              sizeof(result->error_msg));
+            if (rc != SCHEMA_OK) {
+                result->error_code = rc;
+                memset(result->data, 0, sizeof(result->data));   /* no partial payload */
+                return rc;
+            }
             continue;
         }
         bool bitlike = field->type == FIELD_TYPE_BITS || field->type == FIELD_TYPE_BOOL;
@@ -2621,9 +2731,17 @@ static inline int schema_encode_direction(
                 continue;
             }
             /* PS-551: rejected, naming the field, and no payload. encode_field reported
-             * the code alone; nothing said which field was missing. */
-            snprintf(result->error_msg, sizeof(result->error_msg),
-                     "Missing required field: %s", field->name);
+             * the code alone; nothing said which field was missing. An internal field
+             * is PS-434's error: this interpreter has no `value` for it to write, and it
+             * was passed over, writing nothing for the bytes a decoder reads. */
+            if (schema->fields[i].name[0] == '_') {
+                snprintf(result->error_msg, sizeof(result->error_msg),
+                         "internal field '%s' reads payload bytes and declares no value, "
+                         "and the input does not supply it (PS-434)", field->name);
+            } else {
+                snprintf(result->error_msg, sizeof(result->error_msg),
+                         "Missing required field: %s", field->name);
+            }
             result->error_code = SCHEMA_ERR_PARSE;
             return SCHEMA_ERR_PARSE;
         }
@@ -2728,6 +2846,21 @@ static inline int schema_encode_direction(
     }
 
     result->len = (int)(pos > filled ? pos : filled);
+    if (result->len == 0) {
+        /* PS-442: no bytes, where the input gives a field that reads them. Unreachable
+         * while every such field is required; the last line, as in the other encoders. */
+        for (int i = 0; i < schema->field_count; i++) {
+            const field_def_t* f = &schema->fields[i];
+            if (f->type == FIELD_TYPE_SKIP || f->type == FIELD_TYPE_MATCH
+                || f->name[0] == '_' || schema->nameless) continue;
+            if (!find_input(inputs, f->name)) continue;
+            snprintf(result->error_msg, sizeof(result->error_msg),
+                     "Encoding wrote no bytes, though the input gives '%s', which the "
+                     "schema reads from the payload (PS-442)", f->name);
+            result->error_code = SCHEMA_ERR_PARSE;
+            return SCHEMA_ERR_PARSE;
+        }
+    }
     return SCHEMA_OK;
 }
 

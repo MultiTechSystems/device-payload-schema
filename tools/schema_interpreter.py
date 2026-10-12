@@ -743,6 +743,76 @@ def internal_name_errors(schema):
     return errors
 
 
+def declared_sources(fields: Any) -> Dict[str, Dict[str, Any]]:
+    """Every name a field list declares, anywhere in it, with whether some declaration
+    reads payload bytes or computes from them (`reads`) and the values its literals give
+    (`literals`). A declaration is a mapping with `name` and `type`, or a match's `name`.
+
+    For the empty-payload check in every encoder (PS-442, no-silent-empty): a payload of
+    no bytes is a faithful encoding only of input that no field reads from bytes.
+    """
+    found = {}  # type: Dict[str, Dict[str, Any]]
+
+    def note(name, literal, value=None):
+        entry = found.setdefault(name, {'reads': False, 'literals': []})
+        if literal:
+            entry['literals'].append(value)
+        else:
+            entry['reads'] = True
+
+    def walk(node):
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+            return
+        if not isinstance(node, dict):
+            return
+        name = node.get('name')
+        if isinstance(name, str) and name and 'type' in node:
+            if is_literal(node):
+                note(name, True, node['value'])
+            else:
+                note(name, False)
+        match = node.get('match')
+        if isinstance(match, dict) and isinstance(match.get('name'), str):
+            note(match['name'], False)
+        for value in node.values():
+            if isinstance(value, (list, dict)):
+                walk(value)
+
+    walk(fields)
+    return found
+
+
+def empty_payload_error(fields: Any, data: Dict[str, Any]) -> Optional[str]:
+    """PS-442: an encoder that wrote no bytes, where the input gives a value that only a
+    field reading payload bytes (or computing from them) reports, dropped that field's
+    bytes without a word. The first such name is reported, in the input's order.
+
+    A value that can be written in no bytes is not one: an empty list, mapping or string
+    (a repeat over nothing, an empty `remaining` text), a value a literal of that name
+    gives, and an internal or absent one. So a schema that legitimately reads nothing
+    for the input - a literal-only branch, a tlv of no entries - still encodes to an
+    empty payload.
+    """
+    sources = None
+    for key, value in data.items():
+        if not isinstance(key, str) or key.startswith('_') or value is None:
+            continue
+        if isinstance(value, (list, dict, str, bytes)) and len(value) == 0:
+            continue
+        if sources is None:
+            sources = declared_sources(fields)
+        entry = sources.get(key)
+        if not entry or not entry['reads']:
+            continue
+        if any(same_label(literal, value) for literal in entry['literals']):
+            continue
+        return (f"Encoding wrote no bytes, though the input gives '{key}', which the "
+                f"schema reads from the payload (PS-442)")
+    return None
+
+
 def missing_field_message(name):
     """PS-551: what every encoder says for a required value the input omits. The spec
     prototype's text, so a cross-language diff compares equal strings."""
@@ -6544,6 +6614,12 @@ class SchemaInterpreter:
                 check_peeks(frame)                          # PS-551 (CR-2026-141)
             except ValueError as e:
                 result.errors.append(str(e))
+        if not result.errors and not frame:
+            # PS-442: the last line against a construct that wrote nothing and said so
+            # to no one - a match with no case chosen, a tlv entry no case claimed.
+            empty = empty_payload_error(fields, data)
+            if empty:
+                result.errors.append(empty)
         result.payload = b'' if result.errors else bytes(frame)
         result.warnings.extend(self._encode_warnings)
         return result
@@ -6665,7 +6741,7 @@ class SchemaInterpreter:
                 source = self._derived_source(fields, f['match'].get('field'))
                 if source is None or derived.get(source['name']) is not None:
                     continue
-                key = self._sole_case_given(f['match'].get('cases') or {}, data)
+                key = self._sole_case_given(f['match'], data)
                 if key is not None:
                     derived[source['name']] = key
             elif isinstance(f.get('flagged'), dict):
@@ -6695,25 +6771,127 @@ class SchemaInterpreter:
                         f"set {bits} (PS-551)")
         return derived
 
-    def _sole_case_given(self, cases: Dict[Any, Any], data: Dict[str, Any]) -> Optional[int]:
+    @staticmethod
+    def _default_body(match_def: Dict[str, Any]) -> Optional[List[Any]]:
+        """A match's default field list - `default:` beside its cases, or a `default`
+        case - or None where its default is `error` or `skip`."""
+        default = match_def.get('default')
+        if isinstance(default, list):
+            return default
+        default = (match_def.get('cases') or {}).get('default')
+        return default if isinstance(default, list) else None
+
+    def _best_case(self, match_def: Dict[str, Any], data: Dict[str, Any]):
+        """The case whose fields the input gives most of, scored by _body_score, as
+        ``(key, fields, tied)``, or ``(None, None, False)``. The first of equal cases
+        wins, and ``tied`` says another equalled it. Where the match's default list
+        explains more of the input than any case, no case is returned, and the default
+        is what a decoder takes for every value no case lists (dc600's report, whose
+        `monitorStatus` a case also declares)."""
+        best, best_fields, best_hits, tied = None, None, 0, False
+        for case_key, case_fields in (match_def.get('cases') or {}).items():
+            if case_key == 'default' or not isinstance(case_fields, list):
+                continue
+            hits = self._body_score(case_fields, data) or 0
+            if hits > best_hits:
+                best, best_fields, best_hits, tied = case_key, case_fields, hits, False
+            elif hits and hits == best_hits:
+                tied = True
+        default = self._default_body(match_def)
+        if best is not None and default is not None \
+                and (self._body_score(default, data) or 0) > best_hits:
+            return None, None, False
+        return best, best_fields, tied
+
+    def _sole_case_given(self, match_def: Dict[str, Any],
+                         data: Dict[str, Any]) -> Optional[int]:
         """The discriminator of the one match case whose fields the input gives.
 
         None where no case's fields are given, where two cases explain the input equally
-        well, or where the case stands for more than one value.
+        well, where the default explains it as well, or where the case stands for more
+        than one value. A case is scored by _body_score, so the fields of a match nested
+        in it count, and a literal the input contradicts rules it out.
         """
-        best, best_hits, tied = None, 0, False
-        for case_key, case_fields in cases.items():
-            if case_key == 'default' or not isinstance(case_fields, list):
-                continue
-            hits = sum(1 for f in self._claimable_fields(case_fields)
-                       if f.get('name') in data)
-            if hits > best_hits:
-                best, best_hits, tied = case_key, hits, False
-            elif hits and hits == best_hits:
-                tied = True
+        best, _, tied = self._best_case(match_def, data)
         if best is None or tied:
             return None
         return self._exact_case_value(best)
+
+    def _body_score(self, body: Any, data: Dict[str, Any]) -> Optional[int]:
+        """How many of a match branch's reported names the input gives, or None where the
+        input rules the branch out (no-silent-empty).
+
+        Counted through every construct a decode of the branch reports from: a byte_group's
+        or flagged group's members, a nested match's best branch and a tlv's cases. A literal the input gives
+        with another value rules the branch out (PS-359, PS-513), as does a nested match
+        every branch of which is ruled out and whose default is not `skip`. A computed
+        field is not counted: its name says only that the branch reports it, and a
+        literal of that name in another branch says which value it came from. Only the top
+        level of a branch used to be counted, so a branch whose fields sit in another
+        construct - imbuildings' and dingtek's `match: {remaining: true}` cases, a header
+        and then a match on its type byte - scored nothing, no case was chosen, and the
+        match wrote no bytes and reported nothing.
+        """
+        if not isinstance(body, list):
+            return None
+        score = 0
+        for f in body:
+            if not isinstance(f, dict):
+                continue
+            if 'byte_group' in f and not f.get('type'):
+                group = f['byte_group']
+                members = group.get('fields') if isinstance(group, dict) else group
+                hits = self._body_score(members or [], data)
+                if hits is None:
+                    return None
+                score += hits
+                continue
+            if 'flagged' in f and not f.get('type'):
+                for group in f['flagged'].get('groups') or []:
+                    score += self._body_score(group.get('fields') or [], data) or 0
+                continue
+            if isinstance(f.get('match'), dict) and not f.get('type'):
+                inner = f['match']
+                if inner.get('name') and inner['name'] in data:
+                    score += 1
+                inner_cases = inner.get('cases') or {}
+                bodies = [b for k, b in inner_cases.items()
+                          if k != 'default' and isinstance(b, list)]
+                default = inner.get('default', 'error')
+                if isinstance(default, list):
+                    bodies.append(default)
+                elif isinstance(inner_cases.get('default'), list):
+                    bodies.append(inner_cases['default'])
+                scores = [h for h in (self._body_score(b, data) for b in bodies)
+                          if h is not None]
+                if scores:
+                    score += max(scores)
+                elif default != 'skip':
+                    return None
+                continue
+            if isinstance(f.get('tlv'), dict) and not f.get('type'):
+                names = set()
+                for case_fields in (f['tlv'].get('cases') or {}).values():
+                    if isinstance(case_fields, list):
+                        names.update(c['name'] for c, _ in self._case_claims(case_fields))
+                score += sum(1 for n in names if n in data)
+                continue
+            name = f.get('name')
+            if not name or str(name).startswith('_') \
+                    or (f.get('type') in COMPUTED_TYPES and not is_literal(f)):
+                continue
+            key = name
+            if f.get('name_from'):
+                try:
+                    key = self._resolve_encode_name(f, name, data)
+                except ValueError:
+                    key = None
+            if key is None or key not in data:
+                continue
+            if is_literal(f) and not same_label(f['value'], data[key]):
+                return None
+            score += 1
+        return score
 
     def _flagged_group_given(self, group: Dict[str, Any], data: Dict[str, Any]) -> bool:
         """Whether the input gives any of a flagged group's own values."""
@@ -7048,27 +7226,6 @@ class SchemaInterpreter:
             return reverse_enum(value, source)      # its code (CR-2026-132)
         return value
 
-    def _case_fields_present(self, cases: Dict[Any, Any], data: Dict[str, Any]):
-        """The case whose fields the data carries most of, or ``(None, None)``.
-
-        Used where the discriminator is not in the output - an inline match with no
-        ``name`` reports nothing of itself, so the case has to be recovered from which
-        of its fields are there.
-        """
-        best_key, best_fields, best_hits = None, None, 0
-        for case_key, case_fields in cases.items():
-            if case_key == 'default' or not isinstance(case_fields, list):
-                continue
-            names = [
-                f.get('name') for f in case_fields
-                if isinstance(f, dict) and f.get('name')
-                and not str(f['name']).startswith('_') and f.get('type') not in COMPUTED_TYPES
-            ]
-            hits = sum(1 for n in names if n in data)
-            if hits > best_hits:
-                best_key, best_fields, best_hits = case_key, case_fields, hits
-        return best_key, best_fields
-
     def _encode_match(self, field_def: Dict[str, Any], data: Dict[str, Any],
                       peeked: Optional[bytes] = None) -> bytes:
         """Rebuild a ``match`` construct's bytes from decoded output.
@@ -7118,29 +7275,50 @@ class SchemaInterpreter:
                     break
 
         if matched_fields is None:
-            matched_key, matched_fields = self._case_fields_present(cases, data)
+            # Where the discriminator is not in the output - an inline match with no
+            # `name` reports nothing of itself, and a `remaining` match has none to
+            # report - the case is recovered from which of its fields are there; the
+            # first of equal cases wins.
+            matched_key, matched_fields, _ = self._best_case(match_def, data)
+
+        if matched_fields is None and match_def.get('remaining') is True \
+                and not self._body_score(self._default_body(match_def), data):
+            # No case's fields are given, nor the default's: a case reading nothing is
+            # selected by the payload ending here, so the case that matches 0 bytes is
+            # the one writing nothing selects (pm-io-5-sm's `0..1: []`). Its fields, if
+            # any, are asked for as any case's are.
+            for case_key, case_fields in cases.items():
+                if case_key != 'default' and isinstance(case_fields, list) \
+                        and self._match_case_pattern(0, case_key):
+                    matched_key, matched_fields = case_key, case_fields
+                    break
 
         if matched_fields is None:
             if isinstance(default, list):
                 matched_fields = default
             elif isinstance(cases.get('default'), list):
                 matched_fields = cases['default']
-            elif discriminator is None and (
-                    default == 'skip' or (length is not None and not match_name)):
-                # Nothing given and nothing the input could give: an inline match with no
-                # name reports no discriminator, and a `skip` default none for an
-                # unmatched value. This is the corpus's non-advancing peek (r718x, dnt,
-                # and registry schemas), whose byte the bit range before it already
-                # wrote. Left as it was; see AGENTS.md.
-                return b''
             elif length is not None and discriminator is None:
                 # PS-551: an inline discriminator the input neither gives nor fixes
-                # through a case's fields. This returned no bytes at all, dropping the
-                # discriminator's own (PS-442).
+                # through a case's fields, nor a bit range before it peeked. This returned
+                # no bytes at all where the match was nameless or its default `skip`,
+                # dropping the bytes the decoder reads (PS-442).
                 raise ValueError(missing_field_message(match_name or 'match'))
-            else:
-                # 'skip': the discriminator, and nothing for the case.
+            elif default == 'skip':
+                # The discriminator, if the match reads one, and nothing for the case: a
+                # decoder skips an unmatched value. A `remaining` match given no case's
+                # fields writes nothing, and the payload's length then matches no case.
                 matched_fields = []
+            elif discriminator is not None:
+                # PS-442: no case for the discriminator given, and no default. A decoder
+                # rejects it, as an encoder must; this wrote the discriminator alone.
+                raise ValueError(f"No matching case for value {discriminator}")
+            else:
+                # PS-442, PS-551: no discriminator given or derivable, and no case whose
+                # fields the input gives. This wrote nothing and reported nothing - a
+                # `remaining` match, or one on an internal field (imbuildings, dingtek).
+                raise ValueError(missing_field_message(
+                    match_name or str(field_ref or 'match').lstrip('$')))
 
         out = bytearray()
         if length is not None:
@@ -7482,7 +7660,17 @@ class SchemaInterpreter:
                 out.extend(self._match_claims(f['match']))
                 continue
             name = f.get('name')
-            if not name or str(name).startswith('_') or f.get('type') in COMPUTED_TYPES:
+            if not name or str(name).startswith('_'):
+                continue
+            if is_literal(f) or f.get('type') in COMPUTED_TYPES:
+                # A literal or computed field writes no bytes, but only this case reports
+                # it, so it claims its name, never required: a literal where the input
+                # gives its value (wt303's `device_request`, a literal-only entry), a
+                # computed field so that the case is chosen and what it is computed from
+                # is asked for (PS-434). Neither claimed anything, so an entry reporting
+                # only these was never written and the encode returned no bytes and no
+                # error.
+                out.append((f, True))
                 continue
             # PS-551 (CR-2026-141): a peek the case's next field writes over is derived
             # where the input omits it, so the case does not need it given.
@@ -7499,7 +7687,7 @@ class SchemaInterpreter:
         refused every value, since its members were none of the names it declared."""
         if not isinstance(match_def, dict):
             return []
-        out, seen = [], set()
+        out, seen = [], set()   # a literal is seen by its value as well (no-silent-empty)
         if match_def.get('name'):
             width = int(match_def.get('length') or 1)
             out.append(({'name': match_def['name'], 'type': f'u{8 * min(width, 8)}'}
@@ -7515,8 +7703,12 @@ class SchemaInterpreter:
             if not isinstance(body, list):
                 continue
             for f, _ in self._case_claims(body, True):
-                if f['name'] not in seen:
-                    seen.add(f['name'])
+                # Branches report one name as different literals (aquascope's `pc`, "ok"
+                # in one and "alarm" in another): each is a claim, since the input's
+                # value says which branch it came from.
+                key = (f['name'], repr(f['value'])) if is_literal(f) else f['name']
+                if key not in seen:
+                    seen.add(key)
                     out.append((f, True))
         return out
 
@@ -7681,6 +7873,10 @@ class SchemaInterpreter:
             if f.get('type') == 'object' and not isinstance(value, dict) \
                     and modes.get(f['name']) != 'merge':
                 return False
+            if is_literal(f):
+                return same_label(f['value'], value)        # PS-359, PS-513
+            if f.get('type') in COMPUTED_TYPES:
+                return True             # written from what it is computed from (PS-434)
             fit, exact = self._case_takes(f, value)
             return fit and (exact or not exact_only)
 
@@ -7738,6 +7934,31 @@ class SchemaInterpreter:
             if members:
                 raise ValueError(f"tlv: no case takes the members {sorted(members)} of "
                                  f"the merged object '{n}' in full (PS-527)")
+        # A `name_from` field reports under a key built from its template, which no
+        # claim above can name. Where the template reads a tag component (rakwireless's
+        # `digital_in_${ch}`) the tag is not in the data, so no case can take the value -
+        # and it was dropped with nothing reported. A key some field declares by name is
+        # that field's, not the template's.
+        declared = None
+        for case_fields in cases.values():
+            if not isinstance(case_fields, list):
+                continue
+            for f, _ in self._case_claims(case_fields):
+                template = f.get('name_from')
+                if not isinstance(template, str):
+                    continue
+                pattern = re.compile('.+'.join(
+                    re.escape(part) for part in re.split(r'\$\{\w+\}', template)))
+                for key in data:
+                    if not isinstance(key, str) or key in queues or key in pending \
+                            or not pattern.fullmatch(key):
+                        continue
+                    if declared is None:
+                        declared = declared_sources(getattr(self, '_encode_scope', None) or [])
+                    if key in declared:
+                        continue
+                    raise ValueError(f"tlv: no case takes the value of '{key}' "
+                                     f"{data[key]!r} in full (PS-502, PS-527)")
 
         # The entries go out in payload order - the order of the names in decoded
         # output - so a payload round-trips; entries of one name keep the order the

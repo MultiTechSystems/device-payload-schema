@@ -434,6 +434,9 @@ type EncodeContext struct {
 	// order is the schema's source key order, from which encodeTLV recovers the cases'
 	// declaration order (PS-527). A Go map has none.
 	order keyOrder
+	// scope is the resolved field list being encoded, whose declared names a tlv's
+	// name_from check excludes (the reference's _encode_scope).
+	scope []Field
 }
 
 // NewEncodeContext creates a new encode context.
@@ -472,6 +475,7 @@ func (ctx *EncodeContext) branch() *EncodeContext {
 	child.Variables = ctx.Variables
 	child.Definitions = ctx.Definitions
 	child.order = ctx.order
+	child.scope = ctx.scope
 	return child
 }
 
@@ -4150,6 +4154,7 @@ func (s *Schema) encodeToContext(
 	if err != nil {
 		return nil, err
 	}
+	ctx.scope = fields
 
 	// Encode main fields
 	if err := encodeFields(fields, data, ctx); err != nil {
@@ -4161,6 +4166,13 @@ func (s *Schema) encodeToContext(
 	}
 	if err := ctx.checkPeeks(0); err != nil { // PS-551 (CR-2026-141)
 		return nil, err
+	}
+	if len(ctx.Buffer) == 0 {
+		// PS-442: the last line against a construct that wrote nothing and said so to no
+		// one - a match with no case chosen, a tlv entry no case claimed.
+		if err := emptyPayloadError(append(append([]Field{}, s.Header...), fields...), data); err != nil {
+			return nil, err
+		}
 	}
 
 	return ctx, nil
@@ -4584,6 +4596,12 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 		if isObject && !isMap && repeat.mode(f.Name) != "merge" {
 			return false
 		}
+		if isLiteralField(f) {
+			return sameLabel(f.Value, value) // PS-359, PS-513
+		}
+		if isComputedField(f) {
+			return true // written from what it is computed from (PS-434)
+		}
 		fit, exact := caseTakes(f, value)
 		return fit && (exact || !exactOnly)
 	}
@@ -4707,6 +4725,14 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 				strings.Join(left, ", "), name)
 		}
 	}
+	claimed := func(key string) bool {
+		_, q := queues[key]
+		_, p := pending[key]
+		return q || p
+	}
+	if err := nameFromKeyError(field, data, claimed, ctx.scope); err != nil {
+		return err
+	}
 
 	// A Go map has no payload order, so the entries go out in the order DecodeOrdered
 	// reported where there is one, else in ascending tag order - how this corpus's
@@ -4794,14 +4820,14 @@ func encodeMatch(field Field, siblings []Field, data map[string]any, ctx *Encode
 					raw = c.Match
 				}
 				if !c.Default && fractionInRangePattern(f, raw) {
-					chosen, chosenKey = c.Fields, fmt.Sprintf("%v", c.Case)
+					chosen, chosenKey = nonNilFields(c.Fields), fmt.Sprintf("%v", c.Case)
 					break
 				}
 			}
 		} else if intVal, ok := toInt(discriminator); ok {
 			for _, c := range field.Cases {
 				if caseMatchesValue(intVal, c) {
-					chosen, chosenKey = c.Fields, fmt.Sprintf("%v", c.Case)
+					chosen, chosenKey = nonNilFields(c.Fields), fmt.Sprintf("%v", c.Case)
 					break
 				}
 			}
@@ -4819,65 +4845,78 @@ func encodeMatch(field Field, siblings []Field, data map[string]any, ctx *Encode
 	if chosen == nil && discriminator != nil {
 		for _, c := range field.Cases {
 			if c.Default {
-				chosen, chosenKey = c.Fields, "default"
+				chosen, chosenKey = nonNilFields(c.Fields), "default"
 				break
 			}
 		}
 		if chosen == nil {
 			switch fallback := field.MatchDefault.(type) {
 			case []any:
-				chosen, chosenKey = parseFieldsRaw(fallback), "default"
+				chosen, chosenKey = nonNilFields(parseFieldsRaw(fallback)), "default"
 			case []Field:
-				chosen, chosenKey = fallback, "default"
+				chosen, chosenKey = nonNilFields(fallback), "default"
 			}
 		}
 	}
 
 	if chosen == nil {
-		best := -1
+		// Where the discriminator is not in the output - an inline match with no `name`
+		// reports nothing of itself, and a `remaining` match has none to report - the case
+		// is recovered from which of its fields are there (bodyScore, no-silent-empty).
+		if c, _, ok := bestCase(field, data); ok {
+			chosen, chosenKey = nonNilFields(c.Fields), fmt.Sprintf("%v", c.Case)
+		}
+	}
+	if chosen == nil && field.MatchRemaining && !defaultScores(field, data) {
+		// No case's fields are given: the case matching 0 bytes is the one writing nothing
+		// selects (pm-io-5-sm's `0..1: []`). Its fields, if any, are asked for as any are.
 		for _, c := range field.Cases {
-			hits := 0
-			for _, f := range c.Fields {
-				if f.Name != "" {
-					if _, ok := data[f.Name]; ok {
-						hits++
-					}
+			if !c.Default && caseMatchesValue(0, c) {
+				chosen, chosenKey = nonNilFields(c.Fields), fmt.Sprintf("%v", c.Case)
+				if chosen == nil {
+					chosen = []Field{}
 				}
-			}
-			if hits > best {
-				best, chosen, chosenKey = hits, c.Fields, fmt.Sprintf("%v", c.Case)
+				break
 			}
 		}
-		if best <= 0 {
-			chosen, chosenKey = nil, ""
+	}
+	if chosen == nil {
+		if discriminator == nil {
 			// Nothing in the input belongs to any case: the default, as the reference
 			// takes it here.
-			if discriminator == nil {
-				switch fallback := field.MatchDefault.(type) {
-				case []any:
-					chosen, chosenKey = parseFieldsRaw(fallback), "default"
-				case []Field:
-					chosen, chosenKey = fallback, "default"
+			if d, ok := defaultBody(field); ok {
+				chosen, chosenKey = d, "default"
+				if chosen == nil {
+					chosen = []Field{}
 				}
 			}
-			switch {
-			case chosen != nil:
-			case discriminator == nil && (field.MatchDefault == "skip" || (field.Length > 0 && field.Name == "")):
-				// Nothing given and nothing the input could give: an inline match with
-				// no name reports no discriminator, and a `skip` default none for an
-				// unmatched value. This is the corpus's non-advancing peek (r718x, dnt,
-				// and registry schemas), whose byte the bit range before it already
-				// wrote. Left as it was.
-				return nil
-			case field.Length > 0 && discriminator == nil:
-				// PS-551: an inline discriminator the input neither gives nor fixes
-				// through a case's fields. This returned no bytes at all, dropping the
-				// discriminator's own (PS-442).
-				return missingFieldError(matchLabel(field))
-			default:
-				// 'skip' with a discriminator: the discriminator, and nothing for the case.
-				chosen = []Field{}
+		}
+		switch {
+		case chosen != nil:
+		case field.Length > 0 && discriminator == nil:
+			// PS-551, PS-442: an inline discriminator the input neither gives nor fixes
+			// through a case's fields, nor a bit range before it peeked. This returned no
+			// bytes where the match was nameless or its default `skip`, dropping the bytes
+			// the decoder reads.
+			return missingFieldError(matchLabel(field))
+		case field.MatchDefault == "skip":
+			// The discriminator, if the match reads one, and nothing for the case.
+			chosen = []Field{}
+		case discriminator != nil:
+			// PS-442: no case for the discriminator given, and no default. A decoder
+			// rejects it, as an encoder must; this wrote the discriminator alone.
+			return fmt.Errorf("No matching case for value %v", discriminator)
+		default:
+			// PS-442, PS-551: no discriminator given or derivable, and no case whose
+			// fields the input gives. This wrote nothing and reported nothing.
+			label := field.Name
+			if label == "" {
+				label = strings.TrimPrefix(field.On, "$")
 			}
+			if label == "" {
+				label = "match"
+			}
+			return missingFieldError(label)
 		}
 	}
 
