@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 #include "schema_ffi.h"
 
 #define CHECK(cond, msg) do { if (!(cond)) { printf("FAIL: %s\n", msg); return 1; } } while (0)
@@ -62,6 +63,13 @@ int main(void) {
     CHECK(strcmp(schema_ffi_result_get_field_name(r, 0), "temperature") == 0, "name 0");
     CHECK(strcmp(schema_ffi_result_get_field_name(r, 2), "battery") == 0, "name 2");
     CHECK(schema_ffi_result_get_field_int(r, 2) == 3300, "battery value");
+    CHECK(schema_ffi_result_get_field_float(r, 2) == 3300.0, "integer field widens to float");
+    /* temperature has a mult, so it is a float-tagged field holding 23.45 */
+    CHECK(schema_ffi_result_get_field_type(r, 0) == SCHEMA_FFI_VAL_FLOAT, "scaled field is float");
+    CHECK(fabs(schema_ffi_result_get_field_float(r, 0) - 23.45) < 1e-9, "scaled float value");
+    CHECK(schema_ffi_result_get_field_int(r, 0) == 23, "scaled field as int truncates");
+    CHECK(fabs(schema_ffi_result_get_field_float(r, 1) - 65.0) < 1e-9, "humidity scaled");
+    CHECK(schema_ffi_result_get_field_int(r, 1) == 65, "humidity as int");
 
     char* json = schema_ffi_result_to_json(r);
     CHECK(json != NULL, "json");
@@ -72,7 +80,8 @@ int main(void) {
 
     const uint8_t shortp[] = {0x09};
     r = schema_ffi_decode(s, shortp, sizeof(shortp));
-    CHECK(r != NULL && schema_ffi_result_get_error(r) != 0, "short payload is an error");
+    CHECK(r != NULL && schema_ffi_result_get_error(r) == SCHEMA_FFI_ERR_DECODE,
+          "short payload reports SCHEMA_FFI_ERR_DECODE");
     schema_ffi_result_free(r);
 
     schema_ffi_free(s);

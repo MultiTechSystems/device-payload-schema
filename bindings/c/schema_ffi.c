@@ -101,9 +101,21 @@ SCHEMA_API void schema_ffi_result_free(result_t_ffi result) {
     }
 }
 
+/* The interpreter's SCHEMA_ERR_* codes are mapped onto the published SCHEMA_FFI_ERR_*
+ * set, so a binding sees only the constants schema_ffi.h declares. Parse and overflow
+ * keep their meaning; every other decode failure (short buffer, type, match, lookup,
+ * unsupported, missing, direction) is SCHEMA_FFI_ERR_DECODE, and the exact reason is in
+ * schema_ffi_result_get_error_msg(). */
+static int map_error(int code) {
+    if (code == SCHEMA_OK) return SCHEMA_FFI_OK;
+    if (code == SCHEMA_ERR_PARSE) return SCHEMA_FFI_ERR_PARSE;
+    if (code == SCHEMA_ERR_OVERFLOW) return SCHEMA_FFI_ERR_OVERFLOW;
+    return SCHEMA_FFI_ERR_DECODE;
+}
+
 SCHEMA_API int schema_ffi_result_get_error(result_t_ffi result) {
     if (!result || !result->valid) return SCHEMA_FFI_ERR_INVALID;
-    return result->result.error_code;
+    return map_error(result->result.error_code);
 }
 
 SCHEMA_API const char* schema_ffi_result_get_error_msg(result_t_ffi result) {
@@ -168,16 +180,37 @@ SCHEMA_API int schema_ffi_result_get_field_type(result_t_ffi result, int index) 
     }
 }
 
+/* A field's value is held in the union member its type tag names: integer types in
+ * i64 (u64 in u64), float types - which includes any field carrying a modifier, PS-279 -
+ * in f64. Both getters read the member the decoder filled and CONVERT to the type asked
+ * for: get_field_int truncates a float toward zero (saturating at the int64 range),
+ * get_field_float widens an integer. Use schema_ffi_result_get_field_type() to learn
+ * which the field is. */
+static int is_float_tag(field_type_t t) {
+    return t == FIELD_TYPE_F16 || t == FIELD_TYPE_F32 || t == FIELD_TYPE_F64;
+}
+
 SCHEMA_API int64_t schema_ffi_result_get_field_int(result_t_ffi result, int index) {
     if (!result || !result->valid) return 0;
     if (index < 0 || index >= result->result.field_count) return 0;
-    return result->result.fields[index].value.i64;
+    const decoded_field_t* f = &result->result.fields[index];
+    if (is_float_tag(f->type)) {
+        double d = f->value.f64;
+        if (d != d) return 0;
+        if (d >= 9223372036854775807.0) return INT64_MAX;
+        if (d <= -9223372036854775808.0) return INT64_MIN;
+        return (int64_t)d;
+    }
+    return f->value.i64;
 }
 
 SCHEMA_API double schema_ffi_result_get_field_float(result_t_ffi result, int index) {
     if (!result || !result->valid) return 0.0;
     if (index < 0 || index >= result->result.field_count) return 0.0;
-    return result->result.fields[index].value.f64;
+    const decoded_field_t* f = &result->result.fields[index];
+    if (is_float_tag(f->type)) return f->value.f64;
+    if (f->type == FIELD_TYPE_U64) return (double)f->value.u64;
+    return (double)f->value.i64;
 }
 
 SCHEMA_API const char* schema_ffi_result_get_field_string(result_t_ffi result, int index) {
