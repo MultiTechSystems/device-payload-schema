@@ -85,10 +85,12 @@ UNREACHABLE_KEYS = {
     # a field type for both now. What remains unreachable about either is size, not shape -
     # see tlv_source() and flagged_source().
     "match": "no inline match support in this harness",
-    # A C gap, not a harness one: FIELD_TYPE_BYTE_GROUP is an enum value with no decode
-    # path in the interpreter, so there is nothing to build (CR-2026-131 widened it in
-    # the other five; C has no group to widen).
-    "byte_group": "the interpreter has no byte_group decode path",
+    # The interpreter decodes a byte_group since the C-interpreter wave (CR-2026-131);
+    # schema_source() builds one at top level. One inside a tlv case or a flagged group
+    # would need its members placed after the case body, which this harness does not
+    # do - a harness limit, so said.
+    "byte_group": "a byte_group nested in a case or group body is not built by this "
+                  "harness (the interpreter decodes one)",
     "object": "no nested object support in this harness",
     "name_from": "no name template in C (fixed-size name buffers)",
     # These say "the interpreter has none" rather than "not built by the struct API",
@@ -445,6 +447,31 @@ def schema_source(index, schema):
             top_level.append(("flagged", flags_field, len(deferred)))
             deferred.append([(bit, members) for bit, members in groups])
             continue
+        if "byte_group" in field and not field.get("type"):
+            group = field["byte_group"]
+            members = group.get("fields") if isinstance(group, dict) else group
+            if not isinstance(members, list) or not members:
+                return None, "a byte_group has no members"
+            # The array form takes `size` from beside it (CR-2026-019).
+            size = (group.get("size", 0) if isinstance(group, dict)
+                    else field.get("size", 0)) or 0
+            if not isinstance(size, int) or not 0 <= size <= 8:
+                return None, "a byte_group size is not 0 to 8 bytes"
+            g_endian = group.get("endian") if isinstance(group, dict) else None
+            built = []
+            for member in members:
+                if not isinstance(member, dict):
+                    return None, "a byte_group member is not a mapping"
+                lines, reason = field_source(member, schema.get("endian"))
+                if lines is None:
+                    return None, reason
+                built.append(lines)
+            ctor = (f"field_byte_group({size}, "
+                    f"{ {'little': 'ENDIAN_LITTLE', 'big': 'ENDIAN_BIG'}.get(g_endian, 'ENDIAN_DEFAULT') }"
+                    ", {start}, {count})")
+            top_level.append(("group", ctor, len(deferred)))
+            deferred.append([(None, built)])
+            continue
         lines, reason = field_source(field, schema.get("endian"))
         if lines is None:
             return None, reason
@@ -486,6 +513,11 @@ def schema_source(index, schema):
                 add = body.pop()
                 body.append(f'    strncpy(f.var_name, "{name}", SCHEMA_MAX_NAME_LEN - 1);')
                 body.append(add)
+            continue
+        if kind == "group":
+            _, start, count = case_calls[group_index][0]
+            body.append(f"    f = {payload.format(start=start, count=count)};")
+            body.append("    schema_add_field(s, &f);")
             continue
         if kind == "flagged":
             body.append(f"    f = field_flagged({c_string(payload)});")

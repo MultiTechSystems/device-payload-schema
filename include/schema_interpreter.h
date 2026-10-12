@@ -1262,6 +1262,216 @@ static inline int schema_field_failed(
 }
 
 /* ============================================
+ * byte_group (CR-2026-131, PS-070, PS-364, PS-397)
+ * ============================================
+ *
+ * A group is read as one value: `size` bytes - at least its widest member's base, which
+ * is the width where `size` is 0 - assembled in the group's effective byte order, and
+ * every member names bits of that value whatever its own base: a bit range `uN[a:b]` /
+ * `sN[a:b]` its bits a..b, a whole integer (`u16` is `u16[0:15]`) bits 0 up, a `bool`
+ * its `bit`, 0 to 7. FIELD_TYPE_BYTE_GROUP was an enum value with no decode path, so a
+ * schema using the construct could not be expressed in C at all.
+ *
+ * The members are fields [nested_start, nested_start + nested_count) of the schema,
+ * placed above field_count with schema_place_field, as a tlv case body is. */
+static inline field_def_t field_byte_group(uint8_t size, endian_t endian,
+                                           int member_start, int member_count) {
+    field_def_t f;
+    memset(&f, 0, sizeof(f));
+    f.type = FIELD_TYPE_BYTE_GROUP;
+    f.size = size;
+    f.endian = endian;
+    f.nested_start = member_start;
+    f.nested_count = member_count;
+    return f;
+}
+
+/* A member's base in bytes, and the bits of the group's value it names; false for a
+ * type that cannot be a member. */
+static inline bool byte_group_member_bits(const field_def_t* m, int* base, int* start,
+                                          int* width, bool* is_signed) {
+    *is_signed = false;
+    *start = 0;
+    switch (m->type) {
+        case FIELD_TYPE_BITS:
+            *base = bits_base_bytes(m); *start = m->bit_start; *width = m->bit_width;
+            *is_signed = m->bit_signed;
+            return true;
+        case FIELD_TYPE_BOOL: *base = 1; *start = m->bit_start; *width = 1; return true;
+        case FIELD_TYPE_S8: *is_signed = true; /* fall through */
+        case FIELD_TYPE_U8: *base = 1; break;
+        case FIELD_TYPE_S16: *is_signed = true; /* fall through */
+        case FIELD_TYPE_U16: *base = 2; break;
+        case FIELD_TYPE_S24: *is_signed = true; /* fall through */
+        case FIELD_TYPE_U24: *base = 3; break;
+        case FIELD_TYPE_S32: *is_signed = true; /* fall through */
+        case FIELD_TYPE_U32: *base = 4; break;
+        case FIELD_TYPE_S64: *is_signed = true; /* fall through */
+        case FIELD_TYPE_U64: *base = 8; break;
+        default: return false;
+    }
+    *width = *base * 8;
+    return true;
+}
+
+/* The group's width, or a message in `err` and -1 where the group is invalid: a member
+ * that cannot be one, a `bool` past bit 7, bits outside the member's own base or the
+ * group, or a `size` narrower than a member (PS-070). */
+static inline int byte_group_width(const schema_t* schema, const field_def_t* group,
+                                   char* err, size_t err_len) {
+    int widest = 0;
+    for (int k = 0; k < group->nested_count; k++) {
+        int idx = group->nested_start + k;
+        if (idx < 0 || idx >= SCHEMA_MAX_FIELDS) {
+            snprintf(err, err_len, "byte_group member %d is outside the schema", idx);
+            return -1;
+        }
+        const field_def_t* m = &schema->fields[idx];
+        int base, start, width;
+        bool is_signed;
+        if (!byte_group_member_bits(m, &base, &start, &width, &is_signed)) {
+            snprintf(err, err_len, "byte_group member '%.*s' is a %s, which a byte_group "
+                     "cannot hold (PS-070)", SCHEMA_MAX_NAME_LEN - 1, m->name,
+                     schema_type_label(m->type));
+            return -1;
+        }
+        if (m->type == FIELD_TYPE_BOOL && m->bit_start > 7) {
+            snprintf(err, err_len, "byte_group member '%.*s' is a bool at bit %d; a bool "
+                     "member is one bit of a u8, 0 to 7 (PS-070)",
+                     SCHEMA_MAX_NAME_LEN - 1, m->name, m->bit_start);
+            return -1;
+        }
+        if (width < 1 || base > 8 || start + width > base * 8) {
+            snprintf(err, err_len, "byte_group member '%.*s' names bits outside its base",
+                     SCHEMA_MAX_NAME_LEN - 1, m->name);
+            return -1;
+        }
+        if (base > widest) widest = base;
+    }
+    if (group->size && group->size < widest) {
+        snprintf(err, err_len, "byte_group declares size %d, narrower than its widest "
+                 "member's %d bytes (PS-070)", group->size, widest);
+        return -1;
+    }
+    int w = group->size ? group->size : widest;
+    if (w < 1 || w > 8) {
+        snprintf(err, err_len, "a byte_group of %d bytes; this interpreter assembles 1 "
+                 "to 8", w);
+        return -1;
+    }
+    /* PS-397: members' bits, in the group's value, do not overlap. */
+    uint64_t masks[SCHEMA_MAX_FIELDS];
+    for (int k = 0; k < group->nested_count && k < SCHEMA_MAX_FIELDS; k++) {
+        const field_def_t* m = &schema->fields[group->nested_start + k];
+        int base, start, width;
+        bool is_signed;
+        byte_group_member_bits(m, &base, &start, &width, &is_signed);
+        masks[k] = bits_width_mask(width) << start;
+        for (int j = 0; j < k; j++) {
+            if (masks[j] & masks[k]) {
+                snprintf(err, err_len, "byte_group members '%.*s' and '%.*s' overlap "
+                         "(PS-397)", SCHEMA_MAX_NAME_LEN - 1,
+                         schema->fields[group->nested_start + j].name,
+                         SCHEMA_MAX_NAME_LEN - 1, m->name);
+                return -1;
+            }
+        }
+    }
+    return w;
+}
+
+/* PS-535 as CR-2026-137 words it for a group: by every named member, `_` ones
+ * included, in declaration order - "byte_group of 'a', 'b'" - else "an unnamed
+ * byte_group". */
+static inline void byte_group_underflow(decode_result_t* result, const schema_t* schema,
+                                        const field_def_t* group, size_t pos) {
+    /* As many names as fit beside the rest of the message in error_msg; a list cut
+     * short ends at a whole name. */
+    char label[92];
+    size_t used = 0;
+    label[0] = '\0';
+    for (int k = 0; k < group->nested_count; k++) {
+        const char* n = schema->fields[group->nested_start + k].name;
+        if (!n[0]) continue;
+        int w = snprintf(label + used, sizeof(label) - used, "%s'%s'",
+                         used ? ", " : "byte_group of ", n);
+        if (w < 0 || (size_t)w >= sizeof(label) - used) {
+            label[used] = '\0';
+            break;
+        }
+        used += (size_t)w;
+    }
+    snprintf(result->error_msg, sizeof(result->error_msg),
+             "Field %s: Buffer underflow at peek offset %u (PS-535)",
+             used ? label : "an unnamed byte_group", (unsigned)pos);
+}
+
+/* Decode a byte_group at *pos into result's next slots, advancing past its width. Each
+ * member is decoded as a bit range over the group's assembled value, through
+ * decode_field, so its sign, modifiers, lookup and variable are applied as any field's
+ * are; a bool member reports a boolean. A member is reported unless it is internal. */
+static inline int schema_decode_byte_group(
+    const schema_t* schema,
+    const field_def_t* group,
+    const uint8_t* buf,
+    size_t len,
+    size_t* pos,
+    decode_result_t* result,
+    var_context_t* vars
+) {
+    const int width = byte_group_width(schema, group, result->error_msg,
+                                       sizeof(result->error_msg));
+    if (width < 0) {
+        result->error_code = SCHEMA_ERR_TYPE;
+        return SCHEMA_ERR_TYPE;
+    }
+    if (*pos + (size_t)width > len) {
+        result->error_code = SCHEMA_ERR_BUFFER;
+        byte_group_underflow(result, schema, group, *pos);
+        return SCHEMA_ERR_BUFFER;
+    }
+    const endian_t endian = group->endian != ENDIAN_DEFAULT ? group->endian : schema->endian;
+    const uint64_t value = bits_read_base(buf + *pos, width, endian);
+
+    for (int k = 0; k < group->nested_count; k++) {
+        const int idx = group->nested_start + k;
+        const field_def_t* m = &schema->fields[idx];
+        if (result->field_count >= SCHEMA_MAX_FIELDS) break;
+        decoded_field_t* out = &result->fields[result->field_count];
+        int base, start, bits;
+        bool is_signed;
+        byte_group_member_bits(m, &base, &start, &bits, &is_signed);
+
+        if (m->type == FIELD_TYPE_BOOL) {
+            memset(out, 0, sizeof(*out));
+            strncpy(out->name, m->name, SCHEMA_MAX_NAME_LEN - 1);
+            out->type = FIELD_TYPE_BOOL;
+            out->value.b = ((value >> start) & 1) != 0;
+            out->valid = true;
+            if (m->var_name[0]) var_set(vars, m->var_name, out->value.b ? 1 : 0);
+        } else {
+            /* The member as a bit range of the whole group: the group's bytes, in the
+             * group's order, read without advancing. */
+            field_def_t as_range = *m;
+            as_range.type = FIELD_TYPE_BITS;
+            as_range.size = (uint8_t)width;
+            as_range.bit_start = (uint8_t)start;
+            as_range.bit_width = (uint8_t)bits;
+            as_range.bit_signed = is_signed;
+            as_range.consume = 0;
+            as_range.endian = endian;
+            size_t at = *pos;
+            int rc = decode_field(&as_range, buf, len, &at, out, vars, endian);
+            if (rc != SCHEMA_OK) return schema_field_failed(result, rc, m, *pos, len);
+        }
+        out->field_index = idx;
+        if (out->valid && m->name[0] && m->name[0] != '_') result->field_count++;
+    }
+    *pos += (size_t)width;
+    return SCHEMA_OK;
+}
+
+/* ============================================
  * Main Decode Function
  * ============================================ */
 
@@ -1359,6 +1569,12 @@ static inline int schema_decode_direction(
                      * the top-level loop does not walk it, exactly as a tlv case is. */
                     if (field_idx < 0 || field_idx >= SCHEMA_MAX_FIELDS) break;
                     if (result->field_count >= SCHEMA_MAX_FIELDS) break;
+                    if (schema->fields[field_idx].type == FIELD_TYPE_BYTE_GROUP) {
+                        int grc = schema_decode_byte_group(schema, &schema->fields[field_idx],
+                                                           buf, len, &pos, result, &vars);
+                        if (grc != SCHEMA_OK) return grc;
+                        continue;
+                    }
 
                     int rc = decode_field(
                         &schema->fields[field_idx],
@@ -1481,6 +1697,12 @@ static inline int schema_decode_direction(
                      * construct owns and the loop decoded nothing at all. */
                     if (field_idx < 0 || field_idx >= SCHEMA_MAX_FIELDS) break;
                     if (result->field_count >= SCHEMA_MAX_FIELDS) break;
+                    if (schema->fields[field_idx].type == FIELD_TYPE_BYTE_GROUP) {
+                        int grc = schema_decode_byte_group(schema, &schema->fields[field_idx],
+                                                           buf, len, &pos, result, &vars);
+                        if (grc != SCHEMA_OK) return grc;
+                        continue;
+                    }
 
                     int rc = decode_field(
                         &schema->fields[field_idx],
@@ -1556,6 +1778,12 @@ static inline int schema_decode_direction(
             continue;
         }
         
+        if (field->type == FIELD_TYPE_BYTE_GROUP) {
+            int grc = schema_decode_byte_group(schema, field, buf, len, &pos, result, &vars);
+            if (grc != SCHEMA_OK) return grc;
+            continue;
+        }
+
         /* Regular field */
         int rc = decode_field(
             field, buf, len, &pos,
@@ -1946,6 +2174,73 @@ static inline int encode_field(
     return SCHEMA_OK;
 }
 
+/* Encode a byte_group (PS-063, PS-365, PS-397): every member's value placed in one
+ * value of the group's width, written once in the group's byte order; bits no member
+ * names are zero. Each member is checked and reduced to its bits by encode_field as
+ * the member it is - so a value outside it is the PS-168 error naming the member and its
+ * own type - and then moved to its place in the group. A member the input omits is
+ * missing (PS-551); an internal one is PS-434's error, this interpreter having no
+ * `value` for it to write. */
+static inline int schema_encode_byte_group(
+    const schema_t* schema,
+    const field_def_t* group,
+    const encode_inputs_t* inputs,
+    uint8_t* buf,
+    size_t* pos,
+    char* err,
+    size_t err_len
+) {
+    char why[sizeof(((encode_result_t*)0)->error_msg)];
+    const int width = byte_group_width(schema, group, why, sizeof(why));
+    if (width < 0) {
+        if (err && err_len) snprintf(err, err_len, "%s", why);
+        return SCHEMA_ERR_TYPE;
+    }
+    if (*pos + (size_t)width > SCHEMA_MAX_PAYLOAD) return SCHEMA_ERR_BUFFER;
+    const endian_t endian = group->endian != ENDIAN_DEFAULT ? group->endian : schema->endian;
+    uint64_t value = 0;
+
+    for (int k = 0; k < group->nested_count; k++) {
+        const field_def_t* m = &schema->fields[group->nested_start + k];
+        const encode_input_t* input = find_input(inputs, m->name);
+        if (!input) {
+            if (err && err_len) {
+                if (m->name[0] == '_') {
+                    snprintf(err, err_len, "internal field '%s' reads payload bytes and "
+                             "declares no value, and the input does not supply it "
+                             "(PS-434)", m->name);
+                } else {
+                    snprintf(err, err_len, "Missing required field: %s", m->name);
+                }
+            }
+            return SCHEMA_ERR_PARSE;
+        }
+        int base, start, bits;
+        bool is_signed;
+        byte_group_member_bits(m, &base, &start, &bits, &is_signed);
+        uint64_t pattern;
+        if (m->type == FIELD_TYPE_BOOL) {
+            pattern = (input->is_int ? input->value.i64 != 0 : input->value.f64 != 0.0);
+        } else {
+            uint8_t own[8] = {0};
+            size_t at = 0;
+            field_def_t member = *m;
+            member.consume = 0;
+            member.endian = ENDIAN_DEFAULT;
+            int rc = encode_field(&member, inputs, own, &at, endian, err, err_len);
+            if (rc != SCHEMA_OK) return rc;
+            pattern = (uint64_t)bits_extract(bits_read_base(own, base, endian), start, bits,
+                                             false);
+        }
+        value |= (pattern & bits_width_mask(bits)) << start;
+    }
+    for (int b = 0; b < width; b++) {
+        buf[*pos + b] |= bits_byte_mask(value, width, b, endian);
+    }
+    *pos += (size_t)width;
+    return SCHEMA_OK;
+}
+
 /* Main encode function */
 /* schema_encode with the direction the message will travel supplied.
  *
@@ -2020,7 +2315,8 @@ static inline int schema_encode_direction(
         const endian_t fendian = field->endian != ENDIAN_DEFAULT ? field->endian
                                                                  : schema->endian;
 
-        if (field->type != FIELD_TYPE_SKIP && !find_input(inputs, field->name)) {
+        if (field->type != FIELD_TYPE_SKIP && field->type != FIELD_TYPE_BYTE_GROUP
+            && !find_input(inputs, field->name)) {
             if (bitlike && !field->consume && pos + (size_t)base <= SCHEMA_MAX_PAYLOAD) {
                 /* PS-551 (CR-2026-141): derived from the fields that write its bits. */
                 peeks[peek_count].pos = pos;
@@ -2046,8 +2342,11 @@ static inline int schema_encode_direction(
         }
         /* Encoded alone, so its own bits can be told from those already placed. */
         size_t at = pos;
-        int rc = encode_field(field, inputs, scratch, &pos, schema->endian,
-                              result->error_msg, sizeof(result->error_msg));
+        int rc = field->type == FIELD_TYPE_BYTE_GROUP
+            ? schema_encode_byte_group(schema, field, inputs, scratch, &pos,
+                                       result->error_msg, sizeof(result->error_msg))
+            : encode_field(field, inputs, scratch, &pos, schema->endian,
+                           result->error_msg, sizeof(result->error_msg));
         size_t end = bitlike && at + (size_t)base > pos ? at + base : pos;
         if (rc == SCHEMA_OK && end > SCHEMA_MAX_PAYLOAD) rc = SCHEMA_ERR_BUFFER;
         /* A skip is padding: its zeros fix no peek's bits and contradict none. */

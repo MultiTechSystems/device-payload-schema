@@ -1073,6 +1073,163 @@ static void test_a_covered_peek_is_derived(void) {
     }
 }
 
+/* CR-2026-131 (PS-070, PS-364, PS-397), CR-2026-137 (PS-535): a byte_group is one value
+ * of its widest member's base, in its own byte order; members name bits of it. Layouts
+ * are byte-group-width.yaml's, byte-group-bool.yaml's and tlv-nameless-case.yaml's. */
+static void build_group(schema_t* s, uint8_t size, endian_t e, field_def_t* m, int n,
+                        bool trailer) {
+    memset(s, 0, sizeof(*s));
+    s->endian = ENDIAN_BIG;
+    field_def_t g = field_byte_group(size, e, 4, n);
+    schema_add_field(s, &g);
+    if (trailer) {
+        field_def_t t = field_u8("after");
+        schema_add_field(s, &t);
+    }
+    for (int i = 0; i < n; i++) schema_place_field(s, 4 + i, &m[i]);
+}
+
+static void test_a_byte_group_reads_one_value(void) {
+    schema_t s;
+    decode_result_t r;
+    {   /* No size: as wide as u16; little-endian, so s8 is the first byte. */
+        field_def_t m[] = { field_s8("signed_low"),
+                            field_bit_range("mid", 2, false, 8, 4, 0, ENDIAN_DEFAULT) };
+        build_group(&s, 0, ENDIAN_LITTLE, m, 2, true);
+        const uint8_t p[] = {0xFE, 0x03, 0x44};
+        TCHECK(schema_decode(&s, p, sizeof(p), &r) == SCHEMA_OK);
+        TCHECK(r.field_count == 3 && r.bytes_consumed == 3);
+        TCHECK(result_get_int(&r, "signed_low", 0) == -2);
+        TCHECK(result_get_int(&r, "mid", 0) == 3);
+        TCHECK(result_get_int(&r, "after", 0) == 0x44);
+    }
+    {   /* size: 3 widens a u16 group; u32 members in a four-byte little-endian one. */
+        field_def_t m[] = { field_bit_range("lo", 2, false, 0, 8, 0, ENDIAN_DEFAULT),
+                            field_bit_range("hi", 2, false, 8, 8, 0, ENDIAN_DEFAULT) };
+        build_group(&s, 3, ENDIAN_LITTLE, m, 2, true);
+        const uint8_t p[] = {0x34, 0x12, 0x00, 0x33};
+        TCHECK(schema_decode(&s, p, sizeof(p), &r) == SCHEMA_OK);
+        TCHECK(result_get_int(&r, "lo", 0) == 0x34 && result_get_int(&r, "hi", 0) == 0x12);
+        TCHECK(result_get_int(&r, "after", 0) == 0x33);
+    }
+    {   /* bools and a range in one byte. */
+        field_def_t m[] = { field_bool("flag_a", 0, false),
+                            field_bit_range("level", 1, false, 1, 3, 0, ENDIAN_DEFAULT),
+                            field_bool("flag_b", 7, false) };
+        build_group(&s, 1, ENDIAN_DEFAULT, m, 3, true);
+        const uint8_t p[] = {0x83, 0x2A};
+        TCHECK(schema_decode(&s, p, sizeof(p), &r) == SCHEMA_OK);
+        TCHECK(result_get_field(&r, "flag_a")->value.b);
+        TCHECK(result_get_field(&r, "flag_b")->value.b);
+        TCHECK(result_get_int(&r, "level", 0) == 1 && result_get_int(&r, "after", 0) == 42);
+    }
+}
+
+static void test_a_byte_group_is_checked(void) {
+    schema_t s;
+    decode_result_t r;
+    field_def_t m[] = { field_bit_range("a", 2, false, 0, 4, 0, ENDIAN_DEFAULT),
+                        field_bit_range("_b", 2, false, 4, 4, 0, ENDIAN_DEFAULT) };
+    build_group(&s, 0, ENDIAN_DEFAULT, m, 2, false);
+    const uint8_t one[] = {0x34};
+    TCHECK(schema_decode(&s, one, sizeof(one), &r) == SCHEMA_ERR_BUFFER);
+    TCHECK(strcmp(r.error_msg, "Field byte_group of 'a', '_b': Buffer underflow at peek "
+                               "offset 0 (PS-535)") == 0);
+    /* The internal member decodes and is not reported. */
+    const uint8_t two[] = {0x00, 0x21};
+    TCHECK(schema_decode(&s, two, sizeof(two), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 1 && result_get_int(&r, "a", 0) == 1);
+
+    build_group(&s, 1, ENDIAN_DEFAULT, m, 2, false);
+    TCHECK(schema_decode(&s, two, sizeof(two), &r) == SCHEMA_ERR_TYPE);
+    TCHECK(strcmp(r.error_msg, "byte_group declares size 1, narrower than its widest "
+                               "member's 2 bytes (PS-070)") == 0);
+
+    field_def_t o[] = { field_bit_range("a", 1, false, 0, 4, 0, ENDIAN_DEFAULT),
+                        field_bit_range("b", 1, false, 3, 3, 0, ENDIAN_DEFAULT) };
+    build_group(&s, 0, ENDIAN_DEFAULT, o, 2, false);
+    TCHECK(schema_decode(&s, two, sizeof(two), &r) == SCHEMA_ERR_TYPE);
+    TCHECK(strcmp(r.error_msg, "byte_group members 'a' and 'b' overlap (PS-397)") == 0);
+
+    field_def_t b[] = { field_bool("a", 9, false) };
+    build_group(&s, 2, ENDIAN_DEFAULT, b, 1, false);
+    TCHECK(schema_decode(&s, two, sizeof(two), &r) == SCHEMA_ERR_TYPE);
+    TCHECK(strcmp(r.error_msg, "byte_group member 'a' is a bool at bit 9; a bool member "
+                               "is one bit of a u8, 0 to 7 (PS-070)") == 0);
+}
+
+static void test_a_byte_group_in_a_tlv_case(void) {
+    schema_t s;
+    decode_result_t r;
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t t = field_tlv(1, 1);
+    field_add_tlv_case(&t, 0x20, 2, 1);
+    schema_add_field(&s, &t);
+    field_def_t g = field_byte_group(1, ENDIAN_DEFAULT, 3, 2);
+    field_def_t c = field_bit_range("charger_status", 1, false, 0, 2, 0, ENDIAN_DEFAULT);
+    field_def_t d = field_bit_range("device_status", 1, false, 4, 4, 0, ENDIAN_DEFAULT);
+    schema_place_field(&s, 2, &g);
+    schema_place_field(&s, 3, &c);
+    schema_place_field(&s, 4, &d);
+    const uint8_t p[] = {0x20, 0x01, 0x51};
+    TCHECK(schema_decode(&s, p, sizeof(p), &r) == SCHEMA_OK);
+    TCHECK(result_get_int(&r, "charger_status", -1) == 1);
+    TCHECK(result_get_int(&r, "device_status", -1) == 5);
+}
+
+static void test_a_byte_group_encodes_as_decoded(void) {
+    schema_t s;
+    encode_inputs_t in;
+    encode_result_t out;
+    field_def_t m[] = { field_s8("signed_low"),
+                        field_bit_range("mid", 2, false, 8, 4, 0, ENDIAN_DEFAULT) };
+    build_group(&s, 0, ENDIAN_LITTLE, m, 2, true);
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "signed_low", -2);
+    encode_inputs_add_int(&in, "mid", 3);
+    encode_inputs_add_int(&in, "after", 0x44);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_OK);
+    TCHECK(out.len == 3 && out.data[0] == 0xFE && out.data[1] == 0x03 && out.data[2] == 0x44);
+
+    /* A member's value is checked as the member it is (PS-168). */
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "signed_low", -200);
+    encode_inputs_add_int(&in, "mid", 3);
+    encode_inputs_add_int(&in, "after", 1);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_OVERFLOW && out.len == 0);
+    TCHECK(strcmp(out.error_msg, "Field 'signed_low': -200 encodes as -200, outside -128 "
+                                 "to 127 (PS-168)") == 0);
+
+    /* A member left out is missing; an internal one is PS-434's. */
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "signed_low", 1);
+    encode_inputs_add_int(&in, "after", 1);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_PARSE);
+    TCHECK(strcmp(out.error_msg, "Missing required field: mid") == 0);
+    field_def_t i[] = { field_bit_range("a", 2, false, 0, 4, 0, ENDIAN_DEFAULT),
+                        field_bit_range("_b", 2, false, 4, 4, 0, ENDIAN_DEFAULT) };
+    build_group(&s, 0, ENDIAN_DEFAULT, i, 2, false);
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "a", 1);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_PARSE);
+    TCHECK(strcmp(out.error_msg, "internal field '_b' reads payload bytes and declares no "
+                                 "value, and the input does not supply it (PS-434)") == 0);
+
+    /* Bools at their bits, uncovered bits zero (PS-397). */
+    field_def_t b[] = { field_bool("flag_a", 0, false),
+                        field_bit_range("level", 1, false, 1, 3, 0, ENDIAN_DEFAULT),
+                        field_bool("flag_b", 7, false) };
+    build_group(&s, 1, ENDIAN_DEFAULT, b, 3, true);
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "flag_a", 1);
+    encode_inputs_add_int(&in, "level", 1);
+    encode_inputs_add_int(&in, "flag_b", 1);
+    encode_inputs_add_int(&in, "after", 42);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_OK);
+    TCHECK(out.len == 2 && out.data[0] == 0x83 && out.data[1] == 0x2A);
+}
+
 /* CR-2026-136 (PS-059, PS-352, PS-353, PS-365): a bit range's base is N/8 bytes in the
  * field's byte order, an `sN` range sign-extends from its width, and encoding writes the
  * base back in the same order. The layout and payload are bit-range-order.yaml's,
@@ -1222,6 +1379,10 @@ void selftest_schema(void) {
     test_bit_ranges_are_laid_out_as_decoded();
     test_a_missing_input_is_named();
     test_a_covered_peek_is_derived();
+    test_a_byte_group_reads_one_value();
+    test_a_byte_group_is_checked();
+    test_a_byte_group_in_a_tlv_case();
+    test_a_byte_group_encodes_as_decoded();
     test_a_wide_bit_range_reads_its_base();
     test_a_wide_bit_range_short_read_is_named();
     test_a_wide_bit_range_encodes_as_decoded();
