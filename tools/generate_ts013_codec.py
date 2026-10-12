@@ -973,11 +973,39 @@ function encDefaultBody(m) {                          // _default_body
   return Array.isArray(d) ? d : null;
 }
 
+// A match's case keys in declaration order (PS-563): an object's integer-like keys
+// iterate ascending, so the generator records the order written as `__order`.
+function encCaseKeys(m) {
+  var cases = m.cases || {};
+  var keys = Array.isArray(m.__order) ? m.__order.filter(function (k) { return Object.prototype.hasOwnProperty.call(cases, k); }) : Object.keys(cases);
+  Object.keys(cases).forEach(function (k) { if (keys.indexOf(k) < 0) keys.push(k); });
+  return keys;
+}
+
+// remaining_selection (PS-564): the case a decoder selects for `count` bytes left.
+function encRemainingSelection(m, count) {
+  var cases = m.cases || {}, keys = encCaseKeys(m);
+  for (var i = 0; i < keys.length; i++) {
+    if (keys[i] !== "default" && encCasePattern(count, keys[i])) return keys[i];
+  }
+  var d = m["default"] === undefined ? "error" : m["default"];
+  if (Array.isArray(d) || d === "skip" || Array.isArray(cases["default"])) return "default";
+  return null;
+}
+
+function encRemainingMismatch(m, count, selected, chosen) {   // remaining_mismatch_message
+  var label = m.name ? "'" + m.name + "'" : "an unnamed match";
+  function describe(k) { return k === null ? "no case" : k === "default" ? "its default" : "case " + k; }
+  return "Field " + label + ": the " + count + " byte(s) from it to the end of the payload select " +
+         describe(selected) + ", not " + describe(chosen) + ", the case its input gives (PS-564)";
+}
+
 // _best_case: the case scoring highest, the first of equals, with `tied` where another
 // equalled it; null where none scores, or the default list scores higher than any.
 function encBestCase(m, data) {
-  var cases = m.cases || {}, best = null, bestHits = 0, tied = false;
-  for (var key in cases) {
+  var cases = m.cases || {}, best = null, bestHits = 0, tied = false, keys = encCaseKeys(m);
+  for (var ki = 0; ki < keys.length; ki++) {
+    var key = keys[ki];
     if (key === "default" || !Array.isArray(cases[key])) continue;
     var hits = encBodyScore(cases[key], data) || 0;
     if (hits > bestHits) { best = key; bestHits = hits; tied = false; }
@@ -1025,19 +1053,25 @@ function encMatch(out, f, data, ctx, peeked) {        // _encode_match
             String(disc) + " is not an integer, so it cannot be written (PS-557)");
   }
   if (disc !== null && disc !== undefined) {
-    for (var k in cases) {
+    var ordered = encCaseKeys(m);
+    for (var ki = 0; ki < ordered.length; ki++) {
+      var k = ordered[ki];
       if (k === "default") continue;
       if (encCasePattern(disc, k)) { key = k; body = cases[k]; break; }
     }
   }
-  if (body === null) {
+  if (body === null && (disc === null || disc === undefined)) {
+    // PS-563: by score only where no discriminator is given; a given one matching no
+    // case takes the default or is rejected (PS-565).
     var found = encBestCase(m, data);
     if (found) { key = found.key; body = found.body; }
   }
   if (body === null && m.remaining === true && !encBodyScore(encDefaultBody(m), data)) {
     // No case's fields given, nor the default's: the case matching 0 bytes is the one
     // writing nothing selects.
-    for (var zk in cases) {
+    var zeroKeys = encCaseKeys(m);
+    for (var zi = 0; zi < zeroKeys.length; zi++) {
+      var zk = zeroKeys[zi];
       if (zk !== "default" && Array.isArray(cases[zk]) && encCasePattern(0, zk)) { key = zk; body = cases[zk]; break; }
     }
   }
@@ -1076,7 +1110,13 @@ function encMatch(out, f, data, ctx, peeked) {        // _encode_match
     encFits(encRint(Number(value)), parseInt(length, 10) * 8, false, { name: label }, value);
     encWriteInt(out, value, parseInt(length, 10), false, ctx.endian);
   }
-  return encList(out, body, data, ctx);
+  var bodyStart = out.length;
+  var carriedBack = encList(out, body, data, ctx);
+  if (m.remaining === true && ctx.d564 === 0) {
+    // PS-564: checked at the top, once the bytes after the match are known.
+    ctx.t564.push({ m: m, tail: out.length - bodyStart, chosen: key === null ? "default" : String(key) });
+  }
+  return carriedBack;
 }
 
 // _nested_discriminator (CR-2026-151): [value, case key or null, branch fields] where a
@@ -1158,6 +1198,12 @@ function encRepeatSize(f, key, data, siblings) {      // _repeat_size
 }
 
 function encRepeatElements(out, f, data, records, count, ctx) {   // _encode_repeat_elements
+  // PS-564 is not checked inside a tlv or repeat (tail_unchecked).
+  ctx.d564 = (ctx.d564 === undefined ? 1 : ctx.d564) + 1;
+  try { return encRepeatElementsBody(out, f, data, records, count, ctx); } finally { ctx.d564--; }
+}
+
+function encRepeatElementsBody(out, f, data, records, count, ctx) {
   var name = f.name || "";
   // PS-550: a sibling identifying these values position by position is given as many
   // values as this repeat, as a decoder requires (PS-546).
@@ -1208,6 +1254,12 @@ function encRepeatElements(out, f, data, records, count, ctx) {   // _encode_rep
 }
 
 function encRepeat(out, f, data, ctx, siblings) {     // _encode_repeat
+  // PS-564 is not checked inside a tlv or repeat (tail_unchecked).
+  ctx.d564 = (ctx.d564 === undefined ? 1 : ctx.d564) + 1;
+  try { return encRepeatBody(out, f, data, ctx, siblings); } finally { ctx.d564--; }
+}
+
+function encRepeatBody(out, f, data, ctx, siblings) {
   var name = f.name || "", raw = data[name];
   if (raw !== undefined && raw !== null && typeof raw !== "object") encFail("repeat field " + JSON.stringify(name) + ": expected a list of records, got " + typeof raw);
   var records = encRecords(f, data);
@@ -1454,6 +1506,12 @@ function encMatchClaims(m) {
 }
 
 function encTlv(out, f, data, ctx) {                  // _encode_tlv
+  // PS-564 is not checked inside a tlv or repeat (tail_unchecked).
+  ctx.d564 = (ctx.d564 === undefined ? 1 : ctx.d564) + 1;
+  try { return encTlvBody(out, f, data, ctx); } finally { ctx.d564--; }
+}
+
+function encTlvBody(out, f, data, ctx) {
   var tlv = f.tlv || {}, cases = tlv.cases || {}, lsize = tlv.length_size || 0;
   if (tlv.merge === false) encFail("a tlv with merge: false reports its entries under 'channels', and encoding them is not supported");
   var order = Object.keys(data), has = Object.prototype.hasOwnProperty;
@@ -1833,12 +1891,25 @@ function encList(out, fields, data, ctx, top) {
   // CR-2026-136: a frame laid out as a decoder reads it (FrameBuffer). A bit range or
   // bool that does not consume leaves its bytes pending, and the next field's are ORed in.
   var fr = { out: [], pend: [], cov: {}, pk: [] };
+  // PS-564 (TailLevel): bytes an item adds go to the checks earlier items registered.
+  var tl = { checks: [], size: null, mark: 0 };
+  function tlClose() {
+    if (tl.size === null) return;
+    var grown = fr.out.length + fr.pend.length - tl.size;
+    tl.checks.forEach(function (c) { c.tail += grown; });
+    if (ctx.t564) tl.checks = tl.checks.concat(ctx.t564.slice(tl.mark));
+    tl.size = null;
+  }
   encRuns(fields).forEach(function (item) {
+    tlClose();
+    tl.size = fr.out.length + fr.pend.length;
+    tl.mark = ctx.t564 ? ctx.t564.length : 0;
     if (item.bits) { encBitRun(fr, item.bits, data, ctx); return; }
     var tmp = [];
     var carried = encOne(item, tmp);
     encEmit(fr, tmp, typeof carried === "number" ? carried : 0);
   });
+  tlClose();
   var base = out.length, total = fr.out.length + fr.pend.length;
   for (var fo = 0; fo < fr.out.length; fo++) out.push(fr.out[fo]);
   for (var fp = 0; fp < fr.pend.length; fp++) out.push(fr.pend[fp]);
@@ -1919,10 +1990,14 @@ function encList(out, fields, data, ctx, top) {
 
 function encodeRoot(fields, data, endian) {
   // wa: PS-537's warnings, reported after the others as the reference reports them.
-  var ctx = { endian: endian, w: [], wa: [] }, out = [];
+  var ctx = { endian: endian, w: [], wa: [], t564: [], d564: 0 }, out = [];
   ENC_SCOPE = fields;
   encList(out, fields, data || {}, ctx, true);
   encCheckPeeks(out);                                    // PS-551 (CR-2026-141)
+  ctx.t564.forEach(function (c) {                        // PS-564
+    var selected = encRemainingSelection(c.m, c.tail);
+    if (selected !== c.chosen) encFail(encRemainingMismatch(c.m, c.tail, selected, c.chosen));
+  });
   if (!out.length) {
     var empty = encEmptyPayloadError(fields, data || {});   // PS-442
     if (empty) encFail(empty);
@@ -2053,6 +2128,10 @@ def _annotate_on_repeat(node):
     if not isinstance(node, dict):
         return node
     out = {k: _annotate_on_repeat(v) for k, v in node.items()}
+    match = node.get('match')
+    if isinstance(match, dict) and isinstance(match.get('cases'), dict) and not node.get('type'):
+        # PS-563: a tie goes to the case declared first, which the runtime reads here.
+        out['match'] = dict(out['match'], __order=[str(key) for key in match['cases']])
     tlv = node.get('tlv')
     if isinstance(tlv, dict) and isinstance(tlv.get('cases'), dict):
         modes, last_members, _ = _tlv_repeat_modes(tlv)

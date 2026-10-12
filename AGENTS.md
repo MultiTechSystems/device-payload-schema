@@ -1058,11 +1058,8 @@ only: 5267 -> 5410 round trips (+143, none lost).
   - 25 "no case takes the value" (rakwireless's tag-built keys, aquascope);
   - 3 "matches a range of tags".
 
-**Open:** a `remaining` match does not check that the bytes it writes - with what follows
-it - select the case it chose. A case chosen by its fields writes its own length, but a
-default list or a variable-length field could select another case on decode. Go, Java and
-C# also keep their CR-2026-027 order for a known discriminator matching no case: the
-default before recovery by fields. The reference recovers by fields first.
+**Closed by CR-2026-153 (below):** the `remaining` length check (PS-564), the order for
+a known discriminator matching no case (PS-565), and Go's tie order (PS-563).
 
 Fixtures: `length-selects-layout` (4 vectors), `literal-selects-branch` (2) and
 `tag-entry-constants` (4). With `tlv-case-field-list`'s `literal_only`, all 11 round-trip
@@ -1082,6 +1079,49 @@ consulted. Where both rejections could apply - an inline match with no discrimin
 and nothing to derive - CR-2026-151's is taken, being the more specific: it names the
 discriminator (`Missing required field: report_type`, its `name`, else its `var`), and
 this note's fall-through says `match` only where the match has neither.
+
+**CR-2026-153 (PS-562 to PS-565, la-payload-schema branch `cr/0.5.5-apply-152-154`, for
+0.5.5) wrote #140 into the spec; three items were left for this repository.**
+
+- **PS-564: what a `remaining` match writes selects the case it chose.** The bytes from
+  the match to the end of the payload are counted per field list (`TailLevel` in Python,
+  `tl` in the runtime's `encList`, and each port's equivalent). After each item of a list,
+  the bytes it added go to every check an earlier item of the same list registered, so at
+  the top each check holds its whole tail. A decoder's choice for that count is then
+  compared with the encoder's - the first case in declaration order matching it, else the
+  default, else none (`remaining_selection`). A mismatch is rejected, naming the match as
+  PS-535 does: `Field an unnamed match: the 2 byte(s) from it to the end of the payload
+  select case 2, not case 1, the case its input gives (PS-564)` ("its default", "no case";
+  `'name'` for a named match). The spec prototype encodes no match, so this text is this
+  repository's. **Not checked inside a tlv or a repeat** (`tail_unchecked`): the bytes
+  after the match are not all in field lists there. No corpus, registry or fixture vector
+  is rejected by it.
+- **PS-563: a tie goes to the case declared first, in all five.** The runtime iterated a
+  match's cases as a JS object, whose integer-like keys run ascending; the generator now
+  records the order written as `__order` (`_annotate_on_repeat`) and `encCaseKeys` reads
+  it, for the score, the discriminator's case, the 0-byte case and PS-564. Go keeps
+  `Cases` sorted for decode and now reads the order written from the YAML node tree
+  (`s.keyOrder`, as `_meta` and the reference walk do; a JSON-authored schema falls back
+  to the sorted order), so `{2: [a], 1: [a]}` given `{a: 5}` writes `0205` where it wrote
+  `0105`. Go's empty-payload guard checks names in declaration order, where it checked the
+  input's keys sorted (`TestEmptyPayloadGuardDeclarationOrder`). Java and C# already
+  walked their cases in declaration order. Go measures PS-564's tail as the payload length
+  less the match's start, since it writes every field list into one buffer.
+- **PS-565: a given discriminator matching no case takes the default, or is rejected.**
+  Python and the runtime recovered a case by score first, so `{k: 9, a: 4, b: 3}` against
+  `{1: [a]}` with `default: [b]` wrote `0904` - case 1's byte under a discriminator that
+  decodes as the default, reading `b` = 4 - and an inline `kind: 9` with no default wrote
+  `0904` with no error. Both now follow Go, Java and C#: the default, else `No matching
+  case for value 9`; the score runs only where no discriminator is given. A `skip` default
+  writes the discriminator alone, as a decoder reads it.
+- **Cases:** `tests/cr-2026-153-cases.yaml` (11), read by `test_cr_2026_153_cases.py`
+  (reference and runtime), Go `cr153_test.go`, Java `CR2026153Test`, C# `CR2026_153Tests`.
+  Corpus and registry (Python, 5475 of 32336 round trips at f57faba) unchanged; no floor
+  moves.
+- **The match's own case wins** (CR-2026-155, editorial, PS-551 and PS-563): an inline
+  match settles its case in the order given discriminator or peek, own case by score or
+  the 0-byte case, nested derivation, default, reject - so `{0: [temp]}` beside a nested
+  `{1: [temp]}` given `{temp: 26}` writes `000a28` (`own_case_wins_over_nested_derivation`).
 Cases: `tests/silent-empty-cases.yaml` (14), read by the reference and the runtime
 (`test_silent_empty_cases.py`), Go (`silent_empty_test.go`, both APIs), Java
 (`SilentEmptyTest`) and C# (`SilentEmptyTests`).

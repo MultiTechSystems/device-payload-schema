@@ -400,6 +400,83 @@ def written_discriminator_error(value, name):
             f"integer, so it cannot be written (PS-557)")
 
 
+def tail_unchecked(method):
+    """PS-564 is checked only where the bytes after a `remaining` match are all in the
+    field lists enclosing it; inside a tlv or a repeat they are not, so a `remaining`
+    match there is not checked (`_ps564_depth`)."""
+    def wrapper(self, *args, **kwargs):
+        self._ps564_depth = getattr(self, '_ps564_depth', 1) + 1
+        try:
+            return method(self, *args, **kwargs)
+        finally:
+            self._ps564_depth -= 1
+    wrapper.__name__ = method.__name__
+    wrapper.__doc__ = method.__doc__
+    return wrapper
+
+
+class TailLevel:
+    """PS-564: one field list's share of the bytes written after a `remaining` match.
+
+    A `remaining` match is decoded on the count of bytes from it to the end of the
+    payload, so what an encoder writes there must select the case it chose. Each field
+    list is a level: once an item of it is written, the bytes it added are added to the
+    tail of every check an earlier item of the same list registered - its own `remaining`
+    match, or one nested inside it - so at the top each check holds the bytes from its
+    match to the end. `start()` before each item, `close()` after the list."""
+
+    def __init__(self, encoder: Any, out: 'FrameBuffer'):
+        self.encoder, self.out, self.checks = encoder, out, []
+        self.size, self.mark = None, 0
+
+    def _size(self) -> int:
+        return len(self.out.buf) + len(self.out.pending)
+
+    def start(self) -> None:
+        self.close()
+        self.size, self.mark = self._size(), len(self.encoder._ps564)
+
+    def close(self) -> None:
+        if self.size is None:
+            return
+        grown = self._size() - self.size
+        for check in self.checks:
+            check['tail'] += grown
+        self.checks.extend(self.encoder._ps564[self.mark:])
+        self.size = None
+
+
+def remaining_selection(match_def: Dict[str, Any], count: int, pattern) -> Any:
+    """The case key a decoder selects for a `remaining` match with `count` bytes left,
+    'default' where no case lists it and the match declares a default (a list or
+    `skip`), else None (PS-414, PS-415)."""
+    cases = match_def.get('cases') or {}
+    for key in cases:
+        if key != 'default' and pattern(count, key):
+            return key
+    default = match_def.get('default', 'error')
+    if isinstance(default, list) or default == 'skip' or isinstance(cases.get('default'), list):
+        return 'default'
+    return None
+
+
+def remaining_mismatch_message(match_def: Dict[str, Any], count: int, selected: Any,
+                               chosen: Any) -> str:
+    """PS-564's rejection, naming the match as PS-535 and PS-557 name one."""
+    name = match_def.get('name')
+    label = f"'{name}'" if name else 'an unnamed match'
+
+    def describe(key):
+        if key is None:
+            return 'no case'
+        if key == 'default':
+            return 'its default'
+        return f"case {key}"
+    return (f"Field {label}: the {count} byte(s) from it to the end of the payload select "
+            f"{describe(selected)}, not {describe(chosen)}, the case its input gives "
+            f"(PS-564)")
+
+
 def check_written_discriminator(value, name):
     """PS-557: a written discriminator is read back as an integer, so a fraction is
     rejected rather than rounded or truncated. `int()` truncated 2.5 to 2."""
@@ -3561,6 +3638,9 @@ class SchemaInterpreter:
     #: PS-541: the records the current repeat element yields; None outside an element.
     _pending_records = None
 
+    _ps564 = ()             # PS-564's checks, set per encode
+    _ps564_depth = 1        # not checked outside encode()
+
     def __init__(self, schema: Dict[str, Any]):
         # Every `$ref` is spliced before anything reads the schema (PS-346, PS-347), so
         # a reference works in any field list - a port entry, an object, a repeat, a
@@ -6459,6 +6539,8 @@ class SchemaInterpreter:
         """
         result = EncodeResult(payload=b'')
         self._encode_warnings = []
+        self._ps564 = []            # PS-564: each `remaining` match's chosen case
+        self._ps564_depth = 0       # inside a tlv or repeat, where it is not checked
         if self._load_errors:
             result.errors.extend(self._load_errors)
             return result
@@ -6491,7 +6573,9 @@ class SchemaInterpreter:
 
         omitted_optional = None     # the first optional field the input left out (PS-405)
 
+        tails = TailLevel(self, output)                  # PS-564
         for _kind, _item in self._bitfield_runs(fields):
+            tails.start()
             # A run of bit ranges shares one span of bytes, so it is packed once rather
             # than a byte per field (CR-2026-023). The LoRaWAN MHDR's three ranges used to
             # come back as three bytes of unshifted values: `40` encoded as `020000`.
@@ -6697,12 +6781,22 @@ class SchemaInterpreter:
         
         # A rejected input produces no payload: the bytes written before the error are a
         # frame short of the rest, as Go has always returned nothing.
+        tails.close()
         frame = output.frame()
         if not result.errors:
             try:
                 check_peeks(frame)                          # PS-551 (CR-2026-141)
             except ValueError as e:
                 result.errors.append(str(e))
+        if not result.errors:
+            # PS-564: the bytes from each `remaining` match to the end select its case.
+            for check in self._ps564:
+                selected = remaining_selection(check['match'], check['tail'],
+                                               self._match_case_pattern)
+                if selected != check['chosen']:
+                    result.errors.append(remaining_mismatch_message(
+                        check['match'], check['tail'], selected, check['chosen']))
+                    break
         if not result.errors and not frame:
             # PS-442: the last line against a construct that wrote nothing and said so
             # to no one - a match with no case chosen, a tlv entry no case claimed.
@@ -7363,11 +7457,13 @@ class SchemaInterpreter:
                     matched_key, matched_fields = case_key, case_fields
                     break
 
-        if matched_fields is None:
+        if matched_fields is None and discriminator is None:
             # Where the discriminator is not in the output - an inline match with no
             # `name` reports nothing of itself, and a `remaining` match has none to
             # report - the case is recovered from which of its fields are there; the
-            # first of equal cases wins.
+            # first of equal cases, in declaration order, wins (PS-563). A given
+            # discriminator that matches no case takes the default, or is rejected
+            # (PS-565): the fields given cannot overrule it, and they did here.
             matched_key, matched_fields, _ = self._best_case(match_def, data)
 
         if matched_fields is None and match_def.get('remaining') is True \
@@ -7438,6 +7534,13 @@ class SchemaInterpreter:
             check_fits(round_to_integer(value), low, high, label, value)
             out.extend(int(value).to_bytes(int(length), byteorder))
         body = self._encode_field_list(matched_fields, data)
+        if match_def.get('remaining') is True and not getattr(self, '_ps564_depth', 1):
+            # PS-564: checked at the top, once the bytes after the match are known.
+            # Inside a tlv or repeat the bytes after it are not all in one field list,
+            # so it is not checked there.
+            self._ps564.append({'match': match_def, 'tail': len(body),
+                                'chosen': matched_key if matched_key is not None
+                                else 'default'})
         return prefixed_frame(bytes(out), body)
 
     def _nested_discriminator(self, match_def, data, label):
@@ -7564,7 +7667,9 @@ class SchemaInterpreter:
         data = self._derive_inputs(fields, data)                           # PS-551
         out = FrameBuffer()             # CR-2026-136: laid out as the decoder reads it
         omitted_optional = None     # the first optional field the input left out (PS-405)
+        tails = TailLevel(self, out)                     # PS-564
         for kind, item in self._bitfield_runs(fields):
+            tails.start()
             # A run of bit ranges shares one span of bytes, so it is packed once rather
             # than a byte per field (CR-2026-023).
             if kind == 'bits':
@@ -7658,8 +7763,10 @@ class SchemaInterpreter:
                 self._place_bool(f, value, out)                       # CR-2026-136
                 continue
             out.extend(self._encode_field(f, value))
+        tails.close()
         return out.frame()
 
+    @tail_unchecked
     def _encode_repeat_elements(self, field_def: Dict[str, Any], data: Dict[str, Any],
                                 records: List[Any], count: Optional[int] = None) -> bytes:
         """A repeat's elements back to back: no framing, no trailer.
@@ -7721,6 +7828,7 @@ class SchemaInterpreter:
             out.extend(element)
         return bytes(out)
 
+    @tail_unchecked
     def _encode_repeat(self, field_def: Dict[str, Any], data: Dict[str, Any],
                        siblings: Optional[List[Dict[str, Any]]] = None) -> bytes:
         """Encode a ``repeat``: its records back to back, then any trailer.
@@ -7975,6 +8083,7 @@ class SchemaInterpreter:
             forward = self._apply_transform(forward, field_def['transform'])
         return True, forward is not OMITTED and forward == given
 
+    @tail_unchecked
     def _encode_tlv(self, field_def: Dict[str, Any], data: Dict[str, Any]) -> bytes:
         """Rebuild a TLV payload from decoded output.
 

@@ -190,6 +190,8 @@ public static class SchemaEncoder
         {
             data ??= new Dictionary<string, object?>();
             var output = new List<byte>();
+            _t564.Clear();
+            _d564 = 0;          // PS-564 is checked from here, outside any tlv or repeat
 
             // PS-551: a value the input omits but the rest of it fixes - a repeat's count or
             // byte_length field, a match's discriminator, a flagged mask - is derived before
@@ -223,6 +225,21 @@ public static class SchemaEncoder
                 catch (InvalidOperationException e)
                 {
                     _result.Errors.Add(e.Message);
+                }
+            }
+
+            if (_result.Errors.Count == 0)
+            {
+                // PS-564: the bytes from each `remaining` match to the end select its case.
+                foreach (var check in _t564)
+                {
+                    var selected = RemainingSelection(check.Match, check.Tail);
+                    if (!SameSelection(selected, check.Chosen))
+                    {
+                        _result.Errors.Add(RemainingMismatch(check.Match, check.Tail, selected,
+                            check.Chosen));
+                        break;
+                    }
                 }
             }
 
@@ -540,8 +557,25 @@ public static class SchemaEncoder
             // supplied after an omitted earlier one cannot be placed.
             string? omittedOptional = null;
 
+            // PS-564 (the reference's TailLevel): once an item of this list is written, the
+            // bytes it added go to the tail of every check an earlier item registered.
+            var levelChecks = new List<Check564>();
+            int? levelSize = null;
+            int levelMark = 0;
+            void CloseItem()
+            {
+                if (levelSize == null) return;
+                int grown = output.Size - levelSize.Value;
+                foreach (var c in levelChecks) c.Tail += grown;
+                levelChecks.AddRange(_t564.Skip(levelMark));
+                levelSize = null;
+            }
+
             foreach (var field in fields)
             {
+                CloseItem();
+                levelSize = output.Size;
+                levelMark = _t564.Count;
                 if (field.Optional && !string.IsNullOrEmpty(field.Name) && !field.Name.StartsWith("_"))
                 {
                     var key = ResolveEncodeName(field, data) ?? field.Name;
@@ -582,6 +616,7 @@ public static class SchemaEncoder
                 if (field.Consume >= 1) Flush();
             }
             Flush();
+            CloseItem();
             var frameBytes = output.Frame();
             _frameBytes = frameBytes;
             _framePending = output.PendingCount;
@@ -1157,7 +1192,16 @@ public static class SchemaEncoder
         /// and byte_length, literal or referenced. An absent list wrote nothing, leaving the
         /// frame short of the elements a count or byte_length field still declared.
         /// </summary>
+        // PS-564 is not checked inside a tlv or repeat (the reference's tail_unchecked).
         byte[] EncodeRepeat(SchemaField field, Dictionary<string, object?> data,
+            List<SchemaField> siblings)
+        {
+            _d564++;
+            try { return EncodeRepeatUnchecked(field, data, siblings); }
+            finally { _d564--; }
+        }
+
+        byte[] EncodeRepeatUnchecked(SchemaField field, Dictionary<string, object?> data,
             List<SchemaField> siblings)
         {
             data.TryGetValue(field.Name ?? "", out var raw);
@@ -1216,7 +1260,16 @@ public static class SchemaEncoder
         /// or the input states one, is checked after the refusals that concern the schema
         /// rather than the input (PS-550, PS-542, PS-387).
         /// </summary>
+        // PS-564 is not checked inside a tlv or repeat (the reference's tail_unchecked).
         byte[] EncodeRepeatElements(SchemaField field, Dictionary<string, object?> data,
+            List<object?> list, long? count)
+        {
+            _d564++;
+            try { return EncodeRepeatElementsUnchecked(field, data, list, count); }
+            finally { _d564--; }
+        }
+
+        byte[] EncodeRepeatElementsUnchecked(SchemaField field, Dictionary<string, object?> data,
             List<object?> list, long? count)
         {
             // PS-550: a sibling identifying these values position by position is given as
@@ -1379,7 +1432,9 @@ public static class SchemaEncoder
                 // constructs a branch holds (BestCase); a `remaining` match given no case's
                 // fields takes the case matching 0 bytes, which writing nothing selects, unless
                 // its default list explains some of the input.
-                matched ??= BestCase(match, data).best;
+                // PS-563 by score only where no discriminator is given: a given one that
+                // matches no case takes the default or is rejected (PS-565).
+                if (discriminator == null) matched ??= BestCase(match, data).best;
                 if (matched == null && match.MatchRemaining
                     && (BodyScore(DefaultBody(match), data) ?? 0) == 0)
                     matched = match.Cases.FirstOrDefault(c => !IsDefaultCase(c)
@@ -1453,6 +1508,7 @@ public static class SchemaEncoder
                     fallbackBody.Length);
                 fallbackOut.AddRange(fallbackBody);
                 var fallbackBytes = fallbackOut.ToArray();
+                Register564(match, fallbackBody.Length, null);
                 _frameBytes = fallbackBytes;
                 _framePending = fallbackPending;
                 _frameMeta = fallbackMeta;
@@ -1489,10 +1545,64 @@ public static class SchemaEncoder
             var bodyMeta = FrameMeta.Prefixed(output.Count, MetaOf(body), body.Length);
             output.AddRange(body);
             var matchBytes = output.ToArray();
+            Register564(match, body.Length, IsDefaultCase(matched!) ? null : matched);
             _frameBytes = matchBytes;
             _framePending = bodyPending;
             _frameMeta = bodyMeta;
             return matchBytes;
+        }
+
+        // --- PS-564: the bytes a `remaining` match writes select its case --------------
+
+        /// <summary>A `remaining` match's chosen case (null for its default) and the bytes
+        /// from it to the end of the payload so far.</summary>
+        sealed class Check564
+        {
+            public SchemaField Match = null!;
+            public long Tail;
+            public MatchCase? Chosen;
+        }
+
+        readonly List<Check564> _t564 = new();
+        int _d564 = 1;      // inside a tlv or repeat, or outside Run: not checked
+
+        void Register564(SchemaField match, int bodyLength, MatchCase? chosen)
+        {
+            // Inside a tlv or repeat the bytes after the match are not all in one field
+            // list, so it is not checked there (the reference's tail_unchecked).
+            if (match.MatchRemaining && _d564 == 0)
+                _t564.Add(new Check564 { Match = match, Tail = bodyLength, Chosen = chosen });
+        }
+
+        static readonly MatchCase DefaultSelected = new() { IsDefault = true };
+
+        /// <summary>The case a decoder selects for <paramref name="count"/> bytes left
+        /// (PS-414, PS-415): the first in declaration order whose key holds the count, else
+        /// <see cref="DefaultSelected"/> where the match declares a default, else null.</summary>
+        static MatchCase? RemainingSelection(SchemaField match, long count)
+        {
+            foreach (var c in match.Cases)
+                if (!IsDefaultCase(c) && CaseMatches((double)count, c.CaseValue)) return c;
+            if (match.Cases.Any(IsDefaultCase) || match.MatchDefault is List<SchemaField>
+                || (match.MatchDefault as string) == "skip")
+                return DefaultSelected;
+            return null;
+        }
+
+        static bool SameSelection(MatchCase? selected, MatchCase? chosen)
+            => chosen == null ? object.ReferenceEquals(selected, DefaultSelected)
+                : object.ReferenceEquals(selected, chosen);
+
+        static string RemainingMismatch(SchemaField match, long count, MatchCase? selected,
+            MatchCase? chosen)
+        {
+            var label = !string.IsNullOrEmpty(match.Name) ? $"'{match.Name}'" : "an unnamed match";
+            static string Describe(MatchCase? c) => c == null ? "no case"
+                : object.ReferenceEquals(c, DefaultSelected) || IsDefaultCase(c) ? "its default"
+                : "case " + (c.CaseValue is string text ? text : DiscriminatorText(c.CaseValue!));
+            return $"Field {label}: the {count} byte(s) from it to the end of the payload select "
+                + $"{Describe(selected)}, not {Describe(chosen ?? DefaultSelected)}, the case its "
+                + "input gives (PS-564)";
         }
 
         static bool IsDefaultCase(MatchCase c)
@@ -1925,7 +2035,15 @@ public static class SchemaEncoder
         /// a wildcard tag (PS-270), or a field the data does not carry - throws, so the
         /// caller records it against the payload rather than writing a wrong tag.
         /// </remarks>
+        // PS-564 is not checked inside a tlv or repeat (the reference's tail_unchecked).
         byte[] EncodeTLV(SchemaField tlv, Dictionary<string, object?> data)
+        {
+            _d564++;
+            try { return EncodeTLVUnchecked(tlv, data); }
+            finally { _d564--; }
+        }
+
+        byte[] EncodeTLVUnchecked(SchemaField tlv, Dictionary<string, object?> data)
         {
             // `merge: false` reports its entries as a list under `channels`, which the
             // claiming below cannot see, so this wrote nothing and reported success. Encoding
@@ -2970,6 +3088,9 @@ internal sealed class FrameBuffer
     public IReadOnlyList<byte> Pending => _pending;
 
     public int PendingCount => _pending.Count;
+
+    /// <summary>Bytes written and pending, for PS-564's tails.</summary>
+    public int Size => _buf.Count + _pending.Count;
 
     /// <summary>Write a field's bytes, ORed from the start with whatever is pending; the
     /// pending bytes they cover are then dropped. Where the bytes are a nested field list's
