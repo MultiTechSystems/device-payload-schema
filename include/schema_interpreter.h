@@ -1964,6 +1964,10 @@ typedef struct {
     char name[SCHEMA_MAX_NAME_LEN];
     field_value_t value;
     bool is_int;               /* value.i64 holds it (encode_inputs_add_int), else value.f64 */
+    /* Keyed by field index rather than by name (encode_inputs_add_int_at), for a schema
+     * that carries no names (PS-555, CR-2026-146). `name` is then "#<index>", the key
+     * the encoder looks it up by. Last member, so existing initializers leave it false. */
+    bool by_index;
     /* value.str holds `text_len` bytes of text (encode_inputs_add_text), for an `ascii`
      * field. Last members, so existing initializers leave them unset. */
     bool is_text;
@@ -1993,6 +1997,38 @@ static inline void encode_inputs_add_double(encode_inputs_t* inputs, const char*
     inputs->inputs[inputs->count].value.f64 = val;
     inputs->inputs[inputs->count].is_int = false;
     inputs->count++;
+}
+
+/* PS-555 (CR-2026-146): a schema loaded without its names - schema_t.nameless - is
+ * encoded from values keyed by field index, in schema order, as its decode reports them
+ * (result_get_index); "an encoder working from such a form takes each value by the same
+ * index". A schema with names keeps name keying. The two are not mixed: schema_encode
+ * refuses index-keyed inputs for a named schema and name-keyed ones for a nameless one,
+ * since either would otherwise be ignored and the field reported missing - or, worse,
+ * matched by a name that happened to look like an index.
+ *
+ * Returns false, adding nothing, where the inputs are full or `index` is outside the
+ * schema's field array. */
+static inline bool encode_inputs_add_at(encode_inputs_t* inputs, int index,
+                                        bool is_int, int64_t iv, double dv) {
+    if (inputs->count >= SCHEMA_MAX_FIELDS) return false;
+    if (index < 0 || index >= SCHEMA_MAX_FIELDS) return false;
+    encode_input_t* in = &inputs->inputs[inputs->count];
+    memset(in, 0, sizeof(*in));
+    snprintf(in->name, sizeof(in->name), "#%d", index);
+    if (is_int) in->value.i64 = iv; else in->value.f64 = dv;
+    in->is_int = is_int;
+    in->by_index = true;
+    inputs->count++;
+    return true;
+}
+
+static inline bool encode_inputs_add_int_at(encode_inputs_t* inputs, int index, int64_t val) {
+    return encode_inputs_add_at(inputs, index, true, val, 0.0);
+}
+
+static inline bool encode_inputs_add_double_at(encode_inputs_t* inputs, int index, double val) {
+    return encode_inputs_add_at(inputs, index, false, 0, val);
 }
 
 /* Text for an `ascii` field: `len` bytes, each the ISO 8859-1 character of the same
@@ -2488,8 +2524,37 @@ static inline int schema_encode_direction(
     memset(covered, 0, sizeof(covered));
     memset(scratch, 0, sizeof(scratch));
 
+    /* PS-555: a nameless schema takes its values by field index, a named one by name;
+     * an input of the other kind is refused rather than ignored. */
+    for (int k = 0; k < inputs->count; k++) {
+        if (inputs->inputs[k].by_index == schema->nameless) continue;
+        snprintf(result->error_msg, sizeof(result->error_msg),
+                 schema->nameless
+                     ? "input '%s' is keyed by name, and a schema without names takes "
+                       "each value by its field index (PS-555)"
+                     : "input '%s' is keyed by field index, and a schema with names takes "
+                       "each value by name (PS-555)",
+                 inputs->inputs[k].name);
+        result->error_code = SCHEMA_ERR_PARSE;
+        return SCHEMA_ERR_PARSE;
+    }
+    /* Each field's key where the schema has no names: "#<index>", the name an
+     * index-keyed input carries, so a message names the field by it ("Missing required
+     * field: #3") rather than by an empty name. */
+    char index_keys[SCHEMA_MAX_FIELDS][12];
+    field_def_t keyed;
+
     for (int i = 0; i < schema->field_count; i++) {
         const field_def_t* field = &schema->fields[i];
+        if (schema->nameless && field->type != FIELD_TYPE_SKIP) {
+            snprintf(index_keys[i], sizeof(index_keys[i]), "#%d", i);
+            keyed = *field;
+            memcpy(keyed.name, index_keys[i], sizeof(index_keys[i]));
+            field = &keyed;
+        }
+        /* Peeks are checked after the loop, so their names must outlive `keyed`. */
+        const char* key = schema->nameless && field->type != FIELD_TYPE_SKIP
+                          ? index_keys[i] : schema->fields[i].name;
 
         /* Skip internal/match fields for now. A skip is padding, not an internal value:
          * field_skip() names it `_skip`, so this used to drop it and every field after a
@@ -2519,7 +2584,7 @@ static inline int schema_encode_direction(
                 peeks[peek_count].given = false;
                 peeks[peek_count].endian = fendian;
                 peeks[peek_count].raw = 0;
-                peeks[peek_count].name = field->name;
+                peeks[peek_count].name = key;
                 peek_count++;
                 if (pos + base > filled) filled = pos + base;
                 continue;
@@ -2588,7 +2653,7 @@ static inline int schema_encode_direction(
             peeks[peek_count].raw = bits_extract(bits_read_base(scratch + at, base, fendian),
                                                  field->bit_start, width,
                                                  peeks[peek_count].is_signed);
-            peeks[peek_count].name = field->name;
+            peeks[peek_count].name = key;
             peek_count++;
             for (int b = 0; b < base; b++) {
                 covered[at + b] |= bits_byte_mask(mask, base, b, fendian);

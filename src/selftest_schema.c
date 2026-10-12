@@ -1073,6 +1073,73 @@ static void test_a_covered_peek_is_derived(void) {
     }
 }
 
+/* PS-555 (CR-2026-146): "an encoder working from such a form takes each value by the
+ * same index". The nameless blob above - u16, skip 1, u8 - encoded from values keyed by
+ * field index, as its decode reports them; a named schema keeps name keying, and the two
+ * are not mixed. */
+static void test_a_nameless_schema_encodes_by_index(void) {
+    uint8_t blob[5 + 12];
+    memcpy(blob, named_blob, sizeof(blob));
+    blob[4] = 3;                                  /* no name table */
+    schema_t s;
+    decode_result_t r;
+    encode_inputs_t in;
+    encode_result_t out;
+    TCHECK(schema_load_binary(&s, blob, sizeof(blob)) == SCHEMA_OK && s.nameless);
+
+    encode_inputs_init(&in);
+    TCHECK(encode_inputs_add_int_at(&in, 0, 0x0102));
+    TCHECK(encode_inputs_add_double_at(&in, 2, 7.0));
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_OK);
+    TCHECK(out.len == 4 && out.data[0] == 0x01 && out.data[1] == 0x02
+           && out.data[2] == 0x00 && out.data[3] == 0x07);
+
+    /* Decode, then encode the values by the indexes they were reported under. */
+    TCHECK(schema_decode(&s, named_payload, sizeof(named_payload), &r) == SCHEMA_OK);
+    encode_inputs_init(&in);
+    for (int i = 0; i < r.field_count; i++)
+        encode_inputs_add_int_at(&in, r.fields[i].field_index, r.fields[i].value.i64);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_OK);
+    TCHECK(out.len == 4 && memcmp(out.data, "\x01\x02\x00\x07", 4) == 0);
+
+    /* A missing index, and a value that does not fit, are named by their index. */
+    encode_inputs_init(&in);
+    encode_inputs_add_int_at(&in, 0, 1);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_PARSE && out.len == 0);
+    TCHECK(strcmp(out.error_msg, "Missing required field: #2") == 0);
+    encode_inputs_add_int_at(&in, 2, 256);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_OVERFLOW);
+    TCHECK(strcmp(out.error_msg, "Field '#2': 256 encodes as 256, outside 0 to 255 "
+                                 "(PS-168)") == 0);
+
+    /* A name-keyed input for a nameless schema is refused, not ignored. */
+    encode_inputs_init(&in);
+    encode_inputs_add_int_at(&in, 0, 1);
+    encode_inputs_add_int_at(&in, 2, 1);
+    encode_inputs_add_int(&in, "battery", 7);
+    TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_PARSE);
+    TCHECK(strcmp(out.error_msg, "input 'battery' is keyed by name, and a schema without "
+                                 "names takes each value by its field index (PS-555)") == 0);
+
+    /* And the other way round: the named blob takes names. */
+    schema_t named;
+    TCHECK(schema_load_binary(&named, named_blob, sizeof(named_blob)) == SCHEMA_OK);
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "soil_temperature", 1);
+    encode_inputs_add_int_at(&in, 2, 7);
+    TCHECK(schema_encode(&named, &in, &out) == SCHEMA_ERR_PARSE);
+    TCHECK(strcmp(out.error_msg, "input '#2' is keyed by field index, and a schema with "
+                                 "names takes each value by name (PS-555)") == 0);
+    encode_inputs_init(&in);
+    encode_inputs_add_int(&in, "soil_temperature", 0x0102);
+    encode_inputs_add_int(&in, "battery", 7);
+    TCHECK(schema_encode(&named, &in, &out) == SCHEMA_OK);
+    TCHECK(out.len == 4 && memcmp(out.data, "\x01\x02\x00\x07", 4) == 0);
+
+    TCHECK(!encode_inputs_add_int_at(&in, SCHEMA_MAX_FIELDS, 1));
+    TCHECK(!encode_inputs_add_int_at(&in, -1, 1));
+}
+
 /* PS-523 (CR-2026-109, CR-2026-132): a reference binds the value after the modifiers
  * and before the lookup. A `flagged` mask is a reference, so it shows what was bound:
  * bit 0 adds `a`, bit 1 adds `b` - mask-reference-binding.yaml's layout. */
@@ -1579,6 +1646,7 @@ void selftest_schema(void) {
     test_bit_ranges_are_laid_out_as_decoded();
     test_a_missing_input_is_named();
     test_a_covered_peek_is_derived();
+    test_a_nameless_schema_encodes_by_index();
     test_a_text_label_binds_its_number();
     test_an_enum_binds_its_code();
     test_a_reference_binds_the_modified_value();
