@@ -168,7 +168,7 @@ func exactCaseValue(c Case) (int64, bool) {
 // well, or the case stands for more than one value. Scored by bodyScore, so the fields
 // of a match nested in a case count, and a literal the input contradicts rules it out.
 func soleCaseGiven(m Field, data map[string]any) (int64, bool) {
-	best, tied, ok := bestCase(m, data)
+	best, tied, ok := bestCase(m, data, nil)
 	if !ok || tied {
 		return 0, false
 	}

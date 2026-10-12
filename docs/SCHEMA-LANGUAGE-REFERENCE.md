@@ -113,6 +113,21 @@ the range is an error (PS-420).
 | `bytes` | Raw bytes, reported as declared by `format:` (requires `length:`, PS-456) |
 | `base64` | Base64 encoded output (requires `length:`) |
 
+An `ascii` field that declares `numeral: decimal` or `numeral: hex` reports its digit text
+as the integer it spells (PS-560), so modifiers, lookups and references apply to it as to
+any integer. The text, after the trailing 0x00 padding is removed, must be wholly a numeral:
+`decimal` is an optional `+` or `-` and one or more of `0`-`9`, `hex` is one or more hex
+digits with no sign and no `0x`. Anything else (empty text, whitespace, a digit outside the
+base) is an error naming the field, never a prefix read as JavaScript's `parseInt` would.
+An encoder writes the integer in digits of the base, uppercase hex, `0`-filled to `length`
+after any sign, and rejects a negative `hex` value or one that does not fit (PS-561, PS-168).
+`numeral` on any other type, or with another value, is rejected at load.
+
+```yaml
+- {name: major, type: ascii, length: 4, numeral: hex}       # "001A" -> 26
+- {name: rssi,  type: ascii, length: 4, numeral: decimal}   # "-065" -> -65
+```
+
 A `bytes` field reports a **lowercase** hex string by default (PS-281). Its `format:` is
 one of `hex`, `hex:upper`, `base64` or `array` (PS-079), and a `separator:` goes between
 the bytes of either hex format (PS-391). `hex:upper` is a format, not a type: `type:

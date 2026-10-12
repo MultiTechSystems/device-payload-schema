@@ -164,6 +164,7 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "formula": (("py",), "legacy formula expression (Python only)"),
         "encode_formula": (("py",), "inverse of `formula` for encoding"),
         "encoding": (_DECODERS, "sign_magnitude | bcd | gray on a uN (PS-422)"),
+        "numeral": (_DECODERS, "decimal | hex: an ascii field reported as the integer its digits give (PS-560)"),
         "on": (("py",), "legacy `type: match` discriminator (`on: $var`)"),
         "cases": (("py",), "legacy `type: match` case list"),
         "valid_range": (("py", "go", "cs", "outschema"), "quality flag (_quality)"),

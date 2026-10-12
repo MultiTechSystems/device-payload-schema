@@ -21,6 +21,13 @@
           "minimum": 1,
           "description": "Byte length for bytes/string/hex/base64/bitfield_string/version_string types"
         },
+        "numeral": {
+          "enum": [
+            "decimal",
+            "hex"
+          ],
+          "description": "On an ascii field: report its digit text as the integer it spells, in base 10 or base 16, strictly (PS-560, PS-561)."
+        },
         "consume": {
           "type": "integer",
           "minimum": 0,

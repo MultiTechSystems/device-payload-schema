@@ -202,6 +202,7 @@ C_UNSUPPORTED_KEYS = {
     "formula": "the C interpreter has no formula",
     "guard": "the C interpreter has no guard",
     "encoding": "the C interpreter has no sign_magnitude/bcd/gray encodings",
+    "numeral": "the C interpreter holds ascii text, not the integer it spells (PS-560)",
     "sentinel": "the C interpreter has no sentinel (PS-427)",
     "out_of_range": "the C interpreter has no out_of_range: omit (PS-428)",
     "default": ("the C interpreter has no enum default, and no field default to write "

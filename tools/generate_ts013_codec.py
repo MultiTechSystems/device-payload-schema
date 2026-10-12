@@ -279,6 +279,20 @@ function encBf16(v, f) {
   return sign | word;
 }
 
+/* encode_numeral (PS-561): digits in the declared base, uppercase hex, 0-filled to the length
+ * after any sign; a negative hex value, or one that does not fit, is a PS-168 error. */
+function encNumeral(f, value, fixed) {
+  var n = encRint(Number(value));
+  var digits = f.numeral === "hex" ? Math.abs(n).toString(16).toUpperCase() : String(Math.abs(n));
+  var sign = n < 0 ? "-" : "";
+  var width = fixed !== null ? fixed : sign.length + digits.length;
+  if ((n < 0 && f.numeral === "hex") || sign.length + digits.length > width) {
+    encFail("Field '" + f.name + "': " + String(value) + " does not fit " + (fixed !== null ? fixed : digits.length) + " " + f.numeral + " digits (PS-168)");
+  }
+  while (sign.length + digits.length < width) digits = "0" + digits;
+  return sign + digits;
+}
+
 function encWriteFloat(out, value, type, endian) {
   var v = Number(value);
   var size = type === "f16" ? 2 : type === "f32" ? 4 : 8;
@@ -462,8 +476,9 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
   }
   if (encIsLiteral(f)) return;                       // PS-359: a literal writes nothing
   if (type === "string" || type === "ascii") {        // encode_ascii (PS-537)
-    var text = String(value), u = [], high = false;
     var fixed = typeof f.length === "number" && f.length >= 0 ? f.length : null;
+    if (f.numeral && type === "ascii") value = encNumeral(f, value, fixed);   // encode_numeral (PS-561)
+    var text = String(value), u = [], high = false;
     for (var c = 0; c < text.length; c++) {
       var code = text.charCodeAt(c);
       if (code > 0xFF) {
@@ -958,11 +973,39 @@ function encDefaultBody(m) {                          // _default_body
   return Array.isArray(d) ? d : null;
 }
 
+// A match's case keys in declaration order (PS-563): an object's integer-like keys
+// iterate ascending, so the generator records the order written as `__order`.
+function encCaseKeys(m) {
+  var cases = m.cases || {};
+  var keys = Array.isArray(m.__order) ? m.__order.filter(function (k) { return Object.prototype.hasOwnProperty.call(cases, k); }) : Object.keys(cases);
+  Object.keys(cases).forEach(function (k) { if (keys.indexOf(k) < 0) keys.push(k); });
+  return keys;
+}
+
+// remaining_selection (PS-564): the case a decoder selects for `count` bytes left.
+function encRemainingSelection(m, count) {
+  var cases = m.cases || {}, keys = encCaseKeys(m);
+  for (var i = 0; i < keys.length; i++) {
+    if (keys[i] !== "default" && encCasePattern(count, keys[i])) return keys[i];
+  }
+  var d = m["default"] === undefined ? "error" : m["default"];
+  if (Array.isArray(d) || d === "skip" || Array.isArray(cases["default"])) return "default";
+  return null;
+}
+
+function encRemainingMismatch(m, count, selected, chosen) {   // remaining_mismatch_message
+  var label = m.name ? "'" + m.name + "'" : "an unnamed match";
+  function describe(k) { return k === null ? "no case" : k === "default" ? "its default" : "case " + k; }
+  return "Field " + label + ": the " + count + " byte(s) from it to the end of the payload select " +
+         describe(selected) + ", not " + describe(chosen) + ", the case its input gives (PS-564)";
+}
+
 // _best_case: the case scoring highest, the first of equals, with `tied` where another
 // equalled it; null where none scores, or the default list scores higher than any.
 function encBestCase(m, data) {
-  var cases = m.cases || {}, best = null, bestHits = 0, tied = false;
-  for (var key in cases) {
+  var cases = m.cases || {}, best = null, bestHits = 0, tied = false, keys = encCaseKeys(m);
+  for (var ki = 0; ki < keys.length; ki++) {
+    var key = keys[ki];
     if (key === "default" || !Array.isArray(cases[key])) continue;
     var hits = encBodyScore(cases[key], data) || 0;
     if (hits > bestHits) { best = key; bestHits = hits; tied = false; }
@@ -1010,19 +1053,25 @@ function encMatch(out, f, data, ctx, peeked) {        // _encode_match
             String(disc) + " is not an integer, so it cannot be written (PS-557)");
   }
   if (disc !== null && disc !== undefined) {
-    for (var k in cases) {
+    var ordered = encCaseKeys(m);
+    for (var ki = 0; ki < ordered.length; ki++) {
+      var k = ordered[ki];
       if (k === "default") continue;
       if (encCasePattern(disc, k)) { key = k; body = cases[k]; break; }
     }
   }
-  if (body === null) {
+  if (body === null && (disc === null || disc === undefined)) {
+    // PS-563: by score only where no discriminator is given; a given one matching no
+    // case takes the default or is rejected (PS-565).
     var found = encBestCase(m, data);
     if (found) { key = found.key; body = found.body; }
   }
   if (body === null && m.remaining === true && !encBodyScore(encDefaultBody(m), data)) {
     // No case's fields given, nor the default's: the case matching 0 bytes is the one
     // writing nothing selects.
-    for (var zk in cases) {
+    var zeroKeys = encCaseKeys(m);
+    for (var zi = 0; zi < zeroKeys.length; zi++) {
+      var zk = zeroKeys[zi];
       if (zk !== "default" && Array.isArray(cases[zk]) && encCasePattern(0, zk)) { key = zk; body = cases[zk]; break; }
     }
   }
@@ -1061,7 +1110,13 @@ function encMatch(out, f, data, ctx, peeked) {        // _encode_match
     encFits(encRint(Number(value)), parseInt(length, 10) * 8, false, { name: label }, value);
     encWriteInt(out, value, parseInt(length, 10), false, ctx.endian);
   }
-  return encList(out, body, data, ctx);
+  var bodyStart = out.length;
+  var carriedBack = encList(out, body, data, ctx);
+  if (m.remaining === true && ctx.d564 === 0) {
+    // PS-564: checked at the top, once the bytes after the match are known.
+    ctx.t564.push({ m: m, tail: out.length - bodyStart, chosen: key === null ? "default" : String(key) });
+  }
+  return carriedBack;
 }
 
 // _nested_discriminator (CR-2026-151): [value, case key or null, branch fields] where a
@@ -1143,6 +1198,12 @@ function encRepeatSize(f, key, data, siblings) {      // _repeat_size
 }
 
 function encRepeatElements(out, f, data, records, count, ctx) {   // _encode_repeat_elements
+  // PS-564 is not checked inside a tlv or repeat (tail_unchecked).
+  ctx.d564 = (ctx.d564 === undefined ? 1 : ctx.d564) + 1;
+  try { return encRepeatElementsBody(out, f, data, records, count, ctx); } finally { ctx.d564--; }
+}
+
+function encRepeatElementsBody(out, f, data, records, count, ctx) {
   var name = f.name || "";
   // PS-550: a sibling identifying these values position by position is given as many
   // values as this repeat, as a decoder requires (PS-546).
@@ -1193,6 +1254,12 @@ function encRepeatElements(out, f, data, records, count, ctx) {   // _encode_rep
 }
 
 function encRepeat(out, f, data, ctx, siblings) {     // _encode_repeat
+  // PS-564 is not checked inside a tlv or repeat (tail_unchecked).
+  ctx.d564 = (ctx.d564 === undefined ? 1 : ctx.d564) + 1;
+  try { return encRepeatBody(out, f, data, ctx, siblings); } finally { ctx.d564--; }
+}
+
+function encRepeatBody(out, f, data, ctx, siblings) {
   var name = f.name || "", raw = data[name];
   if (raw !== undefined && raw !== null && typeof raw !== "object") encFail("repeat field " + JSON.stringify(name) + ": expected a list of records, got " + typeof raw);
   var records = encRecords(f, data);
@@ -1439,6 +1506,12 @@ function encMatchClaims(m) {
 }
 
 function encTlv(out, f, data, ctx) {                  // _encode_tlv
+  // PS-564 is not checked inside a tlv or repeat (tail_unchecked).
+  ctx.d564 = (ctx.d564 === undefined ? 1 : ctx.d564) + 1;
+  try { return encTlvBody(out, f, data, ctx); } finally { ctx.d564--; }
+}
+
+function encTlvBody(out, f, data, ctx) {
   var tlv = f.tlv || {}, cases = tlv.cases || {}, lsize = tlv.length_size || 0;
   if (tlv.merge === false) encFail("a tlv with merge: false reports its entries under 'channels', and encoding them is not supported");
   var order = Object.keys(data), has = Object.prototype.hasOwnProperty;
@@ -1818,12 +1891,25 @@ function encList(out, fields, data, ctx, top) {
   // CR-2026-136: a frame laid out as a decoder reads it (FrameBuffer). A bit range or
   // bool that does not consume leaves its bytes pending, and the next field's are ORed in.
   var fr = { out: [], pend: [], cov: {}, pk: [] };
+  // PS-564 (TailLevel): bytes an item adds go to the checks earlier items registered.
+  var tl = { checks: [], size: null, mark: 0 };
+  function tlClose() {
+    if (tl.size === null) return;
+    var grown = fr.out.length + fr.pend.length - tl.size;
+    tl.checks.forEach(function (c) { c.tail += grown; });
+    if (ctx.t564) tl.checks = tl.checks.concat(ctx.t564.slice(tl.mark));
+    tl.size = null;
+  }
   encRuns(fields).forEach(function (item) {
+    tlClose();
+    tl.size = fr.out.length + fr.pend.length;
+    tl.mark = ctx.t564 ? ctx.t564.length : 0;
     if (item.bits) { encBitRun(fr, item.bits, data, ctx); return; }
     var tmp = [];
     var carried = encOne(item, tmp);
     encEmit(fr, tmp, typeof carried === "number" ? carried : 0);
   });
+  tlClose();
   var base = out.length, total = fr.out.length + fr.pend.length;
   for (var fo = 0; fo < fr.out.length; fo++) out.push(fr.out[fo]);
   for (var fp = 0; fp < fr.pend.length; fp++) out.push(fr.pend[fp]);
@@ -1904,10 +1990,14 @@ function encList(out, fields, data, ctx, top) {
 
 function encodeRoot(fields, data, endian) {
   // wa: PS-537's warnings, reported after the others as the reference reports them.
-  var ctx = { endian: endian, w: [], wa: [] }, out = [];
+  var ctx = { endian: endian, w: [], wa: [], t564: [], d564: 0 }, out = [];
   ENC_SCOPE = fields;
   encList(out, fields, data || {}, ctx, true);
   encCheckPeeks(out);                                    // PS-551 (CR-2026-141)
+  ctx.t564.forEach(function (c) {                        // PS-564
+    var selected = encRemainingSelection(c.m, c.tail);
+    if (selected !== c.chosen) encFail(encRemainingMismatch(c.m, c.tail, selected, c.chosen));
+  });
   if (!out.length) {
     var empty = encEmptyPayloadError(fields, data || {});   // PS-442
     if (empty) encFail(empty);
@@ -2038,6 +2128,10 @@ def _annotate_on_repeat(node):
     if not isinstance(node, dict):
         return node
     out = {k: _annotate_on_repeat(v) for k, v in node.items()}
+    match = node.get('match')
+    if isinstance(match, dict) and isinstance(match.get('cases'), dict) and not node.get('type'):
+        # PS-563: a tie goes to the case declared first, which the runtime reads here.
+        out['match'] = dict(out['match'], __order=[str(key) for key in match['cases']])
     tlv = node.get('tlv')
     if isinstance(tlv, dict) and isinstance(tlv.get('cases'), dict):
         modes, last_members, _ = _tlv_repeat_modes(tlv)
@@ -2141,6 +2235,21 @@ NUMERIC_TYPE_SIZES = {
 
 def type_size(t: str) -> Optional[int]:
     return NUMERIC_TYPE_SIZES.get(str(t))
+
+
+def slice_base_size(base_type: str) -> Optional[int]:
+    """Bytes in the base of a bit range (PS-059): any uN or sN of a whole number of
+    bytes, 8 to 64 bits. `u40`, `u48` and `u56` are bases only - no plain field has
+    those types - so type_size, which knows the plain ones, answered None for them and the
+    generator emitted a comment where the field's read should have been, leaving the
+    name unbound for a match after it."""
+    size = type_size(base_type)
+    if size is not None:
+        return size
+    m = re.match(r'^[us](\d+)$', base_type)
+    if m and int(m.group(1)) % 8 == 0 and 8 <= int(m.group(1)) <= 64:
+        return int(m.group(1)) // 8
+    return None
 
 
 def parse_bit_slice_type(t: str) -> Optional[Tuple[str, int, int]]:
@@ -3930,10 +4039,10 @@ function writeS(buf, pos, size, value, endian) {
         bit_slice = parse_bit_slice_type(ftype)
         if bit_slice is not None:
             base_type, bit_start, bit_width = bit_slice
-            base_size = type_size(base_type)
+            base_size = slice_base_size(base_type)
             if base_size is None:
-                lines.append(f'{i}  // TODO: unsupported base type for {ftype}')
-                return lines
+                raise ValueError(f"Field '{name}': {ftype} has no base of a whole number of "
+                                 f"bytes, 8 to 64 bits (PS-059)")
 
             eo = field_endian_override(base_type, field)
             endian_arg = f'"{eo}"' if eo else 'endian'
@@ -4071,6 +4180,24 @@ function writeS(buf, pos, size, value, endian) {
                 warning = json.dumps(ASCII_HIGH_BYTE_WARNING.format(field.get('name')))
                 lines.append(f'{i}  if (/[\\u0080-\\u00ff]/.test({js_name})) wn.push({warning});')
                 lines.append(f'{i}  {js_name} = {js_name}.replace(/\\u0000+$/, "");')
+                if field.get('numeral'):
+                    # PS-560: the whole text is a numeral of the declared base, or an error
+                    # naming the field; parseInt alone would take a prefix.
+                    base = field['numeral']
+                    pattern = '/^[+-]?[0-9]+$/' if base == 'decimal' else '/^[0-9A-Fa-f]+$/'
+                    lines.append(f'{i}  if (!{pattern}.test({js_name})) throw new Error("Field \'" + '
+                                 f'{json.dumps(str(field.get("name")))} + "\': \'" + {js_name} + "\' is not a '
+                                 f'{base} numeral (PS-560)");')
+                    lines.append(f'{i}  {js_name} = parseInt({js_name}, {10 if base == "decimal" else 16});')
+                    val_expr = self._apply_modifiers_expr(js_name, field)
+                    lines.append(f'{i}  var {js_name}_out = {val_expr};')
+                    lines.extend(f'{i}  {s}' for s in self._bind_js(field, js_name, f'{js_name}_out', False))
+                    if not name.startswith('_'):
+                        guards, target = name_from_to_js(field, js_name)
+                        for guard in guards:
+                            lines.append(f'{i}  {guard}')
+                        lines.append(f'{i}  {target} = {js_name}_out;')
+                    return lines
             elif ftype == 'bytes' and field.get('format', 'hex') in ('base64', 'array'):
                 # PS-079: the declared format. Ignored before, so every bytes field was
                 # rendered as lowercase hex whatever the schema asked for.
@@ -4440,7 +4567,7 @@ function writeS(buf, pos, size, value, endian) {
                 # the count is the low nibble of the next byte - took two bytes and
                 # every record after it read from the wrong offset.
                 base_type, bit_start, bit_width = tf_slice
-                base_size = type_size(base_type) or 1
+                base_size = slice_base_size(base_type) or 1
                 if base_size >= 7:
                     lines.append(f'{i}    var {tfname} = bitRange(orderedBytes(buf, pos, '
                                  f'{base_size}, endian), {bit_start}, {bit_width}, '

@@ -118,6 +118,8 @@ type Field struct {
 	Type        FieldType      `json:"type" yaml:"type"`
 	// Encoding is a named code on an unsigned integer (PS-422): sign_magnitude, bcd, gray.
 	Encoding string `json:"encoding,omitempty" yaml:"encoding,omitempty"`
+	// Numeral is `decimal` or `hex` on an ascii field reported as an integer (PS-560).
+	Numeral string `json:"numeral,omitempty" yaml:"numeral,omitempty"`
 	// GroupEndian is a byte_group's own byte order (PS-364), empty for the context's.
 	GroupEndian string `json:"-" yaml:"-"`
 	// IntegerResult marks a computed field written `type: integer` (PS-283); its Type
@@ -247,6 +249,9 @@ type Field struct {
 	// decl is the field's declaration as written (after $ref splicing), from which its
 	// _meta entry is derived (CR-2026-096). See meta.go.
 	decl map[string]any
+	// matchDecl is an inline match's mapping as written, whose `cases` give the cases'
+	// declaration order (PS-563) through the schema's keyOrder; Cases are kept sorted.
+	matchDecl map[string]any
 }
 
 // Transform represents a single transformation stage.
@@ -437,6 +442,12 @@ type EncodeContext struct {
 	// scope is the resolved field list being encoded, whose declared names a tlv's
 	// name_from check excludes (the reference's _encode_scope).
 	scope []Field
+	// ps564 holds each `remaining` match's chosen case and where it started, checked at
+	// the end of the encode (PS-564); nil in a branch, a tlv's entry, where the bytes after
+	// the match are not this buffer's. ps564Depth counts the repeats being encoded, inside
+	// which a `remaining` match is not checked either (the reference's tail_unchecked).
+	ps564      *[]remainingCheck
+	ps564Depth int
 }
 
 // NewEncodeContext creates a new encode context.
@@ -1182,6 +1193,9 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 	if encoding, ok := fm["encoding"].(string); ok {
 		f.Encoding = encoding
 	}
+	if numeral, ok := fm["numeral"].(string); ok {
+		f.Numeral = numeral
+	}
 	if typ, ok := fm["type"].(string); ok {
 		f.Type = canonicalFieldType(typ)
 		// `integer` is `number` declaring an integer result (PS-283), so it takes
@@ -1810,6 +1824,7 @@ func parseFieldMap(fm map[string]any, node *yaml.Node) Field {
 		// PS-414: the discriminator is the count of bytes remaining.
 		matchField.MatchRemaining = matchRaw["remaining"] == true
 		matchField.Cases = parseMatchCases(matchRaw["cases"])
+		matchField.matchDecl = matchRaw
 		f.MatchInline = &matchField
 	}
 	
@@ -2407,7 +2422,7 @@ func decodeFlagged(fd *FlaggedDef, ctx *DecodeContext) (map[string]any, error) {
 }
 
 // bitRangePattern matches a bit-range type such as u8[0:0] or u16[4:11].
-var bitRangePattern = regexp.MustCompile(`^([us](?:8|16|24|32|64))\[(\d+):(\d+)\]$`)
+var bitRangePattern = regexp.MustCompile(`^([us](?:8|16|24|32|40|48|56|64))\[(\d+):(\d+)\]$`)
 
 // decodeBitRange extracts a contiguous bit range from an unsigned base value.
 //
@@ -2643,6 +2658,13 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 			return nil, err
 		}
 		value = decodeASCII(field.Name, data, ctx) // PS-534, PS-538
+		if field.Numeral != "" {
+			n, err := decodeNumeral(field.Name, value.(string), field.Numeral) // PS-560
+			if err != nil {
+				return nil, err
+			}
+			value = n
+		}
 
 	case TypeEnum, TypeEnumLower:
 		// Enum: read base type and map to string
@@ -4144,6 +4166,7 @@ func (s *Schema) encodeToContext(
 	ctx.TLVOrder = order
 	ctx.Definitions = s.Definitions
 	ctx.order = s.keyOrder
+	ctx.ps564 = &[]remainingCheck{}
 
 	// Encode header fields first
 	if len(s.Header) > 0 {
@@ -4181,10 +4204,14 @@ func (s *Schema) encodeToContext(
 	if err := ctx.checkPeeks(0); err != nil { // PS-551 (CR-2026-141)
 		return nil, err
 	}
+	if err := ctx.checkRemaining(); err != nil { // PS-564
+		return nil, err
+	}
 	if len(ctx.Buffer) == 0 {
 		// PS-442: the last line against a construct that wrote nothing and said so to no
 		// one - a match with no case chosen, a tlv entry no case claimed.
-		if err := emptyPayloadError(append(append([]Field{}, s.Header...), fields...), data); err != nil {
+		if err := emptyPayloadError(append(append([]Field{}, s.Header...), fields...), data,
+			ctx.order); err != nil {
 			return nil, err
 		}
 	}
@@ -4785,6 +4812,10 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 // bytes itself, so encoding writes them back; a match on field: $var read nothing,
 // because the variable came from a field earlier in the list that is encoded on its own.
 func encodeMatch(field Field, siblings []Field, data map[string]any, ctx *EncodeContext) error {
+	// PS-564: the position a decoder reads a `remaining` match's count from.
+	matchStart := len(ctx.Buffer)
+	// PS-563: on encode, the cases in declaration order; Cases stay sorted for decode.
+	declared := declaredCases(field, ctx.order)
 	var discriminator any
 	if field.Name != "" {
 		if v, ok := data[field.Name]; ok {
@@ -4828,7 +4859,7 @@ func encodeMatch(field Field, siblings []Field, data map[string]any, ctx *Encode
 	if discriminator != nil {
 		if f, ok := toFloat64(discriminator); ok && f != math.Trunc(f) {
 			// A fraction selects no case toInt would truncate it into (decodeMatch).
-			for _, c := range field.Cases {
+			for _, c := range declared {
 				raw := c.Case
 				if raw == nil {
 					raw = c.Match
@@ -4839,7 +4870,7 @@ func encodeMatch(field Field, siblings []Field, data map[string]any, ctx *Encode
 				}
 			}
 		} else if intVal, ok := toInt(discriminator); ok {
-			for _, c := range field.Cases {
+			for _, c := range declared {
 				if caseMatchesValue(intVal, c) {
 					chosen, chosenKey = nonNilFields(c.Fields), fmt.Sprintf("%v", c.Case)
 					break
@@ -4857,7 +4888,7 @@ func encodeMatch(field Field, siblings []Field, data map[string]any, ctx *Encode
 	// heuristic below is the only thing that can choose a branch, and a default that
 	// claims no names would beat a case that does.
 	if chosen == nil && discriminator != nil {
-		for _, c := range field.Cases {
+		for _, c := range declared {
 			if c.Default {
 				chosen, chosenKey = nonNilFields(c.Fields), "default"
 				break
@@ -4873,18 +4904,21 @@ func encodeMatch(field Field, siblings []Field, data map[string]any, ctx *Encode
 		}
 	}
 
-	if chosen == nil {
+	if chosen == nil && discriminator == nil {
 		// Where the discriminator is not in the output - an inline match with no `name`
 		// reports nothing of itself, and a `remaining` match has none to report - the case
-		// is recovered from which of its fields are there (bodyScore, no-silent-empty).
-		if c, _, ok := bestCase(field, data); ok {
+		// is recovered from which of its fields are there (bodyScore, no-silent-empty),
+		// the first of equal cases in declaration order (PS-563). A given discriminator
+		// matching no case takes the default or is rejected (PS-565): the fields given
+		// do not overrule it.
+		if c, _, ok := bestCase(field, data, ctx.order); ok {
 			chosen, chosenKey = nonNilFields(c.Fields), fmt.Sprintf("%v", c.Case)
 		}
 	}
 	if chosen == nil && field.MatchRemaining && !defaultScores(field, data) {
 		// No case's fields are given: the case matching 0 bytes is the one writing nothing
 		// selects (pm-io-5-sm's `0..1: []`). Its fields, if any, are asked for as any are.
-		for _, c := range field.Cases {
+		for _, c := range declared {
 			if !c.Default && caseMatchesValue(0, c) {
 				chosen, chosenKey = nonNilFields(c.Fields), fmt.Sprintf("%v", c.Case)
 				if chosen == nil {
@@ -4979,6 +5013,15 @@ func encodeMatch(field Field, siblings []Field, data map[string]any, ctx *Encode
 			return err
 		}
 		ctx.Write(encodeUint(uint64(value), field.Length, ctx.Endian))
+	}
+	if field.MatchRemaining && ctx.ps564 != nil && ctx.ps564Depth == 0 {
+		// PS-564: checked at the end of the encode, once the bytes after it are known.
+		key := chosenKey
+		if key == "" {
+			key = "default"
+		}
+		*ctx.ps564 = append(*ctx.ps564, remainingCheck{match: field, start: matchStart,
+			chosen: key, declared: declared})
 	}
 	return encodeFields(chosen, data, ctx)
 }
@@ -5080,6 +5123,8 @@ func encodeRef(ref string, data map[string]any, ctx *EncodeContext) error {
 // byte_length, literal or referenced. An absent list wrote nothing, leaving the frame
 // short of the elements a count or byte_length field still declared (PS-442).
 func encodeRepeat(field Field, data map[string]any, ctx *EncodeContext, siblings []Field) error {
+	ctx.ps564Depth++ // PS-564 is not checked inside a repeat (tail_unchecked)
+	defer func() { ctx.ps564Depth-- }()
 	raw, present := data[field.Name]
 	if present && raw != nil {
 		switch raw.(type) {
@@ -5130,6 +5175,8 @@ func encodeRepeat(field Field, data map[string]any, ctx *EncodeContext, siblings
 // none; otherwise the list must have that many values (PS-551), checked after the
 // refusals that concern the schema rather than the input.
 func encodeRepeatRecords(field Field, records []any, ctx *EncodeContext, count int) error {
+	ctx.ps564Depth++ // PS-564 is not checked inside a repeat (tail_unchecked)
+	defer func() { ctx.ps564Depth-- }()
 	if recordsReachable(field.Fields) {
 		// PS-542: the records do not say which element they came from.
 		return fmt.Errorf("Repeat '%s' has elements that yield several records, which cannot be encoded (PS-542)", field.Name)
@@ -5966,6 +6013,15 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 				fixed = field.Length
 			}
 			strVal, ok := value.(string)
+			if field.Numeral != "" {
+				if numVal, isNum := toFloat64(value); isNum {
+					text, err := encodeNumeral(field.Name, numVal, fixed, field.Numeral) // PS-561
+					if err != nil {
+						return err
+					}
+					strVal, ok = text, true
+				}
+			}
 			if !ok {
 				strVal = fmt.Sprintf("%v", value)
 			}

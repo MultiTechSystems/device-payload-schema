@@ -323,6 +323,7 @@ public static partial class SchemaParser
     {
         var name = fm.TryGetValue("name", out var n) ? Scalar(n) : "?";
         var type = fm.TryGetValue("type", out var t) ? Scalar(t) : "";
+        Numeral.Check(fm);                                              // PS-560
         if (fm.Children.ContainsKey(new YamlScalarNode("match_value")))
             throw new InvalidOperationException($"Field '{name}': match_value is withdrawn; write a signed "
                 + "type (sN), a signed bit range (sN[start:end]), encoding, match or guard instead (PS-426)");
@@ -907,6 +908,7 @@ public static partial class SchemaParser
 
         // Byte group
         if (fm.TryGetValue("encoding", out var encodingNode)) f.Encoding = Scalar(encodingNode);
+        if (fm.TryGetValue("numeral", out var numeralNode)) f.Numeral = Scalar(numeralNode);
         if (fm.TryGetValue("byte_group", out var bgNode))
         {
             if (bgNode is YamlSequenceNode bgSeq)

@@ -232,11 +232,11 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 2129 |
-| Go | `go/schema/corpus_conformance_test.go` | 2722 | 2147 (plain API 2119) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2722 | 2130 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2722 | 2129 |
-| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 569 of 569 attempted | n/a |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2133 |
+| Go | `go/schema/corpus_conformance_test.go` | 2727 | 2151 (plain API 2123) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2727 | 2134 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2727 | 2133 |
+| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 575 of 575 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
 its own implementation's actual; trust it over this table.
@@ -816,10 +816,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2129 |
-| Go | `go/schema/corpus_encode_test.go` | 2147 (plain 2119) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2129 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2130 |
+| Python | `tests/test_encode_round_trip.py` | 2133 |
+| Go | `go/schema/corpus_encode_test.go` | 2151 (plain 2123) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2133 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2134 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 - **A name may be an object under one tag and a scalar under another, and a tlv encoder
@@ -982,6 +982,22 @@ same values); `..._0006160405fc` is a separate gap.
     nested match reads the discriminator (rb02b's reads `$device_type`), so its `default`
     stands for every non-zero report type and nothing in the input fixes it.
 
+**A bit range's base may be any whole number of bytes from 1 to 8, and a wide non-consuming one
+binds its name as a selector** (`u40`, `u48`, `u56` as well as the plain widths): a byte several
+positions ahead is the last byte of a base that wide, so `u56[2:6]` at offset 0 reads bits 2-6 of
+byte 6 without moving, and a `match` after it dispatches on the name. The registry's dragino
+lse01-121 and lsn50v2-d20-d22-d23 use it. Measured on `wide-peek-selector.yaml` (a signed `s40`
+range too) and `wide-peek-selector-u64.yaml`: Python, Java and C# decoded both; **Go refused the
+schema** (`unknown type: u40[0:1]`, its `bitRangePattern` listed 8/16/24/32/64 only); **the TS013
+generator emitted a TODO comment for the read** - `type_size`, which knows plain types, returned
+None for `u40`/`u48`/`u56` - so `$layout` was never bound and the codec threw `Match field
+$layout has no value`. A u64 base worked. Go's pattern and the generator's new `slice_base_size`
+fix both, and the generator now raises for a base it cannot size rather than emit a comment.
+The peeks are named, not `_`-prefixed, on purpose: an internal one writes payload bytes and
+declares no value, a PS-434 error on encode, whereas a named peek is derived from the field that
+writes its bits (PS-551, CR-2026-141). Floors: decode +5 in Go, Java and C#; re-encode +4 and `match`
++4 everywhere (the skipped-four vector cannot round-trip).
+
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
 from `tools/schema_interpreter.py`. Read that one first when changing any of them.
 
@@ -1090,11 +1106,8 @@ only: 5267 -> 5410 round trips (+143, none lost).
   - 25 "no case takes the value" (rakwireless's tag-built keys, aquascope);
   - 3 "matches a range of tags".
 
-**Open:** a `remaining` match does not check that the bytes it writes - with what follows
-it - select the case it chose. A case chosen by its fields writes its own length, but a
-default list or a variable-length field could select another case on decode. Go, Java and
-C# also keep their CR-2026-027 order for a known discriminator matching no case: the
-default before recovery by fields. The reference recovers by fields first.
+**Closed by CR-2026-153 (below):** the `remaining` length check (PS-564), the order for
+a known discriminator matching no case (PS-565), and Go's tie order (PS-563).
 
 Fixtures: `length-selects-layout` (4 vectors), `literal-selects-branch` (2) and
 `tag-entry-constants` (4). With `tlv-case-field-list`'s `literal_only`, all 11 round-trip
@@ -1114,6 +1127,49 @@ consulted. Where both rejections could apply - an inline match with no discrimin
 and nothing to derive - CR-2026-151's is taken, being the more specific: it names the
 discriminator (`Missing required field: report_type`, its `name`, else its `var`), and
 this note's fall-through says `match` only where the match has neither.
+
+**CR-2026-153 (PS-562 to PS-565, la-payload-schema branch `cr/0.5.5-apply-152-154`, for
+0.5.5) wrote #140 into the spec; three items were left for this repository.**
+
+- **PS-564: what a `remaining` match writes selects the case it chose.** The bytes from
+  the match to the end of the payload are counted per field list (`TailLevel` in Python,
+  `tl` in the runtime's `encList`, and each port's equivalent). After each item of a list,
+  the bytes it added go to every check an earlier item of the same list registered, so at
+  the top each check holds its whole tail. A decoder's choice for that count is then
+  compared with the encoder's - the first case in declaration order matching it, else the
+  default, else none (`remaining_selection`). A mismatch is rejected, naming the match as
+  PS-535 does: `Field an unnamed match: the 2 byte(s) from it to the end of the payload
+  select case 2, not case 1, the case its input gives (PS-564)` ("its default", "no case";
+  `'name'` for a named match). The spec prototype encodes no match, so this text is this
+  repository's. **Not checked inside a tlv or a repeat** (`tail_unchecked`): the bytes
+  after the match are not all in field lists there. No corpus, registry or fixture vector
+  is rejected by it.
+- **PS-563: a tie goes to the case declared first, in all five.** The runtime iterated a
+  match's cases as a JS object, whose integer-like keys run ascending; the generator now
+  records the order written as `__order` (`_annotate_on_repeat`) and `encCaseKeys` reads
+  it, for the score, the discriminator's case, the 0-byte case and PS-564. Go keeps
+  `Cases` sorted for decode and now reads the order written from the YAML node tree
+  (`s.keyOrder`, as `_meta` and the reference walk do; a JSON-authored schema falls back
+  to the sorted order), so `{2: [a], 1: [a]}` given `{a: 5}` writes `0205` where it wrote
+  `0105`. Go's empty-payload guard checks names in declaration order, where it checked the
+  input's keys sorted (`TestEmptyPayloadGuardDeclarationOrder`). Java and C# already
+  walked their cases in declaration order. Go measures PS-564's tail as the payload length
+  less the match's start, since it writes every field list into one buffer.
+- **PS-565: a given discriminator matching no case takes the default, or is rejected.**
+  Python and the runtime recovered a case by score first, so `{k: 9, a: 4, b: 3}` against
+  `{1: [a]}` with `default: [b]` wrote `0904` - case 1's byte under a discriminator that
+  decodes as the default, reading `b` = 4 - and an inline `kind: 9` with no default wrote
+  `0904` with no error. Both now follow Go, Java and C#: the default, else `No matching
+  case for value 9`; the score runs only where no discriminator is given. A `skip` default
+  writes the discriminator alone, as a decoder reads it.
+- **Cases:** `tests/cr-2026-153-cases.yaml` (11), read by `test_cr_2026_153_cases.py`
+  (reference and runtime), Go `cr153_test.go`, Java `CR2026153Test`, C# `CR2026_153Tests`.
+  Corpus and registry (Python, 5475 of 32336 round trips at f57faba) unchanged; no floor
+  moves.
+- **The match's own case wins** (CR-2026-155, editorial, PS-551 and PS-563): an inline
+  match settles its case in the order given discriminator or peek, own case by score or
+  the 0-byte case, nested derivation, default, reject - so `{0: [temp]}` beside a nested
+  `{1: [temp]}` given `{temp: 26}` writes `000a28` (`own_case_wins_over_nested_derivation`).
 Cases: `tests/silent-empty-cases.yaml` (14), read by the reference and the runtime
 (`test_silent_empty_cases.py`), Go (`silent_empty_test.go`, both APIs), Java
 (`SilentEmptyTest`) and C# (`SilentEmptyTests`).
@@ -2686,6 +2742,40 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     (Python, Java 2115 -> 2121; C# 2116 -> 2122; Go 2133 -> 2139, plain 2106 -> 2112), all
     `plain fixed` (148 -> 154).
 
+- **CR-2026-150 (PS-560, PS-561): `ascii` with `numeral: decimal|hex`** (spec main 96e3638,
+  for 0.5.5). An `ascii` field reports its digit text as an integer, so modifiers, lookups and
+  references apply to it (PS-476, PS-523) and the output schema says `integer`. Decode is
+  **strict**: after PS-534's trailing-0x00 removal the whole text must match `[+-]?[0-9]+`
+  (decimal) or `[0-9A-Fa-f]+` (hex, no sign, no `0x`), else `Field 'v': '0x1A' is not a hex
+  numeral (PS-560)` - the text in single quotes, an all-NUL value as `''`. No prefix is ever
+  read, which is where JavaScript's `parseInt` (the vendor's) differs. Encode writes the
+  integer, rounded as PS-552 requires after the modifiers are inverted, in uppercase hex or
+  decimal, right-aligned and `0`-filled to `length` after any sign; a negative hex value or
+  one that does not fit is `Field 'v': 65536 does not fit 4 hex digits (PS-168)` (the value
+  as JavaScript writes it, the count the field's `length`). `1a` and `+65` decode and come
+  back as `001A` and `0065`, so only canonical text round-trips.
+  - **Load-time (PS-560):** `Field 'v': numeral is defined only on an ascii field, not on u8
+    (PS-560)` and `Field 'v': numeral must be decimal or hex, not 'octal' (PS-560)`, the
+    prototype's text, from Python `numeral_errors` (in `schema_iterator_errors`, so the
+    validator and the TS013 generator too), Go `checkNumeral` (from `checkFieldRules`), Java
+    `Numeral.check` (from `checkWave4`) and C# `Numeral.Check` (from `CheckWave4`). The key is
+    in `tools/schema_vocabulary.py` (all five decoders) and `payload-schema.json`.
+  - **Where:** Python `decode_numeral`/`encode_numeral`, Go `go/schema/cr150.go`, Java
+    `Numeral`, C# `Numeral`, the generator's decode branch (a regex test before `parseInt`,
+    then the field's modifiers like any number) and `encNumeral` in `ENCODER_RUNTIME_JS`;
+    `generate_output_schema.py` maps it to `integer`. C: `schema_binary.py` refuses `numeral`
+    (PS-446) and the harness files it as a C gap.
+  - **Not done:** a tlv case holding a `numeral` field takes any number (CR-2026-148's
+    "fits" does not test the digit count), so a value too wide for `length` is PS-168 from
+    the case chosen rather than a reason to choose another case.
+  - **Fixtures and cases:** `_language-conformance/ascii-numeral.yaml` (Dragino lbt1's mode 3
+    `major`, `minor` and `rssi`, four vendor-codec vectors, all round-tripping) and
+    `tests/cr-2026-150-cases.yaml` with three lists - `decode` (the prototype's pins and the
+    strict rejections), `cases` (encode) and `load` - read by all five (`test_cr_2026_150_cases.py`
+    for the reference and the generated codec, Go `cr150_test.go`, Java `CR2026150Test`, C#
+    `CR2026_150Tests`). Floors: decode +4 in Go, Java and C# (2718 -> 2722), re-encode +4
+    everywhere, all `plain fixed` (154 -> 158; C# 2126, Go 2143, plain 2116).
+
 - **Per-definition tables are held by identity, never by address alone** (found auditing
   for the spec prototype's `id()`-keyed SIBLINGS defect, CR-2026-141). Python's decode
   tables `_guard_else`, `_pre_lookup` and `_lookup_numbers` and the PS-168 `_encode_given`
@@ -2983,7 +3073,7 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   (CR-2026-032).** `make test-c` builds the three previously-orphaned C test files and runs
   `tools/c-corpus-harness.py`, which generates C that builds each expressible corpus schema
   through the struct API, compiles it, and compares the decode against the vectors.
-  **569 of 569 attempted vectors pass** (2026-10-13) since CR-2026-033 added `tlv` and CR-2026-034
+  **575 of 575 attempted vectors pass** (2026-10-13) since CR-2026-033 added `tlv` and CR-2026-034
   `flagged` (it was 50 of 50 before either). 751 of 1239 are still in schemas the struct API
   cannot build - 26 use a `transform` chain, 24 a `bitfield_string`, 15 more cases than
   `SCHEMA_MAX_CASES` allows, 3 `repeat`, 3 a `u32le16` **the interpreter has and the harness

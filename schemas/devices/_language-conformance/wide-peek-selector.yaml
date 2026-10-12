@@ -1,0 +1,70 @@
+# A wide non-consuming bit range binds its name as a selector for the cases after it. The
+# base is N/8 bytes from the current position (PS-059), so a byte several positions ahead
+# is the last byte of a base that wide, and the bits chosen sit in that byte. Nothing is
+# consumed by the read, so the cases decode the region from its start.
+#
+# Both ranges are reported, which is what lets the encoder derive them from the byte that
+# writes their bits (PS-551). Seven bytes: a two-byte reading, four bytes whose layout the last byte chooses, and that
+# last byte. Both ranges are read from offset 2, a five-byte base ending on byte 6: the
+# low two bits as the layout, and bit 7 as a signed one-bit range, which is 0 or -1.
+name: probe_wide_peek_selector
+endian: big
+fields:
+- name: reading
+  type: u16
+- name: layout
+  type: "u40[0:1]"
+- name: flag
+  type: "s40[7:7]"
+- match:
+    field: $layout
+    cases:
+      0:
+      - name: whole
+        type: u32
+      1:
+      - name: high_half
+        type: u16
+      - name: low_half
+        type: u16
+      default:
+      - name: spare
+        type: skip
+        length: 4
+- match:
+    field: $flag
+    cases:
+      0:
+      - name: tail_plain
+        type: u8
+      -1:
+      - name: tail_high
+        type: u8
+test_vectors:
+- name: layout_zeroflag_clear
+  source: spec-example
+  payload: "0102 11223344 20"
+  expected:
+    reading: 258
+    layout: 0
+    flag: 0
+    whole: 287454020
+    tail_plain: 32
+- name: layout_oneflag_set
+  source: spec-example
+  payload: "0102 11223344 81"
+  expected:
+    reading: 258
+    layout: 1
+    flag: -1
+    high_half: 4386
+    low_half: 13124
+    tail_high: 129
+- name: layout_other_skips_the_four
+  source: spec-example
+  payload: "0102 11223344 03"
+  expected:
+    reading: 258
+    layout: 3
+    flag: 0
+    tail_plain: 3

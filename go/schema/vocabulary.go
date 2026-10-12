@@ -307,6 +307,10 @@ func checkFieldRules(field map[string]any, at string) error {
 			return fmt.Errorf("%s: encoding applies only to an unsigned integer type uN, not %v (PS-422)", at, field["type"])
 		}
 	}
+	// PS-560 (CR-2026-150): numeral is decimal or hex, on an ascii field only.
+	if err := checkNumeral(field); err != nil {
+		return err
+	}
 	// PS-510 (CR-2026-102): ipso and senml are mappings.
 	if err := checkAnnotations(field); err != nil {
 		return err
