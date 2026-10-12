@@ -2398,7 +2398,7 @@ func decodeFlagged(fd *FlaggedDef, ctx *DecodeContext) (map[string]any, error) {
 }
 
 // bitRangePattern matches a bit-range type such as u8[0:0] or u16[4:11].
-var bitRangePattern = regexp.MustCompile(`^([us](?:8|16|24|32|64))\[(\d+):(\d+)\]$`)
+var bitRangePattern = regexp.MustCompile(`^([us](?:8|16|24|32|40|48|56|64))\[(\d+):(\d+)\]$`)
 
 // decodeBitRange extracts a contiguous bit range from an unsigned base value.
 //
