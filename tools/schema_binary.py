@@ -204,7 +204,8 @@ C_UNSUPPORTED_KEYS = {
     "encoding": "the C interpreter has no sign_magnitude/bcd/gray encodings",
     "sentinel": "the C interpreter has no sentinel (PS-427)",
     "out_of_range": "the C interpreter has no out_of_range: omit (PS-428)",
-    "default": "the C interpreter has no enum/lookup default",
+    "default": ("the C interpreter has no enum default, and no field default to write "
+                "where the input omits the field (PS-554)"),
     "var": "this format has no variable names",
     "optional": "the C interpreter has no optional fields (PS-402)",
     # Constructs with no record in this format. A field carrying one and no `type` was
@@ -312,7 +313,6 @@ def field_errors(field: Dict, schema_endian: str = 'big') -> List[str]:
 
     if 'match' in field and not field.get('type'):
         refuse("`match`", "this format has no inline match record")
-
     ftype = str(field.get('type', ''))
     if not field.get('type'):
         if not errors:

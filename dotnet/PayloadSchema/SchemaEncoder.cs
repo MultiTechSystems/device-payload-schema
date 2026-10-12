@@ -255,6 +255,8 @@ public static class SchemaEncoder
                         + "cannot be rebuilt");
                 if (data.TryGetValue(lookupName, out var supplied) && supplied != null)
                     value = supplied;
+                else if (HasFieldDefault(field))
+                    value = FieldDefault(field);   // PS-554: a declared default, as input
                 else if (field.Sentinel is { Count: > 0 })
                     // A reading the decode omitted as "no reading" (PS-427) goes back as
                     // the sentinel it was, not as zero.
@@ -345,10 +347,42 @@ public static class SchemaEncoder
         /// `value`, else the input's value under its name, else an error naming it. Mirrors
         /// _internal_encode_value in tools/schema_interpreter.py.
         /// </summary>
+        /// <summary>
+        /// PS-554 (CR-2026-139): whether an omitted input takes the field's declared
+        /// <c>default</c>, which is in the field's reported form and is encoded exactly as
+        /// that value given as input, so one that cannot be encoded is rejected as such input
+        /// is (PS-168). A declared default is a defined absence (PS-551 as amended). An enum's
+        /// <c>default</c> is its unmapped label (PS-068) and a legacy <c>type: match</c>'s its
+        /// fallback case, so neither is written. Read from the declaration as written.
+        /// </summary>
+        static bool HasFieldDefault(SchemaField field)
+        {
+            if (field.Node == null) return false;
+            YamlDotNet.RepresentationModel.YamlNode? type = null;
+            bool found = false;
+            foreach (var kv in field.Node.Children)
+            {
+                if (kv.Key is not YamlDotNet.RepresentationModel.YamlScalarNode k) continue;
+                if (k.Value == "default") found = true;
+                if (k.Value == "type") type = kv.Value;
+            }
+            var typeText = (type as YamlDotNet.RepresentationModel.YamlScalarNode)?.Value;
+            return found && typeText != "enum" && typeText != "match";
+        }
+
+        static object? FieldDefault(SchemaField field)
+        {
+            foreach (var kv in field.Node!.Children)
+                if (kv.Key is YamlDotNet.RepresentationModel.YamlScalarNode { Value: "default" })
+                    return Meta.FromYaml(kv.Value);
+            return null;
+        }
+
         static object? InternalEncodeValue(SchemaField field, Dictionary<string, object?> data)
         {
             if (field.Value != null) return field.Value;
             if (data.TryGetValue(field.Name, out var supplied)) return supplied;
+            if (HasFieldDefault(field)) return FieldDefault(field);              // PS-554
             throw new InvalidOperationException($"internal field '{field.Name}' reads payload bytes "
                 + "and declares no value, and the input does not supply it (PS-434)");
         }
@@ -543,7 +577,8 @@ public static class SchemaEncoder
             {
                 if (!string.IsNullOrEmpty(member.Name) && member.Value == null
                     && !member.Name.StartsWith("_") && member.Consume == 0
-                    && !(data.TryGetValue(member.Name, out var given0) && given0 != null))
+                    && !(data.TryGetValue(member.Name, out var given0) && given0 != null)
+                    && !HasFieldDefault(member))                            // PS-554 first
                 {
                     // PS-551 (CR-2026-141): a range that does not consume is fixed by the
                     // fields that write its bits, so it is derived and writes none; the
@@ -557,6 +592,7 @@ public static class SchemaEncoder
                 object? value = member.Value != null || (member.Name ?? "").StartsWith("_")
                         ? InternalEncodeValue(member, data)                    // PS-360, PS-434
                     : data.TryGetValue(member.Name, out var v) && v != null ? v
+                    : HasFieldDefault(member) ? FieldDefault(member)            // PS-554
                     // PS-551. A range was written as zero bits, which read back as a value.
                     : throw new InvalidOperationException(MissingFieldMessage(member.Name));
                 var given = value;
@@ -866,6 +902,7 @@ public static class SchemaEncoder
                     : member.Value != null || member.Name.StartsWith("_")
                         ? InternalEncodeValue(member, data)                    // PS-360, PS-434
                     : data.TryGetValue(member.Name, out var v) && v != null ? v
+                    : HasFieldDefault(member) ? FieldDefault(member)            // PS-554
                     // PS-551. A member was written as zero bits, which read back as a value.
                     : throw new InvalidOperationException(MissingFieldMessage(member.Name));
                 var given = value;

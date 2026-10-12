@@ -703,6 +703,23 @@ def missing_field_message(name):
     return f"Missing required field: {name}"
 
 
+def field_default(field_def):
+    """PS-554 (CR-2026-139): `(True, default)` where an omitted input takes the field's
+    declared `default`, else `(False, None)`.
+
+    The default is in the field's reported form - after its modifiers, transform and
+    lookup - and the caller encodes it exactly as that value given as input, so one that
+    cannot be encoded is rejected as such input is (PS-168). A declared default is a
+    defined absence (PS-551 as amended). An enum's `default` is its unmapped label
+    (PS-068) and a legacy `type: match`'s is its fallback case, so neither is a value to
+    write. Since CR-2026-134 a declared default was rejected as a missing value.
+    """
+    if isinstance(field_def, dict) and 'default' in field_def \
+            and field_def.get('type') not in ('enum', 'match'):
+        return True, field_def['default']
+    return False, None
+
+
 def raw_bits_field(field_def):
     """The field without its `encoding`: a sentinel is written as the bits it is (PS-427)."""
     return {k: v for k, v in field_def.items() if k != 'encoding'}
@@ -4372,6 +4389,9 @@ class SchemaInterpreter:
         name = field_def.get('name')
         if name in data:
             return data[name]
+        has_default, default = field_default(field_def)                # PS-554
+        if has_default:
+            return default
         raise ValueError(f"internal field {name!r} reads payload bytes and declares no "
                          f"value, and the input does not supply it (PS-434)")
 
@@ -6392,6 +6412,11 @@ class SchemaInterpreter:
                         f"Error encoding {name}: optional field supplied while the earlier "
                         f"optional field {omitted_optional!r} is not (PS-405)")
                     continue
+                if value is None:
+                    # PS-554: a declared default is a defined absence, encoded as input.
+                    has_default, default = field_default(field_def)
+                    if has_default:
+                        value = default
                 if value is None and field_def.get('sentinel'):
                     # A reading the decode omitted as "no reading" (PS-427) goes back as
                     # the sentinel it was, not as zero.
@@ -6697,6 +6722,8 @@ class SchemaInterpreter:
                 value = gf.get('default', 0)
             elif 'value' in gf or str(name).startswith('_'):
                 value = self._internal_encode_value(gf, data)          # PS-360, PS-434
+            elif data.get(name) is None and field_default(gf)[0]:
+                value = field_default(gf)[1]                           # PS-554
             elif data.get(name) is None:
                 # PS-551. A member was written as zero bits, which read back as a value.
                 raise ValueError(missing_field_message(name))
@@ -6828,6 +6855,8 @@ class SchemaInterpreter:
             # A nameless range is refused at load (PS-553); it was written as zero bits.
             if 'value' in field_def or str(name).startswith('_'):
                 value = self._internal_encode_value(field_def, data)   # PS-360, PS-434
+            elif data.get(name) is None and field_default(field_def)[0]:
+                value = field_default(field_def)[1]                    # PS-554
             elif data.get(name) is None:
                 if not int(field_def.get('consume', 0) or 0):
                     # PS-551 (CR-2026-141): a range that does not consume is fixed by the
@@ -7156,6 +7185,9 @@ class SchemaInterpreter:
             else:
                 # As in the top-level loop: a templated key is where the value lives.
                 lookup_name = self._resolve_encode_name(f, name, data) or name
+                has_default, default = field_default(f)
+                if data.get(lookup_name) is None and has_default:
+                    data = dict(data, **{lookup_name: default})        # PS-554
                 if data.get(lookup_name) is None:
                     if f.get('sentinel'):
                         # A reading the decode omitted as "no reading" (PS-427) goes back
@@ -7861,6 +7893,8 @@ class SchemaInterpreter:
                 continue
             
             value = data.get(name)
+            if value is None and field_default(field_def)[0]:
+                value = field_default(field_def)[1]                    # PS-554
             if value is None:
                 # PS-551: written as zero, silently where the key was absent.
                 result.errors.append(missing_field_message(name))

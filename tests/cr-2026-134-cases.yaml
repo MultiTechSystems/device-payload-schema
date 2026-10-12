@@ -781,3 +781,153 @@ cases:
           - {name: x, type: u8}
   input: '{"a": 1}'
   payload: "01"
+
+# --- CR-2026-139 (PS-554): a field's `default` is written where the input omits it ----
+#
+# A declared `default` is a defined absence (PS-551 as amended). It is in the field's
+# reported form - after its modifiers, transform and lookup - and is encoded exactly as
+# that value given as input would be, and rejected as such input would be (PS-168). An
+# enum's `default` is its unmapped label (PS-068) and is never written. The first five
+# cases are the spec prototype's TestCR2026139FieldDefault.
+
+- name: default_written_when_omitted
+  schema: |
+    name: t
+    fields:
+      - {name: interval, type: u16, default: 300}
+      - {name: enabled, type: bool, default: true, consume: 1}
+  input: '{"enabled": false}'
+  payload: "012c00"
+
+- name: every_default_written
+  schema: |
+    name: t
+    fields:
+      - {name: interval, type: u16, default: 300}
+      - {name: enabled, type: bool, default: true, consume: 1}
+  input: '{}'
+  payload: "012c01"
+
+- name: default_in_reported_form
+  schema: |
+    name: t
+    fields:
+      - {name: t, type: u8, div: 10, default: 2.5}
+      - {name: m, type: u8, lookup: {1: eco, 2: boost}, default: boost}
+  input: '{}'
+  payload: "1902"
+
+- name: input_wins_over_default
+  schema: |
+    name: t
+    fields:
+      - {name: t, type: u8, div: 10, default: 2.5}
+      - {name: m, type: u8, lookup: {1: eco, 2: boost}, default: boost}
+  input: '{"t": 1.2, "m": "eco"}'
+  payload: "0c01"
+
+- name: enum_default_is_not_a_fill_value
+  schema: |
+    name: t
+    fields:
+      - {name: e, type: enum, base: u8, values: {1: a}, default: other}
+  input: '{}'
+  error: "Missing required field: e"
+
+- name: default_in_a_byte_group
+  schema: |
+    name: t
+    fields:
+      - byte_group:
+          size: 1
+          fields:
+            - {name: lo, type: "u8[0:3]", default: 5}
+            - {name: hi, type: "u8[4:7]"}
+  input: '{"hi": 1}'
+  payload: "15"
+
+- name: default_in_a_bit_run
+  schema: |
+    name: t
+    fields:
+      - {name: lo, type: "u8[0:3]", default: 5}
+      - {name: hi, type: "u8[4:7]", consume: 1}
+  input: '{"hi": 1}'
+  payload: "15"
+
+- name: default_in_a_present_flagged_group
+  schema: |
+    name: t
+    fields:
+      - {name: flags, type: u8}
+      - flagged:
+          field: flags
+          groups:
+            - bit: 0
+              fields:
+                - {name: a, type: u8}
+                - {name: b, type: u8, default: 9}
+            - bit: 1
+              fields:
+                - {name: c, type: u8, default: 7}
+  input: '{"a": 1}'
+  payload: "010109"
+
+- name: default_in_a_match_case
+  schema: |
+    name: t
+    fields:
+      - {name: k, type: u8}
+      - match:
+          field: $k
+          cases:
+            1:
+              - {name: a, type: u8, default: 4}
+  input: '{"k": 1}'
+  payload: "0104"
+
+- name: default_in_an_object
+  schema: |
+    name: t
+    fields:
+      - name: o
+        type: object
+        fields:
+          - {name: a, type: u8}
+          - {name: b, type: s16, default: -2}
+  input: '{"o": {"a": 1}}'
+  payload: "01fffe"
+
+- name: default_on_an_internal_field
+  schema: |
+    name: t
+    fields:
+      - {name: _reserved, type: u8, default: 170}
+      - {name: a, type: u8}
+  input: '{"a": 1}'
+  payload: "aa01"
+
+- name: unencodable_default_is_rejected
+  schema: |
+    name: t
+    fields:
+      - {name: x, type: u8, default: 300}
+  input: '{}'
+  error: "Field 'x': 300 encodes as 300, outside 0 to 255 (PS-168)"
+
+- name: unencodable_scaled_default_is_rejected
+  schema: |
+    name: t
+    fields:
+      - {name: x, type: u8, div: 10, default: 25.6}
+  input: '{}'
+  error: "Field 'x': 25.6 encodes as 256, outside 0 to 255 (PS-168)"
+
+- name: unencodable_bit_range_default_is_rejected
+  schema: |
+    name: t
+    fields:
+      - {name: lo, type: "u8[0:3]", default: 16}
+      - {name: hi, type: "u8[4:7]", consume: 1}
+  input: '{"hi": 1}'
+  error: "Field 'lo': 16 encodes as 16, outside 0 to 15 for u8[0:3] (PS-168)"
