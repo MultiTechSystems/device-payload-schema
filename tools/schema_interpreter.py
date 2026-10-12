@@ -7594,6 +7594,15 @@ class SchemaInterpreter:
                 every = {m['name'] for m, _ in claims}
                 needed = {m['name'] for m, is_optional in claims if not is_optional}
                 return needed <= set(value) <= every
+            # A mapping is no value for a field that reads a number, a string or bytes:
+            # two cases may report one name as an object in one and a scalar in another
+            # (sensative/strips' `temperature`), and the scalar case cannot have written
+            # an object. It reached the numeric encode path and raised from float().
+            if isinstance(value, dict) and f.get('type') not in ('object', None, 'repeat'):
+                return False
+            if f.get('type') == 'object' and not isinstance(value, dict) \
+                    and modes.get(f['name']) != 'merge':
+                return False
             return self._case_fidelity([f], {f['name']: value})[1]
 
         written = []  # (case key, fields, data for the entry)

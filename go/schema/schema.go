@@ -4602,6 +4602,17 @@ func encodeTLV(field Field, data map[string]any, ctx *EncodeContext) error {
 			}
 			return true
 		}
+		// A mapping is no value for a scalar field, nor a non-mapping for an object: one name
+		// may be an object under one tag and a number under another.
+		_, isMap := value.(map[string]any)
+		isObject := f.Type == TypeObject || f.Type == "object"
+		isRepeat := f.Type == TypeRepeat || f.Type == "repeat"
+		if isMap && !isObject && !isRepeat {
+			return false
+		}
+		if isObject && !isMap && repeat.mode(f.Name) != "merge" {
+			return false
+		}
 		return fieldTakes(f, value)
 	}
 

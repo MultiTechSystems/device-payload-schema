@@ -1196,6 +1196,11 @@ function encTlv(out, f, data, ctx) {                  // _encode_tlv
       Object.keys(v).forEach(function (k) { if (!every[k]) ok = false; });
       return ok;
     }
+    // A mapping is no value for a scalar field, nor a non-mapping for an object (the
+    // reference's `fits`): one name may be an object under one tag and a number under another.
+    var isMap = v !== null && typeof v === "object" && !Array.isArray(v);
+    if (isMap && c.type && c.type !== "object" && c.type !== "repeat") return false;
+    if (c.type === "object" && !isMap && modes[c.name] !== "merge") return false;
     var one = {}; one[c.name] = v;
     return encCaseFidelity([c], one)[1];
   }

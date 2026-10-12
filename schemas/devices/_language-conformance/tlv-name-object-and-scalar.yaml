@@ -1,0 +1,49 @@
+# One name reported as an object under one tag and as a plain number under another
+# (sensative/strips' `temperature`: tag 2 an object, tag 80 a scalar beside `humidity`).
+# Each value goes back under the case whose shape it has: a mapping is no value for a
+# scalar field and a number none for an object. The Python encoder offered the mapping to
+# the scalar case and raised from float(), reported as "Error encoding tlv: float()
+# argument must be a string or a real number, not 'dict'".
+name: probe_tlv_name_object_and_scalar
+endian: big
+fields:
+- tlv:
+    tag_size: 1
+    length_size: 0
+    cases:
+      1:
+      - name: reading
+        type: object
+        fields:
+        - name: value
+          type: u8
+      2:
+      - name: extra
+        type: object
+        fields:
+        - name: value
+          type: u8
+      - name: reading
+        type: u16
+      3:
+      - name: extra
+        type: object
+        fields:
+        - name: value
+          type: u8
+test_vectors:
+- name: object_beside_a_case_with_the_scalar
+  source: generated
+  payload: "01 05 03 09"
+  expected:
+    reading:
+      value: 5
+    extra:
+      value: 9
+- name: scalar_beside_its_object
+  source: generated
+  payload: "02 09 0007"
+  expected:
+    extra:
+      value: 9
+    reading: 7

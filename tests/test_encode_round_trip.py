@@ -120,7 +120,9 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # -4 deliberately, PS-169 (CR-2026-146): a label several codes share is rejected. vobo's
 # mutant_p32_01, mutant_p112_01, two_analog_xp_all and two_analog_xx_ain3 round-tripped
 # only because the first code found was the right one. All tlv.
-FLOOR_TOTAL = 2101
+# +2: tlv-name-object-and-scalar (tlv): a mapping is no value for a scalar case, nor a
+# number for an object one.
+FLOOR_TOTAL = 2103
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -128,7 +130,7 @@ FLOOR_BY_SHAPE = {
     # 1283 -> 1281 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped
     # only because their internal byte halves were all zero, which the encoder wrote
     # for an internal field with no value. It now reports such a field instead.
-    "tlv": 1555,  # -4: PS-169 (see FLOOR_TOTAL); +16: CR-2026-141 (see FLOOR_TOTAL); -26: CR-2026-136 with CR-2026-134 (see FLOOR_TOTAL); +264: CR-2026-136 (see FLOOR_TOTAL); +2: CR-2026-128; +3: CR-2026-125 fixtures; +1: tlv-repeat-merge (CR-2026-110)
+    "tlv": 1557,  # +2: tlv-name-object-and-scalar; -4: PS-169 (see FLOOR_TOTAL); +16: CR-2026-141 (see FLOOR_TOTAL); -26: CR-2026-136 with CR-2026-134 (see FLOOR_TOTAL); +264: CR-2026-136 (see FLOOR_TOTAL); +2: CR-2026-128; +3: CR-2026-125 fixtures; +1: tlv-repeat-merge (CR-2026-110)
     "flagged": 198,  # +1: CR-2026-134; +4: mask-reference-binding (see FLOOR_TOTAL)
     "plain fixed": 148,  # +1: CR-2026-135 (see FLOOR_TOTAL); +4: ascii-latin1 (CR-2026-114)
     # +1: CR-2026-132 enum port; +5: lookup-reference-binding (CR-2026-109);
