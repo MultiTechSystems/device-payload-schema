@@ -31,7 +31,7 @@ count that matters is how many vectors the C interpreter *decodes correctly*, ag
 many the corpus holds. Everything else is a reason it could not be asked.
 
 The expressible subset is what the struct API can build today: plain integers and floats,
-`bool`, a `u8[a:b]` bit range, `skip`, `ascii`/`hex`/`bytes`, `enum`, a `lookup` table, and
+`bool`, a `uN[a:b]` or `sN[a:b]` bit range, `skip`, `ascii`/`hex`/`bytes`, `enum`, a `lookup` table, and
 the `mult`/`div`/`add` modifiers. A construct outside it is named in the skip reasons rather
 than approximated - an approximated schema would report a pass for something the interpreter
 cannot actually do.
@@ -128,7 +128,9 @@ UNREACHABLE_KEYS = {
     "separator": "the interpreter has no bytes separator (PS-391)",
 }
 
-BIT_RANGE = re.compile(r"^u(\d+)\[(\d+):(\d+)\]$")
+#: `uN[a:b]` or `sN[a:b]`: the base's sign, its width in bits, and the range (CR-2026-136).
+#: This matched `uN` only and built every range on a one-byte base, whatever N said.
+BIT_RANGE = re.compile(r"^([us])(8|16|24|32|64)\[(\d+):(\d+)\]$")
 
 #: CR-2026-114 (la-payload-schema main c932961). The interpreter holds `ascii` text as a
 #: C string, so it stops at the first 0x00 - "AB\0C" is "AB", where PS-534 keeps the NUL
@@ -188,10 +190,14 @@ def field_source(field, schema_endian):
 
     match = BIT_RANGE.match(ftype)
     if match:
-        start, end = int(match.group(2)), int(match.group(3))
-        consume = "true" if int(field.get("consume", 0) or 0) >= 1 else "false"
-        lines.append(f"    f = field_bits({c_string(name)}, {start}, "
-                     f"{end - start + 1}, {consume});")
+        signed = "true" if match.group(1) == "s" else "false"
+        base = int(match.group(2)) // 8
+        start, end = int(match.group(3)), int(match.group(4))
+        consume = field.get("consume", 0) or 0
+        if not isinstance(consume, int) or not 0 <= consume <= 255:
+            return None, "consume is not a byte count"
+        lines.append(f"    f = field_bit_range({c_string(name)}, {base}, {signed}, "
+                     f"{start}, {end - start + 1}, {consume}, {endian});")
     elif ftype == "bool":
         bit = int(field.get("bit", 0) or 0)
         consume = "true" if int(field.get("consume", 1) or 0) >= 1 else "false"

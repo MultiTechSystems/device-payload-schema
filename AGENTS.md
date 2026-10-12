@@ -236,7 +236,7 @@ implementation has a runner that reads the same YAML and the same vectors:
 | Go | `go/schema/corpus_conformance_test.go` | 2695 | 2119 (plain API 2092) |
 | C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2695 | 2102 |
 | Java | `bindings/java/.../CorpusConformanceTest.java` | 2695 | 2101 |
-| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 554 of 554 attempted | n/a |
+| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 556 of 556 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
 its own implementation's actual; trust it over this table.
@@ -2638,13 +2638,37 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   (CR-2026-032).** `make test-c` builds the three previously-orphaned C test files and runs
   `tools/c-corpus-harness.py`, which generates C that builds each expressible corpus schema
   through the struct API, compiles it, and compares the decode against the vectors.
-  **550 of 550 attempted vectors pass** (2026-10-10) since CR-2026-033 added `tlv` and CR-2026-034
+  **556 of 556 attempted vectors pass** (2026-10-11) since CR-2026-033 added `tlv` and CR-2026-034
   `flagged` (it was 50 of 50 before either). 751 of 1239 are still in schemas the struct API
   cannot build - 26 use a `transform` chain, 24 a `bitfield_string`, 15 more cases than
   `SCHEMA_MAX_CASES` allows, 3 `repeat`, 3 a `u32le16` **the interpreter has and the harness
   has no constructor for**. The report names which side each limit is on, and that
   distinction is load-bearing: `no constructor for type 'u32le16'` used to read as a C gap
   when C decodes it perfectly well.
+
+  **The C-interpreter wave (2026-10-11)** closed these, one PR each; the figures are the
+  harness's at each step (struct API / `--from-blob names` / `--from-blob nameless`):
+  - **Multi-byte and signed bit ranges (CR-2026-136; PS-059, PS-352, PS-353, PS-365)**:
+    554 -> 556 attempted, all passing (`wide-bit-range.yaml`); blob 64/64 unchanged. A
+    range was read from one byte, unsigned, whatever its type said, and the harness built
+    every `uN[...]` that way too. Now `field_def_t.size` is the base's bytes (0 is 1), read
+    in the field's effective byte order; `bit_signed` (in what was padding, so
+    `sizeof(field_def_t)` is unchanged) sign-extends from the range's width; and
+    `consume` is a byte count (`consume: 2` advances two), which it already was in the
+    YAML. `field_bit_range(name, base_bytes, signed, start, width, consume, endian)`
+    builds one; `field_bits` keeps its one-byte meaning. A bit range now reports through
+    the integer member (it was tagged `FIELD_TYPE_F64` though nothing scaled it). Encode
+    ORs the range into its base in the same byte order, checks an `sN` range against
+    -2^(w-1)..2^(w-1)-1 and names `s16[12:15]` in the PS-168 text, and the PS-551 peek
+    bookkeeping in `schema_encode` holds a mask in the base's bit space, so a peek spans
+    its base's bytes. A short base is PS-535's peek message, a short `consume` its need
+    message, as the reference words them. A full `u64[0:63]` past 2^63 is
+    `SCHEMA_ERR_UNSUPPORTED` (no int64 holds it). **The binary form refuses both**: its
+    bitfield record carries a start and a width, its base is one unsigned byte, and its
+    consume marker is one byte, so `tools/schema_binary.py` now names a wide or signed base
+    and a `consume` above 1 rather than writing something that decodes differently; the
+    loader sets a bitfield's `size` to its one-byte base (the record's size nibble is the
+    width). `bit-range-order.yaml` still waits on `byte_group`.
 
   **A `flagged` construct's mask field must declare `var_name`.** This interpreter records a
   value in its variable table only where a field declares one, while a YAML `flagged` names a
