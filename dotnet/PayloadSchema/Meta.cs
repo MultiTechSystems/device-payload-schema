@@ -425,6 +425,8 @@ public static class Meta
             entry["element"] = FieldMeta(element, field, siblings);
             if (Has(field, "identity"))
                 entry["identity"] = Reference(Value(field, "identity"), field, bare: true, siblings: siblings);
+            if (Has(field, "sampled"))
+                entry["sampled"] = SchemaParser.SampledMeta(Value(field, "sampled"));    // PS-568
         }
         else if (declaredType == "repeat")
         {
@@ -435,6 +437,8 @@ public static class Meta
             entry["elements"] = elements;
             if (Has(field, "identity"))
                 entry["identity"] = Reference(Value(field, "identity"), field, bare: true, siblings: siblings);
+            if (Has(field, "sampled"))
+                entry["sampled"] = SchemaParser.SampledMeta(Value(field, "sampled"));    // PS-568
         }
         else if (declaredType == "object")
         {

@@ -263,6 +263,9 @@ final class Meta {
             if (fieldDef.containsKey("identity")) {
                 entry.put("identity", reference(fieldDef.get("identity"), fieldDef, true, siblings));
             }
+            if (fieldDef.get("sampled") instanceof Map<?, ?> sampled) {
+                entry.put("sampled", Sampled.meta(sampled));                              // PS-568
+            }
         } else if ("repeat".equals(declaredType)) {
             Map<String, Object> elements = new LinkedHashMap<>();
             Map<String, Map<?, ?>> inner = Wave6a.elementRepeats(fieldDef.get("fields"));
@@ -272,6 +275,9 @@ final class Meta {
             entry.put("elements", elements);
             if (fieldDef.containsKey("identity")) {
                 entry.put("identity", reference(fieldDef.get("identity"), fieldDef, true, siblings));
+            }
+            if (fieldDef.get("sampled") instanceof Map<?, ?> sampled) {
+                entry.put("sampled", Sampled.meta(sampled));                              // PS-568
             }
         } else if ("object".equals(declaredType)) {
             Map<String, Object> members = new LinkedHashMap<>();

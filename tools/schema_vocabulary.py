@@ -135,6 +135,7 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
         "present_if": (_DECODERS, "drops an element whose condition is false (PS-386)"),
         "carry": (_DECODERS, "a computed field's value from the previous element (PS-378)"),
         "identity": (("py", "go", "java", "cs"), "what identifies a repeat element's metric (PS-372)"),
+        "sampled": (("py", "go", "java", "cs"), "a repeat's elements are samples at a fixed interval (PS-567)"),
         "optional": (_DECODERS, "present where its bytes remain, else absent (PS-402)"),
         "sentinel": (_DECODERS, "raw values meaning no reading (PS-427)"),
         "out_of_range": (_DECODERS, "omit or flag a value outside valid_range (PS-428)"),
@@ -260,6 +261,11 @@ VOCABULARY: Dict[str, Dict[str, Tuple[Tuple[str, ...], str]]] = {
             ("doc:reference",),
             "documented in the language reference; no tool reads it",
         ),
+    },
+    "sampled": {
+        "interval": (("py", "go", "java", "cs"), "seconds, a $ reference or {configured: name} (PS-567)"),
+        "order": (("py", "go", "java", "cs"), "newest_first | oldest_first (PS-567)"),
+        "at": (("py", "go", "java", "cs"), "rx_time or a timestamps entry naming the newest sample's time (PS-567)"),
     },
     "senml": {
         "name": (("score",), "SenML record name"),
@@ -491,7 +497,7 @@ def iter_keys(schema: Any) -> Iterator[Tuple[str, str, str]]:
                 for i, cond in enumerate(value.get("when") or []):
                     if isinstance(cond, dict):
                         yield from rec("guard_when", cond, "%s.when[%d]" % (kpath, i))
-            elif key in ("compute", "ipso", "senml", "semantic") and isinstance(
+            elif key in ("compute", "ipso", "senml", "semantic", "sampled") and isinstance(
                 value, dict
             ):
                 yield from rec(key, value, kpath)
