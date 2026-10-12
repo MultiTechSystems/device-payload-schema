@@ -25,6 +25,7 @@ func decodeBF16(word uint64) float64 {
 // rounded once and never through a binary32. A finite value that rounds past the largest
 // bf16 is a PS-168 error naming the field; NaN and the infinities are their words.
 func encodeBF16(value float64, name string) (uint64, error) {
+	value = positiveZero(value) // PS-566
 	if math.IsNaN(value) {
 		return 0x7FC0, nil
 	}
@@ -52,4 +53,15 @@ func encodeBF16(value float64, name string) (uint64, error) {
 			name, givenText(value), givenText(-bf16Max), givenText(bf16Max))
 	}
 	return sign | word, nil
+}
+
+// positiveZero turns a negative zero into the positive one and changes nothing else
+// (PS-566): a decoder reports -0 as 0 and an encoder writes the positive-zero word for -0.0,
+// for a decoded -0 and for one its own arithmetic produced. Go does not fold `v + 0`, but a
+// comparison says what is meant.
+func positiveZero(v float64) float64 {
+	if v == 0 {
+		return 0
+	}
+	return v
 }

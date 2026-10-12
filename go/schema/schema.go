@@ -2932,6 +2932,11 @@ func applyLookupAndModifiers(value any, field Field, ctx *DecodeContext) (any, e
 	if f, ok := value.(float64); ok && (math.IsNaN(f) || math.IsInf(f, 0)) {
 		return omitted, nil
 	}
+	// A negative zero is reported as 0 (PS-566), whichever float type, modifier or arithmetic
+	// made it.
+	if f, ok := value.(float64); ok {
+		value = positiveZero(f)
+	}
 
 	// PS-475: valid_range compares the value here, after the arithmetic and before the
 	// lookup, and a value `out_of_range: omit` drops takes no further step - it is not
@@ -3071,6 +3076,9 @@ func computedSource(field Field, ctx *DecodeContext) (float64, error) {
 func finishComputedValue(value any, field Field, ctx *DecodeContext) (any, error) {
 	if f, ok := value.(float64); ok && (math.IsNaN(f) || math.IsInf(f, 0)) {
 		return omitted, nil
+	}
+	if f, ok := value.(float64); ok {
+		value = positiveZero(f) // PS-566: a computed -0 is 0
 	}
 	if field.IntegerResult {
 		if numVal, ok := toFloat64(value); ok {
@@ -6211,6 +6219,7 @@ func encodeSint(val int64, length int, endian string) []byte {
 
 // float16Bits converts to IEEE 754 binary16, rounding to nearest with ties to even.
 func float16Bits(v float64) uint16 {
+	v = positiveZero(v) // PS-566
 	f := math.Float32bits(float32(v))
 	sign := uint16((f >> 16) & 0x8000)
 	rawExp := (f >> 23) & 0xFF
@@ -6248,6 +6257,7 @@ func float16Bits(v float64) uint16 {
 }
 
 func encodeFloat32(val float32, endian string) []byte {
+	val = float32(positiveZero(float64(val))) // PS-566
 	buf := make([]byte, 4)
 	bits := math.Float32bits(val)
 	if endian == "little" {
@@ -6259,6 +6269,7 @@ func encodeFloat32(val float32, endian string) []byte {
 }
 
 func encodeFloat64(val float64, endian string) []byte {
+	val = positiveZero(val) // PS-566
 	buf := make([]byte, 8)
 	bits := math.Float64bits(val)
 	if endian == "little" {

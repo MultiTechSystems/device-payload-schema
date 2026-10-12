@@ -174,7 +174,7 @@ public static class Helpers
     public static byte[] EncodeFloat32(float val, string endian)
     {
         var buf = new byte[4];
-        uint bits = BitConverter.SingleToUInt32Bits(val);
+        uint bits = BitConverter.SingleToUInt32Bits(val + 0.0f);   // PS-566: -0 + 0 is 0
         if (endian == "little")
             BinaryPrimitives.WriteUInt32LittleEndian(buf, bits);
         else
@@ -185,7 +185,7 @@ public static class Helpers
     public static byte[] EncodeFloat64(double val, string endian)
     {
         var buf = new byte[8];
-        ulong bits = BitConverter.DoubleToUInt64Bits(val);
+        ulong bits = BitConverter.DoubleToUInt64Bits(val + 0.0);   // PS-566
         if (endian == "little")
             BinaryPrimitives.WriteUInt64LittleEndian(buf, bits);
         else
@@ -202,7 +202,7 @@ public static class Helpers
     {
         // .NET's Half does the rounding, including subnormals and the overflow to infinity,
         // so this is a conversion rather than a hand-rolled bit shuffle.
-        ushort bits = BitConverter.HalfToUInt16Bits((Half)val);
+        ushort bits = BitConverter.HalfToUInt16Bits((Half)(val + 0.0));   // PS-566
         return EncodeUint(bits, 2, endian);
     }
 

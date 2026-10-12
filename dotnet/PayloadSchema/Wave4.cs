@@ -33,7 +33,7 @@ static class Wave4
     public static byte[] WriteWordOrdered(FieldType t, double value)
     {
         uint word = t is FieldType.F32LE16 or FieldType.F32BE16LE
-            ? BitConverter.SingleToUInt32Bits((float)value)
+            ? BitConverter.SingleToUInt32Bits((float)(value + 0.0))   // PS-566
             : unchecked((uint)(long)Math.Round(value, MidpointRounding.ToEven));
         uint high = word >> 16, low = word & 0xFFFF;
         return Le16(t)

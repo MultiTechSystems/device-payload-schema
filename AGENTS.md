@@ -2776,6 +2776,54 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     `CR2026_150Tests`). Floors: decode +4 in Go, Java and C# (2718 -> 2722), re-encode +4
     everywhere, all `plain fixed` (154 -> 158; C# 2126, Go 2143, plain 2116).
 
+- **CR-2026-154 (PS-566; la-payload-schema main, for 0.5.5): negative zero is zero.** For every
+  float type - `f16`, `bf16`, `f32`, `f64`, `f32le16`, `f32be16le` and the minifloats (PS-418
+  cites it) - a decoder reports a negative zero as 0, and an encoder writes the positive-zero
+  word for an input of -0.0, for a decoded -0 and for a -0 its own arithmetic makes (`mult: -1`
+  over 0). Measured before, in both byte orders: Python and Java reported 0 and re-encoded a
+  decoded -0 as the zero word, but wrote the sign word for an input of -0.0; Go and C# reported
+  -0 (printed `-0` in JSON) and wrote the sign word for all three; the TS013 codec and C kept -0
+  and wrote the sign word for all three. The minifloats already complied in all five. Every
+  implementation now complies, normalised in one place per direction:
+  - **Encode:** Python `positive_zero` (`-0.0 + 0.0` is `0.0`), applied at the f16/bf16/f32/f64
+    and word-ordered writes; the runtime's `encWriteFloat`, the bf16 call and `writeWordOrdered`
+    (`+ 0`); Go `positiveZero`, in `float16Bits`, `encodeFloat32`, `encodeFloat64`,
+    `writeWordOrdered` and `encodeBF16`; Java once in the float branch of `encodeField`
+    (`raw + 0.0`) and in `Wave4.writeWordOrdered`; C# in `EncodeFloat16/32/64`, `Bf16.Encode` and
+    `Wave4.WriteWordOrdered`; C once in `encode_field`, after the modifiers are undone, so the
+    `0 / -1` of a `mult: -1` is caught too. C still cannot encode an f16 (`SCHEMA_ERR_*`).
+  - **Decode:** Python and Java already reported 0. The generated codec normalises once in
+    `omitAbsent`, the pass every decode leaves through (`v + 0`); Go once in the decode tail that
+    drops NaN and the infinities (and in `finishComputedValue`); C# beside the same NaN test;
+    C in `finish_numeric`, after the modifiers. So a -0 from `mult: -1` over a `u8` is 0 too.
+    **A normalisation must be a comparison or `+ 0`, never a bare assignment**: Go does not fold
+    `v + 0` but a compiler may fold nothing else, and `-0 == 0` is true, so `if v == 0 { v = 0 }`
+    is what the Go and C helpers say.
+  - **Cases:** `tests/cr-2026-154-cases.yaml` has `encode_cases` (-0.0 for each type, in each
+    byte order for f16, f32 and f64, `mult: -1` and `div: -4` over 0, and a negative value that
+    keeps its sign) and `decode_cases` (the prototype's -0 words: f16/bf16/sflt16 `8000`, sflt24
+    `800000`, f32 `80000000`, f64 `8000000000000000`, f32le16 `00008000`, f32be16le `00800000`;
+    each must decode to a **positive** 0 and re-encode to the zero word), read by
+    `test_cr_2026_154_cases.py` (reference and generated codec), Go `cr154_test.go`, Java
+    `CR2026154Test` and C# `CR2026_154Tests`. C cannot read YAML: `src/selftest_schema.c`'s
+    `test_a_negative_zero_is_zero` holds f32 and f64 by hand (`make selftest`; `make test-c`
+    does not run it).
+  - **Fixtures:** `_language-conformance/negative-zero.yaml` (two vectors; each -0 word is
+    followed by the same type's 1.0 so a mutation of its width or byte order is noticed, mutation
+    score 0.893) and bf16.yaml's `negative_zero` vector, which the first bf16 PR had to drop.
+  - **A vector that decodes a sign-bit word cannot round-trip, and the convention is
+    `tools/encode-round-trip.py`'s reasons, not the floors.** The encoder writes the zero word,
+    so `encode(decode(payload))` differs by the sign bit; it is the same loss as the minifloats'
+    `8000`. The tool files it as the inherent reason `negative-zero` (a float field of a vector
+    that does not re-encode and reports 0; it is last in `classify`, so a vector another reason
+    already explains keeps that reason), and `test_cr_2026_023_encode_round_trip.py` still finds
+    nothing `unexplained`. Floors count passes only, so they move only by what round-trips:
+    `negative-zero.yaml`'s second vector (positive zero words, `made_negative_zero` 0 over
+    `mult: -1`) does, and fails to before this CR. Decode floors +3 in Go, Java and C# (2740 ->
+    2743: the two fixture vectors and bf16's); re-encode +1 everywhere (Python 2143 -> 2144,
+    Java 2143 -> 2144, C# 2144 -> 2145, Go 2161 -> 2162, plain 2133 -> 2134), `plain fixed` +1.
+    C: 575 of 575, unchanged.
+
 - **Per-definition tables are held by identity, never by address alone** (found auditing
   for the spec prototype's `id()`-keyed SIBLINGS defect, CR-2026-141). Python's decode
   tables `_guard_else`, `_pre_lookup` and `_lookup_numbers` and the PS-168 `_encode_given`

@@ -24,6 +24,7 @@ internal static class Bf16
     internal static ulong Encode(double value, string? name)
     {
         if (double.IsNaN(value)) return 0x7FC0;
+        value += 0.0;   // PS-566: a negative zero is written as the zero word
         ulong sign = BitConverter.DoubleToInt64Bits(value) < 0 ? 0x8000UL : 0;
         double magnitude = Math.Abs(value);
         if (double.IsInfinity(magnitude)) return sign | 0x7F80;

@@ -834,6 +834,9 @@ static inline bool finish_numeric(
         *value /= field->div;
     }
     if (field->has_add) *value += field->add;
+    /* A negative zero is reported as 0 (PS-566), whichever float type, modifier or arithmetic
+     * made it; the comparison is true for either zero and the assignment is the positive one. */
+    if (*value == 0.0) *value = 0.0;
 
     /* PS-523 (CR-2026-109, CR-2026-132): a reference binds the value here, after the
      * modifiers and before the lookup - so a text label binds the number under it, an
@@ -2283,7 +2286,10 @@ static inline int encode_field(
     if (field->has_div) {
         raw_val *= field->div;
     }
-    
+    /* PS-566: an input of -0.0, or a -0 the reversed arithmetic made (0 / -1), is written as
+     * the positive-zero word. */
+    if (raw_val == 0.0) raw_val = 0.0;
+
     /* PS-552: nearest, a tie to even, on the binary64 value; then PS-168. */
     bool exact_int = input && input->is_int && !field->has_add && !field->has_mult
                      && !field->has_div;

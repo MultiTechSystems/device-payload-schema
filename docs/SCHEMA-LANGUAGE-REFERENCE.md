@@ -83,6 +83,12 @@ PS-168 requires (PS-559). Netvox r718e sends it little-endian:
   endian: little
 ```
 
+A negative zero is zero for every float type (`f16`, `bf16`, `f32`, `f64`, `f32le16`,
+`f32be16le` and the minifloats, PS-566): the sign-bit word decodes to 0, and an encoder writes
+the positive-zero word for -0.0, for a decoded -0 and for a -0 that arithmetic such as
+`mult: -1` over 0 produces. A vector carrying a sign-bit zero word therefore does not
+re-encode to itself.
+
 ### Compact Floats (MCCI)
 
 Unsigned and signed minifloats used by MCCI sensors (PS-417 to PS-421). They are not

@@ -37,7 +37,7 @@ final class Wave4 {
 
     static byte[] writeWordOrdered(FieldType t, double value) {
         long word = (t == FieldType.F32LE16 || t == FieldType.F32BE16LE)
-                ? Float.floatToIntBits((float) value) & 0xFFFFFFFFL
+                ? Float.floatToIntBits((float) (value + 0.0)) & 0xFFFFFFFFL   // PS-566
                 : Math.round(Math.rint(value)) & 0xFFFFFFFFL;
         int high = (int) (word >>> 16), low = (int) (word & 0xFFFF);
         if (le16(t)) {

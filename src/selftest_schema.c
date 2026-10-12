@@ -863,6 +863,46 @@ static void test_an_encoder_rounds_ties_to_even(void) {
     TCHECK(encodes_to(half, -1.25, (const uint8_t[]){0xFE}, 1));
 }
 
+/* CR-2026-154 (PS-566): a negative zero is reported as 0 and written as the positive-zero
+ * word. The figures of tests/cr-2026-154-cases.yaml for f32 and f64, which is all C has: it
+ * cannot encode an f16 and has no word-ordered or minifloat type. */
+static bool decodes_to_positive_zero(field_def_t f, const uint8_t* payload, size_t len) {
+    schema_t s;
+    decode_result_t r;
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    schema_add_field(&s, &f);
+    if (schema_decode(&s, payload, len, &r) != SCHEMA_OK || r.field_count != 1) return false;
+    double v = r.fields[0].value.f64;
+    return v == 0.0 && 1.0 / v > 0.0;   /* 1/-0 is -infinity */
+}
+
+static void test_a_negative_zero_is_zero(void) {
+    const uint8_t zero4[4] = {0}, zero8[8] = {0};
+    field_def_t mult = field_f32("x", ENDIAN_BIG);
+    field_set_mult(&mult, -1);
+
+    TCHECK(decodes_to_positive_zero(field_f32("x", ENDIAN_BIG),
+                                    (const uint8_t[]){0x80, 0, 0, 0}, 4));
+    TCHECK(decodes_to_positive_zero(field_f32("x", ENDIAN_LITTLE),
+                                    (const uint8_t[]){0, 0, 0, 0x80}, 4));
+    TCHECK(decodes_to_positive_zero(field_f64("x", ENDIAN_BIG),
+                                    (const uint8_t[]){0x80, 0, 0, 0, 0, 0, 0, 0}, 8));
+    TCHECK(decodes_to_positive_zero(field_f64("x", ENDIAN_LITTLE),
+                                    (const uint8_t[]){0, 0, 0, 0, 0, 0, 0, 0x80}, 8));
+    /* A -0 the field's own arithmetic makes: 0 * -1. */
+    TCHECK(decodes_to_positive_zero(mult, zero4, 4));
+
+    TCHECK(encodes_to(field_f32("x", ENDIAN_BIG), -0.0, zero4, 4));
+    TCHECK(encodes_to(field_f32("x", ENDIAN_LITTLE), -0.0, zero4, 4));
+    TCHECK(encodes_to(field_f64("x", ENDIAN_BIG), -0.0, zero8, 8));
+    TCHECK(encodes_to(field_f64("x", ENDIAN_LITTLE), -0.0, zero8, 8));
+    /* 0 / -1 is -0 when the multiplier is undone. */
+    TCHECK(encodes_to(mult, 0.0, zero4, 4));
+    /* A negative value keeps its sign: -0.5f is bf000000. */
+    TCHECK(encodes_to(field_f32("x", ENDIAN_BIG), -0.5, (const uint8_t[]){0xBF, 0, 0, 0}, 4));
+}
+
 static void test_a_value_that_does_not_fit_is_named(void) {
     field_def_t div10 = field_u8("x");
     field_set_div(&div10, 10);
@@ -1838,6 +1878,7 @@ void selftest_schema(void) {
     test_a_skip_is_written_on_encode();
     test_an_unknown_tag_is_left_over_from_the_tag();
     test_an_encoder_rounds_ties_to_even();
+    test_a_negative_zero_is_zero();
     test_a_value_that_does_not_fit_is_named();
     test_a_nibble_decimal_that_does_not_fit_is_named();
     test_bit_ranges_are_laid_out_as_decoded();

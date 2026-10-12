@@ -294,7 +294,7 @@ function encNumeral(f, value, fixed) {
 }
 
 function encWriteFloat(out, value, type, endian) {
-  var v = Number(value);
+  var v = Number(value) + 0;                          // PS-566: -0 + 0 is 0, the zero word
   var size = type === "f16" ? 2 : type === "f32" ? 4 : 8;
   var dv = new DataView(new ArrayBuffer(size));
   if (type === "f16") dv.setUint16(0, encHalf(v), false);
@@ -454,7 +454,7 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
     out.push(((whole & 0x0F) << 4) | (n - whole * 10));
     return;
   }
-  if (type === "bf16") { encWriteInt(out, encBf16(Number(value), f), 2, false, endian); return; }
+  if (type === "bf16") { encWriteInt(out, encBf16(Number(value) + 0, f), 2, false, endian); return; }   // PS-566
   if (type === "f16" || type === "f32" || type === "f64") { encWriteFloat(out, value, type, endian); return; }
   if (type === "bool") { out.push(value ? 1 : 0); return; }
   if (type === "skip") {
@@ -2876,7 +2876,9 @@ function tlvFold(outer, entry, modes, lastMembers, collected) {
 // the generated codec reported null for log10(0) and the undivided value for div 0.
 // Mirrors normalize_output in the reference interpreter.
 function omitAbsent(v) {
-  if (typeof v === 'number') return isFinite(v) ? v : undefined;
+  // -0 + 0 is 0: a negative zero is reported as 0 (PS-566), whichever float type, modifier
+  // or arithmetic produced it.
+  if (typeof v === 'number') return isFinite(v) ? v + 0 : undefined;
   if (Array.isArray(v)) {
     var list = [];
     for (var i = 0; i < v.length; i++) {
@@ -3253,7 +3255,7 @@ function writeWordOrdered(buf, pos, value, layout, kind) {
   var word;
   if (kind === 'f') {
     var dv = new DataView(new ArrayBuffer(4));
-    dv.setFloat32(0, value, false);
+    dv.setFloat32(0, value + 0, false);                // PS-566: a negative zero is written as zero
     word = dv.getUint32(0, false);
   } else {
     word = Math.round(value);

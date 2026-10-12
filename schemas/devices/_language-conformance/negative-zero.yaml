@@ -1,0 +1,96 @@
+# Negative zero (PS-566, CR-2026-154), for every floating-point type.
+#
+# A decoder reports a negative zero as 0: the sign-bit word of f16, bf16, f32, f64, f32le16
+# and f32be16le, and a -0 the field's own arithmetic makes (`mult: -1` over 0). An encoder
+# writes the positive-zero word for it, which is why these vectors cannot round-trip:
+# encode(decode(payload)) is all zero where the payload carries a sign bit. The shared encode
+# cases are in tests/cr-2026-154-cases.yaml; here every negative-zero word is followed by the
+# same type's 1.0, so a mutation of its width or byte order moves the 1.0 and is noticed.
+#
+# The word-ordered types ignore `endian` (PS-272): f32le16 writes the low unit first, f32be16le
+# the high unit first with each unit little-endian, so their negative-zero words are 00008000
+# and 00800000.
+name: probe_negative_zero
+endian: big
+fields:
+- name: f16_negative
+  type: f16
+- name: f16_one
+  type: f16
+- name: bf16_negative
+  type: bf16
+- name: bf16_one
+  type: bf16
+- name: f32_negative
+  type: f32
+- name: f32_one
+  type: f32
+- name: f64_negative
+  type: f64
+- name: f64_one
+  type: f64
+- name: f32le16_negative
+  type: f32le16
+- name: f32le16_one
+  type: f32le16
+- name: f32be16le_negative
+  type: f32be16le
+- name: f32be16le_one
+  type: f32be16le
+- name: f32_little_negative
+  type: f32
+  endian: little
+- name: f32_little_one
+  type: f32
+  endian: little
+- name: made_negative_zero
+  type: f32
+  mult: -1
+- name: made_minus_one
+  type: f32
+  mult: -1
+test_vectors:
+- name: each_negative_zero_word_is_reported_as_zero
+  source: spec-example
+  payload: "8000 3C00  8000 3F80  80000000 3F800000  8000000000000000 3FF0000000000000  00008000 00003F80  00800000 803F0000  00000080 0000803F  00000000 3F800000"
+  expected:
+    f16_negative: 0
+    f16_one: 1
+    bf16_negative: 0
+    bf16_one: 1
+    f32_negative: 0
+    f32_one: 1
+    f64_negative: 0
+    f64_one: 1
+    f32le16_negative: 0
+    f32le16_one: 1
+    f32be16le_negative: 0
+    f32be16le_one: 1
+    f32_little_negative: 0
+    f32_little_one: 1
+    made_negative_zero: 0
+    made_minus_one: -1
+  expected_warnings: []
+# The same frame with every word the positive zero and a negative reading after it, so a
+# sign-bit mutation of any field is noticed too.
+- name: positive_zero_words_and_negative_one
+  source: spec-example
+  payload: "0000 BC00  0000 BF80  00000000 BF800000  0000000000000000 BFF0000000000000  00000000 0000BF80  00000000 80BF0000  00000000 000080BF  00000000 BF800000"
+  expected:
+    f16_negative: 0
+    f16_one: -1
+    bf16_negative: 0
+    bf16_one: -1
+    f32_negative: 0
+    f32_one: -1
+    f64_negative: 0
+    f64_one: -1
+    f32le16_negative: 0
+    f32le16_one: -1
+    f32be16le_negative: 0
+    f32be16le_one: -1
+    f32_little_negative: 0
+    f32_little_one: -1
+    made_negative_zero: 0
+    made_minus_one: 1
+  expected_warnings: []
