@@ -2628,8 +2628,8 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     `EncodeWithPort` share its `encodeToContext`.
   - **Fixtures:** `_language-conformance/bf16.yaml` (Netvox r718e's three accelerations from
     the vendor decoder run under node - `B3 40` little-endian is 5.59375 - a negative, the
-    smallest subnormal and the largest finite, every vector round-tripping) and
-    `bf16-specials.yaml` (infinities and NaN: absent, so no round trip).
+    smallest subnormal and the largest finite, each round-tripping) and
+    three vectors of infinities and NaN (absent, so no round trip) in the same fixture.
     `tests/cr-2026-149-cases.yaml` is the shared encode case list (ties both ways, the
     double-rounding trap, the overflow tie and the largest value, subnormals, the document
     endian case), read by all five; NaN and the infinities cannot be JSON input, so each

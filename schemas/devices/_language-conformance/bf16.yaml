@@ -2,10 +2,11 @@
 #
 # The word is read in the field's effective byte order, then read as the binary32 whose
 # lower 16 bits are zero. `le` is little-endian as Netvox r718e sends it, `be` is the
-# document's big-endian. Every value here is exact in bf16, and every vector round-trips:
-# the encoder rounds the binary64 value to the nearest bf16, a tie to the even fraction.
-# Infinities and NaN, which decode as absent (PS-282) and so cannot round-trip, are in
-# bf16-specials.yaml.
+# document's big-endian. Every finite value here is exact in bf16 and round-trips: the
+# encoder rounds the binary64 value to the nearest bf16, a tie to the even fraction. The
+# last three vectors are infinities and NaN, which decode as absent (PS-282) and so cannot
+# round-trip. They sit beside the finite ones so that a mutation of the field is
+# distinguishable by some vector.
 name: probe_bf16
 endian: big
 fields:
@@ -42,3 +43,15 @@ test_vectors:
   source: spec-example
   payload: "7F7F FF7F"
   expected: {le: 3.3895313892515355e+38, be: -3.3895313892515355e+38}
+- name: positive_infinity
+  source: spec-example
+  payload: "807F 7F80"
+  expected: {le: null, be: null}
+- name: negative_infinity
+  source: spec-example
+  payload: "80FF FF80"
+  expected: {le: null, be: null}
+- name: nan_with_a_fraction
+  source: spec-example
+  payload: "C17F 7FC1"
+  expected: {le: null, be: null}

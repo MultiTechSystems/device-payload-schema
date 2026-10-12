@@ -124,7 +124,7 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # number for an object one.
 # +12: the four tlv encode-gap fixtures (tlv-object-with-inner-branch,
 # tlv-case-of-one-inline-branch, tlv-float-reading, tlv-scaled-wide-reading), all tlv.
-# +6: bf16 (CR-2026-149), all plain fixed; bf16-specials re-encodes nothing (an absent field).
+# +6: bf16 (CR-2026-149), all plain fixed; its three infinity and NaN vectors re-encode nothing (an absent field).
 # +3: match-discriminator-from-inner-case (CR-2026-151), all match.
 # +11, no silent empty encode (PS-442): the fixtures length-selects-layout (4) and
 # literal-selects-branch (2), match, and tag-entry-constants (4), tlv, and

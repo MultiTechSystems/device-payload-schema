@@ -123,14 +123,14 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Device schemas
 
-351 schemas under `schemas/devices/`.
-Mean quality score 82.0% (PLATINUM 43, GOLD 49, SILVER 238, BRONZE 6, REJECTED 15). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+350 schemas under `schemas/devices/`.
+Mean quality score 82.0% (PLATINUM 43, GOLD 50, SILVER 236, BRONZE 6, REJECTED 15). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
-| _language-conformance | 139 | 299 | SILVER 135, BRONZE 4 |
+| _language-conformance | 138 | 299 | GOLD 1, SILVER 133, BRONZE 4 |
 | milesight | 84 | 1427 | PLATINUM 30, GOLD 35, SILVER 16, REJECTED 3 |
 | decentlab | 58 | 204 | PLATINUM 10, GOLD 11, SILVER 32, BRONZE 1, REJECTED 4 |
 | _library-composed | 49 | 57 | SILVER 49 |
@@ -159,8 +159,7 @@ Mean quality score 82.0% (PLATINUM 43, GOLD 49, SILVER 238, BRONZE 6, REJECTED 1
 | `_language-conformance/arithmetic-worked-examples` | 8 | 1 | fields | 81% | SILVER |
 | `_language-conformance/ascii-latin1` | 1 | 4 | fields | 87% | SILVER |
 | `_language-conformance/ascii-nul-padding` | 1 | 3 | fields | 83% | SILVER |
-| `_language-conformance/bf16-specials` | 1 | 3 | fields | 83% | SILVER |
-| `_language-conformance/bf16` | 2 | 6 | fields | 88% | SILVER |
+| `_language-conformance/bf16` | 2 | 9 | fields | 90% | GOLD |
 | `_language-conformance/bit-range-order` | 6 | 1 | fields | 81% | SILVER |
 | `_language-conformance/bitfield-string-hex-case` | 2 | 1 | fields | 81% | SILVER |
 | `_language-conformance/bitfield-string-wide` | 3 | 2 | fields | 83% | SILVER |
