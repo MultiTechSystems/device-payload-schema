@@ -1201,24 +1201,35 @@ static inline int schema_field_failed(
  *
  * Writes the message the other implementations report, so a schema's declaration reads
  * the same whichever language decodes it. */
-static inline int schema_check_direction(
+static inline int schema_check_direction_msg(
     const schema_t* schema,
     schema_direction_t direction,
-    decode_result_t* result
+    char* msg,
+    size_t msg_size
 ) {
     if (direction == SCHEMA_DIR_UNSET) return SCHEMA_OK;
     if (schema->direction == SCHEMA_DIR_UNSET) return SCHEMA_OK;
     if (schema->direction == SCHEMA_DIR_BOTH) return SCHEMA_OK;
     if (schema->direction == direction) return SCHEMA_OK;
 
-    if (result) {
+    if (msg && msg_size > 0) {
         const char* declared = schema->direction == SCHEMA_DIR_UPLINK ? "uplink" : "downlink";
         const char* travelling = direction == SCHEMA_DIR_UPLINK ? "uplink" : "downlink";
-        snprintf(result->error_msg, sizeof(result->error_msg),
+        snprintf(msg, msg_size,
                  "schema '%s' is declared direction:%s; message direction is %s",
                  schema->name, declared, travelling);
     }
     return SCHEMA_ERR_DIRECTION;
+}
+
+static inline int schema_check_direction(
+    const schema_t* schema,
+    schema_direction_t direction,
+    decode_result_t* result
+) {
+    return schema_check_direction_msg(schema, direction,
+                                      result ? result->error_msg : NULL,
+                                      result ? sizeof(result->error_msg) : 0);
 }
 
 /* schema_decode with the direction of the message supplied.
@@ -1852,7 +1863,8 @@ static inline int schema_encode_direction(
 ) {
     memset(result, 0, sizeof(*result));
 
-    int direction_err = schema_check_direction(schema, direction, NULL);
+    int direction_err = schema_check_direction_msg(schema, direction, result->error_msg,
+                                                   sizeof(result->error_msg));
     if (direction_err != SCHEMA_OK) {
         return direction_err;
     }
