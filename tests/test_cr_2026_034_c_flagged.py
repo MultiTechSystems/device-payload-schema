@@ -115,7 +115,10 @@ class TestAMissingMaskIsAnErrorNotZero:
         start = text.index("if (field->type == FIELD_TYPE_FLAGGED) {")
         window = text[start:start + 900]
         assert "var_has(&vars" in window
-        assert window.index("var_has(&vars") < window.index("var_get(&vars")
+        # The mask is read with var_find since PS-523's binding may hold a fraction
+        # (CR-2026-109); it was var_get. Either way the check comes first.
+        read = "var_find(&vars" if "var_find(&vars" in window else "var_get(&vars"
+        assert window.index("var_has(&vars") < window.index(read)
 
     def test_it_reports_rather_than_returning_empty(self):
         text = HEADER.read_text()

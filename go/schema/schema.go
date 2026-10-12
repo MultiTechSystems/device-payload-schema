@@ -827,19 +827,30 @@ func reverseCanonicalModifiers(value float64, field Field) float64 {
 // Labels are compared by sameLabel (PS-513): a boolean is found only as a boolean, so
 // `true` never reverses through a label of 1, nor 1 through a label of `true`.
 func reverseLookupLabel(field Field, value any) (any, error) {
+	return reverseLookupLabelMode(field, value, true)
+}
+
+// reverseLookupAnyCode is reverseLookupLabel for a caller only ranking candidate cases,
+// which takes the smallest of several codes sharing a label rather than rejecting it, as
+// the reference's _case_fidelity does; the field's own encoding rejects it (PS-169).
+func reverseLookupAnyCode(field Field, value any) (any, error) {
+	return reverseLookupLabelMode(field, value, false)
+}
+
+func reverseLookupLabelMode(field Field, value any, strict bool) (any, error) {
 	if field.Lookup == nil && field.LookupArray == nil {
 		return value, nil
 	}
-	// Smallest matching key, so a table that gives two values the same label resolves
-	// the same way on every run rather than however the map happens to be walked.
-	matched, found := 0, false
-	for k, v := range field.Lookup {
-		if sameLabel(v, value) && (!found || k < matched) {
-			matched, found = k, true
+	// PS-169 (CR-2026-146): a label two or more codes share names no one code. It used to
+	// encode as the smallest.
+	if codes := lookupLabelCodes(field, value); len(codes) > 0 {
+		if strict && len(codes) > 1 {
+			return nil, newSharedLabelError(field.Name, value, codes)
 		}
+		return float64(codes[0]), nil
 	}
-	if found {
-		return float64(matched), nil
+	if codes := arrayLabelCodes(field, value); strict && len(codes) > 1 {
+		return nil, newSharedLabelError(field.Name, value, codes)
 	}
 	strVal, isStr := value.(string)
 	if boolVal, isBool := value.(bool); isBool {
@@ -2617,16 +2628,7 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 
 	case TypeEnum, TypeEnumLower:
 		// Enum: read base type and map to string
-		baseLen := 1
-		switch field.Base {
-		case "u8", "s8":
-			baseLen = 1
-		case "u16", "s16":
-			baseLen = 2
-		case "u32", "s32":
-			baseLen = 4
-		}
-		data, err := ctx.Read(baseLen)
+		data, err := ctx.Read(enumBaseWidth(field.Base))
 		if err != nil {
 			return nil, err
 		}
@@ -3160,6 +3162,34 @@ func matchCasePattern(value int, pattern any) bool {
 	return false
 }
 
+// fractionInRangePattern is matchCasePattern for a discriminator with a fraction. It equals
+// no integer, so no single key and no member of a list matches it; only an inclusive range
+// can hold it (PS-152), as the reference and the spec prototype read `lo..hi`.
+func fractionInRangePattern(value float64, pattern any) bool {
+	switch v := pattern.(type) {
+	case string:
+		if _, ok := parseListCaseKey(v); ok {
+			return false
+		}
+		if strings.Contains(v, "..") {
+			parts := strings.SplitN(v, "..", 2)
+			lo, errLo := parseIntAny(strings.TrimSpace(parts[0]))
+			hi, errHi := parseIntAny(strings.TrimSpace(parts[1]))
+			return errLo == nil && errHi == nil && value >= float64(lo) && value <= float64(hi)
+		}
+	case map[string]any:
+		lo, hi := math.Inf(-1), math.Inf(1)
+		if min, ok := toFloat64(v["min"]); ok {
+			lo = min
+		}
+		if max, ok := toFloat64(v["max"]); ok {
+			hi = max
+		}
+		return value >= lo && value <= hi
+	}
+	return false
+}
+
 // parseListCaseKey reads a quoted list case key, "[1, 2, 0x10]" (PS-398).
 func parseListCaseKey(text string) ([]int, bool) {
 	text = strings.TrimSpace(text)
@@ -3200,6 +3230,11 @@ func parseRangePattern(text string) (int, int, bool) {
 
 func decodeMatch(field Field, ctx *DecodeContext) (any, error) {
 	var matchValue int
+	// The discriminator as the number it is. One taken from `field` may be a computed
+	// value with a fraction, which equals no integer key; toInt truncated it, so 2.5
+	// selected case 2 (PS-484's reading, applied to case keys).
+	var matchNumber float64
+	fractional := false
 	// What this construct contributes on its own: the discriminator under `name`, where
 	// it was read here and named. nil where there is nothing to report.
 	var inline map[string]any
@@ -3216,6 +3251,9 @@ func decodeMatch(field Field, ctx *DecodeContext) (any, error) {
 			return nil, fmt.Errorf("variable not found: $%s", varName)
 		}
 		matchValue, _ = toInt(val)
+		if f, ok := toFloat64(val); ok && f != math.Trunc(f) {
+			matchNumber, fractional = f, true
+		}
 	} else {
 		// Inline match - read bytes
 		length := field.Length
@@ -3263,6 +3301,13 @@ func decodeMatch(field Field, ctx *DecodeContext) (any, error) {
 			continue
 		}
 
+		if fractional {
+			if fractionInRangePattern(matchNumber, caseVal) {
+				decoded, err := decodeFields(c.Fields, ctx)
+				return mergeMatchResult(inline, decoded, err)
+			}
+			continue
+		}
 		if matchCasePattern(matchValue, caseVal) {
 			decoded, err := decodeFields(c.Fields, ctx)
 			return mergeMatchResult(inline, decoded, err)
@@ -3278,14 +3323,18 @@ func decodeMatch(field Field, ctx *DecodeContext) (any, error) {
 	// `default` decides what an unmatched value means, and defaults to "error". Nothing
 	// read the key here, so every value of it behaved as "skip" and a schema declaring a
 	// fallback got none.
+	shown := strconv.Itoa(matchValue)
+	if fractional {
+		shown = strconv.FormatFloat(matchNumber, 'f', -1, 64)
+	}
 	switch fallback := field.MatchDefault.(type) {
 	case nil:
-		return inline, fmt.Errorf("no matching case for value %d", matchValue)
+		return inline, fmt.Errorf("no matching case for value %s", shown)
 	case string:
 		if fallback == "skip" {
 			return inline, nil
 		}
-		return inline, fmt.Errorf("no matching case for value %d", matchValue)
+		return inline, fmt.Errorf("no matching case for value %s", shown)
 	case []any:
 		decoded, err := decodeFields(parseFieldsRaw(fallback), ctx)
 		return mergeMatchResult(inline, decoded, err)
@@ -4211,7 +4260,7 @@ func integerRange(t FieldType) (int64, int64, bool) {
 // the rounding that encodeField applies - so a caller can see whether the value could
 // have come from this field at all.
 func rawForField(field Field, value any) (float64, bool) {
-	reversed, err := reverseLookupLabel(field, value)
+	reversed, err := reverseLookupAnyCode(field, value)
 	if err != nil {
 		// A label with no value behind it: this case cannot have written those bytes.
 		return 0, false
@@ -4746,7 +4795,19 @@ func encodeMatch(field Field, siblings []Field, data map[string]any, ctx *Encode
 	var chosen []Field
 	chosenKey := ""
 	if discriminator != nil {
-		if intVal, ok := toInt(discriminator); ok {
+		if f, ok := toFloat64(discriminator); ok && f != math.Trunc(f) {
+			// A fraction selects no case toInt would truncate it into (decodeMatch).
+			for _, c := range field.Cases {
+				raw := c.Case
+				if raw == nil {
+					raw = c.Match
+				}
+				if !c.Default && fractionInRangePattern(f, raw) {
+					chosen, chosenKey = c.Fields, fmt.Sprintf("%v", c.Case)
+					break
+				}
+			}
+		} else if intVal, ok := toInt(discriminator); ok {
 			for _, c := range field.Cases {
 				if caseMatchesValue(intVal, c) {
 					chosen, chosenKey = c.Fields, fmt.Sprintf("%v", c.Case)
@@ -4880,6 +4941,9 @@ func encodeByteGroup(field Field, data map[string]any, ctx *EncodeContext) error
 				packed |= 1 << uint(gf.Bit)
 			}
 			continue
+		}
+		if err := sharedLabelCheck(gf, value); err != nil {
+			return err // PS-169
 		}
 		raw, ok := rawForField(gf, value)
 		if !ok {
@@ -5120,6 +5184,9 @@ func encodeBitfieldRun(run []Field, data map[string]any, ctx *EncodeContext) err
 			}
 			value = v
 		}
+		if err := sharedLabelCheck(gf, value); err != nil {
+			return err // PS-169
+		}
 		raw, ok := rawForField(gf, value)
 		if !ok {
 			// A label on a bit range: recover the number rather than writing zero, which
@@ -5160,6 +5227,9 @@ func bitfieldLabelValue(value any, gf Field) (float64, error) {
 	if _, err := reverseLookupLabel(gf, value); err != nil {
 		if _, isBool := value.(bool); isBool {
 			return 0, err
+		}
+		if _, shared := err.(*sharedLabelError); shared {
+			return 0, err // PS-169
 		}
 	}
 	label := fmt.Sprintf("%v", value)
@@ -5760,12 +5830,9 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 		if tenths == 10 {
 			whole, tenths = whole+1, 0
 		}
-		low, high := 0.0, 15.0
-		if field.Type == TypeSDec {
-			low, high = -8, 7
-		}
-		if whole < low || whole > high {
-			return fmt.Errorf("field %q: %v does not fit %s", field.Name, numVal, field.Type)
+		if err := nibbleDecimalFitError(int(whole)*10+int(tenths), field.Type == TypeSDec,
+			field.Name, given); err != nil {
+			return err // PS-168
 		}
 		ctx.Write([]byte{byte((int(whole)&0x0F)<<4) | byte(tenths)})
 
@@ -5860,30 +5927,12 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 		ctx.placeNamedBits(1, "big", uint(field.Bit), uint64(b), field.Consume, 1, field.Name, false)
 
 	case TypeEnum, TypeEnumLower:
-		// The label maps back through `values`; an unmapped one cannot be recovered.
-		if strVal, ok := value.(string); ok {
-			// A `type: enum` field keeps its mapping in Values; Lookup is the separate
-			// `lookup:` modifier. Reading the wrong one made every label unknown.
-			for k, v := range field.Values {
-				if v == strVal {
-					ctx.Write(encodeUint(uint64(k), maxInt(length, 1), endian))
-					return nil
-				}
-			}
-			for k, v := range field.Lookup {
-				if sameLabel(v, strVal) {
-					ctx.Write(encodeUint(uint64(k), maxInt(length, 1), endian))
-					return nil
-				}
-			}
-			return fmt.Errorf(
-				"enum field %q: %q is not one of its values; an unmapped value is "+
-					"reported through `default` (PS-068), and that label cannot be "+
-					"traced back to the value that produced it", field.Name, strVal)
+		// A name back to its code, a code as given (PS-067, PS-169, PS-168).
+		encoded, err := encodeEnumValue(field, value, endian)
+		if err != nil {
+			return err
 		}
-		if num, ok := toFloat64(value); ok {
-			ctx.Write(encodeUint(uint64(int64(num)), maxInt(length, 1), endian))
-		}
+		ctx.Write(encoded)
 
 	case TypeBytes, TypeBytesLower:
 		if err := encodeBytes(field, value, length, ctx); err != nil {

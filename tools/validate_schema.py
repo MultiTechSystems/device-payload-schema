@@ -691,6 +691,38 @@ def meta_matches(expected, actual, path='_meta'):
     return (True, '') if ok else (False, '%s: expected %r, got %r' % (path, expected, actual))
 
 
+def shared_labels(fld: Dict[str, Any]) -> List[Tuple[Any, List[int]]]:
+    """Every label a field's `lookup` or enum `values` gives two or more codes, with the
+    codes ascending (PS-169, CR-2026-146): decoding is unaffected, but no encoder can
+    write such a label."""
+    tables = []
+    if fld.get('lookup') is not None:
+        tables.append(fld['lookup'])
+    if fld.get('type') == 'enum' and fld.get('values') is not None:
+        tables.append(fld['values'])
+    found = []
+    for table in tables:
+        if isinstance(table, dict):
+            pairs = [(key, entry) for key, entry in table.items() if key != 'default']
+        elif isinstance(table, list):
+            pairs = list(enumerate(table))
+        else:
+            continue
+        codes_by_label: Dict[Any, List[int]] = {}
+        for key, entry in pairs:
+            label = entry.get('name') if isinstance(entry, dict) else entry
+            try:
+                code = key if isinstance(key, int) else int(str(key), 0)
+            except ValueError:
+                continue
+            # (type, value): True and 1 are different labels (PS-513).
+            codes_by_label.setdefault((type(label).__name__, label), []).append(code)
+        for (_, label), codes in codes_by_label.items():
+            if len(codes) > 1:
+                found.append((label, sorted(codes)))
+    return found
+
+
 def warnings_match(expected: Any, actual: List[str]) -> Tuple[bool, str]:
     """Whether the warnings an execution reported are the ones a vector expects.
 
@@ -1852,6 +1884,19 @@ def check_best_practices(schema: Dict[str, Any], result: ValidationResult) -> No
                     % (", ".join(written), ", ".join(canonical)),
                     f"{name}"
                 )
+
+            # PS-169 (amended by CR-2026-146, 0.5.5): a label that several codes of a
+            # lookup or an enum share names no one code, so an encoder rejects it. A
+            # computed field is never written (PS-214), so its lookup is not warned about.
+            if ftype not in ('number', 'integer'):
+                for label, codes in shared_labels(fld):
+                    result.add_warning(
+                        "The label %s is shared by codes [%s], so a value reported with "
+                        "it cannot be encoded; give each code its own label, or encode "
+                        "the code as a number (PS-169)."
+                        % (repr(label), ", ".join(str(c) for c in codes)),
+                        f"{name}"
+                    )
 
             # PS-453: `consume: 0` advances nothing, which is the point on a bit range
             # or a bool and a trap anywhere else - the next field reads the same bytes.
