@@ -1,0 +1,55 @@
+# Entries that report constants (PS-359): one reports nothing else, and one reports a
+# state under a byte of its own whose bodies give one name different constants. An
+# encoder chooses each entry by the constant's value. Before, the constant-only entry
+# was dropped with no error (PS-442), and the state byte was refused as an internal
+# value the input does not give (PS-434) wherever its body held only a constant.
+name: probe_tag_entry_constants
+version: 1
+endian: big
+fields:
+- tlv:
+    tag_size: 1
+    cases:
+      7:
+      - name: _state
+        type: u8
+      - match:
+          field: $_state
+          cases:
+            2:
+            - name: pc
+              type: string
+              value: ok
+            3:
+            - name: pc
+              type: string
+              value: alarm
+            - name: diff
+              type: u16
+      9:
+      - name: request
+        type: number
+        value: 1
+test_vectors:
+- name: state_ok
+  source: generated
+  payload: "07 02"
+  expected:
+    pc: ok
+- name: state_alarm_with_its_reading
+  source: generated
+  payload: "07 03 0005"
+  expected:
+    pc: alarm
+    diff: 5
+- name: constant_alone
+  source: generated
+  payload: "09"
+  expected:
+    request: 1
+- name: both_entries
+  source: generated
+  payload: "09 07 02"
+  expected:
+    request: 1
+    pc: ok

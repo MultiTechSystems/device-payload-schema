@@ -89,6 +89,83 @@ public static class SchemaEncoder
             $"No port definition for fPort {fPort} and no default in schema '{schema.Name}'");
     }
 
+    /// <summary>A literal: a string, number or boolean declaring <c>value</c> (PS-357).</summary>
+    static bool IsLiteral(SchemaField f)
+        => f.Type is FieldType.Number or FieldType.String or FieldType.Boolean && f.Value != null;
+
+    /// <summary>A computed field: <c>type: number</c> (or integer) with no <c>value</c>.</summary>
+    static bool IsComputed(SchemaField f) => f.Type == FieldType.Number && f.Value == null;
+
+    /// <summary>
+    /// Every name a field list declares, anywhere in it, with whether some declaration
+    /// reads payload bytes or computes from them, and the values its literals give.
+    /// Mirrors declared_sources, for the empty-payload check (PS-442).
+    /// </summary>
+    public static Dictionary<string, (bool reads, List<object?> literals)> DeclaredSources(
+        List<SchemaField> fields)
+    {
+        var found = new Dictionary<string, (bool reads, List<object?> literals)>();
+        void Note(string name, bool literal, object? value)
+        {
+            if (!found.TryGetValue(name, out var entry)) entry = (false, new List<object?>());
+            if (literal) entry.literals.Add(value); else entry.reads = true;
+            found[name] = entry;
+        }
+        void WalkList(IEnumerable<SchemaField>? list)
+        {
+            if (list == null) return;
+            foreach (var f in list) Walk(f);
+        }
+        void Walk(SchemaField f)
+        {
+            bool construct = f.MatchInline != null || f.ByteGroup.Count > 0 || f.Flagged != null
+                || f.TLVInline != null || f.Ref2 != null || f.Records != null;
+            if (!construct && !string.IsNullOrEmpty(f.Name))
+            {
+                if (IsLiteral(f)) Note(f.Name, true, f.Value); else Note(f.Name, false, null);
+            }
+            WalkList(f.Fields);
+            WalkList(f.ByteGroup);
+            WalkList(f.TagFields);
+            WalkList(f.Trailer);
+            foreach (var c in f.Cases) WalkList(c.Fields);
+            if (f.MatchDefault is List<SchemaField> d) WalkList(d);
+            if (f.Flagged != null) foreach (var g in f.Flagged.Groups) WalkList(g.Fields);
+            if (f.TLVCases != null) foreach (var list in f.TLVCases.Values) WalkList(list);
+            if (f.Records != null) foreach (var list in f.Records) WalkList(list);
+            if (f.TLVInline != null) Walk(f.TLVInline);
+            // An inline match's own name is its discriminator's, which reads bytes.
+            if (f.MatchInline != null) Walk(f.MatchInline);
+        }
+        WalkList(fields);
+        return found;
+    }
+
+    /// <summary>
+    /// PS-442: an encoder that wrote no bytes, where the input gives a value that only a
+    /// field reading payload bytes (or computing from them) reports, dropped that field's
+    /// bytes without a word. The first such name, in the input's order. A value that can
+    /// be written in no bytes is not one: an empty list, mapping or string, a value a
+    /// literal of that name gives, and an internal or absent one. Mirrors
+    /// empty_payload_error.
+    /// </summary>
+    public static string? EmptyPayloadError(List<SchemaField> fields, Dictionary<string, object?> data)
+    {
+        Dictionary<string, (bool reads, List<object?> literals)>? sources = null;
+        foreach (var (key, value) in data)
+        {
+            if (key.StartsWith("_") || value == null) continue;
+            if (value is string text && text.Length == 0) continue;
+            if (value is System.Collections.ICollection coll && coll.Count == 0) continue;
+            sources ??= DeclaredSources(fields);
+            if (!sources.TryGetValue(key, out var entry) || !entry.reads) continue;
+            if (entry.literals.Any(l => Helpers.SameLabel(l, value))) continue;
+            return $"Encoding wrote no bytes, though the input gives '{key}', which the "
+                + "schema reads from the payload (PS-442)";
+        }
+        return null;
+    }
+
     /// <summary>One encode call's state: the schema, the endianness, and what went wrong.</summary>
     sealed class Encoding
     {
@@ -147,6 +224,14 @@ public static class SchemaEncoder
                 {
                     _result.Errors.Add(e.Message);
                 }
+            }
+
+            if (_result.Errors.Count == 0 && frame.Length == 0)
+            {
+                // PS-442: the last line against a construct that wrote nothing and said so
+                // to no one - a match with no case chosen, a tlv entry no case claimed.
+                var empty = EmptyPayloadError(_fields, data);
+                if (empty != null) _result.Errors.Add(empty);
             }
 
             // A rejected input produces no payload: the bytes written before the error are
@@ -749,17 +834,41 @@ public static class SchemaEncoder
 
         /// <summary>
         /// The discriminator of the one match case whose fields the input gives; null where
-        /// none is given, two tie, or the case stands for more than one value.
+        /// none is given, two tie, the default explains the input as well, or the case
+        /// stands for more than one value. Mirrors _sole_case_given.
         /// </summary>
-        static long? SoleCaseGiven(List<MatchCase> cases, Dictionary<string, object?> data)
+        long? SoleCaseGiven(SchemaField match, Dictionary<string, object?> data)
+        {
+            var (best, tied) = BestCase(match, data);
+            return best == null || tied ? null : ExactCaseValue(best.CaseValue);
+        }
+
+        /// <summary>
+        /// A match's default field list - <c>default:</c> beside its cases, or a default
+        /// case - or null where its default is <c>error</c> or <c>skip</c>. Mirrors
+        /// _default_body.
+        /// </summary>
+        static List<SchemaField>? DefaultBody(SchemaField match)
+        {
+            if (match.MatchDefault is List<SchemaField> declared) return declared;
+            return match.Cases.FirstOrDefault(IsDefaultCase)?.Fields;
+        }
+
+        /// <summary>
+        /// The case whose fields the input gives most of, scored by BodyScore; the first of
+        /// equal cases wins, and <c>tied</c> says another equalled it. Where the match's
+        /// default list explains more of the input than any case, no case is returned.
+        /// Mirrors _best_case.
+        /// </summary>
+        (MatchCase? best, bool tied) BestCase(SchemaField match, Dictionary<string, object?> data)
         {
             MatchCase? best = null;
             int bestHits = 0;
             bool tied = false;
-            foreach (var c in cases)
+            foreach (var c in match.Cases)
             {
                 if (IsDefaultCase(c)) continue;
-                int hits = ClaimableFields(c.Fields).Count(f => data.ContainsKey(f.Name));
+                int hits = BodyScore(c.Fields, data) ?? 0;
                 if (hits > bestHits)
                 {
                     best = c;
@@ -769,7 +878,83 @@ public static class SchemaEncoder
                 else if (hits > 0 && hits == bestHits)
                     tied = true;
             }
-            return best == null || tied ? null : ExactCaseValue(best.CaseValue);
+            var fallback = DefaultBody(match);
+            if (best != null && fallback != null && (BodyScore(fallback, data) ?? 0) > bestHits)
+                return (null, false);
+            return (best, tied);
+        }
+
+        /// <summary>
+        /// How many of a match branch's reported names the input gives, or null where the
+        /// input rules the branch out (no-silent-empty). Counted through a byte_group's or
+        /// flagged group's members, a nested match's best branch and a tlv's cases. A literal
+        /// the input gives with another value rules the branch out (PS-359, PS-513), as does
+        /// a nested match every branch of which is ruled out and whose default is not
+        /// <c>skip</c>. A computed field is not counted. Mirrors _body_score: only the top
+        /// level of a branch used to be counted, so a branch whose fields sit in another
+        /// construct scored nothing, no case was chosen, and the match wrote no bytes and
+        /// reported nothing.
+        /// </summary>
+        int? BodyScore(List<SchemaField>? body, Dictionary<string, object?> data)
+        {
+            if (body == null) return null;
+            int score = 0;
+            foreach (var f in body)
+            {
+                if (f.ByteGroup.Count > 0)
+                {
+                    var hits = BodyScore(f.ByteGroup, data);
+                    if (hits == null) return null;
+                    score += hits.Value;
+                    continue;
+                }
+                if (f.Flagged?.Groups != null)
+                {
+                    foreach (var group in f.Flagged.Groups)
+                        score += BodyScore(group.Fields, data) ?? 0;
+                    continue;
+                }
+                if (f.MatchInline is { } inner)
+                {
+                    if (!string.IsNullOrEmpty(inner.Name) && data.ContainsKey(inner.Name)) score++;
+                    var bodies = inner.Cases.Where(c => !IsDefaultCase(c)).Select(c => c.Fields).ToList();
+                    var fallback = DefaultBody(inner);
+                    if (fallback != null) bodies.Add(fallback);
+                    int? best = null;
+                    foreach (var b in bodies)
+                    {
+                        var h = BodyScore(b, data);
+                        if (h != null && (best == null || h > best)) best = h;
+                    }
+                    if (best != null) score += best.Value;
+                    else if ((inner.MatchDefault as string ?? "error") != "skip") return null;
+                    continue;
+                }
+                var tlvCases = f.TLVInline?.TLVCases ?? (f.Type == FieldType.TLV ? f.TLVCases : null);
+                if (tlvCases != null)
+                {
+                    var names = new HashSet<string>();
+                    foreach (var caseFields in tlvCases.Values)
+                        foreach (var (c, _) in CaseClaims(caseFields, false))
+                            if (!string.IsNullOrEmpty(c.Name)) names.Add(c.Name);
+                    score += names.Count(data.ContainsKey);
+                    continue;
+                }
+                if (string.IsNullOrEmpty(f.Name) || f.Name.StartsWith("_") || IsComputed(f)) continue;
+                string? key;
+                try
+                {
+                    key = ResolveEncodeName(f, data);
+                }
+                catch (InvalidOperationException)
+                {
+                    key = null;
+                }
+                if (key == null || !data.TryGetValue(key, out var given)) continue;
+                if (IsLiteral(f) && !Helpers.SameLabel(f.Value, given)) return null;
+                score++;
+            }
+            return score;
         }
 
         /// <summary>
@@ -804,7 +989,7 @@ public static class SchemaEncoder
                     var source = DerivedSource(fields, match.On);
                     if (source == null || (derived.TryGetValue(source.Name, out var have) && have != null))
                         continue;
-                    var key = SoleCaseGiven(match.Cases, data);
+                    var key = SoleCaseGiven(match, data);
                     if (key != null) derived[source.Name] = key.Value;
                 }
                 else if (f.Flagged is { } flagged)
@@ -1190,28 +1375,62 @@ public static class SchemaEncoder
             // recovered from which of its fields the data carries.
             if (fallbackFields == null)
             {
-                matched ??= CasePresent(match.Cases, data);
-                matched ??= match.Cases.FirstOrDefault(IsDefaultCase);
+                // Recovered from which of its fields the input gives, scored through the
+                // constructs a branch holds (BestCase); a `remaining` match given no case's
+                // fields takes the case matching 0 bytes, which writing nothing selects, unless
+                // its default list explains some of the input.
+                matched ??= BestCase(match, data).best;
+                if (matched == null && match.MatchRemaining
+                    && (BodyScore(DefaultBody(match), data) ?? 0) == 0)
+                    matched = match.Cases.FirstOrDefault(c => !IsDefaultCase(c)
+                        && CaseMatches(0L, c.CaseValue));
             }
+            var label = !string.IsNullOrEmpty(match.Name) ? match.Name!
+                : !string.IsNullOrEmpty(match.Var) ? match.Var! : "match";
+            if (matched == null && fallbackFields == null && discriminator == null && match.Length > 0)
+            {
+                // CR-2026-151 (PS-551): where neither the input nor one of this match's own
+                // cases fixes the discriminator, a nested match reading it, with exactly one
+                // case the input fills, does.
+                var nested = NestedDiscriminator(match, data, label);
+                if (nested != null)
+                {
+                    discriminator = (double)nested.Value.value;
+                    matched = nested.Value.matched;
+                    fallbackFields = nested.Value.fallback;
+                    if (!string.IsNullOrEmpty(match.Var))
+                        data = new Dictionary<string, object?>(data) { [match.Var!] = (long)nested.Value.value };
+                }
+            }
+            if (fallbackFields == null)
+                matched ??= match.Cases.FirstOrDefault(IsDefaultCase);
+            if (matched == null && fallbackFields == null
+                && match.MatchDefault is List<SchemaField> declaredFallback)
+                // The `default:` beside `cases`, taken as the reference takes it where
+                // nothing in the input belongs to a case; its discriminator is then missing.
+                fallbackFields = declaredFallback;
             if (matched == null && fallbackFields == null)
             {
                 var mode = match.MatchDefault as string ?? "error";
-                if (discriminator == null
-                    && (mode == "skip" || (match.Length > 0 && string.IsNullOrEmpty(match.Name))))
-                    // Nothing given and nothing the input could give: an inline match
-                    // with no name reports no discriminator, and a `skip` default none
-                    // for an unmatched value. This is the corpus's non-advancing peek
-                    // (r718x, dnt, and registry schemas), whose byte the bit range before
-                    // it already wrote. Left as it was, as the reference leaves it.
-                    return Array.Empty<byte>();
                 if (match.Length > 0 && discriminator == null)
-                    // PS-551: an inline discriminator the input neither gives nor fixes
-                    // through a case's fields. This returned no bytes at all, dropping the
-                    // discriminator's own (PS-442).
+                    // PS-551, PS-442: an inline discriminator the input neither gives nor
+                    // fixes through a case's fields, nor a bit range before it peeked. This
+                    // returned no bytes at all where the match was nameless or its default
+                    // `skip`. Named by the discriminator, its `var` where it has no `name`.
+                    throw new InvalidOperationException(MissingFieldMessage(label));
+                if (mode == "skip")
+                    // The discriminator, if the match reads one, and nothing for the case.
+                    fallbackFields = new List<SchemaField>();
+                else if (discriminator != null)
+                    // PS-442: no case for the discriminator given, and no default.
+                    throw new InvalidOperationException(
+                        $"No matching case for value {DiscriminatorText(discriminator)}");
+                else
+                    // PS-442, PS-551: no discriminator given or derivable, and no case
+                    // whose fields the input gives. This wrote nothing and reported nothing.
                     throw new InvalidOperationException(MissingFieldMessage(
-                        string.IsNullOrEmpty(match.Name) ? "match" : match.Name));
-                // 'skip': the discriminator, and nothing for the case.
-                fallbackFields = new List<SchemaField>();
+                        label != "match" ? label
+                        : !string.IsNullOrEmpty(match.On) ? match.On.TrimStart('$') : "match"));
             }
 
             if (fallbackFields != null)
@@ -1220,8 +1439,13 @@ public static class SchemaEncoder
                 if (match.Length > 0)
                 {
                     var (ok, numeric) = Helpers.ToFloat64(discriminator);
-                    var value = ok ? (long)Math.Round(numeric, MidpointRounding.ToEven) : 0L;
-                    fallbackOut.AddRange(Helpers.EncodeUint((ulong)value, match.Length, _endian));
+                    // A `default` stands for every unlisted value, so it names none to
+                    // write; a zero was written here (PS-551).
+                    if (!ok) throw new InvalidOperationException(MissingFieldMessage(label));
+                    var rounded = Math.Round(numeric, MidpointRounding.ToEven);
+                    var (dlow, dhigh) = IntegerBounds(match.Length * 8, false);
+                    CheckFits(rounded, dlow, dhigh, label, discriminator);                 // PS-168
+                    fallbackOut.AddRange(Helpers.EncodeUint((ulong)(long)rounded, match.Length, _endian));
                 }
                 var fallbackBody = EncodeFieldList(fallbackFields, data);
                 int fallbackPending = CarriedBy(fallbackBody);
@@ -1249,14 +1473,15 @@ public static class SchemaEncoder
                     if (IsDefaultCase(matched!))
                         // PS-551: the default case names no value to write for the
                         // discriminator the input left out.
-                        throw new InvalidOperationException(MissingFieldMessage(
-                            string.IsNullOrEmpty(match.Name) ? "match" : match.Name));
+                        throw new InvalidOperationException(MissingFieldMessage(label));
                     var fromKey = ExactCaseValue(matched!.CaseValue);
                     if (fromKey == null)
                         throw new InvalidOperationException(
                             $"match case {matched!.CaseValue} names no single discriminator value");
                     value = fromKey.Value;
                 }
+                var (wlow, whigh) = IntegerBounds(match.Length * 8, false);
+                CheckFits(value, wlow, whigh, label, discriminator ?? value);              // PS-168
                 output.AddRange(WriteUint(value, match.Length, _endian));
             }
             var body = EncodeFieldList(matched!.Fields, data);
@@ -1275,22 +1500,89 @@ public static class SchemaEncoder
             // rather than setting the flag, so both spellings are checked here.
             => c.IsDefault || (c.CaseValue as string) == "default";
 
-        /// <summary>The case whose fields the data carries most of, or null.</summary>
-        static MatchCase? CasePresent(List<MatchCase> cases, Dictionary<string, object?> data)
+        /// <summary>
+        /// CR-2026-151 (PS-551), applied on spec main for 0.5.5: the value a nested
+        /// match fixes for this match's discriminator, with the outer case it selects (or the
+        /// `default` fields beside the cases), or null where no nested match reading it has
+        /// a case the input fills. The input fixes it where it fills exactly one such case,
+        /// whose key is a single value selecting, in this match and in every match between
+        /// that reads it, the branch holding the nested match; otherwise it is rejected,
+        /// naming the discriminator. Mirrors the reference's _nested_discriminator.
+        /// </summary>
+        static (long value, MatchCase? matched, List<SchemaField>? fallback)? NestedDiscriminator(
+            SchemaField match, Dictionary<string, object?> data, string label)
         {
-            MatchCase? best = null;
-            int bestHits = 0;
-            foreach (var c in cases)
+            var names = new HashSet<string>();
+            if (!string.IsNullOrEmpty(match.Var)) names.Add(match.Var!);
+            if (!string.IsNullOrEmpty(match.Name)) names.Add(match.Name!);
+            if (names.Count == 0) return null;
+            List<string> NamesOf(List<SchemaField> fields) =>
+                fields.Where(f => PayloadName(f) != null).Select(f => f.Name!).ToList();
+            // A case is filled where the input gives every one of its fields and nothing any
+            // other case of its match declares beyond them (Netvox r718n3's case 3 holds
+            // the fields of cases 1 and 2 together).
+            bool Filled(List<string> own, HashSet<string> given) =>
+                own.Count > 0 && own.All(data.ContainsKey) && given.All(own.Contains);
+            // A step is the match and the branch taken: a case, or null for the default beside.
+            var filled = new List<(List<(SchemaField m, MatchCase? branch)> path, MatchCase c)>();
+            void Walk(List<SchemaField>? fields, List<(SchemaField m, MatchCase? branch)> path)
             {
-                if (IsDefaultCase(c)) continue;
-                int hits = c.Fields.Count(f => PayloadName(f) != null && data.ContainsKey(f.Name));
-                if (hits > bestHits)
+                if (fields == null) return;
+                foreach (var f in fields)
                 {
-                    best = c;
-                    bestHits = hits;
+                    var inner = f.MatchInline;
+                    if (inner == null) continue;
+                    var on = (inner.On ?? "").TrimStart('$');
+                    bool reads = on.Length > 0 && names.Contains(on);
+                    var given = reads
+                        ? inner.Cases.Where(c => !IsDefaultCase(c)).SelectMany(c => NamesOf(c.Fields))
+                            .Where(data.ContainsKey).ToHashSet()
+                        : new HashSet<string>();
+                    foreach (var c in inner.Cases)
+                    {
+                        var next = path;
+                        if (reads)
+                        {
+                            if (!IsDefaultCase(c) && Filled(NamesOf(c.Fields), given)) filled.Add((path, c));
+                            next = new List<(SchemaField, MatchCase?)>(path) { (inner, c) };
+                        }
+                        Walk(c.Fields, next);
+                    }
+                    if (inner.MatchDefault is List<SchemaField> fb)
+                        Walk(fb, reads ? new List<(SchemaField, MatchCase?)>(path) { (inner, null) } : path);
                 }
             }
-            return best;
+            foreach (var c in match.Cases)
+                Walk(c.Fields, new List<(SchemaField, MatchCase?)> { (match, c) });
+            if (match.MatchDefault is List<SchemaField> outerDefault)
+                Walk(outerDefault, new List<(SchemaField, MatchCase?)> { (match, null) });
+            if (filled.Count == 0) return null;
+            if (filled.Count != 1) throw new InvalidOperationException(MissingFieldMessage(label));
+            var (steps, filledCase) = filled[0];
+            var value = ExactCaseValue(filledCase.CaseValue);
+            if (value == null) throw new InvalidOperationException(MissingFieldMessage(label));
+            foreach (var (m, branch) in steps)
+            {
+                MatchCase? selected = m.Cases.FirstOrDefault(c => !IsDefaultCase(c)
+                    && CaseMatches((double)value.Value, c.CaseValue));
+                if (selected == null && branch != null && IsDefaultCase(branch)) selected = branch;
+                if (!ReferenceEquals(selected, branch))
+                    throw new InvalidOperationException(MissingFieldMessage(label));
+            }
+            var outer = steps[0].branch;
+            return outer != null
+                ? (value.Value, outer, null)
+                : (value.Value, null, (List<SchemaField>)match.MatchDefault!);
+        }
+
+        /// <summary>A discriminator as Python's str() writes it: an integral number as an integer.</summary>
+        static string DiscriminatorText(object discriminator)
+        {
+            if (discriminator is bool b) return b ? "True" : "False";
+            var (ok, numeric) = Helpers.ToFloat64(discriminator);
+            if (!ok) return discriminator.ToString() ?? "";
+            if (numeric == Math.Floor(numeric) && Math.Abs(numeric) < 1e15) return ((long)numeric).ToString();
+            return numeric.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
         }
 
         static bool CaseMatches(object? discriminator, object? caseValue)
@@ -1376,6 +1668,17 @@ public static class SchemaEncoder
                     continue;
                 }
                 if (f.MatchInline != null) { sink.AddRange(MatchClaims(f.MatchInline)); continue; }
+                if (!string.IsNullOrEmpty(f.Name) && !f.Name.StartsWith("_")
+                    && (IsLiteral(f) || IsComputed(f)))
+                {
+                    // A literal or computed field writes no bytes, but only this case reports
+                    // it, so it claims its name, never required: a literal where the input
+                    // gives its value, a computed field so the case is chosen and what it is
+                    // computed from is asked for (PS-434). Neither claimed anything, so an
+                    // entry reporting only these was never written (PS-442).
+                    sink.Add((f, true));
+                    continue;
+                }
                 if (PayloadName(f) == null) continue;
                 // PS-551 (CR-2026-141): a peek the case's next field writes over is derived
                 // where the input omits it, so the case does not need it given.
@@ -1410,9 +1713,23 @@ public static class SchemaEncoder
             if (match.MatchDefault is List<SchemaField> fallback) bodies.Add(fallback);
             foreach (var body in bodies)
                 foreach (var (f, _) in CaseClaims(body, true))
-                    if (f.Name != null && seen.Add(f.Name)) sink.Add((f, true));
+                {
+                    // A literal is seen by its value too: branches report one name as
+                    // different literals (aquascope's `pc`), and the input's value says which.
+                    var seenKey = IsLiteral(f) ? f.Name + "\u0000" + LiteralKey(f.Value) : f.Name;
+                    if (f.Name != null && seen.Add(seenKey)) sink.Add((f, true));
+                }
             return sink;
         }
+
+        static string LiteralKey(object? value) => value switch
+        {
+            bool b => "b:" + b,
+            string t => "s:" + t,
+            _ => Helpers.ToFloat64(value) is (true, var d)
+                ? "n:" + d.ToString("R", System.Globalization.CultureInfo.InvariantCulture)
+                : "o:" + value,
+        };
 
         /// <summary>Whether a type's encoded value carries a fraction (FRACTIONAL_TYPES).</summary>
         static bool IsFractionalType(FieldType t) => t is FieldType.F16 or FieldType.BF16 or FieldType.F32
@@ -1437,7 +1754,9 @@ public static class SchemaEncoder
         /// </summary>
         bool Fits(SchemaField f, object? value, Dictionary<string, string> modes, bool exactOnly)
         {
-            var name = PayloadName(f)!;
+            if (IsLiteral(f)) return Helpers.SameLabel(f.Value, value);        // PS-359, PS-513
+            if (IsComputed(f)) return true;        // asks for what it is computed from (PS-434)
+            var name = f.Name;
             if (f.Type == FieldType.Object && value is Dictionary<string, object?> whole
                 && !(modes.TryGetValue(name, out var md) && md == "merge"))
             {
@@ -1636,7 +1955,7 @@ public static class SchemaEncoder
                 foreach (var (f, isOptional) in CaseClaims(caseFields, false))
                 {
                     (isOptional ? optional : required).Add(f);
-                    var n = PayloadName(f)!;
+                    var n = f.Name;
                     if (ModeOf(n) != "merge") continue;
                     foreach (var m in f.Fields)
                     {
@@ -1667,7 +1986,7 @@ public static class SchemaEncoder
             foreach (var e in entries)
                 foreach (var f in e.required.Concat(e.optional))
                 {
-                    var n = PayloadName(f)!;
+                    var n = f.Name;
                     if (!data.TryGetValue(n, out var v) || queues.ContainsKey(n) || ModeOf(n) == "merge") continue;
                     bool collected = v is System.Collections.IList && !(f.Type == FieldType.Repeat
                         || (f.Type == FieldType.Bytes && f.Format == "array")) && ModeOf(n) == "collect";
@@ -1699,7 +2018,7 @@ public static class SchemaEncoder
                             bool complete = true;
                             foreach (var f in e.required)
                             {
-                                var n = PayloadName(f)!;
+                                var n = f.Name;
                                 if (ModeOf(n) == "merge")
                                 {
                                     if (!pending.ContainsKey(n) || data[n] is not Dictionary<string, object?> whole)
@@ -1732,7 +2051,7 @@ public static class SchemaEncoder
                             if (!complete) break;
                             foreach (var f in e.optional)
                             {
-                                var n = PayloadName(f)!;
+                                var n = f.Name;
                                 if (queues.TryGetValue(n, out var q) && q.Count > 0 && Fits(f, q.Peek(), modes, exactOnly))
                                 {
                                     values[n] = q.Peek();
@@ -1767,6 +2086,27 @@ public static class SchemaEncoder
                     throw new InvalidOperationException("tlv: no case takes the members ["
                         + string.Join(", ", left.Select(m => $"'{m}'").OrderBy(m => m, StringComparer.Ordinal))
                         + $"] of the merged object '{n}' in full (PS-527)");
+            // A `name_from` key no claim can name. Where the template reads a tag component
+            // the tag is not in the data, so no case can take the value - and it was dropped
+            // with nothing reported. A key some field declares by name is that field's.
+            Dictionary<string, (bool reads, List<object?> literals)>? declaredNames = null;
+            foreach (var caseFields in tlv.TLVCases.Values)
+                foreach (var (f, _) in CaseClaims(caseFields, false))
+                {
+                    if (string.IsNullOrEmpty(f.NameFrom)) continue;
+                    var pattern = new System.Text.RegularExpressions.Regex("^" + string.Join(".+",
+                        System.Text.RegularExpressions.Regex.Split(f.NameFrom!, @"\$\{\w+\}")
+                            .Select(System.Text.RegularExpressions.Regex.Escape)) + "$");
+                    foreach (var key in order)
+                    {
+                        if (!data.ContainsKey(key) || queues.ContainsKey(key) || pending.ContainsKey(key)
+                            || !pattern.IsMatch(key)) continue;
+                        declaredNames ??= DeclaredSources(_fields);
+                        if (declaredNames.ContainsKey(key)) continue;
+                        throw new InvalidOperationException($"tlv: no case takes the value of '{key}' "
+                            + $"{data[key]} in full (PS-502, PS-527)");
+                    }
+                }
 
             // Payload order, so a payload round-trips; entries of one name keep the order taken.
             var output = new List<byte>();

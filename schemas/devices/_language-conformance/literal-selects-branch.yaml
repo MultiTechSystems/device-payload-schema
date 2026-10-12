@@ -1,0 +1,39 @@
+# Two bodies report the same field names and differ only in a constant each reports
+# (PS-359). The type byte is internal, so an encoder derives it from the one body the
+# input fits (PS-551), and a constant given with another body's value rules a body out
+# (PS-513). Before, both bodies scored alike, nothing was derived, and the type byte
+# was refused as an internal value the input does not give (PS-434).
+name: probe_literal_selects_branch
+version: 1
+endian: big
+fields:
+- name: _type
+  type: u8
+- match:
+    field: $_type
+    cases:
+      1:
+      - name: kind
+        type: string
+        value: comfort
+      - name: reading
+        type: u16
+      2:
+      - name: kind
+        type: string
+        value: counter
+      - name: reading
+        type: u16
+test_vectors:
+- name: first_body
+  source: generated
+  payload: "01 0064"
+  expected:
+    kind: comfort
+    reading: 100
+- name: second_body
+  source: generated
+  payload: "02 0064"
+  expected:
+    kind: counter
+    reading: 100

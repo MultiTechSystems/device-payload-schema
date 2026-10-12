@@ -519,6 +519,44 @@ function encHasDefault(f) {                           // field_default
   return "default" in f && f.type !== "enum" && f.type !== "match";
 }
 
+// declared_sources: every name a field list declares, whether some declaration reads
+// payload bytes or computes from them (`reads`), and the values its literals give.
+function encDeclared(fields) {
+  var found = {};
+  function note(name, literal, value) {
+    if (!Object.prototype.hasOwnProperty.call(found, name)) found[name] = { reads: false, literals: [] };
+    if (literal) found[name].literals.push(value); else found[name].reads = true;
+  }
+  (function walk(node) {
+    if (Array.isArray(node)) { node.forEach(walk); return; }
+    if (!node || typeof node !== "object") return;
+    if (typeof node.name === "string" && node.name && "type" in node) {
+      if (encIsLiteral(node)) note(node.name, true, node.value); else note(node.name, false);
+    }
+    if (node.match && typeof node.match === "object" && typeof node.match.name === "string") note(node.match.name, false);
+    Object.keys(node).forEach(function (k) { var v = node[k]; if (v && typeof v === "object") walk(v); });
+  })(fields);
+  return found;
+}
+
+// empty_payload_error (PS-442): no bytes written, where the input gives a value only a
+// field reading payload bytes reports.
+function encEmptyPayloadError(fields, data) {
+  var sources = null;
+  for (var key in data) {
+    var v = data[key];
+    if (key.charAt(0) === "_" || v === null || v === undefined) continue;
+    if ((typeof v === "string" || Array.isArray(v)) && v.length === 0) continue;
+    if (typeof v === "object" && !Array.isArray(v) && Object.keys(v).length === 0) continue;
+    if (sources === null) sources = encDeclared(fields);
+    var e = Object.prototype.hasOwnProperty.call(sources, key) ? sources[key] : null;
+    if (!e || !e.reads) continue;
+    if (e.literals.some(function (l) { return l === v; })) continue;
+    return "Encoding wrote no bytes, though the input gives '" + key + "', which the schema reads from the payload (PS-442)";
+  }
+  return null;
+}
+
 function encIsLiteral(f) {                            // is_literal
   return (f.type === "string" || f.type === "number" || f.type === "boolean") && "value" in f;
 }
@@ -865,18 +903,75 @@ function encCasePattern(value, pattern) {             // _match_case_pattern
   return false;
 }
 
-function encCaseFieldsPresent(cases, data) {          // _case_fields_present
-  var best = null, bestHits = 0;
+// _body_score: how many of a branch's reported names the input gives, through the
+// constructs a decode reports from, or null where a literal the input contradicts, or a
+// nested match with every branch ruled out and no `skip` default, rules it out.
+function encBodyScore(body, data) {
+  if (!Array.isArray(body)) return null;
+  var score = 0, has = Object.prototype.hasOwnProperty;
+  for (var i = 0; i < body.length; i++) {
+    var f = body[i];
+    if (!f || typeof f !== "object") continue;
+    if ("byte_group" in f && !f.type) {
+      var g = f.byte_group, h = encBodyScore(Array.isArray(g) ? g : (g.fields || []), data);
+      if (h === null) return null;
+      score += h; continue;
+    }
+    if ("flagged" in f && !f.type) {
+      (f.flagged.groups || []).forEach(function (grp) { score += encBodyScore(grp.fields || [], data) || 0; });
+      continue;
+    }
+    if (f.match && typeof f.match === "object" && !f.type) {
+      var m = f.match, mc = m.cases || {}, bodies = [];
+      if (m.name && has.call(data, m.name)) score++;
+      Object.keys(mc).forEach(function (k) { if (k !== "default" && Array.isArray(mc[k])) bodies.push(mc[k]); });
+      var dflt = m["default"] === undefined ? "error" : m["default"];
+      if (Array.isArray(dflt)) bodies.push(dflt);
+      else if (Array.isArray(mc["default"])) bodies.push(mc["default"]);
+      var best = null;
+      bodies.forEach(function (b) { var s2 = encBodyScore(b, data); if (s2 !== null && (best === null || s2 > best)) best = s2; });
+      if (best !== null) score += best;
+      else if (dflt !== "skip") return null;
+      continue;
+    }
+    if (f.tlv && typeof f.tlv === "object" && !f.type) {
+      var names = {};
+      Object.keys(f.tlv.cases || {}).forEach(function (k) {
+        if (Array.isArray(f.tlv.cases[k])) encCaseClaims(f.tlv.cases[k]).forEach(function (c) { names[c[0].name] = true; });
+      });
+      Object.keys(names).forEach(function (n) { if (has.call(data, n)) score++; });
+      continue;
+    }
+    if (!f.name || String(f.name).charAt(0) === "_" || (ENC_COMPUTED.indexOf(f.type) >= 0 && !encIsLiteral(f))) continue;
+    var key = f.name;
+    if (f.name_from) { try { key = encResolveName(f, f.name, data); } catch (e) { key = null; } }
+    if (key === null || !has.call(data, key)) continue;
+    if (encIsLiteral(f) && f.value !== data[key]) return null;
+    score++;
+  }
+  return score;
+}
+
+function encDefaultBody(m) {                          // _default_body
+  if (Array.isArray(m["default"])) return m["default"];
+  var d = (m.cases || {})["default"];
+  return Array.isArray(d) ? d : null;
+}
+
+// _best_case: the case scoring highest, the first of equals, with `tied` where another
+// equalled it; null where none scores, or the default list scores higher than any.
+function encBestCase(m, data) {
+  var cases = m.cases || {}, best = null, bestHits = 0, tied = false;
   for (var key in cases) {
     if (key === "default" || !Array.isArray(cases[key])) continue;
-    var hits = 0;
-    cases[key].forEach(function (f) {
-      if (f && f.name && String(f.name).charAt(0) !== "_" && ENC_COMPUTED.indexOf(f.type) < 0 &&
-          Object.prototype.hasOwnProperty.call(data, f.name)) hits++;
-    });
-    if (hits > bestHits) { best = [key, cases[key]]; bestHits = hits; }
+    var hits = encBodyScore(cases[key], data) || 0;
+    if (hits > bestHits) { best = key; bestHits = hits; tied = false; }
+    else if (hits && hits === bestHits) tied = true;
   }
-  return best;
+  if (best === null) return null;
+  var d = encDefaultBody(m);
+  if (d !== null && (encBodyScore(d, data) || 0) > bestHits) return null;
+  return { key: best, body: cases[best], tied: tied };
 }
 
 function encParseInt0(text) {                         // int(text, 0)
@@ -921,28 +1016,112 @@ function encMatch(out, f, data, ctx, peeked) {        // _encode_match
     }
   }
   if (body === null) {
-    var found = encCaseFieldsPresent(cases, data);
-    if (found) { key = found[0]; body = found[1]; }
+    var found = encBestCase(m, data);
+    if (found) { key = found.key; body = found.body; }
+  }
+  if (body === null && m.remaining === true && !encBodyScore(encDefaultBody(m), data)) {
+    // No case's fields given, nor the default's: the case matching 0 bytes is the one
+    // writing nothing selects.
+    for (var zk in cases) {
+      if (zk !== "default" && Array.isArray(cases[zk]) && encCasePattern(0, zk)) { key = zk; body = cases[zk]; break; }
+    }
   }
   var known = disc !== null && disc !== undefined;
   var inline = length !== undefined && length !== null;
+  var label = m.name || m["var"] || "match";
+  if (body === null && !known && inline) {
+    // CR-2026-151: a nested match reading this discriminator fixes it (_nested_discriminator).
+    var nested = encNestedDiscriminator(m, data, label);
+    if (nested) {
+      disc = nested[0]; key = nested[1]; body = nested[2]; known = true;
+      if (m["var"]) {
+        var withVar = {};
+        for (var dk in data) withVar[dk] = data[dk];
+        withVar[m["var"]] = disc;
+        data = withVar;
+      }
+    }
+  }
   if (body === null) {
     if (Array.isArray(dflt)) body = dflt;
     else if (Array.isArray(cases["default"])) body = cases["default"];
-    else if (!known && (dflt === "skip" || (inline && !m.name))) return;   // the non-advancing peek
-    else if (inline && !known) encFail(encMissing(m.name || "match"));   // PS-551
-    else body = [];
+    else if (inline && !known) encFail(encMissing(label));   // PS-551, PS-442, named by the discriminator
+    else if (dflt === "skip") body = [];
+    else if (known) encFail("No matching case for value " + String(disc));   // PS-442
+    else encFail(encMissing(m.name || m["var"] || String(m.field || "match").replace(/^\$+/, "")));
   }
   if (inline) {
     var value = disc;
     if (!known) {
-      if (key === null) encFail(encMissing(m.name || "match"));
+      if (key === null) encFail(encMissing(label));
       value = encExactCase(key);
       if (value === null) encFail("match case " + JSON.stringify(key) + " names no single discriminator value");
     }
+    // PS-168: a discriminator, given or derived, fits the bytes it is written in.
+    encFits(encRint(Number(value)), parseInt(length, 10) * 8, false, { name: label }, value);
     encWriteInt(out, value, parseInt(length, 10), false, ctx.endian);
   }
   return encList(out, body, data, ctx);
+}
+
+// _nested_discriminator (CR-2026-151): [value, case key or null, branch fields] where a
+// nested match reading this discriminator has exactly one case the input fills, its key a
+// single value selecting the branch that holds it; null where none is filled.
+function encNestedDiscriminator(m, data, label) {
+  var names = {};
+  if (m["var"]) names[m["var"]] = true;
+  if (m.name) names[m.name] = true;
+  if (!m["var"] && !m.name) return null;
+  var cases = m.cases || {}, branches = [];
+  Object.keys(cases).forEach(function (k) { if (k !== "default" && Array.isArray(cases[k])) branches.push([k, cases[k]]); });
+  var fb = Array.isArray(m["default"]) ? m["default"] : (Array.isArray(cases["default"]) ? cases["default"] : null);
+  if (fb) branches.push(["default", fb]);
+  function namesOf(fields) {
+    return fields.filter(function (f) {
+      return f && f.name && String(f.name).charAt(0) !== "_" && ENC_COMPUTED.indexOf(f.type) < 0;
+    }).map(function (f) { return f.name; });
+  }
+  var filled = [];
+  function walk(fields, path) {
+    (fields || []).forEach(function (f) {
+      if (!f || f.type || !f.match || typeof f.match !== "object") return;
+      var inner = f.match, ic = inner.cases || {};
+      var reads = !!names[String(inner.field || "").replace(/^\$+/, "")];
+      var bodies = [];
+      Object.keys(ic).forEach(function (k) { if (k !== "default" && Array.isArray(ic[k])) bodies.push([k, ic[k]]); });
+      if (Array.isArray(inner["default"])) bodies.push(["default", inner["default"]]);
+      // A case is filled where the input gives every one of its fields and nothing any
+      // other case of this match declares beyond them.
+      var given = {};
+      if (reads) bodies.forEach(function (b) {
+        if (b[0] !== "default") namesOf(b[1]).forEach(function (n) { if (encHas(data, n)) given[n] = true; });
+      });
+      bodies.forEach(function (b) {
+        if (reads && b[0] !== "default") {
+          var own = namesOf(b[1]);
+          var ok = own.length > 0 && own.every(function (n) { return encHas(data, n); }) &&
+            Object.keys(given).every(function (n) { return own.indexOf(n) >= 0; });
+          if (ok) filled.push([path, b[0]]);
+        }
+        walk(b[1], reads ? path.concat([[inner, b[0]]]) : path);
+      });
+    });
+  }
+  branches.forEach(function (b) { walk(b[1], [[m, b[0]]]); });
+  if (!filled.length) return null;
+  if (filled.length !== 1) encFail(encMissing(label));
+  var value = encExactCase(filled[0][1]);
+  if (value === null) encFail(encMissing(label));
+  filled[0][0].forEach(function (step) {
+    var ec = step[0].cases || {}, selected = "default";
+    for (var k in ec) {
+      if (k !== "default" && encCasePattern(value, k)) { selected = k; break; }
+    }
+    if (selected !== step[1]) encFail(encMissing(label));
+  });
+  var outer = filled[0][0][0][1], body = null;
+  branches.forEach(function (b) { if (b[0] === outer) body = b[1]; });
+  return [value, outer === "default" ? null : outer, body];
 }
 
 function encRecords(f, data) {                        // _repeat_records
@@ -1226,7 +1405,9 @@ function encCaseClaims(fields, optional) {             // _case_claims
       return;
     }
     if ("match" in f && !f.type) { out = out.concat(encMatchClaims(f.match)); return; }
-    if (!f.name || String(f.name).charAt(0) === "_" || ENC_COMPUTED.indexOf(f.type) >= 0) return;
+    if (!f.name || String(f.name).charAt(0) === "_") return;
+    // A literal or computed field claims its name, never required (no-silent-empty).
+    if (encIsLiteral(f) || ENC_COMPUTED.indexOf(f.type) >= 0) { out.push([f, true]); return; }
     // PS-551 (CR-2026-141): a peek the fields after it fix need not be given.
     out.push([f, !!optional || f.optional === true || covered.indexOf(f) >= 0]);
   });
@@ -1249,7 +1430,9 @@ function encMatchClaims(m) {
     if (b && !Array.isArray(b) && typeof b === "object") b = b.fields;
     if (!Array.isArray(b)) return;
     encCaseClaims(b, true).forEach(function (c) {
-      if (!seen[c[0].name]) { seen[c[0].name] = true; out.push([c[0], true]); }
+      // A literal is seen by its value too: branches report one name as different literals.
+      var sk = encIsLiteral(c[0]) ? c[0].name + "\u0000" + JSON.stringify(c[0].value) : c[0].name;
+      if (!seen[sk]) { seen[sk] = true; out.push([c[0], true]); }
     });
   });
   return out;
@@ -1316,6 +1499,8 @@ function encTlv(out, f, data, ctx) {                  // _encode_tlv
     var isMap = v !== null && typeof v === "object" && !Array.isArray(v);
     if (isMap && c.type && c.type !== "object" && c.type !== "repeat") return false;
     if (c.type === "object" && !isMap && modes[c.name] !== "merge") return false;
+    if (encIsLiteral(c)) return c.value === v;        // PS-359, PS-513
+    if (ENC_COMPUTED.indexOf(c.type) >= 0) return true;   // asks for its source (PS-434)
     var took = encCaseTakes(c, v);
     return took[0] && (took[1] || !exactOnly);
   }
@@ -1370,6 +1555,25 @@ function encTlv(out, f, data, ctx) {                  // _encode_tlv
   });
   Object.keys(pending).forEach(function (n) {
     if (pending[n].length) encFail("tlv: no case takes the members [" + pending[n].slice().sort().map(function (m) { return "'" + m + "'"; }).join(", ") + "] of the merged object '" + n + "' in full (PS-527)");
+  });
+  // A `name_from` key no claim can name: where no field declares it by name, no case
+  // takes it, and it was dropped with nothing reported.
+  var declared = null;
+  keys.forEach(function (key) {
+    if (!Array.isArray(cases[key])) return;
+    encCaseClaims(cases[key]).forEach(function (c) {
+      var t = c[0].name_from;
+      if (typeof t !== "string") return;
+      var re = new RegExp("^" + t.split(/\$\{\w+\}/).map(function (part) {
+        return part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      }).join(".+") + "$");
+      order.forEach(function (k) {
+        if (has.call(queues, k) || has.call(pending, k) || !re.test(k)) return;
+        if (declared === null) declared = encDeclared(ENC_SCOPE || []);
+        if (has.call(declared, k)) return;
+        encFail("tlv: no case takes the value of '" + k + "' " + JSON.stringify(data[k]) + " in full (PS-502, PS-527)");
+      });
+    });
   });
   // Payload order, so a payload round-trips; entries of one name keep the order taken.
   written.sort(function (a, b) { return a.p - b.p || a.seq - b.seq; });
@@ -1552,15 +1756,9 @@ function encExactCase(key) {                          // _exact_case_value
   try { return encParseInt0(key); } catch (e) { return null; }
 }
 
-function encSoleCase(cases, data) {                   // _sole_case_given
-  var best = null, bestHits = 0, tied = false;
-  for (var key in cases) {
-    if (key === "default" || !Array.isArray(cases[key])) continue;
-    var hits = encClaimable(cases[key]).filter(function (c) { return Object.prototype.hasOwnProperty.call(data, c.name); }).length;
-    if (hits > bestHits) { best = key; bestHits = hits; tied = false; }
-    else if (hits && hits === bestHits) tied = true;
-  }
-  return (best === null || tied) ? null : encExactCase(best);
+function encSoleCase(m, data) {                       // _sole_case_given
+  var best = encBestCase(m, data);
+  return (best === null || best.tied) ? null : encExactCase(best.key);
 }
 
 function encDerive(fields, data, ctx) {                 // _derive_inputs
@@ -1585,7 +1783,7 @@ function encDerive(fields, data, ctx) {                 // _derive_inputs
     } else if (f.match && typeof f.match === "object" && !f.type) {
       src = encDerivedSource(fields, f.match.field);
       if (!src || encHas(d, src.name)) return;
-      var v = encSoleCase(f.match.cases || {}, data);
+      var v = encSoleCase(f.match, data);
       if (v !== null) d[src.name] = v;
     } else if (f.flagged && typeof f.flagged === "object") {
       var mask = String(f.flagged.field || "").replace(/^\$+/, "");
@@ -1710,6 +1908,10 @@ function encodeRoot(fields, data, endian) {
   ENC_SCOPE = fields;
   encList(out, fields, data || {}, ctx, true);
   encCheckPeeks(out);                                    // PS-551 (CR-2026-141)
+  if (!out.length) {
+    var empty = encEmptyPayloadError(fields, data || {});   // PS-442
+    if (empty) encFail(empty);
+  }
   return { bytes: Array.prototype.slice.call(out), warnings: ctx.w.concat(ctx.wa) };
 }
 '''
