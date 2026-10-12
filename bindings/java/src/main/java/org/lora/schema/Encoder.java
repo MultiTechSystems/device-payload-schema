@@ -1296,6 +1296,12 @@ final class Encoder {
 
     private static boolean caseMatches(Object discriminator, Object caseValue) {
         if (caseValue == null) return false;
+        Double number = discriminator instanceof Boolean ? null : asDouble(discriminator);
+        if (number != null && number != Math.rint(number) && !number.isInfinite()) {
+            // A fraction selects no case it would round to: 2.5 chose case 2 here, where
+            // every decoder reads it as matching no single key (Schema.decodeMatch).
+            return Schema.fractionInRange(number, caseValue);
+        }
         Long value = asLong(discriminator);
         if (value == null) {
             return String.valueOf(discriminator).equals(String.valueOf(caseValue));
@@ -1305,6 +1311,11 @@ final class Encoder {
         }
         if (caseValue instanceof String text && Schema.parseListCaseKey(text) != null) {
             return Schema.parseListCaseKey(text).contains(value);
+        }
+        if (caseValue instanceof String spelled && spelled.contains("..")) {
+            // An inclusive range (PS-152), as the decoder reads it; it fell through to
+            // parseIntAny and matched nothing.
+            return Schema.fractionInRange(value, caseValue);
         }
         if (caseValue instanceof List<?> list) {
             for (Object item : list) {
@@ -1754,11 +1765,9 @@ final class Encoder {
     private static Object boundFromReported(Field source, Object reported) {
         if (source != null && source.getType() == FieldType.ENUM && reported instanceof String name) {
             // CR-2026-132: a reference to an enum bound its code.
-            if (source.getValues() != null) {
-                for (Map.Entry<Integer, String> e : source.getValues().entrySet()) {
-                    if (name.equals(e.getValue())) return (long) e.getKey();
-                }
-            }
+            List<Integer> codes = enumCodes(source, name);
+            if (codes.size() > 1) throw sharedLabel(source.getName(), name, codes);   // PS-169
+            if (!codes.isEmpty()) return (long) codes.get(0);
             if (name.startsWith("unknown(") && name.endsWith(")")) {
                 try {
                     return Long.parseLong(name.substring(8, name.length() - 1));
@@ -1772,7 +1781,7 @@ final class Encoder {
                 || reported instanceof Number) {
             return reported;
         }
-        Object reversed = reverseLookup(reported, source.getLookup());
+        Object reversed = reverseLookup(reported, source.getLookup(), source.getName());
         String template = Wave5.template(source);
         if (reversed instanceof String text && template != null) {
             Double recovered = Wave5.matchTemplate(template, text);
@@ -1860,7 +1869,7 @@ final class Encoder {
         // The value as given, for a PS-168 rejection to name (PS-552).
         givenField = field;
         givenValue = value;
-        Object reversed = reverseLookup(value, field.getLookup());
+        Object reversed = reverseLookup(value, field.getLookup(), field.getName());   // PS-169
 
         if (reversed instanceof Boolean flag && field.getLookup() != null
                 && !field.getLookup().isEmpty()) {
@@ -1925,13 +1934,50 @@ final class Encoder {
      * {@code [true, false]} wrote index 0 (CR-2026-104).
      */
     private static Object reverseLookup(Object value, Map<Integer, Object> lookup) {
+        return reverseLookup(value, lookup, null);
+    }
+
+    /**
+     * {@link #reverseLookup(Object, Map)} rejecting a label two or more codes share, naming
+     * the field {@code name} and the codes (PS-169, CR-2026-146). It wrote the first code
+     * found. With no {@code name} - a caller only ranking candidate cases - the smallest
+     * code is returned instead, as the reference's _case_fidelity takes one.
+     */
+    private static Object reverseLookup(Object value, Map<Integer, Object> lookup, String name) {
         if (lookup == null || lookup.isEmpty()) return value;
+        List<Integer> codes = new ArrayList<>();
         for (Map.Entry<Integer, Object> entry : lookup.entrySet()) {
-            if (Schema.sameLabel(entry.getValue(), value)) {
-                return Long.valueOf(entry.getKey());
-            }
+            if (Schema.sameLabel(entry.getValue(), value)) codes.add(entry.getKey());
         }
-        return value;
+        if (codes.isEmpty()) return value;
+        java.util.Collections.sort(codes);
+        if (codes.size() > 1 && name != null) throw sharedLabel(name, value, codes);
+        return Long.valueOf(codes.get(0));
+    }
+
+    /** The PS-169 rejection, in the spec prototype's words; the codes ascending. */
+    static SchemaException.EncodeException sharedLabel(String name, Object label,
+                                                      List<Integer> codes) {
+        List<Integer> sorted = new ArrayList<>(codes);
+        java.util.Collections.sort(sorted);
+        StringBuilder listed = new StringBuilder();
+        for (int i = 0; i < sorted.size(); i++) {
+            if (i > 0) listed.append(", ");
+            listed.append(sorted.get(i));
+        }
+        return new SchemaException.EncodeException("Field '" + name + "': the label "
+                + labelText(label) + " is shared by codes [" + listed
+                + "], so it cannot be encoded (PS-169)");
+    }
+
+    /**
+     * A label as the PS-169 and PS-067 messages write it: text in single quotes, a boolean
+     * as JSON writes it, a number as JavaScript's String(number) does.
+     */
+    static String labelText(Object label) {
+        if (label instanceof String text) return "'" + text + "'";
+        if (label instanceof Boolean flag) return flag ? "true" : "false";
+        return jsNumber(label);
     }
 
     /**
@@ -2099,13 +2145,12 @@ final class Encoder {
                         + "': expected a number, got " + describeValue(value));
             }
             long whole = (long) Math.floor(raw);
-            long tenths = Math.round((raw - whole) * 10);
+            // Half to even, as the reference's round() and Go's RoundToEven; Math.round
+            // rounded a tie up.
+            long tenths = (long) Math.rint((raw - whole) * 10);
             if (tenths == 10) { whole += 1; tenths = 0; }
-            long low = type == FieldType.SDEC ? -8 : 0, high = type == FieldType.SDEC ? 7 : 15;
-            if (whole < low || whole > high) {
-                throw new SchemaException.EncodeException("field '" + field.getName()
-                        + "': " + raw + " does not fit " + type.name().toLowerCase());
-            }
+            checkNibbleDecimal(whole * 10 + tenths, type == FieldType.SDEC, field.getName(),
+                    given(field, value));                                         // PS-168
             return new byte[] {(byte) (((whole & 0x0F) << 4) | tenths)};
         }
 
@@ -2133,28 +2178,51 @@ final class Encoder {
     }
 
     private byte[] encodeEnum(Field field, Object value) {
-        int size = switch (field.getBase() == null ? "u8" : field.getBase()) {
+        String base = field.getBase() == null ? "u8" : field.getBase();
+        int size = switch (base) {
             case "u16", "s16" -> 2;
             case "u24", "s24" -> 3;
             case "u32", "s32" -> 4;
             default -> 1;
         };
-        Map<Integer, String> values = field.getValues();
-        if (values != null) {
-            for (Map.Entry<Integer, String> entry : values.entrySet()) {
-                if (entry.getValue() != null && entry.getValue().equals(value)) {
-                    return writeInt(entry.getKey(), size, false);
-                }
+        boolean signed = base.startsWith("s");
+        long raw;
+        if (value instanceof String name) {
+            // A name back to its code (PS-067). One several codes share names none of them
+            // (PS-169); one with no code, the `default` label among them, cannot be
+            // recovered (PS-068, PS-554).
+            List<Integer> codes = enumCodes(field, name);
+            if (codes.isEmpty()) {
+                throw new SchemaException.EncodeException("Field '" + field.getName() + "': "
+                        + labelText(name) + " is not a name of the enum (PS-067)");
+            }
+            if (codes.size() > 1) throw sharedLabel(field.getName(), name, codes);
+            raw = codes.get(0);
+        } else if (value instanceof Number number && !(value instanceof Boolean)) {
+            // A code as given, rounded (PS-552) and checked against the base, naming the
+            // enum (PS-168): a code past it was reported as "300 does not fit 1 unsigned
+            // bytes", naming no field.
+            raw = value instanceof Double || value instanceof Float
+                    ? (long) Math.rint(number.doubleValue()) : number.longValue();
+        } else {
+            throw new SchemaException.EncodeException("Field '" + field.getName() + "': "
+                    + labelText(value) + " is not a name or code of the enum (PS-067)");
+        }
+        long[] bounds = integerBounds(size * 8, signed);
+        checkFits(raw, bounds[0], bounds[1], field.getName(), given(field, value));
+        return writeInt(raw, size, signed);
+    }
+
+    /** Every code an enum gives {@code name} as its name, ascending. */
+    private static List<Integer> enumCodes(Field field, String name) {
+        List<Integer> codes = new ArrayList<>();
+        if (field.getValues() != null) {
+            for (Map.Entry<Integer, String> e : field.getValues().entrySet()) {
+                if (name.equals(e.getValue())) codes.add(e.getKey());
             }
         }
-        Long raw = asLong(value);
-        if (raw == null) {
-            // The label came from `default`, which stands for every unmapped value
-            // (PS-068), so there is no original to recover.
-            throw new SchemaException.EncodeException("enum field '" + field.getName()
-                    + "': '" + value + "' is not one of its declared values");
-        }
-        return writeInt(raw, size, false);
+        java.util.Collections.sort(codes);
+        return codes;
     }
 
     /**
@@ -2318,6 +2386,22 @@ final class Encoder {
                     + high + " (PS-168)");
         }
         return raw;
+    }
+
+    /**
+     * PS-168 for {@code udec}/{@code sdec} (PS-330): one byte holds a whole part in a nibble
+     * and tenths 0 to 9, so 0 to 15.9, or -8 to 7.9 signed. {@code tenths} is the value as
+     * encoded, in tenths, and the message gives it to one decimal, in checkFits's form.
+     * Both said "does not fit udec", in words of their own.
+     */
+    static void checkNibbleDecimal(long tenths, boolean signed, String name, Object given) {
+        long low = signed ? -80 : 0, high = signed ? 79 : 159;
+        if (tenths >= low && tenths <= high) return;
+        long abs = Math.abs(tenths);
+        String encoded = (tenths < 0 ? "-" : "") + (abs / 10) + (abs % 10 != 0 ? "." + (abs % 10) : "");
+        throw new SchemaException.EncodeException("Field '" + name + "': " + jsNumber(given)
+                + " encodes as " + encoded + ", outside " + (signed ? "-8" : "0") + " to "
+                + (signed ? "7.9" : "15.9") + " (PS-168)");
     }
 
     /** The range of a whole integer of {@code bits} bits. */
