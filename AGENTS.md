@@ -2419,7 +2419,7 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     `tests/cr-2026-135-cases.yaml`, and C's `test_a_nibble_decimal_that_does_not_fit_is_named`.
   - A discriminator with a fraction (one taken from a field whose arithmetic leaves one)
     matches no single key and no list member; an inclusive range `lo..hi` still holds it,
-    as the reference and the spec prototype read PS-152. **Go, Java and C# decoded 2.5 as
+    as the reference and the spec prototype read PS-398 (as CR-2026-147 rules). **Go, Java and C# decoded 2.5 as
     case 2** (`toInt`, `asLong`, `ToLong` truncate), and on encode Go truncated while Java
     and C# rounded half to even, so a schema whose `default` should apply wrote case 2's
     fields. Java and C#'s encoders also never matched an integral discriminator against a
@@ -2429,6 +2429,37 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   - **Floors:** Python and Java 2100 -> 2101 (`match` 142 -> 147, `tlv` 1559 -> 1555), C#
     2101 -> 2102 (`tlv` 1560 -> 1556), Go ordered 2118 -> 2119 (`tlv` 1577 -> 1573), plain
     2091 -> 2092; decode 2690 -> 2695 in Go, Java and C#.
+- **CR-2026-147 (la-payload-schema main, merge 19bbc54, change 8db4385, for 0.5.5): Jason's
+  rulings on the questions above.**
+  - **PS-556: a nibble decimal is n = value x 10, rounded half to even on the binary64
+    product (PS-552)**; the upper nibble is n div 10 and the lower n mod 10, both floored, so
+    the tenths are 0 to 9 and -0.5 is `0xF5`. n outside 0..159 (udec) or -80..79 (sdec) is
+    the PS-168 rejection above, unchanged. The first implementation split the whole part off
+    and rounded the fraction, which differs on a tie of the product: 3.45 wrote `0x35` where
+    PS-556 gives `0x34` (34.5 rounds to 34), and -3.45 `0xC5` where it gives `0xC6`. Fixed in
+    Python, Go, Java, C#, the runtime and C (`schema_encode_nibble_decimal`). Decoders still
+    accept a lower nibble of 10 to 15.
+  - **PS-398 as amended:** a fractional discriminator matches a range containing it and no
+    single or list case - what `match-fractional-discriminator.yaml` already pins.
+  - **PS-169's label is written as JavaScript would** (the prototype's `js_text`), which
+    `label_text` and its ports already did. The prototype lists the codes in declaration
+    order; this repository lists them ascending, as the coordinator's brief for CR-2026-146
+    asked - they differ only for a table declared out of order.
+  - **PS-557: a fractional value for a discriminator the encoder writes** (a match with
+    `length`) is rejected, naming the match as PS-535 does: `Field 'kind': the
+    discriminator 2.5 is not an integer, so it cannot be written (PS-557)`, `Field an
+    unnamed match: ...` with no `name`. Python's `int()` and Go's `toInt` truncated it, and
+    Java and C# rounded it half to even. The prototype encodes no match, so the text is
+    this repository's. `written_discriminator_error` (Python), `writtenDiscriminatorError`
+    (Go), `checkWrittenDiscriminator`/`CheckWrittenDiscriminator`, and the runtime's
+    `encMatch`. C's encoder writes no match, so PS-557 does not apply to it.
+  - **PS-555's keying rule** is #134's (C's index-keyed inputs); the prototype has no
+    nameless form, so there is no prototype text to compare.
+  - **Cases:** `tests/cr-2026-147-cases.yaml`, read by `test_cr_2026_147_cases.py`
+    (reference and runtime), Go `cr147_test.go`, Java `CR2026147Test`, C#
+    `CR2026_147Tests`; C's nibble figures in `test_a_nibble_decimal_that_does_not_fit_is_named`.
+    No corpus vector encodes a nibble decimal or a fractional written discriminator, so no
+    floor moves.
 
 ## Converting a vendor codec
 

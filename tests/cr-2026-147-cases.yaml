@@ -1,0 +1,141 @@
+# CR-2026-147 (0.5.5, PS-556, PS-557, PS-398, PS-169): nibble decimals, written
+# discriminators and the text of a label.
+#
+# - PS-556: an encoder writes a `udec`/`sdec` value as n, the value times 10 rounded as
+#   PS-552 requires (half to even, on the binary64 product); the upper nibble is n divided
+#   by 10 rounded down, the lower n modulo 10, 0 to 9. An n outside 0..159 (udec) or
+#   -80..79 (sdec) is a PS-168 rejection. 3.45 x 10 is 34.5, a tie, so 34: `34`, where
+#   splitting the whole part off first gave 0.55 x 10 = 5.5000000000000004 and `35`.
+# - PS-557: an encoder rejects a fractional value for a discriminator it writes (a match
+#   with `length`), naming the match, and neither rounds nor truncates it.
+# - PS-169: a label is written as JavaScript would - text in single quotes, true/false, a
+#   number as String(n).
+#
+# One case list, read by the reference and the generated codec's runtime encoder
+# (tests/test_cr_2026_147_cases.py), Go (go/schema/cr147_test.go), Java (CR2026147Test.java)
+# and C# (CR2026_147Tests.cs). C holds the nibble figures in src/selftest_schema.c.
+#
+# Same layout as tests/cr-2026-135-cases.yaml: `schema` is YAML text, `input` JSON text,
+# and either `payload` (hex) or `error` (text one of the encoder's errors contains, with
+# no payload returned). The spec prototype's texts (TestCR2026147NibbleDecimalEncode):
+#   Field 'v': 16 encodes as 16, outside 0 to 15.9 (PS-168)
+#   Field 'x': the label true is shared by codes [0, 1], so it cannot be encoded (PS-169)
+# The prototype encodes no `match`, so PS-557's text is this repository's, in PS-535's way
+# of naming a match:
+#   Field 'kind': the discriminator 2.5 is not an integer, so it cannot be written (PS-557)
+#   Field an unnamed match: the discriminator 2.5 is not an integer, so it cannot be written (PS-557)
+
+cases:
+
+# --- PS-556: udec ----------------------------------------------------------------------
+
+- name: udec_top_of_range
+  schema: "name: t\nfields:\n  - {name: v, type: udec}\n"
+  input: '{"v": 15.9}'
+  payload: "f9"
+
+- name: udec_plain
+  schema: "name: t\nfields:\n  - {name: v, type: udec}\n"
+  input: '{"v": 3.7}'
+  payload: "37"
+
+- name: udec_tie_to_even
+  schema: "name: t\nfields:\n  - {name: v, type: udec}\n"
+  input: '{"v": 0.15}'
+  payload: "02"
+
+- name: udec_rounds_the_product_not_the_fraction
+  schema: "name: t\nfields:\n  - {name: v, type: udec}\n"
+  input: '{"v": 3.45}'
+  payload: "34"
+
+- name: udec_whole_sixteen_is_rejected
+  schema: "name: t\nfields:\n  - {name: v, type: udec}\n"
+  input: '{"v": 16}'
+  error: "Field 'v': 16 encodes as 16, outside 0 to 15.9 (PS-168)"
+
+- name: udec_rounds_up_out_of_range
+  schema: "name: t\nfields:\n  - {name: v, type: udec}\n"
+  input: '{"v": 15.96}'
+  error: "Field 'v': 15.96 encodes as 16, outside 0 to 15.9 (PS-168)"
+
+- name: udec_negative_is_rejected
+  schema: "name: t\nfields:\n  - {name: v, type: udec}\n"
+  input: '{"v": -0.1}'
+  error: "Field 'v': -0.1 encodes as -0.1, outside 0 to 15.9 (PS-168)"
+
+# --- PS-556: sdec ----------------------------------------------------------------------
+
+- name: sdec_floors_a_negative_whole_part
+  schema: "name: t\nfields:\n  - {name: v, type: sdec}\n"
+  input: '{"v": -0.5}'
+  payload: "f5"
+
+- name: sdec_bottom_of_range
+  schema: "name: t\nfields:\n  - {name: v, type: sdec}\n"
+  input: '{"v": -8.0}'
+  payload: "80"
+
+- name: sdec_negative_tie_to_even
+  schema: "name: t\nfields:\n  - {name: v, type: sdec}\n"
+  input: '{"v": -3.45}'
+  payload: "c6"
+
+- name: sdec_top_of_range
+  schema: "name: t\nfields:\n  - {name: v, type: sdec}\n"
+  input: '{"v": 7.9}'
+  payload: "79"
+
+- name: sdec_below_range
+  schema: "name: t\nfields:\n  - {name: v, type: sdec}\n"
+  input: '{"v": -8.1}'
+  error: "Field 'v': -8.1 encodes as -8.1, outside -8 to 7.9 (PS-168)"
+
+- name: sdec_above_range
+  schema: "name: t\nfields:\n  - {name: v, type: sdec}\n"
+  input: '{"v": 8}'
+  error: "Field 'v': 8 encodes as 8, outside -8 to 7.9 (PS-168)"
+
+# --- PS-169: a label as JavaScript writes it ------------------------------------------
+
+- name: shared_boolean_label
+  schema: "name: t\nfields:\n  - {name: x, type: u8, lookup: {0: true, 1: true}}\n"
+  input: '{"x": true}'
+  error: "Field 'x': the label true is shared by codes [0, 1], so it cannot be encoded (PS-169)"
+
+- name: shared_fractional_label
+  schema: "name: t\nfields:\n  - {name: x, type: u8, lookup: {1: 2.5, 2: 2.5}}\n"
+  input: '{"x": 2.5}'
+  error: "Field 'x': the label 2.5 is shared by codes [1, 2], so it cannot be encoded (PS-169)"
+
+- name: shared_text_label
+  schema: "name: t\nfields:\n  - {name: x, type: u8, lookup: {3: idle, 4: idle}}\n"
+  input: '{"x": "idle"}'
+  error: "Field 'x': the label 'idle' is shared by codes [3, 4], so it cannot be encoded (PS-169)"
+
+# --- PS-557: a written discriminator is an integer ------------------------------------
+
+- name: named_inline_discriminator_with_a_fraction
+  schema: "name: t\nfields:\n  - match:\n      length: 1\n      name: kind\n      cases:\n        2:\n          - {name: a, type: u8}\n"
+  input: '{"kind": 2.5, "a": 1}'
+  error: "Field 'kind': the discriminator 2.5 is not an integer, so it cannot be written (PS-557)"
+
+- name: fraction_rejected_even_where_a_range_holds_it
+  schema: "name: t\nfields:\n  - match:\n      length: 1\n      name: kind\n      cases:\n        2..3:\n          - {name: a, type: u8}\n"
+  input: '{"kind": 2.5, "a": 1}'
+  error: "Field 'kind': the discriminator 2.5 is not an integer, so it cannot be written (PS-557)"
+
+- name: unnamed_inline_discriminator_from_its_var
+  schema: "name: t\nfields:\n  - match:\n      length: 1\n      var: k\n      cases:\n        2:\n          - {name: a, type: u8}\n"
+  input: '{"k": 2.5, "a": 1}'
+  error: "Field an unnamed match: the discriminator 2.5 is not an integer, so it cannot be written (PS-557)"
+
+- name: integral_inline_discriminator_still_writes
+  schema: "name: t\nfields:\n  - match:\n      length: 1\n      name: kind\n      cases:\n        2:\n          - {name: a, type: u8}\n"
+  input: '{"kind": 2, "a": 1}'
+  payload: "0201"
+
+- name: integral_float_inline_discriminator_writes
+  schema: "name: t\nfields:\n  - match:\n      length: 1\n      name: kind\n      cases:\n        2:\n          - {name: a, type: u8}\n"
+  input: '{"kind": 2.0, "a": 1}'
+  payload: "0201"

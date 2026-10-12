@@ -1668,11 +1668,10 @@ static inline int schema_encode_nibble_decimal(double v, bool is_signed,
     long long lo = is_signed ? -80 : 0, hi = is_signed ? 79 : 159;
     long long tenths_total;
     if (v > -1e15 && v < 1e15) {
-        double whole = (double)(int64_t)v;
-        if (whole > v) whole -= 1.0;
-        double tenths = schema_round_half_even((v - whole) * 10.0);
-        if (tenths == 10.0) { whole += 1.0; tenths = 0.0; }
-        tenths_total = (long long)whole * 10 + (long long)tenths;
+        /* PS-556 (CR-2026-147): n is the value times 10, rounded half to even on the
+         * binary64 product (PS-552). Rounding the fraction after splitting off the whole
+         * part wrote 3.45 as 0x35. */
+        tenths_total = (long long)schema_round_half_even(v * 10.0);
     } else {
         tenths_total = v < 0 ? lo - 1 : hi + 1;
     }

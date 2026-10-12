@@ -1155,6 +1155,8 @@ public static class SchemaEncoder
                 discriminator = (double)peekValue;
             }
 
+            if (match.Length > 0)
+                CheckWrittenDiscriminator(discriminator, match.Name);              // PS-557
             MatchCase? matched = null;
             if (discriminator != null)
             {
@@ -1303,7 +1305,7 @@ public static class SchemaEncoder
             if (caseValue is string text && Helpers.ParseListCaseKey(text) is { } listed)
                 return listed.Contains(value);
             if (caseValue is string spelled && spelled.Contains(".."))
-                // An inclusive range (PS-152), as the decoder reads it; it fell through to
+                // An inclusive range (PS-398), as the decoder reads it; it fell through to
                 // ParseIntAny and matched nothing.
                 return SchemaDecoder.FractionInRange(value, caseValue);
             if (caseValue is List<object?> list)
@@ -1890,6 +1892,22 @@ public static class SchemaEncoder
         /// 0 to 9, so 0 to 15.9, or -8 to 7.9 signed. <paramref name="tenths"/> is the value
         /// as encoded, in tenths. Both said "does not fit udec", in words of their own.
         /// </summary>
+        /// <summary>
+        /// PS-557 (CR-2026-147): a fractional value given for a discriminator the encoder
+        /// writes is rejected, naming the match as PS-535 does, and never rounded or
+        /// truncated.
+        /// </summary>
+        static void CheckWrittenDiscriminator(object? value, string? name)
+        {
+            if (value is not (double or float)) return;
+            double d = Convert.ToDouble(value);
+            if (double.IsNaN(d) || double.IsInfinity(d) || d == Math.Truncate(d)) return;
+            var label = string.IsNullOrEmpty(name) ? "an unnamed match" : $"'{name}'";
+            throw new InvalidOperationException(
+                $"Field {label}: the discriminator {JsNumber(d)} is not an integer, so it "
+                + "cannot be written (PS-557)");
+        }
+
         static void CheckNibbleDecimal(long tenths, bool signed, string? name, object? given)
         {
             long low = signed ? -80 : 0, high = signed ? 79 : 159;
@@ -2157,12 +2175,16 @@ public static class SchemaEncoder
                     // floor the whole part so the tenths stay non-negative.
                     var (ok, numeric) = Helpers.ToFloat64(value);
                     if (!ok) throw NotANumber(field, value);
-                    long whole = (long)Math.Floor(numeric);
-                    long tenths = (long)Math.Round((numeric - whole) * 10, MidpointRounding.ToEven);
-                    if (tenths == 10) { whole += 1; tenths = 0; }
-                    CheckNibbleDecimal(whole * 10 + tenths, field.Type == FieldType.SDec,
+                    // PS-556 (CR-2026-147): n is the value times 10, rounded half to even
+                    // on the binary64 product (PS-552); the upper nibble is n div 10 and
+                    // the lower n mod 10, both floored. Rounding the fraction after
+                    // splitting off the whole part wrote 3.45 as 0x35.
+                    double product = Math.Round(numeric * 10, MidpointRounding.ToEven);
+                    long n = (long)Math.Clamp(product, -9e18, 9e18);
+                    CheckNibbleDecimal(n, field.Type == FieldType.SDec,
                         field.Name, Given(field, value));                                 // PS-168
-                    return new[] { (byte)(((whole & 0x0F) << 4) | tenths) };
+                    long whole = (long)Math.Floor(n / 10.0);
+                    return new[] { (byte)(((whole & 0x0F) << 4) | (n - whole * 10)) };
                 }
                 case FieldType.Base64:
                 {

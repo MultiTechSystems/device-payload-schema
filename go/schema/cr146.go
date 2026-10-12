@@ -2,6 +2,7 @@ package schema
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -164,4 +165,20 @@ func sharedLabelCheck(field Field, value any) error {
 		}
 	}
 	return nil
+}
+
+// writtenDiscriminatorError is PS-557 (CR-2026-147): a fractional value given for a
+// discriminator the encoder writes (a match with `length`) is rejected, naming the match
+// as PS-535 does, and never rounded or truncated - toInt truncated 2.5 to 2.
+func writtenDiscriminatorError(value any, name string) error {
+	f, ok := value.(float64)
+	if !ok || math.IsInf(f, 0) || math.IsNaN(f) || f == math.Trunc(f) {
+		return nil
+	}
+	label := "an unnamed match"
+	if name != "" {
+		label = "'" + name + "'"
+	}
+	return fmt.Errorf("Field %s: the discriminator %s is not an integer, so it cannot be written (PS-557)",
+		label, formatLookupValue(f))
 }

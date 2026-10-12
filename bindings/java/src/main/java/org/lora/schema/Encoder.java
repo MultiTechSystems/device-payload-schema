@@ -1174,6 +1174,7 @@ final class Encoder {
             }
             discriminator = v;
         }
+        if (match.getLength() > 0) checkWrittenDiscriminator(discriminator, name);  // PS-557
 
         Field.Case matched = null;
         if (discriminator != null) {
@@ -1313,7 +1314,7 @@ final class Encoder {
             return Schema.parseListCaseKey(text).contains(value);
         }
         if (caseValue instanceof String spelled && spelled.contains("..")) {
-            // An inclusive range (PS-152), as the decoder reads it; it fell through to
+            // An inclusive range (PS-398), as the decoder reads it; it fell through to
             // parseIntAny and matched nothing.
             return Schema.fractionInRange(value, caseValue);
         }
@@ -2144,14 +2145,15 @@ final class Encoder {
                 throw new SchemaException.EncodeException("field '" + field.getName()
                         + "': expected a number, got " + describeValue(value));
             }
-            long whole = (long) Math.floor(raw);
-            // Half to even, as the reference's round() and Go's RoundToEven; Math.round
-            // rounded a tie up.
-            long tenths = (long) Math.rint((raw - whole) * 10);
-            if (tenths == 10) { whole += 1; tenths = 0; }
-            checkNibbleDecimal(whole * 10 + tenths, type == FieldType.SDEC, field.getName(),
+            // PS-556 (CR-2026-147): n is the value times 10, rounded half to even on the
+            // binary64 product (PS-552); the upper nibble is n div 10 and the lower n mod
+            // 10, both floored. Rounding the fraction after splitting off the whole part
+            // wrote 3.45 as 0x35.
+            long n = (long) Math.rint(raw * 10);
+            checkNibbleDecimal(n, type == FieldType.SDEC, field.getName(),
                     given(field, value));                                         // PS-168
-            return new byte[] {(byte) (((whole & 0x0F) << 4) | tenths)};
+            long whole = Math.floorDiv(n, 10L);
+            return new byte[] {(byte) (((whole & 0x0F) << 4) | Math.floorMod(n, 10L))};
         }
 
         if (type == FieldType.BYTES || type == FieldType.HEX) {
@@ -2402,6 +2404,19 @@ final class Encoder {
         throw new SchemaException.EncodeException("Field '" + name + "': " + jsNumber(given)
                 + " encodes as " + encoded + ", outside " + (signed ? "-8" : "0") + " to "
                 + (signed ? "7.9" : "15.9") + " (PS-168)");
+    }
+
+    /**
+     * PS-557 (CR-2026-147): a fractional value given for a discriminator the encoder writes
+     * is rejected, naming the match as PS-535 does, and never rounded or truncated.
+     */
+    static void checkWrittenDiscriminator(Object value, String name) {
+        if (!(value instanceof Double || value instanceof Float)) return;
+        double d = ((Number) value).doubleValue();
+        if (Double.isNaN(d) || Double.isInfinite(d) || d == Math.rint(d)) return;
+        String label = name != null && !name.isEmpty() ? "'" + name + "'" : "an unnamed match";
+        throw new SchemaException.EncodeException("Field " + label + ": the discriminator "
+                + jsNumber(d) + " is not an integer, so it cannot be written (PS-557)");
     }
 
     /** The range of a whole integer of {@code bits} bits. */

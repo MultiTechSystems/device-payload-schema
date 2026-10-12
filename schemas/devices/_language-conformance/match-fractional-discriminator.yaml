@@ -1,7 +1,7 @@
 # A discriminator with a fraction is compared as the number it is (PS-484's reading of a
 # lookup, applied to case keys): 2.5 equals no integer key and no member of a list key, so
 # it selects none of them and the `default` decides. It is never truncated to 2, which Go
-# did on both decode and encode. A range key `lo..hi` is inclusive bounds (PS-152), and 7.5
+# did on both decode and encode. A range key `lo..hi` is inclusive over the reals (PS-398, CR-2026-147), and 7.5
 # lies within 7..8, as the reference and the spec prototype both read it.
 #
 # The discriminator is a read byte halved, so an odd byte gives the fraction.

@@ -3164,7 +3164,7 @@ func matchCasePattern(value int, pattern any) bool {
 
 // fractionInRangePattern is matchCasePattern for a discriminator with a fraction. It equals
 // no integer, so no single key and no member of a list matches it; only an inclusive range
-// can hold it (PS-152), as the reference and the spec prototype read `lo..hi`.
+// can hold it (PS-398), as the reference and the spec prototype read `lo..hi`.
 func fractionInRangePattern(value float64, pattern any) bool {
 	switch v := pattern.(type) {
 	case string:
@@ -4792,6 +4792,11 @@ func encodeMatch(field Field, siblings []Field, data map[string]any, ctx *Encode
 		discriminator = int(decodeUint(ctx.pending[:field.Length], ctx.Endian))
 	}
 
+	if field.Length > 0 {
+		if err := writtenDiscriminatorError(discriminator, field.Name); err != nil {
+			return err // PS-557
+		}
+	}
 	var chosen []Field
 	chosenKey := ""
 	if discriminator != nil {
@@ -5825,16 +5830,20 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 		if !ok {
 			return notANumber(field, value)
 		}
-		whole := math.Floor(numVal)
-		tenths := math.RoundToEven((numVal - whole) * 10)
-		if tenths == 10 {
-			whole, tenths = whole+1, 0
+		// PS-556 (CR-2026-147): n is the value times 10, rounded half to even on the
+		// binary64 product (PS-552); the upper nibble is n div 10 and the lower n mod 10,
+		// both floored. Rounding the fraction after splitting off the whole part wrote 3.45
+		// as 0x35.
+		n := roundToInteger(numVal * 10)
+		if n < -9e18 || n > 9e18 {
+			n = math.Copysign(9e18, n) // far outside either range; kept within an int
 		}
-		if err := nibbleDecimalFitError(int(whole)*10+int(tenths), field.Type == TypeSDec,
+		if err := nibbleDecimalFitError(int(n), field.Type == TypeSDec,
 			field.Name, given); err != nil {
 			return err // PS-168
 		}
-		ctx.Write([]byte{byte((int(whole)&0x0F)<<4) | byte(tenths)})
+		whole := int(math.Floor(n / 10))
+		ctx.Write([]byte{byte((whole&0x0F)<<4) | byte(int(n)-whole*10)})
 
 	case TypeFloat32, TypeF32:
 		numVal, ok := toFloat64(value)
