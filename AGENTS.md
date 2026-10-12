@@ -2284,7 +2284,78 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     after it (`_is_peek`). Go also loses gs301 `h2s_v12_u16_word`, which only its ordered
     API had recovered. Floors: Python and Java 2106 -> 2080 (`tlv` 1569 -> 1543), C# 2107 ->
     2081 (`tlv` 1570 -> 1544), Go 2124 -> 2097 (`tlv` 1587 -> 1560, plain 2097 -> 2072). The
-    combination re-encodes nothing that neither side did alone.
+    combination re-encodes nothing that neither side did alone. **CR-2026-141 reversed the
+    "not derivable" half of this** (next item).
+
+- **CR-2026-141 (PS-551 editorial): a peek whose bits other fields write is derived.** The
+  spec now names a second derivable case beside a repeat's count: a bit range or `bool`
+  that does not consume (PS-060, PS-066), whose bits the fields after it write. All five
+  encoders, the TS013 runtime and C:
+  - **Absent and covered:** derived, and writes no bits. Milesight's status `u16[0:15]`
+    over its reading, absent wherever the lookup misses (PS-269), encodes as the reading:
+    `{reading: 300}` is `012c` and decodes back to `{reading: 300}`.
+  - **Absent and not covered:** `Missing required field: {name}`, where any of its bits
+    is written by no other field (`[u8[0:3] a, u8[4:7] b consume 1]` given only `b`).
+  - **Supplied and disagreeing:** `Field '{name}' is given {raw}, but the fields that
+    share its bits write {found} (PS-551)`, `raw` and `found` the range's unsigned bits.
+    Checked against the finished frame, and before the OR where a whole field would write
+    over a peek's different bits; where no named peek explains the OR, `A field writes
+    bits a peek before it set otherwise (PS-551)`. The OR used to change both values.
+  - **How:** each frame carries, per byte, the bits some field wrote and every named bit
+    range or bool placed (Python `Frame.covered`/`Frame.peeks`, `FrameBuffer.cover`,
+    `check_peeks`; runtime `unc`/`pk`, `encCheckPeeks`; Go per absolute position in the
+    encode context, with `beginFieldList` setting the enclosing list's bits aside; Java
+    a side table beside `carriedTail`; C# beside `CarriedBy`; C per byte in
+    `schema_encode_direction`, each field encoded into a scratch buffer first). The check
+    runs where a frame closes: top-level encode, each tlv value, each repeat element and
+    trailer. A nameless range is padding and is not checked.
+  - **Two rules this repository adds where the prototype is silent, both raised with the
+    spec session:**
+    - *A skip is padding* (`padding()`): its zeros fix no peek's bits and contradict none.
+      The prototype writes a skip like any field, so it would reject dnt-lw-wsci's status
+      report (a `skip` moves past the `first_command` peek) and registry mutelcor,
+      moko lw001-bg and nexelec sign-codec, which move past peeked bits the same way.
+    - *A tlv case is chosen without its peek only where the case's own next field writes
+      the peek's bits* (`covered_peeks`, read from the schema). Treating every
+      non-consuming range as optional chose registry wt303's case 5 (status nibble beside
+      a mode nibble) for a `mode` that case 0x68 reports alone, and the status was then
+      missing.
+  - **Changed case:** `tests/cr-2026-135-cases.yaml`'s `peeked_range_then_whole_byte`
+    gave `whole: 5` and expected `35`, the OR - which reads back as `whole: 53`. It gives
+    53 now; the old input is a rejection case in `tests/cr-2026-141-cases.yaml`.
+  - **Corpus:** +26 (ct10x 12, ct30x 6, gs301 6, ws515 2; Go ordered also gs301
+    `h2s_v12_u16_word` and `sensor_id_43_bytes`, Go plain 4 of the 6 gs301) and -10: vobo `mutant_p32_03..07` and `mutant_p112_03..07`, whose
+    lookup gives two codes one label (109 and 45 are both `AnalogSensor45`), so the label
+    reverses to 45 and the old OR with the peek's 109 happened to rebuild the byte. All
+    `tlv`. Floors: Python and Java 2080 -> 2096 (`tlv` 1543 -> 1559), C# 2081 -> 2097
+    (`tlv` 1544 -> 1560), Go ordered 2097 -> 2114 (`tlv` 1560 -> 1577), plain 2072 -> 2087. The
+    failing sets of Python, Java and C# are identical (590); Go ordered fails a subset.
+  - **Registry (Python, read only):** 4988 -> 4990 round trips: +8 (em2101 4,
+    iq-opentherm-lrw 4, covered peeks now derived) and -6, each a frame the OR had
+    rebuilt by accident. pm-io-5-sm (4): `valv` and `leak` peek the byte a derived
+    `_flags` mask then writes whole as 0. mutelcor (2): `_di`, a whole-byte peek given its
+    derived flagged mask 15, beside bools the groups place in bits 4-7 of the same byte.
+    Both are schema findings: a mask derived from its groups' declared bits says nothing
+    of the other bits. 172 that already failed fail with different text, mostly a missing
+    peek named now that a derived one is checked.
+  - **Tests:** `tests/cr-2026-141-cases.yaml` (the prototype's four
+    `TestCR2026141CoveredPeek` cases and eleven more) drives
+    `test_cr_2026_141_covered_peek.py` (reference and runtime, decoding back where a case
+    gives `decoded`), Go `cr141_test.go`, Java `CR2026141Test`, C# `CR2026_141Tests`; C has
+    `test_a_covered_peek_is_derived`, in the one-byte ranges its struct API builds.
+
+- **Per-definition tables are held by identity, never by address alone** (found auditing
+  for the spec prototype's `id()`-keyed SIBLINGS defect, CR-2026-141). Python's decode
+  tables `_guard_else`, `_pre_lookup` and `_lookup_numbers` and the PS-168 `_encode_given`
+  were keyed by `id(field_def)`; a repeat's element is a dict built afresh for each decode
+  of the repeat (`repeat_members`), so a later definition at the freed address inherited
+  the entry - a failed guard switched off another field's `valid_range`. They are
+  `IdentityTable`s now, whose entries hold the definition. Go's `keyOrder` was keyed by a
+  map's address and kept on the schema after the raw document was freed; each entry now
+  holds its map. The generated codec named a variable `x_outer{id(field) % 100000}`, so
+  one schema generated different code on each run; it takes `_next_uid()`. Java's
+  `IdentityHashMap`s and C#'s `ReferenceEqualityComparer` tables hold their keys and were
+  never affected. `tests/test_identity_tables.py` reproduces each Python leak.
 
 ## Converting a vendor codec
 

@@ -828,8 +828,16 @@ func jsonSafe(v any) any {
 // --- source order ---
 
 // keyOrder maps a decoded mapping, by identity, to its keys in source order, written as
-// asStringMap writes them.
-type keyOrder map[uintptr][]string
+// asStringMap writes them. Each entry holds the mapping itself: keyed by its address
+// alone, an entry outlived a mapping the schema does not keep (the raw document, its
+// test_vectors), and a map allocated later at that address would inherit its order -
+// the defect the spec prototype's id()-keyed SIBLINGS table had (CR-2026-141).
+type keyOrder map[uintptr]orderEntry
+
+type orderEntry struct {
+	mapping any // keeps the address from being reused while the entry stands
+	keys    []string
+}
 
 func mapIdentity(m any) (uintptr, bool) {
 	v := reflect.ValueOf(m)
@@ -850,7 +858,7 @@ func (o keyOrder) keys(m any) []string {
 	var out []string
 	seen := map[string]bool{}
 	if id, ok := mapIdentity(m); ok {
-		for _, key := range o[id] {
+		for _, key := range o[id].keys {
 			if _, present := view[key]; present && !seen[key] {
 				out = append(out, key)
 				seen[key] = true
@@ -943,7 +951,7 @@ func buildKeyOrder(raw map[string]any, root *yaml.Node) keyOrder {
 				}
 			}
 			if id, ok := mapIdentity(value); ok {
-				order[id] = keys
+				order[id] = orderEntry{mapping: value, keys: keys}
 			}
 		case []any:
 			if node.Kind != yaml.SequenceNode {
@@ -972,7 +980,7 @@ func buildKeyOrder(raw map[string]any, root *yaml.Node) keyOrder {
 		for i := 0; i+1 < len(node.Content); i += 2 {
 			keys = append(keys, node.Content[i].Value)
 		}
-		order[id] = keys
+		order[id] = orderEntry{mapping: raw, keys: keys}
 	}
 	return order
 }
