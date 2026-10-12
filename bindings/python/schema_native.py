@@ -115,77 +115,77 @@ class NativeSchema:
         """Set up ctypes function signatures."""
         lib = cls._lib
         
-        # schema_create_binary
-        lib.schema_create_binary.argtypes = [ctypes.POINTER(ctypes.c_uint8), ctypes.c_size_t]
-        lib.schema_create_binary.restype = ctypes.c_void_p
+        # schema_ffi_create_binary
+        lib.schema_ffi_create_binary.argtypes = [ctypes.POINTER(ctypes.c_uint8), ctypes.c_size_t]
+        lib.schema_ffi_create_binary.restype = ctypes.c_void_p
         
-        # schema_free
-        lib.schema_free.argtypes = [ctypes.c_void_p]
-        lib.schema_free.restype = None
+        # schema_ffi_free
+        lib.schema_ffi_free.argtypes = [ctypes.c_void_p]
+        lib.schema_ffi_free.restype = None
         
-        # schema_get_name
-        lib.schema_get_name.argtypes = [ctypes.c_void_p]
-        lib.schema_get_name.restype = ctypes.c_char_p
+        # schema_ffi_get_name
+        lib.schema_ffi_get_name.argtypes = [ctypes.c_void_p]
+        lib.schema_ffi_get_name.restype = ctypes.c_char_p
         
-        # schema_get_field_count
-        lib.schema_get_field_count.argtypes = [ctypes.c_void_p]
-        lib.schema_get_field_count.restype = ctypes.c_int
+        # schema_ffi_get_field_count
+        lib.schema_ffi_get_field_count.argtypes = [ctypes.c_void_p]
+        lib.schema_ffi_get_field_count.restype = ctypes.c_int
         
-        # schema_decode
-        lib.schema_decode.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint8), ctypes.c_size_t]
-        lib.schema_decode.restype = ctypes.c_void_p
+        # schema_ffi_decode
+        lib.schema_ffi_decode.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint8), ctypes.c_size_t]
+        lib.schema_ffi_decode.restype = ctypes.c_void_p
         
-        # result_free
-        lib.result_free.argtypes = [ctypes.c_void_p]
-        lib.result_free.restype = None
+        # schema_ffi_result_free
+        lib.schema_ffi_result_free.argtypes = [ctypes.c_void_p]
+        lib.schema_ffi_result_free.restype = None
         
-        # result_get_error
-        lib.result_get_error.argtypes = [ctypes.c_void_p]
-        lib.result_get_error.restype = ctypes.c_int
+        # schema_ffi_result_get_error
+        lib.schema_ffi_result_get_error.argtypes = [ctypes.c_void_p]
+        lib.schema_ffi_result_get_error.restype = ctypes.c_int
         
-        # result_get_error_msg
-        lib.result_get_error_msg.argtypes = [ctypes.c_void_p]
-        lib.result_get_error_msg.restype = ctypes.c_char_p
+        # schema_ffi_result_get_error_msg
+        lib.schema_ffi_result_get_error_msg.argtypes = [ctypes.c_void_p]
+        lib.schema_ffi_result_get_error_msg.restype = ctypes.c_char_p
         
-        # result_get_field_count
-        lib.result_get_field_count.argtypes = [ctypes.c_void_p]
-        lib.result_get_field_count.restype = ctypes.c_int
+        # schema_ffi_result_get_field_count
+        lib.schema_ffi_result_get_field_count.argtypes = [ctypes.c_void_p]
+        lib.schema_ffi_result_get_field_count.restype = ctypes.c_int
         
-        # result_get_field_name
-        lib.result_get_field_name.argtypes = [ctypes.c_void_p, ctypes.c_int]
-        lib.result_get_field_name.restype = ctypes.c_char_p
+        # schema_ffi_result_get_field_name
+        lib.schema_ffi_result_get_field_name.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        lib.schema_ffi_result_get_field_name.restype = ctypes.c_char_p
         
-        # result_get_field_type
-        lib.result_get_field_type.argtypes = [ctypes.c_void_p, ctypes.c_int]
-        lib.result_get_field_type.restype = ctypes.c_int
+        # schema_ffi_result_get_field_type
+        lib.schema_ffi_result_get_field_type.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        lib.schema_ffi_result_get_field_type.restype = ctypes.c_int
         
-        # result_get_field_int
-        lib.result_get_field_int.argtypes = [ctypes.c_void_p, ctypes.c_int]
-        lib.result_get_field_int.restype = ctypes.c_int64
+        # schema_ffi_result_get_field_int
+        lib.schema_ffi_result_get_field_int.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        lib.schema_ffi_result_get_field_int.restype = ctypes.c_int64
         
-        # result_get_field_float
-        lib.result_get_field_float.argtypes = [ctypes.c_void_p, ctypes.c_int]
-        lib.result_get_field_float.restype = ctypes.c_double
+        # schema_ffi_result_get_field_float
+        lib.schema_ffi_result_get_field_float.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        lib.schema_ffi_result_get_field_float.restype = ctypes.c_double
         
-        # result_get_field_string
-        lib.result_get_field_string.argtypes = [ctypes.c_void_p, ctypes.c_int]
-        lib.result_get_field_string.restype = ctypes.c_char_p
+        # schema_ffi_result_get_field_string
+        lib.schema_ffi_result_get_field_string.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        lib.schema_ffi_result_get_field_string.restype = ctypes.c_char_p
         
-        # result_get_field_bool
-        lib.result_get_field_bool.argtypes = [ctypes.c_void_p, ctypes.c_int]
-        lib.result_get_field_bool.restype = ctypes.c_int
+        # schema_ffi_result_get_field_bool
+        lib.schema_ffi_result_get_field_bool.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        lib.schema_ffi_result_get_field_bool.restype = ctypes.c_int
         
-        # result_to_json
-        lib.result_to_json.argtypes = [ctypes.c_void_p]
-        lib.result_to_json.restype = ctypes.c_char_p
+        # schema_ffi_result_to_json
+        lib.schema_ffi_result_to_json.argtypes = [ctypes.c_void_p]
+        lib.schema_ffi_result_to_json.restype = ctypes.c_char_p
         
-        # schema_free_string
-        lib.schema_free_string.argtypes = [ctypes.c_char_p]
-        lib.schema_free_string.restype = None
+        # schema_ffi_free_string
+        lib.schema_ffi_free_string.argtypes = [ctypes.c_char_p]
+        lib.schema_ffi_free_string.restype = None
         
-        # schema_version
-        lib.schema_version.argtypes = []
-        lib.schema_version.restype = ctypes.c_char_p
+        # schema_ffi_version
+        lib.schema_ffi_version.argtypes = []
+        lib.schema_ffi_version.restype = ctypes.c_char_p
     
     @classmethod
     def is_available(cls) -> bool:
@@ -198,7 +198,7 @@ class NativeSchema:
         lib = cls._load_library()
         if not lib:
             return "not available"
-        return lib.schema_version().decode('utf-8')
+        return lib.schema_ffi_version().decode('utf-8')
     
     @classmethod
     def from_binary(cls, data: bytes) -> 'NativeSchema':
@@ -209,7 +209,7 @@ class NativeSchema:
                             "cd bindings/c && make")
         
         arr = (ctypes.c_uint8 * len(data))(*data)
-        handle = lib.schema_create_binary(arr, len(data))
+        handle = lib.schema_ffi_create_binary(arr, len(data))
         if not handle:
             raise SchemaError("Failed to parse binary schema")
         
@@ -223,18 +223,18 @@ class NativeSchema:
     def __del__(self):
         """Free native resources."""
         if hasattr(self, '_handle') and self._handle and self._lib:
-            self._lib.schema_free(self._handle)
+            self._lib.schema_ffi_free(self._handle)
             self._handle = None
     
     @property
     def name(self) -> str:
         """Get schema name."""
-        return self._lib.schema_get_name(self._handle).decode('utf-8')
+        return self._lib.schema_ffi_get_name(self._handle).decode('utf-8')
     
     @property
     def field_count(self) -> int:
         """Get number of fields in schema."""
-        return self._lib.schema_get_field_count(self._handle)
+        return self._lib.schema_ffi_get_field_count(self._handle)
     
     def decode(self, payload: bytes) -> Dict[str, Any]:
         """
@@ -250,41 +250,41 @@ class NativeSchema:
             SchemaError: If decoding fails
         """
         arr = (ctypes.c_uint8 * len(payload))(*payload)
-        result = self._lib.schema_decode(self._handle, arr, len(payload))
+        result = self._lib.schema_ffi_decode(self._handle, arr, len(payload))
         
         if not result:
             raise SchemaError("Decode returned null")
         
         try:
-            error = self._lib.result_get_error(result)
+            error = self._lib.schema_ffi_result_get_error(result)
             if error != 0:
-                msg = self._lib.result_get_error_msg(result).decode('utf-8')
+                msg = self._lib.schema_ffi_result_get_error_msg(result).decode('utf-8')
                 raise SchemaError(f"Decode error {error}: {msg}")
             
             output = {}
-            field_count = self._lib.result_get_field_count(result)
+            field_count = self._lib.schema_ffi_result_get_field_count(result)
             
             for i in range(field_count):
-                name = self._lib.result_get_field_name(result, i).decode('utf-8')
+                name = self._lib.schema_ffi_result_get_field_name(result, i).decode('utf-8')
                 if not name:
                     continue
                 
-                field_type = self._lib.result_get_field_type(result, i)
+                field_type = self._lib.schema_ffi_result_get_field_type(result, i)
                 
                 if field_type == FIELD_VAL_INT:
-                    output[name] = self._lib.result_get_field_int(result, i)
+                    output[name] = self._lib.schema_ffi_result_get_field_int(result, i)
                 elif field_type == FIELD_VAL_FLOAT:
-                    output[name] = self._lib.result_get_field_float(result, i)
+                    output[name] = self._lib.schema_ffi_result_get_field_float(result, i)
                 elif field_type == FIELD_VAL_STRING:
-                    output[name] = self._lib.result_get_field_string(result, i).decode('utf-8')
+                    output[name] = self._lib.schema_ffi_result_get_field_string(result, i).decode('utf-8')
                 elif field_type == FIELD_VAL_BOOL:
-                    output[name] = bool(self._lib.result_get_field_bool(result, i))
+                    output[name] = bool(self._lib.schema_ffi_result_get_field_bool(result, i))
                 else:
-                    output[name] = self._lib.result_get_field_int(result, i)
+                    output[name] = self._lib.schema_ffi_result_get_field_int(result, i)
             
             return output
         finally:
-            self._lib.result_free(result)
+            self._lib.schema_ffi_result_free(result)
     
     def decode_json(self, payload: bytes) -> str:
         """
@@ -294,26 +294,26 @@ class NativeSchema:
         generated in C without Python object creation.
         """
         arr = (ctypes.c_uint8 * len(payload))(*payload)
-        result = self._lib.schema_decode(self._handle, arr, len(payload))
+        result = self._lib.schema_ffi_decode(self._handle, arr, len(payload))
         
         if not result:
             raise SchemaError("Decode returned null")
         
         try:
-            error = self._lib.result_get_error(result)
+            error = self._lib.schema_ffi_result_get_error(result)
             if error != 0:
-                msg = self._lib.result_get_error_msg(result).decode('utf-8')
+                msg = self._lib.schema_ffi_result_get_error_msg(result).decode('utf-8')
                 raise SchemaError(f"Decode error {error}: {msg}")
             
-            json_ptr = self._lib.result_to_json(result)
+            json_ptr = self._lib.schema_ffi_result_to_json(result)
             if not json_ptr:
                 raise SchemaError("JSON conversion failed")
             
             json_str = json_ptr.decode('utf-8')
-            self._lib.schema_free_string(json_ptr)
+            self._lib.schema_ffi_free_string(json_ptr)
             return json_str
         finally:
-            self._lib.result_free(result)
+            self._lib.schema_ffi_result_free(result)
 
 
 def benchmark():
