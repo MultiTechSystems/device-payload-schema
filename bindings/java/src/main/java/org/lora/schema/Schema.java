@@ -1660,7 +1660,12 @@ public class Schema {
     }
 
     private Map<String, Object> decodeFlagged(Field.FlaggedDef fd, DecodeContext ctx) {
-        Object flagsVal = ctx.getVariable(fd.getField());
+        // The mask is a reference like any other, so it reads the PS-523 binding that
+        // DecodeContext.bind made: the number under a text or boolean label, a numeric
+        // label itself, an enum's code. Written `$mask` it found nothing.
+        String maskName = fd.getField() == null ? "" : fd.getField();
+        if (maskName.startsWith("$")) maskName = maskName.substring(1);
+        Object flagsVal = ctx.getVariable(maskName);
         if (flagsVal == null) {
             throw new SchemaException.DecodeException("Flagged field reference not found: " + fd.getField());
         }
@@ -2980,24 +2985,14 @@ public class Schema {
         // members are as wide as it is.
         String endian = group.getGroupEndian() != null ? group.getGroupEndian() : this.endian;
         if (group.getByteGroupSize() > ctx.remaining()) {
-            // PS-535: a member reads the group's bytes from its start, so the first member
-            // whose base does not fit is the field that read past the end, as the spec
-            // prototype names it. Where every base fits and the group's size does not, the
-            // group itself made the read.
-            for (Field member : group.getByteGroup()) {
-                // A member's base is CR-2026-131's: a bit range's base, a whole
-                // integer's width, one byte for a bool.
-                int base = byteGroupWidth(List.of(member), 1);
-                if (base > ctx.remaining()) {
-                    throw new SchemaException.BufferUnderflow(String.format(
-                            "Buffer underflow at peek offset %d", start))
-                            .named(member.getName(), kindOf(member));
-                }
-            }
+            // PS-535: the group is read as one value (CR-2026-131), so the failing read is
+            // the group's, in the peek form, and every member is lost; it is identified by
+            // its members, as the spec prototype does.
+            List<String> memberNames = new ArrayList<>();
+            for (Field member : group.getByteGroup()) memberNames.add(member.getName());
             throw new SchemaException.BufferUnderflow(String.format(
-                    "Buffer underflow: need %d bytes at offset %d, but only %d remaining",
-                    group.getByteGroupSize(), start, Math.max(0, ctx.remaining())))
-                    .named(null, "byte_group");
+                    "Buffer underflow at peek offset %d", start))
+                    .namedAs(SchemaException.BufferUnderflow.byteGroupLabel(memberNames));
         }
         long groupValue = ctx.decodeUnsigned(ctx.peek(group.getByteGroupSize(), 0), endian);
 

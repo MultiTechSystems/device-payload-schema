@@ -98,8 +98,13 @@ SCHEMA_API int result_get_bytes_consumed(result_t_ffi result);
  * Field Access
  * ============================================ */
 
-/* Get field name by index */
+/* Get field name by index. Empty for every field of a schema loaded without its name
+ * table, never a name made up from the IPSO object, type or position (PS-555). */
 SCHEMA_API const char* result_get_field_name(result_t_ffi result, int index);
+
+/* The schema field index (schema order) that produced the result's field `index`, or -1.
+ * The way to identify a value decoded with a schema that carries no names. */
+SCHEMA_API int result_get_field_schema_index(result_t_ffi result, int index);
 
 /* Get field value type */
 SCHEMA_API int result_get_field_type(result_t_ffi result, int index);
@@ -120,7 +125,9 @@ SCHEMA_API int result_get_field_bool(result_t_ffi result, int index);
  * JSON Output (convenience)
  * ============================================ */
 
-/* Convert result to JSON string (caller must free with schema_free_string) */
+/* Convert result to JSON string (caller must free with schema_free_string). NULL for
+ * a result decoded with a schema that carries no names: the decoded object cannot be
+ * reported from a nameless form (PS-555, CR-2026-142). */
 SCHEMA_API char* result_to_json(result_t_ffi result);
 
 /* Free a string allocated by this library */

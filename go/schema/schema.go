@@ -2279,7 +2279,7 @@ func decodeByteGroup(field Field, ctx *DecodeContext) (map[string]any, error) {
 	size := byteGroupWidth(field) // PS-070, CR-2026-131
 
 	if size > ctx.Remaining() {
-		return nil, byteGroupUnderflow(field, size, ctx)
+		return nil, byteGroupUnderflow(field, ctx)
 	}
 	data, err := ctx.Read(size)
 	if err != nil {
@@ -2346,7 +2346,10 @@ func decodeByteGroup(field Field, ctx *DecodeContext) (map[string]any, error) {
 }
 
 func decodeFlagged(fd *FlaggedDef, ctx *DecodeContext) (map[string]any, error) {
-	flagsVal, ok := ctx.Variables[fd.Field]
+	// The mask is a reference like any other, so it reads the PS-523 binding that
+	// bindReference made: the number under a text or boolean label, a numeric label
+	// itself, an enum's code. Written `$mask` it found nothing, since names bind bare.
+	flagsVal, ok := ctx.Variables[strings.TrimPrefix(fd.Field, "$")]
 	if !ok {
 		return nil, fmt.Errorf("flagged field reference not found: %s", fd.Field)
 	}

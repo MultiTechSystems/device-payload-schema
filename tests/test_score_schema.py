@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 from score_schema import (  # noqa: E402
     CONFORMANCE_TOLERANCE,
     MIN_VECTORS_HIGH_TIER,
+    NO_DETECTABLE_SEMANTIC_CREDIT,
     analyze_branch_coverage,
     calculate_score,
     check_annotation_correctness,
@@ -23,7 +24,9 @@ from score_schema import (  # noqa: E402
     check_provenance,
     check_semantic_annotations,
     check_test_vectors_exist,
+    classify_il204,
     detect_sensor,
+    il204_words,
     run_python_tests,
 )
 
@@ -65,32 +68,36 @@ def flagged_schema(vectors):
     }
 
 
+def semantic_results(*fields):
+    """check_semantic_annotations over a schema holding these fields."""
+    results, _recs = check_semantic_annotations(
+        {"name": "t", "version": 1, "fields": list(fields)}
+    )
+    return results
+
+
 class TestSensorDetection:
-    """Detection matches whole tokens, not substrings."""
+    """Detection matches whole words, not substrings."""
 
     @pytest.mark.parametrize(
         "field_name",
         [
             "photosynthetically_active_radiation",  # contains 'ph'
             "phase_angle",  # contains 'ph'
+            "temperatures_logged",  # 'temperatures' is not the word 'temperature'
         ],
     )
     def test_substring_does_not_detect_a_sensor(self, field_name):
         assert detect_sensor({"name": field_name, "type": "u16"}) is None
-
-    def test_substring_match_does_not_shadow_the_real_token(self):
-        """'lightning_average_distance' is a distance, never a light sensor."""
-        detected = detect_sensor({"name": "lightning_average_distance", "type": "u16"})
-        assert detected == ("distance", 3330)
 
     @pytest.mark.parametrize(
         ("field_name", "expected_object"),
         [
             ("air_temperature", 3303),
             ("temperature", 3303),
-            ("batteryVoltage", 3316),
-            ("ph", 3326),
-            ("co2_concentration", 3325),
+            ("AmbientTemperature", 3303),
+            ("relative_humidity", 3304),
+            ("barometric_pressure", 3323),
         ],
     )
     def test_token_match_detects_a_sensor(self, field_name, expected_object):
@@ -98,24 +105,180 @@ class TestSensorDetection:
         assert detected is not None
         assert detected[1] == expected_object
 
-    def test_annotation_disambiguates_a_name_matching_two_keywords(self):
-        """'targetTemperature' is a Set Point (3308), not a temperature (3303)."""
-        field = {"name": "targetTemperature", "type": "u8", "ipso": {"object": 3308}}
-        assert detect_sensor(field) == ("target", 3308)
-        ipso_ok, _senml_ok, problems = check_annotation_correctness(field, "target", 3308)
-        assert ipso_ok
-        assert not problems
-
-    def test_unannotated_ambiguous_name_falls_back_to_the_longest_match(self):
-        detected = detect_sensor({"name": "targetTemperature", "type": "u8"})
-        assert detected == ("temperature", 3303)
-
     def test_field_can_declare_its_type(self):
         detected = detect_sensor({"name": "probe_a", "type": "u16", "sensor": "humidity"})
         assert detected == ("humidity", 3304)
 
     def test_field_can_opt_out(self):
         assert detect_sensor({"name": "temperature", "type": "u16", "sensor": "none"}) is None
+
+    def test_a_declared_non_quantity_defers_to_the_name(self):
+        """`sensor:` other than a quantity or `none` does not override IL-204."""
+        assert detect_sensor({"name": "battery", "sensor": "percentage"}) is None
+        detected = detect_sensor({"name": "moisture_at_level_3", "sensor": "percentage"})
+        assert detected == ("moisture", 3320)
+
+
+class TestIl204Classification:
+    """The scorer places a field as IL-204 does (la-integration-layer,
+    docs/guides/protocol-mappings/ttn-normalized.md, CRT-2026-036)."""
+
+    @pytest.mark.parametrize(
+        ("field_name", "word"),
+        [
+            ("temperature_max", "max"),
+            ("humidityThreshold", "threshold"),
+            ("targetTemperature", "target"),
+            ("temperature_target", "target"),
+            ("TemperatureChange", "change"),
+            ("pressure_raw_offset", "raw"),
+            ("lightning_average_distance", "average"),
+        ],
+    )
+    def test_a_qualifier_word_is_not_a_reading(self, field_name, word):
+        placement = classify_il204({"name": field_name})
+        assert placement.step == "qualifier"
+        assert placement.word == word
+        assert detect_sensor({"name": field_name}) is None
+
+    def test_a_qualifier_is_neither_expected_nor_flagged(self):
+        """An annotation on a threshold is not checked: 3304 on a temperature
+        threshold is not reported, and its absence is not either."""
+        results = semantic_results(
+            {"name": "temperature_max", "type": "s16", "ipso": {"object": 3304}},
+            {"name": "humidityThreshold", "type": "u8"},
+        )
+        assert results["detectable_sensors"] == 0
+        assert results["annotation_errors"] == []
+        assert results["ipso_missing"] == []
+
+    @pytest.mark.parametrize(
+        ("field_name", "path"),
+        [
+            ("temperature", "air.temperature"),
+            ("humidity", "air.relativeHumidity"),
+            ("pressure", "air.pressure"),
+            ("precipitation", "rain.cumulative"),
+            ("moisture", "soil.moisture"),
+            ("soil_temperature", "soil.temperature"),
+            ("soilMoisture", "soil.moisture"),
+            ("water_temperature", "water.temperature"),
+        ],
+    )
+    def test_a_ttn_quantity_is_placed(self, field_name, path):
+        placement = classify_il204({"name": field_name})
+        assert placement.step == "name"
+        assert placement.path == path
+        assert placement.detectable
+
+    def test_a_ttn_quantity_without_ipso_is_reported_missing(self):
+        results = semantic_results({"name": "temperature", "type": "s16"})
+        assert results["detectable_sensors"] == 1
+        assert results["ipso_missing"] == ["temperature: add ipso: {object: 3303}"]
+
+    @pytest.mark.parametrize(
+        "field_name",
+        ["internal_temperature", "leaf_temperature", "dewTemperature",
+         "pcb_temperature", "water_pressure", "soil_humidity"],
+    )
+    def test_a_medium_without_a_path_is_unplaced(self, field_name):
+        placement = classify_il204({"name": field_name})
+        assert placement.step == "medium"
+        assert placement.path is None
+        assert detect_sensor({"name": field_name}) is None
+
+    def test_internal_temperature_with_3303_is_not_flagged(self):
+        results = semantic_results(
+            {"name": "internal_temperature", "type": "s16", "unit": "°C",
+             "ipso": {"object": 3303}, "senml": {"unit": "Cel"}}
+        )
+        assert results["annotation_errors"] == []
+        assert results["ipso_missing"] == []
+
+    @pytest.mark.parametrize("field_name", ["battery", "battery_level", "batteryVoltage"])
+    def test_battery_does_not_select_3316(self, field_name):
+        """Neither the word `battery` nor a unit selects an object (IL-203)."""
+        for unit in ("%", "V"):
+            field = {"name": field_name, "type": "u8", "unit": unit}
+            assert detect_sensor(field) is None
+        results = semantic_results({"name": field_name, "type": "u8", "unit": "%"})
+        assert results["detectable_sensors"] == 0
+        assert results["ipso_missing"] == []
+
+    def test_a_battery_percentage_annotated_3320_is_not_flagged(self):
+        results = semantic_results(
+            {"name": "battery", "type": "u8", "unit": "%", "ipso": {"object": 3320}}
+        )
+        assert results["annotation_errors"] == []
+
+    def test_a_unit_alone_does_not_classify(self):
+        """IL-203: `Cel` is as true of a probe called `t1` as of air."""
+        assert detect_sensor({"name": "t1", "type": "s16", "unit": "°C"}) is None
+        assert detect_sensor({"name": "distance", "type": "u16", "unit": "mm"}) is None
+
+    def test_a_name_silent_field_with_an_annotation_is_not_flagged(self):
+        """IL-204 step 4: the annotation is the only evidence, and it is used."""
+        results = semantic_results(
+            {"name": "probe_a", "type": "s16", "ipso": {"object": 3303}},
+            {"name": "channel_3", "type": "u16", "ipso": {"object": 3316}},
+        )
+        assert classify_il204({"name": "probe_a"}).step == "none"
+        assert results["annotation_errors"] == []
+        # ...and earns nothing, or annotating opaque fields would farm points.
+        assert results["detectable_sensors"] == 0
+        assert results["ipso_mapped"] == 0
+
+    @pytest.mark.parametrize("generic", [3300, 3320, 3325, 3332])
+    def test_a_generic_object_is_not_a_mismatch(self, generic):
+        """IL-199: a generic object selects no category, so it cannot disagree."""
+        results = semantic_results(
+            {"name": "temperature", "type": "s16", "ipso": {"object": generic}}
+        )
+        assert results["annotation_errors"] == []
+        assert results["ipso_mapped"] == 0
+        assert any("IL-199" in m for m in results["ipso_missing"])
+
+    def test_a_generic_object_is_right_for_a_quantity_without_one(self):
+        results = semantic_results(
+            {"name": "soil_moisture", "type": "u8", "ipso": {"object": 3320}}
+        )
+        assert results["annotation_errors"] == []
+        assert results["ipso_mapped"] == 1
+
+    def test_water_temperature_annotated_3304_is_flagged(self):
+        results = semantic_results(
+            {"name": "water_temperature", "type": "s16", "ipso": {"object": 3304}}
+        )
+        assert len(results["annotation_errors"]) == 1
+        assert "3304" in results["annotation_errors"][0]
+        assert results["ipso_mapped"] == 0
+
+    def test_a_senml_name_without_a_unit_takes_the_field_unit(self):
+        """PS-478: the record's unit is then the field's own."""
+        results = semantic_results(
+            {"name": "moisture", "type": "u8", "unit": "/100", "senml": {"name": "vwc"}}
+        )
+        assert results["annotation_errors"] == []
+        assert results["senml_mapped"] == 1
+
+    def test_fields_inside_a_field_level_match_are_scanned(self):
+        """laq4 reports temperature and humidity from inside a `match:` block."""
+        results = semantic_results(
+            {"name": "mode", "type": "u8"},
+            {"match": {"field": "$mode", "cases": {
+                1: [{"name": "temperature", "type": "s16", "unit": "°C",
+                     "ipso": {"object": 3303}, "senml": {"unit": "Cel"}}],
+                2: {"fields": [{"name": "humidity", "type": "u8"}]},
+            }, "default": [{"name": "pressure", "type": "u16"}]}},
+        )
+        assert results["detectable_sensors"] == 3
+        assert results["ipso_mapped"] == 1
+        assert sorted(m.split(":")[0] for m in results["ipso_missing"]) == [
+            "humidity", "pressure"]
+
+    def test_words_split_on_underscore_and_camel_case_ignoring_case(self):
+        assert il204_words("Soil_TemperatureAlarm") == ["soil", "temperature", "alarm"]
+        assert classify_il204({"name": "Soil_TemperatureAlarm"}).step == "qualifier"
 
 
 class TestAnnotationCorrectness:
@@ -358,6 +521,24 @@ class TestTiers:
         score, tier = calculate_score(self._perfect_results())
         assert tier == "PLATINUM"
         assert score >= 95
+
+    def test_no_detectable_field_earns_half_the_semantic_points(self):
+        """A schema IL-204 places nothing in gets 10 of 20, not 0 or 20 (PR #123)."""
+        none_detected = {
+            "total_fields": 3, "detectable_sensors": 0, "ipso_mapped": 0,
+            "senml_mapped": 0, "semantic_mapped": 0, "annotation_errors": [],
+        }
+        full, _ = calculate_score(self._perfect_results())
+        half, tier = calculate_score(
+            self._perfect_results(semantic_annotations=none_detected)
+        )
+        assert NO_DETECTABLE_SEMANTIC_CREDIT == 0.5
+        assert full - half == pytest.approx(10)
+        assert tier == "GOLD"
+        # A schema with no fields at all still has nothing to annotate.
+        empty, _ = calculate_score(self._perfect_results(
+            semantic_annotations=dict(none_detected, total_fields=0)))
+        assert empty == full
 
     def test_no_vectors_is_rejected_not_bronze(self):
         """The specification reserves Bronze for 60-69%; below that is Rejected."""

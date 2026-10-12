@@ -15,9 +15,9 @@ using namespace payload_schema;
 // Binary schema for temperature, humidity, battery
 static const std::vector<uint8_t> binary_schema = {
     0x50, 0x53,       // Magic: 'PS'
-    0x01,             // Version: 1
+    0x03,             // Format version: 3
     0x00,             // Flags: big-endian
-    0x03,             // Field count: 3
+    0x83,             // Name table follows; field count: 3
     
     // Field 0: temperature (s16, mult=0.01)
     0x12,             // Type: SINT(1), Size: 2
@@ -32,7 +32,12 @@ static const std::vector<uint8_t> binary_schema = {
     // Field 2: battery (u16)
     0x02,             // Type: UINT(0), Size: 2
     0x00,             // Mult exp: 0 -> 1.0
-    0xF4, 0x0C,       // Field ID: 3316 (voltage)
+    0xF4, 0x0C,       // IPSO object 3316 (voltage) - not the field's name
+
+    // Name table (CR-2026-142)
+    11, 't', 'e', 'm', 'p', 'e', 'r', 'a', 't', 'u', 'r', 'e',
+    8, 'h', 'u', 'm', 'i', 'd', 'i', 't', 'y',
+    7, 'b', 'a', 't', 't', 'e', 'r', 'y',
 };
 
 void test_binary_loading() {
@@ -65,17 +70,17 @@ void test_binary_loading() {
             }, f.value);
         }
         
-        std::cout << "\nExpected: temperature=23.45, humidity=65.00, voltage=3300\n";
+        std::cout << "\nExpected: temperature=23.45, humidity=65.00, battery=3300\n";
         
         // Verify
         auto temp = result.get<double>("temperature");
         auto hum = result.get<double>("humidity");
-        auto volt = result.get<double>("voltage");
+        auto volt = result.get<double>("battery");
         
         std::cout << "\nUsing typed accessors:\n";
         std::cout << "  temperature: " << (temp ? *temp : 0.0) << "\n";
         std::cout << "  humidity: " << (hum ? *hum : 0.0) << "\n";
-        std::cout << "  voltage: " << (volt ? *volt : 0.0) << "\n";
+        std::cout << "  battery: " << (volt ? *volt : 0.0) << "\n";
         
     } catch (const std::exception& e) {
         std::cout << "Exception: " << e.what() << "\n";
