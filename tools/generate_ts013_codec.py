@@ -896,23 +896,99 @@ function encMatch(out, f, data, ctx, peeked) {        // _encode_match
   }
   var known = disc !== null && disc !== undefined;
   var inline = length !== undefined && length !== null;
+  var label = m.name || m["var"] || "match";
+  if (body === null && !known && inline) {
+    // CR-2026-151: a nested match reading this discriminator fixes it (_nested_discriminator).
+    var nested = encNestedDiscriminator(m, data, label);
+    if (nested) {
+      disc = nested[0]; key = nested[1]; body = nested[2]; known = true;
+      if (m["var"]) {
+        var withVar = {};
+        for (var dk in data) withVar[dk] = data[dk];
+        withVar[m["var"]] = disc;
+        data = withVar;
+      }
+    }
+  }
   if (body === null) {
     if (Array.isArray(dflt)) body = dflt;
     else if (Array.isArray(cases["default"])) body = cases["default"];
     else if (!known && (dflt === "skip" || (inline && !m.name))) return;   // the non-advancing peek
-    else if (inline && !known) encFail(encMissing(m.name || "match"));   // PS-551
+    else if (inline && !known) encFail(encMissing(label));   // PS-551, named by the discriminator
     else body = [];
   }
   if (inline) {
     var value = disc;
     if (!known) {
-      if (key === null) encFail(encMissing(m.name || "match"));
+      if (key === null) encFail(encMissing(label));
       value = encExactCase(key);
       if (value === null) encFail("match case " + JSON.stringify(key) + " names no single discriminator value");
     }
+    // PS-168: a discriminator, given or derived, fits the bytes it is written in.
+    encFits(encRint(Number(value)), parseInt(length, 10) * 8, false, { name: label }, value);
     encWriteInt(out, value, parseInt(length, 10), false, ctx.endian);
   }
   return encList(out, body, data, ctx);
+}
+
+// _nested_discriminator (CR-2026-151): [value, case key or null, branch fields] where a
+// nested match reading this discriminator has exactly one case the input fills, its key a
+// single value selecting the branch that holds it; null where none is filled.
+function encNestedDiscriminator(m, data, label) {
+  var names = {};
+  if (m["var"]) names[m["var"]] = true;
+  if (m.name) names[m.name] = true;
+  if (!m["var"] && !m.name) return null;
+  var cases = m.cases || {}, branches = [];
+  Object.keys(cases).forEach(function (k) { if (k !== "default" && Array.isArray(cases[k])) branches.push([k, cases[k]]); });
+  var fb = Array.isArray(m["default"]) ? m["default"] : (Array.isArray(cases["default"]) ? cases["default"] : null);
+  if (fb) branches.push(["default", fb]);
+  function namesOf(fields) {
+    return fields.filter(function (f) {
+      return f && f.name && String(f.name).charAt(0) !== "_" && ENC_COMPUTED.indexOf(f.type) < 0;
+    }).map(function (f) { return f.name; });
+  }
+  var filled = [];
+  function walk(fields, path) {
+    (fields || []).forEach(function (f) {
+      if (!f || f.type || !f.match || typeof f.match !== "object") return;
+      var inner = f.match, ic = inner.cases || {};
+      var reads = !!names[String(inner.field || "").replace(/^\$+/, "")];
+      var bodies = [];
+      Object.keys(ic).forEach(function (k) { if (k !== "default" && Array.isArray(ic[k])) bodies.push([k, ic[k]]); });
+      if (Array.isArray(inner["default"])) bodies.push(["default", inner["default"]]);
+      // A case is filled where the input gives every one of its fields and nothing any
+      // other case of this match declares beyond them.
+      var given = {};
+      if (reads) bodies.forEach(function (b) {
+        if (b[0] !== "default") namesOf(b[1]).forEach(function (n) { if (encHas(data, n)) given[n] = true; });
+      });
+      bodies.forEach(function (b) {
+        if (reads && b[0] !== "default") {
+          var own = namesOf(b[1]);
+          var ok = own.length > 0 && own.every(function (n) { return encHas(data, n); }) &&
+            Object.keys(given).every(function (n) { return own.indexOf(n) >= 0; });
+          if (ok) filled.push([path, b[0]]);
+        }
+        walk(b[1], reads ? path.concat([[inner, b[0]]]) : path);
+      });
+    });
+  }
+  branches.forEach(function (b) { walk(b[1], [[m, b[0]]]); });
+  if (!filled.length) return null;
+  if (filled.length !== 1) encFail(encMissing(label));
+  var value = encExactCase(filled[0][1]);
+  if (value === null) encFail(encMissing(label));
+  filled[0][0].forEach(function (step) {
+    var ec = step[0].cases || {}, selected = "default";
+    for (var k in ec) {
+      if (k !== "default" && encCasePattern(value, k)) { selected = k; break; }
+    }
+    if (selected !== step[1]) encFail(encMissing(label));
+  });
+  var outer = filled[0][0][0][1], body = null;
+  branches.forEach(function (b) { if (b[0] === outer) body = b[1]; });
+  return [value, outer === "default" ? null : outer, body];
 }
 
 function encRecords(f, data) {                        // _repeat_records
