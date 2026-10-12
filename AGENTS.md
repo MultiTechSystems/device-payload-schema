@@ -236,7 +236,7 @@ implementation has a runner that reads the same YAML and the same vectors:
 | Go | `go/schema/corpus_conformance_test.go` | 2690 | 2101 (plain API 2076) |
 | C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2690 | 2085 |
 | Java | `bindings/java/.../CorpusConformanceTest.java` | 2690 | 2084 |
-| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 554 of 554 attempted | n/a |
+| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 558 of 558 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
 its own implementation's actual; trust it over this table.
@@ -2028,10 +2028,10 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     `encodeASCII` (Go, `cr114_115.go`), Java `Encoder.encodeAscii` and the ascii case of
     `Schema.decodeFieldBody`, C# `Helpers.DecodeAscii`/`EncodeAscii`, TS013 `encField` in
     `ENCODER_RUNTIME_JS`.
-  - **C holds text as a C string**, so it stops at the first 0x00 and reports a high byte as
-    itself, and it cannot encode `ascii` at all: PS-534, PS-538 and PS-537 are C gaps. The
-    harness skips a schema whose vectors expect such text as an interpreter gap
-    (`expects_text_c_cannot_hold`), which today is `ascii-latin1.yaml` alone.
+  - **C has it too, since the C-interpreter wave** (see "The C interpreter is measured
+    now" under Current gaps): `decoded_field_t.text_len` carries the length, so an interior
+    0x00 is kept, and `non_ascii` is the PS-073 warning as a flag. The harness no longer
+    skips `ascii-latin1.yaml`; it passes all four vectors, warnings included.
   - No corpus vector relied on U+FFFD, `?`, raw bytes or truncation: every implementation's
     counts rose by exactly the new fixture's four vectors. Fixture: `ascii-latin1.yaml`
     (high bytes, interior 0x00, all 0x00, each round-tripping).
@@ -2581,13 +2581,32 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   (CR-2026-032).** `make test-c` builds the three previously-orphaned C test files and runs
   `tools/c-corpus-harness.py`, which generates C that builds each expressible corpus schema
   through the struct API, compiles it, and compares the decode against the vectors.
-  **550 of 550 attempted vectors pass** (2026-10-10) since CR-2026-033 added `tlv` and CR-2026-034
+  **558 of 558 attempted vectors pass** (2026-10-11) since CR-2026-033 added `tlv` and CR-2026-034
   `flagged` (it was 50 of 50 before either). 751 of 1239 are still in schemas the struct API
   cannot build - 26 use a `transform` chain, 24 a `bitfield_string`, 15 more cases than
   `SCHEMA_MAX_CASES` allows, 3 `repeat`, 3 a `u32le16` **the interpreter has and the harness
   has no constructor for**. The report names which side each limit is on, and that
   distinction is load-bearing: `no constructor for type 'u32le16'` used to read as a C gap
   when C decodes it perfectly well.
+
+  **The C-interpreter wave (2026-10-11)** closed these, one PR each; the figures are the
+  harness's at each step (struct API / `--from-blob names` / `--from-blob nameless`):
+  - **`ascii` (CR-2026-114, PS-534, PS-537, PS-538)**: 554 -> 558 attempted, all passing;
+    blob 64/64 unchanged. Decode keeps an interior 0x00 (`decoded_field_t.text_len`; the
+    C string in `value.str` stops early, the value does not), reports each byte as itself -
+    ISO 8859-1, so a JSON writer maps 0x80-0xFF to U+0080-U+00FF - and raises
+    `decoded_field_t.non_ascii` for PS-073's warning, which the harness renders. A value
+    longer than 31 bytes after its padding is `SCHEMA_ERR_UNSUPPORTED` naming the field,
+    never truncated as it was. Encode, which had no `ascii` case at all, takes text through
+    `encode_inputs_add_text(inputs, name, bytes, len)` (or `_add_string`): Latin-1 bytes,
+    the form decode reports, so a decoded value re-encodes to its bytes. It pads with 0x00,
+    rejects a value longer than `length` with PS-537's message, and sets
+    `encode_result_t.non_ascii` for its warning. A character above U+00FF cannot be put
+    in that input, so PS-537's rejection of one belongs to whatever converts Unicode text
+    to it (a gateway's JSON reader). Text for a numeric field, and a number for an `ascii`
+    one, are `SCHEMA_ERR_TYPE`. **The binary form still refuses `ascii`**: its type code
+    `bytes` is shared with `hex` and `bytes`, every code 0-7 is taken, and a new one would
+    be a format version - not invented here.
 
   **A `flagged` construct's mask field must declare `var_name`.** This interpreter records a
   value in its variable table only where a field declares one, while a YAML `flagged` names a

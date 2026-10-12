@@ -1046,6 +1046,132 @@ static void test_a_covered_peek_is_derived(void) {
     }
 }
 
+/* CR-2026-114 (PS-534, PS-538): ascii is ISO 8859-1, and only trailing 0x00 is
+ * padding. The payloads are ascii-latin1.yaml's. */
+static int decode_label(const uint8_t* payload, size_t len, decode_result_t* r) {
+    schema_t s;
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t f = field_ascii("label", 6);
+    schema_add_field(&s, &f);
+    return schema_decode(&s, payload, len, r);
+}
+
+static void test_ascii_keeps_an_interior_nul(void) {
+    decode_result_t r;
+    const uint8_t p[] = {0x41, 0x42, 0x00, 0x43, 0x00, 0x00};
+    TCHECK(decode_label(p, sizeof(p), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 1 && r.fields[0].text_len == 4);
+    TCHECK(memcmp(r.fields[0].value.str, "AB\0C", 4) == 0);
+    TCHECK(!r.fields[0].non_ascii);
+
+    const uint8_t zeros[] = {0, 0, 0, 0, 0, 0};
+    TCHECK(decode_label(zeros, sizeof(zeros), &r) == SCHEMA_OK);
+    TCHECK(r.field_count == 1 && r.fields[0].text_len == 0 && r.fields[0].value.str[0] == 0);
+    TCHECK(r.bytes_consumed == 6);
+
+    /* A space is text, not padding. */
+    const uint8_t space[] = {0x48, 0x43, 0x20, 0x00, 0x00, 0x00};
+    TCHECK(decode_label(space, sizeof(space), &r) == SCHEMA_OK);
+    TCHECK(r.fields[0].text_len == 3 && strcmp(r.fields[0].value.str, "HC ") == 0);
+}
+
+static void test_ascii_reports_a_high_byte_as_itself(void) {
+    decode_result_t r;
+    const uint8_t p[] = {0x80, 0xA0, 0xFF, 0x41, 0x00, 0x00};
+    TCHECK(decode_label(p, sizeof(p), &r) == SCHEMA_OK);
+    TCHECK(r.fields[0].text_len == 4);
+    TCHECK(memcmp(r.fields[0].value.str, "\x80\xA0\xFF" "A", 4) == 0);
+    TCHECK(r.fields[0].non_ascii);
+}
+
+static void test_ascii_is_never_truncated(void) {
+    schema_t s;
+    decode_result_t r;
+    uint8_t p[40];
+    memset(&s, 0, sizeof(s));
+    field_def_t f = field_ascii("serial", 40);
+    schema_add_field(&s, &f);
+    memset(p, 0, sizeof(p));
+    memset(p, 'x', 31);
+    TCHECK(schema_decode(&s, p, sizeof(p), &r) == SCHEMA_OK);   /* 31 fit */
+    TCHECK(r.fields[0].text_len == 31);
+    p[31] = 'y';
+    TCHECK(schema_decode(&s, p, sizeof(p), &r) == SCHEMA_ERR_UNSUPPORTED);
+    TCHECK(r.field_count == 0);
+    TCHECK(strcmp(r.error_msg, "Field 'serial': an ascii value longer than the 31 bytes "
+                               "this interpreter holds, not truncated (PS-538)") == 0);
+}
+
+/* PS-537: padded with 0x00, written byte for byte, and longer than `length` rejected. */
+static int encode_label(const uint8_t* text, size_t len, encode_result_t* out) {
+    schema_t s;
+    encode_inputs_t inputs;
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    field_def_t f = field_ascii("label", 6);
+    field_def_t g = field_u8("n");
+    schema_add_field(&s, &f);
+    schema_add_field(&s, &g);
+    encode_inputs_init(&inputs);
+    TCHECK(encode_inputs_add_text(&inputs, "label", text, len));
+    encode_inputs_add_int(&inputs, "n", 7);
+    return schema_encode(&s, &inputs, out);
+}
+
+static void test_ascii_encodes_padded(void) {
+    encode_result_t out;
+    TCHECK(encode_label((const uint8_t*)"AB\0C", 4, &out) == SCHEMA_OK);
+    TCHECK(out.len == 7);
+    TCHECK(memcmp(out.data, "\x41\x42\x00\x43\x00\x00\x07", 7) == 0);
+    TCHECK(!out.non_ascii);
+
+    TCHECK(encode_label((const uint8_t*)"A\xE9", 2, &out) == SCHEMA_OK);
+    TCHECK(memcmp(out.data, "\x41\xE9\x00\x00\x00\x00\x07", 7) == 0);
+    TCHECK(out.non_ascii);
+
+    TCHECK(encode_label((const uint8_t*)"ABCDEFG", 7, &out) == SCHEMA_ERR_OVERFLOW);
+    TCHECK(out.len == 0);
+    TCHECK(strcmp(out.error_msg, "Field 'label': an ascii value of 7 bytes is longer than "
+                                 "its length of 6 (PS-537)") == 0);
+
+    /* A decoded value re-encodes to its own bytes. */
+    decode_result_t r;
+    const uint8_t p[] = {0x80, 0xA0, 0xFF, 0x41, 0x00, 0x00};
+    TCHECK(decode_label(p, sizeof(p), &r) == SCHEMA_OK);
+    TCHECK(encode_label((const uint8_t*)r.fields[0].value.str, r.fields[0].text_len,
+                        &out) == SCHEMA_OK);
+    TCHECK(memcmp(out.data, p, sizeof(p)) == 0);
+}
+
+static void test_ascii_and_numbers_are_not_mixed(void) {
+    schema_t s;
+    encode_inputs_t inputs;
+    encode_result_t out;
+    memset(&s, 0, sizeof(s));
+    field_def_t f = field_ascii("label", 2);
+    schema_add_field(&s, &f);
+    encode_inputs_init(&inputs);
+    encode_inputs_add_int(&inputs, "label", 5);
+    TCHECK(schema_encode(&s, &inputs, &out) == SCHEMA_ERR_TYPE);
+    TCHECK(strcmp(out.error_msg, "Field 'label': an ascii value is text, and a number "
+                                 "was given") == 0);
+
+    memset(&s, 0, sizeof(s));
+    field_def_t n = field_u8("n");
+    schema_add_field(&s, &n);
+    encode_inputs_init(&inputs);
+    TCHECK(encode_inputs_add_string(&inputs, "n", "5"));
+    TCHECK(schema_encode(&s, &inputs, &out) == SCHEMA_ERR_TYPE);
+    TCHECK(strcmp(out.error_msg, "Field 'n': text was given for a u8 field") == 0);
+
+    /* Text the input cannot hold is refused, not truncated. */
+    char longer[40];
+    memset(longer, 'x', sizeof(longer) - 1);
+    longer[sizeof(longer) - 1] = 0;
+    TCHECK(!encode_inputs_add_string(&inputs, "label", longer));
+}
+
 /*
  * Main test entry point
  */
@@ -1093,6 +1219,11 @@ void selftest_schema(void) {
     test_bit_ranges_are_laid_out_as_decoded();
     test_a_missing_input_is_named();
     test_a_covered_peek_is_derived();
+    test_ascii_keeps_an_interior_nul();
+    test_ascii_reports_a_high_byte_as_itself();
+    test_ascii_is_never_truncated();
+    test_ascii_encodes_padded();
+    test_ascii_and_numbers_are_not_mixed();
 
     LOG(LOG_INFO, MOD, "Schema interpreter self-tests complete");
 }

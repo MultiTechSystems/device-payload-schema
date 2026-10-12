@@ -1,8 +1,7 @@
 # Text read from the payload loses its trailing NUL padding and nothing else: a
 # trailing space is kept (PS-534, CR-2026-114). The generated codec reported "HC"
 # followed by two NULs; Java removed every NUL and then trimmed spaces. A NUL before
-# other text is asserted in ascii-latin1.yaml, not here: C holds text as a
-# NUL-terminated string, a recorded C gap, and its harness reads this file.
+# other text is asserted in ascii-latin1.yaml.
 #
 # Round-trips: the encoder pads text to its length with NUL.
 name: probe_ascii_nul_padding

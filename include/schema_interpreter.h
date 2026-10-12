@@ -211,6 +211,17 @@ typedef struct {
      * its name table (PS-555, CR-2026-142) - and `name` is then empty, never made up.
      * See result_get_index(). Last member, so existing initializers leave it zero. */
     int field_index;
+    /* An `ascii` value's length in bytes. `value.str` is NUL-terminated as well, but a
+     * 0x00 followed by other text is kept (PS-534), so the C string stops early where
+     * the value does not: read `text_len` bytes. Each byte is the ISO 8859-1 character
+     * of the same number (PS-538) - 0xE9 is U+00E9 - so a writer of JSON or UTF-8 maps
+     * a byte above 0x7F to that code point rather than copying it. */
+    uint8_t text_len;
+    /* PS-073's warning, as a flag: the value holds a byte above 0x7F. This interpreter
+     * has no warning list, so it reports the fact and a caller renders the text the
+     * other five give, "Field '{name}': a byte above 0x7F in an ascii value (PS-073,
+     * PS-538)". */
+    bool non_ascii;
 } decoded_field_t;
 
 /* Which way a message travels, for a schema or a decode call.
@@ -938,18 +949,32 @@ static inline int decode_field(
             return SCHEMA_OK;
         }
             
-        case FIELD_TYPE_ASCII:
-            if (*pos + field->size > len) return SCHEMA_ERR_BUFFER;
-            memcpy(out->value.str, buf + *pos, field->size < SCHEMA_MAX_NAME_LEN ? field->size : SCHEMA_MAX_NAME_LEN - 1);
-            out->value.str[field->size < SCHEMA_MAX_NAME_LEN ? field->size : SCHEMA_MAX_NAME_LEN - 1] = '\0';
-            /* Strip trailing nulls */
-            {
-                int slen = (int)strlen(out->value.str);
-                while (slen > 0 && out->value.str[slen - 1] == '\0') slen--;
+        /* CR-2026-114. Only the trailing 0x00 bytes are padding (PS-534): a 0x00 with
+         * text after it is kept, which a C string cannot show, so `text_len` carries the
+         * length. Every byte is reported as itself, the ISO 8859-1 character of the same
+         * number (PS-538), and one above 0x7F raises the PS-073 flag. This copied the
+         * field into a C string and called that the value, so "AB\0C" read as "AB".
+         *
+         * A value is never cut short to fit: one longer than SCHEMA_MAX_NAME_LEN - 1
+         * bytes, once its padding is dropped, is SCHEMA_ERR_UNSUPPORTED (PS-538 forbids
+         * dropping a byte). It used to be truncated to 31 bytes and reported. */
+        case FIELD_TYPE_ASCII: {
+            size_t width = field->size;
+            if (*pos + width > len) return SCHEMA_ERR_BUFFER;
+            size_t n = width;
+            while (n > 0 && buf[*pos + n - 1] == 0x00) n--;
+            if (n > SCHEMA_MAX_NAME_LEN - 1) return SCHEMA_ERR_UNSUPPORTED;
+            memcpy(out->value.str, buf + *pos, n);
+            out->value.str[n] = '\0';
+            out->text_len = (uint8_t)n;
+            out->non_ascii = false;
+            for (size_t c = 0; c < n; c++) {
+                if (buf[*pos + c] > 0x7F) out->non_ascii = true;
             }
-            *pos += field->size;
+            *pos += width;
             out->valid = true;
             return SCHEMA_OK;
+        }
             
         case FIELD_TYPE_HEX:
             if (*pos + field->size > len) return SCHEMA_ERR_BUFFER;
@@ -1187,6 +1212,14 @@ static inline int schema_field_failed(
     result->error_code = rc;
     if (rc == SCHEMA_ERR_BUFFER && result->error_msg[0] == '\0') {
         schema_underflow_message(result, field, pos, len);
+    }
+    if (rc == SCHEMA_ERR_UNSUPPORTED && field->type == FIELD_TYPE_ASCII
+        && result->error_msg[0] == '\0') {
+        /* A capacity of this interpreter, not of the payload: say which. */
+        snprintf(result->error_msg, sizeof(result->error_msg),
+                 "Field '%.*s': an ascii value longer than the %d bytes this "
+                 "interpreter holds, not truncated (PS-538)",
+                 SCHEMA_MAX_NAME_LEN - 1, field->name, SCHEMA_MAX_NAME_LEN - 1);
     }
     return rc;
 }
@@ -1538,6 +1571,11 @@ typedef struct {
      * "Missing required field: {name}" where an input is missing, and PS-168's
      * "Field '{name}': {value} encodes as {n}, outside {low} to {high} (PS-168)". */
     char error_msg[160];
+    /* PS-537's warning, as a flag: an `ascii` value held a character from U+0080 to
+     * U+00FF, written as the byte of the same number. The other encoders warn "Field
+     * '{name}': a character above U+007F in an ascii value (PS-537)"; this one has no
+     * warning list. Last member, so existing initializers leave it false. */
+    bool non_ascii;
 } encode_result_t;
 
 /* Input values for encoding */
@@ -1545,6 +1583,10 @@ typedef struct {
     char name[SCHEMA_MAX_NAME_LEN];
     field_value_t value;
     bool is_int;               /* value.i64 holds it (encode_inputs_add_int), else value.f64 */
+    /* value.str holds `text_len` bytes of text (encode_inputs_add_text), for an `ascii`
+     * field. Last members, so existing initializers leave them unset. */
+    bool is_text;
+    uint8_t text_len;
 } encode_input_t;
 
 typedef struct {
@@ -1570,6 +1612,37 @@ static inline void encode_inputs_add_double(encode_inputs_t* inputs, const char*
     inputs->inputs[inputs->count].value.f64 = val;
     inputs->inputs[inputs->count].is_int = false;
     inputs->count++;
+}
+
+/* Text for an `ascii` field: `len` bytes, each the ISO 8859-1 character of the same
+ * number (PS-538) - the form decode reports in value.str and text_len, so a decoded value
+ * re-encodes to the same bytes. A 0x00 inside the text is kept. Text held as Unicode is
+ * the caller's to convert: a character from U+0080 to U+00FF is the byte of the same
+ * number, and one above U+00FF has no byte and MUST be rejected naming the field
+ * (PS-537) - which this input cannot carry, so the rejection belongs to that conversion.
+ *
+ * Returns false, adding nothing, where the inputs are full or the text is longer than
+ * SCHEMA_MAX_NAME_LEN - 1 bytes; nothing is truncated. The encode then reports the field
+ * as missing (PS-551). */
+static inline bool encode_inputs_add_text(encode_inputs_t* inputs, const char* name,
+                                          const uint8_t* text, size_t len) {
+    if (inputs->count >= SCHEMA_MAX_FIELDS) return false;
+    if (len > SCHEMA_MAX_NAME_LEN - 1 || (len && !text)) return false;
+    encode_input_t* in = &inputs->inputs[inputs->count];
+    memset(in, 0, sizeof(*in));
+    strncpy(in->name, name, SCHEMA_MAX_NAME_LEN - 1);
+    if (len) memcpy(in->value.str, text, len);
+    in->value.str[len] = '\0';
+    in->is_text = true;
+    in->text_len = (uint8_t)len;
+    inputs->count++;
+    return true;
+}
+
+/* encode_inputs_add_text for a NUL-terminated string. */
+static inline bool encode_inputs_add_string(encode_inputs_t* inputs, const char* name,
+                                            const char* text) {
+    return encode_inputs_add_text(inputs, name, (const uint8_t*)text, text ? strlen(text) : 0);
 }
 
 /* Find input value by name */
@@ -1671,6 +1744,41 @@ static inline int encode_field(
     const encode_input_t* input = find_input(inputs, field->name);
     if (!input && field->type != FIELD_TYPE_SKIP) {
         return SCHEMA_ERR_PARSE;  /* Missing input */
+    }
+
+    /* PS-537 (CR-2026-114): text written byte for byte, padded with 0x00 to `length`; a
+     * value longer than `length` is rejected naming the field. It had no case here, so an
+     * ascii field could not be encoded at all (SCHEMA_ERR_UNSUPPORTED). */
+    if (field->type == FIELD_TYPE_ASCII) {
+        if (!input->is_text) {
+            if (err && err_len) {
+                snprintf(err, err_len, "Field '%s': an ascii value is text, and a "
+                         "number was given", field->name);
+            }
+            return SCHEMA_ERR_TYPE;
+        }
+        if (input->text_len > field->size) {
+            if (err && err_len) {
+                snprintf(err, err_len, "Field '%s': an ascii value of %u bytes is longer "
+                         "than its length of %u (PS-537)", field->name,
+                         (unsigned)input->text_len, (unsigned)field->size);
+            }
+            return SCHEMA_ERR_OVERFLOW;
+        }
+        if (*pos + field->size > SCHEMA_MAX_PAYLOAD) return SCHEMA_ERR_BUFFER;
+        memcpy(buf + *pos, input->value.str, input->text_len);
+        memset(buf + *pos + input->text_len, 0, field->size - input->text_len);
+        *pos += field->size;
+        return SCHEMA_OK;
+    }
+    if (input && input->is_text) {
+        /* Text for a numeric field: its bytes are not a number, and reading them as one
+         * would write whatever the union's other member happens to hold. */
+        if (err && err_len) {
+            snprintf(err, err_len, "Field '%s': text was given for a %s field",
+                     field->name, schema_type_label(field->type));
+        }
+        return SCHEMA_ERR_TYPE;
     }
     
     /* An integer input is read from i64. Reading f64 for every input reinterpreted the
@@ -1949,6 +2057,11 @@ static inline int schema_encode_direction(
             result->error_code = rc;
             memset(result->data, 0, sizeof(result->data));   /* no partial payload */
             return rc;
+        }
+        if (field->type == FIELD_TYPE_ASCII) {
+            for (size_t b = at; b < end; b++) {
+                if (scratch[b] > 0x7F) result->non_ascii = true;   /* PS-537's warning */
+            }
         }
         if (bitlike) {
             peeks[peek_count].pos = at;
