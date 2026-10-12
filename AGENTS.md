@@ -236,7 +236,7 @@ implementation has a runner that reads the same YAML and the same vectors:
 | Go | `go/schema/corpus_conformance_test.go` | 2690 | 2101 (plain API 2076) |
 | C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2690 | 2085 |
 | Java | `bindings/java/.../CorpusConformanceTest.java` | 2690 | 2084 |
-| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 554 of 554 attempted | n/a |
+| C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 565 of 565 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
 its own implementation's actual; trust it over this table.
@@ -449,8 +449,8 @@ rather than the comments, which claim more than the code does (`definitions`, `$
   `bytes`, `string`/`ascii`, `hex`, `base64`, `udec`/`sdec`, `enum`, `match`,
   `skip`, the bracket bitfield range, `lookup`, `var`/`$var`, `consume`,
   per-field `endian`, and the three bare modifiers.
-- **Lacks**: `object` and `byte_group` (both are `field_type_t` values, and `object`
-  is even parsed from its name, but neither has a decode path), `compute`, `polynomial`, `guard`, `ref`, `formula`, the whole
+- **Lacks**: `object` (a `field_type_t` value, even parsed from its name, with no
+  decode path; `byte_group` had none either until the C-interpreter wave), `compute`, `polynomial`, `guard`, `ref`, `formula`, the whole
   `transform` array (so no `round`, `sqrt`, `log`, `pow`, and no multi-stage),
   `name_from`, `tlv`, `flagged`, `repeat`/`until`/`count`/`byte_length`,
   `bitfield_string`, `number`, `version_string`, `definitions`/`$ref`, `ports`,
@@ -1994,9 +1994,9 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     base reaches past the end, which is what all five named until this change, with the
     need form where only the group's `size` did not fit. One helper per language:
     `byte_group_label` (Python; the TS013 generator calls it), Go `byteGroupLabel`, Java
-    `BufferUnderflow.byteGroupLabel`, C# `BufferUnderflowException.ByteGroupLabel`. C has
-    no byte_group decode path (`FIELD_TYPE_BYTE_GROUP` is an enum value only), so there is
-    nothing to name there.
+    `BufferUnderflow.byteGroupLabel`, C# `BufferUnderflowException.ByteGroupLabel`, and C's
+    `byte_group_underflow` since its byte_group decode path landed in the C-interpreter
+    wave.
   - Unchanged, as PS-535 excepts them: `remaining`, PS-403's optional message, PS-477/486
     for a tlv entry, and PS-343's ragged tail for an `until: end` element.
   - Found on the way: Go's `bool` discarded its `consume` read's error, and Python and the
@@ -2052,7 +2052,8 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   runtime. **Overlap is now counted in the group's assembled value** (PS-364) in all four;
   it was counted most-significant-first within each member's own base, which disagreed with
   every decoder for members of different widths, and C# skipped signed ranges entirely. C
-  has no byte_group decode path, so this is a C gap like the construct itself. **No corpus,
+  checks the same, in `byte_group_width`, since its byte_group path landed in the
+  C-interpreter wave. **No corpus,
   library, example or registry schema is rejected or changes decode** (registry yabby-edge
   was rewritten as one 8-byte group, 69e1023). Fixture: `byte-group-width.yaml`.
 - **CR-2026-142 (PS-555): the binary schema form carries its names.** `schema_load_binary`
@@ -2581,13 +2582,36 @@ Known weaknesses, so you neither trip over them nor assume they are intentional:
   (CR-2026-032).** `make test-c` builds the three previously-orphaned C test files and runs
   `tools/c-corpus-harness.py`, which generates C that builds each expressible corpus schema
   through the struct API, compiles it, and compares the decode against the vectors.
-  **550 of 550 attempted vectors pass** (2026-10-10) since CR-2026-033 added `tlv` and CR-2026-034
+  **565 of 565 attempted vectors pass** (2026-10-11) since CR-2026-033 added `tlv` and CR-2026-034
   `flagged` (it was 50 of 50 before either). 751 of 1239 are still in schemas the struct API
   cannot build - 26 use a `transform` chain, 24 a `bitfield_string`, 15 more cases than
   `SCHEMA_MAX_CASES` allows, 3 `repeat`, 3 a `u32le16` **the interpreter has and the harness
   has no constructor for**. The report names which side each limit is on, and that
   distinction is load-bearing: `no constructor for type 'u32le16'` used to read as a C gap
   when C decodes it perfectly well.
+
+  **The C-interpreter wave (2026-10-11)** closed these, one PR each; the figures are the
+  harness's at each step (struct API / `--from-blob names` / `--from-blob nameless`):
+  - **`byte_group` (CR-2026-131, CR-2026-137; PS-063, PS-070, PS-364, PS-365, PS-397,
+    PS-535)**: 556 -> 565 attempted, all passing (`wide-group`, `byte-group-width`,
+    `byte-group-bool`, `bit-range-order`); blob 64/64 unchanged. `FIELD_TYPE_BYTE_GROUP`
+    was an enum value with no decode or encode path. Built with
+    `field_byte_group(size, endian, member_start, member_count)`, its members placed above
+    `field_count` (`nested_start`/`nested_count`, which nothing used). The group is one
+    value of `size` bytes, or its widest member's base where 0, assembled in its own byte
+    order; each member - a bit range of any base, a whole integer, a `bool` at bit 0-7 -
+    is decoded as a bit range of that value through `decode_field`, so its sign,
+    modifiers, lookup and variable apply as any field's. Load-time rules are checked at
+    decode and encode, with the reference's text: a `size` narrower than a member, a `bool`
+    past bit 7, an overlap (PS-397), and PS-535's "byte_group of 'a', 'b'" for a short
+    read. Encode checks each member as the member it is (PS-168 names `s8`, not the
+    group), ORs it into the group's value, writes the value once, zero where no member
+    names bits; a member left out is "Missing required field", an internal one PS-434's
+    error. The top-level loop, a tlv case and a flagged group all dispatch it; the harness
+    builds a top-level group only (two schemas with one nested in a case body are a harness
+    limit, said so). This branch carries the multi-byte/signed bit range header change
+    verbatim, since members use its base helpers. **The binary form has no byte_group
+    record** and still refuses one. `sizeof(schema_t)` unchanged at 52536.
 
   **A `flagged` construct's mask field must declare `var_name`.** This interpreter records a
   value in its variable table only where a field declares one, while a YAML `flagged` names a

@@ -143,10 +143,15 @@ typedef struct {
 struct field_def {
     char name[SCHEMA_MAX_NAME_LEN];
     field_type_t type;
-    uint8_t size;              /* Size in bytes (or bits for bitfield) */
+    uint8_t size;              /* Size in bytes; for a bit range, its base's (0 is 1) */
     uint8_t bit_start;         /* Bit position for bitfields */
     uint8_t bit_width;         /* Bit width for bitfields */
-    bool consume;              /* Whether to advance position */
+    /* Bytes a bit range or bool advances by (`consume: N`, PS-016/PS-060), 0 for none.
+     * A bool once; `true` is still 1, so a builder passing a bool keeps its meaning. */
+    uint8_t consume;
+    /* A bit range on an `sN` base: sign-extended from the range's width (PS-352,
+     * PS-353). Sits in what was padding before `endian`, so field_def_t keeps its size. */
+    bool bit_signed;
     endian_t endian;
     
     /* Modifiers */
@@ -445,6 +450,40 @@ static inline uint8_t extract_bits(uint8_t byte, uint8_t start, uint8_t width) {
     return (byte >> start) & ((1 << width) - 1);
 }
 
+/* CR-2026-136: a bit range's base is `size` bytes - one for `u8[...]`, two for
+ * `u16[...]` - assembled in the field's effective byte order (PS-059), and its bits are
+ * numbered from the least significant bit of that value (PS-058). This interpreter read
+ * a range from one byte only, and unsigned. */
+static inline int bits_base_bytes(const field_def_t* field) {
+    return field->size ? field->size : 1;
+}
+
+static inline uint64_t bits_width_mask(int width) {
+    return width >= 64 ? ~(uint64_t)0 : (((uint64_t)1 << width) - 1);
+}
+
+static inline uint64_t bits_read_base(const uint8_t* p, int n, endian_t endian) {
+    uint64_t v = 0;
+    for (int i = 0; i < n; i++) {
+        v = (v << 8) | p[endian == ENDIAN_LITTLE ? n - 1 - i : i];
+    }
+    return v;
+}
+
+/* The bits byte `b` of an `n`-byte base holds of a value-space mask. */
+static inline uint8_t bits_byte_mask(uint64_t mask, int n, int b, endian_t endian) {
+    int shift = 8 * (endian == ENDIAN_LITTLE ? b : n - 1 - b);
+    return (uint8_t)((mask >> shift) & 0xFF);
+}
+
+/* The range's value from an assembled base, sign-extended from its width for an `sN`
+ * base (PS-353). */
+static inline int64_t bits_extract(uint64_t base, int start, int width, bool is_signed) {
+    uint64_t v = (base >> start) & bits_width_mask(width);
+    if (is_signed && width < 64 && ((v >> (width - 1)) & 1)) v |= ~bits_width_mask(width);
+    return (int64_t)v;
+}
+
 /* ============================================
  * Type Parsing from String
  * ============================================ */
@@ -690,6 +729,9 @@ static inline bool field_reports_as_integer(const field_def_t* field) {
         case FIELD_TYPE_S8:  case FIELD_TYPE_S16: case FIELD_TYPE_S24:
         case FIELD_TYPE_S32: case FIELD_TYPE_S64:
         case FIELD_TYPE_U32LE16: case FIELD_TYPE_S32LE16:
+        /* A bit range is an integer of its base's signedness; it was reported through
+         * the double member, tagged FIELD_TYPE_F64, though nothing scaled it. */
+        case FIELD_TYPE_BITS:
             break;
         default:
             return false;
@@ -915,16 +957,39 @@ static inline int decode_field(
                 uint8_t bit_pos = field->bit_start;
                 out->value.b = ((byte >> bit_pos) & 1) != 0;
             }
-            if (field->consume) *pos += 1;
+            /* `consume: N` advances N bytes (PS-016); past the payload it is a short read
+             * of N (PS-535), reported by schema_underflow_message. */
+            if (field->consume) {
+                if (*pos + field->consume > len) return SCHEMA_ERR_BUFFER;
+                *pos += field->consume;
+            }
             out->valid = true;
             if (field->var_name[0]) var_set(vars, field->var_name, out->value.b ? 1 : 0);
             return SCHEMA_OK;
             
-        case FIELD_TYPE_BITS:
-            if (*pos >= len) return SCHEMA_ERR_BUFFER;
-            raw_value = extract_bits(buf[*pos], field->bit_start, field->bit_width);
-            if (field->consume) *pos += 1;
+        case FIELD_TYPE_BITS: {
+            /* CR-2026-136 (PS-059, PS-352, PS-353): the base is `uN`/`sN`, N/8 bytes in
+             * the field's effective byte order; a signed range sign-extends from its own
+             * width. It was one byte, unsigned, whatever the type said. */
+            const int base = bits_base_bytes(field);
+            if (field->bit_width == 0 || base > 8
+                || field->bit_start + field->bit_width > base * 8) {
+                return SCHEMA_ERR_TYPE;
+            }
+            if (*pos + (size_t)base > len) return SCHEMA_ERR_BUFFER;
+            uint64_t assembled = bits_read_base(buf + *pos, base, endian);
+            raw_value = bits_extract(assembled, field->bit_start, field->bit_width,
+                                     field->bit_signed);
+            if (!field->bit_signed && field->bit_width == 64 && raw_value < 0) {
+                /* A full u64 range past 2^63 has no int64 to be reported in. */
+                return SCHEMA_ERR_UNSUPPORTED;
+            }
+            if (field->consume) {
+                if (*pos + field->consume > len) return SCHEMA_ERR_BUFFER;
+                *pos += field->consume;
+            }
             break;
+        }
             
         /* A skip past the end is a short read like any other. It stepped *pos past len
          * and reported success, so bytes_consumed exceeded the payload and bytes_unread
@@ -1162,16 +1227,21 @@ static inline void schema_underflow_message(
     } else {
         snprintf(label, sizeof(label), "an unnamed %s", schema_type_label(field->type));
     }
+    size_t need = schema_read_need(field);
     if (field->type == FIELD_TYPE_BOOL || field->type == FIELD_TYPE_BITS) {
-        snprintf(result->error_msg, sizeof(result->error_msg),
-                 "Field %s: Buffer underflow at peek offset %u (PS-535)",
-                 label, (unsigned)pos);
-        return;
+        size_t peek = field->type == FIELD_TYPE_BITS ? (size_t)bits_base_bytes(field) : 1;
+        if (pos + peek > len) {
+            snprintf(result->error_msg, sizeof(result->error_msg),
+                     "Field %s: Buffer underflow at peek offset %u (PS-535)",
+                     label, (unsigned)pos);
+            return;
+        }
+        need = field->consume;     /* the base was there; its `consume` was not */
     }
     snprintf(result->error_msg, sizeof(result->error_msg),
              "Field %s: Buffer underflow: need %u bytes at offset %u, but only %u "
              "remaining (PS-535)",
-             label, (unsigned)schema_read_need(field), (unsigned)pos,
+             label, (unsigned)need, (unsigned)pos,
              (unsigned)(pos < len ? len - pos : 0));
 }
 
@@ -1189,6 +1259,216 @@ static inline int schema_field_failed(
         schema_underflow_message(result, field, pos, len);
     }
     return rc;
+}
+
+/* ============================================
+ * byte_group (CR-2026-131, PS-070, PS-364, PS-397)
+ * ============================================
+ *
+ * A group is read as one value: `size` bytes - at least its widest member's base, which
+ * is the width where `size` is 0 - assembled in the group's effective byte order, and
+ * every member names bits of that value whatever its own base: a bit range `uN[a:b]` /
+ * `sN[a:b]` its bits a..b, a whole integer (`u16` is `u16[0:15]`) bits 0 up, a `bool`
+ * its `bit`, 0 to 7. FIELD_TYPE_BYTE_GROUP was an enum value with no decode path, so a
+ * schema using the construct could not be expressed in C at all.
+ *
+ * The members are fields [nested_start, nested_start + nested_count) of the schema,
+ * placed above field_count with schema_place_field, as a tlv case body is. */
+static inline field_def_t field_byte_group(uint8_t size, endian_t endian,
+                                           int member_start, int member_count) {
+    field_def_t f;
+    memset(&f, 0, sizeof(f));
+    f.type = FIELD_TYPE_BYTE_GROUP;
+    f.size = size;
+    f.endian = endian;
+    f.nested_start = member_start;
+    f.nested_count = member_count;
+    return f;
+}
+
+/* A member's base in bytes, and the bits of the group's value it names; false for a
+ * type that cannot be a member. */
+static inline bool byte_group_member_bits(const field_def_t* m, int* base, int* start,
+                                          int* width, bool* is_signed) {
+    *is_signed = false;
+    *start = 0;
+    switch (m->type) {
+        case FIELD_TYPE_BITS:
+            *base = bits_base_bytes(m); *start = m->bit_start; *width = m->bit_width;
+            *is_signed = m->bit_signed;
+            return true;
+        case FIELD_TYPE_BOOL: *base = 1; *start = m->bit_start; *width = 1; return true;
+        case FIELD_TYPE_S8: *is_signed = true; /* fall through */
+        case FIELD_TYPE_U8: *base = 1; break;
+        case FIELD_TYPE_S16: *is_signed = true; /* fall through */
+        case FIELD_TYPE_U16: *base = 2; break;
+        case FIELD_TYPE_S24: *is_signed = true; /* fall through */
+        case FIELD_TYPE_U24: *base = 3; break;
+        case FIELD_TYPE_S32: *is_signed = true; /* fall through */
+        case FIELD_TYPE_U32: *base = 4; break;
+        case FIELD_TYPE_S64: *is_signed = true; /* fall through */
+        case FIELD_TYPE_U64: *base = 8; break;
+        default: return false;
+    }
+    *width = *base * 8;
+    return true;
+}
+
+/* The group's width, or a message in `err` and -1 where the group is invalid: a member
+ * that cannot be one, a `bool` past bit 7, bits outside the member's own base or the
+ * group, or a `size` narrower than a member (PS-070). */
+static inline int byte_group_width(const schema_t* schema, const field_def_t* group,
+                                   char* err, size_t err_len) {
+    int widest = 0;
+    for (int k = 0; k < group->nested_count; k++) {
+        int idx = group->nested_start + k;
+        if (idx < 0 || idx >= SCHEMA_MAX_FIELDS) {
+            snprintf(err, err_len, "byte_group member %d is outside the schema", idx);
+            return -1;
+        }
+        const field_def_t* m = &schema->fields[idx];
+        int base, start, width;
+        bool is_signed;
+        if (!byte_group_member_bits(m, &base, &start, &width, &is_signed)) {
+            snprintf(err, err_len, "byte_group member '%.*s' is a %s, which a byte_group "
+                     "cannot hold (PS-070)", SCHEMA_MAX_NAME_LEN - 1, m->name,
+                     schema_type_label(m->type));
+            return -1;
+        }
+        if (m->type == FIELD_TYPE_BOOL && m->bit_start > 7) {
+            snprintf(err, err_len, "byte_group member '%.*s' is a bool at bit %d; a bool "
+                     "member is one bit of a u8, 0 to 7 (PS-070)",
+                     SCHEMA_MAX_NAME_LEN - 1, m->name, m->bit_start);
+            return -1;
+        }
+        if (width < 1 || base > 8 || start + width > base * 8) {
+            snprintf(err, err_len, "byte_group member '%.*s' names bits outside its base",
+                     SCHEMA_MAX_NAME_LEN - 1, m->name);
+            return -1;
+        }
+        if (base > widest) widest = base;
+    }
+    if (group->size && group->size < widest) {
+        snprintf(err, err_len, "byte_group declares size %d, narrower than its widest "
+                 "member's %d bytes (PS-070)", group->size, widest);
+        return -1;
+    }
+    int w = group->size ? group->size : widest;
+    if (w < 1 || w > 8) {
+        snprintf(err, err_len, "a byte_group of %d bytes; this interpreter assembles 1 "
+                 "to 8", w);
+        return -1;
+    }
+    /* PS-397: members' bits, in the group's value, do not overlap. */
+    uint64_t masks[SCHEMA_MAX_FIELDS];
+    for (int k = 0; k < group->nested_count && k < SCHEMA_MAX_FIELDS; k++) {
+        const field_def_t* m = &schema->fields[group->nested_start + k];
+        int base, start, width;
+        bool is_signed;
+        byte_group_member_bits(m, &base, &start, &width, &is_signed);
+        masks[k] = bits_width_mask(width) << start;
+        for (int j = 0; j < k; j++) {
+            if (masks[j] & masks[k]) {
+                snprintf(err, err_len, "byte_group members '%.*s' and '%.*s' overlap "
+                         "(PS-397)", SCHEMA_MAX_NAME_LEN - 1,
+                         schema->fields[group->nested_start + j].name,
+                         SCHEMA_MAX_NAME_LEN - 1, m->name);
+                return -1;
+            }
+        }
+    }
+    return w;
+}
+
+/* PS-535 as CR-2026-137 words it for a group: by every named member, `_` ones
+ * included, in declaration order - "byte_group of 'a', 'b'" - else "an unnamed
+ * byte_group". */
+static inline void byte_group_underflow(decode_result_t* result, const schema_t* schema,
+                                        const field_def_t* group, size_t pos) {
+    /* As many names as fit beside the rest of the message in error_msg; a list cut
+     * short ends at a whole name. */
+    char label[92];
+    size_t used = 0;
+    label[0] = '\0';
+    for (int k = 0; k < group->nested_count; k++) {
+        const char* n = schema->fields[group->nested_start + k].name;
+        if (!n[0]) continue;
+        int w = snprintf(label + used, sizeof(label) - used, "%s'%s'",
+                         used ? ", " : "byte_group of ", n);
+        if (w < 0 || (size_t)w >= sizeof(label) - used) {
+            label[used] = '\0';
+            break;
+        }
+        used += (size_t)w;
+    }
+    snprintf(result->error_msg, sizeof(result->error_msg),
+             "Field %s: Buffer underflow at peek offset %u (PS-535)",
+             used ? label : "an unnamed byte_group", (unsigned)pos);
+}
+
+/* Decode a byte_group at *pos into result's next slots, advancing past its width. Each
+ * member is decoded as a bit range over the group's assembled value, through
+ * decode_field, so its sign, modifiers, lookup and variable are applied as any field's
+ * are; a bool member reports a boolean. A member is reported unless it is internal. */
+static inline int schema_decode_byte_group(
+    const schema_t* schema,
+    const field_def_t* group,
+    const uint8_t* buf,
+    size_t len,
+    size_t* pos,
+    decode_result_t* result,
+    var_context_t* vars
+) {
+    const int width = byte_group_width(schema, group, result->error_msg,
+                                       sizeof(result->error_msg));
+    if (width < 0) {
+        result->error_code = SCHEMA_ERR_TYPE;
+        return SCHEMA_ERR_TYPE;
+    }
+    if (*pos + (size_t)width > len) {
+        result->error_code = SCHEMA_ERR_BUFFER;
+        byte_group_underflow(result, schema, group, *pos);
+        return SCHEMA_ERR_BUFFER;
+    }
+    const endian_t endian = group->endian != ENDIAN_DEFAULT ? group->endian : schema->endian;
+    const uint64_t value = bits_read_base(buf + *pos, width, endian);
+
+    for (int k = 0; k < group->nested_count; k++) {
+        const int idx = group->nested_start + k;
+        const field_def_t* m = &schema->fields[idx];
+        if (result->field_count >= SCHEMA_MAX_FIELDS) break;
+        decoded_field_t* out = &result->fields[result->field_count];
+        int base, start, bits;
+        bool is_signed;
+        byte_group_member_bits(m, &base, &start, &bits, &is_signed);
+
+        if (m->type == FIELD_TYPE_BOOL) {
+            memset(out, 0, sizeof(*out));
+            strncpy(out->name, m->name, SCHEMA_MAX_NAME_LEN - 1);
+            out->type = FIELD_TYPE_BOOL;
+            out->value.b = ((value >> start) & 1) != 0;
+            out->valid = true;
+            if (m->var_name[0]) var_set(vars, m->var_name, out->value.b ? 1 : 0);
+        } else {
+            /* The member as a bit range of the whole group: the group's bytes, in the
+             * group's order, read without advancing. */
+            field_def_t as_range = *m;
+            as_range.type = FIELD_TYPE_BITS;
+            as_range.size = (uint8_t)width;
+            as_range.bit_start = (uint8_t)start;
+            as_range.bit_width = (uint8_t)bits;
+            as_range.bit_signed = is_signed;
+            as_range.consume = 0;
+            as_range.endian = endian;
+            size_t at = *pos;
+            int rc = decode_field(&as_range, buf, len, &at, out, vars, endian);
+            if (rc != SCHEMA_OK) return schema_field_failed(result, rc, m, *pos, len);
+        }
+        out->field_index = idx;
+        if (out->valid && m->name[0] && m->name[0] != '_') result->field_count++;
+    }
+    *pos += (size_t)width;
+    return SCHEMA_OK;
 }
 
 /* ============================================
@@ -1289,6 +1569,12 @@ static inline int schema_decode_direction(
                      * the top-level loop does not walk it, exactly as a tlv case is. */
                     if (field_idx < 0 || field_idx >= SCHEMA_MAX_FIELDS) break;
                     if (result->field_count >= SCHEMA_MAX_FIELDS) break;
+                    if (schema->fields[field_idx].type == FIELD_TYPE_BYTE_GROUP) {
+                        int grc = schema_decode_byte_group(schema, &schema->fields[field_idx],
+                                                           buf, len, &pos, result, &vars);
+                        if (grc != SCHEMA_OK) return grc;
+                        continue;
+                    }
 
                     int rc = decode_field(
                         &schema->fields[field_idx],
@@ -1411,6 +1697,12 @@ static inline int schema_decode_direction(
                      * construct owns and the loop decoded nothing at all. */
                     if (field_idx < 0 || field_idx >= SCHEMA_MAX_FIELDS) break;
                     if (result->field_count >= SCHEMA_MAX_FIELDS) break;
+                    if (schema->fields[field_idx].type == FIELD_TYPE_BYTE_GROUP) {
+                        int grc = schema_decode_byte_group(schema, &schema->fields[field_idx],
+                                                           buf, len, &pos, result, &vars);
+                        if (grc != SCHEMA_OK) return grc;
+                        continue;
+                    }
 
                     int rc = decode_field(
                         &schema->fields[field_idx],
@@ -1486,6 +1778,12 @@ static inline int schema_decode_direction(
             continue;
         }
         
+        if (field->type == FIELD_TYPE_BYTE_GROUP) {
+            int grc = schema_decode_byte_group(schema, field, buf, len, &pos, result, &vars);
+            if (grc != SCHEMA_OK) return grc;
+            continue;
+        }
+
         /* Regular field */
         int rc = decode_field(
             field, buf, len, &pos,
@@ -1646,8 +1944,9 @@ static inline int schema_check_fits(double rounded, double lo, double hi,
         if (field->type == FIELD_TYPE_BITS) {
             /* PS-064 (CR-2026-136): a bit range names its type, as the prototype does. */
             snprintf(err, err_len,
-                     "Field '%s': %s encodes as %.0f, outside %.0f to %.0f for u8[%d:%d] (PS-168)",
-                     field->name, given, rounded, lo, hi, field->bit_start,
+                     "Field '%s': %s encodes as %.0f, outside %.0f to %.0f for %c%d[%d:%d] (PS-168)",
+                     field->name, given, rounded, lo, hi, field->bit_signed ? 's' : 'u',
+                     bits_base_bytes(field) * 8, field->bit_start,
                      field->bit_start + field->bit_width - 1);
         } else {
             snprintf(err, err_len,
@@ -1708,8 +2007,14 @@ static inline int encode_field(
         case FIELD_TYPE_S32: lo = -2147483648.0; hi = 2147483647.0; break;
         case FIELD_TYPE_U64: lo = 0; hi = 18446744073709551615.0; break;
         case FIELD_TYPE_S64: lo = -9223372036854775808.0; hi = 9223372036854775807.0; break;
-        case FIELD_TYPE_BITS:     /* a bit range's type is its width */
-            lo = 0; hi = (double)((1ULL << field->bit_width) - 1); break;
+        case FIELD_TYPE_BITS:     /* a bit range's type is its width (PS-064) */
+            if (field->bit_signed) {
+                lo = -(double)((uint64_t)1 << (field->bit_width - 1));
+                hi = (double)(((uint64_t)1 << (field->bit_width - 1)) - 1);
+            } else {
+                lo = 0; hi = (double)bits_width_mask(field->bit_width);
+            }
+            break;
         default: break;
     }
     /* An exact int64 input always fits s64, and fits u64 unless negative; checking it as a
@@ -1770,19 +2075,25 @@ static inline int encode_field(
             /* Its `bit` of the byte it peeks, advancing only where it consumes (PS-389,
              * PS-066, CR-2026-136). It was written as a whole byte of 0 or 1. */
             if (int_val) buf[*pos] |= (uint8_t)(1u << field->bit_start);
-            if (field->consume) (*pos)++;
+            *pos += field->consume;
             break;
             
         case FIELD_TYPE_BITS: {
-            /* Bitfield - read current byte, modify bits, write back */
-            uint8_t byte_val = buf[*pos];
-            uint8_t mask = ((1 << field->bit_width) - 1) << field->bit_start;
-            byte_val &= ~mask;
-            byte_val |= ((int_val & ((1 << field->bit_width) - 1)) << field->bit_start);
-            buf[*pos] = byte_val;
-            if (field->consume) {
-                (*pos)++;
+            /* PS-062, PS-365 (CR-2026-136): the checked value, its two's complement kept
+             * to the range's width, ORed into a base of `size` bytes written in the order
+             * the decoder reads it. It was one byte, whatever the base. */
+            const int base = bits_base_bytes(field);
+            if (field->bit_width == 0 || base > 8
+                || field->bit_start + field->bit_width > base * 8) {
+                return SCHEMA_ERR_TYPE;
             }
+            if (*pos + (size_t)base > SCHEMA_MAX_PAYLOAD) return SCHEMA_ERR_BUFFER;
+            uint64_t placed = ((uint64_t)int_val & bits_width_mask(field->bit_width))
+                              << field->bit_start;
+            for (int b = 0; b < base; b++) {
+                buf[*pos + b] |= bits_byte_mask(placed, base, b, endian);
+            }
+            *pos += field->consume;
             break;
         }
         
@@ -1834,6 +2145,73 @@ static inline int encode_field(
     return SCHEMA_OK;
 }
 
+/* Encode a byte_group (PS-063, PS-365, PS-397): every member's value placed in one
+ * value of the group's width, written once in the group's byte order; bits no member
+ * names are zero. Each member is checked and reduced to its bits by encode_field as
+ * the member it is - so a value outside it is the PS-168 error naming the member and its
+ * own type - and then moved to its place in the group. A member the input omits is
+ * missing (PS-551); an internal one is PS-434's error, this interpreter having no
+ * `value` for it to write. */
+static inline int schema_encode_byte_group(
+    const schema_t* schema,
+    const field_def_t* group,
+    const encode_inputs_t* inputs,
+    uint8_t* buf,
+    size_t* pos,
+    char* err,
+    size_t err_len
+) {
+    char why[sizeof(((encode_result_t*)0)->error_msg)];
+    const int width = byte_group_width(schema, group, why, sizeof(why));
+    if (width < 0) {
+        if (err && err_len) snprintf(err, err_len, "%s", why);
+        return SCHEMA_ERR_TYPE;
+    }
+    if (*pos + (size_t)width > SCHEMA_MAX_PAYLOAD) return SCHEMA_ERR_BUFFER;
+    const endian_t endian = group->endian != ENDIAN_DEFAULT ? group->endian : schema->endian;
+    uint64_t value = 0;
+
+    for (int k = 0; k < group->nested_count; k++) {
+        const field_def_t* m = &schema->fields[group->nested_start + k];
+        const encode_input_t* input = find_input(inputs, m->name);
+        if (!input) {
+            if (err && err_len) {
+                if (m->name[0] == '_') {
+                    snprintf(err, err_len, "internal field '%s' reads payload bytes and "
+                             "declares no value, and the input does not supply it "
+                             "(PS-434)", m->name);
+                } else {
+                    snprintf(err, err_len, "Missing required field: %s", m->name);
+                }
+            }
+            return SCHEMA_ERR_PARSE;
+        }
+        int base, start, bits;
+        bool is_signed;
+        byte_group_member_bits(m, &base, &start, &bits, &is_signed);
+        uint64_t pattern;
+        if (m->type == FIELD_TYPE_BOOL) {
+            pattern = (input->is_int ? input->value.i64 != 0 : input->value.f64 != 0.0);
+        } else {
+            uint8_t own[8] = {0};
+            size_t at = 0;
+            field_def_t member = *m;
+            member.consume = 0;
+            member.endian = ENDIAN_DEFAULT;
+            int rc = encode_field(&member, inputs, own, &at, endian, err, err_len);
+            if (rc != SCHEMA_OK) return rc;
+            pattern = (uint64_t)bits_extract(bits_read_base(own, base, endian), start, bits,
+                                             false);
+        }
+        value |= (pattern & bits_width_mask(bits)) << start;
+    }
+    for (int b = 0; b < width; b++) {
+        buf[*pos + b] |= bits_byte_mask(value, width, b, endian);
+    }
+    *pos += (size_t)width;
+    return SCHEMA_OK;
+}
+
 /* Main encode function */
 /* schema_encode with the direction the message will travel supplied.
  *
@@ -1872,14 +2250,20 @@ static inline int schema_encode_direction(
     size_t pos = 0;
     size_t filled = 0;      /* bytes a non-consuming bit range or bool has filled */
     /* CR-2026-141 (PS-551): per byte, the bits some field wrote; and each bit range or
-     * bool placed, with the value it was given or -1 where it was absent and derived. A
-     * bit range or bool that does not consume shares its byte with the fields after it,
+     * bool placed, with the value it was given, or derived where it was absent. A bit
+     * range or bool that does not consume shares its bytes with the fields after it,
      * which fix its value: absent, it writes no bits and is missing only where a bit is
-     * left unwritten; supplied, it must read back from the finished frame. */
+     * left unwritten; supplied, it must read back from the finished frame.
+     *
+     * A peek covers its base's bytes - one for a bool or a `u8[...]`, N/8 for a
+     * `uN[...]` (CR-2026-136) - so its mask is kept in the assembled value's bit space,
+     * with the base's width and byte order to map it onto bytes. */
     uint8_t covered[SCHEMA_MAX_PAYLOAD];
     uint8_t scratch[SCHEMA_MAX_PAYLOAD];
-    struct { size_t pos; uint8_t mask; uint8_t start; int16_t raw; const char* name; }
-        peeks[SCHEMA_MAX_FIELDS];
+    struct {
+        size_t pos; uint64_t mask; uint8_t base; uint8_t start; uint8_t width;
+        bool is_signed; bool given; endian_t endian; int64_t raw; const char* name;
+    } peeks[SCHEMA_MAX_FIELDS];
     int peek_count = 0;
     memset(covered, 0, sizeof(covered));
     memset(scratch, 0, sizeof(scratch));
@@ -1895,20 +2279,29 @@ static inline int schema_encode_direction(
             continue;
         }
         bool bitlike = field->type == FIELD_TYPE_BITS || field->type == FIELD_TYPE_BOOL;
-        uint8_t mask = field->type == FIELD_TYPE_BOOL
-            ? (uint8_t)(1u << field->bit_start)
-            : (uint8_t)(((1u << field->bit_width) - 1u) << field->bit_start);
+        const int base = field->type == FIELD_TYPE_BITS ? bits_base_bytes(field) : 1;
+        const uint8_t width = field->type == FIELD_TYPE_BOOL ? 1 : field->bit_width;
+        const uint64_t mask = width && width <= 64 && field->bit_start < 64
+            ? bits_width_mask(width) << field->bit_start : 0;
+        const endian_t fendian = field->endian != ENDIAN_DEFAULT ? field->endian
+                                                                 : schema->endian;
 
-        if (field->type != FIELD_TYPE_SKIP && !find_input(inputs, field->name)) {
-            if (bitlike && !field->consume && pos < SCHEMA_MAX_PAYLOAD) {
+        if (field->type != FIELD_TYPE_SKIP && field->type != FIELD_TYPE_BYTE_GROUP
+            && !find_input(inputs, field->name)) {
+            if (bitlike && !field->consume && pos + (size_t)base <= SCHEMA_MAX_PAYLOAD) {
                 /* PS-551 (CR-2026-141): derived from the fields that write its bits. */
                 peeks[peek_count].pos = pos;
                 peeks[peek_count].mask = mask;
+                peeks[peek_count].base = (uint8_t)base;
                 peeks[peek_count].start = field->bit_start;
-                peeks[peek_count].raw = -1;
+                peeks[peek_count].width = width;
+                peeks[peek_count].is_signed = field->type == FIELD_TYPE_BITS && field->bit_signed;
+                peeks[peek_count].given = false;
+                peeks[peek_count].endian = fendian;
+                peeks[peek_count].raw = 0;
                 peeks[peek_count].name = field->name;
                 peek_count++;
-                if (pos + 1 > filled) filled = pos + 1;
+                if (pos + base > filled) filled = pos + base;
                 continue;
             }
             /* PS-551: rejected, naming the field, and no payload. encode_field reported
@@ -1920,9 +2313,12 @@ static inline int schema_encode_direction(
         }
         /* Encoded alone, so its own bits can be told from those already placed. */
         size_t at = pos;
-        int rc = encode_field(field, inputs, scratch, &pos, schema->endian,
-                              result->error_msg, sizeof(result->error_msg));
-        size_t end = bitlike && pos == at ? at + 1 : pos;
+        int rc = field->type == FIELD_TYPE_BYTE_GROUP
+            ? schema_encode_byte_group(schema, field, inputs, scratch, &pos,
+                                       result->error_msg, sizeof(result->error_msg))
+            : encode_field(field, inputs, scratch, &pos, schema->endian,
+                           result->error_msg, sizeof(result->error_msg));
+        size_t end = bitlike && at + (size_t)base > pos ? at + base : pos;
         if (rc == SCHEMA_OK && end > SCHEMA_MAX_PAYLOAD) rc = SCHEMA_ERR_BUFFER;
         /* A skip is padding: its zeros fix no peek's bits and contradict none. */
         bool padding = field->type == FIELD_TYPE_SKIP;
@@ -1933,12 +2329,17 @@ static inline int schema_encode_direction(
                 snprintf(result->error_msg, sizeof(result->error_msg),
                          "A field writes bits a peek before it set otherwise (PS-551)");
                 for (int k = 0; k < peek_count; k++) {
-                    if (peeks[k].raw < 0 || peeks[k].pos < at || peeks[k].pos >= end) continue;
-                    int found = (scratch[peeks[k].pos] & peeks[k].mask) >> peeks[k].start;
+                    if (!peeks[k].given || peeks[k].pos >= end
+                        || peeks[k].pos + peeks[k].base <= at) continue;
+                    int64_t found = bits_extract(
+                        bits_read_base(scratch + peeks[k].pos, peeks[k].base,
+                                       peeks[k].endian),
+                        peeks[k].start, peeks[k].width, peeks[k].is_signed);
                     if (found == peeks[k].raw) continue;
                     snprintf(result->error_msg, sizeof(result->error_msg),
-                             "Field '%s' is given %d, but the fields that share its bits "
-                             "write %d (PS-551)", peeks[k].name, peeks[k].raw, found);
+                             "Field '%s' is given %lld, but the fields that share its bits "
+                             "write %lld (PS-551)", peeks[k].name,
+                             (long long)peeks[k].raw, (long long)found);
                     break;
                 }
                 rc = SCHEMA_ERR_PARSE;
@@ -1953,33 +2354,50 @@ static inline int schema_encode_direction(
         if (bitlike) {
             peeks[peek_count].pos = at;
             peeks[peek_count].mask = mask;
+            peeks[peek_count].base = (uint8_t)base;
             peeks[peek_count].start = field->bit_start;
-            peeks[peek_count].raw = (int16_t)((scratch[at] & mask) >> field->bit_start);
+            peeks[peek_count].width = width;
+            peeks[peek_count].is_signed = field->type == FIELD_TYPE_BITS && field->bit_signed;
+            peeks[peek_count].given = true;
+            peeks[peek_count].endian = fendian;
+            peeks[peek_count].raw = bits_extract(bits_read_base(scratch + at, base, fendian),
+                                                 field->bit_start, width,
+                                                 peeks[peek_count].is_signed);
             peeks[peek_count].name = field->name;
             peek_count++;
-            covered[at] |= mask;
+            for (int b = 0; b < base; b++) {
+                covered[at + b] |= bits_byte_mask(mask, base, b, fendian);
+            }
         }
         for (size_t b = at; b < end; b++) {
             result->data[b] |= scratch[b];
             if (!bitlike && !padding) covered[b] = 0xFF;
             scratch[b] = 0;
         }
-        /* A bit range or bool that did not consume filled the byte at pos: the next field
-         * shares it, and if none does it is still written (CR-2026-136). */
-        if (bitlike && !field->consume && pos + 1 > filled) {
-            filled = pos + 1;
+        /* A bit range or bool that did not consume its base filled those bytes: the next
+         * field shares them, and if none does they are still written (CR-2026-136). */
+        if (bitlike && at + base > filled) {
+            filled = at + base;
         }
     }
 
     for (int k = 0; k < peek_count; k++) {
-        int found = (result->data[peeks[k].pos] & peeks[k].mask) >> peeks[k].start;
-        if (peeks[k].raw < 0 && (covered[peeks[k].pos] & peeks[k].mask) != peeks[k].mask) {
+        int64_t found = bits_extract(
+            bits_read_base(result->data + peeks[k].pos, peeks[k].base, peeks[k].endian),
+            peeks[k].start, peeks[k].width, peeks[k].is_signed);
+        bool uncovered = false;
+        for (int b = 0; b < peeks[k].base; b++) {
+            uint8_t m = bits_byte_mask(peeks[k].mask, peeks[k].base, b, peeks[k].endian);
+            if ((covered[peeks[k].pos + b] & m) != m) uncovered = true;
+        }
+        if (!peeks[k].given && uncovered) {
             snprintf(result->error_msg, sizeof(result->error_msg),
                      "Missing required field: %s", peeks[k].name);
-        } else if (peeks[k].raw >= 0 && found != peeks[k].raw) {
+        } else if (peeks[k].given && found != peeks[k].raw) {
             snprintf(result->error_msg, sizeof(result->error_msg),
-                     "Field '%s' is given %d, but the fields that share its bits write %d "
-                     "(PS-551)", peeks[k].name, peeks[k].raw, found);
+                     "Field '%s' is given %lld, but the fields that share its bits write "
+                     "%lld (PS-551)", peeks[k].name, (long long)peeks[k].raw,
+                     (long long)found);
         } else {
             continue;
         }
@@ -2018,6 +2436,25 @@ static inline field_def_t field_s16(const char* name, endian_t endian) {
     strncpy(f.name, name, SCHEMA_MAX_NAME_LEN - 1);
     f.type = FIELD_TYPE_S16;
     f.size = 2;
+    f.endian = endian;
+    return f;
+}
+
+/* A bit range on a multi-byte or signed base (CR-2026-136): `uN[start:end]` is
+ * field_bit_range(name, N / 8, false, start, end - start + 1, consume, endian), and
+ * `sN[...]` the same with `is_signed`. `consume` is the bytes it advances (PS-016), 0 to
+ * peek; `endian` is the base's byte order, ENDIAN_DEFAULT for the schema's (PS-059). */
+static inline field_def_t field_bit_range(const char* name, uint8_t base_bytes,
+                                          bool is_signed, uint8_t start, uint8_t width,
+                                          uint8_t consume, endian_t endian) {
+    field_def_t f = {0};
+    strncpy(f.name, name, SCHEMA_MAX_NAME_LEN - 1);
+    f.type = FIELD_TYPE_BITS;
+    f.size = base_bytes;
+    f.bit_signed = is_signed;
+    f.bit_start = start;
+    f.bit_width = width;
+    f.consume = consume;
     f.endian = endian;
     return f;
 }
@@ -2457,7 +2894,10 @@ static inline int schema_load_binary_msg(
                                      "field %d: type code %u with size %u names no type",
                                      i, (unsigned)type_code, (unsigned)size);
         }
-        f.size = size;
+        /* A bitfield record's size nibble is its width, which the bit-range byte below
+         * carries too; its base is one byte, the only one this format can name
+         * (CR-2026-136 made `size` a bit range's base width). */
+        f.size = type_code == BINARY_TYPE_BITFIELD ? 1 : size;
 
         double mult = binary_exp_to_mult(data[offset + 1]);
         if (mult != 1.0) {

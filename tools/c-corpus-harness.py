@@ -31,7 +31,7 @@ count that matters is how many vectors the C interpreter *decodes correctly*, ag
 many the corpus holds. Everything else is a reason it could not be asked.
 
 The expressible subset is what the struct API can build today: plain integers and floats,
-`bool`, a `u8[a:b]` bit range, `skip`, `ascii`/`hex`/`bytes`, `enum`, a `lookup` table, and
+`bool`, a `uN[a:b]` or `sN[a:b]` bit range, `skip`, `ascii`/`hex`/`bytes`, `enum`, a `lookup` table, and
 the `mult`/`div`/`add` modifiers. A construct outside it is named in the skip reasons rather
 than approximated - an approximated schema would report a pass for something the interpreter
 cannot actually do.
@@ -85,10 +85,12 @@ UNREACHABLE_KEYS = {
     # a field type for both now. What remains unreachable about either is size, not shape -
     # see tlv_source() and flagged_source().
     "match": "no inline match support in this harness",
-    # A C gap, not a harness one: FIELD_TYPE_BYTE_GROUP is an enum value with no decode
-    # path in the interpreter, so there is nothing to build (CR-2026-131 widened it in
-    # the other five; C has no group to widen).
-    "byte_group": "the interpreter has no byte_group decode path",
+    # The interpreter decodes a byte_group since the C-interpreter wave (CR-2026-131);
+    # schema_source() builds one at top level. One inside a tlv case or a flagged group
+    # would need its members placed after the case body, which this harness does not
+    # do - a harness limit, so said.
+    "byte_group": "a byte_group nested in a case or group body is not built by this "
+                  "harness (the interpreter decodes one)",
     "object": "no nested object support in this harness",
     "name_from": "no name template in C (fixed-size name buffers)",
     # These say "the interpreter has none" rather than "not built by the struct API",
@@ -128,7 +130,9 @@ UNREACHABLE_KEYS = {
     "separator": "the interpreter has no bytes separator (PS-391)",
 }
 
-BIT_RANGE = re.compile(r"^u(\d+)\[(\d+):(\d+)\]$")
+#: `uN[a:b]` or `sN[a:b]`: the base's sign, its width in bits, and the range (CR-2026-136).
+#: This matched `uN` only and built every range on a one-byte base, whatever N said.
+BIT_RANGE = re.compile(r"^([us])(8|16|24|32|64)\[(\d+):(\d+)\]$")
 
 #: CR-2026-114 (la-payload-schema main c932961). The interpreter holds `ascii` text as a
 #: C string, so it stops at the first 0x00 - "AB\0C" is "AB", where PS-534 keeps the NUL
@@ -188,10 +192,14 @@ def field_source(field, schema_endian):
 
     match = BIT_RANGE.match(ftype)
     if match:
-        start, end = int(match.group(2)), int(match.group(3))
-        consume = "true" if int(field.get("consume", 0) or 0) >= 1 else "false"
-        lines.append(f"    f = field_bits({c_string(name)}, {start}, "
-                     f"{end - start + 1}, {consume});")
+        signed = "true" if match.group(1) == "s" else "false"
+        base = int(match.group(2)) // 8
+        start, end = int(match.group(3)), int(match.group(4))
+        consume = field.get("consume", 0) or 0
+        if not isinstance(consume, int) or not 0 <= consume <= 255:
+            return None, "consume is not a byte count"
+        lines.append(f"    f = field_bit_range({c_string(name)}, {base}, {signed}, "
+                     f"{start}, {end - start + 1}, {consume}, {endian});")
     elif ftype == "bool":
         bit = int(field.get("bit", 0) or 0)
         consume = "true" if int(field.get("consume", 1) or 0) >= 1 else "false"
@@ -439,6 +447,31 @@ def schema_source(index, schema):
             top_level.append(("flagged", flags_field, len(deferred)))
             deferred.append([(bit, members) for bit, members in groups])
             continue
+        if "byte_group" in field and not field.get("type"):
+            group = field["byte_group"]
+            members = group.get("fields") if isinstance(group, dict) else group
+            if not isinstance(members, list) or not members:
+                return None, "a byte_group has no members"
+            # The array form takes `size` from beside it (CR-2026-019).
+            size = (group.get("size", 0) if isinstance(group, dict)
+                    else field.get("size", 0)) or 0
+            if not isinstance(size, int) or not 0 <= size <= 8:
+                return None, "a byte_group size is not 0 to 8 bytes"
+            g_endian = group.get("endian") if isinstance(group, dict) else None
+            built = []
+            for member in members:
+                if not isinstance(member, dict):
+                    return None, "a byte_group member is not a mapping"
+                lines, reason = field_source(member, schema.get("endian"))
+                if lines is None:
+                    return None, reason
+                built.append(lines)
+            ctor = (f"field_byte_group({size}, "
+                    f"{ {'little': 'ENDIAN_LITTLE', 'big': 'ENDIAN_BIG'}.get(g_endian, 'ENDIAN_DEFAULT') }"
+                    ", {start}, {count})")
+            top_level.append(("group", ctor, len(deferred)))
+            deferred.append([(None, built)])
+            continue
         lines, reason = field_source(field, schema.get("endian"))
         if lines is None:
             return None, reason
@@ -480,6 +513,11 @@ def schema_source(index, schema):
                 add = body.pop()
                 body.append(f'    strncpy(f.var_name, "{name}", SCHEMA_MAX_NAME_LEN - 1);')
                 body.append(add)
+            continue
+        if kind == "group":
+            _, start, count = case_calls[group_index][0]
+            body.append(f"    f = {payload.format(start=start, count=count)};")
+            body.append("    schema_add_field(s, &f);")
             continue
         if kind == "flagged":
             body.append(f"    f = field_flagged({c_string(payload)});")
