@@ -123,14 +123,14 @@ Generated inventory of this repository: what lives where, what each document cov
 
 ## Device schemas
 
-338 schemas under `schemas/devices/`.
-Mean quality score 82.0% (PLATINUM 43, GOLD 49, SILVER 225, BRONZE 6, REJECTED 15). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
+339 schemas under `schemas/devices/`.
+Mean quality score 82.0% (PLATINUM 43, GOLD 49, SILVER 226, BRONZE 6, REJECTED 15). Tiers follow the specification's Section 10: Platinum 95-100%, Gold 85-94%, Silver 70-84%, Bronze 60-69%, Rejected below 60%. Gold and Platinum also have gates (PS-239) -- see `../AGENTS.md`. A high score shows self-consistency with a schema's own test vectors, not that the vectors are right.
 
 ### By vendor
 
 | Vendor | Schemas | Vectors | Tiers |
 |---|---|---|---|
-| _language-conformance | 126 | 254 | SILVER 122, BRONZE 4 |
+| _language-conformance | 127 | 258 | SILVER 123, BRONZE 4 |
 | milesight | 84 | 1427 | PLATINUM 30, GOLD 35, SILVER 16, REJECTED 3 |
 | decentlab | 58 | 204 | PLATINUM 10, GOLD 11, SILVER 32, BRONZE 1, REJECTED 4 |
 | _library-composed | 49 | 57 | SILVER 49 |
@@ -194,6 +194,7 @@ Mean quality score 82.0% (PLATINUM 43, GOLD 49, SILVER 225, BRONZE 6, REJECTED 1
 | `_language-conformance/lookup-default` | 1 | 1 | fields | 81% | SILVER |
 | `_language-conformance/lookup-number-labels` | 2 | 4 | fields | 83% | SILVER |
 | `_language-conformance/lookup-reference-binding` | 52 | 14 | ports | 82% | SILVER |
+| `_language-conformance/mask-reference-binding` | 12 | 4 | ports | 78% | SILVER |
 | `_language-conformance/match-case-range` | 3 | 3 | fields | 83% | SILVER |
 | `_language-conformance/match-cases-default-key` | 3 | 2 | fields | 81% | SILVER |
 | `_language-conformance/match-default-fields` | 3 | 2 | fields | 81% | SILVER |
