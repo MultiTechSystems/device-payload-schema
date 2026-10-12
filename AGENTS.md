@@ -220,8 +220,8 @@ Use the existing platinum schemas as templates: `decentlab/dl-5tm`,
 
 ## The corpus is the conformance suite
 
-The 2690 payload vectors in `schemas/devices/` (measured 2026-10-11 with
-`tools/check-floors.py`, after the CR-2026-118 and CR-2026-124 fixtures, CR-2026-117's
+The 2695 payload vectors in `schemas/devices/` (measured 2026-10-11 with
+`tools/check-floors.py`, after match-fractional-discriminator, the CR-2026-118 and CR-2026-124 fixtures, CR-2026-117's
 guard-absent-operand, the `match-u32-*` and names-mangling-alike fixtures, CR-2026-127's
 guard-boolean-operand, the CR-2026-121 and CR-2026-123 fixtures, CR-2026-110's,
 CR-2026-125's and CR-2026-128's tlv-repeat-* fixtures, the mutation-gate vector in
@@ -232,10 +232,10 @@ implementation has a runner that reads the same YAML and the same vectors:
 
 | Implementation | Runner | Decode floor | Re-encode floor |
 |---|---|---|---|
-| Python | `tests/test_corpus_conformance.py` | every vector | 2084 |
-| Go | `go/schema/corpus_conformance_test.go` | 2690 | 2101 (plain API 2076) |
-| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2690 | 2085 |
-| Java | `bindings/java/.../CorpusConformanceTest.java` | 2690 | 2084 |
+| Python | `tests/test_corpus_conformance.py` | every vector | 2101 |
+| Go | `go/schema/corpus_conformance_test.go` | 2695 | 2119 (plain API 2092) |
+| C# | `dotnet/PayloadSchema.Tests/CorpusConformanceTests.cs` | 2695 | 2102 |
+| Java | `bindings/java/.../CorpusConformanceTest.java` | 2695 | 2101 |
 | C | `tools/c-corpus-harness.py` (builds each expressible schema through the struct API) | 554 of 554 attempted | n/a |
 
 These figures move with every schema added. `make check-floors` prints each floor beside
@@ -810,10 +810,10 @@ exercised to the best-covered part of the project:
 
 | | Runner | Round-trips |
 |---|---|---|
-| Python | `tests/test_encode_round_trip.py` | 2084 |
-| Go | `go/schema/corpus_encode_test.go` | 2101 (plain 2076) |
-| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2084 |
-| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2085 |
+| Python | `tests/test_encode_round_trip.py` | 2101 |
+| Go | `go/schema/corpus_encode_test.go` | 2119 (plain 2092) |
+| Java | `bindings/java/.../CorpusEncodeRoundTripTest.java` | 2101 |
+| C# | `dotnet/.../CorpusEncodeRoundTripTests.cs` | 2102 |
 | C | `src/test_encoder.c`, built by `make test-c` (unit tests, not a corpus round trip) | n/a |
 
 All five implementations have an encoder; Java's and C#'s were built from nothing, ported
@@ -2378,6 +2378,57 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
   one schema generated different code on each run; it takes `_next_uid()`. Java's
   `IdentityHashMap`s and C#'s `ReferenceEqualityComparer` tables hold their keys and were
   never affected. `tests/test_identity_tables.py` reproduces each Python leak.
+
+- **CR-2026-146 (PS-169 amended, la-payload-schema main, merge 65701a0, for 0.5.5): a label
+  several codes share cannot be encoded.** Decoding is unaffected. An encoder given a label
+  that two or more codes of a lookup (mapping or sequence) or an enum share rejects it:
+  `Field '{name}': the label {label} is shared by codes [{a}, {b}], so it cannot be encoded
+  (PS-169)`, codes ascending, a text label in single quotes, a boolean `true`/`false`, a
+  number as JavaScript's String(number). A code given as a number still encodes. Every
+  encoder wrote a guess - Python, Java, C# and the runtime the first code declared, Go the
+  smallest. A caller that only ranks candidate cases (`_case_fidelity`, Go
+  `reverseLookupAnyCode`/`rawForField`, Java and C# `ReverseLookup` without a name) takes
+  the smallest code instead of rejecting; the field's own encoding rejects. The validator
+  warns of a shared label on any field that is not computed (`shared_labels`), which in
+  the corpus is vobo alone (104 warnings, through its YAML anchors). C's encoder takes
+  native values only, so neither applies to it. `encode-round-trip.py` files the
+  rejection as `shared-label`, read per vector from the encoder's error. Shared cases:
+  `tests/cr-2026-146-cases.yaml`, read by `test_cr_2026_146_shared_labels.py` (reference
+  and runtime), Go `cr146_test.go`, Java `CR2026146Test`, C# `CR2026_146Tests`.
+  - **An enum encodes a name as its code and a code as given** (PS-067); a name with no
+    code, the `default` label among them, is `Field '{name}': '{label}' is not a name of
+    the enum (PS-067)`, the prototype's text. Measured before: Python named the base
+    field `'None'` in its PS-168 text and still read `unknown(N)`; **Go wrote a code past
+    the base wrapped and silently (300 as `2c`) and wrote every non-`u8` base as one
+    byte** (`length` is 1 for an enum - 70000 under `u16` came out `70`); Java and C#
+    said `300 does not fit 1 unsigned bytes`, naming no field. All five now give PS-168's
+    text naming the enum and write the base's width; Go's decode shares `enumBaseWidth`,
+    which adds `u24`/`s24`.
+  - **Corpus:** -4 deliberately, all `tlv`: vobo `mutant_p32_01`, `mutant_p112_01`
+    (`AnalogSensor36` is codes 36, 100, 164, 228), `two_analog_xp_all` and
+    `two_analog_xx_ain3` (`%` is 57 and 170) round-tripped only because the first code
+    found was the one in the payload. The ten `mutant_p*_03..07` already failed and now
+    fail with the PS-169 text. Identical sets in Python and Go (diffed).
+- **PS-168 for `udec`/`sdec`, and a fractional match discriminator.**
+  - `udec`/`sdec` now reject in PS-168's form, `Field 'v': 123.5 encodes as 123.5,
+    outside 0 to 15.9 (PS-168)`, the encoded value given to tenths and the range what one
+    byte holds with tenths 0 to 9: 0 to 15.9, or -8 to 7.9 (`check_nibble_decimal`).
+    Python, Go, Java, C# and the runtime said `does not fit udec` in four spellings; **C
+    clamped silently** - udec 123.5 wrote `0x95`, and any udec of 10 or more wrote 9.x.
+    Java rounded the tenths half up; all round half to even now. Cases in
+    `tests/cr-2026-135-cases.yaml`, and C's `test_a_nibble_decimal_that_does_not_fit_is_named`.
+  - A discriminator with a fraction (one taken from a field whose arithmetic leaves one)
+    matches no single key and no list member; an inclusive range `lo..hi` still holds it,
+    as the reference and the spec prototype read PS-152. **Go, Java and C# decoded 2.5 as
+    case 2** (`toInt`, `asLong`, `ToLong` truncate), and on encode Go truncated while Java
+    and C# rounded half to even, so a schema whose `default` should apply wrote case 2's
+    fields. Java and C#'s encoders also never matched an integral discriminator against a
+    `lo..hi` key; they do now. Python and the runtime compared by value already.
+    `_language-conformance/match-fractional-discriminator.yaml` (5 vectors) holds all five
+    to it; decode floors 2690 -> 2695, `match` +5 everywhere.
+  - **Floors:** Python and Java 2100 -> 2101 (`match` 142 -> 147, `tlv` 1559 -> 1555), C#
+    2101 -> 2102 (`tlv` 1560 -> 1556), Go ordered 2118 -> 2119 (`tlv` 1577 -> 1573), plain
+    2091 -> 2092; decode 2690 -> 2695 in Go, Java and C#.
 
 ## Converting a vendor codec
 

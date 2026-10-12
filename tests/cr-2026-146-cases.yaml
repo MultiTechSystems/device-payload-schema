@@ -1,0 +1,107 @@
+# CR-2026-146 (PS-169, amended for 0.5.5): a label two or more codes share cannot be encoded.
+#
+# Decoding is unaffected. An encoder given a label that several codes of a lookup (mapping
+# or sequence) or an enum share rejects it, naming the field and the codes, ascending, and
+# writes none of them; the code given as a number still encodes. An enum encodes a name
+# back to its code and a code as given; a name with no code, the enum's `default` label
+# among them, is rejected (PS-067, PS-068, PS-554).
+#
+# One case list, read by the reference and the generated codec's runtime encoder
+# (tests/test_cr_2026_146_shared_labels.py), Go (go/schema/cr146_test.go), Java
+# (CR2026146Test.java) and C# (CR2026_146Tests.cs).
+#
+# Same layout as tests/cr-2026-135-cases.yaml: `schema` is YAML text, `input` JSON text,
+# and either `payload` (hex) or `error` (text one of the encoder's errors contains, with
+# no payload returned). The messages are the spec prototype's:
+#   Field '{name}': the label {label} is shared by codes [{a}, {b}], so it cannot be encoded (PS-169)
+#   Field '{name}': {label} is not a name of the enum (PS-067)
+# with a text label in single quotes, a boolean as true/false and a number as JavaScript's
+# String(number) writes it.
+
+cases:
+
+# --- A mapping lookup ----------------------------------------------------------------
+
+- name: shared_mapping_label_is_rejected
+  schema: "name: t\nfields:\n  - {name: x, type: u8, lookup: {45: AnalogSensor45, 109: AnalogSensor45}}\n"
+  input: '{"x": "AnalogSensor45"}'
+  error: "Field 'x': the label 'AnalogSensor45' is shared by codes [45, 109], so it cannot be encoded (PS-169)"
+
+- name: shared_label_codes_are_listed_ascending
+  schema: "name: t\nfields:\n  - {name: x, type: u8, lookup: {109: AnalogSensor45, 7: other, 45: AnalogSensor45}}\n"
+  input: '{"x": "AnalogSensor45"}'
+  error: "Field 'x': the label 'AnalogSensor45' is shared by codes [45, 109], so it cannot be encoded (PS-169)"
+
+- name: three_codes_sharing_a_label
+  schema: "name: t\nfields:\n  - {name: x, type: u8, lookup: {3: idle, 1: idle, 2: idle, 4: busy}}\n"
+  input: '{"x": "idle"}'
+  error: "Field 'x': the label 'idle' is shared by codes [1, 2, 3], so it cannot be encoded (PS-169)"
+
+- name: the_code_given_as_a_number_still_encodes
+  schema: "name: t\nfields:\n  - {name: x, type: u8, lookup: {45: AnalogSensor45, 109: AnalogSensor45}}\n"
+  input: '{"x": 109}'
+  payload: "6d"
+
+- name: a_label_of_its_own_beside_a_shared_one_encodes
+  schema: "name: t\nfields:\n  - {name: x, type: u8, lookup: {1: a, 2: b, 3: b}}\n"
+  input: '{"x": "a"}'
+  payload: "01"
+
+- name: shared_numeric_label
+  schema: "name: t\nfields:\n  - {name: x, type: u8, lookup: {1: 10, 2: 10, 3: 20}}\n"
+  input: '{"x": 10}'
+  error: "Field 'x': the label 10 is shared by codes [1, 2], so it cannot be encoded (PS-169)"
+
+- name: shared_boolean_label
+  schema: "name: t\nfields:\n  - {name: x, type: u8, lookup: {0: false, 1: true, 2: true}}\n"
+  input: '{"x": true}'
+  error: "Field 'x': the label true is shared by codes [1, 2], so it cannot be encoded (PS-169)"
+
+- name: shared_label_in_a_bit_range
+  schema: "name: t\nfields:\n  - {name: x, type: \"u8[0:3]\", lookup: {1: busy, 2: busy}}\n  - {name: y, type: \"u8[4:7]\", consume: 1}\n"
+  input: '{"x": "busy", "y": 1}'
+  error: "Field 'x': the label 'busy' is shared by codes [1, 2], so it cannot be encoded (PS-169)"
+
+# --- A sequence lookup ---------------------------------------------------------------
+
+- name: shared_sequence_label_is_rejected
+  schema: "name: t\nfields:\n  - {name: x, type: u8, lookup: [idle, busy, busy]}\n"
+  input: '{"x": "busy"}'
+  error: "Field 'x': the label 'busy' is shared by codes [1, 2], so it cannot be encoded (PS-169)"
+
+- name: unshared_sequence_label_encodes
+  schema: "name: t\nfields:\n  - {name: x, type: u8, lookup: [idle, busy, busy]}\n"
+  input: '{"x": "idle"}'
+  payload: "00"
+
+# --- An enum -------------------------------------------------------------------------
+
+- name: enum_name_encodes_as_its_code
+  schema: "name: t\nfields:\n  - {name: x, type: enum, base: u8, values: {1: a, 2: b, 3: b}, default: other}\n"
+  input: '{"x": "a"}'
+  payload: "01"
+
+- name: enum_code_encodes_as_given
+  schema: "name: t\nfields:\n  - {name: x, type: enum, base: u8, values: {1: a, 2: b, 3: b}, default: other}\n"
+  input: '{"x": 2}'
+  payload: "02"
+
+- name: enum_shared_name_is_rejected
+  schema: "name: t\nfields:\n  - {name: x, type: enum, base: u8, values: {1: a, 2: b, 3: b}, default: other}\n"
+  input: '{"x": "b"}'
+  error: "Field 'x': the label 'b' is shared by codes [2, 3], so it cannot be encoded (PS-169)"
+
+- name: enum_default_label_has_no_code
+  schema: "name: t\nfields:\n  - {name: x, type: enum, base: u8, values: {1: a, 2: b, 3: b}, default: other}\n"
+  input: '{"x": "other"}'
+  error: "Field 'x': 'other' is not a name of the enum (PS-067)"
+
+- name: enum_unmapped_name_has_no_code
+  schema: "name: t\nfields:\n  - {name: x, type: enum, base: u8, values: {1: a}}\n"
+  input: '{"x": "zzz"}'
+  error: "Field 'x': 'zzz' is not a name of the enum (PS-067)"
+
+- name: enum_shared_name_in_description_form
+  schema: "name: t\nfields:\n  - {name: x, type: enum, base: u8, values: {4: {name: alarm, description: high}, 5: {name: alarm, description: low}}}\n"
+  input: '{"x": "alarm"}'
+  error: "Field 'x': the label 'alarm' is shared by codes [4, 5], so it cannot be encoded (PS-169)"

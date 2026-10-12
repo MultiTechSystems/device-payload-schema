@@ -884,6 +884,33 @@ static void test_a_value_that_does_not_fit_is_named(void) {
     TCHECK(encodes_to(field_bits("x", 4, 4, true), 2.5, (const uint8_t[]){0x20}, 1));
 }
 
+/* PS-168 for udec/sdec (PS-330): the figures of tests/cr-2026-135-cases.yaml. Both
+ * clamped silently: udec 123.5 wrote 0x95. */
+static field_def_t field_nibble(const char* name, field_type_t type) {
+    field_def_t f = field_u8(name);
+    f.type = type;
+    return f;
+}
+
+static void test_a_nibble_decimal_that_does_not_fit_is_named(void) {
+    field_def_t udec = field_nibble("v", FIELD_TYPE_UDEC);
+    field_def_t sdec = field_nibble("v", FIELD_TYPE_SDEC);
+    TCHECK(encodes_to(udec, 15.9, (const uint8_t[]){0xF9}, 1));
+    TCHECK(encodes_to(udec, 2.5, (const uint8_t[]){0x25}, 1));
+    TCHECK(encodes_to(sdec, -0.5, (const uint8_t[]){0xF5}, 1));
+    TCHECK(encodes_to(sdec, -8, (const uint8_t[]){0x80}, 1));
+    TCHECK(rejects(udec, false, 0, 123.5,
+                   "Field 'v': 123.5 encodes as 123.5, outside 0 to 15.9 (PS-168)"));
+    TCHECK(rejects(udec, false, 0, 15.96,
+                   "Field 'v': 15.96 encodes as 16, outside 0 to 15.9 (PS-168)"));
+    TCHECK(rejects(udec, true, -1, 0,
+                   "Field 'v': -1 encodes as -1, outside 0 to 15.9 (PS-168)"));
+    TCHECK(rejects(sdec, false, 0, 99.9,
+                   "Field 'v': 99.9 encodes as 99.9, outside -8 to 7.9 (PS-168)"));
+    TCHECK(rejects(sdec, false, 0, -8.5,
+                   "Field 'v': -8.5 encodes as -8.5, outside -8 to 7.9 (PS-168)"));
+}
+
 /* CR-2026-136 (PS-064, PS-062): bit ranges and bools are written as a decoder reads
  * them - a non-consuming one shares its byte with the next field - and a value the range
  * cannot hold is rejected rather than masked into its neighbour. */
@@ -1090,6 +1117,7 @@ void selftest_schema(void) {
     test_an_unknown_tag_is_left_over_from_the_tag();
     test_an_encoder_rounds_ties_to_even();
     test_a_value_that_does_not_fit_is_named();
+    test_a_nibble_decimal_that_does_not_fit_is_named();
     test_bit_ranges_are_laid_out_as_decoded();
     test_a_missing_input_is_named();
     test_a_covered_peek_is_derived();
