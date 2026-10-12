@@ -511,7 +511,7 @@ func inferLengthFromType(t FieldType) int {
 		return 4
 	case TypeU64, TypeS64, TypeI64, TypeF64:
 		return 8
-	case TypeF16, TypeUFlt16, TypeSFlt16:
+	case TypeF16, TypeBF16, TypeUFlt16, TypeSFlt16:
 		return 2
 	case TypeSFlt24:
 		return 3
@@ -2501,6 +2501,15 @@ func decodeField(field Field, ctx *DecodeContext) (any, error) {
 			return nil, err
 		}
 		value = readWordOrdered(field.Type, data)
+
+	case TypeBF16:
+		// CR-2026-149 (PS-558): the upper half of a binary32, a word in the field's
+		// effective byte order.
+		data, err := ctx.Read(2)
+		if err != nil {
+			return nil, err
+		}
+		value = decodeBF16(decodeUint(data, endian))
 
 	case TypeUFlt16, TypeSFlt16, TypeSFlt24:
 		// The MCCI minifloats (CR-2026-063): a word in the field's effective byte order.
@@ -5737,6 +5746,17 @@ func encodeField(field Field, value any, ctx *EncodeContext) error {
 			}
 		}
 		ctx.Write(writeWordOrdered(field.Type, numVal))
+
+	case TypeBF16:
+		numVal, ok := toFloat64(value)
+		if !ok {
+			return notANumber(field, value)
+		}
+		word, err := encodeBF16(numVal, field.Name) // PS-559
+		if err != nil {
+			return err
+		}
+		ctx.Write(encodeUint(word, 2, endian))
 
 	case TypeUFlt16, TypeSFlt16, TypeSFlt24:
 		numVal, ok := toFloat64(value)

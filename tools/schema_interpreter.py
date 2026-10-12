@@ -528,6 +528,41 @@ def encode_minifloat(field_type, value):
     return sign | f
 
 
+#: The largest finite bf16, 0x7F7F: (2 - 2**-7) * 2**127 (CR-2026-149).
+BF16_MAX = (2 - 2.0 ** -7) * 2.0 ** 127
+
+
+def decode_bf16(word):
+    """PS-558: the binary32 whose upper half is the word and whose lower half is zero."""
+    return struct.unpack('>f', (word << 16).to_bytes(4, 'big'))[0]
+
+
+def encode_bf16(value, name=None):
+    """PS-559: the nearest bf16 to the binary64 value, a tie to the even fraction, rounded
+    once (never through a binary32); a finite value beyond the largest bf16 is a PS-168
+    error, in the spec prototype's text. NaN and the infinities are their words."""
+    value = float(value)
+    if math.isnan(value):
+        return 0x7FC0
+    sign = 0x8000 if math.copysign(1.0, value) < 0 else 0
+    magnitude = abs(value)
+    if math.isinf(magnitude):
+        return sign | 0x7F80
+    mantissa, exponent = math.frexp(magnitude)       # magnitude = mantissa * 2**exponent
+    if magnitude == 0 or exponent - 1 < -126:
+        word = round(magnitude * 2.0 ** 133)         # subnormal: fraction * 2**-133
+    else:
+        fraction = round(mantissa * 256)             # 128..256, the leading bit included
+        if fraction == 256:
+            fraction, exponent = 128, exponent + 1
+        word = (exponent + 126) << 7 | (fraction - 128)
+    if word >= 0x7F80:
+        raise ValueError(
+            f"Field '{name}': {format_lookup_value(value)} is outside the range of bf16, "
+            f"{format_lookup_value(-BF16_MAX)} to {format_lookup_value(BF16_MAX)} (PS-168)")
+    return sign | word
+
+
 #: The largest finite magnitude each binary float type holds (CR-2026-148, PS-168): a
 #: value past it is no value the field can write. f64 holds any finite value.
 FLOAT_TYPE_MAX = {'f16': 65504.0, 'f32': 3.4028234663852886e38,
@@ -683,7 +718,7 @@ _FIXED_TYPE_SIZES = {
     'u8': 1, 'u16': 2, 'u24': 3, 'u32': 4, 'u64': 8,
     's8': 1, 's16': 2, 's24': 3, 's32': 4, 's64': 8,
     'u32le16': 4, 's32le16': 4, 'f32le16': 4,
-    'u32be16le': 4, 's32be16le': 4, 'f32be16le': 4, 'f16': 2,
+    'u32be16le': 4, 's32be16le': 4, 'f32be16le': 4, 'f16': 2, 'bf16': 2,
     'uflt16': 2, 'sflt16': 2, 'sflt24': 3, 'f32': 4, 'f64': 8, 'udec': 1, 'sdec': 1,
 }
 
@@ -4012,6 +4047,10 @@ class SchemaInterpreter:
             # IEEE 754 half-precision (2 bytes)
             return self._read_float16(buf, pos)
         
+        if field_type == 'bf16':
+            word, new_pos = self._read_int(buf, pos, 2, False)       # PS-558
+            return decode_bf16(word), new_pos
+
         if field_type == 'f32':
             return self._read_float(buf, pos, 4)
         
@@ -7563,6 +7602,13 @@ class SchemaInterpreter:
             stored = round_to_integer(raw)
             if not low <= stored <= high:
                 return False, False
+        elif field_type == 'bf16':
+            # CR-2026-149: through the type's storage is through PS-559's rounding; a
+            # value that rounds past the largest bf16 does not fit.
+            try:
+                stored = decode_bf16(encode_bf16(raw))
+            except ValueError:
+                return False, False
         elif field_type in FLOAT_TYPE_MAX:
             if abs(raw) > FLOAT_TYPE_MAX[field_type]:
                 return False, False
@@ -7808,7 +7854,7 @@ class SchemaInterpreter:
         
         # Float types should preserve fractional values
         field_type = field_def.get('type', 'u8')
-        if field_type in ('f16', 'f32', 'f64', 'udec', 'sdec', 'f32le16', 'f32be16le',
+        if field_type in ('f16', 'bf16', 'f32', 'f64', 'udec', 'sdec', 'f32le16', 'f32be16le',
                           'uflt16', 'sflt16', 'sflt24'):
             return float(value)
         
@@ -7910,6 +7956,9 @@ class SchemaInterpreter:
             fmt = '<e' if self.endian == Endian.LITTLE else '>e'
             return struct.pack(fmt, float(value))
         
+        if field_type == 'bf16':
+            return self._write_int(encode_bf16(value, field_def.get('name')), 2, False)
+
         if field_type == 'f32':
             fmt = '<f' if self.endian == Endian.LITTLE else '>f'
             return struct.pack(fmt, float(value))

@@ -209,7 +209,7 @@ public static class Helpers
     public static int InferLengthFromType(FieldType type) => type switch
     {
         FieldType.U8 or FieldType.S8 => 1,
-        FieldType.U16 or FieldType.S16 or FieldType.F16 => 2,
+        FieldType.U16 or FieldType.S16 or FieldType.F16 or FieldType.BF16 => 2,
         FieldType.U24 or FieldType.S24 => 3,
         FieldType.U32 or FieldType.S32 or FieldType.F32
             or FieldType.U32LE16 or FieldType.S32LE16 or FieldType.F32LE16
@@ -359,6 +359,7 @@ public static class Helpers
             "s32" or "i32" or "int32" => FieldType.S32,
             "s64" or "i64" or "int64" => FieldType.S64,
             "f16" => FieldType.F16,
+            "bf16" => FieldType.BF16,
             "f32" => FieldType.F32,
             "f64" => FieldType.F64,
             "udec" => FieldType.UDec,

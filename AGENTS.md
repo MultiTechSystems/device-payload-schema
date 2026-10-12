@@ -112,7 +112,7 @@ explicitly.
 ## Schema language cheat sheet
 
 ```
-TYPES:        u8 u16 u24 u32 u64 | s8 s16 s24 s32 s64 | f16 f32 f64 | bool
+TYPES:        u8 u16 u24 u32 u64 | s8 s16 s24 s32 s64 | f16 bf16 f32 f64 | bool
               ascii hex bytes base64 | number integer string boolean | skip enum | udec sdec
               aliases uint8..uint64 int8..int64 i8..i64 - nothing else, case-sensitive
 BYTES FORMAT: hex hex:upper base64 array | separator (hex formats only)
@@ -2444,6 +2444,47 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     `test_cr_2026_141_covered_peek.py` (reference and runtime, decoding back where a case
     gives `decoded`), Go `cr141_test.go`, Java `CR2026141Test`, C# `CR2026_141Tests`; C has
     `test_a_covered_peek_is_derived`, in the one-byte ranges its struct API builds.
+
+- **CR-2026-149 (PS-558, PS-559; PS-055/055a amended): `bf16`.** The upper 16 bits of an
+  IEEE 754 binary32 (spec main, applied for 0.5.5). Decode reads the word in the field's
+  effective byte order and reports the binary32 whose low half is zero; an infinity or NaN
+  is absent (PS-282), as for f32. Encode rounds the binary64 value to the nearest bf16, a tie
+  to the even fraction, **once and never through a float32** - 1 + 2^-8 + 2^-40 is `3f81`,
+  where a binary32 detour rounds to the tie first and gives `3f80` - and a finite value that
+  rounds past 0x7F7F is a PS-168 error in the prototype's text, `Field 'x': 3.4e+38 is outside
+  the range of bf16, -3.3895313892515355e+38 to 3.3895313892515355e+38 (PS-168)`; NaN and the
+  infinities are written as `7fc0`, `7f80`, `ff80`.
+  - **Where:** one helper pair per language - Python `decode_bf16`/`encode_bf16`
+    (`schema_interpreter.py`), Go `go/schema/cr149.go`, Java `Bf16`, C# `Bf16`, and the TS013
+    generator's `readBf16`/`decodeBf16` (a `DataView` `setUint16` into the upper half, then
+    `getFloat32`) and `encBf16` in `ENCODER_RUNTIME_JS`. The type is in `validate_schema`'s
+    vocabulary, Go's `canonicalTypes`, Java's `FieldType`, C#'s `FieldType` and the output
+    schema (a number). `tools/schema_binary.py` refuses it for C through the same
+    "no such type" refusal as the minifloats (it is not in `C_REPRESENTABLE_TYPES`); the C
+    harness files the fixtures as C gaps.
+  - **CR-2026-148's exact comparison:** "through the type's storage" is through PS-559's
+    rounding, in `_case_takes` and its four ports; a value that rounds past the largest bf16
+    does not fit. Exercised by the encode cases, not a corpus vector.
+  - **Found on the way, in Java and C#:** both wrote a number of 1e21 or more in their own
+    exponent forms (`3.4E38`, `3.4E+38`) where PS-168's text is JavaScript's `3.4e+38`; their
+    `jsNumber`/`JsNumber` now write it as JavaScript does, and C# writes a number from 1e-6 up
+    in fixed notation. No earlier message carried so large a value.
+  - **The prototype's document-level `endian` gap is not ours:** its `encode()` wrote a field
+    with no `endian` of its own big-endian under a little-endian document. All five encoders
+    pass the plain case (`document_endian_on_encode` in `tests/cr-2026-149-cases.yaml`: Go's
+    `Encode`, Java, C#, the reference and the generated codec); Go's `EncodeOrdered` and
+    `EncodeWithPort` share its `encodeToContext`.
+  - **Fixtures:** `_language-conformance/bf16.yaml` (Netvox r718e's three accelerations from
+    the vendor decoder run under node - `B3 40` little-endian is 5.59375 - a negative, the
+    smallest subnormal and the largest finite, every vector round-tripping) and
+    `bf16-specials.yaml` (infinities and NaN: absent, so no round trip).
+    `tests/cr-2026-149-cases.yaml` is the shared encode case list (ties both ways, the
+    double-rounding trap, the overflow tie and the largest value, subnormals, the document
+    endian case), read by all five; NaN and the infinities cannot be JSON input, so each
+    language's `cr149` test holds them.
+  - **Floors:** decode +9 in Go, Java and C# (2709 -> 2718); re-encode +6 everywhere
+    (Python, Java 2115 -> 2121; C# 2116 -> 2122; Go 2133 -> 2139, plain 2106 -> 2112), all
+    `plain fixed` (148 -> 154).
 
 - **Per-definition tables are held by identity, never by address alone** (found auditing
   for the spec prototype's `id()`-keyed SIBLINGS defect, CR-2026-141). Python's decode

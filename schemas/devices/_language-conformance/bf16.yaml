@@ -1,0 +1,44 @@
+# bf16, the upper half of an IEEE 754 binary32 (PS-558, PS-559, CR-2026-149).
+#
+# The word is read in the field's effective byte order, then read as the binary32 whose
+# lower 16 bits are zero. `le` is little-endian as Netvox r718e sends it, `be` is the
+# document's big-endian. Every value here is exact in bf16, and every vector round-trips:
+# the encoder rounds the binary64 value to the nearest bf16, a tie to the even fraction.
+# Infinities and NaN, which decode as absent (PS-282) and so cannot round-trip, are in
+# bf16-specials.yaml.
+name: probe_bf16
+endian: big
+fields:
+- name: le
+  type: bf16
+  endian: little
+- name: be
+  type: bf16
+test_vectors:
+# r718e's AccelerationX, Y and Z from payload 01 C7 01 24 B3 40 B2 C0 6A 3E 00 (fPort 6),
+# bytes 4 to 9, with what the vendor's decoder reports (run under node, to 6 decimals).
+# Each word is given to `le` as sent and to `be` byte-swapped.
+- name: vendor_acceleration_x
+  source: vendor-codec
+  payload: "B340 40B3"
+  expected: {le: 5.59375, be: 5.59375}
+- name: vendor_acceleration_y_negative
+  source: vendor-codec
+  payload: "B2C0 C0B2"
+  expected: {le: -5.5625, be: -5.5625}
+- name: vendor_acceleration_z
+  source: vendor-codec
+  payload: "6A3E 3E6A"
+  expected: {le: 0.228515625, be: 0.228515625}
+- name: one_and_zero
+  source: spec-example
+  payload: "803F 0000"
+  expected: {le: 1.0, be: 0}
+- name: smallest_subnormal
+  source: spec-example
+  payload: "0100 8001"
+  expected: {le: 9.183549615799121e-41, be: -9.183549615799121e-41}
+- name: largest_finite
+  source: spec-example
+  payload: "7F7F FF7F"
+  expected: {le: 3.3895313892515355e+38, be: -3.3895313892515355e+38}

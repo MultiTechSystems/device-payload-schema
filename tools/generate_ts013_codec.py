@@ -132,7 +132,7 @@ function encReverseCanonical(v, f) {                  // reverse_canonical_modif
   return v;
 }
 
-var ENC_FLOAT_TYPES = ["f16", "f32", "f64", "udec", "sdec", "f32le16", "f32be16le",
+var ENC_FLOAT_TYPES = ["f16", "bf16", "f32", "f64", "udec", "sdec", "f32le16", "f32be16le",
                        "uflt16", "sflt16", "sflt24"];
 
 /* PS-168, PS-552: the value as the input gave it, for a rejection to name (_given_value). */
@@ -248,6 +248,35 @@ function encHalf(v) {
   }
   if (h >= 0x7C00) encFail("float too large to pack with e format");
   return sign | h;
+}
+
+/* bfloat16 from a double (encode_bf16, PS-559): rounded once from the binary64 value, a tie to
+ * the even fraction, never through a binary32; a finite value past the largest bf16 is a
+ * PS-168 error naming the field. */
+var ENC_BF16_MAX = (2 - Math.pow(2, -7)) * Math.pow(2, 127);
+function encBf16(v, f) {
+  if (isNaN(v)) return 0x7FC0;
+  var sign = (v < 0 || (v === 0 && 1 / v < 0)) ? 0x8000 : 0;
+  var a = Math.abs(v);
+  if (a === Infinity) return sign | 0x7F80;
+  var word, e = 0, m;
+  if (a !== 0) {
+    e = Math.floor(Math.log2(a));
+    if (Math.pow(2, e) > a) e -= 1;
+    if (Math.pow(2, e + 1) <= a) e += 1;
+  }
+  if (a === 0 || e < -126) {
+    word = encRint(a * Math.pow(2, 133));             // subnormal: fraction * 2**-133
+  } else {
+    m = encRint(a / Math.pow(2, e) * 128);            // 128..256, the leading bit included
+    if (m === 256) { m = 128; e += 1; }
+    word = ((e + 127) * 128) + (m - 128);
+  }
+  if (word >= 0x7F80) {
+    encFail("Field '" + f.name + "': " + String(v) + " is outside the range of bf16, " +
+            String(-ENC_BF16_MAX) + " to " + String(ENC_BF16_MAX) + " (PS-168)");
+  }
+  return sign | word;
 }
 
 function encWriteFloat(out, value, type, endian) {
@@ -411,6 +440,7 @@ function encFieldInner(out, f, value, endian, ctx) {  // _encode_field_inner
     out.push(((whole & 0x0F) << 4) | (n - whole * 10));
     return;
   }
+  if (type === "bf16") { encWriteInt(out, encBf16(Number(value), f), 2, false, endian); return; }
   if (type === "f16" || type === "f32" || type === "f64") { encWriteFloat(out, value, type, endian); return; }
   if (type === "bool") { out.push(value ? 1 : 0); return; }
   if (type === "skip") {
@@ -1120,6 +1150,8 @@ function encCaseTakes(f, value) {
       b = encBounds(bits, info[1]);
       if (stored < b[0] || stored > b[1]) return [false, false];
     }
+  } else if (t === "bf16") {                         // through PS-559's rounding
+    try { stored = decodeBf16(encBf16(raw, f)); } catch (e) { return [false, false]; }
   } else if (has_(ENC_FLOAT_MAX, t)) {
     if (Math.abs(raw) > ENC_FLOAT_MAX[t]) return [false, false];
     stored = t === "f64" ? raw : t === "f16" ? encF16Round(raw) : Math.fround(raw);
@@ -1901,7 +1933,7 @@ NUMERIC_TYPE_SIZES = {
     'u32le16': 4, 's32le16': 4, 'f32le16': 4,
     'u32be16le': 4, 's32be16le': 4, 'f32be16le': 4,
     'u64': 8, 'uint64': 8, 's64': 8, 'i64': 8, 'int64': 8,
-    'f16': 2, 'f32': 4, 'f64': 8,
+    'f16': 2, 'bf16': 2, 'f32': 4, 'f64': 8,
 }
 
 
@@ -1952,7 +1984,7 @@ def is_signed(t: str) -> bool:
 def is_float(t: str) -> bool:
     # Exactly the three float spellings: a prefix test admitted `float` and `float16`,
     # which are not types (CR-2026-037), and read them as four bytes.
-    return str(t) in ('f16', 'f32', 'f64')
+    return str(t) in ('f16', 'bf16', 'f32', 'f64')
 
 
 def field_endian_override(t: str, field: Optional[Dict[str, Any]] = None) -> Optional[str]:
@@ -2813,6 +2845,12 @@ function decodeEncoding(v, enc, size) {
 /* The MCCI minifloats (PS-417 to PS-419). Decoded by their formulas, never as IEEE half
  * precision (PS-421); an sflt24 with exponent 127 has no value and is left undefined, which
  * the output pass drops (PS-282). */
+function decodeBf16(word) {
+  var dv = new DataView(new ArrayBuffer(4));
+  dv.setUint16(0, word, false);
+  return dv.getFloat32(0, false);
+}
+
 function decodeMinifloat(type, w) {
   var sign, e, f, v;
   if (type === 'uflt16') {
@@ -2843,6 +2881,14 @@ function readF16(buf, pos, endian) {
   if (exp === 0) return sign * Math.pow(2, -14) * (frac / 1024);
   if (exp === 31) return frac ? NaN : sign * Infinity;
   return sign * Math.pow(2, exp - 15) * (1 + frac / 1024);
+}
+
+/* bfloat16 (PS-558): the word is the upper half of a binary32 whose lower half is zero. */
+function readBf16(buf, pos, endian) {
+  var w = readU(buf, pos, 2, endian);
+  var dv = new DataView(new ArrayBuffer(4));
+  dv.setUint16(0, w, false);
+  return dv.getFloat32(0, false);
 }
 
 function readF32(buf, pos, endian) {
@@ -3861,7 +3907,9 @@ function writeS(buf, pos, size, value, endian) {
             sz = type_size(ftype) or 4
             eo = field_endian_override(ftype, field)
             endian_arg = f'"{eo}"' if eo else 'endian'
-            if sz == 2:
+            if ftype == 'bf16':
+                lines.append(f'{i}  var {js_name} = readBf16(buf, pos, {endian_arg});')
+            elif sz == 2:
                 lines.append(f'{i}  var {js_name} = readF16(buf, pos, {endian_arg});')
             elif sz == 4:
                 lines.append(f'{i}  var {js_name} = readF32(buf, pos, {endian_arg});')

@@ -1420,6 +1420,12 @@ final class Encoder {
             if (!fitsBits(stored, t.defaultLength() * 8, t.isSigned())) {
                 return new boolean[] {false, false};
             }
+        } else if (t == FieldType.BF16) {
+            try {
+                stored = Bf16.decode(Bf16.encode(raw, f.getName()));   // PS-559's rounding
+            } catch (RuntimeException e) {
+                return new boolean[] {false, false};
+            }
         } else if (t != null && floatMax(t) != null) {
             if (Math.abs(raw) > floatMax(t)) return new boolean[] {false, false};
             stored = switch (t) {
@@ -2259,6 +2265,7 @@ final class Encoder {
                     field.getEffectiveEndian(schema.getEndian()));
             return switch (type) {
                 case F16, FLOAT16 -> writeInt(floatToHalfBits(raw), 2, false, useLittle);
+                case BF16 -> writeInt(Bf16.encode(raw, field.getName()), 2, false, useLittle);   // PS-559
                 case F64, FLOAT64 -> writeInt(Double.doubleToLongBits(raw), 8, false, useLittle);
                 default -> writeInt(Float.floatToIntBits((float) (double) raw) & 0xFFFFFFFFL,
                         4, false, useLittle);
@@ -2595,7 +2602,13 @@ final class Encoder {
         if (Math.abs(d) >= 1e-6 && Math.abs(d) < 1e21) {
             return new java.math.BigDecimal(Double.toString(d)).stripTrailingZeros().toPlainString();
         }
-        return Double.toString(d);
+        // Exponent form as JavaScript writes it: 3.4e+38, 1e-7 (Java's is 3.4E38, 1.0E-7).
+        String text = Double.toString(d);
+        int e = text.indexOf('E');
+        if (e < 0) return text;
+        String mantissa = text.substring(0, e), exponent = text.substring(e + 1);
+        if (mantissa.endsWith(".0")) mantissa = mantissa.substring(0, mantissa.length() - 2);
+        return mantissa + "e" + (exponent.startsWith("-") ? "" : "+") + exponent;
     }
 
     private static byte[] writeInt(long value, int size, boolean signed, boolean little) {

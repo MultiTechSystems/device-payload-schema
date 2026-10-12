@@ -773,7 +773,7 @@ def validate_field_list(fields: List[Dict], path: str, errors: List[str],
         's8', 's16', 's24', 's32', 's64',
         'i8', 'i16', 'i24', 'i32', 'i64',
         'int8', 'int16', 'int24', 'int32', 'int64',
-        'f16', 'f32', 'f64',
+        'f16', 'bf16', 'f32', 'f64',
         'bool', 'bytes', 'string', 'ascii', 'hex', 'base64',
         # PS-519: a literal type only; not an alias of `bool`, which reads a bit.
         'boolean',
