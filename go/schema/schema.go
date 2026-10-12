@@ -1003,6 +1003,11 @@ func ParseSchema(data string) (*Schema, error) {
 	if err := checkFieldNames(raw); err != nil {
 		return nil, err
 	}
+	// CR-2026-156: `sampled` only on a repeat, with an interval, an order and an anchor
+	// that mean something (PS-569).
+	if err := checkSampled(raw, order); err != nil {
+		return nil, err
+	}
 
 	schema := &Schema{repeatOnly: repeatOnlyNames(raw), keyOrder: order}
 	schema.rawName = raw["name"]

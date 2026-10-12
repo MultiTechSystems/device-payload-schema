@@ -116,6 +116,8 @@ public class Schema {
         // CR-2026-138: every field but a skip has a name (PS-553). Checked after the rules
         // above, as the spec prototype does, so a construct's own error keeps its text.
         FieldNames.check(raw);
+        // CR-2026-156: `sampled` only on a repeat, with a usable interval, order and anchor (PS-569).
+        Sampled.check(raw);
         Schema schema = new Schema();
         schema.repeatOnlyNames = Wave6a.repeatOnlyNames(raw);
         schema.metaName = raw.get("name");

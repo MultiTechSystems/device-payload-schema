@@ -29,7 +29,7 @@ final class References {
 
     /** Keys whose string value may be a {@code $} reference. */
     static final Set<String> REFERENCE_KEYS = Set.of("ref", "a", "b", "field", "count",
-            "byte_length", "carry", "instance", "unit", "identity");
+            "byte_length", "carry", "instance", "unit", "identity", "interval");
 
     /** Keys holding data, not declarations or references. A match's {@code default} is a field list. */
     static final Set<String> DATA_KEYS = Set.of("lookup", "values", "else", "value");

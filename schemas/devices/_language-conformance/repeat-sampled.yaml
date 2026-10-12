@@ -1,0 +1,59 @@
+# A history that says how it was taken (PS-567, PS-568, CR-2026-156). A device sends the
+# last few readings of one measurement, newest first, at a fixed interval. Each array
+# declares that interval, and `_meta` carries the declaration with its defaults written:
+#
+#   - `recent`: the interval is a field decoded earlier in the same frame, written
+#     {field: name};
+#   - `older`: the interval is a device setting the frame does not carry, written
+#     {configured: name}, and the order is the one the author gave;
+#   - `daily`: a plain number of seconds, with the order and the anchor left to their
+#     defaults (newest_first, rx_time).
+#
+# The decoded output is untouched: the arrays are reported as they were read, with no
+# times added and no element moved. A bad declaration is rejected at load; no vector kind
+# expects a failure, so tests/cr-2026-156-cases.yaml holds those for each implementation.
+name: probe_sampled_history
+endian: big
+fields:
+- name: period
+  type: u16
+- name: recent
+  type: repeat
+  count: 2
+  element: {type: u16, unit: ug/m3}
+  sampled: {interval: $period}
+- name: older
+  type: repeat
+  count: 2
+  element: {type: u16, unit: ug/m3}
+  sampled: {interval: {configured: history_period}, order: oldest_first, at: rx_time}
+- name: daily
+  type: repeat
+  until: end
+  element: {type: u8}
+  sampled: {interval: 86400}
+test_vectors:
+- name: three_histories
+  source: spec-example
+  payload: "0258 0001 0002 0003 0004 0a 0b 0c"
+  expected:
+    period: 600
+    recent: [1, 2]
+    older: [3, 4]
+    daily: [10, 11, 12]
+  expected_meta:
+    schema: probe_sampled_history
+    fields:
+      period: {type: u16}
+      recent:
+        type: repeat
+        element: {type: u16, unit: ug/m3}
+        sampled: {interval: {field: period}, order: newest_first, at: rx_time}
+      older:
+        type: repeat
+        element: {type: u16, unit: ug/m3}
+        sampled: {interval: {configured: history_period}, order: oldest_first, at: rx_time}
+      daily:
+        type: repeat
+        element: {type: u8}
+        sampled: {interval: 86400, order: newest_first, at: rx_time}
