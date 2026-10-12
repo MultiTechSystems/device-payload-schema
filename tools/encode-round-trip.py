@@ -71,6 +71,12 @@ The `inherent` reasons, each of which is a decision recorded elsewhere:
                     zero. The input here is the decode's own output, so such a rejection
                     means the decode reported no value for that field: it is filed here
                     when no other reason already explains the vector.
+  shared-label      A `lookup` or `enum` gives several codes the same label - vobo's '%'
+                    under 57 and 170 - so the label names no one code to write back. Every
+                    encoder rejects it, naming the field and the codes (PS-169, amended by
+                    CR-2026-146 for 0.5.5), where each used to write whichever code it found
+                    first. Read from the encoder's own error, per vector, since a schema
+                    with a shared label has many vectors that never report one.
   null-element      A repeat declaring `element` reports an omitted value as `null` in its
                     position (PS-528). An encoder writes the element's first `sentinel` for
                     it, and refuses the array, naming the position, where the element
@@ -120,6 +126,7 @@ INHERENT = (
     "last-value",
     "ambiguous-case",
     "null-element",
+    "shared-label",
 )
 
 #: Recoverable in principle, so counted apart from the inherent set.
@@ -310,7 +317,10 @@ def run():
             kind = ("error" if result.errors
                     else "length" if len(got) != len(want) else "bytes")
             counts[kind] += 1
-            reason = classify(decoded, traits, schema, port)
+            if any("(PS-169)" in e for e in result.errors):
+                reason = "shared-label"                                  # PS-169
+            else:
+                reason = classify(decoded, traits, schema, port)
             if reason is None and any(
                     "Missing required field: " in e for e in result.errors):
                 reason = "absent-value"                                  # PS-551

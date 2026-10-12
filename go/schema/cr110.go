@@ -478,7 +478,7 @@ func tlvCaseOrder(field Field, order keyOrder) []string {
 // outside its type's range is not taken. A value that is not a number after the lookup -
 // a string, a boolean, a list - is taken, as the reference takes it.
 func fieldTakes(f Field, value any) bool {
-	reversed, err := reverseLookupLabel(f, value)
+	reversed, err := reverseLookupAnyCode(f, value)
 	if err != nil {
 		return false
 	}

@@ -1,0 +1,72 @@
+# A discriminator with a fraction is compared as the number it is (PS-484's reading of a
+# lookup, applied to case keys): 2.5 equals no integer key and no member of a list key, so
+# it selects none of them and the `default` decides. It is never truncated to 2, which Go
+# did on both decode and encode. A range key `lo..hi` is inclusive bounds (PS-152), and 7.5
+# lies within 7..8, as the reference and the spec prototype both read it.
+#
+# The discriminator is a read byte halved, so an odd byte gives the fraction.
+name: probe_match_fractional_discriminator
+endian: big
+fields:
+  - name: kind
+    type: u8
+    div: 2
+  - match:
+      field: $kind
+      default:
+        - name: fallback
+          type: u8
+      cases:
+        2:
+          - name: two
+            type: u8
+        "[4, 5]":
+          - name: listed
+            type: u8
+        7..8:
+          - name: ranged
+            type: u8
+test_vectors:
+  - name: an_integral_value_selects_its_key
+    description: "4 halved is 2, which the single key 2 matches"
+    payload: "0407"
+    source: generated
+    expected:
+      kind: 2
+      two: 7
+    expected_warnings: []
+  - name: a_fraction_matches_no_single_key
+    description: "5 halved is 2.5, which equals no key, so the default's field is read"
+    payload: "0507"
+    source: generated
+    expected:
+      kind: 2.5
+      fallback: 7
+      two: null
+    expected_warnings: []
+  - name: a_fraction_matches_no_list_member
+    description: "9 halved is 4.5, which is neither 4 nor 5"
+    payload: "0907"
+    source: generated
+    expected:
+      kind: 4.5
+      fallback: 7
+      listed: null
+    expected_warnings: []
+  - name: a_fraction_inside_a_range_selects_it
+    description: "15 halved is 7.5, which lies between the bounds 7 and 8"
+    payload: "0f07"
+    source: generated
+    expected:
+      kind: 7.5
+      ranged: 7
+    expected_warnings: []
+  - name: a_fraction_past_a_range_takes_the_default
+    description: "17 halved is 8.5, above the range's upper bound"
+    payload: "1107"
+    source: generated
+    expected:
+      kind: 8.5
+      fallback: 7
+      ranged: null
+    expected_warnings: []

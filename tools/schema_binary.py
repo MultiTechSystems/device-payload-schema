@@ -321,6 +321,18 @@ def field_errors(field: Dict, schema_endian: str = 'big') -> List[str]:
         start, end = map(int, re.match(r'^u8\[(\d+):(\d+)\]$', ftype).groups())
         if not 0 <= start <= end <= 7:
             refuse(f"type {ftype!r}", "not a bit range of one byte")
+        if field.get('consume', 0) not in (0, 1, None, False, True):
+            # The record's consume marker is one byte, 0x01: `consume: 2` would come back
+            # as 1. The C interpreter advances N bytes since CR-2026-136; the format
+            # cannot say N, so it is refused rather than changed.
+            refuse(f"`consume: {field.get('consume')!r}`",
+                   "this format's consume marker advances one byte")
+    elif re.match(r'^[us](8|16|24|32|64)\[\d+:\d+\]$', ftype):
+        # The C interpreter reads a multi-byte or signed base since CR-2026-136, but the
+        # bitfield record holds a start and a width only: its base is one unsigned byte.
+        # Carrying N or the sign needs a record this format version does not have.
+        refuse(f"type {ftype!r}", "this format's bitfield record has a one-byte "
+               "unsigned base; a multi-byte or signed base has no slot")
     elif ftype == 'boolean':
         # A boolean literal (PS-519) reads no bytes; this format has no literal record,
         # so it would have gone out as a u8 and read a byte the payload does not carry.
