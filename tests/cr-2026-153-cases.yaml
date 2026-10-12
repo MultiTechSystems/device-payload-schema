@@ -29,6 +29,13 @@ cases:
   input: '{"h": 1, "a": 258}'
   payload: "010102"
 
+- name: own_case_wins_over_nested_derivation
+  # CR-2026-155: the match's own case, chosen by score, comes before a nested match's
+  # derivation (PS-551), so case 0 is written although the nested case 1 is filled too.
+  schema: "name: t\nendian: big\nfields:\n  - match:\n      length: 1\n      var: rt\n      cases:\n        0: [{name: temp, type: s16, div: 100}]\n      default:\n        - match:\n            field: $rt\n            default: skip\n            cases:\n              1: [{name: temp, type: s16, div: 100}]\n"
+  input: '{"temp": 26}'
+  payload: "000a28"
+
 # --- PS-564: the bytes written select the case chosen ------------------------------
 
 - name: the_bytes_after_select_another_case

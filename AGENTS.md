@@ -1098,19 +1098,14 @@ this note's fall-through says `match` only where the match has neither.
   `0904` with no error. Both now follow Go, Java and C#: the default, else `No matching
   case for value 9`; the score runs only where no discriminator is given. A `skip` default
   writes the discriminator alone, as a decoder reads it.
-- **Cases:** `tests/cr-2026-153-cases.yaml` (10), read by `test_cr_2026_153_cases.py`
+- **Cases:** `tests/cr-2026-153-cases.yaml` (11), read by `test_cr_2026_153_cases.py`
   (reference and runtime), Go `cr153_test.go`, Java `CR2026153Test`, C# `CR2026_153Tests`.
   Corpus and registry (Python, 5475 of 32336 round trips at f57faba) unchanged; no floor
   moves.
-- **Where the score and CR-2026-152's "fills exactly one" disagree.** Both can apply to an
-  inline match whose own case and whose default's nested match report the same name:
-  `{0: [temp]}` beside a `default` holding `match: {field: $rt, cases: {1: [temp]}}`,
-  given `{temp: 26}`. The score ties case 0 with the default and takes case 0, writing
-  `000a28`; the nested derivation would take 1, writing `010a28`. Both decode to
-  `{temp: 26}`, so neither is wrong, but the encoder runs the score first (as merged with
-  #139) while PS-563's text has it run only where PS-551 fixes nothing - which would put
-  the nested derivation first and write `010a28`. Raised with the spec session; the code
-  is unchanged.
+- **The match's own case wins** (CR-2026-155, editorial, PS-551 and PS-563): an inline
+  match settles its case in the order given discriminator or peek, own case by score or
+  the 0-byte case, nested derivation, default, reject - so `{0: [temp]}` beside a nested
+  `{1: [temp]}` given `{temp: 26}` writes `000a28` (`own_case_wins_over_nested_derivation`).
 Cases: `tests/silent-empty-cases.yaml` (14), read by the reference and the runtime
 (`test_silent_empty_cases.py`), Go (`silent_empty_test.go`, both APIs), Java
 (`SilentEmptyTest`) and C# (`SilentEmptyTests`).
