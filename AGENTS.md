@@ -2486,6 +2486,40 @@ improved. The Go, Java and C# corpus runners write per-vector reports only when
     (Python, Java 2115 -> 2121; C# 2116 -> 2122; Go 2133 -> 2139, plain 2106 -> 2112), all
     `plain fixed` (148 -> 154).
 
+- **CR-2026-150 (PS-560, PS-561): `ascii` with `numeral: decimal|hex`** (spec main 96e3638,
+  for 0.5.5). An `ascii` field reports its digit text as an integer, so modifiers, lookups and
+  references apply to it (PS-476, PS-523) and the output schema says `integer`. Decode is
+  **strict**: after PS-534's trailing-0x00 removal the whole text must match `[+-]?[0-9]+`
+  (decimal) or `[0-9A-Fa-f]+` (hex, no sign, no `0x`), else `Field 'v': '0x1A' is not a hex
+  numeral (PS-560)` - the text in single quotes, an all-NUL value as `''`. No prefix is ever
+  read, which is where JavaScript's `parseInt` (the vendor's) differs. Encode writes the
+  integer, rounded as PS-552 requires after the modifiers are inverted, in uppercase hex or
+  decimal, right-aligned and `0`-filled to `length` after any sign; a negative hex value or
+  one that does not fit is `Field 'v': 65536 does not fit 4 hex digits (PS-168)` (the value
+  as JavaScript writes it, the count the field's `length`). `1a` and `+65` decode and come
+  back as `001A` and `0065`, so only canonical text round-trips.
+  - **Load-time (PS-560):** `Field 'v': numeral is defined only on an ascii field, not on u8
+    (PS-560)` and `Field 'v': numeral must be decimal or hex, not 'octal' (PS-560)`, the
+    prototype's text, from Python `numeral_errors` (in `schema_iterator_errors`, so the
+    validator and the TS013 generator too), Go `checkNumeral` (from `checkFieldRules`), Java
+    `Numeral.check` (from `checkWave4`) and C# `Numeral.Check` (from `CheckWave4`). The key is
+    in `tools/schema_vocabulary.py` (all five decoders) and `payload-schema.json`.
+  - **Where:** Python `decode_numeral`/`encode_numeral`, Go `go/schema/cr150.go`, Java
+    `Numeral`, C# `Numeral`, the generator's decode branch (a regex test before `parseInt`,
+    then the field's modifiers like any number) and `encNumeral` in `ENCODER_RUNTIME_JS`;
+    `generate_output_schema.py` maps it to `integer`. C: `schema_binary.py` refuses `numeral`
+    (PS-446) and the harness files it as a C gap.
+  - **Not done:** a tlv case holding a `numeral` field takes any number (CR-2026-148's
+    "fits" does not test the digit count), so a value too wide for `length` is PS-168 from
+    the case chosen rather than a reason to choose another case.
+  - **Fixtures and cases:** `_language-conformance/ascii-numeral.yaml` (Dragino lbt1's mode 3
+    `major`, `minor` and `rssi`, four vendor-codec vectors, all round-tripping) and
+    `tests/cr-2026-150-cases.yaml` with three lists - `decode` (the prototype's pins and the
+    strict rejections), `cases` (encode) and `load` - read by all five (`test_cr_2026_150_cases.py`
+    for the reference and the generated codec, Go `cr150_test.go`, Java `CR2026150Test`, C#
+    `CR2026_150Tests`). Floors: decode +4 in Go, Java and C# (2718 -> 2722), re-encode +4
+    everywhere, all `plain fixed` (154 -> 158; C# 2126, Go 2143, plain 2116).
+
 - **Per-definition tables are held by identity, never by address alone** (found auditing
   for the spec prototype's `id()`-keyed SIBLINGS defect, CR-2026-141). Python's decode
   tables `_guard_else`, `_pre_lookup` and `_lookup_numbers` and the PS-168 `_encode_given`

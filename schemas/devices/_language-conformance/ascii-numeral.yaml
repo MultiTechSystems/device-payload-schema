@@ -1,0 +1,44 @@
+# An ascii field with `numeral` reports its digit text as an integer (PS-560, PS-561,
+# CR-2026-150): the fields of Dragino lbt1's mode 3 report (fPort 2, bytes 18 to 31), where
+# the vendor decoder reads `major` and `minor` with parseInt(text, 16) and `rssi` with
+# parseInt(text).
+#
+# The text is taken whole or not at all: strict rejection (" 065", "0x1A", "12G4", empty
+# text) is held by tests/cr-2026-150-cases.yaml, since no vector kind expects a failure.
+# Every vector here is canonical, zero-filled with uppercase hex, so it round-trips: the
+# vendor's own decoder also accepts "1a" or "+065", which re-encode as "001A" and "0065".
+name: probe_ascii_numeral
+endian: big
+fields:
+- name: major
+  type: ascii
+  length: 4
+  numeral: hex
+- name: minor
+  type: ascii
+  length: 4
+  numeral: hex
+- name: pad
+  type: skip
+  length: 2
+- name: rssi
+  type: ascii
+  length: 4
+  numeral: decimal
+test_vectors:
+- name: vendor_mixed
+  source: vendor-codec
+  payload: "303031413030464600002d303635"
+  expected: {major: 26, minor: 255, rssi: -65}
+- name: vendor_zeros_and_all_f
+  source: vendor-codec
+  payload: "3030303046464646000030303030"
+  expected: {major: 0, minor: 65535, rssi: 0}
+- name: vendor_positive_rssi
+  source: vendor-codec
+  payload: "3030303130303130000030303635"
+  expected: {major: 1, minor: 16, rssi: 65}
+- name: vendor_uppercase_hex_and_small_negative
+  source: vendor-codec
+  payload: "414243443132333400002d303031"
+  expected: {major: 43981, minor: 4660, rssi: -1}

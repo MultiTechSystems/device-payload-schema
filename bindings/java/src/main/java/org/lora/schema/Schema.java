@@ -572,6 +572,7 @@ public class Schema {
     @SuppressWarnings("unchecked")
     private static void checkWave4(Map<String, Object> fm) {
         String at = "Field '" + fm.get("name") + "': ";
+        Numeral.check(fm);                                    // PS-560
         if (fm.containsKey("match_value")) {
             throw new SchemaException(at + "match_value is withdrawn; write a signed type (sN), a "
                     + "signed bit range (sN[start:end]), encoding, match or guard instead (PS-426)");
@@ -1111,6 +1112,7 @@ public class Schema {
         }
         
         if (fm.get("encoding") instanceof String encoding) f.setEncoding(encoding);
+        if (fm.get("numeral") instanceof String numeral) f.setNumeral(numeral);
 
         // byte_group: fields packed into shared bytes. Written either as a list of
         // fields with a sibling `size`, or as {size: N, fields: [...]}.
@@ -1859,6 +1861,9 @@ public class Schema {
                 int end = str.length();
                 while (end > 0 && str.charAt(end - 1) == '\0') end--;
                 value = str.substring(0, end);
+                if (field.getNumeral() != null) {
+                    value = Numeral.decode(field.getName(), (String) value, field.getNumeral());   // PS-560
+                }
             }
             
             case HEX -> {
