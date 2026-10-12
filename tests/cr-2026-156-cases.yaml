@@ -1,0 +1,80 @@
+# CR-2026-156 (0.5.5, PS-567 to PS-569): a repeat declares that its elements are samples
+# taken at a fixed interval, and `_meta` carries the declaration with its defaults filled in.
+#
+# One case list, read by the reference and the validator and generator's load path
+# (tests/test_cr_2026_156_sampled.py), Go (go/schema/cr156_test.go), Java (CR2026156Test.java)
+# and C# (CR2026_156Tests.cs). C has no repeat; tools/schema_binary.py refuses the key.
+#
+# `schema` is YAML text. A case is either
+#   - `payload` (hex), `sampled` (JSON text: the `_meta.fields.pm25.sampled` entry the
+#     interpreter produces, order and at filled in) and optionally `decoded` (JSON text:
+#     what `pm25` decodes to, which `sampled` never changes), or
+#   - `error`: the text the schema's load error contains. The wording is the spec
+#     prototype's check_sampled (TestCR2026156SampledHistory); the last two are PS-539's,
+#     which the prototype does not apply to `interval` and PS-569 requires.
+#
+cases:
+
+- name: breath_configured_interval
+  schema: "name: t\nversion: 1\nfields:\n  - name: pm25\n    type: repeat\n    until: end\n    element: {type: u16, unit: ug/m3}\n    sampled: {interval: {configured: history_period}}\n"
+  payload: "000a000b"
+  sampled: "{\"interval\": {\"configured\": \"history_period\"}, \"order\": \"newest_first\", \"at\": \"rx_time\"}"
+  decoded: "[10, 11]"
+
+- name: a_number_oldest_first
+  schema: "name: t\nversion: 1\nfields:\n  - name: pm25\n    type: repeat\n    until: end\n    element: {type: u16, unit: ug/m3}\n    sampled: {interval: 600, order: oldest_first}\n"
+  payload: "000a"
+  sampled: "{\"interval\": 600, \"order\": \"oldest_first\", \"at\": \"rx_time\"}"
+  decoded: "[10]"
+
+- name: a_reference
+  schema: "name: t\nversion: 1\nfields:\n  - {name: period, type: u16}\n  - name: pm25\n    type: repeat\n    until: end\n    element: {type: u16, unit: ug/m3}\n    sampled: {interval: $period}\n"
+  payload: "0258000a"
+  sampled: "{\"interval\": {\"field\": \"period\"}, \"order\": \"newest_first\", \"at\": \"rx_time\"}"
+  decoded: "[10]"
+
+- name: at_a_timestamps_entry
+  schema: "name: t\nversion: 1\nmetadata:\n  timestamps:\n    - {name: sent, mode: unix_epoch, field: ts}\nfields:\n  - {name: ts, type: u32}\n  - name: pm25\n    type: repeat\n    until: end\n    element: {type: u16, unit: ug/m3}\n    sampled: {interval: 60, at: sent}\n"
+  payload: "6553f100000a"
+  sampled: "{\"interval\": 60, \"order\": \"newest_first\", \"at\": \"sent\"}"
+  decoded: "[10]"
+
+- name: no_interval
+  schema: "name: t\nversion: 1\nfields:\n  - name: pm25\n    type: repeat\n    until: end\n    element: {type: u16, unit: ug/m3}\n    sampled: {}\n"
+  error: "Field 'pm25': sampled needs an interval (PS-569)"
+
+- name: interval_zero
+  schema: "name: t\nversion: 1\nfields:\n  - name: pm25\n    type: repeat\n    until: end\n    element: {type: u16, unit: ug/m3}\n    sampled: {interval: 0}\n"
+  error: "Field 'pm25': sampled interval 0 is not a number of seconds above 0, a $ reference or {configured: name} (PS-569)"
+
+- name: interval_negative
+  schema: "name: t\nversion: 1\nfields:\n  - name: pm25\n    type: repeat\n    until: end\n    element: {type: u16, unit: ug/m3}\n    sampled: {interval: -5}\n"
+  error: "Field 'pm25': sampled interval -5 is not a number of seconds above 0, a $ reference or {configured: name} (PS-569)"
+
+- name: interval_a_bare_string
+  schema: "name: t\nversion: 1\nfields:\n  - name: pm25\n    type: repeat\n    until: end\n    element: {type: u16, unit: ug/m3}\n    sampled: {interval: period}\n"
+  error: "Field 'pm25': sampled interval 'period' is not a number of seconds above 0, a $ reference or {configured: name} (PS-569)"
+
+- name: interval_another_mapping
+  schema: "name: t\nversion: 1\nfields:\n  - name: pm25\n    type: repeat\n    until: end\n    element: {type: u16, unit: ug/m3}\n    sampled: {interval: {cfg: x}}\n"
+  error: "Field 'pm25': sampled interval {'cfg': 'x'} is not a number of seconds above 0, a $ reference or {configured: name} (PS-569)"
+
+- name: order_sideways
+  schema: "name: t\nversion: 1\nfields:\n  - name: pm25\n    type: repeat\n    until: end\n    element: {type: u16, unit: ug/m3}\n    sampled: {interval: 60, order: sideways}\n"
+  error: "Field 'pm25': sampled order 'sideways' is not newest_first or oldest_first (PS-569)"
+
+- name: at_names_no_timestamp
+  schema: "name: t\nversion: 1\nfields:\n  - name: pm25\n    type: repeat\n    until: end\n    element: {type: u16, unit: ug/m3}\n    sampled: {interval: 60, at: sampled_time}\n"
+  error: "Field 'pm25': sampled at 'sampled_time' is neither rx_time nor a unix_epoch or iso8601 timestamps entry (PS-569)"
+
+- name: sampled_on_a_u8
+  schema: "name: t\nversion: 1\nfields:\n  - {name: v, type: u8, sampled: {interval: 60}}\n"
+  error: "Field 'v': sampled is defined only on a repeat, not on u8 (PS-569)"
+
+- name: a_reference_read_before_it_is_declared
+  schema: "name: t\nversion: 1\nfields:\n  - name: pm25\n    type: repeat\n    until: end\n    element: {type: u16, unit: ug/m3}\n    sampled: {interval: $late}\n  - {name: late, type: u16}\n"
+  error: "`$late` (interval) is referenced before the schema declares it (PS-539, PS-122)"
+
+- name: a_reference_to_nothing
+  schema: "name: t\nversion: 1\nfields:\n  - name: pm25\n    type: repeat\n    until: end\n    element: {type: u16, unit: ug/m3}\n    sampled: {interval: $nowhere}\n"
+  error: "`$nowhere` (interval) names no field"

@@ -1542,7 +1542,7 @@ def annotation_schema_errors(node, _top=True):
 #: Keys whose string value may be a `$` reference (PS-539), as the spec prototype's
 #: key_vocabulary.REFERENCE_KEYS lists them.
 REFERENCE_KEYS = ('ref', 'a', 'b', 'field', 'count', 'byte_length', 'carry', 'instance',
-                  'unit', 'identity')
+                  'unit', 'identity', 'interval')
 #: Keys whose string value is a template of `${name}` references (PS-265, PS-373).
 TEMPLATE_KEYS = ('name_from',)
 #: Keys under which a field tree holds data, not declarations or references. A
@@ -2668,6 +2668,66 @@ def field_name_errors(schema):
     return errors
 
 
+def sampled_meta(sampled):
+    """PS-568: a repeat's `sampled`, from the schema alone, with `order` and `at` filled
+    in; a `$name` interval is written {"field": name}."""
+    interval = sampled['interval']
+    if isinstance(interval, str):
+        interval = {'field': interval[1:]}
+    return {'interval': interval, 'order': sampled.get('order', 'newest_first'),
+            'at': sampled.get('at', 'rx_time')}
+
+
+def sampled_errors(schema):
+    """PS-569 (CR-2026-156): `sampled` only on a repeat; an interval above 0, a `$`
+    reference or {configured: name}; a known order; `at` is rx_time or a unix_epoch or
+    iso8601 timestamps entry. The wording is the spec prototype's check_sampled. A `$`
+    reference must name a field the repeat can see, which reference_errors holds to
+    PS-539 (`interval` is one of its reference keys)."""
+    metadata = schema.get('metadata') if isinstance(schema.get('metadata'), dict) else {}
+    times = {t.get('name') for t in metadata.get('timestamps') or []
+             if isinstance(t, dict) and t.get('mode') in ('unix_epoch', 'iso8601')}
+    errors = []
+
+    def bad(field, why):
+        errors.append(f"Field '{field.get('name')}': sampled {why} (PS-569)")
+
+    def walk(node):
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+        elif isinstance(node, dict):
+            if 'sampled' in node and 'type' in node:
+                check(node, node['sampled'])
+            for key, value in node.items():
+                if key != 'test_vectors' and isinstance(value, (list, dict)):
+                    walk(value)
+
+    def check(field, sampled):
+        if field.get('type') != 'repeat':
+            return bad(field, f"is defined only on a repeat, not on {field.get('type')}")
+        if not isinstance(sampled, dict) or 'interval' not in sampled:
+            return bad(field, "needs an interval")
+        interval = sampled['interval']
+        if isinstance(interval, bool) or not (
+                (isinstance(interval, (int, float)) and interval > 0)
+                or (isinstance(interval, str) and interval.startswith('$'))
+                or (isinstance(interval, dict) and set(interval) == {'configured'}
+                    and isinstance(interval['configured'], str))):
+            return bad(field, f"interval {interval!r} is not a number of seconds above 0, "
+                              f"a $ reference or {{configured: name}}")
+        if sampled.get('order', 'newest_first') not in ('newest_first', 'oldest_first'):
+            return bad(field, f"order {sampled.get('order')!r} is not newest_first or "
+                              f"oldest_first")
+        at = sampled.get('at', 'rx_time')
+        if at != 'rx_time' and at not in times:
+            bad(field, f"at {at!r} is neither rx_time nor a unix_epoch or iso8601 "
+                       f"timestamps entry")
+
+    walk({k: schema.get(k) for k in ('header', 'fields', 'ports', 'definitions')})
+    return errors
+
+
 def schema_iterator_errors(schema):
     """iterator_errors over the top-level and port field lists, and every tlv's reserve.
 
@@ -2695,6 +2755,7 @@ def schema_iterator_errors(schema):
     for node in tlvs(schema):
         errors.extend(tlv_reserve_errors(node))
     errors.extend(records_errors(schema))                            # PS-541
+    errors.extend(sampled_errors(schema))                            # PS-569
     errors.extend(condition_errors(schema))                          # PS-543
     return errors
 
@@ -3345,6 +3406,8 @@ def field_meta(field_def, repeat=None, siblings=None):
         if 'identity' in field_def:
             entry['identity'] = meta_reference(field_def['identity'], field_def, bare=True,
                                                siblings=siblings)
+        if 'sampled' in field_def:
+            entry['sampled'] = sampled_meta(field_def['sampled'])      # PS-568
     elif declared_type == 'repeat':
         inner = element_repeats(field_def.get('fields'))
         entry['elements'] = {name: field_meta(member, field_def, inner)     # PS-371
@@ -3353,6 +3416,8 @@ def field_meta(field_def, repeat=None, siblings=None):
         if 'identity' in field_def:
             entry['identity'] = meta_reference(field_def['identity'], field_def, bare=True,
                                                siblings=siblings)
+        if 'sampled' in field_def:
+            entry['sampled'] = sampled_meta(field_def['sampled'])      # PS-568
     elif declared_type == 'object':
         inner = element_repeats(field_def.get('fields'))
         entry['fields'] = {name: field_meta(member, siblings=inner)          # PS-481

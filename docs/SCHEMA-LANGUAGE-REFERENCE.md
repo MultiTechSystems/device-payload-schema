@@ -904,6 +904,37 @@ value at the same position. The sibling's element must carry a `lookup` or be a 
 two arrays of different lengths are a decode error naming both. A per-element `unit` or
 `ipso.instance` may name a sibling the same way.
 
+### A history: `sampled`
+
+A device that buffers readings sends them as a history: one frame, the last N samples of a
+measurement, taken at a fixed interval. A repeat says so with `sampled` (PS-567), in either
+its `element` or its `fields` form:
+
+```yaml
+- name: pm25
+  type: repeat
+  until: end
+  element: {type: u16, unit: ug/m3}
+  sampled: {interval: {configured: history_period}, order: newest_first}
+```
+
+- `interval` (required) is a number of seconds above 0, a `$field` decoded before the repeat
+  (its value after modifiers is the seconds), or `{configured: name}`, a device setting the
+  frame does not carry and the integration supplies.
+- `order` is `newest_first` (the default) or `oldest_first`.
+- `at` is the time of the newest sample: `rx_time` (the default) or the name of a
+  `metadata.timestamps` entry whose mode is `unix_epoch` or `iso8601`.
+
+Element k of N was sampled at `at` - k x `interval` for `newest_first`, and at `at` -
+(N - 1 - k) x `interval` for `oldest_first`. `sampled` is an annotation: decoding and
+encoding ignore it, and no time is added to the output. `_meta.fields.<repeat>.sampled`
+carries it with the defaults written (PS-568): `{"interval": {"configured": "history_period"},
+"order": "newest_first", "at": "rx_time"}`, a reference as `{"field": "period"}`. A schema is
+rejected at load where `sampled` is on a field that is not a repeat, the interval is absent,
+not above 0, a bare string without `$` or a mapping other than `configured`, the order is
+neither value, or `at` names no `unix_epoch`/`iso8601` entry (PS-569). Python, Go, Java and
+C# implement it; the C binary form has no repeat.
+
 ## Nested Objects
 
 ```yaml

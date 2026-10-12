@@ -218,6 +218,8 @@ C_UNSUPPORTED_KEYS = {
     # `type: repeat` is refused already; these name the keys where they appear.
     "element": "this format has no repeat record (PS-528)",
     "index_base": "this format has no repeat record (PS-530)",
+    # CR-2026-156: a repeat's sample interval (PS-567).
+    "sampled": "this format has no repeat record (PS-567)",
     # CR-2026-118: several records from one repeat element (PS-541).
     "records": "this format has no repeat record (PS-541)",
     "fields": "this format has no nested object record",

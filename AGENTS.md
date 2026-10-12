@@ -892,6 +892,54 @@ same values); `..._0006160405fc` is a separate gap.
   - 207 vectors encoded to an empty payload with no error, under `internal-field`,
     `pattern-tag` or `undecoded-bytes`. Closed by "No silent empty encode" below.
 
+- **CR-2026-156 (PS-567 to PS-569; applied on spec main for 0.5.5):
+  `sampled` on a repeat.** A repeat, in its `element` or its `fields` form, may declare that
+  its elements are samples of one measurement at a fixed interval: `interval` (required: a
+  number of seconds above 0, a `$field` decoded earlier, or `{configured: name}`), `order`
+  (`newest_first`, the default, or `oldest_first`) and `at` (`rx_time`, the default, or a
+  `metadata.timestamps` entry of mode `unix_epoch` or `iso8601`). It is an annotation:
+  decode and encode are untouched and no time is added to the output.
+  - **`_meta`:** `_meta.fields.<repeat>.sampled` is `{interval, order, at}` with the defaults
+    written, after `identity` (PS-568); a `$name` interval is `{"field": name}`, a number
+    stays a number. Where it lives: Python `sampled_meta` (`field_meta`), Go `sampledMeta`
+    (`go/schema/cr156.go`, from `fieldMeta`), Java `Sampled.meta`, C# `SchemaParser.SampledMeta`
+    (`dotnet/PayloadSchema/Sampled.cs`). The TS013 codec carries no `_meta`, so it only loads
+    and rejects.
+  - **Load (PS-569), in the spec prototype's words** (`check_sampled`): `Field 'x': sampled
+    needs an interval (PS-569)`, `... interval 0 is not a number of seconds above 0, a $
+    reference or {configured: name} (PS-569)`, `... order 'sideways' is not newest_first or
+    oldest_first ...`, `... at 'x' is neither rx_time nor a unix_epoch or iso8601 timestamps
+    entry ...`, `... is defined only on a repeat, not on u8 ...`. The value in a message is
+    Python's repr (`sampledRepr`, `Sampled.repr`, `PyRepr`). Python `sampled_errors`, called from
+    `schema_iterator_errors`, so the interpreter, the validator and the TS013 generator
+    refuse the same schemas; Go `checkSampled` (`schema.go`, after `checkFieldNames`), Java
+    `Sampled.check` (`Schema.java`), C# `CheckSampled` (`SchemaParser.cs`). Each walks the
+    header, fields, ports and definitions of the raw document, test_vectors skipped.
+  - **Where the prototype and PS-569 differ, this repository follows PS-569.** The text says an
+    interval that references a field the repeat cannot see is rejected (PS-539); the
+    prototype's `REFERENCE_KEYS` has no `interval`, so it accepts `$nowhere`. `interval` is a
+    reference key here in all four (`REFERENCE_KEYS`, `referenceKeys`, `REFERENCE_KEYS`,
+    `ReferenceKeys`), so a `$` interval naming nothing, or a field declared after the repeat,
+    gets PS-539's message (`interval` is the key it names). The walk reads `element` and
+    `fields` before the repeat's other keys, so a field of the repeat's own elements counts
+    as declared - the same looseness `identity` has.
+  - **Vocabulary:** `sampled` is a field key and a context of its own (`interval`, `order`,
+    `at`) in `tools/schema_vocabulary.py`, with the keys under `definitions.field` in
+    `schemas/payload-schema.json` (the object is closed). `docs/SCHEMA-LANGUAGE-REFERENCE.md`
+    carries a section; `tests/test_reference_vocabulary.py` requires it.
+  - **C:** has no repeat, and `tools/schema_binary.py` refuses `sampled` by name.
+  - **Cases:** `tests/cr-2026-156-cases.yaml` (the prototype's ten tests as four accepted
+    `_meta` cases and eleven rejections, two of them PS-539's) is read by
+    `test_cr_2026_156_sampled.py` (interpreter, validator and TS013 generator), Go
+    `cr156_test.go`, Java `CR2026156Test`, C# `CR2026_156Tests`. The fixture
+    `_language-conformance/repeat-sampled.yaml` carries `expected_meta` with all three
+    interval forms. **The only floor moves are that fixture's one vector:** decode +1 in Go,
+    Java and C#; re-encode +1 everywhere (Python, Java 2135 -> 2136, C# 2136 -> 2137, Go 2153
+    -> 2154, plain 2125 -> 2126), `repeat` 25 -> 26. A timestamps `at` is not in the fixture:
+    the enrichment is optional (see the rule on optional features), so that form is a case.
+  - **Open, as the CR says:** a unit other than seconds (`{value: 10, unit: min}`) is not
+    accepted; it can be added later without breaking a schema. The Integration Layer's half
+    (stamping each sample) reads `_meta...sampled` and is not here.
 - **CR-2026-151 (PS-551), applied on spec main for 0.5.5: a nested match fixes the
   discriminator it reads.** An inline match (`length:`) whose discriminator the input
   neither gives nor fixes through one of its own cases takes it from a nested match that

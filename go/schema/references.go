@@ -25,7 +25,7 @@ import (
 // referenceKeys are the keys whose string value may be a `$` reference.
 var referenceKeys = map[string]bool{"ref": true, "a": true, "b": true, "field": true,
 	"count": true, "byte_length": true, "carry": true, "instance": true, "unit": true,
-	"identity": true}
+	"identity": true, "interval": true}
 
 // referenceDataKeys hold data, not declarations or references. A `default` is data too,
 // except a match's, which is a field list.

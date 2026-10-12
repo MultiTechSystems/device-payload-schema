@@ -423,6 +423,9 @@ func (s *Schema) fieldMeta(decl map[string]any, repeat map[string]any, siblings 
 		if identity, present := decl["identity"]; present {
 			entry["identity"] = s.metaReference(identity, decl, true, siblings)
 		}
+		if sampled := asStringMap(decl["sampled"]); sampled != nil {
+			entry["sampled"] = sampledMeta(sampled) // PS-568
+		}
 	case declaredType == "repeat":
 		elements := map[string]any{} // PS-371
 		members := s.metaDeclarations(decl["fields"])
@@ -433,6 +436,9 @@ func (s *Schema) fieldMeta(decl map[string]any, repeat map[string]any, siblings 
 		entry["elements"] = elements
 		if identity, present := decl["identity"]; present {
 			entry["identity"] = s.metaReference(identity, decl, true, siblings)
+		}
+		if sampled := asStringMap(decl["sampled"]); sampled != nil {
+			entry["sampled"] = sampledMeta(sampled) // PS-568
 		}
 	case declaredType == "object":
 		nested := map[string]any{} // PS-481

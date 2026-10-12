@@ -26,7 +26,7 @@ public static partial class SchemaParser
     /// <summary>Keys whose string value may be a <c>$</c> reference.</summary>
     static readonly HashSet<string> ReferenceKeys = new()
     {
-        "ref", "a", "b", "field", "count", "byte_length", "carry", "instance", "unit", "identity",
+        "ref", "a", "b", "field", "count", "byte_length", "carry", "instance", "unit", "identity", "interval",
     };
 
     /// <summary>Keys holding data, not declarations or references. A match's <c>default</c> is a field list.</summary>

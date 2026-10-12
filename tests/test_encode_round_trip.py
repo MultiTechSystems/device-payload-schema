@@ -130,7 +130,7 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # literal-selects-branch (2), match, and tag-entry-constants (4), tlv, and
 # tlv-case-field-list's literal_only, tlv - an entry reporting only a constant, which
 # encoded to no bytes with no error.
-FLOOR_TOTAL = 2135
+FLOOR_TOTAL = 2136  # +1: repeat-sampled (CR-2026-156); earlier moves follow
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -152,7 +152,7 @@ FLOOR_BY_SHAPE = {
     # carry only the definitions they reach, so one no longer has a `repeat` in an
     # unreferenced definition for the classifier to find.
     # 19 -> 25: CR-2026-121 and CR-2026-123 (see FLOOR_TOTAL).
-    "repeat": 25,
+    "repeat": 26,  # +1: repeat-sampled (CR-2026-156)
 }
 
 #: Encoding must never raise. It used to, 26 times: "Cannot encode type: number" for any

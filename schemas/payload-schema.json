@@ -309,6 +309,25 @@
             "type": "string",
             "description": "`type: repeat`: its `index`, a `$` reference to a field of its elements, or `$name[i]` naming an earlier sibling repeat declaring `element` at the same position (PS-546), identifying the metric each element carries (PS-372). An annotation; decoding ignores it (PS-376)."
           },
+          "sampled": {
+            "type": "object",
+            "properties": {
+              "interval": {
+                "description": "Seconds between samples: a number above 0, a `$` reference to a field decoded before the repeat, or `{configured: name}` for a device setting the frame does not carry (PS-567)."
+              },
+              "order": {
+                "enum": ["newest_first", "oldest_first"],
+                "description": "Which end of the array is the newest sample; default `newest_first` (PS-567)."
+              },
+              "at": {
+                "type": "string",
+                "description": "The time of the newest sample: `rx_time` (default) or the name of a `metadata.timestamps` entry of mode unix_epoch or iso8601 (PS-567)."
+              }
+            },
+            "required": ["interval"],
+            "additionalProperties": false,
+            "description": "`type: repeat`: its elements are samples of one measurement taken at a fixed interval (PS-567). An annotation; decoding ignores it. Rejected on any other field (PS-569). `_meta` carries it (PS-568)."
+          },
           "on_repeat": {
             "enum": [
               "collect",
