@@ -79,8 +79,24 @@ func bitRangeFitError(raw float64, width int, rangeType FieldType, name string, 
 // placeBits ORs `bits` at `start` into the pending base of `baseSize` bytes, read and
 // written in `endian`, then moves `consume` bytes from pending to the buffer (PS-016).
 func (ctx *EncodeContext) placeBits(baseSize int, endian string, start uint, bits uint64, consume int) {
+	ctx.placeNamedBits(baseSize, endian, start, bits, consume, 0, "", false)
+}
+
+// placeNamedBits is placeBits recording a named range of `width` bits for the check where
+// the frame closes (CR-2026-141, PS-551). A derived one - absent from the input and not
+// consuming - writes no bits: the fields that write them fix its value.
+func (ctx *EncodeContext) placeNamedBits(baseSize int, endian string, start uint, bits uint64,
+	consume int, width uint, name string, derived bool) {
 	if baseSize < 1 {
 		baseSize = 1
+	}
+	if width > 0 && name != "" {
+		peek := peekRecord{pos: len(ctx.Buffer), size: baseSize, endian: endian, start: start,
+			width: width, raw: bits, derived: derived, name: name}
+		ctx.peeks = append(ctx.peeks, peek)
+		if !derived {
+			ctx.cover(len(ctx.Buffer), peek.maskBytes())
+		}
 	}
 	for len(ctx.pending) < baseSize {
 		ctx.pending = append(ctx.pending, 0)
@@ -99,7 +115,44 @@ func (ctx *EncodeContext) placeBits(baseSize int, endian string, start uint, bit
 // extend is FrameBuffer.extend: `data` is ORed over the pending bytes from its start, and
 // its last `carried` bytes - a nested list's unconsumed tail - stay pending, ORed with any
 // older pending bytes beyond them, rather than being written.
-func (ctx *EncodeContext) extend(data []byte, carried int) {
+func (ctx *EncodeContext) extend(data []byte, carried int) error {
+	full := make([]byte, len(data))
+	for i := range full {
+		full[i] = 0xff
+	}
+	if err := ctx.checkOverlay(data, full); err != nil {
+		return err
+	}
+	ctx.cover(len(ctx.Buffer), full)
+	ctx.extendRaw(data, carried)
+	return nil
+}
+
+// checkOverlay is the PS-551 check before an OR (CR-2026-141): a field whose written bits
+// (`covered`) are clear where a peek before it set them would change both values.
+func (ctx *EncodeContext) checkOverlay(data, covered []byte) error {
+	shared := len(ctx.pending)
+	if len(data) < shared {
+		shared = len(data)
+	}
+	for i := 0; i < shared; i++ {
+		if ctx.pending[i]&^data[i]&covered[i] != 0 {
+			frame := append(append([]byte(nil), ctx.Buffer...), data...)
+			return fmt.Errorf("%s", peekDisagreement(ctx.peeks, frame))
+		}
+	}
+	return nil
+}
+
+// writePadding writes a skip's zeros (CR-2026-141, the reference's padding()). Padding
+// carries no value, so its bits fix no peek and contradict none: a decoder skips them,
+// whatever the peek before set there. They cover nothing and are not checked.
+func (ctx *EncodeContext) writePadding(length int) {
+	ctx.extendRaw(make([]byte, length), 0)
+}
+
+// extendRaw ORs and writes `data` with no coverage bookkeeping (see extend).
+func (ctx *EncodeContext) extendRaw(data []byte, carried int) {
 	if carried > len(data) {
 		carried = len(data)
 	}
@@ -141,13 +194,28 @@ func (ctx *EncodeContext) flushPending() {
 // the list's bytes to the enclosing list as FrameBuffer.extend(Frame) does - ORed over its
 // pending bytes, with the list's own pending tail carried where `carry` is set and
 // written otherwise.
-func (ctx *EncodeContext) beginFieldList() ([]byte, int) {
-	outer := ctx.pending
-	ctx.pending = nil
-	return outer, len(ctx.Buffer)
+//
+// The mark also holds the enclosing list's coverage of the bytes from `start` - its
+// pending bytes' (CR-2026-141) - set aside so the nested list's own bits are what the
+// check before the OR reads, as the reference's nested Frame carries its own.
+type fieldListMark struct {
+	outer    []byte
+	start    int
+	outerCov []byte
 }
 
-func (ctx *EncodeContext) endFieldList(outer []byte, start int, carry bool) {
+func (ctx *EncodeContext) beginFieldList() fieldListMark {
+	mark := fieldListMark{outer: ctx.pending, start: len(ctx.Buffer)}
+	ctx.pending = nil
+	if len(ctx.covered) > mark.start {
+		mark.outerCov = append([]byte(nil), ctx.covered[mark.start:]...)
+		ctx.covered = ctx.covered[:mark.start]
+	}
+	return mark
+}
+
+func (ctx *EncodeContext) endFieldList(mark fieldListMark, carry bool) error {
+	outer, start := mark.outer, mark.start
 	nested := append(append([]byte(nil), ctx.Buffer[start:]...), ctx.pending...)
 	carried := 0
 	if carry {
@@ -155,7 +223,167 @@ func (ctx *EncodeContext) endFieldList(outer []byte, start int, carry bool) {
 	}
 	ctx.Buffer = ctx.Buffer[:start]
 	ctx.pending = outer
-	ctx.extend(nested, carried)
+	// The nested list's bits are already recorded at these positions (CR-2026-141).
+	covered := make([]byte, len(nested))
+	for i := range covered {
+		covered[i] = ctx.coveredAt(start + i)
+	}
+	if err := ctx.checkOverlay(nested, covered); err != nil {
+		return err
+	}
+	ctx.cover(start, mark.outerCov) // the enclosing list's bits rejoin the nested list's
+	ctx.extendRaw(nested, carried)
+	return nil
+}
+
+// --- CR-2026-141 (PS-551): a peek whose bits other fields write is derived ---------------
+//
+// Mirrors Frame/FrameBuffer's `covered` and `peeks` and check_peeks in
+// tools/schema_interpreter.py. Positions are the context's absolute ones: a nested field
+// list writes into the same Buffer at the same offsets, so nothing is shifted.
+
+// peekRecord is a named bit range or bool placed: `raw` is its unsigned bits as given,
+// unused where it was derived.
+type peekRecord struct {
+	pos, size  int
+	endian     string
+	start      uint
+	width      uint
+	raw        uint64
+	derived    bool
+	name       string
+}
+
+func (p peekRecord) maskBits() uint64 {
+	if p.width >= 64 {
+		return ^uint64(0)
+	}
+	return (uint64(1)<<p.width - 1) << p.start
+}
+
+func (p peekRecord) maskBytes() []byte {
+	return encodeUint(p.maskBits(), p.size, p.endian)
+}
+
+// found is the range's unsigned bits as `frame` holds them, zero past its end.
+func (p peekRecord) found(frame []byte) uint64 {
+	window := make([]byte, p.size)
+	for i := range window {
+		if p.pos+i < len(frame) {
+			window[i] = frame[p.pos+i]
+		}
+	}
+	return (decodeUint(window, p.endian) & p.maskBits()) >> p.start
+}
+
+func (ctx *EncodeContext) cover(position int, mask []byte) {
+	for len(ctx.covered) < position+len(mask) {
+		ctx.covered = append(ctx.covered, 0)
+	}
+	for i, m := range mask {
+		ctx.covered[position+i] |= m
+	}
+}
+
+func (ctx *EncodeContext) coveredAt(position int) byte {
+	if position < len(ctx.covered) {
+		return ctx.covered[position]
+	}
+	return 0
+}
+
+// peekDisagreement is peek_disagreement: the first supplied peek `frame` contradicts.
+func peekDisagreement(peeks []peekRecord, frame []byte) string {
+	for _, p := range peeks {
+		if p.derived || p.pos+p.size > len(frame) {
+			continue
+		}
+		if found := p.found(frame); found != p.raw {
+			return fmt.Sprintf("Field '%s' is given %d, but the fields that share its bits write %d (PS-551)",
+				p.name, p.raw, found)
+		}
+	}
+	return "A field writes bits a peek before it set otherwise (PS-551)"
+}
+
+// checkPeeks is check_peeks over the frame written so far (Buffer, then pending), for the
+// peeks recorded from index `from`: each reads back what it was given, and a derived one
+// has every bit written by another field, or it is missing.
+func (ctx *EncodeContext) checkPeeks(from int) error {
+	frame := append(append([]byte(nil), ctx.Buffer...), ctx.pending...)
+	for _, p := range ctx.peeks[from:] {
+		if p.derived {
+			mask := p.maskBytes()
+			for i, m := range mask {
+				if ctx.coveredAt(p.pos+i)&m != m {
+					return missingFieldError(p.name)
+				}
+			}
+			continue
+		}
+		if p.found(frame) != p.raw {
+			return fmt.Errorf("%s", peekDisagreement([]peekRecord{p}, frame))
+		}
+	}
+	return nil
+}
+
+// sealFrom closes what was written from `start` and recorded from peek `from`: its bytes
+// are now whole, as the reference's plain bytes are, and its peeks are checked and gone.
+func (ctx *EncodeContext) sealFrom(start, from int) {
+	end := len(ctx.Buffer) + len(ctx.pending)
+	full := make([]byte, end-start)
+	for i := range full {
+		full[i] = 0xff
+	}
+	ctx.cover(start, full)
+	ctx.peeks = ctx.peeks[:from]
+}
+
+// isPeekField is is_peek_field: a named bit range or bool that does not consume (PS-060,
+// PS-066).
+func isPeekField(f Field) bool {
+	if f.Name == "" || f.Consume != 0 {
+		return false
+	}
+	return f.Type == TypeBool || f.Type == TypeBoolLower ||
+		(f.Type != TypeBitfieldString && isBareBitfieldField(f))
+}
+
+// coveredPeeks is covered_peeks: the indices of the peeks in `fields` a whole field after
+// them writes over - read from the schema, so a tlv case can be chosen without them
+// (PS-551, CR-2026-141). A peek counts only where the next field that reads bytes is a
+// plain whole field: a range that consumes, a skip or a construct ends its span first,
+// and its bits may be left unwritten (wt303's status nibble beside a mode nibble).
+// Whether a peek is derived when encoding is decided by the bits actually written.
+func coveredPeeks(fields []Field) map[int]bool {
+	out := map[int]bool{}
+	var pending []int
+	for i, f := range fields {
+		if isPeekField(f) {
+			pending = append(pending, i)
+			continue
+		}
+		if isComputedField(f) || isLiteralField(f) {
+			continue
+		}
+		t := string(f.Type)
+		construct := f.MatchInline != nil || f.TLVInline != nil || len(f.ByteGroup) > 0 ||
+			f.Flagged != nil || f.Ref2 != "" || f.Type == TypeMatch || f.Type == TypeMatchLower ||
+			f.Type == TypeTLV || f.Type == TypeTLVLower
+		bits := strings.ContainsAny(t, "[:<")
+		switch {
+		case construct, bits, f.Type == TypeSkip, f.Type == TypeSkipLower,
+			f.Type == TypeObject, f.Type == TypeObjectLower, f.Type == TypeRepeat,
+			f.Type == TypeRepeatLower, f.Type == TypeBool, f.Type == TypeBoolLower:
+		default:
+			for _, p := range pending {
+				out[p] = true
+			}
+		}
+		pending = nil
+	}
+	return out
 }
 
 // givenText writes the value the input gave as JavaScript's String(number) would, so a

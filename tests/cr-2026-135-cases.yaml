@@ -219,9 +219,12 @@ cases:
   input: '{"a": 3.6}'
   payload: "07"
 
+# The whole byte agrees with the range it shares bits with. CR-2026-141 rejects a
+# supplied range the bytes after it contradict: `whole: 5`, ORed into 35, read back as
+# 53 and left `hi` reading 0, so it is now an error (tests/cr-2026-141-cases.yaml).
 - name: peeked_range_then_whole_byte
   schema: "name: t\nfields:\n  - {name: hi, type: \"u8[4:7]\"}\n  - {name: whole, type: u8}\n"
-  input: '{"hi": 3, "whole": 5}'
+  input: '{"hi": 3, "whole": 53}'
   payload: "35"
 
 - name: unconsumed_range_at_the_end_is_written

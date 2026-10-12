@@ -230,14 +230,19 @@ class TestTheCorpusConforms:
                     problems.append(f"{path.name}: bit {bit} has no fields")
         assert not problems, problems
 
-    def test_the_flags_field_is_never_dollar_prefixed(self):
-        """The description claims a bare name; the corpus is the evidence."""
-        prefixed = [
-            f"{path.name}: {flagged['field']}"
+    def test_the_flags_field_is_bare_outside_the_spelling_fixture(self):
+        """The description says the corpus writes a bare name; the corpus is the evidence.
+
+        `$flags` is accepted too, as the spec prototype reads it - every decoder used to
+        look it up as written and fail - and one fixture holds all five to that
+        spelling, so it is the only file allowed to use it.
+        """
+        prefixed = sorted({
+            path.name
             for flagged, path in every_flagged()
             if isinstance(flagged.get("field"), str) and flagged["field"].startswith("$")
-        ]
-        assert not prefixed, prefixed
+        })
+        assert prefixed == ["mask-reference-binding.yaml"], prefixed
 
     def test_the_corpus_actually_exercises_the_construct(self):
         """Guards every sweep above from passing on an empty set."""

@@ -918,10 +918,11 @@ static void test_bit_ranges_are_laid_out_as_decoded(void) {
         TCHECK(out.len == 2 && out.data[0] == 0x81 && out.data[1] == 0x05);
     }
     {
-        /* A peeked range, then the byte read whole: one byte, not two. */
+        /* A peeked range, then the byte read whole: one byte, not two. The whole byte
+         * agrees with the range, as CR-2026-141 requires (it was 5, ORed into 0x35). */
         field_def_t f[] = { field_bits("hi", 4, 4, false), field_u8("whole") };
         const char* n[] = {"hi", "whole"};
-        const int64_t v[] = {3, 5};
+        const int64_t v[] = {3, 0x35};
         TCHECK(encode_fields(f, 2, n, v, &out) == SCHEMA_OK);
         TCHECK(out.len == 1 && out.data[0] == 0x35);
     }
@@ -967,6 +968,82 @@ static void test_a_missing_input_is_named(void) {
     TCHECK(schema_encode(&s, &inputs, &out) == SCHEMA_OK);
     TCHECK(out.len == 2 && out.data[0] == 1 && out.data[1] == 2);
     TCHECK(out.error_msg[0] == 0);
+}
+
+/* Encode `nf` fields from `ni` inputs, which may leave some of them out. */
+static int encode_some(field_def_t* fields, int nf, const char** names, const int64_t* vals,
+                       int ni, encode_result_t* out) {
+    schema_t s;
+    encode_inputs_t inputs;
+    memset(&s, 0, sizeof(s));
+    s.endian = ENDIAN_BIG;
+    for (int i = 0; i < nf; i++) schema_add_field(&s, &fields[i]);
+    encode_inputs_init(&inputs);
+    for (int i = 0; i < ni; i++) encode_inputs_add_int(&inputs, names[i], vals[i]);
+    return schema_encode(&s, &inputs, out);
+}
+
+static void test_a_covered_peek_is_derived(void) {
+    /* PS-551 (CR-2026-141): a bit range or bool that does not consume is fixed by the
+     * fields that write its bits. Absent, it is derived and writes none; with a bit no
+     * other field writes, it is missing; supplied, it must agree with the frame. The
+     * cases are tests/cr-2026-141-cases.yaml's, in the widths C's ranges have. */
+    encode_result_t out;
+    {   /* Milesight's status peek, a byte wide here: the reading fixes it. */
+        field_def_t f[] = { field_bits("status", 0, 8, false), field_u16("reading", ENDIAN_BIG) };
+        const char* n[] = {"reading"};
+        const int64_t v[] = {300};
+        TCHECK(encode_some(f, 2, n, v, 1, &out) == SCHEMA_OK);
+        TCHECK(out.len == 2 && out.data[0] == 0x01 && out.data[1] == 0x2c);
+    }
+    {
+        field_def_t f[] = { field_bits("status", 0, 8, false), field_u16("reading", ENDIAN_BIG) };
+        const char* n[] = {"status", "reading"};
+        const int64_t agree[] = {255, 65535};
+        TCHECK(encode_some(f, 2, n, agree, 2, &out) == SCHEMA_OK);
+        TCHECK(out.len == 2 && out.data[0] == 0xff && out.data[1] == 0xff);
+        const int64_t disagree[] = {255, 300};
+        TCHECK(encode_some(f, 2, n, disagree, 2, &out) == SCHEMA_ERR_PARSE);
+        TCHECK(out.len == 0);
+        TCHECK(strcmp(out.error_msg, "Field 'status' is given 255, but the fields that share "
+                                     "its bits write 1 (PS-551)") == 0);
+    }
+    {
+        field_def_t f[] = { field_bits("a", 0, 4, false), field_bits("b", 4, 4, true) };
+        const char* n[] = {"b"};
+        const int64_t v[] = {2};
+        TCHECK(encode_some(f, 2, n, v, 1, &out) == SCHEMA_ERR_PARSE);
+        TCHECK(out.len == 0);
+        TCHECK(strcmp(out.error_msg, "Missing required field: a") == 0);
+    }
+    {
+        field_def_t f[] = { field_bool("f", 7, false), field_u8("x") };
+        const char* n[] = {"x"};
+        const int64_t v[] = {128};
+        TCHECK(encode_some(f, 2, n, v, 1, &out) == SCHEMA_OK);
+        TCHECK(out.len == 1 && out.data[0] == 0x80);
+        const char* n2[] = {"f", "x"};
+        const int64_t v2[] = {1, 1};
+        TCHECK(encode_some(f, 2, n2, v2, 2, &out) == SCHEMA_ERR_PARSE);
+        TCHECK(strcmp(out.error_msg, "Field 'f' is given 1, but the fields that share its "
+                                     "bits write 0 (PS-551)") == 0);
+    }
+    {
+        field_def_t f[] = { field_bool("f", 7, false), field_bool("g", 0, true) };
+        const char* n[] = {"g"};
+        const int64_t v[] = {1};
+        TCHECK(encode_some(f, 2, n, v, 1, &out) == SCHEMA_ERR_PARSE);
+        TCHECK(strcmp(out.error_msg, "Missing required field: f") == 0);
+    }
+    {   /* A skip is padding: it keeps the peek's bits, and fixes none of them. */
+        field_def_t f[] = { field_bits("p", 0, 4, false), field_skip(1) };
+        const char* n[] = {"p"};
+        const int64_t v[] = {5};
+        TCHECK(encode_some(f, 2, n, v, 1, &out) == SCHEMA_OK);
+        TCHECK(out.len == 1 && out.data[0] == 0x05);
+        TCHECK(encode_some(f, 2, n, v, 0, &out) == SCHEMA_ERR_PARSE);
+        TCHECK(strcmp(out.error_msg, "Missing required field: p") == 0);
+    }
 }
 
 /*
@@ -1015,6 +1092,7 @@ void selftest_schema(void) {
     test_a_value_that_does_not_fit_is_named();
     test_bit_ranges_are_laid_out_as_decoded();
     test_a_missing_input_is_named();
+    test_a_covered_peek_is_derived();
 
     LOG(LOG_INFO, MOD, "Schema interpreter self-tests complete");
 }

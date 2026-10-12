@@ -75,37 +75,49 @@ When converting a TTN codec that uses an IPSO object not in this list:
 
 1. Look up the object in the [OMA Registry](https://github.com/OpenMobileAlliance/lwm2m-registry)
 2. Add to this reference document
-3. Add keyword mapping to `tools/score_schema.py` (STANDARD_SENSOR_IPSO)
-4. Add SenML unit mapping if applicable (SENML_UNITS)
+3. Add a SenML unit mapping if applicable (`SENML_UNITS` in `tools/score_schema.py`)
 
-## Keyword Detection
+## Which Fields the Scorer Expects to Be Annotated
 
-The schema scorer auto-detects sensors by field name keywords:
+`tools/score_schema.py` expects an IPSO annotation only on a field the
+Integration Layer's TTN classification rule would place from its name
+(IL-204, in la-integration-layer's `docs/guides/protocol-mappings/ttn-normalized.md`).
+A name is split on `_` and at camelCase boundaries, ignoring case:
 
-| Keyword | IPSO | SenML Unit |
-|---------|------|------------|
-| temperature | 3303 | Cel |
-| humidity | 3304 | %RH |
-| pressure | 3323 | Pa |
-| illuminance, light, lux | 3301 | lx |
-| voltage, battery | 3316 | V |
-| current | 3317 | A |
-| power | 3328 | W |
-| energy | 3331 | J |
-| frequency | 3318 | Hz |
-| distance | 3330 | m |
-| co2, concentration | 3325 | ppm |
-| conductivity | 3327 | - |
-| acidity, ph | 3326 | - |
-| gps, location, latitude, longitude | 3336 | lat/lon |
-| accelerometer, acceleration | 3313 | - |
-| gyroscope | 3334 | - |
-| magnetometer | 3314 | - |
-| setpoint, target | 3308 | Cel |
-| valve, openness | 3337 | % |
-| presence, motion, occupancy | 3302 | - |
-| load, weight | 3322 | kg |
-| button | 3347 | - |
+1. A **qualifier** word means the field is not a reading: `threshold`,
+   `setpoint`, `target`, `min`, `max`, `minimum`, `maximum`, `avg`, `average`,
+   `mean`, `median`, `percentile`, `change`, `delta`, `raw`, `limit`, `alarm`,
+   `offset`. No annotation is expected, and none is checked.
+2. A **TTN quantity** word makes it a reading. With no medium word, the path is
+   the one below. `soil` gives `soil.temperature` and `soil.moisture`; `water`
+   gives `water.temperature`.
+3. A **medium with no TTN path** (`leaf`, `dew`, `surface`, `internal`, `board`,
+   `pcb`, `electronics`, `head`, `barometer`, or `soil`/`water` with a quantity
+   they have no path for) leaves a reading IL-204 cannot place. An annotation on
+   it is right, but none is expected, and none is checked.
+4. Any other name says nothing. Its annotation is the only evidence, so it is
+   neither expected nor flagged, and it earns no credit.
+
+| Quantity | TTN path (no medium) | IPSO expected | Also accepted | SenML Unit |
+|----------|----------------------|---------------|---------------|------------|
+| temperature | air.temperature | 3303 | | Cel |
+| humidity | air.relativeHumidity | 3304 | | %RH |
+| pressure | air.pressure | 3323 | 3315 | Pa |
+| moisture | soil.moisture | 3320 | 3304 | % |
+| precipitation | rain.cumulative | 3300 | | m |
+
+A unit never selects an object (IL-203), so neither `V` nor the word `battery`
+asks for 3316. A generic object (3300, 3320, 3325, 3332) selects no category on
+its own (IL-199), so it is never reported as a mismatch. It earns credit only
+where the table expects it.
+
+An ipso annotation is reported wrong only where the name places the field and
+the annotation names another quantity, as with `water_temperature` annotated
+3304. A field may opt out with `sensor: none`, or state its quantity with
+`sensor: temperature` where the name does not.
+
+A schema with fields but none that IL-204 places has nothing these checks can
+verify. It earns half of the 20 semantic points.
 
 ## Complex Codec Examples (from TTN lorawan-devices)
 

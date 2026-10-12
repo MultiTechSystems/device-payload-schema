@@ -216,10 +216,30 @@ final class Wave6b {
      * it. This wrote 0, which reads back as a value the device never sent wherever the
      * field was not padding.
      */
+    /**
+     * PS-554 (CR-2026-139): whether an omitted input takes the field's declared
+     * {@code default}, which is in the field's reported form and is encoded exactly as that
+     * value given as input, so one that cannot be encoded is rejected as such input is
+     * (PS-168). A declared default is a defined absence (PS-551 as amended). An enum's
+     * {@code default} is its unmapped label (PS-068) and a legacy {@code type: match}'s its
+     * fallback case, so neither is written. Read from the declaration as written.
+     */
+    static boolean hasFieldDefault(Field field) {
+        Map<String, Object> raw = field.getRaw();
+        if (raw == null || !raw.containsKey("default")) return false;
+        Object type = raw.get("type");
+        return !"enum".equals(type) && !"match".equals(type);
+    }
+
+    static Object fieldDefault(Field field) {
+        return field.getRaw().get("default");
+    }
+
     static Object internalEncodeValue(Field field, Map<String, Object> data) {
         if (field.getValue() != null) return field.getValue();
         String name = field.getName();
         if (data.containsKey(name)) return data.get(name);
+        if (hasFieldDefault(field)) return fieldDefault(field);              // PS-554
         throw new SchemaException.EncodeException("internal field '" + name + "' reads payload bytes "
                 + "and declares no value, and the input does not supply it (PS-434)");
     }

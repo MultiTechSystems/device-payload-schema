@@ -80,7 +80,15 @@ final class Encoder {
         // Bit ranges sharing a byte are packed together rather than a byte apiece
         // (CR-2026-024), so the whole list is walked at once: a run cannot be found by
         // looking at one field in isolation.
-        out.write(encodeWithBitfieldRuns(fields, input, true));
+        byte[] frame = encodeWithBitfieldRuns(fields, input, true);
+        if (errors.isEmpty()) {
+            try {
+                checkPeeks(frame);                              // PS-551 (CR-2026-141)
+            } catch (RuntimeException e) {
+                errors.add(e.getMessage());
+            }
+        }
+        out.write(frame);
 
         // A rejected input produces no payload: the bytes written before the error are a
         // frame short of the rest, as Go has always returned nothing.
@@ -154,9 +162,6 @@ final class Encoder {
             // where they are not, and every member encoded as a zero.
             // A `name_from` object was reported under its templated key, so that is the
             // key to read it back from (CR-2026-030), as for any other field.
-            if (field.getName() == null || field.getName().isEmpty()) {
-                return encodeFieldList(field.getFields(), data);
-            }
             String key = resolveEncodeName(field, data);
             if (key == null) key = field.getName();
             Object nested = data.get(key);
@@ -174,7 +179,7 @@ final class Encoder {
         if (type == FieldType.SKIP) {
             // `remaining` gives no count to pad on encode (PS-014).
             int length = field.getLength() > 0 ? field.getLength() : 0;
-            return new byte[length];
+            return padding(length);                     // CR-2026-141: no value
         }
 
         // PS-359: a literal writes no bytes and its key is not required of the input.
@@ -187,13 +192,12 @@ final class Encoder {
             return encodeField(field, field.getValue());
         }
 
-        String name = field.getName();
+        String name = field.getName() == null ? "" : field.getName();
 
+        // A nameless field other than a skip is refused at load (PS-553, CR-2026-138);
+        // it was written here as zero padding.
         Object value;
-        if (name == null || name.isEmpty()) {
-            // Nothing can be supplied for a field with no name; it is padding, as a skip is.
-            value = 0L;
-        } else if (name.startsWith("_")) {
+        if (name.startsWith("_")) {
             // PS-434: an internal field that reads bytes writes its value, else the
             // input's, else it is an error naming the field. It wrote 0.
             value = Wave6b.internalEncodeValue(field, data);
@@ -208,6 +212,8 @@ final class Encoder {
             }
             if (data.get(lookupName) != null) {
                 value = data.get(lookupName);
+            } else if (Wave6b.hasFieldDefault(field)) {
+                value = Wave6b.fieldDefault(field);   // PS-554: a declared default, as input
             } else if (field.getSentinel() != null && !field.getSentinel().isEmpty()) {
                 // A reading the decode omitted as "no reading" (PS-427) goes back as the
                 // sentinel it was, not as zero: the raw value, with no modifier reversed.
@@ -418,6 +424,13 @@ final class Encoder {
                 byte[] savedPeek = peeked;
                 peeked = out.pending();
                 try {
+                    if (isDerivableAbsentBool(field, data)) {
+                        // PS-551 (CR-2026-141): an absent bool that does not consume is
+                        // fixed by the fields that write its bit, so it writes none.
+                        int bit = field.getBoolBit() >= 0 ? field.getBoolBit() : field.getBitOffset();
+                        out.placeBits(1, false, Math.max(0, bit), 0, 0, 1, name, true);
+                        continue;
+                    }
                     byte[] bytes = encodeOne(field, data, list);
                     if (isPlacedBool(field)) {
                         // A bool is its `bit` of the byte it peeks, advancing only where it
@@ -425,10 +438,11 @@ final class Encoder {
                         // byte of 0 or 1.
                         int bit = field.getBoolBit() >= 0 ? field.getBoolBit() : field.getBitOffset();
                         boolean set = bytes.length > 0 && bytes[0] != 0;
-                        out.placeBits(1, false, Math.max(0, bit), set ? 1 : 0, field.getConsume());
+                        out.placeBits(1, false, Math.max(0, bit), set ? 1 : 0, field.getConsume(),
+                                1, name, false);
                     } else {
                         Integer tail = carriedTail.remove(bytes);
-                        out.extend(bytes, tail == null ? 0 : tail);
+                        out.extend(bytes, tail == null ? 0 : tail, frameMeta.remove(bytes));
                     }
                 } catch (RuntimeException e) {
                     if (!topLevel) throw e;
@@ -454,7 +468,165 @@ final class Encoder {
         }
         flushRun(out, run, data, topLevel);
         int tail = out.pendingLength();
-        return carrying(out.frame(), tail);
+        FrameMeta meta = out.meta();
+        byte[] frame = carrying(out.frame(), tail);
+        if (frame.length > 0) frameMeta.put(frame, meta);
+        return frame;
+    }
+
+    /**
+     * CR-2026-141 (PS-551): a named bool that does not consume and that the input omits -
+     * the fields after it fix its bit, so it is derived and writes none.
+     */
+    private boolean isDerivableAbsentBool(Field field, Map<String, Object> data) {
+        if (!isPlacedBool(field) || field.getConsume() > 0 || field.getValue() != null) return false;
+        String name = field.getName();
+        if (name == null || name.isEmpty() || name.startsWith("_")) return false;
+        if (field.getSentinel() != null && !field.getSentinel().isEmpty()) return false;
+        String key = resolveEncodeNameOrNull(field, data);
+        return key != null && data.get(key) == null;
+    }
+
+    /** {@code is_peek_field}: a named bit range or bool that does not consume. */
+    private static boolean isPeekField(Field f) {
+        if (f == null || f.getName() == null || f.getName().isEmpty() || f.getConsume() > 0) {
+            return false;
+        }
+        return isPlacedBool(f) || isBareBitfield(f);
+    }
+
+    /**
+     * {@code covered_peeks}: the peeks in {@code fields} a whole field after them writes
+     * over - read from the schema, so a tlv case can be chosen without them (PS-551,
+     * CR-2026-141). A peek counts only where the next field that reads bytes is a plain
+     * whole field: a range that consumes, a skip or a construct ends its span first, and
+     * its bits may be left unwritten (wt303's status nibble beside a mode nibble).
+     */
+    private static Set<Field> coveredPeeks(List<Field> fields) {
+        Set<Field> out = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        List<Field> pending = new ArrayList<>();
+        if (fields == null) return out;
+        for (Field f : fields) {
+            if (f == null) continue;
+            if (isPeekField(f)) {
+                pending.add(f);
+                continue;
+            }
+            if (isComputed(f) || isLiteral(f)) continue;
+            boolean construct = f.getMatchInline() != null || f.getTlvInline() != null
+                    || (f.getByteGroup() != null && !f.getByteGroup().isEmpty())
+                    || f.getFlagged() != null;
+            FieldType t = f.getType();
+            if (!construct && f.getBits() <= 0 && t != FieldType.SKIP && t != FieldType.OBJECT
+                    && t != FieldType.REPEAT && t != FieldType.BOOL && t != FieldType.TLV) {
+                out.addAll(pending);
+            }
+            pending.clear();
+        }
+        return out;
+    }
+
+    /**
+     * A skip's zeros (CR-2026-141). Padding carries no value, so its bits fix no peek and
+     * contradict none: a decoder skips them, whatever the peek before set there.
+     */
+    private byte[] padding(int length) {
+        byte[] zeros = new byte[length];
+        if (length > 0) frameMeta.put(zeros, new FrameMeta(new byte[length], List.of()));
+        return zeros;
+    }
+
+    // --- CR-2026-141 (PS-551): the bits each field writes, and the peeks to check ---------
+
+    /** A bit range or bool placed: raw is null where it was derived. */
+    private record Peek(int pos, int size, boolean little, int start, int width, Long raw,
+                        String name) {
+        Peek shifted(int by) {
+            return new Peek(pos + by, size, little, start, width, raw, name);
+        }
+
+        long mask() {
+            return width >= 64 ? -1L : (1L << width) - 1;
+        }
+
+        /** The range's bits as {@code frame} holds them, past its end as zeros. */
+        long found(byte[] frame) {
+            long base = 0;
+            for (int i = 0; i < size; i++) {
+                int at = pos + (little ? size - 1 - i : i);
+                base = (base << 8) | (at < frame.length ? frame[at] & 0xFF : 0);
+            }
+            return (base >>> start) & mask();
+        }
+
+        /** Byte {@code i} of the range's mask, in frame order. */
+        int maskByte(int i) {
+            long bits = mask() << start;
+            int shift = (little ? i : size - 1 - i) * 8;
+            return (int) ((bits >>> shift) & 0xFF);
+        }
+    }
+
+    /** Per byte, the bits some field wrote (null: all), and the peeks placed. */
+    private record FrameMeta(byte[] covered, List<Peek> peeks) {}
+
+    /**
+     * Each nested list's coverage and peeks, keyed by the array it returned, as
+     * {@link #carriedTail} keys its pending tail. An array with no entry was written
+     * whole by one field.
+     */
+    private final Map<byte[], FrameMeta> frameMeta = new java.util.IdentityHashMap<>();
+
+    static String peekDisagreement(List<Peek> peeks, byte[] frame) {
+        for (Peek p : peeks) {
+            if (p.raw() == null || p.pos() + p.size() > frame.length) continue;
+            long found = p.found(frame);
+            if (found != p.raw()) {
+                return "Field '" + p.name() + "' is given " + Long.toUnsignedString(p.raw())
+                        + ", but the fields that share its bits write "
+                        + Long.toUnsignedString(found) + " (PS-551)";
+            }
+        }
+        return "A field writes bits a peek before it set otherwise (PS-551)";
+    }
+
+    /**
+     * {@code check_peeks}, where a frame closes: every bit range and bool reads back what
+     * it was given, and a derived one has every bit written by another field.
+     */
+    private void checkPeeks(byte[] frame) {
+        FrameMeta meta = frameMeta.remove(frame);
+        if (meta == null) return;
+        for (Peek p : meta.peeks()) {
+            if (p.raw() == null) {
+                for (int i = 0; i < p.size(); i++) {
+                    int at = p.pos() + i;
+                    int have = at >= frame.length ? 0
+                            : meta.covered() == null ? 0xFF : meta.covered()[at] & 0xFF;
+                    int need = p.maskByte(i);
+                    if ((have & need) != need) throw new MissingFieldException(p.name());
+                }
+                continue;
+            }
+            if (p.found(frame) != p.raw()) {
+                throw new SchemaException.EncodeException(peekDisagreement(List.of(p), frame));
+            }
+        }
+    }
+
+    /** {@code body}'s coverage and peeks for {@code result}, which is a prefix then it. */
+    private byte[] prefixed(int prefix, byte[] body, byte[] result) {
+        FrameMeta meta = frameMeta.remove(body);
+        if (meta == null || result.length == 0) return result;
+        byte[] covered = new byte[result.length];
+        java.util.Arrays.fill(covered, 0, Math.min(prefix, covered.length), (byte) 0xFF);
+        for (int i = 0; i < body.length && prefix + i < covered.length; i++) {
+            covered[prefix + i] = meta.covered() == null ? (byte) 0xFF : meta.covered()[i];
+        }
+        List<Peek> peeks = new ArrayList<>();
+        for (Peek p : meta.peeks()) peeks.add(p.shifted(prefix));
+        frameMeta.put(result, new FrameMeta(covered, peeks));
+        return result;
     }
 
     /** A bool outside a byte_group: placed as its bit, not written as a byte. */
@@ -514,13 +686,21 @@ final class Encoder {
         String declared = run.stream().map(Field::getEndian).filter(e -> e != null).findFirst().orElse(null);
         boolean runLittle = declared != null ? "little".equals(declared) : little;
         for (Field member : run) {
-            String name = member.getName();
+            String name = member.getName() == null ? "" : member.getName();
+            // A nameless range is refused at load (PS-553); it was written as zero bits.
             Object value;
-            if (name == null || name.isEmpty()) {
-                value = Long.valueOf(0);
-            } else if (member.getValue() != null || name.startsWith("_")) {
+            if (member.getValue() != null || name.startsWith("_")) {
                 value = Wave6b.internalEncodeValue(member, data);   // PS-360, PS-434
+            } else if (data.get(name) == null && Wave6b.hasFieldDefault(member)) {
+                value = Wave6b.fieldDefault(member);                // PS-554
             } else if (data.get(name) == null) {
+                if (member.getConsume() == 0) {
+                    // PS-551 (CR-2026-141): a range that does not consume is fixed by the
+                    // fields that write its bits, so it is derived and writes none.
+                    out.placeBits(Math.max(1, member.getBitBaseBytes()), runLittle,
+                            member.getBitOffset(), 0, 0, member.getBits(), name, true);
+                    continue;
+                }
                 // PS-551. A range was written as zero bits, which read back as a value.
                 throw new MissingFieldException(name);
             } else {
@@ -538,7 +718,8 @@ final class Encoder {
             checkBitRange(raw, member);                                  // PS-168, PS-552
             long mask = member.getBits() >= 64 ? -1L : (1L << member.getBits()) - 1;
             out.placeBits(Math.max(1, member.getBitBaseBytes()), runLittle,
-                    member.getBitOffset(), raw & mask, member.getConsume());
+                    member.getBitOffset(), raw & mask, member.getConsume(),
+                    member.getBits(), name, false);
         }
     }
 
@@ -576,6 +757,8 @@ final class Encoder {
                 value = Long.valueOf(0);
             } else if (member.getValue() != null || name.startsWith("_")) {
                 value = Wave6b.internalEncodeValue(member, data);   // PS-360, PS-434
+            } else if (data.get(name) == null && Wave6b.hasFieldDefault(member)) {
+                value = Wave6b.fieldDefault(member);                // PS-554
             } else if (data.get(name) == null) {
                 // PS-551. A member was written as zero bits, which read back as a value.
                 throw new MissingFieldException(name);
@@ -638,7 +821,9 @@ final class Encoder {
         }
         // PS-385: the elements, then the trailer, whose values sit beside the repeat.
         if (field.getTrailer() != null && !field.getTrailer().isEmpty()) {
-            out.write(encodeFieldList(field.getTrailer(), data));
+            byte[] trailer = encodeFieldList(field.getTrailer(), data);
+            checkPeeks(trailer);                                         // PS-551
+            out.write(trailer);
         }
         return out.toArray();
     }
@@ -757,7 +942,9 @@ final class Encoder {
                 element = new LinkedHashMap<>(element);
                 element.put(index, (long) position + field.getIndexBase());   // PS-530
             }
-            out.write(encodeFieldList(field.getFields(), element));
+            byte[] encoded = encodeFieldList(field.getFields(), element);
+            checkPeeks(encoded);            // PS-551: an element's bytes close with it
+            out.write(encoded);
         }
         return out.toArray();
     }
@@ -1059,8 +1246,9 @@ final class Encoder {
             }
             byte[] body = encodeFieldList(fallbackFields, data);
             Integer tail = carriedTail.remove(body);
+            int prefix = fallbackOut.size;
             fallbackOut.write(body);
-            return carrying(fallbackOut.toArray(), tail == null ? 0 : tail);
+            return carrying(prefixed(prefix, body, fallbackOut.toArray()), tail == null ? 0 : tail);
         }
 
         ByteBuf out = new ByteBuf();
@@ -1082,9 +1270,10 @@ final class Encoder {
         }
         byte[] body = encodeFieldList(matched.getFields(), data);
         Integer tail = carriedTail.remove(body);
+        int prefix = out.size;
         out.write(body);
         // The body's unconsumed tail stays pending in the enclosing list (CR-2026-136).
-        return carrying(out.toArray(), tail == null ? 0 : tail);
+        return carrying(prefixed(prefix, body, out.toArray()), tail == null ? 0 : tail);
     }
 
     /** The case whose fields the data carries most of, or null. */
@@ -1225,6 +1414,7 @@ final class Encoder {
      */
     private static void collectClaims(List<Field> fields, boolean optional, List<Claim> out) {
         if (fields == null) return;
+        Set<Field> covered = coveredPeeks(fields);
         for (Field f : fields) {
             if (f.getByteGroup() != null && !f.getByteGroup().isEmpty()) {
                 collectClaims(f.getByteGroup(), optional, out);
@@ -1237,7 +1427,9 @@ final class Encoder {
                 continue;
             }
             if (payloadName(f) == null) continue;
-            out.add(new Claim(f, optional || f.isOptional()));
+            // PS-551 (CR-2026-141): a peek the case's next field writes over is derived
+            // where the input omits it, so the case does not need it given.
+            out.add(new Claim(f, optional || f.isOptional() || covered.contains(f)));
         }
     }
 
@@ -1440,6 +1632,7 @@ final class Encoder {
         for (Written w : written) {
             out.write(encodeTLVTag(w.key(), tlv));
             byte[] value = encodeFieldList(w.fields(), w.data());
+            checkPeeks(value);              // PS-551: a tlv value is measured whole
             if (lengthSize > 0) {
                 out.write(writeInt(value.length, lengthSize, false));
             }
@@ -2310,6 +2503,22 @@ final class Encoder {
     private static final class FrameBuffer {
         private final ByteBuf buf = new ByteBuf();
         private byte[] pending = new byte[0];
+        // CR-2026-141 (PS-551): the bits written, by position in this list's frame, and
+        // each bit range or bool placed.
+        private byte[] covered = new byte[0];
+        private final List<Peek> peeks = new ArrayList<>();
+
+        private void cover(int at, int mask) {
+            if (covered.length <= at) {
+                covered = java.util.Arrays.copyOf(covered, Math.max(at + 1, covered.length * 2));
+            }
+            covered[at] = (byte) (covered[at] | mask);
+        }
+
+        FrameMeta meta() {
+            int total = buf.size + pending.length;
+            return new FrameMeta(java.util.Arrays.copyOf(covered, total), new ArrayList<>(peeks));
+        }
 
         byte[] pending() {
             return pending.clone();
@@ -2320,7 +2529,11 @@ final class Encoder {
         }
 
         void extend(byte[] data) {
-            extend(data, 0);
+            extend(data, 0, null);
+        }
+
+        void extend(byte[] data, int carried) {
+            extend(data, carried, null);
         }
 
         /**
@@ -2328,9 +2541,26 @@ final class Encoder {
          * {@code carried} bytes pending - a nested list's unconsumed tail - ORed with any
          * older pending bytes beyond them.
          */
-        void extend(byte[] data, int carried) {
+        void extend(byte[] data, int carried, FrameMeta meta) {
             if (data == null || data.length == 0) return;
             carried = Math.min(carried, data.length);
+            int offset = buf.size;
+            byte[] dataCovered = meta == null ? null : meta.covered();
+            int shared0 = Math.min(pending.length, data.length);
+            for (int i = 0; i < shared0; i++) {
+                int cov = dataCovered == null ? 0xFF : dataCovered[i] & 0xFF;
+                if ((pending[i] & ~data[i] & cov & 0xFF) != 0) {
+                    // PS-551: a field would OR over a peek's different bits.
+                    byte[] frame = new byte[offset + data.length];
+                    System.arraycopy(buf.buffer, 0, frame, 0, offset);
+                    System.arraycopy(data, 0, frame, offset, data.length);
+                    throw new SchemaException.EncodeException(peekDisagreement(peeks, frame));
+                }
+            }
+            for (int i = 0; i < data.length; i++) {
+                cover(offset + i, dataCovered == null ? 0xFF : dataCovered[i] & 0xFF);
+            }
+            if (meta != null) for (Peek p : meta.peeks()) peeks.add(p.shifted(offset));
             if (pending.length > 0) {
                 data = data.clone();
                 int shared = Math.min(pending.length, data.length);
@@ -2350,6 +2580,23 @@ final class Encoder {
 
         /** OR {@code bits} at {@code start} into the pending base; then consume (PS-016). */
         void placeBits(int baseSize, boolean little, int start, long bits, int consume) {
+            placeBits(baseSize, little, start, bits, consume, 0, null, false);
+        }
+
+        /**
+         * CR-2026-141 (PS-551): a named range of {@code width} bits is recorded for the
+         * check where the frame closes; a derived one writes no bits.
+         */
+        void placeBits(int baseSize, boolean little, int start, long bits, int consume,
+                       int width, String name, boolean derived) {
+            if (width > 0 && name != null && !name.isEmpty()) {
+                Peek peek = new Peek(buf.size, baseSize, little, start, width,
+                        derived ? null : bits, name);
+                peeks.add(peek);
+                if (!derived) {
+                    for (int i = 0; i < baseSize; i++) cover(buf.size + i, peek.maskByte(i));
+                }
+            }
             if (pending.length < baseSize) pending = java.util.Arrays.copyOf(pending, baseSize);
             long base = 0;
             for (int i = 0; i < baseSize; i++) {

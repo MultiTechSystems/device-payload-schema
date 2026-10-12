@@ -429,7 +429,8 @@ type caseClaim struct {
 }
 
 func caseClaims(fields []Field, optional bool, out []caseClaim) []caseClaim {
-	for _, f := range fields {
+	covered := coveredPeeks(fields)
+	for i, f := range fields {
 		if len(f.ByteGroup) > 0 {
 			out = caseClaims(f.ByteGroup, optional, out)
 			continue
@@ -444,7 +445,9 @@ func caseClaims(fields []Field, optional bool, out []caseClaim) []caseClaim {
 			f.Type == TypeNumber || f.Type == "number" {
 			continue
 		}
-		out = append(out, caseClaim{f, optional || f.Optional})
+		// PS-551 (CR-2026-141): a peek the case's next field writes over is derived where
+		// the input omits it, so the case does not need it given.
+		out = append(out, caseClaim{f, optional || f.Optional || covered[i]})
 	}
 	return out
 }

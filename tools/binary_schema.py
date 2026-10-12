@@ -44,6 +44,14 @@ Binary Format (Version 2):
     Header (3 bytes): version(0x02) + flags + record_count
     Records: data fields (4 bytes each) + structural opcodes (variable)
 
+Field names:
+    Neither version carries a field's name. A decoded schema therefore describes its
+    records by position - the list order - with no `name` key and `names: False`, and it
+    is not a schema to decode a payload with: PS-555 forbids deriving a name from a
+    field's position (this decoder used to invent `field_{index}`), and a decoder that
+    reports the decoded object needs the names. `require_names()` refuses such a dict.
+    tools/schema_binary.py is the binary form that carries names (CR-2026-142).
+
 Usage:
     from binary_schema import BinarySchemaEncoder, BinarySchemaDecoder
 
@@ -562,15 +570,19 @@ class BinarySchemaDecoder:
         return 10.0 ** exp
     
     def decode_field(self, binary_field: BinaryField, index: int) -> dict:
-        """Decode binary field to schema dict (v1 format)."""
+        """Decode binary field to schema dict (v1 format).
+
+        The record carries no name, so the dict has none: `index` is the record's
+        position, never a source of a name (PS-555).
+        """
         # Determine type string
         type_key = (binary_field.type_code, binary_field.size)
         type_str = SIZE_TO_TYPE.get(type_key, 'u8')
-        
-        field_def = {
-            'name': binary_field.name or f'field_{index}',
-            'type': type_str,
-        }
+
+        field_def = {'type': type_str}
+        if binary_field.name:
+            # Only a BinaryField built in memory has one; the bytes never do.
+            field_def['name'] = binary_field.name
         
         # Add multiplier if not 1.0
         mult = self._exponent_to_mult(binary_field.mult_exponent)
@@ -603,10 +615,8 @@ class BinarySchemaDecoder:
         type_key = (type_code, size)
         type_str = SIZE_TO_TYPE.get(type_key, 'u8')
         
-        field_def = {
-            'name': f'field_{field_idx}',
-            'type': type_str,
-        }
+        # No name: the record carries none, and its position is not one (PS-555).
+        field_def = {'type': type_str}
         
         if semantic_id:
             field_def['semantic'] = {'ipso': semantic_id}
@@ -746,6 +756,7 @@ class BinarySchemaDecoder:
         result = {
             'version': 2,
             'endian': 'big' if big_endian else 'little',
+            'names': False,
             'fields': fields,
         }
         return result
@@ -763,6 +774,7 @@ class BinarySchemaDecoder:
         
         return {
             'version': binary.version,
+            'names': False,
             'fields': fields,
         }
     
@@ -775,6 +787,22 @@ class BinarySchemaDecoder:
         """Convenience method: decode base64 directly to dict."""
         binary = BinarySchema.from_base64(encoded)
         return self.decode(binary)
+
+
+def require_names(schema: dict) -> dict:
+    """Return `schema` if it can report a decoded object, else raise ValueError.
+
+    A schema decoded from this module's binary form carries no field names, so no
+    decoder may report the decoded object from it (PS-555): an interpreter given it
+    would report every value under a key the schema never named.
+    """
+    if schema.get('names') is False or any(
+            isinstance(f, dict) and 'type' in f and f.get('type') != 'skip'
+            and not f.get('name') for f in schema.get('fields', [])):
+        raise ValueError(
+            "this binary schema carries no field names, so a decoded object cannot be "
+            "reported from it (PS-555); use tools/schema_binary.py, which carries them")
+    return schema
 
 
 def compute_crc32(data: bytes) -> int:
