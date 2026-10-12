@@ -18,9 +18,9 @@
  */
 static const uint8_t binary_schema[] = {
     0x50, 0x53,       /* Magic: 'PS' */
-    0x01,             /* Version: 1 */
+    0x03,             /* Format version: 3 */
     0x00,             /* Flags: big-endian */
-    0x03,             /* Field count: 3 */
+    0x83,             /* Name table follows; field count: 3 */
     
     /* Field 0: temperature (s16, mult=0.01) */
     0x12,             /* Type: SINT(1), Size: 2 */
@@ -35,18 +35,25 @@ static const uint8_t binary_schema[] = {
     /* Field 2: battery (u16) */
     0x02,             /* Type: UINT(0), Size: 2 */
     0x00,             /* Mult exp: 0 -> 1.0 */
-    0xF4, 0x0C,       /* Field ID: 3316 (voltage) */
+    0xF4, 0x0C,       /* IPSO object 3316 (voltage) - not the field's name */
+    /* Name table (CR-2026-142): the names the schema declares, never derived from
+     * the IPSO IDs above */
+    11, 't', 'e', 'm', 'p', 'e', 'r', 'a', 't', 'u', 'r', 'e',
+    8, 'h', 'u', 'm', 'i', 'd', 'i', 't', 'y',
+    7, 'b', 'a', 't', 't', 'e', 'r', 'y',
 };
 
-void test_binary_loading(void) {
+int test_binary_loading(void) {
     printf("=== Binary Schema Loading Test ===\n\n");
-    
+
     schema_t schema;
-    int rc = schema_load_binary(&schema, binary_schema, sizeof(binary_schema));
-    
+    char err[160];
+    int rc = schema_load_binary_msg(&schema, binary_schema, sizeof(binary_schema),
+                                    err, sizeof(err));
+
     if (rc != SCHEMA_OK) {
-        printf("Failed to load binary schema: %d\n", rc);
-        return;
+        printf("Failed to load binary schema: %d %s\n", rc, err);
+        return 1;
     }
     
     printf("Loaded schema: %d fields\n", schema.field_count);
@@ -65,7 +72,7 @@ void test_binary_loading(void) {
     
     if (rc != SCHEMA_OK) {
         printf("Decode failed: %d\n", rc);
-        return;
+        return 1;
     }
     
     printf("\nDecoded %d fields:\n", result.field_count);
@@ -73,7 +80,18 @@ void test_binary_loading(void) {
         printf("  %s: %.2f\n", result.fields[i].name, result.fields[i].value.f64);
     }
     
-    printf("\nExpected: temperature=23.45, humidity=65.0, voltage=3300.0\n");
+    printf("\nExpected: temperature=23.45, humidity=65.0, battery=3300\n");
+    /* The schema's own names (PS-555); the loader used to report "voltage", from the
+     * third field's IPSO object. */
+    if (result.field_count != 3 ||
+        strcmp(result.fields[0].name, "temperature") != 0 ||
+        strcmp(result.fields[1].name, "humidity") != 0 ||
+        strcmp(result.fields[2].name, "battery") != 0 ||
+        result_get_int(&result, "battery", -1) != 3300) {
+        printf("FAIL: decoded keys are not the schema's names\n");
+        return 1;
+    }
+    return 0;
 }
 
 void benchmark_binary_vs_programmatic(void) {
@@ -144,7 +162,7 @@ void benchmark_binary_vs_programmatic(void) {
 }
 
 int main(void) {
-    test_binary_loading();
+    if (test_binary_loading() != 0) return 1;
     benchmark_binary_vs_programmatic();
     return 0;
 }

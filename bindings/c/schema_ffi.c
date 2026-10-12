@@ -131,6 +131,12 @@ SCHEMA_API const char* result_get_field_name(result_t_ffi result, int index) {
     return result->result.fields[index].name;
 }
 
+SCHEMA_API int result_get_field_schema_index(result_t_ffi result, int index) {
+    if (!result || !result->valid) return -1;
+    if (index < 0 || index >= result->result.field_count) return -1;
+    return result->result.fields[index].field_index;
+}
+
 SCHEMA_API int result_get_field_type(result_t_ffi result, int index) {
     if (!result || !result->valid) return -1;
     if (index < 0 || index >= result->result.field_count) return -1;
@@ -192,6 +198,8 @@ SCHEMA_API int result_get_field_bool(result_t_ffi result, int index) {
 
 SCHEMA_API char* result_to_json(result_t_ffi result) {
     if (!result || !result->valid) return NULL;
+    /* A nameless schema has no keys to write, and none may be made up (PS-555). */
+    if (result->result.nameless) return NULL;
     
     size_t buf_size = 4096;
     char* buf = (char*)malloc(buf_size);

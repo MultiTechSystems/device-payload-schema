@@ -419,7 +419,7 @@
       "properties": {
         "field": {
           "type": "string",
-          "description": "Name of the field holding the mask, which must already have been decoded (PS-159). A bare name - `flags`, not `$flags` - unlike the $-prefixed references used by `ref` and `compute`."
+          "description": "Name of the field holding the mask, which must already have been decoded (PS-159). Written bare - `flags` - throughout the corpus. `$flags` names the same field, as the spec prototype reads it, and either spelling binds what any reference to the field binds (PS-523): the number under a text label, a numeric label itself, an enum's code."
         },
         "groups": {
           "type": "array",

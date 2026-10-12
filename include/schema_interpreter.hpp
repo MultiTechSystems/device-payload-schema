@@ -304,54 +304,99 @@ public:
         return decode(buf.data(), buf.size());
     }
     
-    // Load schema from binary format
+    // Load schema from binary format 3 (tools/schema_binary.py; the layout is described
+    // in schema_interpreter.h's "Binary Schema Loading"). The names come from the blob's
+    // name table (PS-555, CR-2026-142): this loader used to make them up from the IPSO
+    // object, so 3316 decoded as "voltage" whatever the schema called it. A blob without
+    // the name table is refused, because this class reports values only by name.
     static Schema loadBinary(const uint8_t* data, size_t len) {
         if (len < 5 || data[0] != 'P' || data[1] != 'S') {
             throw std::runtime_error("Invalid binary schema format");
         }
-        
+        if (data[2] != 3) {
+            throw std::runtime_error("binary schema format version " +
+                                     std::to_string(data[2]) +
+                                     " is not supported; this loader reads version 3");
+        }
+        if (!(data[4] & 0x80)) {
+            throw std::runtime_error("binary schema carries no names; a decoder reporting "
+                                     "named values cannot use it (PS-555)");
+        }
+
         Schema schema("binary");
         schema.endian_ = (data[3] & 0x01) ? Endian::Little : Endian::Big;
-        
-        uint8_t field_count = data[4];
+
+        const int field_count = data[4] & 0x7F;
         size_t offset = 5;
-        
-        for (int i = 0; i < field_count && offset < len; i++) {
-            uint8_t type_byte = data[offset++];
+        auto need = [&](size_t n, int i, const char* what) {
+            if (offset + n > len) {
+                throw std::runtime_error("field " + std::to_string(i) + ": " + what +
+                                         " runs past the end of the blob");
+            }
+        };
+
+        for (int i = 0; i < field_count; i++) {
+            need(4, i, "its record");
+            uint8_t type_byte = data[offset];
+            bool has_lookup = (type_byte & 0x80) != 0;
             uint8_t type_code = (type_byte >> 4) & 0x07;
             uint8_t size = type_byte & 0x0F;
-            
-            // Multiplier
-            if (offset >= len) break;
-            uint8_t mult_exp = data[offset++];
-            double mult = expToMult(mult_exp);
-            
-            // Field ID (2 bytes LE)
-            if (offset + 1 >= len) break;
-            uint16_t field_id = data[offset] | (data[offset + 1] << 8);
-            offset += 2;
-            
-            // Generate name from IPSO or ID
-            std::string name = ipsoToName(field_id);
-            
-            // Add field based on type
-            FieldBuilder fb(name, typeCodeToFieldType(type_code, size));
+            double mult = expToMult(data[offset + 1]);
+            offset += 4;   // type, mult, IPSO object: an annotation, never a name
+
+            FieldBuilder fb("", typeCodeToFieldType(type_code, size));
             fb.size(size);
-            if (mult != 1.0) {
-                fb.mult(mult);
-            }
-            
-            // Handle bitfield
-            if (type_code == 0x6 && offset < len) {
+            if (mult != 1.0) fb.mult(mult);
+
+            if (type_code == 0x6) {
+                need(1, i, "its bit range");
                 uint8_t bf_byte = data[offset++];
                 fb.bit_start_ = (bf_byte >> 4) & 0x0F;
                 fb.bit_width_ = bf_byte & 0x0F;
                 fb.type_ = FieldType::Bits;
+                if (offset < len && data[offset] == 0x01) {
+                    fb.consume(true);
+                    offset++;
+                }
             }
-            
+            if (offset < len && data[offset] == 0xA0) {
+                need(3, i, "its add");
+                int16_t add_val = static_cast<int16_t>(data[offset + 1] | (data[offset + 2] << 8));
+                fb.add(add_val / 100.0);
+                offset += 3;
+            }
+            if (has_lookup) {
+                need(1, i, "its lookup count");
+                int count = data[offset++] & 0x7F;
+                for (int j = 0; j < count; j++) {
+                    need(2, i, "a lookup entry");
+                    int key = data[offset];
+                    uint8_t str_len = data[offset + 1];
+                    offset += 2;
+                    need(str_len, i, "a lookup label");
+                    fb.lookup(key, std::string(reinterpret_cast<const char*>(data + offset),
+                                               str_len));
+                    offset += str_len;
+                }
+            }
             schema.fields_.push_back(fb);
         }
-        
+
+        for (int i = 0; i < field_count; i++) {
+            need(1, i, "its name length");
+            uint8_t name_len = data[offset++];
+            need(name_len, i, "its name");
+            if (name_len == 0 && schema.fields_[i].type_ != FieldType::Skip) {
+                throw std::runtime_error("field " + std::to_string(i) +
+                                         " has an empty name; only a skip has none");
+            }
+            schema.fields_[i].name_ =
+                std::string(reinterpret_cast<const char*>(data + offset), name_len);
+            offset += name_len;
+        }
+        if (offset != len) {
+            throw std::runtime_error("bytes after the last name in the binary schema");
+        }
         return schema;
     }
     
@@ -384,9 +429,10 @@ private:
                 }
                 break;
             case 2: return (size == 4) ? FieldType::F32 : FieldType::F64;
+            case 3: return FieldType::Bytes;
             case 4: return FieldType::Bool;
             case 6: return FieldType::Bits;
-            case 8: return FieldType::Skip;
+            case 7: return FieldType::Skip;   // 0x8 before format version 3
         }
         return FieldType::U8;
     }
@@ -396,6 +442,7 @@ private:
         if (exp == 0) return 1.0;
         if (exp == 0x81) return 0.5;
         if (exp == 0x82) return 0.25;
+        if (exp == 0x84) return 0.0625;
         
         int8_t signed_exp = (exp > 127) ? static_cast<int8_t>(exp - 256) : static_cast<int8_t>(exp);
         double mult = 1.0;
@@ -405,25 +452,6 @@ private:
             for (int i = 0; i < -signed_exp; i++) mult /= 10.0;
         }
         return mult;
-    }
-    
-    // IPSO ID to name
-    static std::string ipsoToName(uint16_t id) {
-        switch (id) {
-            case 3303: return "temperature";
-            case 3304: return "humidity";
-            case 3315: return "pressure";
-            case 3316: return "voltage";
-            case 3317: return "current";
-            case 3328: return "power";
-            case 3330: return "distance";
-            case 3301: return "illuminance";
-            default: {
-                char buf[32];
-                snprintf(buf, sizeof(buf), "field_%04x", id);
-                return std::string(buf);
-            }
-        }
     }
 };
 

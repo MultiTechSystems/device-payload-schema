@@ -162,9 +162,6 @@ final class Encoder {
             // where they are not, and every member encoded as a zero.
             // A `name_from` object was reported under its templated key, so that is the
             // key to read it back from (CR-2026-030), as for any other field.
-            if (field.getName() == null || field.getName().isEmpty()) {
-                return encodeFieldList(field.getFields(), data);
-            }
             String key = resolveEncodeName(field, data);
             if (key == null) key = field.getName();
             Object nested = data.get(key);
@@ -195,13 +192,12 @@ final class Encoder {
             return encodeField(field, field.getValue());
         }
 
-        String name = field.getName();
+        String name = field.getName() == null ? "" : field.getName();
 
+        // A nameless field other than a skip is refused at load (PS-553, CR-2026-138);
+        // it was written here as zero padding.
         Object value;
-        if (name == null || name.isEmpty()) {
-            // Nothing can be supplied for a field with no name; it is padding, as a skip is.
-            value = 0L;
-        } else if (name.startsWith("_")) {
+        if (name.startsWith("_")) {
             // PS-434: an internal field that reads bytes writes its value, else the
             // input's, else it is an error naming the field. It wrote 0.
             value = Wave6b.internalEncodeValue(field, data);
@@ -688,11 +684,10 @@ final class Encoder {
         String declared = run.stream().map(Field::getEndian).filter(e -> e != null).findFirst().orElse(null);
         boolean runLittle = declared != null ? "little".equals(declared) : little;
         for (Field member : run) {
-            String name = member.getName();
+            String name = member.getName() == null ? "" : member.getName();
+            // A nameless range is refused at load (PS-553); it was written as zero bits.
             Object value;
-            if (name == null || name.isEmpty()) {
-                value = Long.valueOf(0);
-            } else if (member.getValue() != null || name.startsWith("_")) {
+            if (member.getValue() != null || name.startsWith("_")) {
                 value = Wave6b.internalEncodeValue(member, data);   // PS-360, PS-434
             } else if (data.get(name) == null) {
                 if (member.getConsume() == 0) {

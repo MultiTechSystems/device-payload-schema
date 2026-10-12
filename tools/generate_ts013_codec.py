@@ -620,9 +620,8 @@ function encBitRun(fr, run, data, ctx) {              // _encode_bitfield_run
   var endian = ctx.endian;
   for (var j = 0; j < run.length; j++) if (run[j].endian) { endian = run[j].endian; break; }
   for (var i = 0; i < run.length; i++) {
-    var f = run[i], name = f.name || "", v;
-    if (!name) v = f["default"] === undefined ? 0 : f["default"];
-    else if ("value" in f || name.charAt(0) === "_") v = encInternalValue(f, data);
+    var f = run[i], name = f.name || "", v;   // a nameless range is refused at load (PS-553)
+    if ("value" in f || name.charAt(0) === "_") v = encInternalValue(f, data);
     else if (!encHas(data, name)) {
       if (!(parseInt(f.consume || 0, 10) || 0)) {
         // PS-551 (CR-2026-141): a range that does not consume is fixed by the fields that
@@ -1479,7 +1478,6 @@ function encList(out, fields, data, ctx, top) {
     if ("flagged" in f && !f.type) { return encFlagged(out, f.flagged, data, ctx); }
     if (type === "repeat") { encRepeat(out, f, data, ctx, fields); return; }
     if (type === "object") {
-      if (!name) return encList(out, f.fields || [], data, ctx);
       // Read back from the key a `name_from` object was reported under (CR-2026-030).
       var objKey = encResolveName(f, name, data);
       if (objKey === null) objKey = name;
@@ -1497,9 +1495,9 @@ function encList(out, fields, data, ctx, top) {
     if (encIsLiteral(f)) return;
     if ("value" in f) { encField(out, f, f.value, ctx); return; }
     var value;
-    if (!name) {
-      value = f["default"] === undefined ? 0 : f["default"];   // padding, as a skip is
-    } else if (name.charAt(0) === "_") {
+    // A nameless field other than a skip is refused at load (PS-553); it was written
+    // here as zero padding.
+    if (name.charAt(0) === "_") {
       value = encInternalValue(f, data);
     } else {
       var key = encResolveName(f, name, data);
@@ -3133,10 +3131,17 @@ function writeS(buf, pos, size, value, endian) {
         if 'flagged' in field:
             fg = field['flagged']
             flag_field = fg['field']
+            # The mask is a reference like any other, so it reads the PS-523 binding in
+            # `vars` (refValue): the number under a text or boolean label, a numeric label
+            # itself, an enum's code. Written `$mask` it read `vars._mask`, which is never
+            # bound, so every group was skipped with no error.
+            mask_js = to_js_name(str(flag_field).lstrip('$'))
             lines.append(f'{i}  // flagged on {flag_field}')
+            lines.append(f'{i}  if (vars.{mask_js} === undefined) throw new Error('
+                         f'{json.dumps("Flagged field reference not found: " + str(flag_field))});')
             for group in fg.get('groups', []):
                 bit = group['bit']
-                lines.append(f'{i}  if (vars.{to_js_name(flag_field)} & (1 << {bit})) {{')
+                lines.append(f'{i}  if (vars.{mask_js} & (1 << {bit})) {{')
                 self.indent += 1
                 for gf in group.get('fields', []):
                     lines.extend(self._gen_decode_field(gf))

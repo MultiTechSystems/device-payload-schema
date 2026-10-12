@@ -2408,9 +2408,104 @@ def ipso_instance_errors(schema):
     return errors
 
 
+#: The constructs PS-553 exempts: an entry carrying one and no `type` is not a field.
+#: `records` is handled first, as the spec prototype's check_field_names does.
+NAMELESS_CONSTRUCTS = ('match', 'byte_group', 'flagged', 'tlv')
+
+
+def field_name_errors(schema):
+    """PS-553 (CR-2026-138): every field that reads or reports a value has a `name`.
+
+    A `skip` is the one nameless field. A construct (`match`, `byte_group`, `flagged`,
+    `tlv`, `records`) is not a field; a byte_group member may leave reserved bits
+    unnamed, and a repeat's `element` is nameless (PS-528). Any other nameless field
+    rejects the schema, identified by its 1-based position in its list, in the spec
+    prototype's text. The walk is the prototype's `check_field_names`: the header, the
+    fields and each port's fields, through an object's or a repeat's `fields` and
+    `trailer` (which add `, in '<name>'`), and through match cases and default, flagged
+    groups, tlv cases and `records` bodies (which add nothing).
+
+    Before, Python decoded a nameless field under the key `unknown`, Go, Java, C# and
+    the generated codec read it and dropped it, and every encoder wrote it as zero
+    padding. The references are spliced first, so a definition is held to it where used.
+    """
+    if not isinstance(schema, dict):
+        return []
+    schema = expand_refs(schema)[0]
+    label = f"Schema {schema.get('name')!r}"
+    errors = []
+
+    def walk(items, where):
+        if not isinstance(items, list):
+            return
+        for position, item in enumerate(items, 1):
+            if not isinstance(item, dict):
+                continue
+            if 'records' in item:
+                for body in item['records'] if isinstance(item['records'], list) else []:
+                    walk(body, where)
+                continue
+            if any(key in item for key in NAMELESS_CONSTRUCTS) and 'type' not in item:
+                spec = item.get('match')
+                if isinstance(spec, dict):
+                    cases = spec.get('cases')
+                    for body in (list(cases.values()) if isinstance(cases, dict) else []) \
+                            + [spec.get('default')]:
+                        walk(body, where)
+                for key in ('tlv', 'flagged'):
+                    spec = item.get(key)
+                    if isinstance(spec, list):
+                        walk(spec, where)
+                    elif isinstance(spec, dict):
+                        walk(spec.get('fields'), where)
+                        cases = spec.get('cases')
+                        for body in (cases.values() if isinstance(cases, dict) else []):
+                            walk(body, where)
+                        for group in spec.get('groups') or []:
+                            walk(group.get('fields') if isinstance(group, dict) else None,
+                                 where)
+                continue
+            if set(item) <= {'$ref'} or item.get('type') == 'skip':
+                continue
+            if 'object' in item and 'type' not in item:
+                continue            # the withdrawn `object:` key, which PS-466 names
+            if item.get('type') == 'match' and not item.get('name'):
+                # The older `type: match` + `on:` spelling of the match construct, which
+                # this repository still reads; its cases are a list of `{case, fields}`.
+                cases = item.get('cases')
+                bodies = (list(cases.values()) if isinstance(cases, dict) else
+                          [c.get('fields') for c in cases if isinstance(c, dict)]
+                          if isinstance(cases, list) else [])
+                for body in bodies + [item.get('default')]:
+                    walk(body, where)
+                continue
+            name = item.get('name')
+            if not (isinstance(name, str) and name):
+                kind = item.get('type', 'field')
+                errors.append(f"{where}: field {position}, a {kind}, has no name; a field "
+                              f"that reads or reports a value is named, and padding is a "
+                              f"`skip` (PS-553)")
+                continue
+            walk(item.get('fields'), f"{where}, in '{name}'")
+            walk(item.get('trailer'), f"{where}, in '{name}'")
+
+    walk(schema.get('header'), f"{label}, header")
+    walk(schema.get('fields'), label)
+    ports = schema.get('ports')
+    for port, entry in (ports.items() if isinstance(ports, dict) else []):
+        group = entry.get('fields') if isinstance(entry, dict) else entry
+        walk(group, f"{label}, port {port}")
+    return errors
+
+
 def schema_iterator_errors(schema):
-    """iterator_errors over the top-level and port field lists, and every tlv's reserve."""
-    errors = iterator_errors(schema.get('fields'))
+    """iterator_errors over the top-level and port field lists, and every tlv's reserve.
+
+    PS-553's nameless-field check rides here too, since every loader - the interpreter,
+    the validator and the TS013 generator - already calls this one.
+    """
+    errors = field_name_errors(schema)
+    errors.extend(iterator_errors(schema.get('fields')))
     errors.extend(ipso_instance_errors(schema))                      # PS-548
     for port, entry in (schema.get('ports') or {}).items():
         group = entry.get('fields') if isinstance(entry, dict) else entry
@@ -4366,7 +4461,7 @@ class SchemaInterpreter:
         result = {}
         case_fields = matched_case.get('fields', [])
         for cf in case_fields:
-            name = cf.get('name', 'unknown')
+            name = cf.get('name') or ''         # PS-553: only a skip is nameless
             if name.startswith('_'):
                 # Internal field - decode and bind, but don't output
                 value, pos = self._decode_field(cf, buf, pos)
@@ -4374,7 +4469,8 @@ class SchemaInterpreter:
             else:
                 value, pos = self._decode_field(cf, buf, pos)
                 value = self._apply_modifiers(value, cf)
-                result[name] = value
+                if name:
+                    result[name] = value
         
         return result, pos
     
@@ -4632,9 +4728,13 @@ class SchemaInterpreter:
         field_name = flagged_def.get('field', '')
         groups = flagged_def.get('groups', [])
         
-        if field_name not in self._variables:
+        # The mask is a reference like any other, so it reads the PS-523 binding: the
+        # number under a text or boolean label, a numeric label itself, an enum's code.
+        # Written `$mask`, it found nothing, because the variables are bound by name.
+        var_name = str(field_name).lstrip('$')
+        if var_name not in self._variables:
             raise ValueError(f"Flagged field reference not found: {field_name}")
-        flags = int(self._variables[field_name])
+        flags = int(self._variables[var_name])
         
         # A present group's fields are a field list (PS-347, PS-441), decoded as the top
         # level is. They were their own loop of plain reads, so a group holding another
@@ -5135,7 +5235,9 @@ class SchemaInterpreter:
         group_value = int.from_bytes(buf[pos:pos + group_size],
                                      'little' if self.endian == Endian.LITTLE else 'big')
         for gf in group_fields:
-            name = gf.get('name', 'unknown')
+            # A member MAY leave reserved bits unnamed (PS-553): read, and neither
+            # reported nor bound. Python reported it under the key `unknown`.
+            name = gf.get('name') or ''
             try:
                 # PS-070: every member is a range of the group's value, read from its
                 # start - a whole integer is its full range, a bool one bit - so no member
@@ -5149,7 +5251,7 @@ class SchemaInterpreter:
                 elif signed and value >= 1 << (width - 1):
                     value -= 1 << width
                 value = self._apply_modifiers(value, gf)
-                if not name.startswith('_'):
+                if name and not name.startswith('_'):
                     result.data[name] = value
                 # Add to variables so field can be referenced by compute/formula
                 self._bind(gf, [name], value)
@@ -5696,8 +5798,8 @@ class SchemaInterpreter:
                     ref_def = self._resolve_ref(field_def['$ref'])
                     ref_fields = ref_def.get('fields', [])
                     for rf in ref_fields:
-                        rf_name = rf.get('name', 'unknown')
-                        if not rf_name.startswith('_'):
+                        rf_name = rf.get('name') or ''      # PS-553: a skip only
+                        if rf_name and not rf_name.startswith('_'):
                             value, pos = self._decode_field(rf, payload, pos)
                             value = self._apply_modifiers(value, rf)
                             if value is not None:
@@ -5782,7 +5884,7 @@ class SchemaInterpreter:
                     break
                 continue
             
-            name = field_def.get('name', 'unknown')
+            name = field_def.get('name') or ''   # PS-553: only a skip is nameless
             field_type = field_def.get('type', 'u8')
             
             # Phase 2: bitfield_string type
@@ -5852,7 +5954,7 @@ class SchemaInterpreter:
                 continue
             
             # Handle match at field level (legacy: no name, type: match)
-            if field_type == 'match' and name == 'unknown':
+            if field_type == 'match' and not name:
                 try:
                     match_result, pos = self._decode_match(field_def, payload, pos)
                     result.data.update(match_result)
@@ -6225,7 +6327,7 @@ class SchemaInterpreter:
                     result.errors.append(error_text(f"Error encoding flagged group: ", e))
                 continue
             
-            name = field_def.get('name', 'unknown')
+            name = field_def.get('name') or ''   # PS-553: only a skip is nameless
             field_type = field_def.get('type', 'u8')
             
             # A derived value is computed from other fields and occupies no bytes of its
@@ -6257,12 +6359,9 @@ class SchemaInterpreter:
                 continue
 
             # PS-434: an internal field that reads bytes writes its value, else the
-            # input's, else it is an error naming the field.
-            if not field_def.get('name'):
-                # Nothing can be supplied for a field with no name; it is padding, as a
-                # skip is.
-                value = field_def.get('default', 0)
-            elif name.startswith('_'):
+            # input's, else it is an error naming the field. A nameless field other than
+            # a skip is refused at load (PS-553); it used to be written as zero padding.
+            if name.startswith('_'):
                 try:
                     value = self._internal_encode_value(field_def, data)
                 except ValueError as e:
@@ -6726,9 +6825,8 @@ class SchemaInterpreter:
         for field_def in run:
             name = field_def.get('name', '')
             ftype = str(field_def.get('type', ''))
-            if not name:
-                value = field_def.get('default', 0)
-            elif 'value' in field_def or str(name).startswith('_'):
+            # A nameless range is refused at load (PS-553); it was written as zero bits.
+            if 'value' in field_def or str(name).startswith('_'):
                 value = self._internal_encode_value(field_def, data)   # PS-360, PS-434
             elif data.get(name) is None:
                 if not int(field_def.get('consume', 0) or 0):
@@ -7030,9 +7128,6 @@ class SchemaInterpreter:
                 # A nested object is reported under its own name (PS-139), so its members
                 # are read from that mapping. They were looked up in the enclosing data,
                 # where they are not, and every member encoded as a zero.
-                if not name:
-                    out.extend(self._encode_field_list(f.get('fields') or [], data))
-                    continue
                 key = self._resolve_encode_name(f, name, data) or name
                 nested = data.get(key)
                 if not isinstance(nested, dict):
@@ -7054,11 +7149,9 @@ class SchemaInterpreter:
                 # PS-360: the constant is written whatever the input says.
                 out.extend(self._encode_field(f, f['value']))
                 continue
-            if not name:
-                # Nothing can be supplied for a field with no name; it is padding, as a
-                # skip is.
-                value = f.get('default', 0)
-            elif name.startswith('_'):
+            # A nameless field other than a skip is refused at load (PS-553); it was
+            # written here as zero padding.
+            if name.startswith('_'):
                 value = self._internal_encode_value(f, data)           # PS-434
             else:
                 # As in the top-level loop: a templated key is where the value lives.
