@@ -20,7 +20,8 @@ the format itself, refused for the same reason: `skip` (TYPE_SKIP is 0x8, and th
 loader reads a three-bit type code because the high bit is the lookup flag, so a skip of
 2 came back as a u16 with a lookup table), a plain `u8` after a bit range that does not
 consume (its type byte 0x01 is the consume marker), and `type: match` (written, never
-parsed by the loader).
+parsed by the loader). Format version 3 (CR-2026-142) gave `skip` the type code 0x7, which
+the match record had held, so a skip of up to 15 bytes is carried now.
 """
 
 import importlib.util
@@ -129,12 +130,16 @@ class TestTheBinaryCompilerRefusesWhatCCannotApply:
                 {
                     "name": "temperature",
                     "type": "u8",
+                    "ipso": {"object": 3303},
                     "add": 1,
                     "lookup": ["a", "b", "c"],
                 }
             )
         )
-        assert blob.hex() == "50530100018100e70ca0640083000161010162020163"
+        # Format version 3 (CR-2026-142): the name table follows the record.
+        assert blob.hex() == (
+            "50530300818100e70ca0640083000161010162020163" "0b74656d7065726174757265"
+        )
 
     @pytest.mark.parametrize(
         "factor,ok",
@@ -157,7 +162,7 @@ class TestTheBinaryCompilerRefusesWhatCCannotApply:
 
     def test_an_add_is_rounded_to_hundredths_not_truncated(self):
         blob = schema_binary.encode_schema(
-            _schema({"name": "t", "type": "u8", "add": 0.29})
+            _schema({"name": "t", "type": "u8", "add": 0.29}), names=False
         )
         assert blob.endswith(bytes([0xA0, 29, 0]))
         assert schema_binary.schema_errors(
@@ -167,7 +172,9 @@ class TestTheBinaryCompilerRefusesWhatCCannotApply:
     @pytest.mark.parametrize(
         "field",
         [
-            {"name": "t", "type": "skip", "length": 2},
+            # A skip has a record since format version 3 (CR-2026-142); one longer
+            # than the size nibble holds still has none.
+            {"type": "skip", "length": 16},
             {"name": "t", "type": "u64"},
             {"name": "t", "type": "ascii", "length": 4},
             {"name": "t", "type": "u8", "endian": "little"},

@@ -698,10 +698,13 @@ void test_binary_schema(void) {
     printf("--- Binary Schema ---\n");
     
     static const uint8_t binary_schema[] = {
-        0x50, 0x53, 0x01, 0x00, 0x03,      /* Header: PS v1, big-endian, 3 fields */
+        0x50, 0x53, 0x03, 0x00, 0x83,      /* Header: PS format 3, big-endian, names, 3 fields */
         0x12, 0xFE, 0xE7, 0x0C,             /* s16, mult=0.01, IPSO 3303 (temperature) */
         0x01, 0x81, 0xE8, 0x0C,             /* u8, mult=0.5, IPSO 3304 (humidity) */
-        0x02, 0x00, 0xF4, 0x0C,             /* u16, mult=1.0, IPSO 3316 (voltage) */
+        0x02, 0x00, 0xF4, 0x0C,             /* u16, mult=1.0, IPSO 3316 */
+        11, 't', 'e', 'm', 'p', 'e', 'r', 'a', 't', 'u', 'r', 'e',
+        8, 'h', 'u', 'm', 'i', 'd', 'i', 't', 'y',
+        7, 'b', 'a', 't', 't', 'e', 'r', 'y',
     };
     
     schema_t s;
@@ -1186,7 +1189,7 @@ void test_binary_schema_errors(void) {
     /* Truncated header (< 5 bytes) */
     {
         schema_t s;
-        uint8_t truncated[] = {'P', 'S', 0x01};
+        uint8_t truncated[] = {'P', 'S', 0x03};
         int rc = schema_load_binary(&s, truncated, sizeof(truncated));
         TCHECK(rc == SCHEMA_ERR_PARSE, "binary truncated header");
     }
@@ -1201,7 +1204,7 @@ void test_binary_schema_errors(void) {
     /* Valid header, 0 fields */
     {
         schema_t s;
-        uint8_t zero_fields[] = {'P', 'S', 0x01, 0x00, 0x00};
+        uint8_t zero_fields[] = {'P', 'S', 0x03, 0x00, 0x80};
         int rc = schema_load_binary(&s, zero_fields, sizeof(zero_fields));
         TCHECK(rc == SCHEMA_OK, "binary 0 fields OK");
         TCHECK_INT(s.field_count, 0, "binary 0 fields count");
