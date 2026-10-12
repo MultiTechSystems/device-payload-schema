@@ -148,7 +148,7 @@ FLOOR_BY_SHAPE = {
     # FLOOR_TOTAL); +5: match-fractional-discriminator; +3:
     # match-discriminator-from-inner-case (CR-2026-151); +6: no silent empty (see
     # FLOOR_TOTAL)
-    "match": 151,  # +4: wide-peek-selector, wide-peek-selector-u64 (match); the skipped-four vector does not round-trip
+    "match": 160,  # +4: wide-peek-selector, wide-peek-selector-u64 (match); the skipped-four vector does not round-trip
     "byte_group": 28,  # +3: byte-group-width (CR-2026-131)
     # 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now
     # carry only the definitions they reach, so one no longer has a `repeat` in an
