@@ -30,10 +30,12 @@ static class Wave4
         return (ulong)word;
     }
 
+    static uint ZeroWord(uint word) => word == 0x80000000u ? 0u : word;
+
     public static byte[] WriteWordOrdered(FieldType t, double value)
     {
         uint word = t is FieldType.F32LE16 or FieldType.F32BE16LE
-            ? BitConverter.SingleToUInt32Bits((float)(value + 0.0))   // PS-566
+            ? ZeroWord(BitConverter.SingleToUInt32Bits((float)(value + 0.0)))   // PS-566, CR-2026-157
             : unchecked((uint)(long)Math.Round(value, MidpointRounding.ToEven));
         uint high = word >> 16, low = word & 0xFFFF;
         return Le16(t)
@@ -96,6 +98,14 @@ static class Wave4
 
     /// <summary>PS-420: the smallest exponent whose fraction fits, ties to even; out of range is an error.</summary>
     public static ulong EncodeMinifloat(FieldType t, double value)
+    {
+        ulong word = MinifloatWord(t, value);
+        // PS-566, CR-2026-157: a negative value the type rounds to zero is the zero word.
+        return (t == FieldType.SFlt16 && word == 0x8000) || (t == FieldType.SFlt24 && word == 0x800000)
+            ? 0 : word;
+    }
+
+    static ulong MinifloatWord(FieldType t, double value)
     {
         bool negative = value < 0;
         var m = Exact.Of(value);

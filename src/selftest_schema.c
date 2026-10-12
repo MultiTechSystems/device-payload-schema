@@ -901,6 +901,13 @@ static void test_a_negative_zero_is_zero(void) {
     TCHECK(encodes_to(mult, 0.0, zero4, 4));
     /* A negative value keeps its sign: -0.5f is bf000000. */
     TCHECK(encodes_to(field_f32("x", ENDIAN_BIG), -0.5, (const uint8_t[]){0xBF, 0, 0, 0}, 4));
+
+    /* CR-2026-157: a negative value the type rounds to zero is the zero word, big or little;
+     * the smallest negative f32 subnormal (-2^-149) is not zero and keeps its sign. */
+    TCHECK(encodes_to(field_f32("x", ENDIAN_BIG), -1e-50, zero4, 4));
+    TCHECK(encodes_to(field_f32("x", ENDIAN_LITTLE), -1e-50, zero4, 4));
+    TCHECK(encodes_to(field_f32("x", ENDIAN_BIG), -1.401298464324817e-45,
+                      (const uint8_t[]){0x80, 0, 0, 0x01}, 4));
 }
 
 static void test_a_value_that_does_not_fit_is_named(void) {

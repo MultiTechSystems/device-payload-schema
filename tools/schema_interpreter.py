@@ -524,11 +524,22 @@ def positive_zero(value):
     return float(value) + 0.0
 
 
+def pack_float(code, value, little=False):
+    """struct.pack of a binary float whose word is the positive zero when it would be a
+    negative zero (PS-566, CR-2026-157): a negative value the type's rounding turns into
+    zero (-1e-50 as an f32) packs the sign word, so the packed word is tested, not the
+    input. A subnormal is not zero and keeps its sign."""
+    packed = struct.pack('>' + code, positive_zero(value))
+    if packed[0] == 0x80 and not any(packed[1:]):
+        packed = bytes(len(packed))
+    return packed[::-1] if little else packed
+
+
 def write_word_ordered(field_type, value):
     """The inverse of read_word_ordered."""
     layout, kind = WORD_ORDERED_TYPES[field_type]
     if kind == 'f':
-        word = int.from_bytes(struct.pack('>f', positive_zero(value)), 'big')
+        word = int.from_bytes(pack_float('f', value), 'big')
     else:
         word = int(value)
         if word < 0:
@@ -577,6 +588,14 @@ def _round_half_even(fraction):
 
 
 def encode_minifloat(field_type, value):
+    """The word for a value, with a sign-only word (a negative value the type rounds to zero)
+    written as the zero word (PS-566, CR-2026-157); see `_minifloat_word`."""
+    word = _minifloat_word(field_type, value)
+    sign_only = {'sflt16': 0x8000, 'sflt24': 0x800000}.get(field_type)
+    return 0 if word == sign_only else word
+
+
+def _minifloat_word(field_type, value):
     """The word for a value: the smallest exponent whose fraction fits, ties to even (PS-420).
 
     A value outside the type's range is an error, not a saturation.
@@ -647,7 +666,7 @@ def encode_bf16(value, name=None):
         raise ValueError(
             f"Field '{name}': {format_lookup_value(value)} is outside the range of bf16, "
             f"{format_lookup_value(-BF16_MAX)} to {format_lookup_value(BF16_MAX)} (PS-168)")
-    return sign | word
+    return sign | word if word else 0            # PS-566: a negative value rounding to zero is 0
 
 
 #: The largest finite magnitude each binary float type holds (CR-2026-148, PS-168): a
@@ -8506,19 +8525,16 @@ class SchemaInterpreter:
             return bytes([((n // 10) & 0x0F) << 4 | (n % 10)])
 
         if field_type == 'f16':
-            fmt = '<e' if self.endian == Endian.LITTLE else '>e'
-            return struct.pack(fmt, positive_zero(value))                    # PS-566
+            return pack_float('e', value, self.endian == Endian.LITTLE)      # PS-566
         
         if field_type == 'bf16':
             return self._write_int(encode_bf16(positive_zero(value), field_def.get('name')), 2, False)
 
         if field_type == 'f32':
-            fmt = '<f' if self.endian == Endian.LITTLE else '>f'
-            return struct.pack(fmt, positive_zero(value))                    # PS-566
+            return pack_float('f', value, self.endian == Endian.LITTLE)      # PS-566
         
         if field_type == 'f64':
-            fmt = '<d' if self.endian == Endian.LITTLE else '>d'
-            return struct.pack(fmt, positive_zero(value))                    # PS-566
+            return pack_float('d', value, self.endian == Endian.LITTLE)      # PS-566
         
         if field_type == 'bool':
             return bytes([1 if value else 0])
