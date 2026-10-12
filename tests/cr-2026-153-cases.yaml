@@ -1,0 +1,74 @@
+# CR-2026-153 (PS-562 to PS-565, la-payload-schema branch cr/0.5.5-apply-152-154, for
+# 0.5.5): the follow-ups #140 left.
+#
+# - PS-563: where no discriminator is given, a tie between cases goes to the case declared
+#   first. Go keeps a match's cases sorted (integers ascending), so it took the lowest key.
+# - PS-564: the bytes a `remaining` match writes, with every byte after it to the end of the
+#   payload, make the remaining count select the case it chose; otherwise the input is
+#   rejected, naming the match as PS-535 names one. The spec prototype encodes no match, so
+#   the text is this repository's.
+# - PS-565: a given discriminator that matches no case takes the `default`, or is rejected
+#   where there is none; the fields the input gives do not overrule it, and the
+#   discriminator is never written alone. A `skip` default writes the discriminator only.
+#
+# One case list, read by the reference and the generated codec's runtime encoder
+# (tests/test_cr_2026_153_cases.py), Go (go/schema/cr153_test.go), Java (CR2026153Test.java)
+# and C# (CR2026_153Tests.cs). Same layout as tests/silent-empty-cases.yaml.
+
+cases:
+
+# --- PS-563: a tie goes to the case declared first ---------------------------------
+
+- name: a_tie_goes_to_the_case_declared_first
+  schema: "name: t\nendian: big\nfields:\n  - match:\n      length: 1\n      cases:\n        2:\n          - {name: a, type: u8}\n        1:\n          - {name: a, type: u8}\n"
+  input: '{"a": 5}'
+  payload: "0205"
+
+- name: a_tie_under_a_length_selected_layout
+  schema: "name: t\nendian: big\nfields:\n  - {name: h, type: u8}\n  - match:\n      remaining: true\n      cases:\n        2..3:\n          - {name: a, type: u16}\n        2:\n          - {name: a, type: u16}\n"
+  input: '{"h": 1, "a": 258}'
+  payload: "010102"
+
+# --- PS-564: the bytes written select the case chosen ------------------------------
+
+- name: the_bytes_after_select_another_case
+  schema: "name: t\nendian: big\nfields:\n  - {name: x, type: u8}\n  - match:\n      remaining: true\n      cases:\n        1:\n          - {name: a, type: u8}\n        2:\n          - {name: b, type: u16}\n  - {name: c, type: u8}\n"
+  input: '{"x": 1, "a": 5, "c": 7}'
+  error: "Field an unnamed match: the 2 byte(s) from it to the end of the payload select case 2, not case 1, the case its input gives (PS-564)"
+
+- name: the_bytes_select_the_case_chosen
+  schema: "name: t\nendian: big\nfields:\n  - {name: x, type: u8}\n  - match:\n      remaining: true\n      cases:\n        1:\n          - {name: a, type: u8}\n        2:\n          - {name: b, type: u16}\n"
+  input: '{"x": 1, "b": 258}'
+  payload: "010102"
+
+- name: a_default_whose_bytes_select_a_case
+  schema: "name: t\nendian: big\nfields:\n  - match:\n      remaining: true\n      cases:\n        2:\n          - {name: a, type: u16}\n      default:\n        - {name: v, type: u16}\n"
+  input: '{"v": 1}'
+  error: "Field an unnamed match: the 2 byte(s) from it to the end of the payload select case 2, not its default, the case its input gives (PS-564)"
+
+- name: a_default_whose_bytes_select_no_case
+  schema: "name: t\nendian: big\nfields:\n  - match:\n      remaining: true\n      cases:\n        3:\n          - {name: a, type: u8}\n      default:\n        - {name: v, type: u16}\n"
+  input: '{"v": 1}'
+  payload: "0001"
+
+- name: a_case_reading_nothing_that_zero_bytes_do_not_select
+  schema: "name: t\nendian: big\nfields:\n  - match:\n      remaining: true\n      cases:\n        0..1: []\n        2:\n          - {name: b, type: u16}\n  - {name: tail, type: u16}\n"
+  input: '{"tail": 3}'
+  error: "Field an unnamed match: the 2 byte(s) from it to the end of the payload select case 2, not case 0..1, the case its input gives (PS-564)"
+
+# --- PS-565: a given discriminator matching no case ---------------------------------
+
+- name: a_given_discriminator_takes_the_default_not_a_case_by_its_fields
+  schema: "name: t\nendian: big\nfields:\n  - {name: k, type: u8}\n  - match:\n      field: $k\n      cases:\n        1:\n          - {name: a, type: u8}\n      default:\n        - {name: b, type: u8}\n"
+  input: '{"k": 9, "a": 4, "b": 3}'
+  payload: "0903"
+
+- name: an_inline_discriminator_matching_no_case_is_never_written_alone
+  schema: "name: t\nendian: big\nfields:\n  - match:\n      length: 1\n      name: kind\n      cases:\n        1:\n          - {name: a, type: u8}\n"
+  input: '{"kind": 9, "a": 4}'
+  error: "No matching case for value 9"
+
+- name: a_skip_default_writes_the_discriminator_only
+  schema: "name: t\nendian: big\nfields:\n  - match:\n      length: 1\n      name: kind\n      default: skip\n      cases:\n        1:\n          - {name: a, type: u8}\n"
+  input: '{"kind": 9}'
+  payload: "09"

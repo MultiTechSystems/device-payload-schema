@@ -89,6 +89,16 @@ final class Encoder {
                 errors.add(e.getMessage());
             }
         }
+        if (errors.isEmpty()) {
+            // PS-564: the bytes from each `remaining` match to the end select its case.
+            for (TailCheck c : tailChecks) {
+                String selected = remainingSelection(c.match, c.tail);
+                if (!java.util.Objects.equals(selected, c.chosen)) {
+                    errors.add(remainingMismatchMessage(c.match, c.tail, selected, c.chosen));
+                    break;
+                }
+            }
+        }
         if (errors.isEmpty() && frame.length == 0) {
             // PS-442: the last line against a construct that wrote nothing and said so to
             // no one - a match with no case chosen, a tlv entry no case claimed.
@@ -490,11 +500,14 @@ final class Encoder {
         // consume leaves its bytes pending, and the next field's bytes are ORed into them
         // rather than written after them.
         FrameBuffer out = new FrameBuffer();
+        TailLevel tails = new TailLevel(out);                                    // PS-564
         List<Field> run = new ArrayList<>();
         String omittedOptional = null;      // the first optional field the input left out
         for (Field field : list) {
             if (!isBareBitfield(field)) {
+                tails.start();
                 flushRun(out, run, data, topLevel);
+                tails.start();
                 // PS-405: an optional field is written only where the input has it, and
                 // supplying one after an omitted earlier one is an error: the decoder
                 // would read it into the earlier field's place.
@@ -555,10 +568,13 @@ final class Encoder {
             run.add(field);
             // `consume` of 1 or more closes the span, which is where the run ends.
             if (field.getConsume() >= 1) {
+                tails.start();
                 flushRun(out, run, data, topLevel);
             }
         }
+        tails.start();
         flushRun(out, run, data, topLevel);
+        tails.close();
         int tail = out.pendingLength();
         FrameMeta meta = out.meta();
         byte[] frame = carrying(out.frame(), tail);
@@ -890,6 +906,16 @@ final class Encoder {
      * and {@code until: end} needs no header at all.
      */
     private byte[] encodeRepeat(Field field, Map<String, Object> data, List<Field> siblings) {
+        // PS-564 is not checked inside a tlv or repeat (tail_unchecked).
+        tailDepth++;
+        try {
+            return encodeRepeatBody(field, data, siblings);
+        } finally {
+            tailDepth--;
+        }
+    }
+
+    private byte[] encodeRepeatBody(Field field, Map<String, Object> data, List<Field> siblings) {
         String name = field.getName();
         Object records = name == null ? null : data.get(name);
         if (records != null && !(records instanceof Map<?, ?>) && !(records instanceof List<?>)) {
@@ -950,6 +976,17 @@ final class Encoder {
      */
     private byte[] encodeRepeatElements(Field field, Map<String, Object> data,
                                         List<Object> list, Long count) {
+        // PS-564 is not checked inside a tlv or repeat (tail_unchecked).
+        tailDepth++;
+        try {
+            return encodeRepeatElementsBody(field, data, list, count);
+        } finally {
+            tailDepth--;
+        }
+    }
+
+    private byte[] encodeRepeatElementsBody(Field field, Map<String, Object> data,
+                                            List<Object> list, Long count) {
         String name = field.getName();
         // PS-550: a sibling identifying these values position by position is given as many
         // values as this repeat, as a decoder requires (PS-546).
@@ -1401,10 +1438,12 @@ final class Encoder {
                 fallbackFields = (List<Field>) declared;
             }
         }
-        if (matched == null && fallbackFields == null) {
+        if (matched == null && fallbackFields == null && discriminator == null) {
             // An inline match with no name reports nothing of itself, and a `remaining`
             // match has none to report, so the case is recovered from which of its fields
-            // the data carries, scored through the constructs in it (_best_case).
+            // the data carries, scored through the constructs in it (_best_case). A given
+            // discriminator matching no case takes the default or is rejected (PS-565):
+            // the fields given cannot overrule it.
             BestCase best = bestCase(match, data);
             if (best != null) matched = best.c();
         }
@@ -1487,6 +1526,7 @@ final class Encoder {
                 fallbackOut.write(writeInt(value, match.getLength(), false));
             }
             byte[] body = encodeFieldList(fallbackFields, data);
+            registerRemaining(match, body.length, "default");                  // PS-564
             Integer tail = carriedTail.remove(body);
             int prefix = fallbackOut.size;
             fallbackOut.write(body);
@@ -1513,11 +1553,97 @@ final class Encoder {
             out.write(writeInt(value, match.getLength(), false));
         }
         byte[] body = encodeFieldList(matched.getFields(), data);
+        registerRemaining(match, body.length,
+                matched.isDefault() ? "default" : String.valueOf(matched.getCaseValue()));
         Integer tail = carriedTail.remove(body);
         int prefix = out.size;
         out.write(body);
         // The body's unconsumed tail stays pending in the enclosing list (CR-2026-136).
         return carrying(prefixed(prefix, body, out.toArray()), tail == null ? 0 : tail);
+    }
+
+    // --- PS-564: the bytes a `remaining` match writes select its case -------------------
+
+    /** A `remaining` match's chosen case and the bytes from it to the end so far. */
+    private static final class TailCheck {
+        final Field match;
+        final String chosen;
+        int tail;
+
+        TailCheck(Field match, int tail, String chosen) {
+            this.match = match;
+            this.tail = tail;
+            this.chosen = chosen;
+        }
+    }
+
+    private final List<TailCheck> tailChecks = new ArrayList<>();
+    /** Inside a tlv or repeat, where the bytes after a match are not in one field list. */
+    private int tailDepth = 0;
+
+    private void registerRemaining(Field match, int bodyLength, String chosen) {
+        if (match.isMatchRemaining() && tailDepth == 0) {
+            tailChecks.add(new TailCheck(match, bodyLength, chosen));
+        }
+    }
+
+    /**
+     * One field list's share of the bytes after a `remaining` match (the reference's
+     * TailLevel): once an item is written, the bytes it added go to the tail of every check
+     * an earlier item of the same list registered.
+     */
+    private final class TailLevel {
+        private final FrameBuffer out;
+        private final List<TailCheck> checks = new ArrayList<>();
+        private int size = -1;
+        private int mark = 0;
+
+        TailLevel(FrameBuffer out) {
+            this.out = out;
+        }
+
+        void start() {
+            close();
+            size = out.size();
+            mark = tailChecks.size();
+        }
+
+        void close() {
+            if (size < 0) return;
+            int grown = out.size() - size;
+            for (TailCheck c : checks) c.tail += grown;
+            checks.addAll(tailChecks.subList(mark, tailChecks.size()));
+            size = -1;
+        }
+    }
+
+    /** The case a decoder selects for a `remaining` match with `count` bytes left. */
+    private static String remainingSelection(Field match, int count) {
+        List<Field.Case> cases = match.getCases() == null ? List.of() : match.getCases();
+        boolean hasDefault = match.getMatchDefault() instanceof List<?>
+                || "skip".equals(match.getMatchDefault());
+        for (Field.Case c : cases) {
+            if (c.isDefault()) {
+                hasDefault = true;
+                continue;
+            }
+            if (caseMatches((long) count, c.getCaseValue())) return String.valueOf(c.getCaseValue());
+        }
+        return hasDefault ? "default" : null;
+    }
+
+    static String remainingMismatchMessage(Field match, int count, String selected, String chosen) {
+        String name = match.getName();
+        String label = name != null && !name.isEmpty() ? "'" + name + "'" : "an unnamed match";
+        return "Field " + label + ": the " + count + " byte(s) from it to the end of the payload select "
+                + describeCase(selected) + ", not " + describeCase(chosen)
+                + ", the case its input gives (PS-564)";
+    }
+
+    private static String describeCase(String key) {
+        if (key == null) return "no case";
+        if ("default".equals(key)) return "its default";
+        return "case " + key;
     }
 
     /**
@@ -1951,6 +2077,16 @@ final class Encoder {
      * (temperature, temperature_alarm) is not stranded by [3, 103] (temperature).
      */
     private byte[] encodeTLV(Field tlv, Map<String, Object> data) {
+        // PS-564 is not checked inside a tlv or repeat (tail_unchecked).
+        tailDepth++;
+        try {
+            return encodeTLVBody(tlv, data);
+        } finally {
+            tailDepth--;
+        }
+    }
+
+    private byte[] encodeTLVBody(Field tlv, Map<String, Object> data) {
         // `merge: false` reports its entries as a list under `channels`, which the claiming
         // below cannot see, so this wrote nothing and reported success. Encoding the list
         // is not defined yet; refuse it by name, as the reference does.
@@ -3136,6 +3272,11 @@ final class Encoder {
 
         int pendingLength() {
             return pending.length;
+        }
+
+        /** The bytes written and pending (PS-564's measure). */
+        int size() {
+            return buf.size + pending.length;
         }
 
         void extend(byte[] data) {

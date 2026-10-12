@@ -122,15 +122,15 @@ func defaultBody(m Field) ([]Field, bool) {
 }
 
 // bestCase is the case whose fields the input gives most of, scored by bodyScore: the
-// first of equal cases wins, and tied says another equalled it. ok is false where none
-// scores, or where the match's default list explains more of the input than any case:
-// the default is what a decoder takes for every value no case lists. Go keeps a match's
-// cases sorted (integers ascending, then strings), not in declaration order, so where
-// two cases tie the first here may not be the reference's first.
-func bestCase(m Field, data map[string]any) (Case, bool, bool) {
+// first of equal cases in declaration order wins (PS-563), and tied says another
+// equalled it. ok is false where none scores, or where the match's default list explains
+// more of the input than any case: the default is what a decoder takes for every value no
+// case lists. Go keeps a match's Cases sorted for decoding; declaredCases gives the order
+// written, from the schema's keyOrder.
+func bestCase(m Field, data map[string]any, order keyOrder) (Case, bool, bool) {
 	var best Case
 	found, bestHits, tied := false, 0, false
-	for _, c := range m.Cases {
+	for _, c := range declaredCases(m, order) {
 		if c.Default {
 			continue
 		}
@@ -162,12 +162,21 @@ type declaredSource struct {
 // declaredSources is every name a field list declares, anywhere in it, walked over the
 // declarations as written: a mapping with `name` and `type`, or a match's `name`.
 func declaredSources(fields []Field) map[string]*declaredSource {
+	found, _ := declaredSourcesInOrder(fields, nil)
+	return found
+}
+
+// declaredSourcesInOrder is declaredSources with the names in the order the schema first
+// declares them, its mappings walked in source order (keyOrder).
+func declaredSourcesInOrder(fields []Field, order keyOrder) (map[string]*declaredSource, []string) {
 	found := map[string]*declaredSource{}
+	var names []string
 	note := func(name string, literal bool, value any) {
 		entry := found[name]
 		if entry == nil {
 			entry = &declaredSource{}
 			found[name] = entry
+			names = append(names, name)
 		}
 		if literal {
 			entry.literals = append(entry.literals, value)
@@ -202,8 +211,8 @@ func declaredSources(fields []Field) map[string]*declaredSource {
 					note(mn, false, nil)
 				}
 			}
-			for _, v := range n {
-				switch v.(type) {
+			for _, key := range order.keys(n) {
+				switch v := n[key]; v.(type) {
 				case []any, map[string]any, []map[string]any:
 					walk(v)
 				}
@@ -215,7 +224,7 @@ func declaredSources(fields []Field) map[string]*declaredSource {
 			walk(f.decl)
 		}
 	}
-	return found
+	return found, names
 }
 
 // emptyPayloadError is PS-442's last line: an encoder that wrote no bytes, where the
@@ -223,15 +232,14 @@ func declaredSources(fields []Field) map[string]*declaredSource {
 // reports, dropped that field's bytes without a word. A value that can be written in no
 // bytes is not one: an empty list, mapping or string, a value a literal of that name
 // gives, and an internal or absent one. The reference reports the first such name in
-// the input's order; a Go map has none, so the keys are taken in sorted order.
-func emptyPayloadError(fields []Field, data map[string]any) error {
-	keys := make([]string, 0, len(data))
-	for k := range data {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	var sources map[string]*declaredSource
+// the input's order; a Go map has none, so the names are taken in the order the schema
+// declares them (keyOrder), which is a decoded input's order too (PS-563's note).
+func emptyPayloadError(fields []Field, data map[string]any, order keyOrder) error {
+	sources, keys := declaredSourcesInOrder(fields, order)
 	for _, key := range keys {
+		if _, given := data[key]; !given {
+			continue
+		}
 		value := data[key]
 		if strings.HasPrefix(key, "_") || value == nil {
 			continue
@@ -253,9 +261,6 @@ func emptyPayloadError(fields []Field, data map[string]any) error {
 			if len(v) == 0 {
 				continue
 			}
-		}
-		if sources == nil {
-			sources = declaredSources(fields)
 		}
 		entry := sources[key]
 		if entry == nil || !entry.reads {

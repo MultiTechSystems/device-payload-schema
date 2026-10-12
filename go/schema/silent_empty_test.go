@@ -107,17 +107,17 @@ func TestEmptyPayloadGuard(t *testing.T) {
 		t.Errorf("kind = %+v", k)
 	}
 	want := "Encoding wrote no bytes, though the input gives 'battery', which the schema reads from the payload (PS-442)"
-	if err := emptyPayloadError(s.Fields, map[string]any{"battery": 3.0}); err == nil || err.Error() != want {
+	if err := emptyPayloadError(s.Fields, map[string]any{"battery": 3.0}, s.keyOrder); err == nil || err.Error() != want {
 		t.Errorf("battery: %v", err)
 	}
-	if err := emptyPayloadError(s.Fields, map[string]any{"distance": "none", "kind": 4.0}); err != nil {
+	if err := emptyPayloadError(s.Fields, map[string]any{"distance": "none", "kind": 4.0}, s.keyOrder); err != nil {
 		t.Errorf("constants: %v", err)
 	}
-	if err := emptyPayloadError(s.Fields, map[string]any{"distance": 12.0}); err == nil || !strings.Contains(err.Error(), "'distance'") {
+	if err := emptyPayloadError(s.Fields, map[string]any{"distance": 12.0}, s.keyOrder); err == nil || !strings.Contains(err.Error(), "'distance'") {
 		t.Errorf("distance 12: %v", err)
 	}
 	none := map[string]any{"battery": []any{}, "distance": "", "_w": 5.0, "other": 1.0, "x": nil}
-	if err := emptyPayloadError(s.Fields, none); err != nil {
+	if err := emptyPayloadError(s.Fields, none, s.keyOrder); err != nil {
 		t.Errorf("no bytes: %v", err)
 	}
 }
