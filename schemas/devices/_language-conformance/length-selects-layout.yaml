@@ -1,0 +1,58 @@
+# The bytes left after the battery byte select the layout (PS-414), and in the three-byte
+# layout a type byte the output does not report selects the body. An encoder recovers
+# both from the fields the input gives, where the body's fields sit one level down, and
+# where the input gives none it writes the layout that reads nothing (PS-551, PS-442).
+# Every vector re-encodes to its payload.
+name: probe_length_selects_layout
+version: 1
+endian: big
+fields:
+- name: battery
+  type: u8
+- match:
+    remaining: true
+    cases:
+      0: []
+      1:
+      - name: status
+        type: u8
+      3:
+      - name: _kind
+        type: u8
+      - match:
+          field: $_kind
+          cases:
+            1:
+            - name: level
+              type: u16
+            2:
+            - name: volts
+              type: u8
+              div: 10
+            - name: flags
+              type: u8
+test_vectors:
+- name: nothing_after_the_battery
+  source: generated
+  payload: "21"
+  expected:
+    battery: 33
+- name: one_status_byte
+  source: generated
+  payload: "21 07"
+  expected:
+    battery: 33
+    status: 7
+- name: level_under_its_type_byte
+  source: generated
+  payload: "21 01 0102"
+  expected:
+    battery: 33
+    level: 258
+- name: volts_and_flags_under_their_type_byte
+  source: generated
+  payload: "21 02 21 05"
+  expected:
+    battery: 33
+    volts: 3.3
+    flags: 5

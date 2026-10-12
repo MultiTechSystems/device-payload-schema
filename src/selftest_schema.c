@@ -980,6 +980,72 @@ static void test_bit_ranges_are_laid_out_as_decoded(void) {
     }
 }
 
+static void test_no_construct_is_encoded_as_nothing(void) {
+    /* PS-442, PS-551 (no silent empty encode): an internal field and a match were passed
+     * over by this encoder, writing nothing for the bytes a decoder reads. An internal
+     * field is now written from its input, else PS-434's error; a match writes the case
+     * its discriminator selects, else names what it lacks. */
+    schema_t s;
+    encode_inputs_t in;
+    encode_result_t out;
+    {   /* An internal byte the input gives is written; one it omits is refused. */
+        memset(&s, 0, sizeof(s));
+        s.endian = ENDIAN_BIG;
+        field_def_t h = field_u8("_h");
+        field_def_t a = field_u8("a");
+        schema_add_field(&s, &h);
+        schema_add_field(&s, &a);
+        encode_inputs_init(&in);
+        encode_inputs_add_int(&in, "a", 7);
+        TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_PARSE);
+        TCHECK(out.len == 0);
+        TCHECK(strcmp(out.error_msg, "internal field '_h' reads payload bytes and declares "
+                      "no value, and the input does not supply it (PS-434)") == 0);
+        encode_inputs_add_int(&in, "_h", 1);
+        TCHECK(schema_encode(&s, &in, &out) == SCHEMA_OK);
+        TCHECK(out.len == 2 && out.data[0] == 1 && out.data[1] == 7);
+    }
+    {   /* A match whose case bodies sit above field_count: the taken body is written. */
+        memset(&s, 0, sizeof(s));
+        s.endian = ENDIAN_BIG;
+        field_def_t k = field_u8("kind");
+        field_set_var(&k, "kind");
+        schema_add_field(&s, &k);
+        field_def_t m = {0};
+        strncpy(m.name, "_m", SCHEMA_MAX_NAME_LEN - 1);
+        m.type = FIELD_TYPE_MATCH;
+        strncpy(m.match_var, "$kind", SCHEMA_MAX_NAME_LEN - 1);
+        for (int c = 0; c < SCHEMA_MAX_CASES; c++) {
+            for (int j = 0; j < 8; j++) m.cases[c].match_list[j] = -1;
+        }
+        m.cases[0].match_value = 1; m.cases[0].field_start = 2; m.cases[0].field_count = 1;
+        m.cases[1].match_value = 2; m.cases[1].field_start = 3; m.cases[1].field_count = 1;
+        m.case_count = 2;
+        schema_add_field(&s, &m);
+        field_def_t level = field_u16("level", ENDIAN_BIG);
+        field_def_t volts = field_u8("volts");
+        schema_place_field(&s, 2, &level);
+        schema_place_field(&s, 3, &volts);
+
+        encode_inputs_init(&in);
+        encode_inputs_add_int(&in, "kind", 2);
+        encode_inputs_add_int(&in, "volts", 33);
+        TCHECK(schema_encode(&s, &in, &out) == SCHEMA_OK);
+        TCHECK(out.len == 2 && out.data[0] == 2 && out.data[1] == 33);
+
+        encode_inputs_init(&in);
+        encode_inputs_add_int(&in, "kind", 9);
+        TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_MATCH);
+        TCHECK(out.len == 0);
+        TCHECK(strcmp(out.error_msg, "No matching case for value 9") == 0);
+
+        encode_inputs_init(&in);
+        encode_inputs_add_int(&in, "kind", 1);
+        TCHECK(schema_encode(&s, &in, &out) == SCHEMA_ERR_PARSE);
+        TCHECK(strcmp(out.error_msg, "Missing required field: level") == 0);
+    }
+}
+
 static void test_a_missing_input_is_named(void) {
     /* PS-551 (CR-2026-134): rejected, naming the field, with no payload. The code alone
      * was returned before, so a caller could not tell which input it had left out. */
@@ -1776,6 +1842,7 @@ void selftest_schema(void) {
     test_a_nibble_decimal_that_does_not_fit_is_named();
     test_bit_ranges_are_laid_out_as_decoded();
     test_a_missing_input_is_named();
+    test_no_construct_is_encoded_as_nothing();
     test_a_covered_peek_is_derived();
     test_a_nameless_schema_encodes_by_index();
     test_a_text_label_binds_its_number();

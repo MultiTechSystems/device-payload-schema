@@ -126,7 +126,14 @@ DEVICES = REPO_ROOT / "schemas" / "devices"
 # tlv-case-of-one-inline-branch, tlv-float-reading, tlv-scaled-wide-reading), all tlv.
 # +6: bf16 (CR-2026-149), all plain fixed; bf16-specials re-encodes nothing (an absent field).
 # +4: ascii-numeral (CR-2026-150), all plain fixed.
-FLOOR_TOTAL = 2125
+# +4: wide-peek-selector, wide-peek-selector-u64 (match); the skipped-four vector does not round-trip.
+# +6: bf16 (CR-2026-149), all plain fixed; its three infinity and NaN vectors re-encode nothing (an absent field).
+# +3: match-discriminator-from-inner-case (CR-2026-151), all match.
+# +11, no silent empty encode (PS-442): the fixtures length-selects-layout (4) and
+# literal-selects-branch (2), match, and tag-entry-constants (4), tlv, and
+# tlv-case-field-list's literal_only, tlv - an entry reporting only a constant, which
+# encoded to no bytes with no error.
+FLOOR_TOTAL = 2143
 
 #: Per-shape floors, so a regression in a shape that works cannot hide behind the 948
 #: TLV vectors that do not. A shape absent here has no working round-trip to protect.
@@ -134,13 +141,16 @@ FLOOR_BY_SHAPE = {
     # 1283 -> 1281 deliberately (CR-2026-067, PS-434): two vobo vectors round-tripped
     # only because their internal byte halves were all zero, which the encoder wrote
     # for an internal field with no value. It now reports such a field instead.
-    "tlv": 1569,  # +12: the tlv encode-gap fixtures; +2: tlv-name-object-and-scalar; -4: PS-169 (see FLOOR_TOTAL); +16: CR-2026-141 (see FLOOR_TOTAL); -26: CR-2026-136 with CR-2026-134 (see FLOOR_TOTAL); +264: CR-2026-136 (see FLOOR_TOTAL); +2: CR-2026-128; +3: CR-2026-125 fixtures; +1: tlv-repeat-merge (CR-2026-110)
+    "tlv": 1574,  # +5: no silent empty (see FLOOR_TOTAL); +12: the tlv encode-gap fixtures; +2: tlv-name-object-and-scalar; -4: PS-169 (see FLOOR_TOTAL); +16: CR-2026-141 (see FLOOR_TOTAL); -26: CR-2026-136 with CR-2026-134 (see FLOOR_TOTAL); +264: CR-2026-136 (see FLOOR_TOTAL); +2: CR-2026-128; +3: CR-2026-125 fixtures; +1: tlv-repeat-merge (CR-2026-110)
     "flagged": 198,  # +1: CR-2026-134; +4: mask-reference-binding (see FLOOR_TOTAL)
     "plain fixed": 158,  # +4: ascii-numeral (CR-2026-150); +6: bf16 (CR-2026-149); +1: CR-2026-135 (see FLOOR_TOTAL); +4: ascii-latin1 (CR-2026-114)
     # +1: CR-2026-132 enum port; +5: lookup-reference-binding (CR-2026-109);
     # +4: match-u32-inline-discriminator; +2: CR-2026-134; +1: both together (see
     # FLOOR_TOTAL); +5: match-fractional-discriminator
-    "match": 147,
+    # FLOOR_TOTAL); +5: match-fractional-discriminator; +3:
+    # match-discriminator-from-inner-case (CR-2026-151); +6: no silent empty (see
+    # FLOOR_TOTAL)
+    "match": 160,  # +4: wide-peek-selector, wide-peek-selector-u64 (match); the skipped-four vector does not round-trip
     "byte_group": 28,  # +3: byte-group-width (CR-2026-131)
     # 6 -> 5 with plain fixed 66 -> 67: a bucket move. Composed library schemas now
     # carry only the definitions they reach, so one no longer has a `repeat` in an
