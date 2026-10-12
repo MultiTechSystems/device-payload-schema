@@ -134,28 +134,6 @@ UNREACHABLE_KEYS = {
 #: This matched `uN` only and built every range on a one-byte base, whatever N said.
 BIT_RANGE = re.compile(r"^([us])(8|16|24|32|64)\[(\d+):(\d+)\]$")
 
-#: CR-2026-114 (la-payload-schema main c932961). The interpreter holds `ascii` text as a
-#: C string, so it stops at the first 0x00 - "AB\0C" is "AB", where PS-534 keeps the NUL
-#: and drops only trailing ones - and copies a byte above 0x7F through as itself rather
-#: than as the ISO 8859-1 character PS-538 requires. Both are interpreter gaps, recorded
-#: in AGENTS.md like the boolean literal; a schema whose vectors expect either is not
-#: attempted, rather than counted as a C failure the harness knows in advance.
-TEXT_GAP = ("ascii text with an interior 0x00 or a byte above 0x7F: the interpreter holds "
-            "text as a C string (PS-534, PS-538, a known C gap)")
-
-
-def expects_text_c_cannot_hold(schema, vectors):
-    """True where a vector expects an ascii value C cannot report (PS-534, PS-538)."""
-    names = {f.get("name") for f in schema.get("fields") or []
-             if isinstance(f, dict) and f.get("type") == "ascii"}
-    for vector in vectors:
-        for key, value in (vector.get("expected") or {}).items():
-            if key in names and isinstance(value, str) and (
-                    "\x00" in value.rstrip("\x00") or any(ord(ch) > 0x7F for ch in value)):
-                return True
-    return False
-
-
 def c_string(text):
     return '"' + str(text).replace("\\", "\\\\").replace('"', '\\"') + '"'
 
@@ -572,12 +550,6 @@ static void emit(const char* schema, const char* vector,
         printf("E\\t%s\\n", r.error_msg);
         return;
     }
-    /* PS-472. The interpreter has no warning list; it reports the leftover bytes as two
-     * numbers, and this renders them as the warning the other five would give, so a
-     * vector's `expected_warnings` is checked here too. */
-    if (r.bytes_unread > 0)
-        printf("W\\t%d byte(s) after the last field left undecoded, from offset %d "
-               "(PS-472)\\n", r.bytes_unread, r.bytes_consumed);
     for (int i = 0; i < r.field_count; i++) {
         const decoded_field_t* d = &r.fields[i];
         if (!d->valid) continue;
@@ -615,7 +587,20 @@ static void emit(const char* schema, const char* vector,
                 printf("F\\t%s\\t%.10g\\n", key, d->value.f64); break;
             case FIELD_TYPE_BOOL:
                 printf("B\\t%s\\t%s\\n", key, d->value.b ? "true" : "false"); break;
-            case FIELD_TYPE_ASCII: case FIELD_TYPE_HEX: case FIELD_TYPE_BASE64:
+            case FIELD_TYPE_ASCII:
+                /* CR-2026-114: `text_len` bytes, a 0x00 among them kept (PS-534), each
+                 * the ISO 8859-1 character of the same number (PS-538) - printed as hex
+                 * so neither survives only by luck, and read back as Latin-1. The PS-073
+                 * warning is a flag here, rendered as the text the other five give. */
+                printf("T\\t%s\\t", key);
+                for (int b = 0; b < d->text_len; b++)
+                    printf("%02x", (unsigned char)d->value.str[b]);
+                printf("\\n");
+                if (d->non_ascii)
+                    printf("W\\tField '%s': a byte above 0x7F in an ascii value "
+                           "(PS-073, PS-538)\\n", d->name);
+                break;
+            case FIELD_TYPE_HEX: case FIELD_TYPE_BASE64:
             case FIELD_TYPE_ENUM:
                 printf("S\\t%s\\t%s\\n", key, d->value.str); break;
             case FIELD_TYPE_BYTES:
@@ -634,6 +619,13 @@ static void emit(const char* schema, const char* vector,
                 break;
         }
     }
+    /* PS-472. The interpreter has no warning list; it reports the leftover bytes as two
+     * numbers, and this renders them as the warning the other five would give, so a
+     * vector's `expected_warnings` is checked here too. Last, where the others report
+     * it: after every field's own warning. */
+    if (r.bytes_unread > 0)
+        printf("W\\t%d byte(s) after the last field left undecoded, from offset %d "
+               "(PS-472)\\n", r.bytes_unread, r.bytes_consumed);
 }
 
 '''
@@ -760,6 +752,8 @@ def parse_output(text):
             results[current][1][parts[1]] = parts[2] == "true"
         elif parts[0] == "S":
             results[current][1][parts[1]] = parts[2]
+        elif parts[0] == "T":
+            results[current][1][parts[1]] = bytes.fromhex(parts[2]).decode("latin-1")
     return results
 
 
@@ -796,12 +790,6 @@ def run():
         if not vectors:
             continue
         vector_total += len(vectors)
-        if expects_text_c_cannot_hold(schema, vectors):
-            # Asked of the interpreter, not of this harness: it would build the schema and
-            # report something else.
-            skips[TEXT_GAP] += 1
-            skipped_vectors += len(vectors)
-            continue
         if args.from_blob:
             import schema_binary
 
