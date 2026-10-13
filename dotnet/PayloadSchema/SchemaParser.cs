@@ -1007,7 +1007,7 @@ public static partial class SchemaParser
         // Flagged construct (inline)
         if (fm.TryGetValue("flagged", out var flaggedNode) && flaggedNode is YamlMappingNode flaggedMap)
         {
-            var fd = new FlaggedDef();
+            var fd = new FlaggedDef { Anchor = flaggedMap };
             if (flaggedMap.TryGetValue("field", out var ff)) fd.Field = Scalar(ff);
             if (flaggedMap.TryGetValue("groups", out var groups) && groups is YamlSequenceNode groupsSeq)
             {
@@ -1036,6 +1036,7 @@ public static partial class SchemaParser
                 syntheticMap.Add(kv.Key, kv.Value);
             var tlvField = ParseField(syntheticMap);
             tlvField.Type = FieldType.TLV;
+            tlvField.Anchor = tlvMap;                                           // PS-572
             f.TLVInline = tlvField;
         }
 
@@ -1045,12 +1046,13 @@ public static partial class SchemaParser
             && !fm.Children.ContainsKey(new YamlScalarNode("type")))
         {
             f.Records = recordsSeq.Children.OfType<YamlSequenceNode>().Select(ParseFields).ToList();
+            f.Anchor = recordsSeq;                                              // PS-572
         }
 
         // Match inline (Option B: `- match: { field: $var, cases: {...} }`)
         if (fm.TryGetValue("match", out var matchNode) && matchNode is YamlMappingNode matchMap)
         {
-            var matchField = new SchemaField { Type = FieldType.Match };
+            var matchField = new SchemaField { Type = FieldType.Match, Anchor = matchMap };
             if (matchMap.TryGetValue("field", out var mf)) matchField.On = Scalar(mf);
             // The block's own `name` and `length`: a match with no `field:` reads its
             // discriminator from the payload, and both the decoder's read width and the
@@ -1076,7 +1078,7 @@ public static partial class SchemaParser
                 // As above: hex keys need ParseScalarValue, not int.TryParse.
                 foreach (var kv in mcMap.Children)
                 {
-                    var c = new MatchCase();
+                    var c = new MatchCase { KeyNode = kv.Key };
                     // A `default` key is the fallback, not a case whose value is the
                     // string "default" - which matched no integer, so the fallback never
                     // ran (CR-2026-020).

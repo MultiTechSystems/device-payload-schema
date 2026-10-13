@@ -121,7 +121,8 @@ sealed class CorpusReport
 /// The interpreter output's `_meta` for every vector with a payload, for rule 3 of
 /// tools/verdicts-gate.py (CR-2026-096). Written only where CORPUS_META_REPORT names a
 /// file; CORPUS_ONLY and CORPUS_ROOT select the vectors as they do for CorpusReport.
-/// Each entry is {schema, index, vector, meta}, meta null where the decode failed (PS-497).
+/// Each entry is {schema, index, vector, meta, decode}, meta and decode (the decode record,
+/// CR-2026-162) null where the decode failed (PS-497).
 /// </summary>
 sealed class CorpusMetaReport
 {
@@ -130,7 +131,9 @@ sealed class CorpusMetaReport
 
     public bool Enabled => !string.IsNullOrEmpty(_path);
 
-    public void Add(string schema, int index, string vector, object? meta)
+    /// <param name="decode">The vector's `_decode` (CR-2026-162, PS-572), for rule 4; null
+    /// where the decode failed.</param>
+    public void Add(string schema, int index, string vector, object? meta, object? decode = null)
     {
         if (!Enabled) return;
         _entries.Add(new Dictionary<string, object?>
@@ -139,6 +142,7 @@ sealed class CorpusMetaReport
             ["index"] = index,
             ["vector"] = vector,
             ["meta"] = meta,
+            ["decode"] = decode,
         });
     }
 

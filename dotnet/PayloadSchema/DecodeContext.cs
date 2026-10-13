@@ -70,6 +70,8 @@ public class DecodeContext
     public int Offset { get; set; }
     public string Endian { get; }
     public Dictionary<string, object?> Variables { get; } = new();
+    /// <summary>The decode record being kept (PS-572); null when not asked for.</summary>
+    internal DecodeTrace? Trace { get; set; }
     /// <summary>
     /// PS-532: the value a looked-up field reported, by the name it binds, for `name_from`
     /// templates - which read the label while a `$` reference reads PS-523's binding.

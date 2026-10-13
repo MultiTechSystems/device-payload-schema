@@ -94,11 +94,17 @@ final class CorpusReport {
         return metaPath != null && !metaPath.isEmpty();
     }
 
-    void addMeta(String schema, int index, Object vector, Object meta) {
+    /**
+     * One vector's {@code _meta}, with its decode record {@code _decode} (CR-2026-162) as
+     * {@code decode}, for rule 4 of tools/verdicts-gate.py; both null where the interpret
+     * failed.
+     */
+    void addMeta(String schema, int index, Object vector, Object meta, Object decode) {
         if (!wantsMeta()) return;
         String name = vector == null ? "" : String.valueOf(vector);
         metaEntries.add("{\"schema\": " + quote(schema) + ", \"index\": " + index
-                + ", \"vector\": " + quote(name) + ", \"meta\": " + json(meta) + "}");
+                + ", \"vector\": " + quote(name) + ", \"meta\": " + json(meta)
+                + ", \"decode\": " + json(decode) + "}");
     }
 
     /** A decoded value as JSON: maps, lists, strings, numbers, booleans and null. */

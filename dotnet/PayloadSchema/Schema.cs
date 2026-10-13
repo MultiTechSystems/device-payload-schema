@@ -73,6 +73,8 @@ public class MatchCase
     public object? CaseValue { get; set; }
     public bool IsDefault { get; set; }
     public List<SchemaField> Fields { get; set; } = new();
+    /// <summary>The key as written, for the case the decode record names (PS-572).</summary>
+    internal YamlNode? KeyNode { get; set; }
 }
 
 public class ComputeDef
@@ -115,6 +117,8 @@ public class FlaggedGroup
 
 public class FlaggedDef
 {
+    /// <summary>The `flagged:` mapping, located by the decode record (PS-572).</summary>
+    internal YamlNode? Anchor { get; set; }
     public string Field { get; set; } = "";
     public List<FlaggedGroup> Groups { get; set; } = new();
 }
@@ -312,6 +316,12 @@ public class SchemaField
     /// field as declared (PS-493, PS-178), which the typed properties above no longer say.
     /// </summary>
     internal YamlMappingNode? Node { get; set; }
+    /// <summary>
+    /// For the synthetic field a `match:` or `tlv:` block parses to, that block's mapping;
+    /// for a field holding `records`, the records list. The node the decode record
+    /// locates (PS-572, CR-2026-162).
+    /// </summary>
+    internal YamlNode? Anchor { get; set; }
 }
 
 public class PortDef

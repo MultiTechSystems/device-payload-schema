@@ -159,21 +159,25 @@ public class CorpusConformanceTests
                 // payload when CORPUS_META_REPORT asks, and wherever a vector pins it.
                 var expectsMeta = vector.Children.TryGetValue(new YamlScalarNode("expected_meta"), out var expectedMeta);
                 object? meta = null;
+                object? decodeRecord = null;
                 string? metaError = null;
                 if ((metaReport.Enabled || expectsMeta)
                     && vector.Children.ContainsKey(new YamlScalarNode("payload")))
                 {
                     try
                     {
+                        // CR-2026-162: the report carries the decode record too, for rule 4.
                         var interpreted = SchemaDecoder.Interpret(schema,
-                            Convert.FromHexString(Text(vector, "payload").Replace(" ", "")), MetaContext(vector));
+                            Convert.FromHexString(Text(vector, "payload").Replace(" ", "")), MetaContext(vector),
+                            decodeRecord: metaReport.Enabled);
                         meta = interpreted["_meta"];
+                        decodeRecord = interpreted.GetValueOrDefault("_decode");
                     }
                     catch (Exception e)
                     {
                         metaError = $"{e.GetType().Name}: {e.Message}";
                     }
-                    metaReport.Add(rel, index, vectorName, meta);
+                    metaReport.Add(rel, index, vectorName, meta, decodeRecord);
                 }
                 try
                 {

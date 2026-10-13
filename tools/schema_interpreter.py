@@ -162,6 +162,119 @@ class IdentityTable:
         self.pop(obj)
 
 
+def pointer_segment(key: Any) -> str:
+    """One RFC 6901 reference token: `~` as `~0`, `/` as `~1` (PS-572)."""
+    return str(key).replace('~', '~0').replace('/', '~1')
+
+
+def pointer_map(document: Dict[str, Any]) -> IdentityTable:
+    """PS-572: the RFC 6901 JSON Pointer of every mapping and list in the `$ref`-expanded
+    schema document, by identity. The spec prototype's `pointer_map`; held as an
+    IdentityTable, so an entry keeps its node alive and is matched by identity."""
+    found = IdentityTable()
+
+    def walk(node: Any, pointer: str) -> None:
+        if isinstance(node, (dict, list)):
+            if node not in found:
+                found[node] = pointer
+            items = node.items() if isinstance(node, dict) else enumerate(node)
+            for key, value in items:
+                walk(value, f"{pointer}/{pointer_segment(key)}")
+
+    for key, value in document.items():
+        if value is not None:
+            walk(value, f"/{key}")
+    return found
+
+
+class DecodeTrace:
+    """The decode record (PS-572), kept while decoding and followed while encoding (PS-573).
+
+    The spec prototype's DecodeTrace. A location is the construct's JSON Pointer into the
+    expanded schema with an occurrence index after each node that repeats at run time:
+    `/repeat[i]` after a repeat field's own pointer, `tlv[k]` for a tlv entry in payload
+    order, and `records/n[k]` for a record."""
+
+    def __init__(self, pointers: IdentityTable, record: Optional[Dict[str, Any]] = None):
+        self.pointers = pointers
+        self.frames: List[tuple] = []           # (anchor pointer, kind, index), outermost first
+        record = record or {}
+        self.matches: Dict[str, Any] = dict(record.get('matches') or {})
+        self.internal: Dict[str, Any] = dict(record.get('internal') or {})
+        self.flagged: Dict[str, Any] = dict(record.get('flagged') or {})
+
+    def push(self, node: Any, kind: str, index: int, suffix: str = '') -> bool:
+        anchor = self.pointers.get(node)
+        if anchor is None:
+            return False
+        self.frames.append((anchor + suffix, kind, index))
+        return True
+
+    def pop(self, pushed: bool) -> None:
+        if pushed:
+            self.frames.pop()
+
+    def loc(self, node: Any) -> Optional[str]:
+        pointer = self.pointers.get(node)
+        if pointer is None:
+            return None
+        for anchor, kind, index in sorted(self.frames, key=lambda f: -len(f[0])):
+            if pointer == anchor or pointer.startswith(anchor + '/'):
+                rest = pointer[len(anchor):]
+                pointer = (f"{anchor}/repeat[{index}]{rest}" if kind == 'repeat'
+                           else f"{anchor}[{index}]{rest}")
+        return pointer
+
+    def lookup(self, table: str, node: Any) -> Any:
+        """The record's entry for a construct at its current location, or _UNRECORDED."""
+        where = self.loc(node)
+        if where is None:
+            return _UNRECORDED
+        return getattr(self, table).get(where, _UNRECORDED)
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {'matches': self.matches, 'internal': self.internal, 'flagged': self.flagged}
+
+
+#: What `DecodeTrace.lookup` gives for a construct the record says nothing of.
+_UNRECORDED = object()
+
+
+def record_declared_fields(fields: Any, skip: Any = None) -> List[str]:
+    """Every data field a field list can report, by name, looking through the constructs
+    whose fields merge into the enclosing object (match, tlv, flagged, byte_group,
+    records): the spec prototype's `declared_fields`, which PS-573's "a field that only
+    another case declares" is checked against. A match's `default` list beside its cases is
+    looked into too, where the prototype's is not: a name a default branch reports is
+    declared by that branch (dingtek df702's `angle`, in a nested match's default, read as
+    declared only by another case)."""
+    found: List[str] = []
+
+    def walk(items):
+        for item in items or []:
+            if not isinstance(item, dict) or item is skip:
+                continue
+            if 'type' in item:
+                if item.get('name') and item['name'] not in found:
+                    found.append(item['name'])
+                walk(item.get('trailer'))
+                continue
+            spec = next((item[k] for k in ('match', 'tlv', 'flagged', 'byte_group',
+                                           'records') if k in item), None)
+            if isinstance(spec, list):
+                for part in spec:
+                    walk(part if isinstance(part, list) else [part])
+            elif isinstance(spec, dict):
+                walk(spec.get('fields'))
+                for body in (spec.get('cases') or {}).values():
+                    walk(body if isinstance(body, list) else None)
+                walk(spec.get('default') if isinstance(spec.get('default'), list) else None)
+                for group in spec.get('groups') or []:
+                    walk(group.get('fields') if isinstance(group, dict) else None)
+    walk(fields if isinstance(fields, list) else None)
+    return found
+
+
 class Frame(bytes):
     """A field list's bytes, with how many at the end are still pending - peeked by a bit
     range or bool and consumed by nothing in the list. The enclosing list keeps them
@@ -860,7 +973,7 @@ def fixed_element_size(fields):
 
 
 #: Names clause 7 reserves for interpreter metadata (PS-176, PS-433).
-RESERVED_OUTPUT_NAMES = ('_meta', '_quality', '_warnings')
+RESERVED_OUTPUT_NAMES = ('_meta', '_quality', '_warnings', '_decode')    # _decode: CR-2026-162
 
 
 def internal_name_errors(schema):
@@ -952,6 +1065,19 @@ def empty_payload_error(fields: Any, data: Dict[str, Any]) -> Optional[str]:
         return (f"Encoding wrote no bytes, though the input gives '{key}', which the "
                 f"schema reads from the payload (PS-442)")
     return None
+
+
+def match_label(spec: Dict[str, Any]) -> str:
+    """How a message names a match (PS-573): its `name`, else its `var`, quoted, else
+    'an unnamed match'. The spec prototype's `match_label`."""
+    name = spec.get('name') or spec.get('var')
+    return f"'{name}'" if name else 'an unnamed match'
+
+
+def undetermined_case_message(name):
+    """PS-574: a match whose case neither the input nor a decode record gives, and which
+    this encoder could not derive either, named by its discriminator."""
+    return f"Missing required field: {name} (PS-574)"
 
 
 def missing_field_message(name):
@@ -3159,6 +3285,14 @@ def same_label(label, value):
     return isinstance(label, bool) == isinstance(value, bool) and label == value
 
 
+def message_value(value) -> str:
+    """A value quoted in an error message (PS-573, CR-2026-164): a number as JavaScript's
+    String(number) writes it (`2`, not `2.0`), anything else as Python's repr."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return format_lookup_value(value)
+    return repr(value)
+
+
 def label_text(label) -> str:
     """A label as a PS-169 or PS-067 message writes it: text in single quotes, a boolean
     as JSON writes it, a number as JavaScript's String(number) does (format_lookup_value),
@@ -3890,6 +4024,8 @@ class SchemaInterpreter:
     _pending_records = None
 
     _ps564 = ()             # PS-564's checks, set per encode
+    _record_supplied = frozenset()  # PS-573: names the decode record supplied, per encode
+    _encode_input_names = frozenset()  # the names the encode's input gives, per encode
     _ps564_depth = 1        # not checked outside encode()
 
     def __init__(self, schema: Dict[str, Any]):
@@ -3920,6 +4056,13 @@ class SchemaInterpreter:
             self._load_errors.extend(optional_errors(group, f"ports[{port}].fields"))
         self._load_errors.extend(internal_name_errors(schema))
         self.schema = schema
+        # PS-572: each construct's location in the expanded document, for the decode
+        # record; built once, as the prototype's Schema.pointers is.
+        self._pointers = pointer_map({'header': schema.get('header'),
+                                      'fields': schema.get('fields'),
+                                      'ports': schema.get('ports')})
+        #: The decode record being kept or followed (PS-572, PS-573); None when not asked.
+        self._trace = None
         self._pre_lookup = IdentityTable()   # PS-475, reset by decode
         self._guard_else = IdentityTable()
         self._leftover_reported = False
@@ -4719,6 +4862,9 @@ class SchemaInterpreter:
             # PS-541: the records this element's `records` entry yields, if any.
             saved_records = self._pending_records
             self._pending_records = []
+            # PS-572: the element's position, in the locations of what it decodes.
+            pushed = (self._trace.push(field_def, 'repeat', iterations)
+                      if self._trace is not None else False)
             try:
                 new_pos = self._decode_field_list(nested_fields, region, at, scratch)
                 if scratch.errors:
@@ -4739,6 +4885,8 @@ class SchemaInterpreter:
                 self._current_data = saved_current
                 self._element_names = saved_names
                 self._pending_records = saved_records
+                if self._trace is not None:
+                    self._trace.pop(pushed)
             iterations += 1
             if keep and records:
                 # PS-541: the records, as consecutive elements, in place of the element;
@@ -5112,6 +5260,19 @@ class SchemaInterpreter:
             return
         value = self._apply_modifiers(value, field_def)
         self._bind(field_def, [name, field_def.get('var')], value)
+        self._record_internal(field_def, value)                             # PS-572
+
+    def _record_internal(self, field_def: Dict[str, Any], value: Any) -> None:
+        """PS-572: an internal field's decoded value - what it would report, its label
+        where it has a lookup - at its location in the decode record."""
+        if self._trace is None or value is None or value is OMITTED:
+            return
+        where = self._trace.loc(field_def)
+        if where is None:
+            return
+        reported = normalize_output(value)
+        if reported is not OMITTED and reported is not None:
+            self._trace.internal[where] = reported
 
     def _decode_match_option_b(self, match_def: Dict[str, Any], buf: bytes,
                                 pos: int) -> Tuple[Dict[str, Any], int]:
@@ -5198,6 +5359,7 @@ class SchemaInterpreter:
         # Cases in Option B are a dict: {value: [field_list], ...}
         matched_fields = None
         default_fields = None
+        chosen_key = 'default'
         
         for case_key, case_fields in cases.items():
             if case_key == 'default':
@@ -5205,13 +5367,19 @@ class SchemaInterpreter:
                 continue
             if self._match_case_pattern(discriminator, case_key):
                 matched_fields = case_fields
+                chosen_key = case_key
                 break
         
+        if matched_fields is None and default_fields is None and default == 'error':
+            raise ValueError(f"No matching case for value {discriminator}")
+        if self._trace is not None:                                         # PS-572
+            where = self._trace.loc(match_def)
+            if where is not None:
+                self._trace.matches[where] = {'case': chosen_key,
+                                              'value': normalize_output(discriminator)}
         if matched_fields is None:
             if default_fields is not None:
                 matched_fields = default_fields
-            elif default == 'error':
-                raise ValueError(f"No matching case for value {discriminator}")
             elif default == 'skip':
                 return result, pos
             elif isinstance(default, list):
@@ -5327,6 +5495,10 @@ class SchemaInterpreter:
         if var_name not in self._variables:
             raise ValueError(f"Flagged field reference not found: {field_name}")
         flags = int(self._variables[var_name])
+        if self._trace is not None:                                         # PS-572
+            where = self._trace.loc(flagged_def)
+            if where is not None:
+                self._trace.flagged[where] = flags
         
         # A present group's fields are a field list (PS-347, PS-441), decoded as the top
         # level is. They were their own loop of plain reads, so a group holding another
@@ -5777,6 +5949,11 @@ class SchemaInterpreter:
                     result.data[name] = value
                 # Add to variables so field can be referenced by compute/formula
                 self._bind(gf, [name], value)
+                if name.startswith('_') and self._trace is not None:
+                    # PS-572: as the prototype records a group member - a bool its flag,
+                    # any other the number its name binds.
+                    self._record_internal(gf, value if gf.get('type') == 'bool'
+                                          else self._variables.get(name, OMITTED))
             except Exception as e:
                 result.errors.append(error_text(f"Error in byte_group field {name}: ", e))
     
@@ -5821,11 +5998,13 @@ class SchemaInterpreter:
         # at load (on_repeat_schema_errors), so only the modes are needed here.
         modes, last_members, _ = tlv_repeat_modes(tlv_def)
         collected = set()       # names already turned into arrays (PS-157)
+        entry_index = -1        # PS-572: each entry's index, in payload order
 
         while pos < len(buf):
             # Where this entry begins, so PS-302 can count the bytes abandoned from the
             # unknown tag itself rather than from after it.
             entry_start = pos
+            entry_index += 1
             # PS-477: a tag is never partly read. Fewer bytes than the tag at the start of
             # an entry is an error identifying the tlv; this used to stop the loop and
             # report a complete decode. A composite tag's width is its tag_fields'.
@@ -5989,7 +6168,13 @@ class SchemaInterpreter:
             # per-field rules (optional, sentinel, out_of_range). It used to be its own
             # loop that knew only `byte_group` and `bitfield_string`, so a number
             # literal in a case was "unknown type: number".
-            tag_result, pos = self._decode_nested_list(matched_fields, buf, pos)
+            pushed = (self._trace.push(tlv_def, 'tlv', entry_index)
+                      if self._trace is not None else False)
+            try:
+                tag_result, pos = self._decode_nested_list(matched_fields, buf, pos)
+            finally:
+                if self._trace is not None:
+                    self._trace.pop(pushed)
 
             if merge:
                 for k, v in tag_result.items():
@@ -6090,7 +6275,7 @@ class SchemaInterpreter:
             f"(PS-472)")
 
     def decode(self, payload: bytes, fPort: int = None, input_metadata: Dict[str, Any] = None,
-               direction: str = None) -> DecodeResult:
+               direction: str = None, trace: Optional[DecodeTrace] = None) -> DecodeResult:
         """
         Decode payload bytes using schema.
         
@@ -6129,6 +6314,9 @@ class SchemaInterpreter:
 
         # Track current data for match references
         self._current_data = result.data
+        # PS-572: the record `interpret(..., decode_record=True)` keeps; decode() itself
+        # never reports it.
+        self._trace = trace
         # Variable storage for Option B match references
         self._variables = {}
         # PS-523, PS-532: the value a looked-up field reports, by the names it binds,
@@ -6192,7 +6380,7 @@ class SchemaInterpreter:
     
     def interpret(self, payload: bytes, fPort: int = None,
                   input_metadata: Dict[str, Any] = None,
-                  direction: str = None) -> DecodeResult:
+                  direction: str = None, decode_record: bool = False) -> DecodeResult:
         """Interpreter output: the decoded JSON with its `_meta` (PS-174, PS-175, PS-180).
 
         `decode()` returns the decoded fields alone and is unchanged, because td-tools and
@@ -6211,12 +6399,21 @@ class SchemaInterpreter:
             internal field has one at any depth (PS-494).
         A failed decode has no `_meta` (PS-497), and neither has a malformed devEUI or
         recvTime: each is an error, as in the specification prototype.
+
+        With `decode_record`, the output also carries `_decode` (PS-572, CR-2026-162): the
+        location of every match evaluated with the case it took and the discriminator it
+        read, every internal field decoded with its value, and every flagged construct with
+        its flags. `encode` follows it where the input is given back with it (PS-573).
         """
         context = dict(input_metadata or {})
         if fPort is None and isinstance(context.get('fPort'), int):
             fPort = context['fPort']
-        result = self.decode(payload, fPort=fPort, input_metadata=input_metadata,
-                             direction=direction)
+        trace = DecodeTrace(self._pointers) if decode_record else None
+        try:
+            result = self.decode(payload, fPort=fPort, input_metadata=input_metadata,
+                                 direction=direction, trace=trace)
+        finally:
+            self._trace = None
         if not result.success:
             return result
 
@@ -6255,6 +6452,8 @@ class SchemaInterpreter:
             meta['fields'][key] = (field_meta(source, siblings=siblings)
                                    if source is not None else {})
         result.data = dict(result.data, _meta=meta)
+        if trace is not None:
+            result.data['_decode'] = trace.as_dict()                 # PS-572
         return result
 
     def _decode_field_list(self, fields: List[Dict[str, Any]], payload: bytes, pos: int,
@@ -6343,8 +6542,16 @@ class SchemaInterpreter:
                                          "a match case within it (PS-541)")
                     break
                 try:
-                    for body in field_def['records']:
-                        record, pos = self._decode_nested_list(body, payload, pos)
+                    for n, body in enumerate(field_def['records']):
+                        # PS-572: a record's location is `records/n[0]`.
+                        pushed = (self._trace.push(field_def['records'], 'records', 0,
+                                                   f"/{n}")
+                                  if self._trace is not None else False)
+                        try:
+                            record, pos = self._decode_nested_list(body, payload, pos)
+                        finally:
+                            if self._trace is not None:
+                                self._trace.pop(pushed)
                         self._pending_records.append(record)
                 except Exception as e:
                     result.errors.append(f"Error in records: {e}")
@@ -6451,6 +6658,8 @@ class SchemaInterpreter:
                         # in its output.
                         if not name.startswith('_'):
                             result.data[name] = value
+                        else:
+                            self._record_internal(field_def, value)         # PS-572
                         self._bind(field_def, [name], value)
                         # Check valid_range for computed fields
                         if field_def.get('valid_range'):
@@ -6682,7 +6891,8 @@ class SchemaInterpreter:
                 warn.append(f"metadata: '{name}' omitted, unknown mode '{mode}'")
 
     def encode(self, data: Dict[str, Any], fPort: int = None,
-               direction: str = None) -> EncodeResult:
+               direction: str = None,
+               decode_record: Optional[Dict[str, Any]] = None) -> EncodeResult:
         """
         Encode data dict to payload bytes using schema.
         
@@ -6692,11 +6902,37 @@ class SchemaInterpreter:
             direction: Direction the message will travel, 'uplink' or 'downlink'.
                 Omit where the caller cannot know it; the check is then skipped and
                 PS-292 is not satisfied.
+            decode_record: The `_decode` that `interpret(..., decode_record=True)`
+                produced (PS-572), or None. It may instead arrive inside `data` as
+                `_decode`; the argument wins. The encoder follows it (PS-573): each
+                recorded case and discriminator, internal field and flags value is
+                used where the input gives none, and input contradicting it is
+                rejected. Where neither the input nor the record gives a match's case,
+                this encoder derives it (PS-551's nested-match rule, PS-563, PS-564),
+                as PS-574 permits and requires it to say.
             
         Returns:
             EncodeResult with encoded payload
         """
         result = EncodeResult(payload=b'')
+        # PS-573: the record, given beside the input or inside it as `_decode`; `_meta`
+        # describes a decode and is not input either.
+        if isinstance(data, dict) and ('_decode' in data or '_meta' in data):
+            if decode_record is None:
+                decode_record = data.get('_decode')
+            data = {k: v for k, v in data.items() if k not in ('_decode', '_meta')}
+        self._trace = (DecodeTrace(self._pointers, decode_record)
+                       if isinstance(decode_record, dict) else None)
+        self._record_supplied = set()   # names whose value the record, not the input, gave
+        self._encode_input_names = set(data) if isinstance(data, dict) else set()
+        try:
+            return self._encode(data, fPort, direction, result)
+        finally:
+            self._trace = None
+
+    def _encode(self, data: Dict[str, Any], fPort: Optional[int], direction: Optional[str],
+                result: EncodeResult) -> EncodeResult:
+        """The body of `encode`, with the decode record (if any) in `self._trace`."""
         self._encode_warnings = []
         self._ps564 = []            # PS-564: each `remaining` match's chosen case
         self._ps564_depth = 0       # inside a tlv or repeat, where it is not checked
@@ -6786,7 +7022,7 @@ class SchemaInterpreter:
             
             if 'match' in field_def and not field_def.get('type'):
                 try:
-                    output.extend(self._encode_match(field_def, data, output.pending))
+                    output.extend(self._encode_match(field_def, data, output.pending, fields))
                 except Exception as e:
                     result.errors.append(error_text(f"Error encoding match: ", e))
                 continue
@@ -7063,6 +7299,8 @@ class SchemaInterpreter:
         not modified.
         """
         derived = dict(data)
+        if self._trace is not None:
+            derived = self._recorded_inputs(fields, data, derived)          # PS-573
         for f in fields:
             if not isinstance(f, dict):
                 continue
@@ -7095,6 +7333,16 @@ class SchemaInterpreter:
                     if self._flagged_group_given(group, data):
                         bits |= 1 << int(group.get('bit', 0))
                 given = data.get(name)
+                if given is None and self._recorded_flags(f['flagged']) is not None:
+                    # PS-573: the flags the decode record holds; the groups written are
+                    # the ones they set (_encode_flagged), so there is nothing to check.
+                    derived.setdefault(name, self._recorded_flags(f['flagged']))
+                    continue
+                if given is None and name in derived:
+                    # An internal mask the decode record supplied (PS-573), checked as a
+                    # supplied one is.
+                    given = derived[name]
+                    data = dict(data, **{name: given})
                 if given is None:
                     derived[name] = bits
                     continue
@@ -7111,6 +7359,56 @@ class SchemaInterpreter:
                     raise ValueError(
                         f"Flagged field '{name}' is given {given}, and the groups given "
                         f"set {bits} (PS-551)")
+        return derived
+
+    def _recorded_inputs(self, fields: List[Dict[str, Any]], data: Dict[str, Any],
+                         derived: Dict[str, Any]) -> Dict[str, Any]:
+        """PS-573: what the decode record supplies for this field list.
+
+        - each internal field's recorded value, where the input does not give it; an input
+          giving another value is rejected, naming the field (the prototype's text);
+        - each flagged construct's recorded flags, under its flags field, where the input
+          gives that field no value.
+
+        A byte_group's internal members are looked into, as the record locates them.
+        """
+        trace = self._trace
+
+        def internal(f):
+            name = f.get('name')
+            if not isinstance(name, str) or not name.startswith('_') \
+                    or f.get('type') in COMPUTED_TYPES or is_literal(f) or 'value' in f:
+                return
+            recorded = trace.lookup('internal', f)
+            if recorded is _UNRECORDED:
+                return
+            if name in data and name not in self._record_supplied:
+                if data[name] != recorded:
+                    raise ValueError(f"Field '{name}' is given {message_value(data[name])}, but "
+                                     f"the decode record holds {message_value(recorded)} "
+                                     f"(PS-573)")
+                return
+            derived[name] = recorded
+            self._record_supplied.add(name)
+
+        for f in fields:
+            if not isinstance(f, dict):
+                continue
+            group = f.get('byte_group')
+            if group is not None:
+                members = group.get('fields') if isinstance(group, dict) else group
+                for member in members or []:
+                    if isinstance(member, dict):
+                        internal(member)
+                continue
+            if isinstance(f.get('flagged'), dict) and not f.get('type'):
+                mask = str(f['flagged'].get('field', '')).lstrip('$')
+                recorded = trace.lookup('flagged', f['flagged'])
+                if mask and recorded is not _UNRECORDED and data.get(mask) is None \
+                        and derived.get(mask) is None:
+                    derived[mask] = recorded
+                continue
+            internal(f)
         return derived
 
     @staticmethod
@@ -7244,9 +7542,27 @@ class SchemaInterpreter:
         return any(f.get('name') in data
                    for f in self._claimable_fields(fields))
 
+    def _recorded_flags(self, flagged_def: Dict[str, Any]) -> Optional[int]:
+        """The flags the decode record holds for this flagged construct (PS-573), where
+        the input gives its flags field no value; else None."""
+        if self._trace is None:
+            return None
+        mask = str(flagged_def.get('field', '')).lstrip('$')
+        if mask in self._encode_input_names:
+            return None
+        recorded = self._trace.lookup('flagged', flagged_def)
+        if recorded is _UNRECORDED or isinstance(recorded, bool) \
+                or not isinstance(recorded, (int, float)):
+            return None
+        return int(recorded)
+
     def _encode_flagged(self, flagged_def: Dict[str, Any], data: Dict[str, Any]) -> bytes:
-        """Encode flagged groups: only encode groups where data is present."""
+        """Encode flagged groups: only encode groups where data is present - or, with a
+        decode record and no flags in the input, the groups its recorded flags set."""
         groups = flagged_def.get('groups', [])
+        recorded = self._recorded_flags(flagged_def)
+        if recorded is not None:
+            groups = [g for g in groups if (recorded >> int(g.get('bit', 0))) & 1]
         # CR-2026-136: the given groups' members are one field list, laid out as a
         # decoder reads them, so a bool or bit range in a group is its bits of a shared
         # byte (vobo's digital groups) and a construct in one is encoded as any is (dnt's
@@ -7256,7 +7572,7 @@ class SchemaInterpreter:
         members = []
         for group in groups:
             group_fields = group.get('fields', [])
-            if not self._flagged_group_given(group, data):
+            if recorded is None and not self._flagged_group_given(group, data):
                 continue
             if any(isinstance(gf, dict) and not gf.get('name') for gf in group_fields):
                 # A construct in the group - a nested flagged block, a byte_group - is
@@ -7569,7 +7885,8 @@ class SchemaInterpreter:
         return value
 
     def _encode_match(self, field_def: Dict[str, Any], data: Dict[str, Any],
-                      peeked: Optional[bytes] = None) -> bytes:
+                      peeked: Optional[bytes] = None,
+                      siblings: Optional[List[Any]] = None) -> bytes:
         """Rebuild a ``match`` construct's bytes from decoded output.
 
         Two sources of the discriminator, and they encode differently. An inline match
@@ -7604,10 +7921,38 @@ class SchemaInterpreter:
             # and device bytes, dnt's first command).
             discriminator = int.from_bytes(bytes(peeked[:int(length)]), byteorder)
 
+        # PS-573: where the input gives no discriminator, the decode record's is written
+        # and its case taken - before any derivation, which PS-574 makes the fallback.
+        given = discriminator is not None
+        if field_ref and str(field_ref).lstrip('$') in self._record_supplied:
+            given = False           # an internal value the record supplied, not input
+        record = (self._trace.lookup('matches', match_def)
+                  if self._trace is not None else _UNRECORDED)
+        record = record if isinstance(record, dict) else None
+        recorded_key = _UNRECORDED
+        if not given and record is not None:
+            if match_def.get('remaining') is True:
+                recorded_key = self._recorded_case(match_def, record.get('case'))
+            elif discriminator is None:
+                discriminator = record.get('value')
+
         if length is not None:
             check_written_discriminator(discriminator, match_name)        # PS-557
+            if discriminator is not None:
+                # PS-168, before a case is looked for, as the spec prototype checks it: a
+                # discriminator its bytes cannot hold is rejected as such.
+                low, high = integer_bounds(int(length), False)
+                check_fits(round_to_integer(discriminator), low, high,
+                           match_name or match_def.get('var') or 'match', discriminator)
 
         matched_key, matched_fields = None, None
+        if recorded_key is not _UNRECORDED:
+            if recorded_key != 'default':
+                matched_key, matched_fields = recorded_key, cases[recorded_key]
+            elif self._default_body(match_def) is not None:
+                matched_fields = self._default_body(match_def)
+            else:
+                matched_fields = []
         if discriminator is not None:
             for case_key, case_fields in cases.items():
                 if case_key == 'default':
@@ -7615,6 +7960,9 @@ class SchemaInterpreter:
                 if self._match_case_pattern(discriminator, case_key):
                     matched_key, matched_fields = case_key, case_fields
                     break
+
+        if record is not None and not given:
+            self._check_recorded_case(match_def, matched_key, data)  # PS-573
 
         if matched_fields is None and discriminator is None:
             # Where the discriminator is not in the output - an inline match with no
@@ -7659,7 +8007,7 @@ class SchemaInterpreter:
                 # no bytes at all where the match was nameless or its default `skip`,
                 # dropping the bytes the decoder reads (PS-442). Named by the
                 # discriminator, its `var` where it has no `name` (CR-2026-151).
-                raise ValueError(missing_field_message(label))
+                raise ValueError(undetermined_case_message(label))
             elif default == 'skip':
                 # The discriminator, if the match reads one, and nothing for the case: a
                 # decoder skips an unmatched value. A `remaining` match given no case's
@@ -7673,7 +8021,7 @@ class SchemaInterpreter:
                 # PS-442, PS-551: no discriminator given or derivable, and no case whose
                 # fields the input gives. This wrote nothing and reported nothing - a
                 # `remaining` match, or one on an internal field (imbuildings, dingtek).
-                raise ValueError(missing_field_message(
+                raise ValueError(undetermined_case_message(
                     match_name or match_def.get('var')
                     or str(field_ref or 'match').lstrip('$')))
 
@@ -7682,7 +8030,7 @@ class SchemaInterpreter:
             value = discriminator
             if value is None:
                 if matched_key is None:
-                    raise ValueError(missing_field_message(label))
+                    raise ValueError(undetermined_case_message(label))
                 value = self._exact_case_value(matched_key)
                 if value is None:
                     raise ValueError(
@@ -7701,6 +8049,47 @@ class SchemaInterpreter:
                                 'chosen': matched_key if matched_key is not None
                                 else 'default'})
         return prefixed_frame(bytes(out), body)
+
+    @staticmethod
+    def _recorded_case(match_def: Dict[str, Any], key: Any) -> Any:
+        """The case of `match_def` a decode record names (PS-573): `'default'`, or the
+        key as the schema writes it. A key the match does not have is rejected."""
+        if key == 'default':
+            return 'default'
+        for case_key in (match_def.get('cases') or {}):
+            if case_key != 'default' and (case_key == key
+                                          or str(case_key).strip() == str(key).strip()):
+                return case_key
+        raise ValueError(f"Field {match_label(match_def)}: the recorded case "
+                         f"{message_value(key)} is not "
+                         f"a case of the match (PS-573)")
+
+    def _check_recorded_case(self, match_def: Dict[str, Any], chosen: Any,
+                             data: Dict[str, Any]) -> None:
+        """PS-573: under a case taken from the decode record, the input may not give a
+        field only another case of the match declares (`chosen` None for the default).
+
+        "Only" is read within the match alone (CR-2026-164): a name that something outside
+        it also declares is still one only another case of this match declares. The
+        match's `default` list is one of its cases."""
+        cases = match_def.get('cases') or {}
+        default = self._default_body(match_def)
+        if chosen is not None and chosen in cases:
+            mine = set(record_declared_fields(cases[chosen]))
+        else:
+            mine = set(record_declared_fields(default))
+        others = set()
+        for key, body in cases.items():
+            if key == 'default' or (chosen is not None and key == chosen):
+                continue
+            others |= set(record_declared_fields(body))
+        if chosen is not None and default is not None:
+            others |= set(record_declared_fields(default))
+        clash = sorted(n for n in others - mine if n in data)
+        if clash:
+            raise ValueError(f"Field {match_label(match_def)}: the input gives '{clash[0]}', "
+                             f"which only another case declares, against the recorded "
+                             f"case (PS-573)")
 
     def _nested_discriminator(self, match_def, data, label):
         """CR-2026-151 (PS-551): the value a nested match fixes for this
@@ -7764,11 +8153,11 @@ class SchemaInterpreter:
         if not filled:
             return None
         if len(filled) != 1:
-            raise ValueError(missing_field_message(label))
+            raise ValueError(undetermined_case_message(label))
         path, case_key = filled[0]
         value = self._exact_case_value(case_key)
         if value is None:
-            raise ValueError(missing_field_message(label))
+            raise ValueError(undetermined_case_message(label))
         for enclosing, branch_key in path:
             selected = 'default'
             for key, body in (enclosing.get('cases', {}) or {}).items():
@@ -7776,7 +8165,7 @@ class SchemaInterpreter:
                     selected = key
                     break
             if selected != branch_key:
-                raise ValueError(missing_field_message(label))
+                raise ValueError(undetermined_case_message(label))
         outer_key = path[0][1]
         body = dict(branches)[outer_key]
         return value, (None if outer_key == 'default' else outer_key), body
@@ -7850,7 +8239,7 @@ class SchemaInterpreter:
                                      f"optional field {omitted_optional!r} is not (PS-405)")
             # A case body may hold another construct rather than a plain field.
             if 'match' in f and not f.get('type'):
-                out.extend(self._encode_match(f, data, out.pending))
+                out.extend(self._encode_match(f, data, out.pending, fields))
                 continue
             if 'tlv' in f and not f.get('type'):
                 out.extend(self._encode_tlv(f, data))
@@ -7982,7 +8371,14 @@ class SchemaInterpreter:
                 # PS-370: the index is bound while each element is encoded, as it was
                 # while each was decoded, so a name_from template resolves the same way.
                 record = dict(record, **{index: position + index_base(field_def)})
-            element = self._encode_field_list(record_fields, record)
+            # PS-572: the element's position, as its decode recorded it.
+            pushed = (self._trace.push(field_def, 'repeat', position)
+                      if self._trace is not None else False)
+            try:
+                element = self._encode_field_list(record_fields, record)
+            finally:
+                if self._trace is not None:
+                    self._trace.pop(pushed)
             check_peeks(element)            # PS-551: an element's bytes close with it
             out.extend(element)
         return bytes(out)
@@ -8425,9 +8821,16 @@ class SchemaInterpreter:
         # cases took them in.
         written.sort(key=lambda item: item[3])
         out = bytearray()
-        for case_key, case_fields, case_data, _ in written:
+        for entry_index, (case_key, case_fields, case_data, _) in enumerate(written):
             tag = self._encode_tlv_tag(case_key, tlv_def)
-            value = self._encode_field_list(case_fields, case_data)
+            # PS-572: the entry's index in payload order, as its decode recorded it.
+            pushed = (self._trace.push(tlv_def, 'tlv', entry_index)
+                      if self._trace is not None else False)
+            try:
+                value = self._encode_field_list(case_fields, case_data)
+            finally:
+                if self._trace is not None:
+                    self._trace.pop(pushed)
             check_peeks(value)              # PS-551: a tlv value is measured whole
             out.extend(tag)
             if length_size > 0:

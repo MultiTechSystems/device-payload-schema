@@ -1174,6 +1174,109 @@ Cases: `tests/silent-empty-cases.yaml` (14), read by the reference and the runti
 (`test_silent_empty_cases.py`), Go (`silent_empty_test.go`, both APIs), Java
 (`SilentEmptyTest`) and C# (`SilentEmptyTests`).
 
+**CR-2026-162 (PS-572 to PS-574; PS-433, PS-551, PS-563, PS-564 amended; la-payload-schema
+branch `cr/0.5.6-apply-158-162`, for 0.5.6): the decode record.** The decoder records what it
+chose, so an encoder need not infer it.
+- **Decode (PS-572).** Asked for, the interpreter output carries `_decode` beside `_meta`:
+  `{matches: {ptr: {case, value}}, internal: {ptr: value}, flagged: {ptr: flags}}`. decode()
+  never carries it, and a TS013 codec never produces it (PS-467). The opt-ins:
+  - Python `interpret(..., decode_record=True)`;
+  - Go `InputContext{DecodeRecord: true}`;
+  - Java `interpret(payload, ctx, true)`;
+  - C# `SchemaDecoder.Interpret(..., decodeRecord: true)`.
+  - C has no `_meta` and no record: not applicable.
+- **What is recorded.** Where the prototype records it, and the same values:
+  - every Option-B match evaluated: its case key (an integer key as a number, else its text;
+    `"default"` for a default or `skip`) and the discriminator, recorded before its body
+    decodes;
+  - every flagged construct's flags;
+  - every internal field decoded, computed ones included, with the value it would report;
+  - an internal byte_group member: a `bool` its flag, any other member the number its name
+    binds.
+- **Locations.** An RFC 6901 pointer into the `$ref`-expanded document (`header`, `fields`,
+  `ports`), `~0`/`~1` escaped. An integer key YAML resolves (`0x01:`) is written in
+  decimal, as PyYAML loads it. The occurrence indices are:
+  - `/repeat[i]` after a repeat field's pointer;
+  - `tlv[k]`, the entry in payload order, unknown tags counted;
+  - `records/n[0]`.
+
+  One builder per language, the prototype's `pointer_map` and `DecodeTrace`: Python
+  `pointer_map`/`DecodeTrace`, Go `cr162.go`, Java `DecodeRecord`, C# `DecodeRecord.cs`. The
+  TS013 generator annotates each locatable node of the embedded plan with `__ptr`
+  (`_annotate_pointers`), and the runtime's `encLoc` composes the indices.
+- **Encode (PS-573).** The record arrives as `data['_decode']` or as a parameter: Python
+  `encode(..., decode_record=)`, Go `EncodeWithRecord`/`EncodeOrderedWithRecord`, Java
+  `encode(data, record)`/`encodeWithPort(..., record)`, C# `Encode(..., decodeRecord:)`, the
+  runtime's encodeDownlink input. `_meta` and `_decode` are never input.
+  - Each field list takes its recorded internal values first (`_recorded_inputs`).
+  - Recorded flags choose a flagged block's groups where the input has no mask.
+  - A match settles its case in this order: the discriminator the input gives, or a peek;
+    then the record's value (its case, for `remaining`); then CR-2026-155's order below.
+  - An inline discriminator's PS-168 check now runs before its case is looked for, as the
+    prototype does: `kind: 300` over one byte is PS-168, where it said "No matching case".
+- **Rejections, in the prototype's text.** Input contradicting the record:
+  - `Field '_k' is given 2, but the decode record holds 1 (PS-573)`, the values as Python's
+    repr;
+  - `Field an unnamed match: the input gives 'b', which only another case declares, against
+    the recorded case (PS-573)`.
+
+  A match whose case nothing settles keeps CR-2026-151's and #140's texts, with ` (PS-574)`
+  appended: `Missing required field: report_type (PS-574)`.
+- **PS-574: this repository derives.** The prototype does not, and rejects
+  `{volt: 3, temp: 26}` for r718n3. Here PS-551's nested-match rule, PS-563's score and
+  PS-564's 0-byte case stay, as the optional fallback, so that input still writes
+  `011e0a28`. Decoding `011e0a28` with the record and encoding it gives `011e0a28` back.
+- **Where this differs from the prototype, and what CR-2026-164 settled.** The clash check
+  reads a match's `default` list (`record_declared_fields`): the prototype's
+  `declared_fields` did not, so a name a nested match's default reports (dingtek df702's
+  `angle`) read as declared only by another case. Jason ruled on 2026-10-13 (CR-2026-164,
+  la-payload-schema `cr/0.5.6-ps573-yaml`, submitted) that the `default` list is one of the
+  match's cases, and that "only another case declares" is read **within the match alone**:
+  a name something outside the match also declares (dragino lht65's `TempC_DS`, reported by
+  a sibling match) and a tlv entry's scope (thermokon) are not refinements PS-573 has. The
+  earlier `_declared_beside` is removed from Python, Go, Java, C# and the TS013 runtime, so
+  the clash reads alike in all five.
+- **A number in a PS-573 message is JavaScript's String(n)** (CR-2026-164): `is given 2`,
+  not `2.0`. `message_value` (Python, over `format_lookup_value`), `messageValue` (Go, over
+  `givenText`), `messageValue` (Java, over `jsNumber`), `MessageValue` (C#, over `JsNumber`);
+  the runtime's `encPyRepr` already wrote `String(n)`. Anything that is not a number keeps
+  Python's repr. A float input is in `tests/cr-2026-162-cases.yaml`.
+- **Measured.** Python, read-only registry (32,408 decoded vectors); the no-record numbers are unchanged
+  in both trees.
+
+  | | No record | With the record | Change |
+  |---|---|---|---|
+  | Registry | 5475 | 12980 | +7505, none lost |
+  | Proto corpus | 2145 | 2402 | +257 (261 gained, 4 lost) |
+
+  - The registry gains are almost all PS-434 internal fields (7485). The CR predicted +628
+    from case and value alone; the recorded internal values are most of the difference.
+  - The four proto losses are dnt-lw-wsci's (two schemas) `reset_ack_then_hall` and
+    `set_ack_then_hall`. Each round-tripped by accident: the flagged block wrote a hall
+    group the decode never took, and its byte ORed into the 0xFD peek. With the recorded
+    flags (0) nothing is written, and the 0xFD entry, which reports nothing, has no value
+    to be written from.
+  - `tools/encode-round-trip.py --decode-record` measures the corpus.
+  - Without the removed refinement, the registry loses 58 round trips against the earlier
+    13038, each rejected by the strict clash check (dnt etrv 34, dragino lt22222-l 12,
+    lht65/lht65n-pir/lsn50-v2 12). Of the 59 vectors a strict check rejects that round-trip
+    unchecked, 3 still do with the `default` list counted and 56 are rejected; 199 vectors
+    are rejected in all, against 220 with a fully strict check. Proto is unchanged at 2402.
+- **Guards.**
+  - `make gate-verdicts` rule 4: each runner's `CORPUS_META_REPORT` entry carries `decode`,
+    and every corpus vector's record must equal Python's. 2744 of 2744 identical in Go, Java
+    and C# on landing, 849 non-empty.
+  - `tests/test_ts013_encode_parity.py`: the runtime given the reference's
+    interpret-with-record output must write the reference's bytes on every corpus vector.
+  - Cases: `tests/cr-2026-162-cases.yaml` (the prototype's 13 tests and six more), read by
+    `test_cr_2026_162_cases.py` (reference and runtime), Go `cr162_test.go`, Java
+    `CR2026162Test`, C# `CR2026_162Tests`.
+- **Found on the way.** Go, Java and C# never matched a text discriminator (an `ascii`
+  field) against a text case key; Go read it through `toInt` as 0. All three now compare
+  text exactly, as Python does.
+- **No floor moves.** The corpus runners decode and re-encode without the record.
+- **PS-433:** `_decode` is reserved for interpreter metadata in all four loaders.
+
 **Three more of that shape were in Go's `encodeFields`, and all three are fixed.** They
 were found from outside, by a consumer building LoRaWAN downlink on the Go encoder, which
 is worth noting: the corpus could not see any of them, because a round-trip that fails on
