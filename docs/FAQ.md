@@ -258,7 +258,7 @@ print(result.data)
 ### How do I decode in Go?
 
 ```go
-import "github.com/MultiTechSystems/lorawan-payload-schema/go/schema"
+import "github.com/MultiTechSystems/device-payload-schema/go/schema"
 
 s, err := schema.ParseSchema(schemaYAML)   // YAML text as a string
 result, err := s.Decode(payload)          // map[string]any
